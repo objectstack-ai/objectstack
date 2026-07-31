@@ -2,9 +2,11 @@
 
 import type { PluginContext } from '@objectstack/core';
 import type { AutomationContext } from '@objectstack/spec/contracts';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { defineActionDescriptor, NotifyConfigSchema } from '@objectstack/spec/automation';
+import type { NotifyConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate, stringifyForTemplate, type VariableMap } from './template.js';
+import { parseNodeConfig } from './parse-config.js';
 
 /**
  * Structural view of `@objectstack/service-messaging`'s service (ADR-0012),
@@ -92,7 +94,7 @@ function toStr(value: unknown): string | undefined {
  * (Prime Directive #12). Same graduation path as `object` → `objectName` (#3796).
  */
 function resolveSource(
-    cfg: Record<string, unknown>,
+    cfg: Pick<NotifyConfigParsed, 'sourceObject' | 'sourceId'>,
     variables: VariableMap,
     context: AutomationContext,
 ): { object: string; id: string } | undefined {
@@ -184,11 +186,17 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             },
         }),
         async execute(node, variables, context) {
-            const cfg = (node.config ?? {}) as Record<string, unknown>;
-
             // The historical aliases (`to`/`subject`/`body`/`url`) are canonicalized
             // at load by the ADR-0087 D2 conversion 'flow-node-notify-config-aliases'
-            // (#3796), so only the canonical keys are read here.
+            // (#3796), so the parse sees only canonical keys. Parsed BEFORE
+            // interpolation — the contract's slots are string-typed, so `{token}`
+            // templates pass; the post-interpolation guards below still own
+            // "title/recipients resolved to nothing" (#3582), which no static
+            // parse can see.
+            const parsed = parseNodeConfig<NotifyConfigParsed>('notify', node.id, NotifyConfigSchema, node.config);
+            if (!parsed.ok) return parsed.refusal;
+            const cfg = parsed.config;
+
             const recipientCfg = cfg.recipients ?? [];
             const recipients = toStringList(interpolate(recipientCfg, variables, context));
             // stringifyForTemplate (not String()): a sole-token `{$error}` resolves

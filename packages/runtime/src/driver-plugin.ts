@@ -16,32 +16,24 @@ import { Plugin, PluginContext } from '@objectstack/core';
  * const driverPlugin = new DriverPlugin(memoryDriver, 'memory');
  * kernel.use(driverPlugin);
  */
-export interface DriverPluginOptions {
-    /**
-     * If set, registers a named datasource so packages declaring
-     * `defaultDatasource: '<name>'` resolve to this driver.
-     */
-    datasourceName?: string;
-    /**
-     * If `true` (default), registers this driver as the `default` datasource
-     * when none exists. Set to `false` for proxy drivers (e.g. cloud proxy)
-     * that should never become the default.
-     */
-    registerAsDefault?: boolean;
-}
-
 export class DriverPlugin implements Plugin {
     name: string;
     type = 'driver';
     version = '1.0.0';
 
     private driver: any;
-    private options: DriverPluginOptions;
 
-    constructor(driver: any, driverNameOrOptions?: string | DriverPluginOptions, options?: DriverPluginOptions) {
+    // A `DriverPluginOptions` bag (`datasourceName` / `registerAsDefault`)
+    // used to be accepted here. Both options configured start()'s datasource
+    // registration, which probed `metadata.addDatasource` — a method no
+    // metadata service implements — so they were inert on every boot since
+    // inception; retired via #4320 (found by #4251). Routing to a named
+    // auxiliary driver needs only the DRIVER name: init() registers
+    // `driver.<name>`, ObjectQL's discovery loop adopts it, and the engine's
+    // lifecycle/datasource resolution keys off that name (see serve.ts's
+    // telemetry provision for the pattern).
+    constructor(driver: any, driverName?: string) {
         this.driver = driver;
-        const driverName = typeof driverNameOrOptions === 'string' ? driverNameOrOptions : undefined;
-        this.options = (typeof driverNameOrOptions === 'object' ? driverNameOrOptions : options) ?? {};
         this.name = `com.objectstack.driver.${driverName || driver.name || 'unknown'}`;
     }
 
@@ -55,33 +47,16 @@ export class DriverPlugin implements Plugin {
         });
     }
 
+    // start() used to hold a named/default datasource registration block,
+    // gated on `metadata.addDatasource` — a method no metadata service
+    // implements, here or anywhere in the repo — so the guard's early return
+    // made every line behind it (and the options that configured it)
+    // unreachable on every boot. Typing the lookup (#4251) surfaced that; the
+    // dead block is gone rather than typed against a phantom shape, and the
+    // options followed it (#4320). Datasource declaration and visibility live
+    // in ADR-0062's DatasourceConnectionService +
+    // `registerInMemory('datasource', …)` path — see DefaultDatasourcePlugin.
     start = async (ctx: PluginContext) => {
-        try {
-            const metadata = ctx.getService<any>('metadata');
-            if (!metadata?.addDatasource) return;
-
-            // Register a named datasource for this driver (e.g. 'cloud').
-            if (this.options.datasourceName) {
-                await metadata.addDatasource({
-                    name: this.options.datasourceName,
-                    driver: this.driver.name,
-                });
-                ctx.logger.info(`[DriverPlugin] Registered named datasource '${this.options.datasourceName}'`, { driver: this.driver.name });
-            }
-
-            // Auto-register as 'default' datasource unless explicitly disabled.
-            if (this.options.registerAsDefault !== false) {
-                const datasources = metadata.getDatasources ? metadata.getDatasources() : [];
-                const hasDefault = datasources.some((ds: any) => ds.name === 'default');
-                if (!hasDefault) {
-                    ctx.logger.info(`[DriverPlugin] No 'default' datasource found — registering '${this.driver.name}' as default.`);
-                    await metadata.addDatasource({ name: 'default', driver: this.driver.name });
-                }
-            }
-        } catch (e) {
-            ctx.logger.debug('[DriverPlugin] Failed to configure datasource (metadata service missing?)', { error: e });
-        }
-
         ctx.logger.debug('Driver plugin started', { driverName: this.driver.name || 'unknown' });
     }
 }

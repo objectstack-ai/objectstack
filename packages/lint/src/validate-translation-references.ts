@@ -67,6 +67,7 @@
 
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectstack/spec/system';
 import { walkPageComponents } from './page-walk.js';
+import { SYSTEM_FIELDS } from './system-fields.js';
 
 export const TRANSLATION_TARGET_UNKNOWN = 'translation-target-unknown';
 export const TRANSLATION_OPTION_KEY_UNKNOWN = 'translation-option-key-unknown';
@@ -163,15 +164,17 @@ function listNames(names: Iterable<string>, max = 12): string {
 }
 
 /**
- * Audit/system fields every object carries implicitly. A bundle translating
- * them is authoring against a real field, so they must not read as orphans.
- * Mirrors `validate-page-field-bindings`' list.
+ * Fields a bundle may translate without reading as orphans: the package-shared
+ * registry-injected columns (`system-fields.ts`, #4330) plus three exemptions
+ * this rule has carried since it landed — `_id` and `space` are legacy
+ * physical spellings older bundles still key, and `name` is an ordinary
+ * authored field on most objects. None of the three is a system column in the
+ * spec's sense, so they stay rule-local (see the shared module's note) instead
+ * of widening every field-existence rule in the package.
  */
-const SYSTEM_FIELDS: ReadonlySet<string> = new Set([
-  'id', '_id', 'name',
-  'created_at', 'created_by', 'updated_at', 'updated_by',
-  'owner_id', 'organization_id', 'tenant_id', 'user_id',
-  'is_deleted', 'deleted_at', 'space',
+const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
+  ...SYSTEM_FIELDS,
+  '_id', 'name', 'space',
 ]);
 
 /** Everything a bundle may legally name under one object. */
@@ -502,7 +505,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           const fieldPath = `${objPath}.fields.${fieldName}`;
           const field = facts.fields.get(fieldName);
           if (!field) {
-            if (SYSTEM_FIELDS.has(fieldName)) continue;
+            if (IMPLICIT_FIELDS.has(fieldName)) continue;
             orphan(
               `${inLocale} · object "${objectName}" · field "${fieldName}"`,
               fieldPath,

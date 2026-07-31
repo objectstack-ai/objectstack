@@ -10,7 +10,7 @@
  * on objectql, even as a devDependency — turbo flags the cycle.)
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { createMetadataProtocolPlugin, ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { ObjectQLPlugin } from './plugin';
@@ -19,7 +19,15 @@ describe('ADR-0076 Step 2 — delegated protocol assembly', () => {
   let kernel: ObjectKernel;
 
   beforeEach(() => {
-    kernel = new ObjectKernel({ logLevel: 'silent' });
+    // See plugin.integration.test.ts for both choices: `logger.level` is the
+    // real config key (`logLevel` never existed on ObjectKernelConfig and
+    // silenced nothing), and gracefulShutdown:false keeps process signal
+    // handlers out of vitest's fork workers (#4250).
+    kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+  });
+
+  afterEach(async () => {
+    if (kernel.getState() === 'running') await kernel.shutdown();
   });
 
   it('registerProtocol:false + MetadataProtocolPlugin reproduces the built-in service surface', async () => {

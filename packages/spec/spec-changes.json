@@ -123,6 +123,12 @@
         "toMajor": 17
       },
       {
+        "surface": "flow.node.subflow.config.flowName",
+        "to": "subflow flow-node config key 'flow' → 'flowName' (#4278 — undeclared executor fallback graduation)",
+        "conversionId": "flow-node-subflow-flow-alias",
+        "toMajor": 17
+      },
+      {
         "surface": "flow.node.script.config",
         "to": "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
         "conversionId": "flow-node-script-config-aliases",
@@ -536,6 +542,12 @@
           "surface": "flow.node.map.config.flowName",
           "to": "map flow-node config key 'flow' → 'flowName' (#4045 — undeclared executor fallback graduation)",
           "conversionId": "flow-node-map-flow-alias",
+          "toMajor": 17
+        },
+        {
+          "surface": "flow.node.subflow.config.flowName",
+          "to": "subflow flow-node config key 'flow' → 'flowName' (#4278 — undeclared executor fallback graduation)",
+          "conversionId": "flow-node-subflow-flow-alias",
           "toMajor": 17
         },
         {

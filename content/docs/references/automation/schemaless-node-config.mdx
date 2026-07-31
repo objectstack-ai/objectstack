@@ -1,0 +1,171 @@
+---
+title: Schemaless Node Config
+description: Schemaless Node Config protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+@module automation/schemaless-node-config
+
+Config contracts for the **descriptor-schemaless** builtins whose designer
+
+form lives ONLY in objectui's hand-written `FLOW_NODE_CONFIG` table —
+
+`script`, `subflow` and `decision` (#4278).
+
+## Why these nodes publish no descriptor `configSchema` — and still need this
+
+`config-schemas.test.ts` in `service-automation` pins the schemaless class
+
+with each member's reason: `decision`'s virtual Target column is derived from
+
+the out-edges, `script`'s form switches on `actionType`, `subflow` carries a
+
+top-level `timeoutMs` — a published partial schema would DROP those editors
+
+(the #4210 `connector_action` incident). So the Studio form for these types
+
+is objectui's hand-written group, and until #4278 **nothing reconciled that
+
+hand-written table against the executors**: `script`'s form offered an
+
+`outputVariables` key nothing reads, two `actionType` options that fail every
+
+run, a no-op default — and could not author the `function`/`inputs`/
+
+`outputVariable` path that works.
+
+These schemas are the machine-readable half of that reconciliation. They are
+
+**written from the executors** (`service-automation/builtin/screen-nodes.ts`
+
+for `script`, `subflow-node.ts`, `logic-nodes.ts` for `decision`), not from
+
+any form, and objectui's `flow-node-config` reconciliation test compares its
+
+hand-written key sets against them — the same bidirectional ledger the
+
+descriptor-schema'd builtins get from `builtin-node-form-zod-ledger.test.ts`,
+
+carried across the repo seam by the `@objectstack/spec` dependency objectui
+
+already has.
+
+`wait` and `connector_action` — the other two schemaless members — need no
+
+entry here: their contracts are the spec-structured sibling blocks on
+
+`FlowNodeSchema` (`waitEventConfig` / `connectorConfig`), which the
+
+same objectui test reconciles directly.
+
+## What these schemas are (and are not) wired to
+
+Contract exports only — no engine path `parse()`s a node config with them,
+
+so registering a flow behaves exactly as before. This is where they differ
+
+from their `builtin-node-config.zod.ts` siblings, which #4277 wired into
+
+execute-time parsing (`service-automation`'s `parse-config.ts`) and into the
+
+`registerFlow()` unknown-key rejection.
+
+That difference is deliberate, and it is the same reason these three publish
+
+no descriptor `configSchema`: **their key set is not the whole contract.**
+
+`script`'s legal keys depend on `actionType` (a built-in side effect reads
+
+`template`/`recipients`/`variables`; the function path reads
+
+`function`/`inputs`/`outputVariable`), and `decision` may carry no
+
+`conditions` at all when it branches purely on edge predicates. A flat parse
+
+would either reject those shapes or wave everything through — neither is the
+
+contract. Wiring them in needs a discriminated form first; until then the
+
+enforcement they DO get is the objectui reconciliation test, which is what
+
+#4278 was actually about (a form authoring keys nothing reads).
+
+Undeclared aliases are NOT part of these contracts: `subflow`'s historical
+
+`flow` spelling graduated into the ADR-0087 D2 conversion
+
+`flow-node-subflow-flow-alias` (the `map.flow` path), so the executor only
+
+ever sees `flowName`.
+
+<Callout type="info">
+**Source:** `packages/spec/src/automation/schemaless-node-config.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { DecisionCondition, DecisionConfig, ScriptConfig, SubflowConfig } from '@objectstack/spec/automation';
+import type { DecisionCondition, DecisionConfig, ScriptConfig, SubflowConfig } from '@objectstack/spec/automation';
+
+// Validate data
+const result = DecisionCondition.parse(data);
+```
+
+---
+
+## DecisionCondition
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Branch label; the winning branch resumes down the out-edge with this label ('true' expression = default/else path) |
+| **expression** | `string` | ✅ | Bare CEL predicate deciding this branch |
+
+
+---
+
+## DecisionConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **conditions** | `{ label: string; expression: string }[]` | optional | Ordered decision branches (first true expression wins; omit to branch purely on edge conditions) |
+
+
+---
+
+## ScriptConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **actionType** | `string` | optional | How this step runs: a built-in side effect ('email' \| 'slack'), the 'invoke_function' marker, or shorthand for a registered-function name |
+| **function** | `string` | optional | Registered function to call (defineStack(`{ functions }`)); takes precedence over actionType |
+| **inputs** | `Record<string, any>` | optional | Inputs passed to the function (values interpolate `{token}` templates) |
+| **outputVariable** | `string` | optional | Flow variable the function's return value is bound to |
+| **template** | `string` | optional | Built-in side effects only: message template id |
+| **recipients** | `string[]` | optional | Built-in side effects only: recipients (user ids, field refs, or addresses) |
+| **variables** | `Record<string, any>` | optional | Built-in side effects only: values injected into the template |
+| **script** | `string` | optional | Inline JS source — recognized but not executed by the built-in runtime; use a registered function via `function` instead |
+
+
+---
+
+## SubflowConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **flowName** | `string` | ✅ | Flow invoked as this step (it may pause — approval / screen / wait) |
+| **input** | `Record<string, any>` | optional | Values passed to the subflow's input variables (interpolate `{token}` templates) |
+| **outputVariable** | `string` | optional | Parent flow variable the subflow's output is bound to |
+
+
+---
+

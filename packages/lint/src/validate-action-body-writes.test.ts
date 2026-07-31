@@ -11,7 +11,7 @@ import {
 import {
   extractHookBodyWrites,
   HOOK_BODY_WRITE_PATTERNS,
-  BODY_WRITE_SYSTEM_FIELDS,
+  IMPLICIT_FIELDS,
 } from './validate-hook-body-writes.js';
 
 // Target objects: array-shaped and map-shaped `fields`, so both authoring
@@ -86,7 +86,7 @@ describe('ACTION_BODY_WRITE_PATTERNS — ledger partition and reconciliation', (
     it(`reports every declared write of '${pattern.id}' through the full validator`, () => {
       const expected = new Set(
         pattern.example.writes
-          .filter((w) => w.object !== undefined && !BODY_WRITE_SYSTEM_FIELDS.has(w.field))
+          .filter((w) => w.object !== undefined && !IMPLICIT_FIELDS.has(w.field))
           .map((w) => `${w.object} ${w.field}`),
       );
       expect(expected.size, `'${pattern.id}' declares no object-addressed write`).toBeGreaterThan(0);

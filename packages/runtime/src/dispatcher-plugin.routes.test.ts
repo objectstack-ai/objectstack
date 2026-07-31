@@ -164,7 +164,7 @@ describe('createDispatcherPlugin — HTTP route registration', () => {
       const { server, routes } = makeFakeServer();
       const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
       await plugin.start?.(ctxWithServices(server, {
-        analytics: { _dev: true, query: async () => ({ rows: [], fields: [] }) },
+        analytics: { __serviceInfo: { status: 'stub' }, query: async () => ({ rows: [], fields: [] }) },
       }));
 
       for (const r of ANALYTICS_ROUTES) expect(routes).not.toContain(r);

@@ -357,6 +357,50 @@ function describeMalformedFilter(filter: unknown[]): string {
 }
 
 /**
+ * Keys the READ path stamps onto a served metadata document, which therefore
+ * must never survive back into a persisted body (#4326).
+ *
+ * Both are recomputed on every read, so persisting them stores a stale copy of
+ * something the reader already replaces:
+ *   - `_diagnostics` — the spec-validation verdict `decorateMetadataItem`
+ *     spreads onto every `getMetaItem`/`getMetaItems` result. A second producer
+ *     stamps the same key: view-container expansion records a name-collision
+ *     rename warning (`stampRenameWarning`, spec/ui/view.zod.ts). Both are
+ *     derived from the document, so neither belongs inside it;
+ *   - `_draft` — the preview badge added by draft reads. Draft-ness lives in
+ *     the row's `state` column and the `mode` parameter, never in the body.
+ *
+ * Deliberately NOT stripped, though they share the underscore spelling: the
+ * ADR-0010 protection envelope (`_lock`, `_lockReason`, `_provenance`) and
+ * `_packageId`. Those are envelope state the write path legitimately carries
+ * and merges (see `mergeArtifactProtection`) — not read-time decoration.
+ */
+const READ_ONLY_DECORATIONS = ['_diagnostics', '_draft'] as const;
+
+/**
+ * Remove {@link READ_ONLY_DECORATIONS} from an about-to-persist body.
+ *
+ * A **silent** strip, unlike the layered-envelope rejection in `saveMetaItem`:
+ * that envelope is a wrong document the caller must fix, whereas these keys are
+ * our own decoration riding along on a document that is otherwise exactly what
+ * the author edited. Rejecting the standard GET → edit → PUT round-trip would
+ * be hostile; stripping restores the invariant that a round-trip persists the
+ * body byte-identical.
+ *
+ * Returns the SAME reference when there is nothing to strip, so the common path
+ * allocates nothing (the discipline {@link graftNormalizedOperators} follows).
+ * Non-object inputs pass through — the caller's own validation owns those.
+ */
+export function stripReadDecorations(item: unknown): unknown {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    const dict = item as Record<string, unknown>;
+    if (!READ_ONLY_DECORATIONS.some((k) => k in dict)) return item;
+    const next = { ...dict };
+    for (const k of READ_ONLY_DECORATIONS) delete next[k];
+    return next;
+}
+
+/**
  * Guarantee a `view` body carries a top-level `name`.
  *
  * {@link ObjectStackProtocolImplementation.getMetaItems} only surfaces a
@@ -5312,6 +5356,15 @@ export class ObjectStackProtocolImplementation implements
         if (!request.item) {
             throw new Error('Item data is required');
         }
+        // Drop OUR OWN read decorations before anything reads the body (#4326).
+        // The write path persists verbatim by design (ADR-0005 §Validation), so
+        // the standard Studio round-trip — GET (decorated) → edit → PUT the whole
+        // body — would otherwise bake a read-time verdict into the row, its
+        // checksum, and every history diff. See {@link stripReadDecorations} for
+        // why this is a silent strip and which underscore keys are NOT touched.
+        // Placed first so the destructive-change diff, the schema gate, the
+        // authoring gate and the persisted body all see the same document.
+        request.item = stripReadDecorations(request.item);
         // Per-item lifecycle (ADR-0005 §"Drafts"). Default is `'publish'`
         // (legacy semantics — save goes straight live) to keep callers
         // that predate the draft/publish split working. Studio's

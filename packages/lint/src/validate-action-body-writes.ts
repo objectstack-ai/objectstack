@@ -54,7 +54,7 @@ import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 import {
   extractHookBodyWrites,
   indexObjectFields,
-  BODY_WRITE_SYSTEM_FIELDS,
+  IMPLICIT_FIELDS,
   HOOK_BODY_WRITE_PATTERNS,
   type HookBodyWritePattern,
 } from './validate-hook-body-writes.js';
@@ -254,7 +254,7 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
 
       const known = objectFields.get(w.object);
       if (!known) continue; // object declared by another package — cannot judge
-      if (BODY_WRITE_SYSTEM_FIELDS.has(w.field) || known.has(w.field)) continue;
+      if (IMPLICIT_FIELDS.has(w.field) || known.has(w.field)) continue;
 
       reported.add(dedupeKey);
       findings.push({
@@ -276,7 +276,7 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
 
 /** Did-you-mean (declared + system columns as candidates) plus the fix. */
 function fixHint(field: string, declared: string[]): string {
-  const suggestion = formatSuggestion(findClosestMatches(field, [...declared, ...BODY_WRITE_SYSTEM_FIELDS]));
+  const suggestion = formatSuggestion(findClosestMatches(field, [...declared, ...IMPLICIT_FIELDS]));
   return (
     (suggestion ? `${suggestion} ` : '') +
     `Fix the field name, or declare '${field}' on the object. Only the literal write patterns in ` +

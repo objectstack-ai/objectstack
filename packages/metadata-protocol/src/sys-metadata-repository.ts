@@ -249,6 +249,22 @@ export class SysMetadataRepository implements MetadataRepository {
    * `opts.state` selects which lifecycle row to read: defaults to the
    * live published row (`'active'`). Pass `'draft'` to read the pending
    * unpublished revision (if any).
+   *
+   * **The body is VERBATIM — no ADR-0087 conversion (#3903 boundary).** This
+   * repository is the version layer, and every caller wants the bytes that
+   * were written, not today's canonical rendering of them:
+   *   - `saveMetaItem` / `revertCommit` / `deleteMetaItem` read only `hash`
+   *     (parent-version lineage and existence probes) — converting would
+   *     change the body a hash was computed over and break the pairing;
+   *   - `diffMeta` compares this body against `sys_metadata_history` bodies,
+   *     which are verbatim by design. Converting one side only would render
+   *     the conversion itself as a user-authored change in the diff.
+   * Metadata that is *served to a consumer* is converted one layer up, at the
+   * `ObjectStackProtocolImplementation` read seams. The lone exception worth
+   * knowing: the seed body captured for `publishPackageDrafts` flows from here
+   * into `applySeedBodies`, which IS a serving path — vacuous today because no
+   * conversion targets the seed/dataset surface, but the seam to wire if one
+   * ever lands.
    */
   async get(
     ref: MetaRef,

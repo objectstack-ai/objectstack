@@ -69,7 +69,17 @@ describe('LoopConfigSchema', () => {
     }) as { properties?: { collection?: { xExpression?: unknown; description?: unknown } } };
     expect(schema.properties?.collection?.xExpression).toBe('template');
     // description survives alongside the marker (they share one .meta()).
-    expect(schema.properties?.collection?.description).toBe('Template/variable resolving to the array to iterate');
+    expect(schema.properties?.collection?.description).toBe(
+      'Template/variable resolving to the array to iterate (an inline array is accepted)',
+    );
+  });
+
+  it('accepts an inline array collection — the union map.collection declares (#4277)', () => {
+    // The executor has always resolved an already-an-array collection (shared
+    // logic with `map`); the string-only declaration under-declared what it
+    // reads, which the execute-time parse wiring surfaced.
+    const parsed = LoopConfigSchema.parse({ collection: [1, 2, 3] });
+    expect(parsed.collection).toEqual([1, 2, 3]);
   });
 });
 

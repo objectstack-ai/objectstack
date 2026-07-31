@@ -41,14 +41,16 @@
 //
 // ACTION bodies run through the same `HookBodySchema` and the same sandbox, so
 // they get the same treatment from a sibling rule — `validate-action-body-
-// writes.ts`, which reuses this module's extractor, ledger and field index.
-// It carries only the pattern subset that survives the context change (an
-// action's `ctx.input` is its params bag, not a record); the reasoning is
-// declared as data there, not restated here.
+// writes.ts`, which reuses this module's extractor, ledger, field index and
+// implicit-field set. It carries only the pattern subset that survives the
+// context change (an action's `ctx.input` is its params bag, not a record);
+// the reasoning is declared as data there, not restated here.
 
 import { createRequire } from 'node:module';
 import type ts from 'typescript';
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
+
+import { SYSTEM_FIELDS } from './system-fields.js';
 
 // The TypeScript compiler must NOT be imported at module top level: it is
 // ~9 MB of CJS, and @objectstack/lint sits on the kernel boot path — while
@@ -182,22 +184,23 @@ const API_WRITE_METHODS: ReadonlyMap<string, number> = new Map([
 const INPUT_ENVELOPE_KEYS: ReadonlySet<string> = new Set(['id', 'options', 'ast', 'data']);
 
 /**
- * Registry-injected columns present on (almost) every object but absent from
- * `object.fields` — always legitimately writable by automation. The UNION of
- * the sets the other field-resolving rules carry, because the cost asymmetry
- * is the same everywhere: over-inclusion is at worst a missed finding,
- * under-inclusion is a false one.
+ * Columns always legitimately writable by automation without appearing in
+ * `object.fields`: the package-shared registry-injected columns
+ * (`system-fields.ts`, #4330) plus the UNION of its sibling rules' local
+ * exemptions (`_id`/`name`/`space` from validate-translation-references,
+ * `name`/`owner`/`record_type` from validate-flow-template-paths) — because
+ * the cost asymmetry is the same everywhere: over-inclusion is at worst a
+ * missed finding, under-inclusion is a false one.
  *
  * Exported for `validate-action-body-writes.ts` only (not re-exported from the
- * package barrel): the two body-write rules must agree on what a system column
- * is, and two copies of this list would drift into two different answers.
+ * package barrel). The action rule is this same check on the other surface that
+ * carries a `HookBodySchema` body, so the two must agree on what is implicitly
+ * writable — a second copy of this extension would drift exactly the way the
+ * five hand-copied lists #4330 collapsed did.
  */
-export const BODY_WRITE_SYSTEM_FIELDS: ReadonlySet<string> = new Set([
-  'id', '_id', 'name', 'space',
-  'owner', 'owner_id', 'user_id',
-  'created_at', 'created_by', 'updated_at', 'updated_by',
-  'organization_id', 'tenant_id',
-  'is_deleted', 'deleted_at', 'record_type',
+export const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
+  ...SYSTEM_FIELDS,
+  '_id', 'name', 'space', 'owner', 'record_type',
 ]);
 
 type AnyRec = Record<string, unknown>;
@@ -220,7 +223,7 @@ function asArray(v: unknown): AnyRec[] {
  * object name → its declared field names (both `fields` authoring shapes).
  *
  * Exported for `validate-action-body-writes.ts` only (see
- * {@link BODY_WRITE_SYSTEM_FIELDS} for why the two rules share rather than copy).
+ * {@link IMPLICIT_FIELDS} for why the two rules share rather than copy).
  */
 export function indexObjectFields(stack: AnyRec): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
@@ -430,7 +433,7 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
         // missing on EVERY named target (a multi-target body may branch per
         // object, so a partial miss is not statically wrong).
         if (!inputJudgeable) continue;
-        if (BODY_WRITE_SYSTEM_FIELDS.has(w.field)) continue;
+        if (IMPLICIT_FIELDS.has(w.field)) continue;
         if (targetSets.some((s) => s!.has(w.field))) continue;
 
         reported.add(dedupeKey);
@@ -454,7 +457,7 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
         // ctx.api write → the named object.
         const known = objectFields!.get(w.object);
         if (!known) continue; // object declared by another package — cannot judge
-        if (BODY_WRITE_SYSTEM_FIELDS.has(w.field) || known.has(w.field)) continue;
+        if (IMPLICIT_FIELDS.has(w.field) || known.has(w.field)) continue;
 
         reported.add(dedupeKey);
         findings.push({
@@ -484,7 +487,7 @@ function unionCandidates(targetSets: ReadonlyArray<Set<string> | undefined>): st
 
 /** Did-you-mean (declared + system columns as candidates) plus the fix. */
 function fixHint(field: string, declared: string[]): string {
-  const suggestion = formatSuggestion(findClosestMatches(field, [...declared, ...BODY_WRITE_SYSTEM_FIELDS]));
+  const suggestion = formatSuggestion(findClosestMatches(field, [...declared, ...IMPLICIT_FIELDS]));
   return (
     (suggestion ? `${suggestion} ` : '') +
     `Fix the field name, or declare '${field}' on the object. Only the literal write patterns in ` +

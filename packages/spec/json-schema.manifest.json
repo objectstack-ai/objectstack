@@ -1,5 +1,5 @@
 {
-  "description": "Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. Auto-appended when new schemas are added (commit the change). A listed schema that a build no longer emits fails gen:schema \u2014 remove a key ONLY for a deliberate retirement. See #2978.",
+  "description": "Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. Auto-appended when new schemas are added (commit the change). A listed schema that a build no longer emits fails gen:schema — remove a key ONLY for a deliberate retirement. See #2978.",
   "schemas": [
     "ai/AIModelConfig",
     "ai/AIUsageRecord",
@@ -531,6 +531,8 @@
     "automation/DataDestinationConfig",
     "automation/DataSourceConfig",
     "automation/DataSyncConfig",
+    "automation/DecisionCondition",
+    "automation/DecisionConfig",
     "automation/DecisionOutputDef",
     "automation/DeleteRecordConfig",
     "automation/ETLDestination",
@@ -571,8 +573,10 @@
     "automation/ScheduleState",
     "automation/ScreenConfig",
     "automation/ScreenFieldConfig",
+    "automation/ScriptConfig",
     "automation/StateMachine",
     "automation/StateNode",
+    "automation/SubflowConfig",
     "automation/SyncDirection",
     "automation/SyncExecutionResult",
     "automation/SyncExecutionStatus",

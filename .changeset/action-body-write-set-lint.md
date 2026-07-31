@@ -48,9 +48,10 @@ every exclusion is proved to be about applicability rather than an
 unextractable shape: the shared extractor still sees it, and this rule still
 reports nothing for it.
 
-One extractor, one field index, one system-column set, shared with the hook
-rule rather than copied — two copies would drift into two different answers
-about what a system column is.
+One extractor, one field index, one implicit-field set, shared with the hook
+rule rather than copied. The action rule is the same check on the other body
+surface, so a second copy of `IMPLICIT_FIELDS` would drift exactly the way the
+five hand-copied system-field lists #4330 collapsed did.
 
 The lint stays off the kernel boot path, and lands one notch tighter than the
 hook side: the only applicable pattern is rooted at `ctx.api`, so an action
