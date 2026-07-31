@@ -334,9 +334,9 @@ const BaseQuerySchema = z.object({
   /** Group By Clause */
   groupBy: z.array(GroupByNodeSchema).optional().describe('GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing)'),
   
-  /** Having Clause */
-  having: FilterConditionSchema.optional().describe('HAVING clause for aggregation filtering'),
-  
+  /** Having Clause — enforced engine-side after aggregation (#4286 step 3). */
+  having: FilterConditionSchema.optional().describe('HAVING — filter over the AGGREGATED rows (aggregation aliases + groupBy projections); applied engine-side after aggregation'),
+
   /** Window functions — REMOVED from the request surface (#4286); the capability's door is `SqlDriver.findWithWindowFunctions()`. */
   windowFunctions: retiredKey(QUERY_WINDOW_FUNCTIONS_REMOVED),
 

@@ -496,6 +496,7 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | **where** | `Record<string, any> \| any` | optional |  |
 | **groupBy** | `string[]` | optional |  |
 | **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]` | optional |  |
+| **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **timezone** | `string` | optional |  |
 
 

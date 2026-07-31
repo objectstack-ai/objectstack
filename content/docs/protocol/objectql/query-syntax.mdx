@@ -90,7 +90,6 @@ on the `find()` path:
 
 | Member | Status |
 |:-------|:-------|
-| `having` | Never read: `engine.aggregate()` forwards only `object`/`where`/`groupBy`/`aggregations`, and the in-memory fallback has no HAVING stage |
 | `cursor` | Accepted by `EngineQueryOptions`, but no driver implements keyset pagination |
 | `distinct` | Not applied by `find()`; the SQL and in-memory drivers expose a separate `distinct(object, field, filters?)` method instead |
 | `aggregations[].filter` | `[EXPERIMENTAL — not enforced]` — a SQL `FILTER (WHERE …)` affordance neither the SQL builders nor the in-memory fallback applies |
@@ -98,14 +97,14 @@ on the `find()` path:
 
 `top` is the exception that *is* honored — the engine normalises it to `limit`.
 
-Two members left this table by being **removed** (#4286, ADR-0049 enforce-or-remove):
-`joins` and `windowFunctions` are tombstoned in `@objectstack/spec` 18 — a query
-carrying either fails to parse with the upgrade prescription, and authoring one is a
-`tsc` error. Related records are read through `expand`; window functions remain a
-SQL-driver door (`SqlDriver.findWithWindowFunctions()`). The inert members that
-*remain* declared (`having`, `cursor`, `distinct`, and the experimental flags above)
-are tracked in the liveness ledger (`packages/spec/liveness/query.json`) pending
-their #4286 dispositions.
+Three members left this table under ADR-0049 enforce-or-remove (#4286): `joins` and
+`windowFunctions` were **removed** — tombstoned in `@objectstack/spec` 18, so a query
+carrying either fails to parse with the upgrade prescription and authoring one is a
+`tsc` error (related records are read through `expand`; window functions remain a
+SQL-driver door, `SqlDriver.findWithWindowFunctions()`) — and `having` was **enforced**
+(see §5). The inert members that remain declared (`cursor`, `distinct`, and the
+experimental flags above) are tracked in the liveness ledger
+(`packages/spec/liveness/query.json`) pending their #4286 dispositions.
 </Callout>
 
 ### Key Types
@@ -659,23 +658,30 @@ const query: QueryAST = {
 };
 ```
 
-### HAVING Clause (protocol only)
+### HAVING Clause
 
-`QuerySchema` defines a `having` property, but **nothing executes it**:
-`engine.aggregate()` forwards only `object` / `where` / `groupBy` / `aggregations` to
-the driver, no driver reads `query.having`, and the in-memory aggregation fallback has
-no HAVING stage. Filter the aggregated rows in application code:
+**Enforced since #4286** (ADR-0049, resolved to enforce). The engine applies `having`
+itself, AFTER aggregation, identically on the native-driver path and the in-memory
+fallback (`packages/objectql/src/having-filter.ts`) — the same correct-first /
+optimize-later two-tier shape date bucketing uses; native SQL `HAVING` pushdown can come
+later behind a driver capability flag without changing these semantics. The REST
+`findData()` aggregate branch forwards the clause.
+
+`having` references the **aggregated row's own columns** — aggregation aliases and
+groupBy projections — with the ordinary FilterCondition operators and
+`$and` / `$or` / `$not`. An unknown operator rejects the query loudly rather than being
+ignored (an ignored operator would silently return unfiltered aggregates — the ADR-0078
+failure mode enforcement exists to end).
 
 ```typescript
+// Only accounts with > $1M pipeline
 const rows = await engine.aggregate('opportunity', {
   groupBy: ['account_id'],
   aggregations: [
     { function: 'sum', field: 'amount', alias: 'total' },
   ],
+  having: { total: { $gt: 1_000_000 } },
 });
-
-// Only accounts with > $1M pipeline
-const bigAccounts = rows.filter((r) => r.total > 1_000_000);
 ```
 
 ### Date Bucketing

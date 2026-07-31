@@ -274,6 +274,14 @@ export const EngineAggregateOptionsSchema = lazySchema(() => BaseEngineOptionsSc
    */
   aggregations: z.array(AggregationNodeSchema).optional(),
   /**
+   * HAVING — a FilterCondition over the AGGREGATED rows, so its namespace is
+   * the aggregated row's own columns: aggregation aliases + groupBy
+   * projections. Enforced ENGINE-side after aggregation (#4286 step 3) —
+   * identical semantics on the native-driver and in-memory paths; drivers do
+   * not receive authority over it.
+   */
+  having: FilterConditionSchema.optional().describe('HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation'),
+  /**
    * Reference timezone (IANA name) for date bucketing (ADR-0053 Phase 2).
    * When set to a non-UTC zone, `groupBy` items carrying a `dateGranularity`
    * bucket on that zone's calendar days. Unset or `'UTC'` keeps the UTC

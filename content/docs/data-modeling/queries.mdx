@@ -376,13 +376,14 @@ silently returns `null` for them. Avoid these three on SQL- or memory-backed obj
 }
 ```
 
-<Callout type="warn">
-`having` is accepted by `QuerySchema` but is not enforced by the query engine today.
-`EngineAggregateOptions` (the type `ObjectQL.aggregate()` actually takes) has no `having`
-field, and both the REST `findData()` dispatcher and `ObjectQL.aggregate()` build their
-driver-facing query from only `where` / `groupBy` / `aggregations` — a `having` clause is
-silently dropped before it reaches any driver. No driver (SQL, in-memory, MongoDB) filters
-on it either. Post-filter grouped results on the client until this is wired up.
+<Callout type="info">
+`having` is **enforced since #4286** (ADR-0049 enforce-or-remove, resolved to enforce): the
+engine applies it itself AFTER aggregation, identically on the native-driver path and the
+in-memory fallback, and the REST `findData()` aggregate branch forwards it. Its namespace is
+the **aggregated row's own columns** — aggregation aliases (`order_count`) and groupBy
+projections — with the ordinary FilterCondition operators and `$and`/`$or`/`$not`. An
+unknown operator is rejected loudly rather than ignored. Native SQL `HAVING` pushdown can
+come later behind a driver capability flag without changing these semantics.
 </Callout>
 
 ---
@@ -536,9 +537,9 @@ called by `ObjectQL.find()`/`.aggregate()`, so it isn't reachable through a norm
 }
 ```
 
-<Callout type="warn">
-As noted under [Aggregations](#aggregations) above, `having` is not currently enforced —
-it's dropped before reaching the aggregation engine or any driver.
+<Callout type="info">
+As noted under [Aggregations](#aggregations) above, `having` filters the aggregated rows
+engine-side — `total_spent` here is the aggregation alias it references.
 </Callout>
 
 ### Date Bucketing in `groupBy`

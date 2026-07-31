@@ -3791,6 +3791,10 @@ export class ObjectStackProtocolImplementation implements
                 where: options.where,
                 groupBy: options.groupBy,
                 aggregations: options.aggregations,
+                // Enforced engine-side since #4286 (step 3) — dropping it here
+                // was finding 1: the one wire path to aggregate() lost the
+                // clause before any executor could ever see it.
+                having: options.having,
                 context: options.context,
             } as any);
             // Apply limit client-side (EngineAggregateOptions doesn't carry limit).

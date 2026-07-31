@@ -3367,6 +3367,7 @@
     "data/EngineAggregateOptions:aggregations",
     "data/EngineAggregateOptions:context",
     "data/EngineAggregateOptions:groupBy",
+    "data/EngineAggregateOptions:having",
     "data/EngineAggregateOptions:timezone",
     "data/EngineAggregateOptions:where",
     "data/EngineCountOptions:context",

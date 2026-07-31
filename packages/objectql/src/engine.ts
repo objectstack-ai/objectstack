@@ -72,6 +72,7 @@ import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
+import { applyHaving } from './having-filter.js';
 
 /**
  * The lifecycle events the engine actually dispatches via `triggerHooks`. This
@@ -3983,6 +3984,11 @@ export class ObjectQL implements IDataEngine {
             where: query.where,
             groupBy: query.groupBy as any,
             aggregations: query.aggregations,
+            // ENFORCED since #4286 (step 3). On the ast so the FLS predicate
+            // guard walks its references (predicate-guard.ts) and a future
+            // native pushdown has it in hand; the engine's post-aggregation
+            // applyHaving() below is authoritative either way.
+            having: query.having,
         },
         options: query,
         context: mergeReadContext(query?.context, options?.context),
@@ -4022,7 +4028,14 @@ export class ObjectQL implements IDataEngine {
         const hasDateBucket = structuredItems.some((g: any) => !!g?.dateGranularity);
         const tzRequiresInMemory = !!tz && tz !== 'UTC' && hasDateBucket;
         if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory) {
-            return drv.aggregate(object, ast, this.buildDriverOptions(object, opCtx.context));
+            // HAVING is engine-owned (#4286): applied AFTER aggregation, over
+            // the aggregated row's own columns (aggregation aliases + groupBy
+            // projections), identically on both paths. No driver implements it
+            // natively today; one that grows native support must advertise a
+            // capability flag, at which point this post-filter becomes the
+            // fallback tier — the dateGranularity two-tier pattern.
+            const aggregated = await drv.aggregate(object, ast, this.buildDriverOptions(object, opCtx.context));
+            return applyHaving(aggregated, ast.having);
         }
         // In-memory fallback path: ask the driver for raw rows, then bucket +
         // aggregate here. This guarantees `groupBy` (incl. structured items
@@ -4031,7 +4044,7 @@ export class ObjectQL implements IDataEngine {
         // driver-memory, partial SQL drivers), and is the path that honours a
         // non-UTC reference timezone.
         const raw = await driver.find(object, ast, this.buildDriverOptions(object, opCtx.context));
-        return applyInMemoryAggregation(raw, ast, tz);
+        return applyHaving(applyInMemoryAggregation(raw, ast, tz), ast.having);
       });
 
       return opCtx.result as any[];

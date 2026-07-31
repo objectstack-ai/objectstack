@@ -93,9 +93,10 @@
       "evidence": "packages/objectql/src/engine.ts aggregate() forwards groupBy; packages/objectql/src/in-memory-aggregation.ts buckets by it (including dateGranularity fallback)"
     },
     "having": {
-      "status": "dead",
+      "status": "live",
       "verifiedAt": "2026-07-31",
-      "note": "Never delivered: engine.aggregate() rebuilds the AST it hands the driver with exactly object/where/groupBy/aggregations, so a driver that DID implement HAVING would never receive it (#4286 finding 1), and the in-memory fallback has no HAVING stage. The strongest ENFORCE candidate of the #4286 set — a genuinely expected SQL capability the fallback could apply in a few lines — so it is deliberately left declared pending that call (#4286 step 3). The FLS predicate guard already walks it (predicate-guard.ts:64), so enforcing it later leaks nothing."
+      "evidence": "packages/objectql/src/having-filter.ts (the evaluator); packages/objectql/src/engine.ts aggregate() applies it after BOTH the native-driver path and the in-memory fallback; packages/metadata-protocol/src/protocol.ts findData aggregate branch forwards it; packages/spec/src/data/data-engine.zod.ts EngineAggregateOptionsSchema declares it",
+      "note": "ENFORCED 2026-07-31 (#4286 step 3, resolved to enforce): engine-owned, applied AFTER aggregation over the aggregated row's namespace (aggregation aliases + groupBy projections); an unknown operator rejects loudly instead of being ignored. Was #4286 finding 1 — aggregate() rebuilt the driver AST without it, so even a HAVING-implementing driver could never receive it. Native SQL pushdown can come later behind a driver capability flag (the dateGranularity two-tier pattern) without changing semantics. The FLS predicate guard walks it (predicate-guard.ts:64)."
     },
     "windowFunctions": {
       "status": "dead",

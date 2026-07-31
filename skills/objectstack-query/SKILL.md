@@ -363,24 +363,21 @@ unique or near-unique column such as `created_at` or `id`) so
 
 ### HAVING Clause
 
-> ⚠️ **Schema-reserved — NOT executed by the engine yet.** `having`
-> validates against `QuerySchema`, but `EngineAggregateOptions` has no
-> `having` property and nothing implements it — the clause is silently
-> dropped. **Working alternative:** post-filter the aggregated rows in
-> application code:
+> ✅ **Enforced since #4286.** The engine applies `having` AFTER aggregation,
+> on both the native-driver path and the in-memory fallback. It references
+> the **aggregated row's columns** — aggregation aliases and groupBy
+> projections — with the ordinary FilterCondition operators plus
+> `$and`/`$or`/`$not`. An unknown operator is rejected loudly, never ignored.
 
 ```typescript
-// ❌ having is silently ignored — do NOT rely on it
-// { ..., having: { total_revenue: { $gt: 100000 } } }
-
-// ✅ Aggregate, then filter the result rows in app code
+// ✅ Only regions with more than 100k revenue
 const rows = await engine.aggregate('deal', {
   groupBy: ['region'],
   aggregations: [
     { function: 'sum', field: 'amount', alias: 'total_revenue' },
   ],
+  having: { total_revenue: { $gt: 100000 } },
 });
-const bigRegions = rows.filter((r) => r.total_revenue > 100000);
 ```
 
 ### Filtered Aggregation
