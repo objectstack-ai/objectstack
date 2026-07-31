@@ -50,8 +50,8 @@ Today this precedence is implemented **inside the protocol layer**, not by
 in-memory code registry — `getMetaItemLayered()` returns `code` / `overlay` /
 `effective` separately. `LayeredRepository` ships in `@objectstack/metadata-core`
 and implements exactly the semantics above, but it is **not yet composed** into
-any production path: the only `new LayeredRepository(...)` call sites are its own
-tests.
+any production path: every `new LayeredRepository(...)` call site is a test
+(`metadata-core`'s own suite plus one `objectql` integration test).
 </Callout>
 
 ---
@@ -127,7 +127,7 @@ See [ADR-0005](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/
 
 ## Conflict handling
 
-Every `put()` requires a `parentVersion` (or `null` for fresh creates). If the head has moved since the caller read it, `ConflictError(ref, expectedParent, actualHead)` is thrown — code `METADATA_CONFLICT`, mapped to HTTP 412 Precondition Failed. Clients are expected to re-read the item and retry; the console does not yet surface a dedicated conflict-resolution UI.
+Every `put()` requires a `parentVersion` (or `null` for fresh creates). If the head has moved since the caller read it, the repository throws `ConflictError(ref, expectedParent, actualHead)` with code `METADATA_CONFLICT`. `protocol.ts` catches it at every write entry point (save, publish, rollback, overlay-delete) and re-throws an API error with code `metadata_conflict`, **HTTP 409 Conflict**, and the `expectedParent` / `actualHead` pair attached. Clients are expected to re-read the item and retry; the console does not yet surface a dedicated conflict-resolution UI.
 
 The hash is `sha256:` + 64-hex of a canonical (sorted-keys, no-undefined) JSON serialization of the body. Identical bodies produce identical hashes — `put()` short-circuits on no-op writes.
 
@@ -170,13 +170,17 @@ The hash is `sha256:` + 64-hex of a canonical (sorted-keys, no-undefined) JSON s
 > **Cross-replica sync happens above the repository, not inside it.**
 > `SysMetadataRepository.watch()` is deliberately scoped to the local instance —
 > it has no `LISTEN/NOTIFY` or pub/sub of its own, and never will. Cross-node
-> propagation is instead a **cluster** concern: install `@objectstack/service-cluster`
-> and its `MetadataClusterBridgePlugin` calls `MetadataManager.attachClusterPubSub()`
-> at `kernel:ready`, fanning every local watch event out over the `metadata.changed`
-> channel (loopback-suppressed by `originNode`) so peer nodes invalidate their
-> caches. Note this replays the *invalidation event*, not the overlay row — peers
-> re-read from the shared database. Without the cluster service registered, the
-> bridge logs and skips, and each replica only sees its own writes.
+> propagation is instead a **cluster** concern: `@objectstack/runtime` registers
+> `ClusterServicePlugin` and `MetadataClusterBridgePlugin` by default (opt out with
+> `cluster: false`), and at `kernel:ready` the bridge calls
+> `MetadataManager.attachClusterPubSub()`, fanning every local watch event out over
+> the `metadata.changed` channel (loopback-suppressed by `originNode`) so peer nodes
+> invalidate their caches. Note this replays the *invalidation event*, not the
+> overlay row — peers re-read from the shared database. The default cluster driver
+> is `memory`, which is in-process, so real cross-replica fan-out still requires
+> configuring a distributed driver; and if no `cluster` (or `metadata`) service is
+> registered the bridge logs and skips, leaving each replica seeing only its own
+> writes.
 
 ---
 

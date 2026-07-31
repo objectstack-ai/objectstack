@@ -218,7 +218,7 @@ const { value, source, locked } = await settings.get('stripe', 'apiKey', {
 **Kernel Solution:**
 - **Package Manifest:** The `manifest` block in `objectstack.config.ts` (compiled to `objectstack.json`) declares what a package provides and needs
 - **Dependency Resolution:** Automatic validation that plugin versions are compatible with core platform
-- **Lifecycle:** plugins implement the optional `init` / `start` / `destroy` hooks, driven by `kernel.bootstrap()` and shutdown
+- **Lifecycle:** every plugin implements a **required** `init` hook plus optional `start` / `destroy` hooks, driven by `kernel.bootstrap()` and shutdown
 - **Sandboxing:** Plugins can't access each other's data or crash each other
 
 **Results:**
@@ -395,8 +395,10 @@ packages/plugins/plugin-slack-integration/
 
 <Callout type="warn">
   The scaffold still emits an `initialize` method. The kernel's plugin contract
-  only invokes `init` / `start` / `destroy` — rename `initialize` to `init` in
-  the generated `src/index.ts` or the hook never runs.
+  only invokes `init` / `start` / `destroy`, and `init` is **required** — rename
+  `initialize` to `init` in the generated `src/index.ts` or `kernel.use()`
+  rejects the plugin outright with
+  `Failed to load plugin: slack-integration - Plugin init function is required`.
 </Callout>
 
 ### Configuration Management
