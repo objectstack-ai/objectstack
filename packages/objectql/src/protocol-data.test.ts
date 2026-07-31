@@ -948,6 +948,11 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             // `client.data.query(object, query)` posts a `Partial<QueryAST>`,
             // whose documented shape includes `object`. Treated as a field
             // filter it would become `where.object` and match zero rows.
+            // `joins`/`windowFunctions` are tombstoned since #4286 but stay in
+            // `keyof QueryAST` (and so in this reserved set) while the
+            // tombstone lives: a caller still sending one must meet the
+            // prescription wherever the schema parses, never a silent
+            // `where.joins` filter.
             const { protocol, engine } = makeProtocol();
             await protocol.findData({
                 object: 'showcase_task',

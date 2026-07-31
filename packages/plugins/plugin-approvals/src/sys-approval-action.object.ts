@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { APPROVAL_ACTION_KINDS } from '@objectstack/spec/contracts';
 
 /**
  * sys_approval_action — Audit trail row per approval action.
@@ -98,12 +99,11 @@ export const SysApprovalAction = ObjectSchema.create({
     }),
 
     action: Field.select(
-      // Keep in sync with `ApprovalActionKind` (spec/contracts). reassign /
-      // remind / request_info / comment are thread interactions — they never
-      // move the flow. revise / resubmit (ADR-0044) DO move it: send back for
-      // revision and the later resubmission. ooo_substitute (#1322 M1) is a
-      // system-recorded reroute of an out-of-office approver — no flow movement.
-      ['submit', 'approve', 'reject', 'recall', 'escalate', 'reassign', 'remind', 'request_info', 'comment', 'revise', 'resubmit', 'ooo_substitute'],
+      // Spread from the contract, not re-typed (#3786). `APPROVAL_ACTION_KINDS`
+      // is where the list and the per-kind notes live (which kinds move the flow
+      // and which are thread-only); `ApprovalActionKind` is derived from it, so
+      // this column and the contract cannot disagree.
+      [...APPROVAL_ACTION_KINDS],
       {
         label: 'Action',
         required: true,

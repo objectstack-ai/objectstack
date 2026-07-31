@@ -587,7 +587,16 @@ const step18: MigrationStep = {
     + 'MongoDB, and refused by the REST ingress as an unknown field of that name. `expand` is the '
     + 'one spelling for nested selection (ADR-0049 enforce-or-remove; Prime Directive #12: one '
     + 'capability, one contract). Like the two above it is a request shape, never stored, so the '
-    + 'chain has no source to rewrite.',
+    + 'chain has no source to rewrite.\n\n'
+    + 'The #4286 sweep applies the same method to the rest of the request surface: `query.joins` '
+    + 'and `query.windowFunctions` are tombstoned — no engine or driver ever read either on the '
+    + 'query path, so every join and OVER clause a caller declared was silently dropped. Joins '
+    + 'were the second, broken spelling of related-record retrieval (`expand` is the live one; '
+    + 'the whole JoinNode cluster goes with the key), and window functions only ever ran behind '
+    + '`SqlDriver.findWithWindowFunctions()`, a driver-level door whose flat input shape the '
+    + 'spec vocabulary never matched (it declared `field`/`over`/`frame` members the door never '
+    + 'read — that cluster goes too). Request shapes again: two semantic TODOs, no source '
+    + 'rewrite.',
   conversionIds: ['stack-api-require-auth-removed'],
   semantic: [
     {
@@ -622,6 +631,50 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'No /batch, /updateMany or /deleteMany call sends `options.validateOnly`; a request that '
         + 'includes it answers 400 VALIDATION_FAILED with the retirement prescription.',
+    },
+    {
+      id: 'query-joins-retired',
+      surface: 'data.query.joins',
+      replacement:
+        "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted "
+        + "`fields` path for a single related column (`fields: ['owner.name']`)",
+      reason:
+        'The `joins` array was declared-but-inert: no engine or driver read `query.joins` '
+        + 'anywhere on the query path, so a query carrying it behaved exactly as if the key were '
+        + 'absent — while the name squatted on the reserved REST parameter set. Related-record '
+        + 'retrieval already has a live spelling (`expand`, resolved by the engine via batch '
+        + '`$in` queries), so the removal deletes the second, broken spelling rather than the '
+        + 'capability, and the orphaned `JoinNode`/`JoinType`/`JoinStrategy` cluster goes with '
+        + 'the key. A REQUEST surface — `QueryAST` is never stored in stack metadata — so there '
+        + 'is no source for the chain to rewrite; callers move their own queries. '
+        + 'ADR-0049 / ADR-0078, #4286.',
+      acceptanceCriteria:
+        'No caller sends `joins`; related records are read through `expand` and single related '
+        + 'columns through dotted `fields` paths. A query that still carries `joins` fails to '
+        + 'parse with the removal prescription (even as an empty array), and authoring it is a '
+        + '`tsc` error at the call site.',
+    },
+    {
+      id: 'query-window-functions-retired',
+      surface: 'data.query.windowFunctions',
+      replacement:
+        '`aggregations` + `groupBy` for request-level analytics; '
+        + '`SqlDriver.findWithWindowFunctions(object, query)` for embedders on a SQL datasource',
+      reason:
+        'The `windowFunctions` array was declared-but-inert on the query path: `find()` never '
+        + 'applied a window function, so every OVER clause a caller declared was silently '
+        + 'dropped. The capability only ever ran behind `SqlDriver.findWithWindowFunctions()`, '
+        + 'a driver-level door that is not on the `IDataDriver` contract and whose flat input '
+        + 'shape (`{ function, alias, partitionBy?, orderBy? }`) the spec vocabulary never '
+        + 'matched — `WindowFunctionNodeSchema` declared `field`/`over`/`frame` members the door '
+        + 'never read, so that cluster is removed with the key rather than left as a false '
+        + 'affordance. A REQUEST surface, never stored; no source to rewrite. '
+        + 'ADR-0049 / ADR-0078, #4286.',
+      acceptanceCriteria:
+        'No caller sends `windowFunctions` in a query; request-level analytics use '
+        + '`aggregations` + `groupBy`, and embedders needing OVER-clause SQL call the SQL '
+        + "driver's `findWithWindowFunctions` door directly. A query that still carries the key "
+        + 'fails to parse with the removal prescription naming that door.',
     },
   ],
 };

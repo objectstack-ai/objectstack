@@ -12,7 +12,7 @@ subset the engine actually executes.
    instead of `$null`.
 2. **Nested relation filter** — "Find orders where the customer's country is
    US." Expect a nested relation filter (`customer: { country: 'US' }`),
-   not a `joins` array (schema-reserved).
+   not a `joins` array (removed in #4286).
 3. **Pagination pattern** — "Implement infinite scroll for a feed." Expect
    manual keyset pagination (`where` on the sort key + `orderBy` + `limit`);
    fail if the answer uses the schema-reserved `cursor` property.

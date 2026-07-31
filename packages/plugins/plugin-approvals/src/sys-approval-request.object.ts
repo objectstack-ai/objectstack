@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { APPROVAL_STATUSES } from '@objectstack/spec/contracts';
 
 /**
  * sys_approval_request — Live approval instance.
@@ -128,9 +129,10 @@ export const SysApprovalRequest = ObjectSchema.create({
     }),
 
     status: Field.select(
-      // Keep in sync with `ApprovalStatus` (spec/contracts). `returned` =
-      // sent back for revision (ADR-0044) — terminal for this round.
-      ['pending', 'approved', 'rejected', 'recalled', 'returned'],
+      // Spread from the contract, not re-typed (#3786). `APPROVAL_STATUSES` is
+      // where the list and the reason for each entry live; `ApprovalStatus` is
+      // derived from it, so this column and the contract cannot disagree.
+      [...APPROVAL_STATUSES],
       {
         label: 'Status',
         required: true,

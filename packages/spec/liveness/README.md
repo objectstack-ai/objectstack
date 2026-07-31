@@ -46,6 +46,14 @@ disconnected from the `sys_webhook` dispatcher (#3461). Since being off the regi
 disconnect like `webhook`'s is resolved (materializer built or surface retired), fold the
 type back onto the registry and drop the override.
 
+`query` is the second override, and a permanent one (#4286): `QuerySchema` is not
+metadata at all but the **request surface** — the client SDK QueryBuilder's output and
+the `POST /data/:object/query` body. It is authorable by every API caller yet never
+stored as stack metadata, which is exactly why 12 declared-but-inert members survived
+every other gate: this ledger governed what authors write into metadata files, and
+nothing governed what callers write into a query. Unlike `webhook`, there is no
+registry to fold it back onto — the override *is* its governance.
+
 ## Status vocabulary
 
 | Status | Meaning |
@@ -455,7 +463,7 @@ The governed set is `GOVERNED` at the top of `check-liveness.mts`. To add a type
    RecordDetailView had been gating the History tab on it the whole time (#2707).
 4. Add the type to `GOVERNED`; confirm the gate is green.
 
-## Current state — 16 governed types
+## Current state — 17 governed types
 
 Counts include drilled `children` entries; regenerate with the snippet below rather
 than hand-editing (this table drifted badly once — field was listed 34/39 while the
@@ -494,6 +502,7 @@ EOF
 
 | report | 13 | 0 | 0 | – | dataset-bound (ADR-0021); the aria/performance LEDGER entries were stale — the keys left the schema in the report-liveness close-out; deleted 2026-07-30 as hygiene. Audit-era `chart` DEAD superseded (framework#1890 / #3441) |
 | dashboard | 10 | 0 | 2 | – | ADR-0021 dataset widgets (#3251; DashboardWidgetSchema `.strict()`); `aria`/`performance` (and widget `performance` + PerformanceConfigSchema) REMOVED 2026-07-30 (#3896 close-out sweep — no renderer applied any of them); audit-era `globalFilters`/`dateRange` DEAD superseded (framework#2501) |
+| query | 15 | 7 | 5 | – | **not a metadata type** — the REQUEST surface (`QuerySchema`: client SDK QueryBuilder output; the `POST /data/:object/query` body), governed via `SPEC_ONLY_SCHEMAS` (#4286). The 7 experimental resolve from `[EXPERIMENTAL — not enforced]` describe markers, not ledger entries (search `fuzzy`/`operator`/`boost`/`minScore`/`language`/`highlight` + `aggregations[].filter` — declared engine affordances no executor receives). dead = the #4286 worklist: `joins`/`windowFunctions` REMOVED 2026-07-31 (tombstoned; protocol-18 semantic migrations `query-joins-retired`/`query-window-functions-retired`; the JoinNode and WindowFunctionNode clusters deleted with them), `cursor`/`distinct` (shipped SDK producers, no executor — `distinct` is MIS-WIRED: its only effect is REST count-suppression, protocol.ts:3816) and `having` (never reaches a driver — `engine.aggregate()` rebuilds the AST without it) pending their #4286 step-3/4 dispositions |
 | webhook | 0 | 1 | 16 | – | **not a registered metadata type** — governed via the gate's spec-only schema override (`SPEC_ONLY_SCHEMAS`), not `getMetadataTypeSchema` (#3461/#3462). The ENTIRE authoring surface is dead: nothing materializes an authored `webhooks:` entry into a `sys_webhook` dispatcher row (#3461, enforce-or-remove pending). `url` carries the single per-webhook `authorWarn` (one no-op heads-up per artifact, not per-prop); `authentication` experimental (HMAC-`secret`-only); `isActive` unmarked (default(true)). Notes cite the sys_webhook column map as the future materializer's mapping table |
 
 The `dead` set across types is the enforce-or-remove worklist (ADR-0049); every
