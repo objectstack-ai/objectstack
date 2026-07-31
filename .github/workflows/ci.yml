@@ -378,7 +378,10 @@ jobs:
     needs: filter
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Backstop only — the stall guard on the test step is the primary detector
+    # for a #4250-style hang (see Test Core). 30 min is ~2.5× the slower shard
+    # (shard 1 runs the verify-CLI step too, ~12 min all in).
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -436,11 +439,16 @@ jobs:
       # break, which was green on every static gate). The `--` args reach the
       # package's `vitest run` and are hashed into the turbo task, so each
       # shard caches independently.
+      # run-with-stall-guard: same wiring as Test Core (see the comment there;
+      # #4250/#4314) — it tees to dogfood.log itself for the completeness guard
+      # below, propagates the suite's real exit status (no `| tee` + pipefail),
+      # and turns frozen output into a labeled red after 10 min of silence.
+      # Dogfood boots real engines in-process — exactly the population #4250's
+      # stalls came from.
       - name: Boot example apps and exercise real user flows
         run: |
-          set -o pipefail
-          pnpm turbo run test --filter=@objectstack/dogfood -- --shard=${{ matrix.shard }}/2 \
-            2>&1 | tee "$RUNNER_TEMP/dogfood.log"
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood.log" --stall-minutes 10 -- \
+            pnpm turbo run test --filter=@objectstack/dogfood -- --shard=${{ matrix.shard }}/2
 
       # Dogfood boots real apps in-process, so a native/OOM abort is likelier
       # here than in the unit suites — and a shard that dies silently looks like
