@@ -388,3 +388,24 @@ export type Hook = z.input<typeof HookSchema>;
 export type ResolvedHook = z.output<typeof HookSchema>;
 export type HookEventType = z.infer<typeof HookEvent>;
 export type HookContext = z.infer<typeof HookContextSchema>;
+
+/**
+ * Type-safe factory for a lifecycle hook. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL shorthand
+ * for `condition`) — preferred over a bare `: Hook` literal (#4269).
+ *
+ * A bare literal gets TS excess-property checking only: constraint-level rules
+ * (snake_case `name`, enum values) and the #4207 alias/guidance errors surface
+ * no earlier than bind time — and never for the convention-scan path
+ * (`src/objects/<name>.hook.ts`), whose artifact also stays in input shape.
+ * The factory closes both gaps: bad config hard-fails at import, and the
+ * returned {@link ResolvedHook} has defaults materialized, so scan-path output
+ * matches what `defineStack({ hooks })` binding produces.
+ *
+ * Deliberately a pure parse — no advisory logic here. Handler-deprecation
+ * warnings stay in the binder (`bindHooksToEngine`'s `warnLegacyHandler`
+ * option), one place only.
+ */
+export function defineHook(config: Hook): ResolvedHook {
+  return HookSchema.parse(config);
+}

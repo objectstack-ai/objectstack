@@ -620,15 +620,15 @@ indexes:
 
 Record-triggered logic is **not** an object-schema field — `triggers` (and `hooks`,
 `workflows`) are rejected at build time. Instead, author a lifecycle hook in its own
-`src/objects/<name>.hook.ts` module as a typed `Hook` and export it (or model the
+`src/objects/<name>.hook.ts` module with `defineHook()` and export it (or model the
 automation as a top-level `record_change` flow).
 
 {/* os:check */}
 ```typescript
 // src/objects/customer.hook.ts
-import { Hook, HookContext } from '@objectstack/spec/data';
+import { defineHook, HookContext } from '@objectstack/spec/data';
 
-const customerHook: Hook = {
+export default defineHook({
   name: 'customer_logic',
   object: 'customer',
   events: ['beforeInsert', 'afterInsert', 'beforeUpdate'],
@@ -637,10 +637,14 @@ const customerHook: Hook = {
     // the session — e.g. set an owner on insert, send an email on afterInsert,
     // guard a status transition on beforeUpdate, etc.
   },
-};
-
-export default customerHook;
+});
 ```
+
+Prefer the factory over a bare `: Hook` literal (the same rule as
+`defineDatasource`): it validates when the module is imported, so constraint-level
+mistakes a bare annotation can't catch — a non-`snake_case` `name`, a misspelled
+key routed through a spread — fail while you author instead of at deploy, and the
+export carries defaults already materialized.
 
 **Event Types** (camelCase) — 8 events:
 - `beforeInsert` / `afterInsert`

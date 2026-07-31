@@ -3,6 +3,7 @@ import {
   HookEvent,
   HookSchema,
   HookContextSchema,
+  defineHook,
   type Hook,
   type HookContext,
 } from './hook.zod';
@@ -752,5 +753,55 @@ describe('HookSchema - condition property', () => {
       handler: 'logChanges',
     });
     expect(hook.condition).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// defineHook factory (#4269)
+// ============================================================================
+
+describe('defineHook (#4269)', () => {
+  const config: Hook = {
+    name: 'order_guard',
+    object: 'order',
+    events: ['beforeUpdate'],
+    handler: 'guardStatus',
+    condition: 'record.amount > 1000',
+  };
+
+  it('drift guard: factory output IS the schema parse output', () => {
+    // The factory must stay a pure `HookSchema.parse` — if it ever grows its
+    // own normalization, the two authoring paths (convention scan vs
+    // `defineStack({ hooks })` binding) fork into different artifact shapes.
+    expect(defineHook(config)).toEqual(HookSchema.parse(config));
+  });
+
+  it('materializes defaults and CEL shorthand (input shape → resolved shape)', () => {
+    const resolved = defineHook({ ...config, retryPolicy: {} });
+    expect(resolved.priority).toBe(100);
+    expect(resolved.async).toBe(false);
+    expect(resolved.onError).toBe('abort');
+    expect(resolved.retryPolicy).toEqual({ maxRetries: 3, backoffMs: 1000 });
+    expect(resolved.condition).toEqual({ dialect: 'cel', source: 'record.amount > 1000' });
+  });
+
+  it('passes an inline function handler through by reference', () => {
+    const fn = async () => {};
+    const resolved = defineHook({ ...config, handler: fn });
+    expect(resolved.handler).toBe(fn);
+  });
+
+  it('re-parsing factory output is idempotent (bind-time double validation is safe)', () => {
+    const resolved = defineHook(config);
+    expect(HookSchema.parse(resolved)).toEqual(resolved);
+  });
+
+  it("hard-fails at authoring time with the schema's own guidance, not a second dialect", () => {
+    expect(() => defineHook({
+      ...config,
+      // @ts-expect-error — `enabled` is not a hook key (#4207 guidance)
+      enabled: true,
+    })).toThrow(/no on\/off switch/);
+    expect(() => defineHook({ ...config, name: 'NotSnakeCase' })).toThrow();
   });
 });

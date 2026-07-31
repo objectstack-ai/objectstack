@@ -1244,15 +1244,16 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
   workflows:
     '`workflows` is not an ObjectSchema field. Object-level, record-triggered ' +
     'automation is authored as a lifecycle hook (`src/objects/<name>.hook.ts`, ' +
-    'registered via `defineHook()`) or as a top-level `record_change` flow — ' +
-    'not as `workflows[]` on the object schema.',
+    'wrapped in `defineHook()` from `@objectstack/spec/data`) or as a top-level ' +
+    '`record_change` flow — not as `workflows[]` on the object schema.',
   workflow:
     '`workflow` is not an ObjectSchema field. Record-triggered automation is ' +
     'authored as a lifecycle hook (`src/objects/<name>.hook.ts`) or a top-level ' +
     '`record_change` flow.',
   hooks:
     '`hooks` is not an ObjectSchema field. Lifecycle hooks live in their own ' +
-    '`src/objects/<name>.hook.ts` module, registered via `defineHook()`.',
+    '`src/objects/<name>.hook.ts` module, wrapped in `defineHook()` from ' +
+    '`@objectstack/spec/data`.',
   triggers:
     '`triggers` is not an ObjectSchema field. Use a lifecycle hook ' +
     '(`src/objects/<name>.hook.ts`) or a top-level `record_change` flow.',

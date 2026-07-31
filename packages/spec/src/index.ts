@@ -82,6 +82,7 @@ export { defineSkill } from './ai/skill.zod';
 // *value* import: a broken import hard-errors instead of silently degrading to
 // `any` (the #2023 failure mode). Input-shape config + runtime `.parse()`.
 export { defineDatasource } from './data/datasource.zod';
+export { defineHook } from './data/hook.zod';
 export { defineConnector } from './integration/connector.zod';
 export { defineSharingRule } from './security/sharing.zod';
 export { definePosition, EVERYONE_POSITION, GUEST_POSITION, AUDIENCE_ANCHOR_POSITIONS } from './identity/position.zod';

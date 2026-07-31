@@ -10,6 +10,7 @@
   "defineEmailTemplateDefinition": "sha256:a50aa92001c427ea",
   "defineFlow": "sha256:54b60bb867083f61",
   "defineForm": "sha256:e009563c8667cfc9",
+  "defineHook": "sha256:8de712350ec58845",
   "defineJob": "sha256:04331c2df9a572eb",
   "defineMapping": "sha256:04c233ba6d0f5ab6",
   "defineObjectExtension": "sha256:5286253308912bb1",
