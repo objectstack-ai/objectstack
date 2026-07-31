@@ -48,6 +48,49 @@ Logic that genuinely needs code still doesn't have to be a hook: a flow
 keeps the orchestration in checked metadata and the code in one named,
 testable unit.
 
+## Targeting objects
+
+`object` takes three forms, and the third one carries a review cost the other
+two do not:
+
+```typescript
+object: 'account'                    // one object
+object: ['account', 'contact']       // a named set
+object: '*'                          // every object in the tenant
+```
+
+<Callout type="warn">
+**An empty target is refused, not treated as "no target".** `''`, `[]` and
+`['']` used to parse; the binder then widened `''` and `[]` to the wildcard, so
+a blank target registered the hook on **every** object, on every event it
+listed, with no diagnostic. (`['']` failed the other way — an object name
+nothing matches, a hook that could never fire.) All three are now a parse
+error naming the two spellings that work. A wildcard hook stays entirely
+legitimate; it just has to be **spelled** `'*'`, so it is a choice a reviewer
+sees in the diff rather than a default someone fell into ([#4001](https://github.com/objectstack-ai/objectstack/issues/4001)).
+</Callout>
+
+### Wildcard hooks earn a higher review bar
+
+`object: '*'` is the right tool for genuinely cross-cutting concerns — audit
+trails, provenance stamping, tenant-wide guards. It is also the broadest thing
+a hook can be, so review it as such:
+
+- **Blast radius is every object, including ones added later.** A wildcard hook
+  written today runs against objects that do not exist yet, whose fields it was
+  never checked against. Prefer a named set when the list is actually known.
+- **Cost multiplies by object count and write volume.** A `beforeUpdate`
+  wildcard hook runs on every write in the tenant; anything non-trivial in it
+  belongs behind a `condition` (evaluated before the handler) rather than an
+  early `return` inside the body.
+- **Reads and writes both widen.** A wildcard hook holding an L2 body with
+  `api.write` can write anywhere. Whether the fields it writes exist is
+  [not statically checked](/docs/automation/hook-bodies#not-statically-checked-the-write-set),
+  so a wildcard write set is the least verifiable shape in the system.
+
+Where a wildcard is the honest answer, say so in `description` — it is the one
+place a reviewer can find out why the broad target was chosen.
+
 ## Before Hook
 
 Mutate the incoming record before it is saved. The engine exposes the pending

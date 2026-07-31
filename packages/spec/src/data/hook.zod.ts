@@ -33,6 +33,35 @@ import { HookBodySchema } from './hook-body.zod';
  *   - hook `retryPolicy.backoffMs` vs datasource `retryPolicy.baseDelayMs`
  */
 
+/*
+ * ── An empty target is not "no target" ──────────────────────────────────────
+ *
+ * `object` had no emptiness constraint, so `''`, `[]` and `['']` all parsed.
+ * The binder (`normalizeObjects` in `packages/objectql/src/hook-binder.ts`)
+ * then mapped the first two to `['*']` — and `'*'` is the match-everything
+ * sentinel in the engine's dispatch (`targets.includes('*')`). An author who
+ * left the target blank therefore got a hook registered on EVERY object in the
+ * tenant, on every event listed, with no diagnostic anywhere.
+ *
+ * That is the #4001 failure mode pointed the wrong way: the usual silent strip
+ * narrows what was written, this one WIDENS it — blank intent became the
+ * broadest possible blast radius. `['']` failed the other way, registering on
+ * an object named `''` that nothing matches — a hook that can never fire
+ * (ADR-0078 "no silently inert metadata").
+ *
+ * Both are refused here, and the binder no longer escalates: a target it cannot
+ * make sense of is skipped and recorded, never widened. A wildcard hook remains
+ * entirely legitimate — it just has to be SPELLED `'*'`, so that it is a choice
+ * a reviewer can see in the diff rather than a default someone fell into.
+ */
+const hookTargetError =
+  'A hook `object` target must name at least one object. An empty target is not '
+  + '"no target": until #4001 `\'\'` and `[]` were widened to the wildcard `\'*\'`, '
+  + 'registering the hook on EVERY object, and `[\'\']` registered it on an object '
+  + 'name nothing matches, so it could never fire. Name the object(s) — '
+  + "`object: 'account'` or `object: ['account', 'contact']` — or, if firing on "
+  + "every object really is the intent, write the wildcard explicitly: `object: '*'`.";
+
 /** Keys {@link HookSchema} declares (drift-guarded by hook.test.ts). */
 const HOOK_KEYS = [
   'name', 'label', 'object', 'events', 'handler', 'body', 'priority',
@@ -142,8 +171,19 @@ export const HookSchema = lazySchema(() => z.object({
    * - Single object: "account"
    * - List of objects: ["account", "contact"]
    * - Wildcard: "*" (All objects)
+   *
+   * Must name at least one object. An empty target (`''`, `[]`, `['']`) is
+   * refused rather than widened to the wildcard — see the note above
+   * {@link HOOK_KEYS}.
    */
-  object: z.union([z.string(), z.array(z.string())]).describe('Target object(s)'),
+  object: z.union([z.string(), z.array(z.string())])
+    .refine(
+      (v) => (Array.isArray(v)
+        ? v.length > 0 && v.every((name) => name.trim().length > 0)
+        : v.trim().length > 0),
+      { error: hookTargetError },
+    )
+    .describe('Target object(s)'),
 
   /**
    * Events to subscribe to

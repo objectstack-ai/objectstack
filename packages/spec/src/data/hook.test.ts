@@ -139,6 +139,41 @@ describe('HookSchema', () => {
 
       expect(hook.object).toBe('*');
     });
+
+    // #4001: an empty target used to parse, and the binder widened `''` / `[]`
+    // to the wildcard `'*'` — so a blank target registered the hook on EVERY
+    // object. `['']` failed the other way: an object name nothing matches, a
+    // hook that could never fire. Both are refused; a wildcard must be spelled.
+    describe('an empty target is refused, not widened to the wildcard', () => {
+      it.each([
+        ['empty string', ''],
+        ['whitespace-only string', '   '],
+        ['empty array', [] as string[]],
+        ['array of one blank', [''] as string[]],
+        ['array with a blank member', ['account', ''] as string[]],
+      ])('rejects %s', (_label, object) => {
+        const result = HookSchema.safeParse({
+          name: 'blank_target',
+          object,
+          events: ['beforeInsert'],
+        });
+
+        expect(result.success).toBe(false);
+        const message = result.error!.issues.map((i) => i.message).join('\n');
+        // The error has to be fixable, not merely loud (#4001): it names both
+        // spellings that work and the wildcard that the blank silently became.
+        expect(message).toMatch(/must name at least one object/);
+        expect(message).toMatch(/object: '\*'/);
+      });
+
+      it('still accepts a wildcard inside an array', () => {
+        expect(HookSchema.parse({
+          name: 'array_wildcard',
+          object: ['*'],
+          events: ['afterUpdate'],
+        }).object).toEqual(['*']);
+      });
+    });
   });
 
   describe('Event Subscription', () => {
