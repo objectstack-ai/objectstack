@@ -196,6 +196,35 @@ new MetadataPlugin({
 });
 ```
 
+#### Artifact sources
+
+Both `artifactSource` modes are implemented, and every bootstrap mode above
+dispatches to them:
+
+| Mode | Reads from | Notes |
+| :--- | :--- | :--- |
+| `local-file` | `path` — a filesystem path, or an `http(s)` URL fetched verbatim | The `os dev` / `os serve` path. Only this mode gets the artifact-file HMR watcher (`artifactWatch`). Outside `artifact-only`, an absent local file is "nothing compiled yet", not a fault. |
+| `artifact-api` | The control plane's `GET /api/v1/cloud/environments/:environmentId/artifact` | Requires `environmentId` on the plugin options; `start()` throws when it is missing. `token` is sent as `Authorization: Bearer`, `commitId` pins a published revision via `?commit=`. |
+
+```typescript
+new MetadataPlugin({
+  config: { bootstrap: 'artifact-only' },
+  environmentId: 'env_42',
+  artifactSource: {
+    mode: 'artifact-api',
+    url: 'https://cloud.example.com', // control-plane base — canonical path appended
+    token: process.env.OS_CLOUD_TOKEN,
+    commitId: 'cmt_1a2b',             // optional: pin a published revision
+  },
+});
+```
+
+`url` may instead be an already-resolved endpoint — any URL whose path ends in
+`/artifact` is used verbatim, which is how the `unlisted`-visibility public
+route (`/pub/v1/environments/:id/artifact`) is reached. Both modes honor
+`fetchTimeoutMs` (and `OS_ARTIFACT_FETCH_TIMEOUT_MS`, default 60 s) for remote
+reads.
+
 ### 2. Persistence Write Gates
 
 `MetadataManagerConfigSchema.persistence` is a two-axis runtime freeze. Both flags default to `true`.

@@ -139,12 +139,35 @@ export interface MetadataPluginOptions {
     config?: Partial<MetadataPluginConfig>;
     /** Organization ID for metadata-scoped consumers; MetadataPlugin itself does not persist runtime metadata. */
     organizationId?: string;
-    /** Project ID used by local artifact envelopes and metadata-scoped consumers. */
+    /**
+     * Environment ID used by local artifact envelopes and metadata-scoped
+     * consumers, and REQUIRED by `artifactSource.mode: 'artifact-api'` — it
+     * addresses the control-plane endpoint. (The v5.0 rename retired the
+     * "project ID" wording this comment used to carry; see ADR-0006.)
+     */
     environmentId?: string;
     /**
      * When set, MetadataPlugin loads metadata from an artifact instead of scanning
-     * the filesystem. Only `local-file` is implemented now; `artifact-api` is
-     * reserved for M3/M4.
+     * the filesystem. **Both modes are implemented** and are dispatched from all
+     * three bootstrap modes (`eager` / `lazy` / `artifact-only`) — see `start()`.
+     *
+     * - `local-file` — read `path` (a filesystem path, or an `http(s)://` URL
+     *   fetched verbatim). The dev/`os serve` path; also the one mode the
+     *   artifact-file HMR watcher ({@link artifactWatch}) applies to.
+     * - `artifact-api` — pull the published artifact from the cloud control
+     *   plane (`GET /api/v1/cloud/environments/:environmentId/artifact`, the
+     *   envelope declared by `EnvironmentArtifactSchema`). REQUIRES
+     *   {@link environmentId}; `start()` throws when it is missing rather than
+     *   fetching a URL it cannot address. `url` is the control-plane base URL
+     *   (the canonical path is appended) or an already-resolved artifact
+     *   endpoint — see `_loadFromArtifactApi`. `token` becomes a Bearer header,
+     *   `commitId` pins a published revision, and both modes honor
+     *   `fetchTimeoutMs` / `OS_ARTIFACT_FETCH_TIMEOUT_MS`.
+     *
+     * Keep this describing what `start()` actually does: it used to call
+     * `artifact-api` "reserved for M3/M4" long after the loader and all three
+     * dispatch sites shipped, which read as "this mode is inert" to callers and
+     * propagated into the docs (#4246).
      */
     artifactSource?:
         | { mode: 'local-file'; path: string; fetchTimeoutMs?: number }
@@ -718,7 +741,18 @@ export class MetadataPlugin implements Plugin {
     }
 
     /**
-     * P2: Load metadata from the cloud artifact API endpoint.
+     * Load metadata from the cloud control plane's artifact endpoint. Shipped
+     * and reachable from every bootstrap mode — see `MetadataPluginOptions.
+     * artifactSource` for the option contract and #4246 for why that doc
+     * comment used to claim otherwise.
+     *
+     * `src.url` accepts two forms, distinguished deterministically by whether
+     * the path already names an artifact endpoint:
+     *  - **control-plane base** (`https://cloud.example.com`) — the canonical
+     *    `/api/v1/cloud/environments/:environmentId/artifact` path is appended.
+     *  - **already-resolved endpoint** (any URL whose path ends in `/artifact`)
+     *    — used verbatim, so the `unlisted`-visibility public route
+     *    (`/pub/v1/environments/:id/artifact`) is reachable too.
      */
     private async _loadFromArtifactApi(
         ctx: PluginContext,
@@ -732,8 +766,14 @@ export class MetadataPlugin implements Plugin {
         // Build the artifact URL:
         //   ${url}/api/v1/cloud/environments/${environmentId}/artifact[?commit=${commitId}]
         let artifactUrl = src.url.replace(/\/+$/, '');
-        // If the URL already contains /api/v1, use it as-is; otherwise append default path.
-        if (!/\/api\/v\d+\/cloud\/projects\//i.test(artifactUrl)) {
+        // A URL that already names an artifact endpoint is used as-is; anything
+        // else is a control-plane base and gets the canonical path appended.
+        // This guard used to test for `/api/v{n}/cloud/projects/` — a segment the
+        // v5.0 `project → environment` rename deleted, leaving it unmatchable. So
+        // every already-resolved URL silently had the canonical path appended a
+        // SECOND time (`…/artifact/api/v1/cloud/environments/…/artifact`) and
+        // 404'd: half of this option's documented input shape was dead (#4246).
+        if (!/\/artifact(?:$|\?)/i.test(artifactUrl)) {
             artifactUrl = `${artifactUrl}/api/v1/cloud/environments/${environmentId}/artifact`;
         }
         if (src.commitId) {

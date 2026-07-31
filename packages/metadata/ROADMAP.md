@@ -31,7 +31,7 @@
 | **Bootstrap modes**              | `MetadataPluginConfig.bootstrap` = `eager` \| `lazy` \| `artifact-only` — supports edge / serverless / read-only deployments. |
 | **Persistence write gates**      | `MetadataManagerConfig.persistence.{ writable, overlayWritable }` — runtime freeze for sealed kernels. |
 | **Single-source schema discipline** | Canonical `MetadataManagerConfigSchema` / `MetadataFallbackStrategySchema` live in `kernel/metadata-loader.zod.ts` and are re-exported from `system/metadata-persistence.zod.ts`. |
-| **`artifact-api` runtime source**   | `MetadataPlugin` can boot from a remote control-plane artifact (`artifactSource: { mode: 'artifact-api', url, projectId, commitId? }`). Wired across `eager` / `lazy` / `artifact-only` bootstrap modes. Configurable timeout via `fetchTimeoutMs` or `OS_ARTIFACT_FETCH_TIMEOUT_MS` (default 60 s). |
+| **`artifact-api` runtime source**   | `MetadataPlugin` can boot from a remote control-plane artifact (`artifactSource: { mode: 'artifact-api', url, token?, commitId? }` plus `environmentId` on the plugin options — the v5.0 rename retired `projectId`). Wired across `eager` / `lazy` / `artifact-only` bootstrap modes. `url` may be the control-plane base (canonical path appended) or an already-resolved `…/artifact` endpoint. Configurable timeout via `fetchTimeoutMs` or `OS_ARTIFACT_FETCH_TIMEOUT_MS` (default 60 s). |
 
 ### 🟡 Partially Implemented
 
