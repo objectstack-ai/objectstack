@@ -33,11 +33,16 @@ keeps working.
 ## Updating
 
 1. Run `scripts/bump-objectui.sh` (or `scripts/bump-objectui.sh <sha>`) at
-   the repo root to update `.objectui-sha`.
-2. CI runs `scripts/build-console.sh` before publish, which clones
+   the repo root to update `.objectui-sha`. Prefer `pnpm objectui:refresh`,
+   which bumps *and* rebuilds in one step.
+2. Opening the PR runs CI's **Console Pin Gate**, which clones objectui at
+   the new SHA, builds `@object-ui/console` against this tree's
+   `@objectstack/client`, and runs `pnpm check:console-sha`. A pin that
+   cannot build fails the PR rather than the release.
+3. CI runs `scripts/build-console.sh` again before publish, which clones
    objectui at the pinned SHA, builds `@object-ui/console`, and copies
    `dist/` into this package.
-3. `pnpm publish` ships it at the same version as every other package in
+4. `pnpm publish` ships it at the same version as every other package in
    the Changesets `fixed` group.
 
 The `dist/` directory is **not** committed — it's a CI publish artifact

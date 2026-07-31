@@ -467,6 +467,8 @@
     "PoolConfig (type)",
     "PoolConfigSchema (const)",
     "ProvisionPrimaryOptions (interface)",
+    "QUERY_CURSOR_REMOVED (const)",
+    "QUERY_DISTINCT_REMOVED (const)",
     "QueryAST (type)",
     "QueryFilter (type)",
     "QueryFilterSchema (const)",

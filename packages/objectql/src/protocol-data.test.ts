@@ -970,6 +970,28 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             expect(engine.find.mock.calls[0][1].where).toBeUndefined();
         });
 
+        it('forwards `having` to engine.aggregate — the wire half of #4286 step 3', async () => {
+            // Finding 1 of #4286: this branch rebuilt the aggregate options
+            // without `having`, so the one wire path to aggregate() lost the
+            // clause before any executor could see it. Now it forwards.
+            const { protocol, engine } = makeProtocol();
+            (engine as any).aggregate = vi.fn().mockResolvedValue([
+                { status: 'done', task_count: 7 },
+            ]);
+            await protocol.findData({
+                object: 'showcase_task',
+                query: {
+                    groupBy: ['status'],
+                    aggregations: [{ function: 'count', alias: 'task_count' }],
+                    having: { task_count: { $gt: 5 } },
+                },
+            });
+            expect((engine as any).aggregate).toHaveBeenCalledOnce();
+            expect((engine as any).aggregate.mock.calls[0][1].having)
+                .toEqual({ task_count: { $gt: 5 } });
+            expect(engine.find).not.toHaveBeenCalled();
+        });
+
         it('stands down when the schema carries no field map — nothing to check against', async () => {
             // External datasources / engine doubles whose columns are not
             // mirrored locally. Same tiering as the #3770 object gate one level

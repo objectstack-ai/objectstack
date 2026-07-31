@@ -69,11 +69,9 @@ interface QueryAST {
   limit?: number;                          // Max records (LIMIT)
   offset?: number;                         // Skip records (OFFSET)
   top?: number;                            // Alias for limit (OData compat)
-  cursor?: Record<string, unknown>;        // Keyset pagination cursor
   aggregations?: AggregationNode[];        // Aggregation functions
   groupBy?: GroupByNode[];                 // GROUP BY targets (string | object)
-  having?: FilterCondition;                // HAVING clause
-  distinct?: boolean;                      // SELECT DISTINCT
+  having?: FilterCondition;                // HAVING — engine-enforced after aggregation
   expand?: Record<string, QueryAST>;       // Recursive relation loading
 }
 ```
@@ -90,22 +88,21 @@ on the `find()` path:
 
 | Member | Status |
 |:-------|:-------|
-| `having` | Never read: `engine.aggregate()` forwards only `object`/`where`/`groupBy`/`aggregations`, and the in-memory fallback has no HAVING stage |
-| `cursor` | Accepted by `EngineQueryOptions`, but no driver implements keyset pagination |
-| `distinct` | Not applied by `find()`; the SQL and in-memory drivers expose a separate `distinct(object, field, filters?)` method instead |
 | `aggregations[].filter` | `[EXPERIMENTAL — not enforced]` — a SQL `FILTER (WHERE …)` affordance neither the SQL builders nor the in-memory fallback applies |
 | `search.fuzzy` / `boost` / `operator` / `minScore` / `language` / `highlight` | `[EXPERIMENTAL — not enforced]` — only `query` and `fields` drive the expansion |
 
 `top` is the exception that *is* honored — the engine normalises it to `limit`.
 
-Two members left this table by being **removed** (#4286, ADR-0049 enforce-or-remove):
-`joins` and `windowFunctions` are tombstoned in `@objectstack/spec` 18 — a query
-carrying either fails to parse with the upgrade prescription, and authoring one is a
-`tsc` error. Related records are read through `expand`; window functions remain a
-SQL-driver door (`SqlDriver.findWithWindowFunctions()`). The inert members that
-*remain* declared (`having`, `cursor`, `distinct`, and the experimental flags above)
-are tracked in the liveness ledger (`packages/spec/liveness/query.json`) pending
-their #4286 dispositions.
+The #4286 sweep (ADR-0049 enforce-or-remove) settled every other declared-but-inert
+member. **Removed** — tombstoned in `@objectstack/spec` 18, so a query carrying one
+fails to parse with the upgrade prescription and authoring it is a `tsc` error:
+`joins` (related records are read through `expand`), `windowFunctions` (a SQL-driver
+door remains: `SqlDriver.findWithWindowFunctions()`), `cursor` (express the keyset as
+a `where` predicate on the sort key — §7), and `distinct` (unique values via
+`groupBy` / `count_distinct` / the drivers' `distinct()` door; its only observable
+effect was suppressing the REST list count, which is truthful again). **Enforced**:
+`having` (§5). The experimental flags above are tracked in the liveness ledger
+(`packages/spec/liveness/query.json`).
 </Callout>
 
 ### Key Types
@@ -460,16 +457,16 @@ const query: QueryAST = {
 ### Sorting on Related Fields
 
 <Callout type="warn">
-`orderBy` only reaches columns of the queried table. A dotted path
-(`account.company_name`) is handed to Knex verbatim and renders as
-`"account"."company_name"`, which the database rejects as an unknown column;
-`SqlDriver.find()` then retries **without the sort**, so the rows come back unordered
-rather than sorted — and no error surfaces. Denormalise the value onto the queried
-object (for example with a formula or rollup field) when you need to sort by it.
+`orderBy` only reaches columns of the queried table. Over the REST/protocol
+ingress a dotted path (`account.company_name`) is `400 INVALID_SORT` (#4256):
+no driver can order by it — `SqlDriver` would render it as
+`"account"."company_name"` against a table that was never joined, and until the
+path was refused, the unknown-column backstop retried **without the sort** and
+answered 200 with unordered rows. Denormalise the value onto the queried object
+(for example with a formula or rollup field) when you need to sort by it.
 
-This is the one sort that still degrades silently: the REST ingress judges a
-dotted path on its **head segment** (`account` here, a real field), so the
-`INVALID_SORT` gate passes it through to the driver backstop.
+Internal callers reaching `engine.find()` directly are unaffected: a dotted
+`orderBy` there still falls through to the driver backstop and orders nothing.
 </Callout>
 
 ---
@@ -671,23 +668,30 @@ const query: QueryAST = {
 };
 ```
 
-### HAVING Clause (protocol only)
+### HAVING Clause
 
-`QuerySchema` defines a `having` property, but **nothing executes it**:
-`engine.aggregate()` forwards only `object` / `where` / `groupBy` / `aggregations` to
-the driver, no driver reads `query.having`, and the in-memory aggregation fallback has
-no HAVING stage. Filter the aggregated rows in application code:
+**Enforced since #4286** (ADR-0049, resolved to enforce). The engine applies `having`
+itself, AFTER aggregation, identically on the native-driver path and the in-memory
+fallback (`packages/objectql/src/having-filter.ts`) — the same correct-first /
+optimize-later two-tier shape date bucketing uses; native SQL `HAVING` pushdown can come
+later behind a driver capability flag without changing these semantics. The REST
+`findData()` aggregate branch forwards the clause.
+
+`having` references the **aggregated row's own columns** — aggregation aliases and
+groupBy projections — with the ordinary FilterCondition operators and
+`$and` / `$or` / `$not`. An unknown operator rejects the query loudly rather than being
+ignored (an ignored operator would silently return unfiltered aggregates — the ADR-0078
+failure mode enforcement exists to end).
 
 ```typescript
+// Only accounts with > $1M pipeline
 const rows = await engine.aggregate('opportunity', {
   groupBy: ['account_id'],
   aggregations: [
     { function: 'sum', field: 'amount', alias: 'total' },
   ],
+  having: { total: { $gt: 1_000_000 } },
 });
-
-// Only accounts with > $1M pipeline
-const bigAccounts = rows.filter((r) => r.total > 1_000_000);
 ```
 
 ### Date Bucketing
@@ -717,8 +721,14 @@ the driver's raw rows.
 
 ### Distinct
 
-The `distinct` flag on `QueryAST` is **not applied by `find()`**. Distinct values come
-from the driver's own `distinct()` method (implemented by the SQL and in-memory drivers;
+`query.distinct` was **removed in `@objectstack/spec` 18** (#4286): no driver ever
+rendered `SELECT DISTINCT`, and the flag's only observable effect was mis-wired — it
+silently suppressed the REST list count (`total`/`hasMore` degraded to a page-local
+estimate) while still returning duplicate rows. The key is tombstoned and
+`QueryBuilder.distinct()` was removed with it; the count suppression is gone, so
+`total` is truthful again. Unique *combinations* come from `groupBy`, deduplicated
+counts from the `count_distinct` aggregation, and one column's distinct values from
+the driver's own `distinct()` method (implemented by the SQL and in-memory drivers;
 it is not part of the `IDataDriver` contract):
 
 ```typescript
@@ -839,9 +849,13 @@ const page2 = await engine.find('customer', {
 ### Keyset Pagination
 
 <Callout type="warn">
-`cursor` is accepted by `QuerySchema` and `EngineQueryOptions`, but **no driver
-implements keyset pagination** — passing it has no effect. Express the keyset yourself
-as an ordinary `where` predicate on the sort key:
+`query.cursor` was **removed in `@objectstack/spec` 18** (#4286): no driver ever
+implemented keyset pagination, so a cursor was accepted and ignored and every page came
+back identical — a caller looping "until `hasMore` is false" never terminated. The key
+is tombstoned (on `EngineQueryOptions` too) and `QueryBuilder.cursor()` was removed
+with it. Express the keyset as an ordinary `where` predicate on the sort key — the
+pattern below is the supported one; a first-class cursor, if ever designed, will be a
+response-minted opaque token:
 </Callout>
 
 ```typescript

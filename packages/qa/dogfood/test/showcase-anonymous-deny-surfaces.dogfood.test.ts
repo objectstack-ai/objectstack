@@ -3,9 +3,11 @@
 // #2567 — anonymous posture must be UNIFORM across HTTP surfaces, not just the
 // REST `/data` routes proven by showcase-anonymous-deny.dogfood.test.ts. Before
 // this fix, on a `requireAuth` deployment `/data/*` denied anonymous callers
-// while three sibling surfaces reached ObjectQL without the gate:
+// while sibling surfaces reached ObjectQL without the gate:
 //   - the metadata endpoints (`/meta`)
-//   - the raw-hono standard `/data` routes (order-dependent shadowing)
+//   - the raw-hono standard `/data` routes (order-dependent shadowing) — that
+//     surface has since been deleted outright (#4073), which removes the entry
+//     point rather than gating it
 //
 // This proof boots the real showcase HTTP stack ON THE PLATFORM DEFAULT (the
 // verify harness passes no `requireAuth` override, so the flipped secure default
@@ -39,7 +41,7 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(r.status, 'authenticated metadata read must clear the auth gate').not.toBe(401);
   });
 
-  // ── /data (surface-level; raw-hono handler proven in plugin-hono-server) ──
+  // ── /data (surface-level; served by @objectstack/rest, its sole owner) ──
   it('anonymous READ of the data surface is denied (401)', async () => {
     const r = await stack.api(OBJ, { method: 'GET' });
     expect(r.status, 'anonymous data read must be 401').toBe(401);

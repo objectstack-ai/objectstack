@@ -30,7 +30,7 @@ type AdapterCase = {
 
 const ADAPTERS: AdapterCase[] = [
     { label: 'node', makePlugin: () => new NodeServerPlugin({ port: 0 }) },
-    { label: 'hono', makePlugin: () => new HonoServerPlugin({ port: 0, registerStandardEndpoints: false }) },
+    { label: 'hono', makePlugin: () => new HonoServerPlugin({ port: 0 }) },
 ];
 
 /**

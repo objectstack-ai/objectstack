@@ -75,6 +75,11 @@ jobs:
       # scratch on every main push (~3 min). Cache the finished dist keyed on
       # exactly those inputs; the stamp check below still verifies whatever
       # dist ends up in place, restored or fresh.
+      #
+      # ci.yml's Console Pin Gate (#4290) uses this exact key, so the pin bump's
+      # PR run and this job share one build — keep the two in step if either
+      # input set changes. That gate is now what proves the pin builds; by the
+      # time this job runs the SHA has already merged.
       - name: Cache vendored Console dist (keyed on the objectui pin)
         id: console-dist-cache
         uses: actions/cache@v6

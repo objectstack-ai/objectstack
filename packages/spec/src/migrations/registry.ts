@@ -597,6 +597,15 @@ const step18: MigrationStep = {
     + 'spec vocabulary never matched (it declared `field`/`over`/`frame` members the door never '
     + 'read — that cluster goes too). Request shapes again: two semantic TODOs, no source '
     + 'rewrite.\n\n'
+    + 'The #4286 close-out settles the remaining three. `having` is ENFORCED, not removed — '
+    + 'the engine applies it after aggregation on both paths, so the clause every SQL-literate '
+    + 'author expects now works (no migration; queries that carried it were silently returning '
+    + 'every group and now filter as written). `cursor` and `distinct` are tombstoned WITH '
+    + 'their shipped SDK producers (`QueryBuilder.cursor()` / `.distinct()` are deleted): no '
+    + 'driver ever implemented keyset pagination or SELECT DISTINCT, `cursor` re-served page 1 '
+    + "forever, and `distinct`'s only observable effect was mis-wired — it suppressed the REST "
+    + 'list count, which is now truthful again. Both are request shapes; two more semantic '
+    + 'TODOs, no source rewrite.\n\n'
     + 'The same kind of retirement covers `wait`\'s timeout pair (#4158). `waitEventConfig.onTimeout` '
     + 'had ZERO readers — no path ever inspected it, so neither `fail` nor `continue` ever '
     + 'happened, while its `.default(\'fail\')` stamped a decision nothing made onto every wait '
@@ -690,6 +699,50 @@ const step18: MigrationStep = {
         + '`aggregations` + `groupBy`, and embedders needing OVER-clause SQL call the SQL '
         + "driver's `findWithWindowFunctions` door directly. A query that still carries the key "
         + 'fails to parse with the removal prescription naming that door.',
+    },
+    {
+      id: 'query-cursor-retired',
+      surface: 'data.query.cursor',
+      replacement:
+        'a `where` predicate on the sort key — `where: { created_at: { $gt: last.created_at } }` '
+        + 'with the matching `orderBy` (the documented manual-keyset pattern)',
+      reason:
+        'The `cursor` key promised keyset pagination and no driver implemented it: the cursor '
+        + 'was accepted and ignored, so every page came back identical — a caller looping '
+        + '"until hasMore is false" never terminates. Worse than inert, it had a shipped public '
+        + 'producer (`QueryBuilder.cursor()`, removed with the key). The caller-built '
+        + '`Record<string, unknown>` shape also leaks sort/storage detail and squats on the '
+        + 'reserved REST parameter set; a first-class cursor, if ever designed, will be a '
+        + 'response-minted opaque token — a different API, so keeping this one preserved a '
+        + 'wrong design rather than a roadmap. A REQUEST surface, never stored; nothing to '
+        + 'rewrite. ADR-0049 / ADR-0078, #4286.',
+      acceptanceCriteria:
+        'No caller sends `cursor` and no SDK call site uses `QueryBuilder.cursor()`; deep '
+        + 'pagination expresses the keyset as a `where` predicate on the sort key. A query '
+        + 'still carrying `cursor` fails to parse with the removal prescription, and authoring '
+        + 'it is a `tsc` error.',
+    },
+    {
+      id: 'query-distinct-retired',
+      surface: 'data.query.distinct',
+      replacement:
+        '`groupBy` for unique combinations; the `count_distinct` aggregation for deduplicated '
+        + "counts; the SQL/memory drivers' `distinct(object, field)` door for one column's values",
+      reason:
+        'The `distinct` flag promised SELECT DISTINCT and no driver ever rendered it — but it '
+        + 'was MIS-WIRED rather than merely dead (the harsher ADR-0078 class): the REST list '
+        + 'path treated a distinct query as not countable and silently degraded '
+        + '`total`/`hasMore` to a page-local estimate, so the caller got duplicate rows AND '
+        + 'worse pagination metadata, and a side effect that "confirmed" the flag was doing '
+        + 'something. It had a shipped public producer (`QueryBuilder.distinct()`, removed with '
+        + 'the key). The count suppression is deleted in the same change — `total` is truthful '
+        + 'for those queries again. A REQUEST surface, never stored; nothing to rewrite. '
+        + 'ADR-0049 / ADR-0078, #4286.',
+      acceptanceCriteria:
+        'No caller sends `distinct` and no SDK call site uses `QueryBuilder.distinct()`; '
+        + 'deduplication goes through `groupBy` / `count_distinct` / the drivers\' `distinct()` '
+        + 'door. A query still carrying the key fails to parse with the removal prescription, '
+        + 'and the REST list response reports a real `total` for queries that used to send it.',
     },
   ],
 };

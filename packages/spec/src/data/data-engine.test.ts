@@ -369,13 +369,18 @@ describe('EngineQueryOptionsSchema', () => {
       limit: 50,
       offset: 0,
       expand: { owner: { object: 'user' } },
-      distinct: true,
     });
     expect(options.where).toBeDefined();
     expect(options.fields).toHaveLength(3);
     expect(options.limit).toBe(50);
     expect(options.expand!.owner.object).toBe('user');
-    expect(options.distinct).toBe(true);
+  });
+
+  it('rejects the removed cursor/distinct keys with the query.* prescriptions (#4286)', () => {
+    expect(() => EngineQueryOptionsSchema.parse({ cursor: { id: 'x' } }))
+      .toThrow(/query\.cursor.*removed/s);
+    expect(() => EngineQueryOptionsSchema.parse({ distinct: true }))
+      .toThrow(/query\.distinct.*removed/s);
   });
 
   it('should accept context', () => {
