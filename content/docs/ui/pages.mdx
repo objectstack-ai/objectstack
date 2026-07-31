@@ -228,13 +228,15 @@ const accountRecordPage = {
           type: 'record:related_list',
           id: 'contacts',
           label: 'Contacts',
-          properties: { object: 'contact', relationship: 'account' },
+          // `objectName` is the RELATED (child) object being listed;
+          // `relationshipField` is the child's field pointing back at this record.
+          properties: { objectName: 'contact', relationshipField: 'account' },
         },
         {
           type: 'record:related_list',
           id: 'opportunities',
           label: 'Opportunities',
-          properties: { object: 'opportunity', relationship: 'account' },
+          properties: { objectName: 'opportunity', relationshipField: 'account' },
         },
       ],
     },

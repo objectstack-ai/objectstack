@@ -133,7 +133,8 @@ Which object a component binds follows `dataSource.object` → `properties.objec
 against one page-wide guess. A `record:related_list`'s `columns`/`sort`/`filter`
 resolve against its **related** object (`objectName`), and its add-picker against
 its own. Advisory, like form-layout field references — every consumer degrades
-rather than failing.
+rather than failing. The same descriptor table drives the react page surface
+(§10), so a component is described once and checked wherever it is authored.
 
 Skipped, to keep false positives at zero: relationship paths (`account.name`,
 resolved by the query engine), registry-injected system fields (`created_at`,
@@ -273,6 +274,49 @@ schemas are headed (ADR-0049 enforce-or-remove), but these are the protocol's
 most-authored surfaces, so the tightening is scheduled on what this check finds
 rather than assumed. `defineStack` reports the same findings at config-load
 time, so an author sees them without running the CLI at all.
+
+### 10. React block props naming fields the object doesn't have
+
+§5 is about a metadata page's untyped `properties` bag. A `kind:'react'` page
+authors the **same** components as JSX props, and every prop that binds by field
+name has the same failure: the block skips the name and renders one column, one
+filter chip, or one form field short.
+
+```jsx
+<ListView objectName="crm_account" columns={['name', 'revenue']} />
+//                                            ↑ not a crm_account field → warning
+```
+
+Checked on every injected block: `<ListView>`'s
+`fields`/`columns`/`sort`/`grouping`/`userFilters`, `<ObjectForm>`'s `fields`,
+`initialValues` keys, `sections[].fields[]` and `subforms` (each against its own
+`childObject`), and `<RecordHighlights>` / `<RecordDetails>` / `<RecordPath>` /
+`<RecordRelatedList>` — those last four through the **same** descriptor table
+§5 uses, so a component's field-bearing props are described once and checked on
+both surfaces. `<Block type="…">` reaches that table by the type the author
+writes, so the escape hatch is covered rather than left as a hole.
+
+`<RecordRelatedList objectName>` is the **related (child)** object whose records
+are listed — the parent record is bound by `recordId`, and `relationshipField`
+is the child's field pointing back at it. Passing the parent there is the
+mistake this check was extended to catch.
+
+A **filter position** is the exception that gates:
+
+```jsx
+<ListView objectName="crm_account" filters={['revenu', '=', stage]} />
+//                                            ↑ error, not a warning
+```
+
+An unknown column in a predicate is not a skipped column — the predicate can
+never match, the driver's "no such column" is swallowed, and the list comes back
+empty and indistinguishable from *"there is no data"*. Each position of a filter
+is judged on its own, so the field above is still checked even though `stage`
+comes from React state.
+
+Skipped, to keep false positives at zero: the same set as §8 — non-static
+values, `{...spread}` usages, relationship paths, system fields, and objects
+another package defines.
 
 ## The one gate, two entry points
 
