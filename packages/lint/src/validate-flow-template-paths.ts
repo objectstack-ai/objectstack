@@ -56,6 +56,7 @@
 //     carry legitimate sub-paths — their `.<sub>` access is left alone.
 
 import { SYSTEM_FIELDS } from './system-fields.js';
+import { walkFlowNodes } from './flow-walk.js';
 
 export type FlowTemplatePathSeverity = 'error' | 'warning';
 
@@ -302,16 +303,33 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
     const fieldTypes = fieldTypesOf(obj);
     const expandSet = declaredExpandOf(flow);
 
-    nodes.forEach((node, nodeIndex) => {
-      if (typeof node !== 'object' || !node) return;
+    // Every node, INCLUDING those nested in try_catch / loop / parallel regions
+    // (#4380). This rule was not merely blind to them — it was WORSE than
+    // blind: the recursive string-leaf scan already saw a nested node's tokens
+    // through its container's `config`, but `collectNodeLeaves` splits `filter`
+    // only at the top level of the node it is handed, so a nested filter token
+    // lost its position and the gating #3810 finding silently degraded to a
+    // warning reported against the wrapping `try_catch`. Walking to the real
+    // node restores both the severity and the location.
+    walkFlowNodes(flow, `flows[${flowIndex}]`).forEach(({ node, path: nodePath, regionTrail, localConfig }, walkIndex) => {
       const nodeLabel =
-        typeof node.type === 'string' ? node.type : typeof node.id === 'string' ? node.id : `#${nodeIndex}`;
+        typeof node.type === 'string' ? node.type : typeof node.id === 'string' ? node.id : `#${walkIndex}`;
+      const where = regionTrail
+        ? `flow "${flowName}" ${regionTrail} node "${nodeLabel}"`
+        : `flow "${flowName}" node "${nodeLabel}"`;
 
       // Collect templated string leaves from the config-bearing blocks only,
       // tagging filter positions when this node type guards its filter (#3810).
       const nodeType = typeof node.type === 'string' ? node.type : '';
       const guarded = FILTER_GUARDED_NODE_TYPES.has(nodeType);
-      const leaves = collectNodeLeaves(node as AnyRec, guarded);
+      // Scan the container's config WITHOUT its region slots: their nodes are
+      // walked in their own right, and leaving them in would report every
+      // nested finding a second time against the container.
+      const scanNode =
+        localConfig !== undefined && localConfig !== node.config
+          ? ({ ...node, config: localConfig } as AnyRec)
+          : (node as AnyRec);
+      const leaves = collectNodeLeaves(scanNode, guarded);
       if (leaves.length === 0) return;
 
       // Dedupe references so one repeated typo yields one finding per node.
@@ -334,8 +352,8 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
             findings.push({
               severity: inFilter ? 'error' : 'warning',
               rule: FLOW_TEMPLATE_UNKNOWN_FIELD,
-              where: `flow "${flowName}" node "${nodeLabel}"`,
-              path: `flows[${flowIndex}].nodes[${nodeIndex}]`,
+              where,
+              path: nodePath,
               message: inFilter
                 ? `${nodeType} filter references '{record.${rest.join('.')}}', but '${head}' is not a field on ` +
                   `object '${objectName}' — the token resolves to nothing, which DROPS the condition from the ` +
@@ -362,8 +380,8 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
               findings.push({
                 severity: inFilter ? 'error' : 'warning',
                 rule: FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
-                where: `flow "${flowName}" node "${nodeLabel}"`,
-                path: `flows[${flowIndex}].nodes[${nodeIndex}]`,
+                where,
+                path: nodePath,
                 message: inFilter
                   ? `${nodeType} filter references '{record.${key}}', a cross-object hop through the ` +
                     `${headType} field '${head}' — the flow record carries '${head}' as a scalar id, not an ` +

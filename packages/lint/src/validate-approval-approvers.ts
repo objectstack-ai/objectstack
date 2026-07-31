@@ -49,6 +49,7 @@ import {
 } from '@objectstack/spec/automation';
 import { BUILTIN_MEMBERSHIP_ROLES } from '@objectstack/spec';
 import { collectCelRootIdentifiers } from '@objectstack/formula';
+import { walkFlowNodes } from './flow-walk.js';
 
 export const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER = 'approval-approver-not-membership-tier';
 export const APPROVAL_APPROVER_TYPE_DEPRECATED = 'approval-approver-type-deprecated';
@@ -151,10 +152,12 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
     const flow = flows[fi];
     if (!flow || typeof flow !== 'object') continue;
     const flowName = typeof flow.name === 'string' ? flow.name : `(flow ${fi})`;
-    const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
+    // Every node, INCLUDING those nested in try_catch / loop / parallel regions
+    // — an approval inside a loop body is still an approval (#4380).
+    const walked = walkFlowNodes(flow, `flows[${fi}]`);
 
-    for (let ni = 0; ni < nodes.length; ni++) {
-      const node = nodes[ni];
+    for (let ni = 0; ni < walked.length; ni++) {
+      const { node, path: nodePath } = walked[ni];
       if (!node || node.type !== APPROVAL_NODE_TYPE) continue;
       const nodeId = typeof node.id === 'string' ? node.id : `(node ${ni})`;
       const cfg = (node.config ?? {}) as AnyRec;
@@ -166,7 +169,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
         if (!a || typeof a !== 'object') continue;
         const type = typeof a.type === 'string' ? a.type : '';
         const value = typeof a.value === 'string' ? a.value : '';
-        const path = `flows[${fi}].nodes[${ni}].config.approvers[${ai}]`;
+        const path = `${nodePath}.config.approvers[${ai}]`;
 
         if (type && !validTypes.has(type)) {
           const fix = TYPE_FIX[type];
@@ -353,7 +356,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           severity: 'info',
           rule: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
           where,
-          path: `flows[${fi}].nodes[${ni}].config.approvers`,
+          path: `${nodePath}.config.approvers`,
           message:
             `every approver on this node routes to a group (position/team/department) whose ` +
             `members are runtime data — if none is staffed, the request resolves to an empty ` +
@@ -379,7 +382,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           severity: 'info',
           rule: APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
           where,
-          path: `flows[${fi}].nodes[${ni}].config`,
+          path: `${nodePath}.config`,
           message:
             `this node resolves approvers from an expression but declares no onEmptyApprovers — ` +
             `an empty result falls back to the default ('admin_rescue': request opens, only a ` +
@@ -403,7 +406,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           severity: 'error',
           rule: APPROVAL_DECISION_OUTPUTS_RESERVED,
           where,
-          path: `flows[${fi}].nodes[${ni}].config.decisionOutputs`,
+          path: `${nodePath}.config.decisionOutputs`,
           message:
             `decisionOutputs declares reserved key(s) \`${reserved.join('`, `')}\` — the resume ` +
             `envelope owns them, so every decide carrying them is rejected.`,
@@ -422,7 +425,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             severity: 'warning',
             rule: APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
             where,
-            path: `flows[${fi}].nodes[${ni}].config.escalation.escalateTo`,
+            path: `${nodePath}.config.escalation.escalateTo`,
             message:
               `escalation.action is 'reassign' but escalateTo is empty — at runtime the ` +
               `escalation degrades to a notify and the request stays with the original approvers.`,

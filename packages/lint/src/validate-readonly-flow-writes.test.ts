@@ -243,4 +243,70 @@ describe('validateReadonlyFlowWrites', () => {
     expect(findings[0].where).toBe('flow "f" › node "my_node"');
     expect(findings[0].path).toBe('flows[0].nodes[0].config.fields.approval_status');
   });
+
+  // ── nested regions (#4380) ───────────────────────────────────────────
+  // A readonly write inside a `catch` branch is the same certain no-op as one
+  // at the top level, and this rule gates on it.
+  it('reaches an update_record nested in a try_catch catch branch', () => {
+    const flow = {
+      name: 'sync',
+      runAs: 'user',
+      nodes: [
+        { id: 'start', type: 'start', config: {} },
+        {
+          id: 'guard',
+          type: 'try_catch',
+          label: 'Guard',
+          config: {
+            try: { nodes: [], edges: [] },
+            catch: {
+              nodes: [
+                {
+                  id: 'flag',
+                  type: 'update_record',
+                  label: 'Flag',
+                  config: { objectName: 'crm_opportunity', fields: { approval_status: 'x' } },
+                },
+              ],
+              edges: [],
+            },
+          },
+        },
+      ],
+      edges: [],
+    };
+    const findings = validateReadonlyFlowWrites({ objects: [opportunityObject], flows: [flow] });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('flows[0].nodes[1].config.catch.nodes[0].config.fields.approval_status');
+    expect(findings[0].where).toBe('flow "sync" › try_catch "Guard" › catch › node "Flag"');
+  });
+
+  it('reaches an update_record nested in a loop body', () => {
+    const flow = {
+      name: 'sweep',
+      runAs: 'user',
+      nodes: [
+        {
+          id: 'each',
+          type: 'loop',
+          label: 'Each',
+          config: {
+            collection: '{items}',
+            body: {
+              nodes: [
+                { id: 'u', type: 'update_record', label: 'U', config: { objectName: 'crm_opportunity', fields: { amount: 1 } } },
+              ],
+              edges: [],
+            },
+          },
+        },
+      ],
+      edges: [],
+    };
+    const findings = validateReadonlyFlowWrites({ objects: [opportunityObject], flows: [flow] });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning'); // readonlyWhen field
+    expect(findings[0].path).toBe('flows[0].nodes[0].config.body.nodes[0].config.fields.amount');
+  });
 });

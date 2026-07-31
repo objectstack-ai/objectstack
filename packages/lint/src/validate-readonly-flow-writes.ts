@@ -32,6 +32,8 @@
 // the CLI and any other consumer (AI authoring), so hand-authored and generated
 // flows are held to the same bar.
 
+import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
+
 export type ReadonlyFlowWriteSeverity = 'error' | 'warning';
 
 export interface ReadonlyFlowWriteFinding {
@@ -134,9 +136,12 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
     const runAs = flow.runAs === 'user' || flow.runAs === 'system' ? flow.runAs : 'user';
 
     const flowName = typeof flow.name === 'string' ? flow.name : `#${flowIndex}`;
-    const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
+    // Every node, INCLUDING those nested in try_catch / loop / parallel regions.
+    // A readonly write inside a `catch` branch is the same certain no-op as one
+    // at the top level, and this rule gates on it (#4380).
+    const walked = walkFlowNodes(flow, `flows[${flowIndex}]`);
 
-    nodes.forEach((node, nodeIndex) => {
+    walked.forEach(({ node, path: nodePath, regionTrail }, walkIndex) => {
       if (node?.type !== 'update_record') return;
       const config = (node.config ?? {}) as AnyRec;
 
@@ -150,12 +155,10 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
       // statically knowable — skip rather than guess.
       if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return;
 
-      const nodeName =
-        typeof node.label === 'string' && node.label
-          ? node.label
-          : typeof node.id === 'string' && node.id
-            ? node.id
-            : `#${nodeIndex}`;
+      const nodeName = flowNodeLabel(node, walkIndex);
+      const where = regionTrail
+        ? `flow "${flowName}" › ${regionTrail} › node "${nodeName}"`
+        : `flow "${flowName}" › node "${nodeName}"`;
 
       for (const fieldName of Object.keys(fields as AnyRec)) {
         const meta = fieldMap.get(fieldName);
@@ -170,8 +173,8 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
           findings.push({
             severity: 'error',
             rule: FLOW_UPDATE_READONLY_FIELD,
-            where: `flow "${flowName}" › node "${nodeName}"`,
-            path: `flows[${flowIndex}].nodes[${nodeIndex}].config.fields.${fieldName}`,
+            where,
+            path: `${nodePath}.config.fields.${fieldName}`,
             message:
               `writes field '${fieldName}', which object '${objectName}' declares readonly:true. Under ` +
               `runAs:'${runAs}' the engine silently strips readonly fields from the UPDATE payload (#2948), ` +
@@ -185,8 +188,8 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
           findings.push({
             severity: 'warning',
             rule: FLOW_UPDATE_READONLY_WHEN_FIELD,
-            where: `flow "${flowName}" › node "${nodeName}"`,
-            path: `flows[${flowIndex}].nodes[${nodeIndex}].config.fields.${fieldName}`,
+            where,
+            path: `${nodePath}.config.fields.${fieldName}`,
             message:
               `writes field '${fieldName}', which object '${objectName}' declares readonlyWhen. On records ` +
               `where that predicate is TRUE, a runAs:'${runAs}' UPDATE strips the field (#3042), so this ` +

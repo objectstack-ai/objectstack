@@ -344,4 +344,78 @@ describe('validateFlowTemplatePaths', () => {
       expect(findings).toHaveLength(0);
     });
   });
+  // ── nested regions (#4380) ─────────────────────────────────────────────
+  //
+  // This rule was not merely blind to nested nodes — it was WORSE than blind.
+  // The recursive string-leaf scan already saw a nested node's tokens through
+  // its container's `config`, but the `filter` split only looked at the top
+  // level of the node it was handed, so a nested filter token lost its position
+  // and the gating #3810 finding silently degraded to a warning reported
+  // against the wrapping `try_catch`.
+  describe('nested regions', () => {
+    const nestedFilterFlow = (container: Record<string, unknown>) => ({
+      objects: [LEAD_OBJECT],
+      flows: [
+        {
+          name: 'guarded',
+          type: 'record_change',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created' } },
+            { id: 'guard', type: 'try_catch', label: 'Guard', config: container },
+          ],
+        },
+      ],
+    });
+    const badFilterNode = {
+      id: 'fetch',
+      type: 'get_record',
+      label: 'Fetch',
+      config: { objectName: 'crm_lead', filter: { company: '{record.budget}' } },
+    };
+
+    it('keeps the gating filter-position severity inside a region', () => {
+      const findings = validateFlowTemplatePaths(
+        nestedFilterFlow({ try: { nodes: [badFilterNode], edges: [] } }),
+      );
+      expect(findings).toHaveLength(1);
+      // The whole point: `error`, not the `warning` it used to degrade to.
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].path).toBe('flows[0].nodes[1].config.try.nodes[0]');
+      expect(findings[0].where).toBe('flow "guarded" try_catch "Guard" › try node "get_record"');
+    });
+
+    it('reports a nested token once, not also against the container', () => {
+      const findings = validateFlowTemplatePaths(
+        nestedFilterFlow({ catch: { nodes: [badFilterNode], edges: [] } }),
+      );
+      expect(findings).toHaveLength(1);
+    });
+
+    it('still checks the container node\'s own config', () => {
+      const findings = validateFlowTemplatePaths({
+        objects: [LEAD_OBJECT],
+        flows: [
+          {
+            name: 'looped',
+            type: 'record_change',
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created' } },
+              {
+                id: 'each',
+                type: 'loop',
+                label: 'Each',
+                // The loop's OWN collection token is a non-filter position on
+                // the container itself — warning, and not swallowed by the
+                // region-stripping that prevents double reporting.
+                config: { collection: '{record.budget}', body: { nodes: [], edges: [] } },
+              },
+            ],
+          },
+        ],
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('warning');
+      expect(findings[0].path).toBe('flows[0].nodes[1]');
+    });
+  });
 });

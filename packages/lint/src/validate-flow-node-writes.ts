@@ -85,6 +85,7 @@
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 
 import { indexObjectFields, judgeableFieldsOf, IMPLICIT_FIELDS } from './validate-hook-body-writes.js';
+import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
 
 export type FlowNodeWriteSeverity = 'error';
 
@@ -190,10 +191,12 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
 
   flows.forEach((flow, flowIndex) => {
     const flowName = typeof flow.name === 'string' && flow.name ? flow.name : `#${flowIndex}`;
-    const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
+    // Every node, INCLUDING those nested in try_catch / loop / parallel regions
+    // — a gating rule that stops at the top level simply stops gating the
+    // moment an author wraps the write in error handling (#4380).
+    const walked = walkFlowNodes(flow, `flows[${flowIndex}]`);
 
-    nodes.forEach((node, nodeIndex) => {
-      if (!isRec(node)) return;
+    walked.forEach(({ node, path: nodePath, regionTrail }, walkIndex) => {
       if (typeof node.type !== 'string' || !COVERED_TYPES.has(node.type)) return;
 
       const config = isRec(node.config) ? node.config : undefined;
@@ -217,12 +220,10 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
       const known = judgeableFieldsOf(objectFields, objectName);
       if (!known) return;
 
-      const nodeName =
-        typeof node.label === 'string' && node.label
-          ? node.label
-          : typeof node.id === 'string' && node.id
-            ? node.id
-            : `#${nodeIndex}`;
+      const nodeName = flowNodeLabel(node, walkIndex);
+      // A nested node names the region that holds it, or "node X" is ambiguous
+      // in a flow where the same label appears in a try and a catch branch.
+      const nodeWhere = regionTrail ? `${regionTrail} › node "${nodeName}"` : `node "${nodeName}"`;
 
       for (const fieldName of written) {
         if (known.has(fieldName) || IMPLICIT_FIELDS.has(fieldName)) continue;
@@ -233,8 +234,8 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
         findings.push({
           severity: 'error',
           rule: FLOW_NODE_WRITE_UNKNOWN_FIELD,
-          where: `flow "${flowName}" › node "${nodeName}"`,
-          path: `flows[${flowIndex}].nodes[${nodeIndex}].config.fields.${fieldName}`,
+          where: `flow "${flowName}" › ${nodeWhere}`,
+          path: `${nodePath}.config.fields.${fieldName}`,
           message:
             `${node.type} writes '${fieldName}', but object '${objectName}' declares no such field. Nothing ` +
             `between the node and storage removes the key: on a SQL datasource the driver rejects the whole ` +

@@ -385,6 +385,90 @@ describe('validateFlowNodeWrites', () => {
     expect(findings).toEqual([]);
   });
 
+  // ── nested regions (#4380) ───────────────────────────────────────────
+  //
+  // A gating rule that stops at the top level stops gating the moment an author
+  // wraps the write in error handling — which is exactly what a `catch` branch
+  // holding an `update_record` is for. app-showcase ships one.
+  describe('nested regions', () => {
+    const nested = (containerType: string, config: Record<string, unknown>) => ({
+      objects: [dealObject],
+      flows: [
+        {
+          name: 'sync',
+          nodes: [
+            { id: 'start', type: 'start', config: {} },
+            { id: 'guard', type: containerType, label: 'Guard', config },
+          ],
+        },
+      ],
+    });
+    const badWrite = {
+      id: 'flag',
+      type: 'update_record',
+      label: 'Flag',
+      config: { objectName: 'deal', fields: { stagee: 'failed' } },
+    };
+
+    it('reaches a try_catch catch branch', () => {
+      const findings = validateFlowNodeWrites(
+        nested('try_catch', { try: { nodes: [], edges: [] }, catch: { nodes: [badWrite], edges: [] } }),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].path).toBe('flows[0].nodes[1].config.catch.nodes[0].config.fields.stagee');
+      expect(findings[0].where).toBe('flow "sync" › try_catch "Guard" › catch › node "Flag"');
+    });
+
+    it('reaches a loop body', () => {
+      const findings = validateFlowNodeWrites(
+        nested('loop', { collection: '{items}', body: { nodes: [badWrite], edges: [] } }),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('flows[0].nodes[1].config.body.nodes[0].config.fields.stagee');
+    });
+
+    it('reaches every parallel branch', () => {
+      const findings = validateFlowNodeWrites(
+        nested('parallel', {
+          branches: [
+            { name: 'a', nodes: [badWrite], edges: [] },
+            { name: 'b', nodes: [{ ...badWrite, id: 'flag2' }], edges: [] },
+          ],
+        }),
+      );
+      expect(findings).toHaveLength(2);
+      expect(findings.map((f) => f.path)).toEqual([
+        'flows[0].nodes[1].config.branches[0].nodes[0].config.fields.stagee',
+        'flows[0].nodes[1].config.branches[1].nodes[0].config.fields.stagee',
+      ]);
+    });
+
+    it('reaches a region nested inside a region', () => {
+      const findings = validateFlowNodeWrites(
+        nested('try_catch', {
+          try: {
+            nodes: [
+              { id: 'each', type: 'loop', label: 'Each', config: { collection: '{x}', body: { nodes: [badWrite], edges: [] } } },
+            ],
+            edges: [],
+          },
+        }),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe(
+        'flows[0].nodes[1].config.try.nodes[0].config.body.nodes[0].config.fields.stagee',
+      );
+    });
+
+    it('reports a nested finding exactly once, not also against its container', () => {
+      const findings = validateFlowNodeWrites(
+        nested('try_catch', { try: { nodes: [badWrite], edges: [] } }),
+      );
+      expect(findings).toHaveLength(1);
+    });
+  });
+
   // ── the family boundary ──────────────────────────────────────────────
   it('does not duplicate the readonly rule: a declared readonly field is that rule’s business, not this one', () => {
     const withReadonly = {

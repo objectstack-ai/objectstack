@@ -371,3 +371,44 @@ describe('cross-organization targeting (ADR-0105 D9)', () => {
     expect(findings.filter(f => f.rule === APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED)).toEqual([]);
   });
 });
+
+// #4380 — an approval inside a loop body or a try/catch branch is still an
+// approval. Before the shared flow walk, every rule here stopped at the top
+// level and a nested node was checked by nothing.
+describe('nested regions', () => {
+  const nestedApproval = (containerType: string, config: Record<string, unknown>) => ({
+    flows: [
+      {
+        name: 'expense_approval',
+        nodes: [
+          { id: 'start', type: 'start', config: {} },
+          { id: 'guard', type: containerType, label: 'Guard', config },
+        ],
+        edges: [],
+      },
+    ],
+  });
+  const badApproval = {
+    id: 'step1',
+    type: 'approval',
+    label: 'Approve',
+    config: { approvers: [{ type: 'bogus_type', value: 'x' }] },
+  };
+
+  it('checks an approval nested in a loop body', () => {
+    const findings = validateApprovalApprovers(
+      nestedApproval('loop', { collection: '{items}', body: { nodes: [badApproval], edges: [] } }),
+    );
+    expect(findings.some((f) => f.rule === APPROVAL_APPROVER_TYPE_UNKNOWN)).toBe(true);
+    expect(findings.find((f) => f.rule === APPROVAL_APPROVER_TYPE_UNKNOWN)?.path).toBe(
+      'flows[0].nodes[1].config.body.nodes[0].config.approvers[0].type',
+    );
+  });
+
+  it('checks an approval nested in a try_catch branch', () => {
+    const findings = validateApprovalApprovers(
+      nestedApproval('try_catch', { try: { nodes: [badApproval], edges: [] } }),
+    );
+    expect(findings.some((f) => f.rule === APPROVAL_APPROVER_TYPE_UNKNOWN)).toBe(true);
+  });
+});
