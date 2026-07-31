@@ -3485,24 +3485,35 @@ export class AutomationEngine implements IAutomationService {
     /**
      * Retry execution with exponential backoff, jitter, and recursive protection.
      * Uses an iterative loop with an internal retry flag to prevent recursive call stacking.
+     *
+     * Reads the PARSED `errorHandling` block straight — no `??` fallbacks
+     * (#4247). It used to declare every knob optional and re-state a default
+     * for each, and one of those copies disagreed with the schema
+     * (`maxRetries ?? 3` against `.default(0)`), which made the retry count a
+     * function of how the flow reached the engine rather than of what its
+     * author wrote. `this.flows` only ever holds `FlowSchema.parse` output —
+     * `registerFlow` parses, and the version-history rollback re-seats a
+     * previously parsed snapshot — so every field below is present, and typing
+     * the parameter as the parsed shape is what keeps a second set of defaults
+     * from growing back here: a knob the spec stops defaulting becomes a
+     * compile error, not a silent engine-side guess.
      */
     private async retryExecution(
         flowName: string,
         context: AutomationContext | undefined,
         startTime: number,
-        errorHandling: {
-            maxRetries?: number;
-            retryDelayMs?: number;
-            backoffMultiplier?: number;
-            maxRetryDelayMs?: number;
-            jitter?: boolean;
-        },
+        errorHandling: NonNullable<FlowParsed['errorHandling']>,
     ): Promise<AutomationResult> {
-        const maxRetries = errorHandling.maxRetries ?? 3;
-        const baseDelay = errorHandling.retryDelayMs ?? 1000;
-        const multiplier = errorHandling.backoffMultiplier ?? 1;
-        const maxDelay = errorHandling.maxRetryDelayMs ?? 30000;
-        const useJitter = errorHandling.jitter ?? false;
+        // `maxRetries >= 1` is guaranteed under `strategy: 'retry'` — the schema
+        // refuses the zero-attempt spelling of "retry" (#4247), so reaching this
+        // method always means at least one re-run.
+        const {
+            maxRetries,
+            retryDelayMs: baseDelay,
+            backoffMultiplier: multiplier,
+            maxRetryDelayMs: maxDelay,
+            jitter: useJitter,
+        } = errorHandling;
 
         let lastError = 'Max retries exceeded';
         for (let i = 0; i < maxRetries; i++) {

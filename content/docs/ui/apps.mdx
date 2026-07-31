@@ -57,7 +57,11 @@ const crmApp = {
 
 ## Navigation Items
 
-The navigation tree supports nine item types, combined to create rich menu structures. The most common are shown below (`object`, `dashboard`, `page`, `url`, `group`, `separator`); the spec also defines `report`, `action`, and `component` items.
+The navigation tree supports nine item types, combined to create rich menu structures: `object`, `dashboard`, `page`, `url`, `report`, `action`, `component`, `group` and `separator`. Each is documented below.
+
+`type` is the discriminator: a value outside that list is rejected with the full
+set of valid ones, and every other key is checked against the branch you picked
+rather than against all nine.
 
 ### Object Navigation
 
@@ -120,6 +124,48 @@ Groups items into collapsible sections with children:
   ],
 }
 ```
+
+### Report Navigation
+
+Links to a saved report:
+
+```typescript
+{ id: 'nav_pipeline', type: 'report', label: 'Pipeline Report', reportName: 'sales_pipeline', icon: 'file-bar-chart' }
+```
+
+### Action Navigation
+
+Runs an action instead of navigating to a surface. The reference lives in a
+nested `actionDef` block — `actionName` is **not** a top-level key on the item:
+
+```typescript
+{
+  id: 'nav_import',
+  type: 'action',
+  label: 'Import Records',
+  icon: 'upload',
+  actionDef: {
+    actionName: 'bulk_import',
+    params: { objectName: 'account', mode: 'upsert' },
+  },
+}
+```
+
+`actionDef` accepts only `actionName` and `params`. `params` itself is **open by
+design** — the action owns its own parameter contract, so the app schema does
+not validate what goes inside it.
+
+### Component Navigation
+
+Renders a registered component. `componentRef` is a component-registry key, not
+a file path:
+
+```typescript
+{ id: 'nav_directory', type: 'component', label: 'Directory', componentRef: 'metadata:directory', icon: 'contact' }
+```
+
+`params` is handed to the component as props and is **open by design** — the
+props are the component's own contract.
 
 ### Separator
 

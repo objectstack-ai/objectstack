@@ -62,7 +62,10 @@ export default {
     type: 'autolaunched',
     active: false,                  // 16: removed (status is the lifecycle)
     template: true,                 // 16: removed (no reader)
-    errorHandling: { strategy: 'retry', fallbackNodeId: 'n9' },  // 16: fault edges own this
+    // 16: fallbackNodeId removed (fault edges own this). maxRetries is stated
+    // because #4247 refuses a zero-attempt 'retry' — the count is the one v17
+    // flow change the chain surfaces as a semantic TODO instead of rewriting.
+    errorHandling: { strategy: 'retry', maxRetries: 2, fallbackNodeId: 'n9' },
     nodes: [
       { id: 'n1', type: 'start', label: 'Start', outputSchema: { ok: { type: 'boolean' } } },  // 16: removed
       { id: 'n2', type: 'delete_record', label: 'Purge', config: { objectName: 'e2e_ticket', filter: { done: true } } },  // canonical since protocol 11 — must pass through untouched
