@@ -2057,9 +2057,10 @@ rc.1, and administrators should know what changed:
 - **Dev setups:** the fabricating stubs are gone — install the real plugin
   for any slot a dev call now finds absent, and note `plugin-dev` refuses
   `NODE_ENV=production` without `OS_ALLOW_DEV_PLUGIN=1` (ADR-0115).
-- **Sharing admins:** grant the new `manage_sharing` capability to roles that
-  administer sharing rules, and expect edit-level shares to stop conferring
-  delete (ADR-0111).
+- **Sharing admins:** add the new `manage_sharing` capability to the permission
+  sets held by whoever administers sharing rules (`admin_full_access` carries
+  it already), and expect edit-level shares to stop conferring delete
+  (ADR-0111).
 - **Flow authors:** rename aliased node-config keys (`subflow`/`map`
   `flow` → `flowName`, notify `to`/`subject`/`body`/`url` →
   `recipients`/`title`/`message`/`actionUrl`, script `functionName`/`input` →
