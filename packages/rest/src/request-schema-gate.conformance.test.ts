@@ -181,6 +181,20 @@ describe('#3899 ④ — rest routes with a declared requestSchema reject violati
     }
   });
 
+  it('the ADR-0061 search wire contract stays valid: { search: string, searchFields: [...] }', async () => {
+    // The first CI run of this gate rejected exactly this body: QuerySchema
+    // declared only the structured `FullTextSearchSchema` form while the
+    // executor and the ADR-0061 dogfood proof (`showcase-search.dogfood
+    // .test.ts`) served the bare string + `searchFields`. The schema was the
+    // wrong half — fixed there; pinned here so entry validation can never
+    // again 400 the contract the conformance ledger declares enforced.
+    const ctx = setup();
+    const res = await drive(ctx.rest, 'POST', '/api/v1/data/:object/query',
+      { search: 'retail', searchFields: ['industry'] }, PARAMS);
+    expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
+    expect(ctx.findData).toHaveBeenCalledTimes(1);
+  });
+
   for (const gateCase of CASES) {
     const [method, path] = gateCase.route.split(' ') as [string, string];
     describe(gateCase.route, () => {
