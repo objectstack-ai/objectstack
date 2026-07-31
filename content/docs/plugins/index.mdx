@@ -122,7 +122,7 @@ export default defineStack({
     myPlugin,
   ],
 
-  // Development-only plugins (loaded only with `os dev`)
+  // Development-only plugins (loaded only with `os dev` / `os serve --dev`)
   devPlugins: [
   ],
 });
@@ -199,8 +199,8 @@ Security features including field-level and row-level security.
 - Middleware-based security
 
 ### `@objectstack/driver-memory`
-In-memory data driver for development and testing.
-- Auto-registered in dev mode if no driver is configured
+In-memory (mingo) data driver for development and testing.
+- Opt in explicitly with `OS_DATABASE_DRIVER=memory`, `--database-driver memory`, or a `memory://` URL — when no driver is configured the dev default is SQLite, not this driver
 
 ---
 
@@ -211,10 +211,22 @@ The `os serve` and `os dev` commands automatically detect and load plugins:
 | Condition | Auto-loaded Plugin |
 |:----------|:-------------------|
 | `objects` defined, no ObjectQL | `@objectstack/objectql` |
-| Dev mode, no driver, has objects | `@objectstack/driver-memory` |
-| `objects`, `manifest`, or `apps` defined | `AppPlugin` (runtime) |
+| `objects` defined, no driver | `DefaultDatasourcePlugin` (runtime) — driver kind from `OS_DATABASE_DRIVER` / `OS_DATABASE_URL`, defaulting to SQLite |
+| `objects`, `manifest`, `apps`, `flows`, or `apis` defined | `AppPlugin` (runtime) |
 | Server not disabled | `@objectstack/plugin-hono-server` |
 | Server enabled | `@objectstack/rest` (REST API) |
+
+<Callout type="info">
+**Which SQLite default you get depends on the boot path.** A bare `defineStack()`
+config — one whose `plugins` array instantiates nothing — boots through
+`createStandaloneStack`, which anchors a SQLite *file* under the project
+(`.objectstack/data/standalone.db`) in development **and** production. A host config
+that already instantiates plugins takes `serve`'s own fallback instead: with no
+`OS_DATABASE_URL` / `OS_DATABASE_DRIVER` set it declares SQLite `:memory:` in dev and
+registers **no** datasource in production, so a missing driver surfaces loudly
+downstream. `os dev` sidesteps both defaults by exporting
+`OS_DATABASE_URL=file:<project>/.objectstack/data/dev.db`.
+</Callout>
 
 This means a minimal config like this already works:
 
@@ -225,7 +237,9 @@ export default defineStack({
 });
 ```
 
-Running `os dev` will auto-register ObjectQL, MemoryDriver, AppPlugin, HonoServer, and REST API.
+Running `os dev` will auto-register ObjectQL, the default datasource (a
+project-anchored SQLite file at `.objectstack/data/dev.db`), AppPlugin,
+HonoServer, and the REST API.
 
 ---
 
@@ -312,7 +326,7 @@ const slowPlugin: PluginMetadata = {
 
 Plugins can extend the ObjectStack CLI (`os`) with custom commands. This enables third-party packages — such as marketplace tools, deployment utilities, or domain-specific workflows — to register new top-level subcommands.
 
-The CLI is built on [oclif](https://oclif.io). Command extension is handled entirely by oclif's plugin system: a plugin ships oclif `Command` classes, declares oclif config in its `package.json`, and is installed into the CLI with `os plugins install <package>`. The host project's `objectstack.config.ts` does **not** determine CLI command availability.
+The CLI is built on [oclif](https://oclif.io). Command extension is handled entirely by oclif's plugin system: a plugin ships oclif `Command` classes, declares oclif config in its `package.json`, and is loaded by the `os` binary as an oclif plugin. The host project's `objectstack.config.ts` does **not** determine CLI command availability.
 
 #### Step 1: Add oclif Config to `package.json`
 
@@ -360,17 +374,21 @@ export default class MarketplaceSearch extends Command {
 }
 ```
 
-#### Step 3: Install the Plugin into the CLI
+#### Step 3: Load the Plugin into the CLI
 
-Users add the plugin to their `os` installation with oclif's plugin manager:
-
-```bash
-os plugins install @acme/plugin-marketplace
-```
+<Callout type="warn">
+**`os plugins install` is not available today.** `@objectstack/cli`'s `package.json`
+lists `@oclif/plugin-plugins` under `oclif.plugins`, but the package sits in
+`devDependencies` — and oclif's core-plugin loader only matches names that appear in
+`dependencies`. The result is that neither `os plugins …` nor `os help` is a
+registered command; `os --help` shows no `plugins` topic. Until that is fixed, load a
+CLI extension by building an `os` distribution that lists the package in **both**
+`oclif.plugins` and `dependencies`.
+</Callout>
 
 #### Using the Extended CLI
 
-Once installed, the new commands appear in `os --help` and can be invoked directly:
+Once loaded, the new commands appear in `os --help` and can be invoked directly:
 
 ```bash
 # List available commands (includes plugin commands)
@@ -378,12 +396,6 @@ os --help
 
 # Use marketplace commands
 os marketplace search "crm"
-```
-
-To remove a plugin command, uninstall it:
-
-```bash
-os plugins uninstall @acme/plugin-marketplace
 ```
 
 ---
@@ -407,12 +419,15 @@ plugin-my-feature/
     │   ├── feature.view.ts     # View definition
     │   └── index.ts            # Barrel export
     └── services/
-        └── feature.service.ts  # Service implementation
+        └── feature-service.ts  # Service implementation (plain module)
 ```
 
 **Naming Rules**:
 - Domain directories: `snake_case`
-- File suffixes: `.object.ts`, `.view.ts`, `.flow.ts`, `.service.ts`, etc.
+- Semantic metadata suffixes: `.object.ts`, `.field.ts`, `.view.ts`, `.page.ts`,
+  `.dashboard.ts`, `.flow.ts`, `.app.ts`. ADR-0088 retired `.trigger.ts`,
+  `.router.ts`, `.function.ts`, and `.service.ts` — plain source modules
+  (services, helpers) simply carry no semantic suffix.
 - Entry point: `index.ts` in every module
 
 ---

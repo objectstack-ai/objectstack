@@ -214,7 +214,8 @@
     "gen:react-blocks": "tsx scripts/build-react-blocks-contract.ts",
     "check:react-blocks": "tsx scripts/build-react-blocks-contract.ts --check",
     "check:react-conformance": "tsx scripts/check-react-blocks-conformance.ts",
-    "check:skill-examples": "tsx scripts/check-skill-examples.ts"
+    "check:skill-examples": "tsx scripts/check-skill-examples.ts",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "objectstack",

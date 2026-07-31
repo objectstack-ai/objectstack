@@ -37,8 +37,8 @@ export const Warehouse = defineDatasource({
   schemaMode: 'external',          // ObjectStack never runs DDL here
   config: { host: 'db.internal', port: 5432, database: 'analytics', user: 'readonly' },
   external: {
-    allowWrites: false,            // read-only (the default)
-    credentialsRef: 'secret:warehouse/password', // resolved from the secret store
+    allowWrites: false,                 // read-only (the default)
+    credentialsRef: 'sys_secret:9f2c…', // opaque handle minted by the secret store
     validation: { onMismatch: 'fail', checkOnBoot: true },
   },
   active: true,
@@ -90,11 +90,12 @@ That's it. `GET /api/v1/data/ext_customer` now returns live rows from the remote
 `customers` table; filters (`?region=EU`) push down to the remote query.
 
 <Callout type="warn">
-**Do not set `field.columnName` on an external object.** For federated objects the
-driver's query pipeline ignores `field.columnName`; `external.columnMap`
-(`remoteColumn → localField`) is the single, authoritative column mapping.
-`os build` / `os validate` rejects `field.columnName` on an external object with a
-clear error (ADR-0062 D7). Managed objects are unaffected.
+**`field.columnName` no longer exists.** It was removed from `FieldSchema` in the
+16.x line (#2377, ADR-0049) — the SQL driver always used the field key as the
+physical column, so a custom column name was silently ignored — and the
+ADR-0062 D7 lint that rejected it on external objects was removed with it.
+`external.columnMap` (`remoteColumn → localField`) is the single, authoritative
+column mapping for a federated object.
 </Callout>
 
 ## 3. Auto-connect — no `onEnable` needed
@@ -121,9 +122,10 @@ from external configuration. Auto-connect is idempotent with it (whichever
 registers the datasource name first wins), so the two never conflict.
 </Callout>
 
-A connected external datasource is also visible in **Setup → Datasources** (stamped
-`origin: code`, read-only in the UI) and via `GET /api/v1/datasources` and
-`GET /api/v1/meta/datasource`, where an admin can run the "Sync objects" wizard.
+A connected external datasource is also visible in **Setup → Integrations →
+Datasources** (stamped `origin: code`, read-only in the UI) and via
+`GET /api/v1/datasources` and `GET /api/v1/meta/datasource`, where an admin can
+run the "Sync objects" wizard.
 
 ### When auto-connect fails
 
@@ -160,8 +162,8 @@ Every connect attempt's verdict is retained, so a datasource that is down no
 longer has to be diagnosed by restarting the server and re-reading boot logs
 ([#3827](https://github.com/objectstack-ai/objectstack/issues/3827)).
 
-**Setup → Datasources** and `GET /api/v1/datasources` report a `status` per
-datasource:
+**Setup → Integrations → Datasources** and `GET /api/v1/datasources` report a
+`status` per datasource:
 
 | `status` | Meaning |
 |:---|:---|
@@ -202,7 +204,7 @@ const policy: DatasourceConnectPolicy = {
       ? { allow: true }
       : {
           allow: false,
-          // operator-facing: logs + Setup → Datasources only
+          // operator-facing: logs + the Setup datasource list only
           reason: `egress allow-list miss for ${ds.name} (${tenant.id}, plan=${tenant.plan})`,
           // tenant-facing: appended to the query-time error
           publicReason: 'External datasources require the Scale plan.',
@@ -216,6 +218,12 @@ Never inline a password. Put a reference in `external.credentialsRef` and store 
 secret in the secret store (the same `SecretBinder` / `ICryptoProvider` the
 runtime-admin "Add Datasource" wizard uses). The credential is resolved to
 cleartext **at connect, before the driver is built**.
+
+The shipped binder encrypts the cleartext into a `sys_secret` row and mints an
+**opaque** handle — `sys_secret:<id>` — as the `credentialsRef`; that is the only
+form it resolves, so a hand-written path like `secret:warehouse/password` will
+not dereference. A host that wants a different scheme (a vault path, say)
+injects its own resolver via `new DatasourceAdminServicePlugin({ secrets })`.
 
 Resolution is **fail-closed**: if a `credentialsRef` is declared but no secret store
 is configured, or the secret cannot be resolved/decrypted, the datasource is left

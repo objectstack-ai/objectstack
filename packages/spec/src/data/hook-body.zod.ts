@@ -131,13 +131,19 @@ export type ExpressionBody = z.infer<typeof ExpressionBodySchema>;
  * - `process`, `globalThis`, `eval`, `new Function`
  * - any identifier resolved from a value-only top-level import
  *
- * **Write-set opacity — accepted static-analysis gap.**
- * `source` is opaque to static analysis: no lint verifies that the fields the
- * body writes (`ctx.input.x = …`, `ctx.api.object('y').update(id, { x })`)
- * exist on the target object(s). Only the read side (`hook.condition`) and
- * the capability surface are statically checked. Write-target field existence
- * is the author's responsibility; when the write set is fixed, prefer a flow
- * `update_record` node, whose structural `fields` config IS lint-checked.
+ * **Write-set lint — author-time, advisory (#4271).**
+ * The fields the body writes are statically checked by
+ * `validateHookBodyWrites` in `@objectstack/lint` (run by `os validate` /
+ * `os lint` / `os build`): the literal write patterns its
+ * `HOOK_BODY_WRITE_PATTERNS` ledger declares (`ctx.input.x = …`,
+ * `Object.assign(ctx.input, { x })`, `ctx.api.object('y').update({ x })`)
+ * are resolved against the target object's declared + system fields, and an
+ * unknown field warns with a did-you-mean. Statically unknowable writes —
+ * computed keys, spreads, aliased `ctx.input`, dynamic object names,
+ * wildcard-target hooks — remain opaque and are skipped silently, so the
+ * warning's absence is not proof of correctness. When the write set is fixed,
+ * still prefer a flow `update_record` node, whose structural `fields` config
+ * is error-checked rather than advisory.
  *
  * @example
  * ```json

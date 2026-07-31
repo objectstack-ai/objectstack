@@ -9,8 +9,8 @@ import { Package, FileCode, Folder, Box, Link2, Shield, Settings } from 'lucide-
 
 <Callout type="warn">
 **Protocol spec.** This page describes the **target** plugin packaging
-specification — `plugin.manifest.ts`, semantic-version dependency resolution,
-provider/consumer contracts, lifecycle hooks. The current runtime implements
+specification — an ergonomic manifest wrapper, semantic-version dependency
+resolution, provider/consumer contracts. The current runtime implements
 plugins as classes/objects matching the `Plugin` interface from
 `@objectstack/core`, and manifests as plain objects matching
 `ManifestSchema` from `@objectstack/spec/kernel`. There is no `definePlugin()`
@@ -28,17 +28,23 @@ Every plugin **must** have a manifest file that declares its identity, dependenc
 
 ```
 my-plugin/
-  plugin.manifest.ts     ← TypeScript (recommended)
-  plugin.manifest.yml    ← YAML (alternative)
-  plugin.manifest.json   ← JSON (alternative)
+  src/manifest.ts            ← TypeScript source: ManifestSchema.parse({ … })
+  objectstack.config.ts      ← stack entry: defineStack({ manifest, objects, … })
+  objectstack.plugin.json    ← distributable manifest read by `os plugin build`
 ```
 
-**Recommendation:** Use TypeScript manifest for **type safety** and **validation**. ObjectStack auto-generates JSON schema from TypeScript.
+There is no `plugin.manifest.ts` / `.yml` / `.json` — that filename appears nowhere in
+the implementation. The shape is always `ManifestSchema` from `@objectstack/spec/kernel`.
+`os plugin build` reads the JSON form (`objectstack.plugin.json`, exported as
+`MANIFEST_FILENAME` from `packages/cli/src/utils/osplugin.ts`) and validates it with
+`ManifestSchema.safeParse`; TypeScript authoring runs the same object through
+`ManifestSchema.parse(...)` and hands it to `defineStack({ manifest })`.
 
 ### Manifest Schema
 
 ```typescript
-// plugin.manifest.ts
+// src/manifest.ts — proposed authoring wrapper (see the callout below for the
+// fields ManifestSchema actually declares today)
 import { definePlugin } from '@objectstack/core';
 
 export default definePlugin({
@@ -54,7 +60,7 @@ export default definePlugin({
   // DEPENDENCIES
   dependencies: {
     '@objectstack/core': '^2.0.0',
-    '@mycompany/base': '>=1.0.0 <2.0.0',
+    '@mycompany/base': '1.0.0 - 2.0.0',
   },
   
   // OPTIONAL DEPENDENCIES (plugin works without these)
@@ -102,16 +108,14 @@ export default definePlugin({
   // never declared it and nothing ever loaded those files (#4212). Runtime
   // behaviour lives on the plugin class (`init`/`start`/`destroy`, below).
 
-  // PERMISSIONS
+  // PERMISSIONS — proposed shape only. The real block has no `system` or
+  // `objects` key; see "Permissions" below for what ManifestSchema accepts.
   permissions: {
-    // System capabilities plugin requires
     system: [
-      'network.http',      // Make HTTP requests
-      'storage.database',  // Database access
-      'storage.cache',     // Redis/cache access
+      'network.http',
+      'storage.database',
+      'storage.cache',
     ],
-    
-    // Objects plugin creates/manages
     objects: [
       'account',
       'contact',
@@ -163,13 +167,32 @@ export default definePlugin({
 });
 ```
 
+<Callout type="warn">
+**What `ManifestSchema` actually declares today**
+(`packages/spec/src/kernel/manifest.zod.ts`): `id`, `version`, `type` and `name` are
+required; the optional fields are `namespace`, `defaultDatasource`, `scope`,
+`description`, `permissions`, `objects`, `datasources`, `dependencies`,
+`configuration`, `contributes`, `data`, `capabilities`, `extensions`,
+`navigationContributions`, `loading`, `engine`, `engines`, `runtime`, `packaging`
+and `integrity`.
+
+The `displayName` / `author` / `license` / `homepage` / `optionalDependencies` /
+`peerDependencies` / `metadata` / `config` / `marketplace` keys above are
+**proposal-only** — the schema declares none of them. Notably: compatibility ranges
+live in `engines: { platform, protocol }` (or the legacy `engine: { objectstack }`),
+not `marketplace.compatibility`; config defaults live in
+`configuration: { title, properties }` (a simplified JSON-Schema map with a per-key
+`secret` flag), not `config.defaults` / `config.secrets`; and metadata globs are the
+top-level `objects` / `datasources` arrays, not a `metadata` block.
+</Callout>
+
 ## Directory Structure
 
 A well-organized plugin follows this **standard structure**:
 
 ```
 @mycompany/crm/
-├── plugin.manifest.ts          # Plugin manifest (required)
+├── objectstack.plugin.json     # Plugin manifest — ManifestSchema (required)
 ├── package.json                # NPM package metadata
 ├── README.md                   # Documentation
 ├── CHANGELOG.md                # Version history
@@ -202,12 +225,9 @@ A well-organized plugin follows this **standard structure**:
 │   ├── jobs/                   # Background jobs
 │   │   └── cleanup.job.ts
 │   │
-│   ├── config.schema.ts        # Configuration schema (Zod)
-│   │
-│   └── lifecycle/              # Lifecycle hooks
-│       ├── install.ts
-│       ├── boot.ts
-│       └── upgrade.ts
+│   └── config.schema.ts        # Configuration schema (Zod)
+│                               # (no src/lifecycle/ — the install/boot/upgrade
+│                               #  hook family was retired, #4212)
 │
 ├── i18n/                       # Translations
 │   ├── en.json
@@ -397,13 +417,19 @@ export type PluginConfig = z.infer<typeof configSchema>;
 
 ### Dependency Types
 
+<Callout type="warn">
+Only `dependencies` exists in `ManifestSchema` today (a
+`Record<packageId, versionRange>`). `optionalDependencies` and `peerDependencies`
+below are **proposal-only** — the schema declares neither, so nothing resolves them.
+</Callout>
+
 #### 1. **Dependencies (Required)**
 Plugin **cannot function** without these.
 
 ```typescript
 dependencies: {
   '@objectstack/core': '^2.0.0',
-  '@mycompany/base': '>=1.0.0 <2.0.0',
+  '@mycompany/base': '1.0.0 - 2.0.0',
 }
 ```
 
@@ -415,8 +441,10 @@ optionalDependencies: {
   '@vendor/email': '^3.0.0',
 }
 
-// In plugin code
-if (context.plugins.isInstalled('@vendor/email')) {
+// In plugin code — `PluginContext` (packages/core/src/types.ts) has no
+// `plugins` namespace and no `isInstalled()`. Probe the service registry:
+if (ctx.getServices().has('email')) {
+  const email = ctx.getService<EmailService>('email');
   await email.send({ to: contact.email, subject: 'Welcome' });
 }
 ```
@@ -434,7 +462,8 @@ Use for large dependencies (React, Vue) that should be shared across plugins.
 
 ### Version Constraints
 
-ObjectStack uses **semantic versioning (semver)** with these operators:
+ObjectStack uses **semantic versioning (semver)**. `SemanticVersionManager.satisfies()`
+(`packages/core/src/dependency-resolver.ts`) accepts exactly these forms:
 
 ```typescript
 dependencies: {
@@ -447,11 +476,17 @@ dependencies: {
   // Minor updates allowed (1.x.x)
   'plugin-c': '^1.0.0',
   
-  // Version range
-  'plugin-d': '>=1.0.0 <2.0.0',
+  // Single bound: >= , > , <= , <
+  'plugin-d': '>=1.0.0',
   
-  // Latest version
-  'plugin-e': '*',        // ⚠️ Not recommended for production
+  // Inclusive range — the hyphen form is the ONLY two-bound form the
+  // resolver parses. A space-separated `>=1.0.0 <2.0.0` is not supported:
+  // `parse()` anchors its semver regex, so the trailing bound throws
+  // "Invalid semantic version".
+  'plugin-e': '1.0.0 - 2.0.0',
+  
+  // Latest version (`*` and `latest` both match everything)
+  'plugin-f': '*',        // ⚠️ Not recommended for production
 }
 ```
 
@@ -472,20 +507,30 @@ ObjectStack builds a **dependency graph** and loads plugins in **topological ord
 **Load Order:** core → base → crm → sales
 
 **Conflict Resolution:**
-If two plugins require incompatible versions of the same dependency, installation fails with error:
+When two plugins require incompatible versions of the same dependency,
+`DependencyResolver.detectConflicts()` reports it as a structured
+`DependencyConflict` record rather than a formatted CLI banner:
 
+```typescript
+{
+  type: 'version-mismatch',   // | missing-dependency | circular-dependency
+                              // | incompatible-versions | conflicting-interfaces
+  severity: 'error',
+  description: 'Version mismatch for @objectstack/core: detected 1 unsatisfied requirements',
+  plugins: [
+    { pluginId: '@objectstack/core', version: '2.4.0' },
+    { pluginId: '@vendor/analytics', version: '^3.0.0' },
+  ],
+  resolutions: [
+    // strategy: upgrade | downgrade | replace | disable | manual
+    { strategy: 'upgrade', description: 'Upgrade @objectstack/core to satisfy all constraints' },
+  ],
+}
 ```
-Error: Dependency conflict
-  @mycompany/sales requires @objectstack/core@^2.0.0
-  @vendor/analytics requires @objectstack/core@^3.0.0
-  
-Cannot satisfy both constraints.
 
-Solutions:
-  1. Upgrade @mycompany/sales to version compatible with core@3.x
-  2. Downgrade @vendor/analytics to version compatible with core@2.x
-  3. Contact plugin authors to update dependencies
-```
+Circular dependencies are reported separately with `severity: 'critical'`; the kernel
+also throws on them directly during `bootstrap()` (`[Kernel] Circular dependency
+detected: …`).
 
 ## Runtime Contract
 
@@ -497,8 +542,8 @@ export class CRMPlugin implements Plugin {
   name = 'plugin.crm';
   version = '2.0.0';
 
-  // Phase 1 — sequential, registration order. Register services, schemas,
-  // routes. Other plugins' services may not exist yet.
+  // Phase 1 — sequential, dependency-topological order. Register services,
+  // schemas, routes. Other plugins' services may not exist yet.
   async init(ctx: PluginContext) {
     ctx.registerService('crm', new CRMService());
   }
@@ -524,8 +569,10 @@ A plugin may also expose `healthCheck()`, which the kernel invokes on demand
 During **boot** (`kernel.bootstrap()`):
 ```
 1. use(plugin)      — validate structure + version, store (no code runs)
-2. init             — every plugin, sequentially, registration order
-3. start            — every plugin that defines it
+2. init             — every plugin, sequentially, in dependency-topological
+                      order (kernel.resolveDependencies() walks each plugin's
+                      `dependencies`; registration order when none declared)
+3. start            — same order, every plugin that defines it
 4. kernel:ready → kernel:bootstrapped → kernel:listening events
 ```
 
@@ -546,72 +593,75 @@ boot — not at install.
 <Callout type="warn">
 Earlier revisions of this page documented an `onInstall` / `onEnable` /
 `onDisable` / `onUninstall` / `onUpgrade` / `onBoot` hook family loaded from a
-manifest `lifecycle` file-map. **None of it existed** — ManifestSchema never
-declared the map and the kernel never called the hooks, so code written
-against them silently never ran. The family was retired from the protocol
+manifest `lifecycle` file-map. **That file-map never existed** — `ManifestSchema`
+has no `lifecycle` key and the kernel never invoked any of these hooks, so code
+written against them silently never ran. `PluginLifecycleSchema`
+(`packages/spec/src/kernel/plugin.zod.ts`) still *declares* `onInstall`,
+`onEnable`, `onDisable`, `onUninstall` and `onUpgrade` as optional functions, but
+nothing calls them; `onBoot` appears nowhere in the implementation at all. The
+single live exception is the **module-level** `onEnable` export of an app bundle
+described above, which `AppPlugin.start()` calls at boot — that is a stack-entry
+export, not a manifest hook. The family was retired from the protocol
 (#4212, ADR-0049 enforce-or-remove).
 </Callout>
 
 ## Permissions
 
-Plugins must **declare permissions** they require. ObjectStack enforces these at runtime.
+Plugins **declare permissions** in the manifest. The declaration is the install-time
+consent request; what the runtime enforces is the *granted* set.
 
-### System Permissions
+### Declared Permissions
 
-```typescript
-permissions: {
-  system: [
-    // Network access
-    'network.http',          // Make HTTP requests
-    'network.websocket',     // Use WebSockets
-    
-    // Storage access
-    'storage.database',      // Query database
-    'storage.cache',         // Use Redis/cache
-    'storage.filesystem',    // Read/write files
-    
-    // System capabilities
-    'system.cron',           // Schedule jobs
-    'system.email',          // Send emails
-    'system.events',         // Publish/subscribe events
-    
-    // Security
-    'security.encrypt',      // Encrypt data
-    'security.sign',         // Sign JWTs
-  ],
-}
-```
-
-If plugin attempts operation without permission, ObjectStack throws error:
-
-```javascript
-// Plugin tries to make HTTP request without permission
-await fetch('https://api.example.com/data');
-
-// Error: PermissionDenied
-// Plugin @mycompany/crm does not have permission 'network.http'
-// Add to plugin.manifest.ts:
-//   permissions: { system: ['network.http'] }
-```
-
-### Object Permissions
-
-Declare which objects plugin creates and manages:
+`ManifestSchema.permissions` accepts either the legacy flat `string[]` or the structured
+`PluginPermissionsSchema` block — four keys, and no `system` list
+(`packages/spec/src/kernel/manifest.zod.ts`):
 
 ```typescript
 permissions: {
-  objects: [
-    'account',       // Full control
-    'contact',
-    'opportunity',
-  ],
+  services: ['object', 'http'],       // services the plugin may resolve
+  hooks: ['record.beforeInsert'],     // lifecycle hooks it may register
+  network: ['api.acme.com'],          // hosts it may reach
+  fs: [],                             // filesystem paths it may access
 }
 ```
 
-ObjectStack uses this for:
-- **Dependency tracking:** Can't uninstall plugin if other plugins reference its objects
-- **Security:** Plugin can only modify its own objects (not objects from other plugins)
-- **Cleanup:** Uninstalling plugin can optionally remove its objects
+Dotted capability strings like `network.http`, `network.websocket` and
+`storage.database` are values of `ResourceTypeSchema` in the plugin-sandbox permission
+*descriptor* (`packages/spec/src/kernel/plugin-security-advanced.zod.ts`) — they are not
+manifest keys. `storage.cache`, `storage.filesystem`, `system.cron`, `system.email`,
+`system.events`, `security.encrypt` and `security.sign` do not exist anywhere in the
+implementation.
+
+<Callout type="warn">
+**Enforcement is narrower than a sandbox.** `PluginPermissionEnforcer`
+(`packages/core/src/security/plugin-permission-enforcer.ts`) derives
+`canAccessService` / `canTriggerHook` / `canReadFile` / `canWriteFile` /
+`canNetworkRequest` from the granted set, but only **service access** is wired into a
+live code path: `SecurePluginContext.getService()` and `.replaceService()` call
+`enforceServiceAccess`. `enforceNetworkRequest`, `enforceFileRead` and `enforceFileWrite`
+have no call sites outside the enforcer module itself, and nothing patches global
+`fetch` — a plugin that calls
+`fetch()` directly is **not** intercepted today. Treat `network` / `fs` declarations as
+consent metadata, not a runtime jail.
+</Callout>
+
+### Declaring Objects
+
+A package declares the objects it ships through the manifest's top-level `objects` glob
+list — `ManifestSchema` has no `permissions.objects` key:
+
+```typescript
+objects: [
+  './src/objects/*.object.ts',
+]
+```
+
+Ownership is tracked by the package registry rather than by a permission declaration:
+install records the package and its metadata (`registry.installPackage()` →
+`sys_packages`), and uninstall unregisters it and runs the data-plane cleanups domain
+plugins registered via `protocol.registerUninstallCleanup(name, cleanup)` — that is how
+plugin-security revokes its package-owned permission sets. There is no runtime rule
+preventing one plugin from writing to another plugin's objects.
 
 ## Distribution Format
 
@@ -859,8 +909,9 @@ Always include migration guide in CHANGELOG.md for major versions.
 - `account.owner` field (use `account.owner_id` instead)
 
 ### Migration
-Upgrading to v2.0.0 applies the metadata migration that renames the field on
-existing records (ADR-0087). No plugin code runs at upgrade.
+Ship a metadata migration with the upgrade (ADR-0087) that renames the field on
+existing records. There is no `onUpgrade` hook to hang this on: the schema
+declares one (`PluginLifecycleSchema`) but nothing in the kernel calls it.
 ```
 
 ### 3. Pin Core Dependencies
@@ -873,39 +924,47 @@ dependencies: {
 ```
 
 ### 4. Validate Configuration Early
-Use Zod schema to validate config during boot, not at runtime:
+Parse config with your Zod schema in `init()` — the first phase that runs — so a bad
+value fails the boot instead of the first request. There is no `onBoot` hook (the name
+appears nowhere in the implementation), and `PluginContext` has no `config` member:
 
 ```typescript
-export async function onBoot({ context }) {
-  const config = context.config.get('crm', configSchema);
-  // Throws clear error if config is invalid
+export class CRMPlugin implements Plugin {
+  name = 'plugin.crm';
+  constructor(private readonly options: unknown) {}
+
+  async init(ctx: PluginContext) {
+    // Throws a clear error before anything starts, not on the first request
+    const config = configSchema.parse(this.options);
+    ctx.registerService('crm', new CRMService(config));
+  }
 }
 ```
 
-### 5. Clean Up on Uninstall
-Always provide `onUninstall` hook to clean up resources:
+### 5. Release Resources in `destroy()`
+`destroy()` is the only cleanup seam the kernel invokes — on shutdown (reverse
+registration order) and on rollback when a later plugin's `start()` fails. There is no
+`onUninstall` hook: `PluginLifecycleSchema` declares one but nothing calls it, and
+`PluginContext` exposes no `db` or `scheduler` member.
 
 ```typescript
-export async function onUninstall({ context, transaction }) {
-  // Stop jobs
-  await context.scheduler.delete('crm-sync', { transaction });
-  
-  // Archive data (don't delete!)
-  await context.db.update('account', 
-    { plugin: 'crm' },
-    { archived: true },
-    { transaction }
-  );
+async destroy() {
+  clearInterval(this.syncTimer);
+  await this.connection.close();
 }
 ```
+
+For data-plane cleanup at **package**-uninstall time, register a named cleanup with the
+metadata protocol instead — `protocol.registerUninstallCleanup('crm-archive', fn)`, which
+`protocol.deletePackage()` runs and whose outcome rides on the response.
 
 ## Summary
 
 Plugin packages in ObjectStack:
-- **Manifest-driven:** `plugin.manifest.ts` is the source of truth
+- **Manifest-driven:** `ManifestSchema` is the source of truth (`objectstack.plugin.json` inside a built artifact)
 - **Self-contained:** Bundle objects, views, logic, and config
 - **Dependency-managed:** Semantic versioning with conflict detection
-- **Lifecycle-aware:** Hooks for install, upgrade, boot, and uninstall
+- **Lifecycle-aware:** `init` → `start` → `destroy` on the plugin class — no install/upgrade/boot/uninstall hooks
 - **NPM-compatible:** Distribute via NPM or `.osplugin` archives
 
 **Next:** Learn how configuration is resolved in [Configuration Resolution](/docs/protocol/kernel/config-resolution).

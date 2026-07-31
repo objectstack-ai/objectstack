@@ -25,13 +25,22 @@ export const myPlugin: Plugin = {
   
   async init(ctx) {
     // Register a service with a concrete implementation
-    const settings = ctx.getService('settings');
     ctx.registerService('cache', new RedisCacheProvider({
-      url: settings.get('redis.url'),
+      url: 'redis://localhost:6379',
     }));
   },
 };
 ```
+
+Take init-time configuration from the plugin's own options (as
+`CacheServicePlugin` and `createApiRegistryPlugin()` do) rather than from the
+`settings` service: that service is an async, namespaced resolver —
+`await settings.get(namespace, key)` returns a `{ value, source, locked, … }`
+envelope, not a synchronous config bag keyed by dotted paths — and it is only
+guaranteed to be registered during your `init` if you declare
+`requiresServices: ['settings']`. Settings-driven config usually belongs in
+`start` instead, the way `EmailServicePlugin` binds the `mail` namespace there
+and re-applies it on every change.
 
 ### Factory Registration (Lazy)
 
@@ -44,8 +53,8 @@ context (and an optional scope id) and is wrapped in lifecycle management:
 import { ServiceLifecycle } from '@objectstack/core';
 
 ctx.registerServiceFactory('data', async (ctx) => {
-  const settings = ctx.getService('settings');
-  const pool = await createPool(settings.get('database'));
+  const pool = await createPool({ url: 'postgres://localhost:5432/app' });
+  ctx.logger.info('Postgres pool ready');
   return new PostgresDriver(pool);
 }, ServiceLifecycle.SINGLETON);
 ```
@@ -79,28 +88,36 @@ if (ctx.getServices().has('search')) {
 }
 ```
 
-**Presence is not capability.** A registered service may be a stub or a degraded
-fallback — dev-mode fakes and the kernel's own in-memory fallbacks both occupy
-real slots. They say so with the `__serviceInfo` descriptor (ADR-0076 D12), and
-consumers are expected to read it rather than trust mere registration:
+**Presence is not capability.** A registered service may be a degraded fallback
+or an outright stub — the kernel auto-injects in-memory fallbacks into the
+`metadata`, `cache`, `queue`, `job`, and `i18n` slots when no plugin provides
+them, and those occupy the real slot. They say so with the `__serviceInfo`
+descriptor (ADR-0076 D12), and consumers are expected to read it rather than
+trust mere registration:
 
 ```typescript
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 
-const ai = ctx.getServices().get('ai');
-const self = readServiceSelfInfo(ai);   // undefined ⇒ a real implementation
+const cache = ctx.getServices().get('cache');
+const self = readServiceSelfInfo(cache);   // undefined ⇒ a real implementation
 
-if (ai && self?.status !== 'stub') {
+if (cache && self?.status !== 'stub') {
   // Safe: a real implementation, or a `degraded` one that genuinely works.
 } else if (self) {
-  ctx.logger.info(`ai is a stub — ${self.message}`);
+  ctx.logger.info(`cache is a stub — ${self.message}`);
 }
 ```
 
-`status: 'degraded'` means real work with reduced capability (the in-memory
-cache, the in-memory search index); `status: 'stub'` means the answer is
-fabricated and must not be used for real work. `handlerReady: false`
-additionally means no HTTP handler serves it.
+`status: 'degraded'` means real work with reduced capability (all five kernel
+fallbacks above declare it); `status: 'stub'` means the answer is fabricated and
+must not be used for real work. `handlerReady: false` additionally means no HTTP
+handler serves it.
+
+Dev mode adds no fakes here: `@objectstack/plugin-dev` registers no
+implementations of its own — it composes the same real plugins (ObjectQL, the
+in-memory driver, auth, security, the HTTP server, REST) you would compose in
+production — so a slot no plugin fills is empty in dev exactly as in production
+(ADR-0115).
 
 ## Standard Services
 
@@ -112,7 +129,7 @@ The core ecosystem defines several standard service contracts:
 | `data` | `IDataEngine` | `@objectstack/objectql` (drivers implement `IDataDriver`) |
 | `auth` | `IAuthService` | `plugin-auth` |
 | `api-registry` | `ApiRegistry` | `@objectstack/core` |
-| `cache` | `ICacheService` | Redis, Memcached, or in-memory |
+| `cache` | `ICacheService` | `@objectstack/service-cache` (memory adapter; its Redis adapter is still a skeleton that throws) — otherwise the kernel's in-memory fallback |
 | `lifecycle` | `LifecycleService` (`@objectstack/objectql`) | Registered by `ObjectQLPlugin` — enforces object `lifecycle` declarations (ADR-0057 retention/rotation/archival); call `sweep()` for an on-demand pass |
 
 The logger is not a registered service — it is exposed directly as `ctx.logger`
@@ -148,21 +165,25 @@ Services follow the plugin lifecycle:
 3. **`destroy`** — Clean up resources (close connections, flush buffers)
 
 ```typescript
+let pool: Pool | undefined;
+
 export const dbPlugin: Plugin = {
   name: 'database',
 
   async init(ctx) {
-    const settings = ctx.getService('settings');
-    const pool = await createPool(settings.get('database'));
+    pool = await createPool({ url: 'postgres://localhost:5432/app' });
     ctx.registerService('data', new PostgresDriver(pool));
-    this.db = pool;
   },
 
   async destroy() {
-    await this.db.close(); // Clean shutdown
+    await pool?.close(); // Clean shutdown
   },
 };
 ```
+
+`destroy()` receives no context, so keep any handle you need to close in the
+plugin's own scope — a class field, or a module-level binding as above. `Plugin`
+declares no state slot, so stashing it on `this` does not typecheck.
 
 The `Plugin` interface defines `init`, `start?`, and `destroy?` — there is no
 `stop` hook, and `destroy()` takes no arguments.

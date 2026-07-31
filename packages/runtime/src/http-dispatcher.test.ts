@@ -1326,9 +1326,12 @@ describe('HttpDispatcher', () => {
             );
 
             expect(result.handled).toBe(true);
-            // top → limit and skip → offset are normalized by the dispatcher
+            // Wire params ride through VERBATIM (#3795): the dispatcher used to
+            // carry its own top→limit / skip→offset fold next to findData's —
+            // two copies of one precedence, disagreeing on three alias pairs.
+            // Folding is owned by the protocol normalizer alone now.
             expect(mockProtocol.findData).toHaveBeenCalledWith(
-                { object: 'task', query: { populate: 'assignee,project', limit: '10', offset: '0' } }
+                { object: 'task', query: { populate: 'assignee,project', top: '10', skip: '0' } }
             );
         });
 

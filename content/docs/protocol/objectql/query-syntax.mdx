@@ -536,9 +536,10 @@ The engine resolves `expand` via batch `$in` queries (driver-agnostic) with a de
 
 ### Filtered Expand
 
-Expansion follows **`lookup`**, **`master_detail`**, and **`user`** fields — i.e. the
-foreign key lives on the object you are querying. The nested `QueryAST` can **filter**
-(`where`) and **select** (`fields`) the related records:
+Expansion follows the same reference field types as above — **`lookup`**,
+**`master_detail`**, **`user`** and **`tree`** — i.e. the foreign key lives on the object
+you are querying. The nested `QueryAST` can **filter** (`where`) and **select**
+(`fields`) the related records:
 
 ```typescript
 const query: QueryAST = {
@@ -935,9 +936,9 @@ const sorted = monthlyRevenue.sort((a, b) =>
 
 ### Unknown Fields Are Tolerated
 
-Unknown field **names** are not rejected — a projected field that doesn't exist on the
-object is **silently dropped** (matching OData / `SELECT *` tolerance), so a stale field
-reference never fails the whole query:
+Unknown field **names** are not rejected by `engine.find()` — a projected field that
+doesn't exist on the object is **silently dropped** (matching OData / `SELECT *`
+tolerance), so a stale field reference never fails the whole query:
 
 ```typescript
 const rows = await engine.find('customer', {
@@ -945,6 +946,15 @@ const rows = await engine.find('customer', {
 });
 // Returns each row with `name`; `nonexistent` is omitted — no error thrown.
 ```
+
+<Callout type="info">
+This tolerance does **not** extend to the REST/protocol ingress: a `select` / `fields`
+naming a column the object does not have is `400 INVALID_FIELD` there, because dropping
+it silently answered a *narrower* projection with a *wider* one — a projection left with
+no known field falls all the way back to every field. The engine's tolerance guards
+internal callers (hooks, flows, expand sub-reads, registry-less hosts) that never pass
+through that ingress.
+</Callout>
 
 ### Security Violations
 
@@ -993,8 +1003,7 @@ Similarly, the following legacy field names should not be used in new code:
 |:-------|:----------|:------|
 | `filters` (array of tuples) | `where` (FilterCondition object) | Use `parseFilterAST()` to convert |
 | `sort` | `orderBy` | Array of `{ field, order }` objects |
-| `group_by` | `groupBy` | Array of field name strings |
-| `aggregate` (object map) | `aggregations` (array) | Array of `AggregationNode` objects |
+| `aggregate` | `aggregations` | Same `AggregationNode[]`; the SQL and MongoDB drivers read either key, but `engine.aggregate()` forwards only `aggregations` |
 | `expand` (string array) | `expand` (Record) | Map of field name → nested QueryAST |
 | `skip` | `offset` | Number |
 | `select` | `fields` | Array of FieldNode (field-name strings) |

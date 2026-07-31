@@ -64,7 +64,8 @@
   },
   "scripts": {
     "build": "tsup",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@objectstack/metadata-core": "workspace:*",
