@@ -434,6 +434,9 @@ function rowFromAction(row: any): ApprovalActionRow {
     action: row.action,
     actor_id: row.actor_id ?? undefined,
     comment: row.comment ?? undefined,
+    // Structured reassign hand-off parties (#4365).
+    reassign_from: row.reassign_from ?? undefined,
+    reassign_to: row.reassign_to ?? undefined,
     // Decision attachments (#3266): rich descriptors carrying the display name +
     // download URL, so consumers label/open them without reading `sys_file`.
     attachments: attachments.length ? attachments : undefined,
@@ -2276,7 +2279,11 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'reassign',
-      actor_id: actorId, comment: input.comment ?? `${from} → ${to}`, created_at: now,
+      // The hand-off parties are STRUCTURED fields (#4365) — the old default
+      // comment (`"<from> → <to>"`) baked raw user ids into user-facing text.
+      // `comment` is pure user input: absent unless the actor wrote one.
+      actor_id: actorId, reassign_from: from, reassign_to: to,
+      comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
     // per_group / quorum (#3266): carry the delegated slot's group membership to
     // the new approver in the snapshot, so their approval still counts for the
@@ -3620,13 +3627,20 @@ export class ApprovalService implements IApprovalService {
     });
     const actions = Array.isArray(rows) ? rows.map(rowFromAction) : [];
     // Timeline display: resolve actor ids to names so the audit trail never
-    // shows a raw identifier. Role/team literals are already readable.
+    // shows a raw identifier. Role/team literals are already readable. The
+    // reassign hand-off parties (#4365) resolve through the same batch.
     const names = await this.resolveUserNames(
-      actions.map(a => a.actor_id).filter(id => id && !id.includes(':')),
+      actions
+        .flatMap(a => [a.actor_id, a.reassign_from, a.reassign_to])
+        .filter(id => id && !id.includes(':')),
     );
     for (const a of actions as any[]) {
       const n = a.actor_id ? names.get(String(a.actor_id)) : undefined;
       if (n) a.actor_name = n;
+      const fromName = a.reassign_from ? names.get(String(a.reassign_from)) : undefined;
+      if (fromName) a.reassign_from_name = fromName;
+      const toName = a.reassign_to ? names.get(String(a.reassign_to)) : undefined;
+      if (toName) a.reassign_to_name = toName;
     }
     return actions;
   }

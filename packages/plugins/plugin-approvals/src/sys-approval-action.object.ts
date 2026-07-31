@@ -119,6 +119,25 @@ export const SysApprovalAction = ObjectSchema.create({
 
     comment: Field.textarea({ label: 'Comment', required: false, group: 'Action' }),
 
+    // Structured hand-off parties for `action: 'reassign'` (#4365). Before
+    // these existed the pair lived only inside a default free-text comment
+    // ("<from_id> → <to_id>"), which no client could parse or render readably.
+    // `comment` is pure user input again; timelines render "from A to B" from
+    // these fields.
+    reassign_from: Field.lookup('sys_user', {
+      label: 'Reassigned From',
+      required: false,
+      group: 'Action',
+      description: 'User whose pending-approver slot was handed over (reassign actions only)',
+    }),
+
+    reassign_to: Field.lookup('sys_user', {
+      label: 'Reassigned To',
+      required: false,
+      group: 'Action',
+      description: 'User who received the pending-approver slot (reassign actions only)',
+    }),
+
     attachments: Field.file({
       label: 'Attachments',
       required: false,

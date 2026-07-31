@@ -235,6 +235,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "Comentario"
       },
+      reassign_from: {
+        label: "Reasignado de",
+        help: "Usuario cuyo turno de aprobación pendiente fue traspasado (solo acciones de reasignación)"
+      },
+      reassign_to: {
+        label: "Reasignado a",
+        help: "Usuario que recibió el turno de aprobación pendiente (solo acciones de reasignación)"
+      },
       attachments: {
         label: "Adjuntos",
         help: "Archivos que respaldan esta acción, p. ej. un contrato firmado o pruebas (#3266)."

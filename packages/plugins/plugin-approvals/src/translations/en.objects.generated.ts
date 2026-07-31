@@ -235,6 +235,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "Comment"
       },
+      reassign_from: {
+        label: "Reassigned From",
+        help: "User whose pending-approver slot was handed over (reassign actions only)"
+      },
+      reassign_to: {
+        label: "Reassigned To",
+        help: "User who received the pending-approver slot (reassign actions only)"
+      },
       attachments: {
         label: "Attachments",
         help: "Files supporting this action — e.g. a signed contract or evidence (#3266)."
