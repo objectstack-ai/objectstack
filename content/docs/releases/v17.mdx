@@ -1025,6 +1025,21 @@ can correct — so it reports the object, field, type, count, sample record ids
 and parse issue, and you re-run until it is clean. `OS_ALLOW_LAX_VALUE_SHAPES=1`
 re-opens leniency while diagnosing.
 
+**You are told about both, rather than having to find this page.** `os migrate
+meta` — the command a 16→17 upgrade already runs — ends by naming the two data
+migrations and the gate each records, including on a run that rewrote nothing,
+since canonical metadata says nothing about stored values. A deployment that
+boots holding covered fields with no verified gate row logs one line naming the
+command that ends warn mode. Neither reads as "done": until a gate is recorded,
+the classes it covers keep warning.
+
+That boot line is scoped to the deployments it can actually help. It counts only
+fields a write would check — not the `lookup`s the registry injects into every
+object — and says nothing once an environment switch has already settled the
+posture, since `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` enforces both classes
+outright and either `OS_ALLOW_LAX_*` opt-out is a deliberate choice the scan
+would not change.
+
 **A database created by 17 attests both flags at creation** (#3438), so a new
 deployment enforces from its first boot instead of waiting for someone to run a
 migration that, for an empty store, does nothing. The platform attests only a
