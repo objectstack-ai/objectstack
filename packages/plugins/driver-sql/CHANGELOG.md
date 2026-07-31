@@ -1,5 +1,846 @@
 # @objectstack/driver-sql
 
+## 17.0.0-rc.1
+
+### Major Changes
+
+- 2d3e255: feat!: ADR-0113 — `required` is a write contract; the column constraint becomes the explicit `storage.notNull`
+
+  `field.required` bound three meanings to one knob (write check, `NOT NULL` DDL,
+  drift expectation), so tightening any invariant on a deployed object was a
+  destructive migration blocked by the very legacy nulls that motivated it — the
+  reason `criteria_json`'s mandatory-in-substance contract lived in three
+  imperative guards instead of one declaration.
+
+  Split, with the **non-regression invariant** as the unifying rule — _a write
+  may not take a record from compliant to violating; a pre-existing violation
+  does not block writes that leave it in place_:
+
+  - `required: true` = the write contract, uniformly on new and deployed objects:
+    insert must provide; **an update PATCHing `null` into a required field is now
+    rejected** (it silently passed before); omitted fields never block, so legacy
+    null rows rest. The column stays nullable.
+  - `storage: { notNull: true }` = the explicit physical constraint, owning the
+    DDL (`sql-driver` `createColumn`) and the destructive drift ceremony.
+    Orthogonal to `required` — all four combinations are legitimate, including
+    the engine-populated column (`storage.notNull` without `required`).
+  - `requiredWhen` inherits the same invariant: flipping the condition true
+    without providing the field is rejected (the write _creates_ the violation);
+    a row violating since before the rule tightened no longer locks out
+    unrelated edits (#3929's objection, cured). `storage.notNull` ×
+    `requiredWhen` rejects at parse (`FieldSchema.superRefine`).
+  - **Pre-17 sources keep their exact meaning** via the migration-chain-only
+    `field-required-notnull-explicit` conversion: `os migrate meta` stamps
+    `storage.notNull` onto every previously-required field — writing down what
+    the old text already meant. The loader never infers semantics from the
+    physical column.
+  - Drift compares nullability against `storage.notNull`; a column stricter than
+    its declaration is `needs_confirm` (never auto-applied — dev auto-reconcile
+    no longer silently strips a stray `NOT NULL`), and silent when the field is
+    write-gated by `required`.
+
+### Minor Changes
+
+- 270650f: feat(migrate): a datastore created from empty attests its data migrations at creation (#3438, ADR-0104 2026-07-30 addendum)
+
+  Deployment-level migration flags could only be recorded by running
+  `os migrate`. That left a hole at the other end of a deployment's life: a
+  database created on a version that already ships the migrations started **lax**
+  and stayed lax until someone thought to run a command that, for them, converts
+  nothing and finds nothing. Every new deployment re-entered the warn regime, so
+  the warn regime would never die out — and, since #3459, every new deployment
+  also kept every released file forever.
+
+  A store the platform **creates from empty** now records
+  `adr-0104-file-references` and `adr-0104-value-shapes` at that moment. Nothing
+  to run; enforcement and collection are live from the first boot.
+
+  **This is not version-gating in disguise.** The fact recorded — no legacy value
+  is stored here — is _observed_: the store had no history at all. The platform
+  attests only what it watched itself create, and the test is deliberately
+  strict: every table made by this boot and **none found already present**. One
+  pre-existing table anywhere, one datasource that was already there, one driver
+  that cannot account for its schema sync — any of those and the deployment
+  attests nothing and produces its evidence by scan, exactly as before. "Found
+  empty" and "created empty" are not the same claim, and only the second is an
+  observation.
+
+  **New surfaces.** `IDataDriver.getSchemaSyncStats?()` (optional, purely
+  observational: tables created vs found since connect — implemented by the SQL
+  and in-memory drivers), `engine.wasDatastoreCreatedFromEmpty()`,
+  `attestFreshDatastore()` in `@objectstack/platform-objects/system`, and
+  `VALUE_SHAPES_MIGRATION_ID` / `CREATION_ATTESTED_MIGRATION_IDS` in
+  `@objectstack/spec/system`. Attestation never overwrites an existing flag row
+  and never throws into a boot: a failure leaves the deployment lax, which a
+  migration run can still fix.
+
+  **Upgrading changes nothing for an existing database.** It is non-empty when
+  the platform reaches it, so it is never attested — run
+  `os migrate files-to-references --apply` as before. Importing legacy values
+  into an attested deployment is rejected loudly at the write path;
+  `OS_ALLOW_LAX_MEDIA_VALUES=1` re-opens leniency while you diagnose.
+
+- c8124e5: fix(driver-sql): give `Field.datetime` one UTC storage form per dialect (#3912, #3942)
+
+  Any window filter on a `Field.datetime` column returned an empty set on SQLite —
+  a dashboard `dateRange: last_30_days` on `created_date` read 0 while 29 matching
+  rows existed.
+
+  There was never a storage _convention_, only a description of what better-sqlite3
+  happened to do with a bound JS `Date`. Nothing enforced it — `formatInput`
+  deliberately left `datetime` untouched — so the form was decided by whichever
+  writer got there first: a JS `Date` landed as INTEGER epoch ms, while a REST/JSON
+  write (JSON has no `Date` type), a `defaultValue: 'NOW()'` slot, and the
+  platform's own `created_at` / `updated_at` all landed as ISO **TEXT**. One column
+  held both forms while the read path coerced comparands to epoch ms purely from
+  the _declared_ type. On SQLite's type ordering (`INTEGER < TEXT`) a two-sided
+  window collapsed to zero rows, and a one-sided `>=` matched every TEXT row
+  regardless of the bound.
+
+  `Field.datetime` now has one canonical instant per dialect, produced by one
+  function applied on write **and** to every filter comparand, so the two sides of
+  a comparison cannot disagree about shape:
+
+  - **SQLite** — `YYYY-MM-DDTHH:MM:SS.sssZ` text. Lexicographic order _is_
+    chronological order, so range filters and `ORDER BY` read the column directly
+    and can use an index; `strftime` parses it, so the date-bucket expression needs
+    no CASE.
+  - **Postgres** — `timestamptz`, unchanged. The fix here is on the write and
+    comparand side: a zone-naive write was previously resolved against the
+    _server's_ timezone (measured 8 hours off on `Asia/Shanghai`), and an
+    un-anchored `YYYY-MM-DD` comparand meant the server's local midnight, so the
+    identical query over the identical instant landed a row on a different calendar
+    day than SQLite did.
+  - **MySQL** — `DATETIME(3)` instead of `TIMESTAMP`, a connection pinned to UTC on
+    both the mysql2 and the server layer, and a MySQL-spelled bind carrying the
+    same UTC wall clock. MySQL accepts neither the `T` separator nor the `Z` suffix
+    in a datetime literal, so datetime writes over REST had always failed outright;
+    `TIMESTAMP` additionally truncated milliseconds and could not store an instant
+    outside 1970..2038.
+
+  Existing rows converge at schema sync. Both migrations are allowed to fail: they
+  log, mark nothing, and the read paths keep a repair expression, so an un-migrated
+  column still compares and buckets **correctly** — just unindexed. Neither can
+  repair instants the old timezone-ambiguous write path recorded wrongly; they
+  preserve what is on disk.
+
+  Also closes #3928 (datetime `ORDER BY` mis-sorted on mixed storage) by
+  construction. Rationale is recorded as ADR-0053 addendum D-B1..D-B4.
+
+  The analytics change is additive: a `coerceTemporalFilterColumn` companion to the
+  existing `coerceTemporalFilterValue` hook, so a raw-SQL strategy can normalise the
+  column side too. Absent hook → byte-identical SQL.
+
+- 9774b78: fix(driver-sql): `Field.time` gets a canonical storage form — `HH:MM:SS[.fff]` wall-clock text on every dialect (#3994)
+
+  `Field.time` repeated the pre-#3912 `Field.datetime` pattern: writes were never
+  normalised and only reads were repaired, so one SQLite column accumulated bare
+  time-of-day TEXT, full-timestamp TEXT and INTEGER epoch ms side by side.
+  `find()` looked right; everything that compared the STORED form was wrong —
+  measured: a business-hours window filter silently dropped 4 of 7 rows, ORDER BY
+  sorted 14:30 before 08:00, a full-ISO write failed the statement outright on
+  both Postgres and MySQL, a bound `Date` stored a process-timezone wall clock on
+  pg, MySQL's bare `TIME` rounded `…00.500` up to `…01`, and a `NOW()` default
+  resolved against three different clocks on the three dialects.
+
+  The #3912→#3942→#3954 construction, transplanted (ADR-0053 D-C1..D-C3):
+
+  - One `canonicalTimeOfDay` — `HH:MM:SS`, `.fff` only when non-zero; `Date`/
+    epoch/full-timestamp fold to the UTC time-of-day — applied on write
+    (`formatInput`), to filter comparands (`coerceFilterValue`, and thereby the
+    `temporalFilterValue` contract hook) and on read (`toTimeOnly`).
+  - SQLite: legacy columns converge at schema sync (`backfillCanonicalTimes`,
+    same `IS NOT`-guarded UPDATE, same log-and-swallow policy); until then the
+    filter paths wrap the column in the repair expression — correct, just
+    unindexed. `os migrate plan` lists the work as `normalize_time_storage` with
+    a row count.
+  - MySQL: new time columns are `TIME(3)`; legacy `TIME(0)` columns widen at
+    schema sync (`migrateMysqlTimeColumns`, plan kind `widen_time_columns`),
+    since zero-precision TIME _rounds_ fractional writes.
+  - `NOW()` defaults read the UTC clock on every dialect (Postgres previously
+    used the server zone, MySQL the inserting session's zone — and MySQL 8.0
+    rejects a plain `CURRENT_TIMESTAMP` default on TIME entirely).
+  - `distinct()`/`aggregate()` present time columns exactly as `find()` does.
+
+  `HH:MM:SS` writes round-trip byte-identically (the field-zoo `f_time`
+  contract); a minutes-only `HH:MM` now completes to `HH:MM:00`, and uninterpretable
+  values still pass through untouched.
+
+- 33a5ff4: `os migrate` no longer touches the database before you confirm, and refuses a
+  SQLite database another process is using (#3917).
+
+  **Nothing is written before the prompt.** `plan` called itself a dry run and
+  `apply` gated on `[y/N]`, but both booted the full plugin set first — and boot
+  schema-sync issued create-table/add-column DDL (plus the artifact's inline seed
+  wrote rows) against the target database before either promise was kept.
+  `SqlDriver` gains `setDeferredDdl` / `previewDeferredSchemaWork` /
+  `flushDeferredSchemaDdl`: while armed, `initObjects` still registers every
+  in-memory map drift detection depends on but records the physical work instead
+  of performing it. Both commands boot with it armed, render the held-back work
+  as a `New (additive)` section of the plan, and `apply` performs it only after
+  confirmation. `os meta resync` / `os migrate files-to-references` keep the old
+  behaviour — they need the tables to exist.
+
+  **Occupancy check.** A live `os dev`/`os serve` holding the same SQLite file is
+  the usual way a migration goes wrong: the migration is transactional and swaps
+  tables inside the file, but the running server keeps prepared statements and a
+  schema cookie the migration invalidates. `os migrate` now probes the target
+  before booting — `PRAGMA locking_mode = EXCLUSIVE` + `BEGIN IMMEDIATE` under
+  `busy_timeout = 0`, which reports `SQLITE_BUSY` when another connection is
+  _attached_, not merely writing. (`wal_checkpoint(TRUNCATE)` only sees an active
+  writer, and `-wal`/`-shm` presence cannot tell a live server from a crashed one;
+  both are encoded as tests.) `apply` refuses with exit 1 — `error: database_busy`
+  under `--json` — unless the new `--force` flag is passed; `plan` warns and
+  continues, since it writes nothing either way. SQLite only: Postgres and MySQL
+  take their own server-side locks.
+
+  `@objectstack/runtime` also exports `resolveStandaloneDatabase()`, so a caller
+  can resolve the database target with the same precedence the boot uses without
+  building the stack, and `createStandaloneStack` accepts `skipSeedData`.
+
+- 9e01213: fix(cli,driver-sql): `os migrate plan` lists the datetime storage convergence (#3954)
+
+  The datetime canonicalisation (#3912/#3942) added two steps to `initObjects`'
+  physical path: a row-rewriting backfill on SQLite and a `TIMESTAMP` →
+  `DATETIME(3)` column rebuild on MySQL. Both already respected the DDL deferral,
+  so `plan` performed neither and `apply` performed both — the behaviour was never
+  wrong. The reporting was.
+
+  `PendingSchemaWork` could only express `create_table` / `add_columns`, so an
+  operator saw a plan listing two added columns, confirmed it, and `apply`
+  additionally rewrote every row of a datetime column — or took a metadata lock to
+  rebuild one on a large table. The plan promises to show what apply will do.
+
+  - `PendingSchemaWork.kind` gains `normalize_datetime_storage` and
+    `widen_datetime_columns`, plus an optional `rows` carrying how much data the
+    step touches: row-writes for the backfill, the table's size for the rebuild —
+    the number that decides "now" versus "in a maintenance window".
+  - `previewDeferredSchemaWork()` measures both without performing either, reusing
+    the exact predicate each migration uses (the backfill's whole `WHERE`, the
+    widening's own `information_schema` filter) so the plan and the apply cannot
+    name different sets. A probe that cannot run is swallowed to "unlisted", never
+    to a failed plan.
+  - The CLI renders them under their own heading rather than folding them into the
+    additive section, whose "created when you apply" framing carries an implicit
+    promise that the work is never data-losing. `summarizePendingSchemaWork` — the
+    line read just before typing `y` — never omits in-place work.
+
+- c53aa53: File-backed SQLite now runs `journal_mode = WAL` (#3941).
+
+  `SqlDriver.connect()` set `auto_vacuum` and left the journal mode alone, so
+  every ObjectStack SQLite database ran SQLite's built-in default — a rollback
+  journal. That is the worst mode for the shape this platform actually has, which
+  is **several processes on one file**: a dev server, `os migrate`,
+  `os meta resync`, a test run. Measured, on the same file:
+
+  |                                                | rollback journal                                   | WAL                                                               |
+  | :--------------------------------------------- | :------------------------------------------------- | :---------------------------------------------------------------- |
+  | writer while another process holds a read open | `SQLITE_BUSY` — committing needs an exclusive lock | proceeds                                                          |
+  | idle attached connection visible to SQL        | no — a lock lasts only as long as its transaction  | yes (`locking_mode = EXCLUSIVE` + `BEGIN IMMEDIATE` reports busy) |
+
+  The second row is why the `os migrate` occupancy check had to inspect file
+  descriptors to see a live server at all (#3940): under a rollback journal there
+  was nothing in the database to see. That signal stays — it names the process,
+  which WAL's lock probe cannot — but the SQL probe is now authoritative for
+  databases ObjectStack created rather than a fallback that was blind in practice.
+  Concurrent _writers_ still serialize; SQLite allows one at a time in any mode.
+
+  Journal mode is a persistent property of the file, so an existing database is
+  converted in place on the next connect (a header change — no rows are touched)
+  and stays converted. Two consequences to plan for:
+
+  - `app.db-wal` / `app.db-shm` exist beside the database while a connection is
+    attached, and `app.db-wal` can hold committed transactions. A clean shutdown
+    checkpoints them away; a naive copy of `app.db` alone while a server runs does
+    not. Use `sqlite3 app.db ".backup …"`.
+  - **WAL does not work on network filesystems** (NFS/SMB). Opt out with
+    `OS_DATABASE_SQLITE_JOURNAL_MODE=delete`, or per datasource with
+    `sqliteJournalMode: 'delete'` in the driver config (which outranks the env
+    var). Either form _applies_ `delete`, so it also converts a database that
+    already adopted WAL back — skipping would have stranded it.
+
+  Nothing here fails a boot, and nothing is assumed: `PRAGMA journal_mode = X`
+  answers with the mode actually in force rather than raising on refusal, so the
+  reply is read back; and because a filesystem can accept WAL and then fail the
+  first read _through_ it, the mode is proven with a read and rolled back to
+  `delete` if that fails — with a warning naming the file and the escape hatch.
+  `synchronous` is untouched, so durability is exactly what it was. `:memory:`
+  databases are left alone, as is `auto_vacuum = INCREMENTAL`, which keeps
+  reclaiming under WAL (ADR-0057).
+
+  `os db clean` now counts `-wal` / `-shm` as part of the database when it measures
+  what a `VACUUM` reclaimed, so bytes that were sitting in the log do not read as a
+  reclaim of zero.
+
+  `@objectstack/driver-sqlite-wasm` deliberately stays out of WAL. Its live
+  database is in the WASM heap and what reaches disk is a byte image it exports, so
+  nothing reads the database across processes and the pragma buys it nothing —
+  while still being a persistent header change in the operator's file. sql.js
+  _accepts_ the pragma (its VFS is memory-backed), so this had to be declared
+  rather than discovered.
+
+  It also now parks a `-wal` left behind by an unclean native-driver exit rather
+  than loading the image beside it: wasm SQLite cannot read that log, and leaving
+  it next to a freshly rewritten image would let a later real SQLite replay frames
+  that no longer belong to it. The warning names the file it parked and how to
+  recover what was in it.
+
+### Patch Changes
+
+- 0af50a3: fix(driver-sql,service-analytics): a bare-day upper bound covers the whole day on `Field.datetime` (#3777)
+
+  A bare `YYYY-MM-DD` comparand anchors to midnight UTC. That is right for a
+  lower bound and was silently wrong for an upper one: the dashboard date-range
+  filter compiles `{ $gte: from, $lte: to }` with bare-day bounds, so on a
+  `datetime` column every row created after 00:00 of the `to` day vanished from
+  the result — no error, the chart renders, the numbers are just smaller. The
+  default configuration hit it: the filter's default field is `created_at`
+  (a system-injected `Field.datetime`) and 7 of the 13 presets end "today".
+
+  The translation is operator-sensitive and half-open, applied at every
+  comparison emitter:
+
+  - `SqlDriver` (and `SqliteWasmDriver` by inheritance): `$lte`/`<=` with a
+    bare-day comparand on a `datetime` column compiles to `< next-day-midnight`
+    in the column's storage form; `$between [min, max]` with a bare-day max
+    decomposes to `>= min AND < next-day(max)`. Both the plain and the
+    legacy-repair (mixed-storage) column paths, both `where` spellings.
+  - `NativeSQLStrategy`: `dateRange` windows and `lte` filters bind `< next-day`
+    instead of an inclusive `BETWEEN`/`<=` when the bound is a bare day.
+  - The `/analytics/sql` rendering and the dataset preview evaluator apply the
+    same rule, so the echoed SQL and drafted numbers reproduce execution.
+
+  `@objectstack/core` gains the shared primitive `nextUtcCalendarDay(value)`:
+  the next calendar day of a valid bare `YYYY-MM-DD` (else `null` — instants,
+  `Date`s and impossible days are never widened).
+
+  Unchanged on purpose, per the semantics table on #3777: `date`/`time` columns
+  (`<= day` is already whole-day-correct there), full-ISO/`Date` comparands
+  (instant semantics), and `$gte`/`$gt`/`$lt` (midnight anchoring is correct for
+  those). No authored metadata changes: a dashboard's existing
+  `{ $gte, $lte }` window now simply includes its final day.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 42e3b01: fix(driver-sql): `Field.date` + `defaultValue: 'NOW()'` records the UTC calendar day on Postgres/MySQL (#4022)
+
+  The bare `CURRENT_TIMESTAMP` default resolved the calendar day in the SERVER's
+  timezone on Postgres — measured: a UTC-12 server recorded yesterday; an
+  Asia/Shanghai server records tomorrow for every default after 16:00 UTC — and
+  MySQL 8.0 rejects it on a DATE column outright (MariaDB is merely permissive,
+  and the driver's UTC-pinned session masked the semantic half there).
+  `nowColumnDefault` now emits a UTC expression default on both dialects, the
+  #3994 D-C3 construction one type over. Defaults only govern newly created
+  columns; existing columns keep their legacy default, per the standing D-B3
+  policy.
+
+- 39eb01b: fix(driver-sql): a currently-declared unique index is never legacy debt — index drift no longer ping-pongs (#3955)
+
+  An object may declare both a tenant-scoped field-level `unique: true` and an
+  object-level single-column unique index on the same column:
+
+  ```ts
+  email: Field.email({ unique: true }),
+  indexes: [{ fields: ['email'], unique: true }],
+  ```
+
+  The declared index materializes under `buildIndexName` as
+  `uniq_<table>_<column>` — which is also one of the two spellings
+  `legacyUniqueIndexNames` looks for when hunting pre-#3696 platform-wide
+  uniques. The detector therefore read an index the current metadata declares
+  as legacy debt and proposed replacing it with the tenant composite (which
+  the same sync had already created).
+
+  The resulting plan never converged: `apply` dropped the declared index, the
+  next `plan` reported it missing and recreated it, and the one after that
+  called it legacy again — an unbounded drop/create cycle on a live unique
+  index, every round rendered as a "safe" change.
+
+  `legacyUniqueReplacements` now takes the object's `declaredIndexes` and
+  filters their normalized names out of the legacy candidate set, so an index
+  metadata declares today is never mistaken for debt. Genuinely legacy indexes
+  are still retired, including the knex-spelled `<table>_<column>_unique` when
+  only the `uniq_…` spelling is declared.
+
+- 4384921: fix(spec,drivers): `bypassTenantAudit` becomes a declared driver option, and `findOne` stops accepting a bare id (#4311)
+
+  Three drivers built with `tsup` and tested with `vitest`, so no `tsc` had ever
+  read them. Onboarding them to the #4311 type-check ratchet surfaced 292 errors,
+  and most of what looked like sloppy test fixtures was the types being wrong.
+
+  **`DriverOptions.bypassTenantAudit` is now declared.** It has been live for a
+  long time without being on the schema: `SqlDriver.auditMissingTenant` reads it
+  to suppress the "tenant-scoped write without `tenantId`" warning, the driver's
+  own warning text tells callers to set it, `ObjectQLEngine` sets it for
+  system-context calls, and `service-settings` / `service-datasource` pass it on
+  every global-scope write. Because the schema never had it, the driver read it
+  through `(options as any)` and no caller was type-checked. The declaration
+  states the limit as well: it silences a diagnostic and MUST NOT change which
+  rows a write touches — suppressing an audit warning is not a permission.
+
+  The same cast covered `timezone`, `tenantId`, `tenantIds` and `preserveAudit`,
+  all long since declared. Those reads now go through `DriverOptions`, so the next
+  undeclared option fails the build instead of hiding behind an existing cast.
+
+  **`SqlDriver.findOne(object, id)` is removed.** An undeclared
+  `typeof query === 'string' | 'number'` branch accepted a bare id. It was on no
+  contract, nothing outside that package's own tests used it, and the other two
+  drivers answered the identical call differently — `MemoryDriver` spreads the
+  string into `{0:'t',1:'1'}`, `MongoDBDriver` reads `query.where` as `undefined`
+  and returns an arbitrary row. It also bypassed the shared `findRows()` path, so
+  it skipped field selection, temporal coercion, unknown-column recovery and the
+  `singleRowLookup` ORDER BY decision. Spell an id lookup as the query it is:
+
+  ```ts
+  -(await driver.findOne("task", "t1"));
+  +(await driver.findOne("task", { object: "task", where: { id: "t1" } }));
+  ```
+
+  **`SqlDriver.initObjects` declares the `tenancy` it consumes.** Each object is
+  fed to `computeAndRecordTenantField`, which reads `obj.tenancy` to pick the
+  tenant column and to set or clear the sticky explicit-opt-out — but the
+  parameter type listed only `{ name, fields }`, so a caller that spelled the key
+  correctly was rejected while the driver read it anyway.
+  `registerExternalObject` already had it.
+
+  **`AnalyticsQueryInput` joins `AnalyticsQuery`.** `timezone` is
+  `.default('UTC')`, so the parsed type requires it and an authored literal does
+  not have it — the same two-tier split `QueryInput`/`QueryAST` already names on
+  the query side. `InMemoryDriver.create`/`bulkCreate` also declare their
+  `IDataDriver` return types; without them TS inferred the literal the method
+  builds and every other column of the created row disappeared from the caller's
+  view.
+
+  One silent runtime bug fell out of the same pass: a driver test asked for
+  `orderBy: [['id', 'asc']]`, the driver reads `item.field`, a tuple has none, and
+  the sort never reached SQL. The tuple spelling appears nowhere else.
+
+- 6f98c2d: fix(driver-sql,driver-memory): an uncompilable filter now throws instead of matching everything (#3948)
+
+  A filter the driver could not compile was **skipped**, not rejected. No predicate
+  was emitted and the query returned every row — the caller asked to filter and
+  silently received the unfiltered set.
+
+  The reachable shape is a bare comparison triple. `['close_date','before','2024-01-01']`
+  arrives at a driver only when `isFilterAST()` refused it — its operator is outside
+  `VALID_AST_OPERATORS`, so `parseFilterAST()` never converted it and the raw array
+  was assigned to `where`. `driver-sql`'s loop then saw three _strings_, matched
+  neither `and` nor `or`, and `continue`d past all three. `driver-memory` was worse:
+  it cast every string to a logic keyword, opening three empty groups and returning
+  `{}` — a filter matching every record.
+
+  This is reachable from ordinary authoring, not just malformed input: `before` and
+  `after` are canonical `VIEW_FILTER_OPERATORS` members that `VALID_AST_OPERATORS`
+  does not accept. Eight of the nineteen canonical view operators are in that
+  position, including `equals`; the others were masked only because ObjectUI's
+  adapter alias table happened to cover them.
+
+  **Behaviour change.** Both drivers now throw on a filter element that is neither a
+  logical keyword (`and`/`or`) nor a condition array, and `driver-memory` throws on
+  an operator it cannot express rather than dropping the condition. The nested and
+  `$`-object paths already threw on the same input, so this makes the three paths
+  agree. A caller that was relying on the old silence was receiving wrong results;
+  the error names the operator and the offending filter.
+
+  **`driver-memory` also gains seven operators it silently ignored:** `not_in`,
+  `is_null`, `is_not_null`, `isnull`, `isnotnull`, `is_empty`, `is_not_empty` — all
+  members of `VALID_AST_OPERATORS`, all previously falling through to
+  `default: return null`. `is_null` narrowed nothing instead of matching null rows.
+  Alias sets and semantics mirror `driver-sql`'s `whereNull`/`whereNotNull` arms so
+  the two backends accept one vocabulary.
+
+  Migration: none for well-formed filters. If a query now throws, the filter was
+  never being applied — fix the operator (the message names it), or lower it to an
+  AST spelling. `before` → `<`, `after` → `>`, `'not in'` → `nin`.
+
+- a13827e: fix(data): paging a sorted read is a partition of the result set, not five queries that share a WHERE clause (objectui#3106)
+
+  `ORDER BY status LIMIT 50 OFFSET 50` names a sort key that does not identify a
+  row, and no backend promises that rows with equal keys keep the same relative
+  arrangement between two queries. MongoDB documents this outright — `sort` +
+  `skip`/`limit` on a non-unique key "may return the same document more than
+  once". So page 2 could repeat a row page 1 already showed and skip one nobody
+  ever saw:
+
+  ```
+  page 1: ORDER BY status LIMIT 5 OFFSET 0   -> [r05 r07 r11 r04 …]
+  page 2: ORDER BY status LIMIT 5 OFFSET 5   -> [r04 …]        r04 again; one row never served
+  ```
+
+  Every page is full, every row is real and belongs, and the duplicate sits
+  several screens from the omission — which is why this is found by a user
+  counting records, never by reading a response.
+
+  `SqlDriver` and `MongoDBDriver` now append a unique tie-breaker to any non-empty
+  `orderBy`, in the last requested key's direction (determinism holds either way,
+  but a same-direction suffix is the one an index can still walk in one pass).
+  `driver-memory` already conformed — `Array#sort` is stable over a table whose
+  order does not move — and now has a suite saying so, because that property is
+  implicit and easy to lose in a refactor that looks like a speed-up.
+
+  `SqlDriver` adds it only for objects it created itself (`initObjects` records
+  those). A federated table (ADR-0015) may have no `id` column, and guessing there
+  would be worse than doing nothing: the unknown-column error is answered by
+  #3821's ladder retrying with **no ORDER BY at all**, trading a reshuffle among
+  ties for the loss of the caller's whole sort.
+
+  The obligation is now normative on `IDataDriver.find`, with shared cases in
+  `@objectstack/spec/data` (`PAGINATION_CASES`) that all three drivers run — so a
+  future driver is held to it by a gate rather than by remembering.
+
+  Not covered by this change: a paged read with **no** `orderBy`. Same defect,
+  wider blast radius, so it was carved out to #4363 rather than folded in — and
+  closed there, in the same release. The contract, the shared cases and both
+  drivers now cover a paged read whatever its `orderBy`, including none at all.
+
+- 3fe0ff1: fix(driver-sql): `os migrate plan` no longer promises columns the apply can never create (#3978)
+
+  `previewDeferredSchemaWork()` listed every declared field name when computing
+  pending `create_table` / `add_columns` work, but `createColumn` returns early
+  for a virtual `formula` field — no column is ever created for it.
+
+  So a formula field showed up as pending `add_columns` that `apply` reported as
+  performed without doing anything, and the very next `plan` reported it again.
+  A freshly-applied database looked permanently un-migrated, with no invocation
+  able to clear the finding. On `examples/app-crm` that was 4 columns
+  (`crm_contact.full_name`, `crm_lead.is_closed`, `crm_opportunity.expected_revenue`,
+  `crm_opportunity.days_to_close`) reported forever.
+
+  The preview now filters through `fieldHasColumn` — the same helper `createColumn`
+  and the column differ already answer "does this field materialize a column?"
+  with — so the plan and the flush cannot disagree. `multiple` fields are
+  unaffected: they materialize as a JSON column and are still reported.
+
+- 8675db6: refactor(data)!: a select-list entry is a field name — the nested-select object form is removed (#4196)
+
+  `FieldNode` declared two forms for one entry of `QueryAST['fields']`:
+
+  ```ts
+  type FieldNode =
+    | string // "name"
+    | { field: string; fields?: FieldNode[]; alias?: string }; // nested select
+  ```
+
+  The object form was **declared-but-inert**. Nothing produced it, and nothing
+  read `.fields` or `.alias` — every consumer on the path treats the list as
+  `string[]`: `objectql`'s formula projection and its two known-field filters,
+  `driver-sql`'s `select()`, `driver-memory`'s `projectFields`. `driver-mongodb`
+  keyed its projection with the entry itself, so an object entry asked for a
+  column literally named `"[object Object]"`, and the REST ingress stringified
+  each entry before comparing it to the field map, so the same entry came back as
+  `400 INVALID_FIELD: Unknown field '[object Object]'` — a rejection naming
+  something the caller never wrote. An author who wrote
+  `fields: [{ field: 'owner', fields: ['name'] }]` got it accepted by validation
+  and then dropped or mangled, depending on the driver (ADR-0078 silently-inert
+  declaration; ADR-0049 enforce-or-remove).
+
+  The capability the object form described is already served, by a different key.
+  Removing the second spelling rather than lowering it into the first is Prime
+  Directive #12: one capability, one contract.
+
+  **FROM → TO**
+
+  | Was                                                               | Now                                                              |
+  | :---------------------------------------------------------------- | :--------------------------------------------------------------- |
+  | `fields: [{ field: 'owner', fields: ['name'] }]`                  | `expand: { owner: { object: 'user', fields: ['name'] } }`        |
+  | `fields: [{ field: 'owner' }]`                                    | `fields: ['owner']`                                              |
+  | `fields: [{ field: 'owner', fields: ['name'] }]`, one column only | `fields: ['owner.name']` (dotted path)                           |
+  | `fields: [{ field: 'total', alias: 't' }]`                        | `aggregations` / `windowFunctions` — they carry the live `alias` |
+
+  The one-line fix: **a `fields[]` entry is a string.** Move nested selection to
+  `expand`, which the engine resolves through batch `$in` queries (default max
+  depth 3).
+
+  There is no `os migrate meta` step, and deliberately so: `QueryAST` is a request
+  shape, never stored in stack metadata, so the chain has no source to rewrite. It
+  is registered as an ADR-0087 D3 **semantic** migration
+  (`query-field-node-object-form-retired`) on the protocol-17 step instead — the
+  `EnhancedApiError.fieldErrors` / `BatchOptions.validateOnly` precedent. Callers
+  move their own select lists, and both channels tell them how:
+
+  - **The parse.** `FieldNodeSchema` narrows to `z.string()` with an error map that
+    answers an object entry with the prescription above, not "expected string,
+    received object". `z.input` becomes `string`, so `tsc` fails at the authoring
+    site first.
+  - **The ingress.** `assertProjectionFieldsExist` judges the entry's _shape_
+    before consulting the object's field map — it is wrong about the shape, not
+    about this object, and a registry-less host would otherwise pass it to a driver
+    that cannot read it. The 400 now names the retired form instead of the field
+    `"[object Object]"`.
+
+  No runtime behaviour changes for anything that ever worked; the defensive
+  unwrapping the drivers had grown against a shape nothing sends goes with it.
+
+- 8b50cb3: fix(data): a paged read with no `orderBy` is a partition too — the shape every list view actually sends (#4363)
+
+  objectui#3106's server half closed the **sorted** paged read: a non-empty
+  `orderBy` now carries a unique tie-breaker, so `ORDER BY status LIMIT 50 OFFSET
+50` can no longer serve one row twice while never serving another. It stopped
+  there deliberately. This closes the half it left, which is the more common one.
+
+  A list view whose metadata configures no `sort`, on which nobody has clicked a
+  column header, sends no `$orderby` at all. `SqlDriver` and `MongoDBDriver` then
+  emitted a bare `LIMIT`/`OFFSET` — and neither backend promises anything about
+  the order that slices:
+
+  - **SQL** leaves the row order of an unordered read to the plan. Small tables
+    hand back insertion order in practice, which is exactly why this survives
+    testing; a parallel scan, an index scan, or a `VACUUM` need not.
+  - **MongoDB** returns natural order, which describes where a document currently
+    sits in its extent — and moves when the document does.
+
+  Every row ties with every other on an empty sort key, so this is the same defect
+  at full strength rather than a different one: page 2 repeats a row page 1 showed
+  and drops one nobody sees, with every page full and every row real.
+
+  Both drivers now order a paged read by their unique key column when the caller
+  supplied no sort keys — the same `id` the tie-breaker was already appending, now
+  standing alone. `driver-memory` again needed no change: it slices its backing
+  array, and two reads with no write between them see the identical sequence. The
+  contract asks for a partition, not for id order.
+
+  **Unpaged reads are untouched, deliberately.** The rule keys off `limit`/
+  `offset`, not off `orderBy` being absent. A read with neither hands back the
+  whole matching set, so no caller can be shown a partial view of it, and sorting
+  every read in the system would change plan selection to buy nothing. `limit`
+  alone does count as paged: page one of a walk is routinely `limit=50` with no
+  offset, and ordering only the later pages would leave the defect fully intact.
+
+  `SqlDriver` keeps the existing restriction to objects it created itself
+  (`initObjects` records them). It matters more here than for the sorted case: on
+  a federated table (ADR-0015) there is no requested sort for #3821's ladder to
+  fall back to, so a wrong guess about `id` would turn a reshuffle into a failed
+  read. Those tables now get a warning — once per object, behavior unchanged —
+  because the contract states determinism as a MUST, and a MUST that quietly does
+  not hold is the same invisible failure the rule was written against.
+
+  `findOne` is deliberately outside all of this, and the contract now says so.
+  Engines reach a driver with `limit: 1`, which is shaped exactly like page one of
+  a walk, but it promises _a_ matching record rather than a position in a
+  sequence — nothing for a second call to be inconsistent with. Reading it as a
+  page would put `ORDER BY id LIMIT 1` on the hottest read in the system, which is
+  the classic shape for a planner to abandon the predicate's own index: measured
+  on Postgres 16 over 2M rows, `WHERE owner_id = ? LIMIT 1` went 0.08 ms → 7.8 ms
+  and swapped the `owner_id` index for the primary key. `MongoDBDriver.findOne`
+  has never sorted, so this also puts the two drivers back in step.
+
+  The obligation is normative on `IDataDriver.find` and the cases are shared —
+  `PAGINATION_UNORDERED_CASES` alongside `PAGINATION_CASES` in
+  `@objectstack/spec/data` — so a future driver is held to both halves by a gate
+  rather than by remembering.
+
+- 0166bd5: fix(spec,drivers): the view filter vocabulary and the AST vocabulary now agree (#3948)
+
+  `VIEW_FILTER_OPERATORS` (`ui/view.zod.ts`) is what an author may declare on a
+  `ViewFilterRule`. `VALID_AST_OPERATORS` (`data/filter.zod.ts`) gates
+  `isFilterAST()`, which decides whether a filter is parsed into a query at all.
+  They disagreed on **8 of 19** members: `equals`, `not_equals`, `greater_than`,
+  `less_than`, `greater_than_or_equal`, `less_than_or_equal`, `before`, `after`.
+
+  An author could declare any of them, `ViewFilterRuleSchema` validated them,
+  `defineStack` accepted them — and then `isFilterAST()` refused the filter, the
+  protocol passed the array through unconverted, and the driver could not apply it.
+  Six of the eight were reachable only in theory because ObjectUI's adapter alias
+  table happened to translate them; the safety of the query path was resting on a
+  hand-written table in another repository being complete, and for `before`/`after`
+  it wasn't.
+
+  **`AST_OPERATOR_MAP` is now the single source of truth.** `VALID_AST_OPERATORS`
+  is derived from its keys rather than restated, so an operator can no longer be
+  accepted by the gate without also having a lowering — the two were separate
+  hand-written lists that happened to agree, with nothing enforcing it. The map
+  gained the eight canonical view spellings plus the squashed/short forms stored
+  metadata carries (`notequals`, `greaterthanorequal`, `eq`, `gt`, …).
+
+  **New export `canonicalAstOperator(op)`** folds every accepted spelling of one
+  comparison onto a single infix form. Both drivers now call it instead of growing
+  private alias lists, which is what let them accept different vocabularies.
+  `like`/`ilike` are deliberately not folded onto `contains`: driver-sql passes them
+  to SQL verbatim, so folding would silently wrap the value in `%…%`.
+
+  Widening only — no spelling was removed, so no stored filter stops validating.
+  A filter that previously produced an error (after #4029) or was silently dropped
+  (before it) now compiles. `filter-view-operator-parity.test.ts` asserts every
+  `VIEW_FILTER_OPERATORS` member and every `VIEW_FILTER_OPERATOR_ALIASES` key has a
+  lowering that is a real `$`-operator rather than the `$${op}` fallback, so the
+  next operator the view layer gains fails a test instead of a query.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/observability@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

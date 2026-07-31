@@ -1,5 +1,442 @@
 # @objectstack/cloud-connection
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- f5a4ef0: refactor!: ADR-0112 batch 2 — sweep the lowercase error-code emitters (#4003)
+
+  Continues #3841 per ADR-0112. Batch 1 (#3988) settled the vocabulary and closed
+  the set; this batch moves the emitters that still spoke lowercase `snake_case`
+  onto it.
+
+  **Wire-visible change.** Error codes on these surfaces change spelling. Generic
+  conditions collapse onto the standard catalog rather than keeping a synonym:
+  `unauthorized`/`unauthenticated` → `UNAUTHENTICATED`, `forbidden` →
+  `PERMISSION_DENIED`, `not_found` → `RESOURCE_NOT_FOUND`, `internal` →
+  `INTERNAL_ERROR`, `unavailable` → `SERVICE_UNAVAILABLE`, `not_supported` →
+  `NOT_IMPLEMENTED`, `bad_request` → `INVALID_REQUEST`. Domain conditions get codes
+  registered in `ERROR_CODE_LEDGER` (`MARKETPLACE_STORAGE_FAILED`,
+  `PLUGIN_MANIFEST_INVALID`, `ITEM_LOCKED`, `DELIVERY_NOT_ELIGIBLE`, …). Swept:
+  `cloud-connection`, `plugin-auth`, `hono`, `metadata-protocol`, `rest`,
+  `service-messaging`, `service-automation`, `trigger-api`.
+
+  Branch on `error.code` values rather than pattern-matching their case: the
+  console's fix for the same rename (objectui#2977) reads codes case-insensitively
+  for exactly this reason, and that is the pattern to copy in your own consumers if
+  you support servers on both sides of the change.
+
+  **Four routes stop putting a code in the message slot.** The webhook redeliver
+  route, the API-trigger webhook, and two `rest` routes answered
+  `{ success: false, error: '<code>', message }` — the code occupying `error`, the
+  declared object envelope nowhere. They now emit `error: { code, message }`, and
+  three API-trigger branches gained a message they never had. Clients reading
+  `body.error` as a string on those routes must read `body.error.code`.
+
+  **`ConnectorErrorCategory` / `ConnectorRetryStrategy`** (ADR-0112 D9a):
+  `@objectstack/spec` exported two mutually incompatible `ErrorCategory` types and
+  two `RetryStrategy` types. The connector-side pair is renamed; importers of the
+  `integration` subpath update the name. Side effect: the api-side `ErrorCategory`
+  and `RetryStrategy` now appear in the generated API reference at all — the name
+  collision had been silently dropping them.
+
+  **`OAUTH_REGISTER_FAILED` replaces an unbounded code source.** The OAuth client
+  registration route put better-auth's arbitrary `body.error` string straight into
+  `error.code`. The code is now ours and the upstream discriminator moved to
+  `details.upstreamError`.
+
+  **Not swept, deliberately.** `sys_metadata_audit.code` keeps its lowercase values
+  (ADR-0112 D6b): it is persisted audit history, and the same column holds
+  non-error outcomes (`ok`, `lock_override`). Diagnostics records that ship inside a
+  200 keep theirs (D6c), as do field-level codes (D6, #3977) and the CLI's
+  `--json` output contract.
+
+  A `check:error-code-casing` CI guard now fails on a new lowercase literal in a
+  code position, since the ledger's casing rule can only police codes that someone
+  registers.
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- f985b3f: fix(spec,core,cloud-connection,metadata): one HTTP contract, one canonical slot name — and the dead shadow copy that helped cause the false exemption is deleted (#4251)
+
+  **`packages/core/src/contracts/` was a dead near-copy of the real contracts,
+  and it is gone.** The directory (http-server.ts, data-engine.ts, logger.ts) had
+  ZERO importers — no relative import, no subpath export, not a tsup entry;
+  core's barrel has re-exported the `@objectstack/spec/contracts` versions all
+  along ("Re-export contracts from @objectstack/spec for backward
+  compatibility"). But the shadow had already **diverged** from the live
+  contract (spec's `IHttpResponse` grew `write?`/`end?` and `IHttpRequest` grew
+  `rawBody?`; the copy never did), so anyone who grepped their way into it read a
+  stale contract that nothing enforces — the exact both-humans-and-AI failure
+  mode behind the false `http.server` exemption (#4382). Deleting it is
+  zero-risk by construction: nothing could reach it.
+
+  **`http.server` is the canonical slot name, and the ledger now says so.**
+  `ServiceSlotContracts` gains `'http.server': IHttpServer` plus the deprecated
+  `'http-server'` alias entry (same instance — hono-plugin and qa's node-plugin
+  register both two lines apart; cloud's two server entrypoints do the same).
+  Canonical is the only name present on EVERY provider path: runtime's
+  `config.server` path registers no alias, so the three cloud-connection plugins
+  that read the alias alone (marketplace-proxy, runtime-config,
+  marketplace-install-local) found an empty slot there — a live miss, now fixed:
+  all readers go canonical-first with the alias as a fallback that dies with the
+  alias registrations. The registrations themselves are untouched this release;
+  both sites now carry the deprecation note.
+
+  **`getRawApp?(): any` joins `IHttpServer`** — the deliberate framework-handle
+  escape, declared once. Four consumers were each declaring it locally
+  (cloud-connection ×2, metadata's HMR routes, cloud's serverless node-server);
+  those local `RawAppHost`/`HttpServerWithRawApp` types are deleted. The `any`
+  return is deliberate and documented at the single declaration: the handle's
+  real type belongs to the framework, and naming it would give the contract a
+  framework dependency. Adapters are not required to expose it; consumers
+  feature-detect.
+
+  **`IMetadataService.bulkRegister`/`bulkUnregister` declare the write options
+  their implementation has always accepted.** `bulkRegister`'s contract options
+  dropped the `MetadataWriteOptions` half its implementation intersects in
+  (`notify` is destructured on the method's first line); `bulkUnregister`
+  declared no options at all while the manager takes them. Same shape as the
+  `IDataEngine` read-methods gap from B2: a caller typed to the contract could
+  not reach the channel without erasing the lookup. Both additive; no implementor
+  or caller breaks.
+
+  Slot-lookup baseline ratchets 168 → 167 (marketplace-install-local's lookup
+  typed while touched).
+
+- ac1cc8c: fix(cloud-connection): align the marketplace seed test's timeout with its sibling (#3785)
+
+  `marketplace-install-local-state-machine-exempt.test.ts` failed under a
+  full-repo `pnpm test` at 30s, while passing every time the package ran alone.
+
+  Both marketplace seed tests drive `MarketplaceInstallLocalPlugin`, whose
+  seeding path dynamically imports the real `@objectstack/runtime` (unmocked on
+  purpose, twice: `recordSeedSummary` and `mergeSeedDatasetsIntoKernel`). That
+  cold import costs seconds by itself and multiples of that under a fully
+  parallel turbo run, and it is charged to whichever test triggers it first.
+
+  Its sibling `marketplace-install-local-seed-lookup.test.ts` was diagnosed as
+  exactly this — _"an import stall, not a hang"_ — and raised to 120s. This file
+  was left at 30s and kept flaking the same way. The budget is now aligned, with
+  the rationale stated locally rather than only in the sibling.
+
+  The flaky set turns out to be exactly the intersection of "does not mock
+  `@objectstack/runtime`" and "actually drives seeding":
+
+  | test                   | mocks runtime | drives seeding                    | budget             |
+  | :--------------------- | :------------ | :-------------------------------- | :----------------- |
+  | `conflict`, `bundle`   | no            | **no** — never reaches the import | default            |
+  | `reseed`, `heal`       | **yes**       | yes                               | default            |
+  | `seed-lookup`          | no            | yes                               | 120s (already)     |
+  | `state-machine-exempt` | no            | yes                               | 120s (this change) |
+
+  So the two tests #3785 recorded are the only two that can hit this, and no
+  other file needs the same treatment. A genuine hang still fails — later.
+
+- 627b188: fix(seed-loader): count reference fields dropped from rows that were still written
+
+  The loader had two failure outcomes and only counted one. A record it cannot
+  write is counted in `errored`. But an unusable **reference value** (an object
+  where a natural key belongs, an array on a single-value field) is removed from
+  the record — never written as NULL, which would sever an existing link on
+  upsert replay — and the row is written **without it**. Nothing counted that.
+
+  So a load that quietly severed N associations reported `totalErrored: 0`, and
+  every count-driven surface read clean. The CLI boot banner — the one seed signal
+  that survives `os dev`'s boot-quiet window and the default `warn` level — printed
+  `showcase 42 rows`, and the warn line said `0 dropped record(s)`: true, and
+  useless ([#3932](https://github.com/objectstack-ai/objectstack/issues/3932)).
+
+  `SeedLoadResult.referencesDropped` and `SeedLoaderSummary.totalReferencesDropped`
+  now count it. It is deliberately **not** folded into `errored` — the row _was_
+  written, so that would break the `inserted + updated + skipped` reconciliation
+  against `total`. The banner names it separately:
+
+  ```
+  ⚠ Seeds:   showcase 42 ok / 3 lost links ⚠
+  ```
+
+  Both counters are additive with a `0` default, so an existing producer or
+  consumer of `SeedLoaderResult` is unaffected.
+
+- d92c72d: fix(lint,runtime,core): the slot-lookup guard sees the split-declaration form — the shape that made the ratchet look cleaner the more it was used (#4251)
+
+  The three selectors from #4321 all key off the erasure and the lookup being in
+  ONE expression. Split them and every selector misses:
+
+  ```ts
+  let ql: any;
+  try {
+    ql = ctx.getService("objectql");
+  } catch {
+    /* optional */
+  }
+  ```
+
+  Selector 1 needs the call inside the declarator (this declarator has no init),
+  selector 2 needs `as`, selector 3 needs a type argument. The contract is erased
+  exactly as in `const ql: any = ctx.getService(…)`.
+
+  **Why this could not wait for the batches.** The baseline's monotonicity check
+  means a file that leaves the grandfather list can never be re-added. So every
+  batch converted more of this shape from "grandfathered" into "lint covers this
+  file and says nothing" — B2 alone moved `plugin-security/security-plugin.ts`
+  into that state. A ratchet that reports a cleaner number the more you sweep is
+  the #4342 failure wearing different clothes, and the fix only gets more
+  expensive per batch shipped.
+
+  **It is a rule, not a fourth selector, and that is the whole finding.** esquery
+  can match `AssignmentExpression:has(CallExpression[…])`, but it cannot tell
+  which declaration the assigned identifier resolves to — so it would equally
+  flag the correctly-typed form this work line exists to produce (`let
+i18nService: II18nService | undefined; i18nService = …`, 8 such sites today in
+  runtime/app-plugin.ts, service-automation and metadata-protocol). Resolving the
+  identifier needs SCOPE analysis. That is cheap and needs no type information, so
+  this stays out of the typed-lint pass the KNOWN RESIDUAL still waits on — but it
+  is a rule, and the earlier "just one more selector" estimate was wrong.
+
+  Verified against exactly that: the rule flags all 16 real sites and none of the
+  8 correctly-typed lookalikes.
+
+  **Scale.** The baseline goes 140 → **169 sites** with the file count unchanged
+  at 37: 29 sites were already inside grandfathered files and simply invisible.
+  16 more could NOT be grandfathered (12 in files earlier batches had cleared, 3
+  in files never listed, 1 the regex sweep had missed) and are typed here —
+  `runtime/app-plugin.ts` ×5, `core/fallbacks/authored-translation-sync.ts` ×2,
+  `plugin-security/security-plugin.ts` ×2, `cloud-connection/{runtime-config,
+marketplace-proxy}-plugin.ts` ×3, `platform-objects/src/plugin.ts` ×2,
+  `runtime/http-dispatcher.ts`, `runtime/domains/ai.ts`. No baseline key was
+  added; the key set still only shrinks.
+
+  Contracts where they exist (`IAIService`, `IJobService`, `IMetadataService`,
+  `II18nService`, `IDataEngine`, `IHttpServer`), named local surfaces where they
+  do not — `AppEngineSurface`, `SecurityEngineSurface`, `RawAppHost`,
+  `EnvRegistrySurface`, `FreshDatastoreEngine`, `AuthoredTranslationSink`. Two of
+  those record something worth naming: `IHttpServer` has no `getRawApp()` (the
+  contract is framework-agnostic and the raw app is Hono's own handle), and
+  ObjectQL's `_defaultBodyRunner` / `_defaultActionRunner` have no public reader
+  at all — the engine attaches them via `(this as any)` and publishes nothing,
+  while `getHookMetricsRecorder()` exists for exactly that question about the
+  metrics recorder. Declared rather than laundered through `any`, and filed.
+
+- Updated dependencies [bc35e00]
+- Updated dependencies [6a67d7a]
+- Updated dependencies [6e141bc]
+- Updated dependencies [48fcf70]
+- Updated dependencies [0ecc656]
+- Updated dependencies [a4e2684]
+- Updated dependencies [06772eb]
+- Updated dependencies [0c90ece]
+- Updated dependencies [195ad76]
+- Updated dependencies [c2bbd97]
+- Updated dependencies [698cbc2]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [ffb003c]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [6fa1827]
+- Updated dependencies [05154a1]
+- Updated dependencies [0f12193]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [fce14ab]
+- Updated dependencies [2e836de]
+- Updated dependencies [7309c81]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [a225ef5]
+- Updated dependencies [c9d254a]
+- Updated dependencies [c8124e5]
+- Updated dependencies [c3bcb42]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [0373d52]
+- Updated dependencies [4f30943]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [bb192c4]
+- Updated dependencies [98e7cc7]
+- Updated dependencies [4cf7c61]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [347f460]
+- Updated dependencies [8a341a4]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [385c4b0]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [99b4392]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [33a5ff4]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [3ba8d77]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [a3cb9c8]
+- Updated dependencies [e87fea1]
+- Updated dependencies [4be9d99]
+- Updated dependencies [c65e529]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [5b08389]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [5c13368]
+- Updated dependencies [1d5dc46]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [1e38158]
+- Updated dependencies [65a3a84]
+- Updated dependencies [de6daa5]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [77a77fd]
+- Updated dependencies [d82f8c0]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [2053714]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [7309c81]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [43fc039]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/runtime@17.0.0-rc.1
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Patch Changes

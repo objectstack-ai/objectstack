@@ -1,5 +1,524 @@
 # @objectstack/driver-mongodb
 
+## 17.0.0-rc.1
+
+### Patch Changes
+
+- b3a2318: fix(driver-memory,driver-mongodb): a bare-day upper bound covers the whole day (#4042)
+
+  The non-SQL half of #3777's calendar-day rule. Both drivers compiled a bare
+  `YYYY-MM-DD` `$lte` (and a `between` max) as-is, so on timestamp values the
+  window cut off at the final day's midnight — the dashboard date-range filter's
+  default configuration (`created_at`, 7 of 13 presets ending "today") lost the
+  current day, exactly as it did on SQL before #3777 was fixed.
+
+  Both drivers now compile a bare-day upper bound half-open, sharing
+  `nextUtcCalendarDay` from `@objectstack/core`:
+
+  - `driver-memory`: the Mongo-style and array `where` spellings in the mingo
+    lowering (`$lte`/`<=` → `$lt` next day; `$between`/`between` max the same),
+    the analytics cube-filter `lte`, and the analytics `dateRange` window — which
+    now also matches BOTH stored forms of a timestamp (ISO strings and `Date`
+    objects) instead of only `Date`s, since mingo compares cross-type as
+    never-equal.
+  - `driver-mongodb`: the `translateFilter` lowering, all three spellings
+    (`$lte`, `$between`, array `<=`/`lte`).
+
+  Unchanged on purpose, matching the #3777 semantics table: full-ISO/`Date`
+  comparands keep instant semantics, and `$gte`/`$gt`/`$lt` keep their midnight
+  anchoring. Known remaining gap (tracked separately): values stored as BSON
+  `Date` (mongodb) or JS `Date` (memory `find()`) never match _string_ comparands
+  of any operator — a storage-form problem, not a bound-semantics one.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 9e8f04d: fix(driver-memory,driver-mongodb): `Field.datetime` has one storage form per driver (#4047)
+
+  The non-SQL counterpart of ADR-0053 D-B (#3912). Both drivers let the writer
+  decide a datetime value's runtime type, and both compare across types by type
+  bracket rather than by value — so a string comparand never matched a `Date`
+  value, in either direction, for **every** operator including `$gte`.
+
+  A datetime column genuinely held both forms: the drivers' own
+  `created_at`/`updated_at` defaults bind a `Date` (mongo) or an ISO string
+  (memory), while REST/JSON writes, relative-date tokens and `initialData`
+  fixtures supply the other. A dashboard date window therefore answered with
+  whichever half happened to match the comparand's type — on MongoDB, where
+  `created_at` is a BSON `Date` and dashboard bounds are strings, that meant
+  **no rows at all**, which is worse than the final-day loss #3777 fixed.
+
+  Each driver now has one canonical form, applied on write and to every filter
+  comparand:
+
+  | Driver           | `datetime`                                                                                                           | `date`            |
+  | ---------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------- |
+  | `driver-mongodb` | BSON `Date` — the dialect's native instant, its `timestamptz`                                                        | `YYYY-MM-DD` text |
+  | `driver-memory`  | canonical UTC ISO text (sorts chronologically under the string comparison mingo performs; survives JSON persistence) | `YYYY-MM-DD` text |
+
+  Both learn their temporal fields from `syncSchema`, so an object that was never
+  declared is left exactly as written — the drivers do not guess types from
+  values. `driver-memory` additionally converges rows already in the table when
+  the schema arrives, which catches `initialData` fixtures and anything a
+  persistence adapter restored (the in-memory analogue of
+  `backfillCanonicalDatetimes`, and idempotent like it).
+
+  `Field.date` deliberately stays timezone-naive text on both — converting it to
+  an instant would invent a midnight and re-couple it to a zone. The
+  calendar-day bound semantics from #3777/#4042 are unchanged and now compose
+  with the converged storage: the whole-day rewrite runs on the calendar string
+  first, and only the resulting bound is converted to the storage form.
+
+- e59786e: fix(spec): five exported symbols resolved to `any` — type the recursive schemas and gate it in CI (#4171)
+
+  A recursive Zod schema needs an explicit annotation to break its circular
+  inference, and five of them took the cheapest one available:
+
+  ```ts
+  export const NavigationItemSchema: z.ZodType<any> = z.lazy(() => …);
+  export type NavigationItem = z.infer<typeof NavigationItemSchema>;   // → any
+  ```
+
+  It compiles, it validates correctly at runtime, and it silently throws the type
+  away. `NavigationItem`, `FormField`, `JoinNode` and `NormalizedFilter` were all
+  `any` on the published surface, plus `FieldNodeSchema` — which had no exported
+  type alias yet, so `z.infer<typeof FieldNodeSchema>` was `any` and
+  `QueryAST['fields']` with it.
+
+  That is worse than a missing export. #4115 tells every consumer that a local
+  declaration under a spec export's name must be replaced by a binding to the
+  spec — and for these, obeying it **replaced a precise type with `any`**.
+  objectui's `NavigationItem` is a 118-line documented interface (`recordId`
+  template variables, `requiresObject` / `requiresService` capability gates,
+  `filters` precedence); every key of it exists in the spec's version, so by every
+  available signal it read as a redundant fork safe to delete. Deleting it swapped
+  a fully-typed interface for `any`, with no compile error anywhere to say so.
+
+  It is hard to catch by inspection because `any` is mutually assignable with
+  everything, so the natural "are these the same type?" check answers _yes_ in both
+  directions and recommends precisely the wrong action. Same failure family as
+  #4075's `[key: string]: any` on `ActionDef`: a type that agrees with everything
+  reads as agreement.
+
+  **Now annotated with the real type**, using the pattern `QueryAST` already
+  follows in `data/query.zod.ts` — infer the non-recursive part, tie the recursive
+  knot in the type, so the keys stay derived from the schema instead of being
+  hand-maintained beside it:
+
+  ```ts
+  const BaseXSchema = z.object({ …every non-recursive key });
+  export type X = z.infer<typeof BaseXSchema> & { children?: X[] };
+  export const XSchema: z.ZodType<X> = z.lazy(() => BaseXSchema.extend({
+    children: z.array(XSchema).optional(),
+  }));
+  ```
+
+  `z.infer` now resolves to the type it should always have been: `NavigationItem`
+  is the nine-branch discriminated union, `FormField` the 30-key form-field
+  contract (with `visibleOn` absent by construction — ADR-0089 D2 folds it into
+  `visibleWhen` at the boundary), `JoinNode` and the newly exported `FieldNode`
+  the query AST nodes, `NormalizedFilter` the normalized filter AST. Runtime
+  validation is unchanged: every schema parses exactly what it parsed before.
+
+  **What the types immediately caught**, none of it visible while they were `any`:
+
+  - `account.app.ts` set `defaultOpen` on three nav groups — a key the spec has
+    never declared. It worked only because objectui's `NavigationRenderer` still
+    falls back to that legacy alias. Fixed at the producer per Prime Directive
+    #12: the canonical key is `expanded`.
+  - The MongoDB driver built its projection with `projection[field] = 1` over
+    `query.fields`, so a relationship `FieldNode` would have keyed the projection
+    on `"[object Object]"`. It now reads the node's field name.
+  - `setup.app.ts`, `studio.app.ts` and `setup-nav.contributions.ts` are annotated
+    with the PARSED `App` / `NavigationContribution` types but omitted
+    `.default()`ed keys (`expanded`, `target`), as did the form fields
+    `metadata-protocol` synthesizes for `getUiView` (`span`). Each now states the
+    default it was relying on, matching what the surrounding literals already do
+    for `active` / `isDefault` / `collapsible` / `collapsed` / `columns`.
+
+  **Gated, not just fixed** (`check:exported-any`, wired into the required
+  `TypeScript Type Check` job). `api-surface.json` records that an export _exists_
+  and never what it _resolves to_, which is how these survived a whole major with
+  every gate green. The new scan reads the built `.d.ts` a consumer's import
+  actually resolves to and fails on any exported type that resolves to `any` — or
+  any exported schema whose output is `any`, the root cause, and the only reason
+  `FieldNodeSchema` was visible at all. Its `KNOWN_ANY` ledger is shrink-only and
+  currently empty. It self-tests against the real zod first, so if the internals it
+  reads are ever renamed the gate fails loudly instead of quietly passing
+  everything forever.
+
+- a13827e: fix(data): paging a sorted read is a partition of the result set, not five queries that share a WHERE clause (objectui#3106)
+
+  `ORDER BY status LIMIT 50 OFFSET 50` names a sort key that does not identify a
+  row, and no backend promises that rows with equal keys keep the same relative
+  arrangement between two queries. MongoDB documents this outright — `sort` +
+  `skip`/`limit` on a non-unique key "may return the same document more than
+  once". So page 2 could repeat a row page 1 already showed and skip one nobody
+  ever saw:
+
+  ```
+  page 1: ORDER BY status LIMIT 5 OFFSET 0   -> [r05 r07 r11 r04 …]
+  page 2: ORDER BY status LIMIT 5 OFFSET 5   -> [r04 …]        r04 again; one row never served
+  ```
+
+  Every page is full, every row is real and belongs, and the duplicate sits
+  several screens from the omission — which is why this is found by a user
+  counting records, never by reading a response.
+
+  `SqlDriver` and `MongoDBDriver` now append a unique tie-breaker to any non-empty
+  `orderBy`, in the last requested key's direction (determinism holds either way,
+  but a same-direction suffix is the one an index can still walk in one pass).
+  `driver-memory` already conformed — `Array#sort` is stable over a table whose
+  order does not move — and now has a suite saying so, because that property is
+  implicit and easy to lose in a refactor that looks like a speed-up.
+
+  `SqlDriver` adds it only for objects it created itself (`initObjects` records
+  those). A federated table (ADR-0015) may have no `id` column, and guessing there
+  would be worse than doing nothing: the unknown-column error is answered by
+  #3821's ladder retrying with **no ORDER BY at all**, trading a reshuffle among
+  ties for the loss of the caller's whole sort.
+
+  The obligation is now normative on `IDataDriver.find`, with shared cases in
+  `@objectstack/spec/data` (`PAGINATION_CASES`) that all three drivers run — so a
+  future driver is held to it by a gate rather than by remembering.
+
+  Not covered by this change: a paged read with **no** `orderBy`. Same defect,
+  wider blast radius, so it was carved out to #4363 rather than folded in — and
+  closed there, in the same release. The contract, the shared cases and both
+  drivers now cover a paged read whatever its `orderBy`, including none at all.
+
+- 8675db6: refactor(data)!: a select-list entry is a field name — the nested-select object form is removed (#4196)
+
+  `FieldNode` declared two forms for one entry of `QueryAST['fields']`:
+
+  ```ts
+  type FieldNode =
+    | string // "name"
+    | { field: string; fields?: FieldNode[]; alias?: string }; // nested select
+  ```
+
+  The object form was **declared-but-inert**. Nothing produced it, and nothing
+  read `.fields` or `.alias` — every consumer on the path treats the list as
+  `string[]`: `objectql`'s formula projection and its two known-field filters,
+  `driver-sql`'s `select()`, `driver-memory`'s `projectFields`. `driver-mongodb`
+  keyed its projection with the entry itself, so an object entry asked for a
+  column literally named `"[object Object]"`, and the REST ingress stringified
+  each entry before comparing it to the field map, so the same entry came back as
+  `400 INVALID_FIELD: Unknown field '[object Object]'` — a rejection naming
+  something the caller never wrote. An author who wrote
+  `fields: [{ field: 'owner', fields: ['name'] }]` got it accepted by validation
+  and then dropped or mangled, depending on the driver (ADR-0078 silently-inert
+  declaration; ADR-0049 enforce-or-remove).
+
+  The capability the object form described is already served, by a different key.
+  Removing the second spelling rather than lowering it into the first is Prime
+  Directive #12: one capability, one contract.
+
+  **FROM → TO**
+
+  | Was                                                               | Now                                                              |
+  | :---------------------------------------------------------------- | :--------------------------------------------------------------- |
+  | `fields: [{ field: 'owner', fields: ['name'] }]`                  | `expand: { owner: { object: 'user', fields: ['name'] } }`        |
+  | `fields: [{ field: 'owner' }]`                                    | `fields: ['owner']`                                              |
+  | `fields: [{ field: 'owner', fields: ['name'] }]`, one column only | `fields: ['owner.name']` (dotted path)                           |
+  | `fields: [{ field: 'total', alias: 't' }]`                        | `aggregations` / `windowFunctions` — they carry the live `alias` |
+
+  The one-line fix: **a `fields[]` entry is a string.** Move nested selection to
+  `expand`, which the engine resolves through batch `$in` queries (default max
+  depth 3).
+
+  There is no `os migrate meta` step, and deliberately so: `QueryAST` is a request
+  shape, never stored in stack metadata, so the chain has no source to rewrite. It
+  is registered as an ADR-0087 D3 **semantic** migration
+  (`query-field-node-object-form-retired`) on the protocol-17 step instead — the
+  `EnhancedApiError.fieldErrors` / `BatchOptions.validateOnly` precedent. Callers
+  move their own select lists, and both channels tell them how:
+
+  - **The parse.** `FieldNodeSchema` narrows to `z.string()` with an error map that
+    answers an object entry with the prescription above, not "expected string,
+    received object". `z.input` becomes `string`, so `tsc` fails at the authoring
+    site first.
+  - **The ingress.** `assertProjectionFieldsExist` judges the entry's _shape_
+    before consulting the object's field map — it is wrong about the shape, not
+    about this object, and a registry-less host would otherwise pass it to a driver
+    that cannot read it. The 400 now names the retired form instead of the field
+    `"[object Object]"`.
+
+  No runtime behaviour changes for anything that ever worked; the defensive
+  unwrapping the drivers had grown against a shape nothing sends goes with it.
+
+- 6038de7: feat(spec,drivers): the temporal conformance matrix gains its `Field.time` axis — and `time` finally gets a storage form off SQL (ADR-0053 D-A3.2)
+
+  `@objectstack/spec/data` gains `TEMPORAL_TIME_ROWS` / `TEMPORAL_TIME_CASES`,
+  the wall-clock half of the shared matrix. A time gets its own table rather than
+  a third `kind` on the existing one because it shares no comparand vocabulary
+  with the other two: no relative token resolves to a wall clock, and the
+  bare-day whole-day rule (#3777) must **not** reach it — which the table now
+  asserts rather than assumes, since "the rule leaked into the wrong field type"
+  is exactly what a conformance matrix is for. The fixture is a business day
+  carrying the boundaries #3994 measured: both window edges, the pair straddling
+  the millisecond-suffix width change, midnight and `23:59:59.999`.
+
+  **The axis found a real gap on its first run.** ADR-0053 D-C gave `Field.time`
+  a canonical form on every SQL dialect, but `driver-memory` and
+  `driver-mongodb` were never extended — both declared
+  `TemporalFieldKind = 'datetime' | 'date'`, so a `time` column was never
+  classified and never coerced. It therefore held whatever each writer produced,
+  and both stores compare across types by bracket: a text bound matched no
+  `Date`-written row, in either direction, for every operator. Measured on
+  `driver-memory`, **8 of the 9 shared cases** returned only the text-written
+  half — a business-hours window answering `[d_mid, f_close]` instead of
+  `[c_open, d_mid, e_mid_ms, f_close]`. This is #4047's failure one field type
+  over, and it survived #4047 because that work extended `datetime` and `date`
+  without revisiting `time`. On mongo it was also a documentation failure: that
+  module's canon table has listed `time` as `HH:MM:SS[.fff]` text since #3994,
+  and nothing implemented it.
+
+  Both drivers now carry `storageTimeValue`, mirroring the SQL
+  `canonicalTimeOfDay`: `HH:MM:SS`, `.fff` only when the milliseconds are
+  non-zero, a `Date` / epoch / full-timestamp folding to its **UTC** time-of-day
+  (never the host's), and totality — an out-of-range wall clock like `'25:00'`
+  passes through rather than being silently rewritten. Text on both, mongo
+  included: a wall clock is not an instant, so a BSON `Date` would invent a
+  calendar day and a zone the author never wrote.
+
+  If you have existing `time` data on either driver, values written as `Date`
+  objects converge to canonical text on their next write; reads of un-migrated
+  documents are unchanged. Filters were already unable to reach the mixed half,
+  so no query that worked before stops working.
+
+- 8b50cb3: fix(data): a paged read with no `orderBy` is a partition too — the shape every list view actually sends (#4363)
+
+  objectui#3106's server half closed the **sorted** paged read: a non-empty
+  `orderBy` now carries a unique tie-breaker, so `ORDER BY status LIMIT 50 OFFSET
+50` can no longer serve one row twice while never serving another. It stopped
+  there deliberately. This closes the half it left, which is the more common one.
+
+  A list view whose metadata configures no `sort`, on which nobody has clicked a
+  column header, sends no `$orderby` at all. `SqlDriver` and `MongoDBDriver` then
+  emitted a bare `LIMIT`/`OFFSET` — and neither backend promises anything about
+  the order that slices:
+
+  - **SQL** leaves the row order of an unordered read to the plan. Small tables
+    hand back insertion order in practice, which is exactly why this survives
+    testing; a parallel scan, an index scan, or a `VACUUM` need not.
+  - **MongoDB** returns natural order, which describes where a document currently
+    sits in its extent — and moves when the document does.
+
+  Every row ties with every other on an empty sort key, so this is the same defect
+  at full strength rather than a different one: page 2 repeats a row page 1 showed
+  and drops one nobody sees, with every page full and every row real.
+
+  Both drivers now order a paged read by their unique key column when the caller
+  supplied no sort keys — the same `id` the tie-breaker was already appending, now
+  standing alone. `driver-memory` again needed no change: it slices its backing
+  array, and two reads with no write between them see the identical sequence. The
+  contract asks for a partition, not for id order.
+
+  **Unpaged reads are untouched, deliberately.** The rule keys off `limit`/
+  `offset`, not off `orderBy` being absent. A read with neither hands back the
+  whole matching set, so no caller can be shown a partial view of it, and sorting
+  every read in the system would change plan selection to buy nothing. `limit`
+  alone does count as paged: page one of a walk is routinely `limit=50` with no
+  offset, and ordering only the later pages would leave the defect fully intact.
+
+  `SqlDriver` keeps the existing restriction to objects it created itself
+  (`initObjects` records them). It matters more here than for the sorted case: on
+  a federated table (ADR-0015) there is no requested sort for #3821's ladder to
+  fall back to, so a wrong guess about `id` would turn a reshuffle into a failed
+  read. Those tables now get a warning — once per object, behavior unchanged —
+  because the contract states determinism as a MUST, and a MUST that quietly does
+  not hold is the same invisible failure the rule was written against.
+
+  `findOne` is deliberately outside all of this, and the contract now says so.
+  Engines reach a driver with `limit: 1`, which is shaped exactly like page one of
+  a walk, but it promises _a_ matching record rather than a position in a
+  sequence — nothing for a second call to be inconsistent with. Reading it as a
+  page would put `ORDER BY id LIMIT 1` on the hottest read in the system, which is
+  the classic shape for a planner to abandon the predicate's own index: measured
+  on Postgres 16 over 2M rows, `WHERE owner_id = ? LIMIT 1` went 0.08 ms → 7.8 ms
+  and swapped the `owner_id` index for the primary key. `MongoDBDriver.findOne`
+  has never sorted, so this also puts the two drivers back in step.
+
+  The obligation is normative on `IDataDriver.find` and the cases are shared —
+  `PAGINATION_UNORDERED_CASES` alongside `PAGINATION_CASES` in
+  `@objectstack/spec/data` — so a future driver is held to both halves by a gate
+  rather than by remembering.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

@@ -1,5 +1,354 @@
 # @objectstack/verify
 
+## 17.0.0-rc.1
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- c3bcb42: feat(runtime,datasource): the default-datasource connect seam accepts a host driver factory — adopt pre-built instances without forking the verdict (#3826)
+
+  ADR-0062 D1's open-core convergence (#3869/#3886) left one structural question
+  open: a host whose `default` needs a driver the shared factory cannot build —
+  the cloud distribution's `turso`, or an instance pooled BEYOND one kernel (the
+  cloud control-plane driver doubles as the proxy base of every environment
+  kernel; per-environment drivers are cached across kernel rebuilds) — had only
+  two options, both bad: stay on the legacy pre-built `DriverPlugin` path, whose
+  connect verdict lives in `ObjectQLEngine.init()` (the second implementation
+  #3826 exists to retire), or fork the connect orchestration. Either re-opens the
+  #3741 → #3758 drift this whole line of work is about.
+
+  Two additive pieces close it:
+
+  - **`DefaultDatasourcePlugin` accepts an injected `IDatasourceDriverFactory`**
+    (defaults to the shared open-core factory, byte-for-byte unchanged when
+    omitted). The factory only changes what `create()` returns — the policy-free
+    init connect, `bootCritical` fail-fast, `OS_ALLOW_DRIVER_CONNECT_FAILURE`
+    escape hatch, and the start() replay into retained admin state are identical
+    either way, and the new tests pin that (an adopted instance that cannot
+    connect takes the exact same verdict).
+  - **`createPrebuiltDriverFactory(driver, { driverId?, fallback? })`** in
+    `@objectstack/service-datasource` — the "adopt an existing driver" seam the
+    first #3826 pass found missing, landed AS a factory so it composes into the
+    one connect path instead of becoming a second entry point. `create()` returns
+    the SAME instance every call: construction, pooling, and reuse stay host
+    concerns; only the verdict converges. Not for the common case — a `default`
+    expressible as `{ driver, config }` should stay a plain definition.
+
+  The `@objectstack/verify` dogfood harness now boots through
+  `DefaultDatasourcePlugin` (declared `sqlite-wasm` definition) instead of a
+  pre-built `DriverPlugin` — so the dogfood gate exercises the same declared
+  -default connect path `objectstack dev`/`serve` use, which is the §Risk
+  mitigation ADR-0062 promised ("behind the dogfood gate") and did not yet have.
+  The degraded-boot parity guard stays: `ObjectQLEngine.init()`'s verdict is
+  still live for the boot re-verification, `DriverPlugin` escape-hatch drivers,
+  and the cloud compositions until they converge onto this seam.
+
+- 64f8cbe: feat(platform-objects,service-settings,verify): `sys_secret` is platform infrastructure — registered by `PlatformObjectsPlugin`, not by the settings service (#4270)
+
+  The environment's encrypted-secret store (`sys_secret`, ADR-0066 D2/④) was
+  registered by `@objectstack/service-settings`, but it has three producer
+  classes and only one of them is settings: the settings service's encrypted
+  specifiers, the ObjectQL engine's own `secret`-field encryption
+  (`encryptSecretFields`/`resolveSecret` — the generic write path of ANY
+  business object carrying a `Field.secret()`), and the datasource credential
+  binder. Unlike the `sys_migration` precedent (#4243), the failure posture is
+  fail-CLOSED: on a kernel composed without settings, every insert/update of an
+  object with a secret field threw — with an error message that told the
+  operator to "Ensure the platform-objects (sys_secret) are registered", naming
+  a package that did not register it.
+
+  The registration now lives in `PlatformObjectsPlugin`
+  (`@objectstack/platform-objects/plugin`) — the plugin `os serve` already
+  auto-injects into every served kernel — so the store exists with the
+  platform, independent of which optional services are composed, and the
+  engine's fail-closed error message is true. Definition ownership is unchanged
+  (`sys_secret` stays in `@objectstack/platform-objects` and in
+  `PLATFORM_OBJECTS_BY_PACKAGE`); the settings service remains a producer and
+  consumer through its `sys_secret`-backed secret store.
+
+  Consequences:
+
+  - `@objectstack/service-settings` no longer contributes `sys_secret` to the
+    manifest (`settingsObjects` is now `[SysSetting, SysSettingAudit]`). An
+    embedder composing `SettingsServicePlugin` on a hand-built kernel that
+    relied on it for the `sys_secret` table must compose
+    `PlatformObjectsPlugin` (the plugin every supported assembly path already
+    includes). The move REPLACES the registration — nothing registers the
+    object twice.
+  - `@objectstack/verify`'s boot harness now composes `PlatformObjectsPlugin`,
+    mirroring `os serve`'s auto-inject — which also means harness kernels now
+    carry the `sys_migration` ledger + fresh-datastore attestation (#4243) the
+    served assembly always had.
+
+- Updated dependencies [bc35e00]
+- Updated dependencies [6a67d7a]
+- Updated dependencies [6e141bc]
+- Updated dependencies [48fcf70]
+- Updated dependencies [0ecc656]
+- Updated dependencies [a4e2684]
+- Updated dependencies [06772eb]
+- Updated dependencies [0c90ece]
+- Updated dependencies [195ad76]
+- Updated dependencies [c2bbd97]
+- Updated dependencies [3ec8186]
+- Updated dependencies [698cbc2]
+- Updated dependencies [b1863a5]
+- Updated dependencies [270650f]
+- Updated dependencies [956e7f9]
+- Updated dependencies [3aef718]
+- Updated dependencies [ffb003c]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [e5e8b10]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [bb1ce2e]
+- Updated dependencies [b4be309]
+- Updated dependencies [6fa1827]
+- Updated dependencies [05154a1]
+- Updated dependencies [7a55913]
+- Updated dependencies [0f12193]
+- Updated dependencies [7a55913]
+- Updated dependencies [f5ab1c7]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [3abd233]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [ea24593]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [fccec22]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [fce14ab]
+- Updated dependencies [2e836de]
+- Updated dependencies [7309c81]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [7df7c64]
+- Updated dependencies [fae74b5]
+- Updated dependencies [545d931]
+- Updated dependencies [a225ef5]
+- Updated dependencies [7bf5349]
+- Updated dependencies [366105c]
+- Updated dependencies [c9d254a]
+- Updated dependencies [c8124e5]
+- Updated dependencies [c3bcb42]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [f4d7f1d]
+- Updated dependencies [217e2e6]
+- Updated dependencies [4dc14cc]
+- Updated dependencies [0373d52]
+- Updated dependencies [4f30943]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [bb192c4]
+- Updated dependencies [98e7cc7]
+- Updated dependencies [4cf7c61]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [347f460]
+- Updated dependencies [8a341a4]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [c39d713]
+- Updated dependencies [dc530b4]
+- Updated dependencies [f0d6594]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [385c4b0]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [d4720ca]
+- Updated dependencies [43ff598]
+- Updated dependencies [e5a4d26]
+- Updated dependencies [839982e]
+- Updated dependencies [623e555]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [71af9f5]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [99b4392]
+- Updated dependencies [99ffc04]
+- Updated dependencies [974c6d4]
+- Updated dependencies [7309c81]
+- Updated dependencies [495019b]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [33a5ff4]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [55bbefc]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [be7945a]
+- Updated dependencies [cc2de0e]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [3ba8d77]
+- Updated dependencies [6c87cc9]
+- Updated dependencies [af2a095]
+- Updated dependencies [bf478e1]
+- Updated dependencies [dd5daac]
+- Updated dependencies [ec796d5]
+- Updated dependencies [77fadbf]
+- Updated dependencies [a3cb9c8]
+- Updated dependencies [e87fea1]
+- Updated dependencies [4be9d99]
+- Updated dependencies [c65e529]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [5b08389]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [0931185]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [5c13368]
+- Updated dependencies [1d5dc46]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [1e38158]
+- Updated dependencies [65a3a84]
+- Updated dependencies [f1f40b4]
+- Updated dependencies [4580597]
+- Updated dependencies [de6daa5]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [77a77fd]
+- Updated dependencies [d82f8c0]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [2053714]
+- Updated dependencies [68dea0b]
+- Updated dependencies [64f8cbe]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [7309c81]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [43fc039]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [4965bfa]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/runtime@17.0.0-rc.1
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/objectql@17.0.0-rc.1
+  - @objectstack/platform-objects@17.0.0-rc.1
+  - @objectstack/plugin-sharing@17.0.0-rc.1
+  - @objectstack/plugin-security@17.0.0-rc.1
+  - @objectstack/rest@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/plugin-auth@17.0.0-rc.1
+  - @objectstack/service-automation@17.0.0-rc.1
+  - @objectstack/service-analytics@17.0.0-rc.1
+  - @objectstack/plugin-hono-server@17.0.0-rc.1
+  - @objectstack/service-datasource@17.0.0-rc.1
+  - @objectstack/service-settings@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

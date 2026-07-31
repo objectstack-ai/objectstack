@@ -1,5 +1,374 @@
 # @objectstack/service-i18n
 
+## 17.0.0-rc.1
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- d5c75e2: fix(spec,runtime,service-i18n): the dispatcher domains and their service contracts describe the same surface (#4127)
+
+  #4087 retired a `/storage` bridge that called `upload(key, data, options?)` as
+  `upload(file, { request })` — a shape no implementation has. Sweeping the other
+  dispatcher domains against `packages/spec/src/contracts/*` found the mirror-image
+  gap in three places: the call site and the implementation agreed, and the
+  **contract** was the thing that had never been written down. Each one was worked
+  around at the call site with `typeof x.foo === 'function'` — a duck-type is what
+  "the contract does not cover this" looks like when nobody fixes the contract.
+
+  Fixed at the contract, per Prime Directive #12.
+
+  **`INotificationService` — the inbox half.** `listInbox` / `markRead` /
+  `markAllRead` now exist, with `InboxQuery` / `InboxNotification` /
+  `InboxListResult` / `MarkReadResult`. Three SDK-expressed routes
+  (`notifications.list` / `.markRead` / `.markAllRead`) have rested on them all
+  along, implemented by `service-messaging`, while this contract described only
+  `send`. The cost was not theoretical: the dev notification stub implements
+  exactly `send` and `sendBatch` **because it followed the contract**, so the one
+  implementation written to spec was the one the dispatcher had to duck-type past.
+
+  They are optional, and the probe stays: an inbox needs a durable store, and a
+  send-only provider (SMTP, Twilio, a Slack webhook) fills the slot legitimately
+  without one. `handlerReady` cannot express that — the slot is serveable, one
+  capability of it is absent. The `/notifications` domain now takes
+  `INotificationService` instead of `as any`, and each write route probes its own
+  method rather than riding the entry `listInbox` check (they are separately
+  optional, so "has an inbox to read" never implied "has read-state to write").
+
+  **`II18nService.getFieldLabels`.** Both serving surfaces — the dispatcher's
+  `/i18n/labels/:object/:locale` and service-i18n's own mount — probed for it and
+  both documented it as "optional on `II18nService`", which was not true. It is
+  now. service-i18n's probe loses two casts with it (one through
+  `Record<string, unknown>`, one re-declaring the signature inline).
+
+  **`IAutomationService.getFlowRuntimeStates`** + the `FlowRuntimeState` type.
+  `GET /automation/_status` (and the CLI boot summary, and the
+  `kernel:bootstrapped` audit) already called it while the contract stopped at
+  `listFlows(): string[]`. The dispatcher's inline cast declared it as
+  `{ name, enabled, bound }` — a third copy of the shape and a narrower one than
+  the engine returns, dropping the `status` / `triggerType` / `object` fields that
+  say WHY a flow is unbound.
+
+  Two runtime fixes fell out of the same sweep:
+
+  - **`POST /automation/trigger/:name` now builds a real `AutomationContext`.**
+    It passed the raw HTTP body to `execute(name, body)`, so the
+    `{ recordId, objectName, params }` translation never ran and — the sharper
+    half — no caller identity was forwarded. A flow's default `runAs` is `'user'`,
+    and a `runAs:'user'` run whose trigger resolved no user has its data
+    operations REFUSED (#3760, fail-closed), so `client.automation.trigger()`
+    could not run a data-touching flow at all while `POST /:name/trigger` could.
+    service-automation's own comment claims "most trigger surfaces (REST action /
+    trigger endpoint) already resolve the full envelope"; for this endpoint it was
+    not true. Both routes share one context builder now.
+  - **The dead `automationService.trigger(...)` probe is gone.** Nothing in the
+    repo has ever implemented `trigger` on the automation slot and the contract
+    never declared it, so the branch was unreachable on every deployment and its
+    `execute` "fallback" was the route. Declaring `trigger?` would have blessed a
+    second name for `execute`; the dead branch is deleted instead.
+
+  No migration. Every added contract member is optional, so existing
+  implementations stay valid; the two runtime fixes only make routes that were
+  failing or degraded behave like their working twins.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- d5749d7: refactor(types,rest,services,plugin-sharing): one shared writer for the response envelope, and `error.code` is enforced at compile time (#3973)
+
+  `BaseResponseSchema` declares one envelope for every REST body the platform
+  emits. It declared it once; the code that _wrote_ it was copied per route
+  module. After #3843 and #3983 converted the last drifting one, seven modules
+  each carried their own two-line `sendOk` / `sendError` pair — so the envelope's
+  shape lived in fourteen places rather than one.
+
+  `pnpm check:route-envelope` proved those seven copies agreed, which is why this
+  is a cleanup rather than a bug fix. But a guard proves agreement; it does not
+  create it. An eighth module starts by copying the pair again — not
+  hypothetically: `share-link-routes.ts` was found already drifting by the
+  repo-wide scan, and its drift had broken `client.shareLinks.create()` and
+  `.list()` through `unwrapResponse` (#3983).
+
+  ## What moved
+
+  `sendOk` / `sendError` now live once, in `@objectstack/types`
+  (`response-envelope.ts`), and all seven modules import them:
+
+  | Module                                |
+  | ------------------------------------- |
+  | `service-storage/storage-routes.ts`   |
+  | `service-settings/settings-routes.ts` |
+  | `service-datasource/admin-routes.ts`  |
+  | `rest/external-datasource-routes.ts`  |
+  | `rest/package-routes.ts`              |
+  | `service-i18n/i18n-service-plugin.ts` |
+  | `plugin-sharing/share-link-routes.ts` |
+
+  Placement was the open question in #3973, not design. `packages/spec` is
+  schemas-only (Prime Directive #2), and the callers span `rest`, four
+  `services/*` and one `plugins/*`, which rules out anything depending on them.
+  `@objectstack/types` depends on nothing but `@objectstack/spec`, so every caller
+  can reach it, and it is already where the repo puts a helper the HTTP boundaries
+  share — `looksLikeInternalErrorLeak` (#3867) sits one file over and made the
+  same argument first.
+
+  The builders take a structural `{ status(n), json(body) }`, so the package
+  imports no HTTP contract at all: `IHttpResponse` satisfies it, and so does the
+  `any`-typed `res` the older modules carry.
+
+  ## `error.code` is now checked by the compiler
+
+  All seven copies typed the parameter `code: string`. ADR-0112 (#3841) closed the
+  vocabulary — `ErrorCode` is `StandardErrorCode ∪ ERROR_CODE_LEDGER` — but an
+  invented code was still caught only at runtime, by a conformance suite parsing a
+  driven body, i.e. only on routes some test happened to drive.
+
+  The shared `sendError` types `code` as `ErrorCode`, so an unregistered code now
+  fails to compile, at every call site at once:
+
+  ```ts
+  sendError(res, 400, "NOT_A_REGISTERED_CODE", "invented");
+  // Argument of type '"NOT_A_REGISTERED_CODE"' is not assignable to parameter of type 'ErrorCode'.
+  ```
+
+  This cost no call-site churn: every code the seven modules emit was already
+  registered.
+
+  ## `extra` is closed at the same place
+
+  `sendError`'s last parameter is `Pick<ApiError, 'category' | 'httpStatus' |
+'details' | 'requestId'>` — exactly what `ApiErrorSchema` declares beside `code`
+  and `message`.
+
+  It was `Record<string, unknown>` while `settings-routes` still hung `namespace` /
+  `key` / `reason` / `fields` beside `code`. Those bodies passed every gate anyway:
+  `ApiErrorSchema` is a plain `z.object`, so unknown keys were STRIPPED rather than
+  rejected, and `envelopeViolations` inspects only the body's top level —
+  conformant _by stripping_ rather than by declaration. #4224 moved that module
+  onto `details`, which is what lets the parameter close here. Closing it at the
+  shared builder is the part that lasts: an undeclared sibling is now a compile
+  error in every module at once, rather than a key that quietly evaporates in
+  whichever module reintroduces it.
+
+  ## Nothing changes on the wire
+
+  The seven pairs were identical modulo the optional `status` and `extra`
+  parameters this one unions, and each module's driven conformance suite still
+  parses its real bodies against the real spec schemas. One internal call site was
+  rewritten: `package-routes` passed `details` positionally and now passes
+  `{ details }`, producing the same `error.details` it always did.
+
+  ## The guard got stronger
+
+  `scripts/check-route-envelope.mjs` counts response write sites per module. A
+  module that routes everything through the shared pair builds **none** itself, so
+  the seven now declare `0 / 0 / 0` where they used to declare `2 / 1 / 1`, and the
+  shared pair is pinned separately at `2 / 1 / 1` so the invariant stays total for
+  the surface rather than per-module. What the count asserts is no longer "your two
+  builders are the enveloped ones" but "you have no builders" — and a new route
+  that hand-rolls a body still moves it off zero and fails.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

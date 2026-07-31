@@ -1,5 +1,588 @@
 # @objectstack/plugin-security
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- 1ea6bce: feat(sharing): hierarchy managers may manage shares within their write DEPTH (ADR-0111 D1 DEPTH)
+
+  `canManageShares` gains its named DEPTH extension: a caller whose effective
+  WRITE scope on the object is a hierarchy scope (`unit` / `unit_and_below` /
+  `own_and_reports`) may now manage shares on a record whose owner falls within
+  that scope's owner set — the same set the write filter and `canEdit` already
+  honour, resolved by the enterprise `hierarchy-scope-resolver`. This lets a
+  manager grant/revoke/list shares on a subordinate's record, matching
+  Salesforce (roles above the owner) and Dataverse (the `Share` privilege's BU
+  depth), without expanding the MVP owner + Modify-All authority.
+
+  - New `ISecurityService.resolveWriteScope(object, context)` — the effective
+    write scope, resolved by the same evaluator the CRUD middleware uses; fails
+    closed to `own`. Mirrored on the sharing plugin's structural probe.
+  - The gate honours only the three hierarchy scopes. `org` from the probe is
+    deliberately ignored: it means both a genuine Modify-All holder (already
+    granted via `hasWriteBypass`) AND the fail-OPEN "no permission set mentions
+    this object" default, so honouring it here would reopen the hole
+    `hasWriteBypass` was chosen to avoid.
+  - Fails closed with no security service or no enterprise resolver — the open
+    edition stays owner + Modify-All, exactly as before.
+
+- c1dcacd: fix(sharing)!: the share-management surface gains the authorization layer it never had (ADR-0111 P0, #3902)
+
+  Record sharing shipped as a data layer with no authorization of its own: every
+  `/data/:object/:id/shares` and `/sharing/rules` route authenticated the caller
+  and then ran the service under `SYSTEM_CTX` — any signed-in user could revoke
+  anyone's share, enumerate who-can-see-what, write self-grants, and define /
+  evaluate org-wide sharing rules. ADR-0111's P0 rulings land here:
+
+  - **D1/D2** — `ISharingService.canManageShares(object, recordId, context)`:
+    system, the record's owner, or a holder of Modify All Data (probed via the
+    new fail-closed `ISecurityService.hasWriteBypass`). Enforced in the SERVICE,
+    so every caller is covered; without plugin-security it fails closed to
+    owner-only.
+  - **D4** — `revoke` is symmetric with grant, validates the share belongs to the
+    URL's record (`NOT_FOUND` on mismatch), and refuses non-`manual` rows
+    (`CONFLICT` — a rule-materialised grant would be resurrected by the next
+    reconcile).
+  - **D5** — `listShares` is management-gated (invisible record → `NOT_FOUND`,
+    visible-but-not-manager → `PERMISSION_DENIED`), and the open
+    `/data/sys_record_share` read surface is self-scoped: non-admin callers see
+    only rows naming them as recipient or grantor.
+  - **D6** — the whole `/sharing/rules` surface (list/create/get/delete/evaluate)
+    requires the new **`manage_sharing`** capability (D9; seeded into
+    `admin_full_access`, `manage_platform_settings` honoured as the legacy
+    equivalent), enforced in `SharingRuleService`.
+  - **D7** — no inert grants: `recipientType` is narrowed to `user` (the only
+    type any gate enforces), grants on objects the sharing gates never consult
+    (public model, no `owner_id`, bypass, `controlled_by_parent`) fail with
+    `SHARING_NOT_ENABLED` (422), and the manual upsert keys on
+    `(object, record, recipient, source)` so manual and rule rows coexist.
+
+  **Breaking** for callers that relied on the missing gate: unauthorized share
+  management now fails with 403/404/409/422 instead of silently succeeding, and
+  `ISharingService.revoke` gained an optional `scope` parameter. The verb
+  boundary (edit ≠ delete, ADR-0111 D3) is NOT in this change — it lands as the
+  separate P1.
+
+- ad303ed: fix(sharing)!: an edit-level share no longer grants delete (ADR-0111 D3, the verb boundary)
+
+  `update` and `delete` shared one `canEdit` gate, and `canEdit` accepts an
+  `edit`-level share — so one "edit" grant silently conferred delete, the
+  opposite error from the retired `full` level. A share widens _which rows_ a
+  principal reaches, never _which verbs_ they may use (Salesforce Read/Write
+  cannot delete; Dataverse `Delete` is a distinct privilege; Odoo splits
+  `write`/`unlink`).
+
+  - `ISharingService.canDelete(object, recordId, context)` — ownership (widened
+    by write DEPTH) or the `modifyAllRecords` super-user bypass ONLY; an `edit`
+    or legacy `full` share does not confer it. `canEdit` is unchanged (the
+    update gate, share included).
+  - `SharingService.buildWriteFilter` takes a `verb` parameter: a bulk
+    `delete({multi:true})` scopes to the owner/DEPTH set alone (no share
+    widening), while a bulk `update` keeps it.
+  - The sharing middleware routes `delete` through `canDelete` and logs a
+    specific fail-closed reason on denial (ADR-0111 D10).
+  - `/security/explain` consults `canDelete` for a `delete` operation, so the
+    record-level explanation matches enforcement.
+
+  **Breaking**: a caller who could delete a record _only_ through an edit-level
+  share (and holds object-level delete CRUD) can no longer delete it — delete now
+  requires ownership, write depth, or Modify All Data. No new delete access level
+  is introduced; a future per-record delete grant would be a capability mask
+  AND-ed with object CRUD, not a fourth share level.
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 7ce02eb: feat(spec,objectql): `IObjectQLEngine` — the `objectql` slot's contract exists, the class `implements` it, and the seven consumer-local stand-ins are deleted (#4251 B3)
+
+  ObjectQL registers one instance under two names, and the ledger can finally say
+  what each name means: `data` stays `IDataEngine` (the data plane), `objectql`
+  now resolves to **`IObjectQLEngine`** — the full engine: schema access
+  (`getSchema` / `getObject` / `registry`), actions (`registerAction` /
+  `removeActionsByPackage` / `executeAction`), the hook/middleware seams
+  (`registerHook` / `unregisterHooksByPackage` / `registerFunction` /
+  `registerMiddleware` / `bindHooks`), the first-wins default runners and hook
+  metrics, boot wiring (`registerDriver` / `setDatasourceMapping` /
+  `registerApp`), and the ops probes (`checkDriversHealth` /
+  `wasDatastoreCreatedFromEmpty` / `invalidateDataMigrationFlags`). The ledger
+  test pins the new relation: `objectql` strictly widens `data`, deliberately no
+  longer equal.
+
+  **Why now, and why `implements` is the point.** The honest state for two
+  batches was recorded on `DomainHandlerContext.getObjectQL`: ObjectQL is wider
+  than `IDataEngine`, the wider part had no contract, and typing it `IDataEngine`
+  would be "the more comfortable-looking lie". The interim discipline — each
+  consumer declares the narrow slice it uses — produced seven local surfaces
+  (`AppEngineSurface`, `EngineRegistrySurface`, `EngineExtensionSurface`,
+  `SecurityEngineSurface`, `FreshDatastoreEngine`, the dispatcher's inline
+  `checkDriversHealth` slice, the `getObjectQL: any` itself). Each was honest and
+  each was an UNCHECKED claim: `getService<Surface>('objectql')` is an assertion,
+  so an engine rename would have broken every consumer at runtime with zero
+  compile errors. `ObjectQL implements IObjectQLEngine` converts all of them into
+  one compiler-verified claim. All seven stand-ins are deleted; consumers import
+  the one declaration. `getObjectQL` is typed `Promise<IObjectQLEngine | null>`
+  end to end, closing the oldest documented `any` in the dispatcher.
+
+  **Evidence bar unchanged.** Every declared member has a cross-package consumer
+  reaching it through the slot; engine members without one (e.g. `triggerHooks`,
+  cross-package only in tests) stay off until a caller appears. The registry view
+  (`EngineSchemaRegistryView`) declares exactly the eight members consumers use.
+
+  **`_registry` never leaves the engine package now.** plugin-security's
+  declared-metadata readers (`readDeclared`, permission-set projection, suggested
+  audience bindings) reached ObjectQL's private `_registry` field through `any` —
+  the same private reach `/me/apps` had in B2, five more times. All migrated to
+  the public `registry` getter the contract declares, test doubles included.
+
+  **`IMetadataService` gains `subscribe?` / `loadMany?`** — implemented by
+  `MetadataManager` beside `watch` all along, reached through the slot only via
+  `any` by ObjectQLPlugin's metadata bridge (the re-sync keeping runtime-authored
+  hooks/actions live). With them declared, the bridge's six `metadata` lookups
+  and metadata-protocol's `objectql` lookup carry contract types, and both files
+  leave the grandfather list entirely: baseline **167 → 159 sites, 36 → 34
+  files**.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- 5b47ab5: refactor(data)!: the QueryAST request surface stops declaring what no executor runs — `joins` and `windowFunctions` removed, six search flags and `aggregations[].filter` marked experimental, and the liveness ledger now governs the query surface (#4286)
+
+  #4196 removed one declared-but-inert member from `FieldNode`. Applying the same
+  method to the rest of the request surface (#4286) found 12 more members of
+  `QueryAST` that no executor runs — `packages/objectql`'s `engine.ts` contains
+  zero reads of any of them on the query path. This change dispositions the
+  mechanical tiers and closes the gate that let the class stay invisible.
+
+  **Removed (tombstoned): `query.joins` and `query.windowFunctions`.**
+
+  - `joins` — no engine or driver ever read it; a query carrying it silently ran
+    as a single-table query. Related-record retrieval already has a live
+    spelling: `expand`. The orphaned `JoinNode` / `JoinNodeInput` /
+    `JoinNodeSchema` / `JoinType` / `JoinStrategy` exports are deleted with the
+    key (`data/JoinNode`, `data/JoinType`, `data/JoinStrategy` leave the
+    published JSON schemas).
+  - `windowFunctions` — `find()` never applied it, so every OVER clause it
+    declared was silently dropped. The one live door is the SQL driver's own
+    `findWithWindowFunctions(object, query)` (driver-level, not on the
+    `IDataDriver` contract), and its input is a flat driver shape the spec
+    vocabulary never matched — `WindowFunctionNodeSchema` declared `field` /
+    `over` / `frame` members that door never read. The `WindowFunction` /
+    `WindowSpec` / `WindowFunctionNode` exports are deleted with the key.
+
+  **FROM → TO**
+
+  | Was                                                     | Now                                                                                                             |
+  | :------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------- |
+  | `joins: [{ type: 'inner', object: 'customer', on: … }]` | `expand: { customer_id: { object: 'customer', fields: ['name'] } }`                                             |
+  | `joins` for one related column                          | `fields: ['customer_id.name']` (dotted path)                                                                    |
+  | `windowFunctions: [{ function: 'rank', … }]` in a query | `aggregations` + `groupBy`, or rankings in report/dashboard metadata                                            |
+  | OVER-clause SQL from an embedder                        | `sqlDriver.findWithWindowFunctions(object, { windowFunctions: [{ function, alias, partitionBy?, orderBy? }] })` |
+
+  The one-line fix: **delete the key**. Both are `retiredKey()` tombstones on the
+  non-strict `BaseQuerySchema`, so authoring either fails `tsc` (input type
+  `never`) and a query still carrying one — even as an empty array — fails to
+  parse with the prescription itself. `QueryAST` is a request shape, never stored
+  in stack metadata, so there is no `os migrate meta` step: the removals are
+  registered as protocol-17 **semantic** migrations (`query-joins-retired`,
+  `query-window-functions-retired`), the #4196 precedent.
+
+  Compat note for the REST boundary: both names remain **reserved** list-query
+  parameters while the tombstones live (`retiredKey()` keeps a key in
+  `keyof QueryAST`, which feeds `RESERVED_LIST_QUERY_PARAMS`), so nothing changes
+  for objects with fields named `joins`/`windowFunctions` — the un-reservation
+  happens when the tombstones age out, and is called out in
+  `metadata-protocol`'s `QUERY_AST_KEYS` comment for whoever does it.
+
+  **Marked `[EXPERIMENTAL — not enforced]` (no wire or compat impact):**
+  `search.fuzzy` / `operator` / `boost` / `minScore` / `language` / `highlight`
+  (the ADR-0061 expansion reads only `query` + `fields`) and
+  `AggregationNode.filter` (a SQL `FILTER (WHERE …)` affordance neither the SQL
+  builders nor the in-memory fallback applies). Authoring one is now a
+  declaration, not a silent no-op.
+
+  **Deliberately NOT dispositioned here** (they want a maintainer call, #4286
+  steps 3–4): `having` (the strongest enforce candidate — `engine.aggregate()`
+  currently rebuilds the driver AST without it), and `cursor` / `distinct`
+  (shipped SDK producers `QueryBuilder.cursor()` / `.distinct()`; `distinct` is
+  mis-wired — its only observable effect is suppressing the REST list count).
+  All three are recorded `dead` with evidence in the new ledger.
+
+  **The gate:** `QuerySchema` joins the liveness ledger through the gate's
+  `SPEC_ONLY_SCHEMAS` override (the `webhook` precedent) as governed type
+  `query` — the first governance of what _callers_ write into a query rather
+  than what authors write into metadata files. `packages/spec/liveness/query.json`
+  classifies all 27 walked members (15 live with evidence, 7 experimental via
+  describe markers, 5 dead), so the next declared-but-inert request member fails
+  CI instead of needing a person to notice it.
+
+  `@objectstack/plugin-security` (patch): the FLS predicate guard's
+  `windowFunctions` walk is pruned — the clause no longer exists to leak through.
+  The `having` and `aggregations[].filter` walks stay, deliberately: those
+  members remain declared, and the guard being ready is what makes enforcing
+  them later safe.
+
+- 94a0bbc: fix(security)!: a disabled RLS policy no longer grants — found by re-verifying the ledger's security subset (#3896 follow-up)
+
+  **The fix.** `RowLevelSecurityPolicySchema.enabled` promises, verbatim: _"Disabled
+  policies are not evaluated."_ Nothing read it — not the collection site, not the
+  projection round-trip, not the compiler. Because applicable policies OR-combine
+  (any match allows access), a policy an admin switched off **kept contributing its
+  grant**: disabling a too-permissive policy silently changed nothing. That is the
+  #3896 shape — a documented security control whose real behaviour is wider than
+  its contract — one layer up, on RLS instead of sharing rules.
+
+  `getApplicablePolicies` now excludes `enabled === false` before any matching, at
+  the single choke point both the find path and the analytics path flow through —
+  the same place, and the same ADR-0049 enforce-or-remove resolution, as the
+  formerly-unenforced `positions` domain. Exact `=== false` on purpose: the schema
+  defaults `enabled` to true and projection rows may omit the key, so absent stays
+  active. Four tests pin both directions. Access-narrowing only: no policy grants
+  MORE after this change, and nothing in-repo authors `enabled: false`.
+
+  **The audit that found it.** All 44 entries of the liveness ledger's security
+  subset (`permission` 33, `position` 4, `object` sharing/access 7) were
+  call-graph-closed by hand and stamped `verifiedAt: 2026-07-30` — the subset's
+  first-ever re-verification (previously 4 dated entries repo-wide, and the last
+  sweep that cited preview renderers went 10-for-13 wrong). Beyond `enabled`:
+
+  - `rowLevelSecurity.priority` → **dead + authorWarn**. Not merely unimplemented:
+    policies OR-combine (the schema's own describe says most-permissive-wins), so
+    the promised "conflict resolution" semantics cannot exist. A REMOVE candidate
+    per the #3715/#3950 precedent while the v17 breaking window is open.
+  - `rowLevelSecurity.label` / `description` / `tags` → dead (benign display —
+    no consumer in either repo; deliberately not authorWarn'd).
+  - `tabPermissions` was UNDERSTATED: the note said only `'hidden'` is read, but
+    hono's rank merge reads all four visibility values across resolved sets, and
+    the `me-apps-and-everyone-baseline` dogfood test exercises it. Evidence
+    upgraded; noted as a proof-binding candidate.
+  - `allowExport` re-verified TRUE against the suspicion that it was
+    projection-only: the export route carries its own caller-level 403 gate
+    (`enforceExportPermission`), fail-closed when the security service cannot
+    answer, separate from the object-level 405.
+  - `allowTransfer/Restore/Purge` notes re-confirmed accurate (M2 operations still
+    unshipped; the RBAC gates are pre-mapped fail-closed).
+  - `object.ownership` evidence had rotted (line drift) — refreshed; six other
+    object-level security entries re-cited and stamped.
+
+  No other runtime behaviour changes.
+
+- d92c72d: fix(lint,runtime,core): the slot-lookup guard sees the split-declaration form — the shape that made the ratchet look cleaner the more it was used (#4251)
+
+  The three selectors from #4321 all key off the erasure and the lookup being in
+  ONE expression. Split them and every selector misses:
+
+  ```ts
+  let ql: any;
+  try {
+    ql = ctx.getService("objectql");
+  } catch {
+    /* optional */
+  }
+  ```
+
+  Selector 1 needs the call inside the declarator (this declarator has no init),
+  selector 2 needs `as`, selector 3 needs a type argument. The contract is erased
+  exactly as in `const ql: any = ctx.getService(…)`.
+
+  **Why this could not wait for the batches.** The baseline's monotonicity check
+  means a file that leaves the grandfather list can never be re-added. So every
+  batch converted more of this shape from "grandfathered" into "lint covers this
+  file and says nothing" — B2 alone moved `plugin-security/security-plugin.ts`
+  into that state. A ratchet that reports a cleaner number the more you sweep is
+  the #4342 failure wearing different clothes, and the fix only gets more
+  expensive per batch shipped.
+
+  **It is a rule, not a fourth selector, and that is the whole finding.** esquery
+  can match `AssignmentExpression:has(CallExpression[…])`, but it cannot tell
+  which declaration the assigned identifier resolves to — so it would equally
+  flag the correctly-typed form this work line exists to produce (`let
+i18nService: II18nService | undefined; i18nService = …`, 8 such sites today in
+  runtime/app-plugin.ts, service-automation and metadata-protocol). Resolving the
+  identifier needs SCOPE analysis. That is cheap and needs no type information, so
+  this stays out of the typed-lint pass the KNOWN RESIDUAL still waits on — but it
+  is a rule, and the earlier "just one more selector" estimate was wrong.
+
+  Verified against exactly that: the rule flags all 16 real sites and none of the
+  8 correctly-typed lookalikes.
+
+  **Scale.** The baseline goes 140 → **169 sites** with the file count unchanged
+  at 37: 29 sites were already inside grandfathered files and simply invisible.
+  16 more could NOT be grandfathered (12 in files earlier batches had cleared, 3
+  in files never listed, 1 the regex sweep had missed) and are typed here —
+  `runtime/app-plugin.ts` ×5, `core/fallbacks/authored-translation-sync.ts` ×2,
+  `plugin-security/security-plugin.ts` ×2, `cloud-connection/{runtime-config,
+marketplace-proxy}-plugin.ts` ×3, `platform-objects/src/plugin.ts` ×2,
+  `runtime/http-dispatcher.ts`, `runtime/domains/ai.ts`. No baseline key was
+  added; the key set still only shrinks.
+
+  Contracts where they exist (`IAIService`, `IJobService`, `IMetadataService`,
+  `II18nService`, `IDataEngine`, `IHttpServer`), named local surfaces where they
+  do not — `AppEngineSurface`, `SecurityEngineSurface`, `RawAppHost`,
+  `EnvRegistrySurface`, `FreshDatastoreEngine`, `AuthoredTranslationSink`. Two of
+  those record something worth naming: `IHttpServer` has no `getRawApp()` (the
+  contract is framework-agnostic and the raw app is Hono's own handle), and
+  ObjectQL's `_defaultBodyRunner` / `_defaultActionRunner` have no public reader
+  at all — the engine attaches them via `(this as any)` and publishes nothing,
+  while `getHookMetricsRecorder()` exists for exactly that question about the
+  metrics recorder. Declared rather than laundered through `any`, and filed.
+
+- c54c822: fix(spec,plugins): sweep the auth/session slot lookups — 31 sites typed, and the user-import metadata reader was pointed at a service that never had the method (#4251)
+
+  Batch B2 of the #4251 sweep: every service-lookup erasure in the auth/session
+  family. `plugin-auth/auth-plugin.ts` (20), `plugin-hono-server/current-user-endpoints.ts`
+  (10) and `plugin-security/security-plugin.ts` (1) now pass the slot's contract
+  type; the ratchet baseline drops **171 → 140 sites, 40 → 37 files**.
+
+  **The yield.** `POST /admin/import-users` resolved the `metadata` slot and probed
+  `metadataService?.getMetaItem` to decide whether to pass the import's field-coercion
+  dependency. `getMetaItem` is a **protocol** method — `ObjectStackProtocolImplementation`,
+  registered by MetadataProtocolPlugin under the `protocol` slot. `MetadataManager`,
+  which occupies `metadata`, has never had it. So the probe was false on every
+  deployment and the dep was never passed: imported rows reached `sys_user`
+  uncoerced, with the branch that says otherwise sitting right there. This is the
+  same shape as #4127's dead `automation.trigger` and #4321's `registerInMemory`
+  probes — a capability the code advertises and the runtime cannot deliver, kept
+  invisible by the `any`. Typing the lookup to `IMetadataService` is what turned it
+  into a compile error. The route reads `protocol` now.
+
+  `/me/apps` reached ObjectQL's **private** `_registry` through `as any` while
+  `/auth/me/permissions`, two handlers up in the same file, read the public
+  `registry` getter over the same field of the same object. Both read the public
+  accessor now; the one test that stubbed `_registry` was pinning the private reach
+  and stubs `registry` instead.
+
+  **Contract, from evidence.** `IDataEngine`'s read methods (`find` / `findOne` /
+  `count` / `aggregate`) declare the trailing `options?: BaseEngineOptions`
+  argument they have always accepted. ObjectQL's own doc explains why it exists:
+  reads once took their context inside the query while writes took it in trailing
+  `options.context`, so the same `{ context }` object was correct as `insert`'s 3rd
+  argument and **silently dropped** as `find`'s — "an intended `isSystem` bypass
+  just vanished". The engine accepts both channels; the contract exposed only the
+  query one, so callers using the trailing channel — the current-user endpoints'
+  permission-set loader among them — could only reach it by erasing the lookup.
+  Adding an optional trailing parameter breaks no implementor (the existing
+  minimal-implementation test proves it) and no caller. `BaseEngineOptions` was
+  already exported, sitting unused under the "legacy/deprecated" heading, which is
+  why the contract went looking and did not find it; it moves up beside the other
+  QueryAST-aligned types with the rationale attached. One new spec test pins the
+  trailing argument at the call site — the position where the old contract rejected it.
+
+  **Where the contract does not reach, the escape hatch is named.** Three slots
+  resist a spec type today and each gets a narrow, documented local interface
+  instead of `any`: `security.permissions` (plugin-security's `PermissionEvaluator`
+  — plugin-hono-server must not depend on an optional plugin), `settings`
+  (service-settings' resolver, same reason), and ObjectQL beyond `IDataEngine`
+  (`registry` / `getSchema` / `registerHook` / `registerMiddleware`). That last one
+  is deliberate scope: the standing record on `getObjectQL` in `@objectstack/runtime`
+  says ObjectQL is genuinely wider than `IDataEngine` and nobody has written the
+  wider contract, so typing the whole thing `IDataEngine` would be "the more
+  comfortable-looking lie". These declarations are what that contract gets written
+  from, and what it deletes.
+
+  No behavior changes beyond the two fixes above.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [cc2de0e]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [68dea0b]
+- Updated dependencies [64f8cbe]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [4965bfa]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/platform-objects@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/formula@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Major Changes

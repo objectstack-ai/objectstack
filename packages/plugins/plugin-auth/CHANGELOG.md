@@ -1,5 +1,501 @@
 # Changelog
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- f5a4ef0: refactor!: ADR-0112 batch 2 — sweep the lowercase error-code emitters (#4003)
+
+  Continues #3841 per ADR-0112. Batch 1 (#3988) settled the vocabulary and closed
+  the set; this batch moves the emitters that still spoke lowercase `snake_case`
+  onto it.
+
+  **Wire-visible change.** Error codes on these surfaces change spelling. Generic
+  conditions collapse onto the standard catalog rather than keeping a synonym:
+  `unauthorized`/`unauthenticated` → `UNAUTHENTICATED`, `forbidden` →
+  `PERMISSION_DENIED`, `not_found` → `RESOURCE_NOT_FOUND`, `internal` →
+  `INTERNAL_ERROR`, `unavailable` → `SERVICE_UNAVAILABLE`, `not_supported` →
+  `NOT_IMPLEMENTED`, `bad_request` → `INVALID_REQUEST`. Domain conditions get codes
+  registered in `ERROR_CODE_LEDGER` (`MARKETPLACE_STORAGE_FAILED`,
+  `PLUGIN_MANIFEST_INVALID`, `ITEM_LOCKED`, `DELIVERY_NOT_ELIGIBLE`, …). Swept:
+  `cloud-connection`, `plugin-auth`, `hono`, `metadata-protocol`, `rest`,
+  `service-messaging`, `service-automation`, `trigger-api`.
+
+  Branch on `error.code` values rather than pattern-matching their case: the
+  console's fix for the same rename (objectui#2977) reads codes case-insensitively
+  for exactly this reason, and that is the pattern to copy in your own consumers if
+  you support servers on both sides of the change.
+
+  **Four routes stop putting a code in the message slot.** The webhook redeliver
+  route, the API-trigger webhook, and two `rest` routes answered
+  `{ success: false, error: '<code>', message }` — the code occupying `error`, the
+  declared object envelope nowhere. They now emit `error: { code, message }`, and
+  three API-trigger branches gained a message they never had. Clients reading
+  `body.error` as a string on those routes must read `body.error.code`.
+
+  **`ConnectorErrorCategory` / `ConnectorRetryStrategy`** (ADR-0112 D9a):
+  `@objectstack/spec` exported two mutually incompatible `ErrorCategory` types and
+  two `RetryStrategy` types. The connector-side pair is renamed; importers of the
+  `integration` subpath update the name. Side effect: the api-side `ErrorCategory`
+  and `RetryStrategy` now appear in the generated API reference at all — the name
+  collision had been silently dropping them.
+
+  **`OAUTH_REGISTER_FAILED` replaces an unbounded code source.** The OAuth client
+  registration route put better-auth's arbitrary `body.error` string straight into
+  `error.code`. The code is now ours and the upstream discriminator moved to
+  `details.upstreamError`.
+
+  **Not swept, deliberately.** `sys_metadata_audit.code` keeps its lowercase values
+  (ADR-0112 D6b): it is persisted audit history, and the same column holds
+  non-error outcomes (`ok`, `lock_override`). Diagnostics records that ship inside a
+  200 keep theirs (D6c), as do field-level codes (D6, #3977) and the CLI's
+  `--json` output contract.
+
+  A `check:error-code-casing` CI guard now fails on a new lowercase literal in a
+  code position, since the ledger's casing rule can only police codes that someone
+  registers.
+
+### Patch Changes
+
+- bb1ce2e: fix(plugin-auth,plugin-webhooks): retire a dead degrade branch and an implicit transitive dependency (ADR-0116 follow-ups, #4187)
+
+  Two concrete findings from the ADR-0116 consumer-side audit, plus the
+  authoring rule that would have prevented both.
+
+  **`plugin-auth` claimed a fallback it did not have.** `init()` ran
+  `const dataEngine = ctx.getService('data'); if (!dataEngine) { warn('No data
+engine service found - auth will use in-memory storage') }`. That branch could
+  never execute: `getService` **throws** for an unregistered service rather than
+  returning `undefined`, and this plugin declares a hard dependency on ObjectQL
+  (which registers `data` unconditionally), so a kernel without the engine fails
+  even earlier with `Dependency … not found`. The branch is removed and the real
+  contract is declared — `requiresServices: ['data', 'manifest']` — which also
+  replaces a trailing `// manifest service required` comment with the
+  machine-checked form of the same claim. `AuthManager` keeps its own optional
+  `dataEngine` guards: it is usable outside the plugin.
+
+  **`plugin-webhook-outbox` was protected only transitively.** It resolves
+  `manifest` in `init()` with no fallback while depending on
+  `com.objectstack.service.messaging`, which in turn depends on ObjectQL, the
+  actual provider. That works today and would have broken silently the day
+  messaging stopped depending on the engine — surfacing as a crash inside an
+  unrelated plugin's init. It now declares `requiresServices: ['manifest']`
+  directly.
+
+  Neither change alters ordering or boot outcomes on any current composition:
+  both plugins were already ordered correctly. What changes is what a broken
+  composition _says_, and that the guarantees are now checked rather than
+  inherited.
+
+  Docs: `content/docs/plugins/anatomy.mdx` gains the three ADR-0116 fields and
+  the decision rule for resolving a service inside `init()` (hard dependency vs
+  `optionalDependencies` + `requiresServices`), including the two traps behind
+  these fixes — don't rely on a transitive provider, and don't write an
+  `if (!svc)` fallback after a bare `getService`. The api-registry example
+  declares the contract on all seven of its plugins instead of relying on
+  `kernel.use()` order.
+
+- ea24593: fix(plugin-auth): the auth catch-all yields paths better-auth does not own (#4088)
+
+  `registerAuthRoutes` mounts `rawApp.all('${basePath}/*')` over the whole auth
+  namespace (`/api/v1/auth` by default), and that handler was **terminal**: it
+  returned better-auth's response unconditionally, including the 404 better-auth
+  produces for a path it does not implement. Any other plugin's route under that
+  prefix was therefore reachable only if it happened to register **first** — Hono
+  runs handlers matching a path in registration order and the first to return a
+  Response wins.
+
+  That put a load-bearing surface at the mercy of `kernel.use()` order.
+  `@objectstack/plugin-hono-server` mounts `/auth/me/permissions` and
+  `/auth/me/localization` from its own `kernel:ready` hook; objectui's entire
+  permission layer reads the former and `core`'s auth gate allow-lists the latter
+  as an endpoint a gated user must still reach. Register `AuthPlugin` before
+  `HonoServerPlugin` and all of it silently 404s.
+
+  A 404 from better-auth now means "this path is not mine" and the catch-all yields
+  to whatever else matched, in either registration order. Deliberately narrow:
+
+  - **Only 404 falls through.** 401/403 are real better-auth answers, not
+    disclaimers of ownership.
+  - **Precedence still favours the namespace owner.** better-auth wins every path
+    it implements; only its leftovers are up for grabs.
+  - **The unclaimed-path wire shape is unchanged.** When nothing downstream
+    answers, better-auth's own 404 is returned verbatim rather than Hono's
+    `404 Not Found`.
+
+  No configuration changes and no new routes. The only behavioural difference for
+  an existing deployment is that a route another plugin mounts under
+  `/api/v1/auth/*` now answers regardless of plugin order — previously it answered
+  only in the lucky order.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- b5f9397: fix(sharing,runtime): a `sort` passed straight to the engine never ordered anything; migrate every in-repo engine call to canonical QueryAST keys (#4346)
+
+  Two changes with different weights, from one sweep of every in-repo engine
+  call site that still speaks a deprecated alias.
+
+  **The bug — three dropped sorts.** #4346 made the engine fold `filter`→`where`
+  and `top`→`limit` on all six methods. The other four pairs in
+  `RPC_QUERY_ALIAS_SLOTS` (`select`, `sort`, `skip`, `populate`) are folded at
+  the RPC/wire layer only — their values need shape lowering that belongs to
+  those layers — and a **direct `engine.find()` never crosses that layer**. Three
+  call sites passed `sort` there, so it rode onto the AST untouched, every
+  driver's `Array.isArray(query.orderBy)` guard declined to emit an ORDER BY, and
+  the query returned an ordinary-looking, arbitrarily-ordered result:
+
+  | call site                           | asked for                                         | actually got                |
+  | ----------------------------------- | ------------------------------------------------- | --------------------------- |
+  | `share-link-routes.ts`              | shared AI conversation messages, `created_at asc` | messages in arbitrary order |
+  | `runtime/domains/share-links.ts`    | same route, runtime-domain copy                   | same                        |
+  | `share-link-service.ts` `listLinks` | the 200 most recent share links                   | an arbitrary 200            |
+
+  All three combine the dropped sort with a `limit` — the "latest N" shape whose
+  failure #4226 spelled out: an unapplied sort returns rows in arbitrary order,
+  which `limit` then slices into an arbitrary page. #4226 fixed that in the wire
+  normalizer; these calls sit one layer below it. `listLinks` had no test at all,
+  which is why it went unnoticed. Now pinned — on the option bag the engine
+  receives, not on row order, because the failure is that the key never becomes
+  `orderBy` and a fake engine honouring either spelling would pass either way.
+
+  **The cleanup — 27 no-op renames.** Every remaining in-repo engine call passing
+  `filter` now passes `where` (approvals 5, auth 2, reports 6, sharing 11,
+  webhooks 2, plus the one `filters` in a spec doc example). These are strict
+  no-ops since #4346 folds the alias — the point is that the framework stops
+  depending on a spelling it asks users to migrate off, which is a prerequisite
+  for ever retiring the aliases. Service-level `filter` PARAMETERS (each
+  service's own public API, e.g. `listRequests(filter)`) are deliberately
+  untouched — those are not engine option bags.
+
+  Two of the renamed calls were live victims of the #4346 bug rather than
+  cosmetic: `auth-manager`'s `stampIdentitySource` read the table's first row via
+  `findOne({filter})` and counted the whole table via `count({filter})`, so a
+  federated sign-in never stamped `source: 'idp_provisioned'`. #4346 already
+  corrected the behaviour; this makes the call say what it means.
+
+- 7ce02eb: feat(spec,objectql): `IObjectQLEngine` — the `objectql` slot's contract exists, the class `implements` it, and the seven consumer-local stand-ins are deleted (#4251 B3)
+
+  ObjectQL registers one instance under two names, and the ledger can finally say
+  what each name means: `data` stays `IDataEngine` (the data plane), `objectql`
+  now resolves to **`IObjectQLEngine`** — the full engine: schema access
+  (`getSchema` / `getObject` / `registry`), actions (`registerAction` /
+  `removeActionsByPackage` / `executeAction`), the hook/middleware seams
+  (`registerHook` / `unregisterHooksByPackage` / `registerFunction` /
+  `registerMiddleware` / `bindHooks`), the first-wins default runners and hook
+  metrics, boot wiring (`registerDriver` / `setDatasourceMapping` /
+  `registerApp`), and the ops probes (`checkDriversHealth` /
+  `wasDatastoreCreatedFromEmpty` / `invalidateDataMigrationFlags`). The ledger
+  test pins the new relation: `objectql` strictly widens `data`, deliberately no
+  longer equal.
+
+  **Why now, and why `implements` is the point.** The honest state for two
+  batches was recorded on `DomainHandlerContext.getObjectQL`: ObjectQL is wider
+  than `IDataEngine`, the wider part had no contract, and typing it `IDataEngine`
+  would be "the more comfortable-looking lie". The interim discipline — each
+  consumer declares the narrow slice it uses — produced seven local surfaces
+  (`AppEngineSurface`, `EngineRegistrySurface`, `EngineExtensionSurface`,
+  `SecurityEngineSurface`, `FreshDatastoreEngine`, the dispatcher's inline
+  `checkDriversHealth` slice, the `getObjectQL: any` itself). Each was honest and
+  each was an UNCHECKED claim: `getService<Surface>('objectql')` is an assertion,
+  so an engine rename would have broken every consumer at runtime with zero
+  compile errors. `ObjectQL implements IObjectQLEngine` converts all of them into
+  one compiler-verified claim. All seven stand-ins are deleted; consumers import
+  the one declaration. `getObjectQL` is typed `Promise<IObjectQLEngine | null>`
+  end to end, closing the oldest documented `any` in the dispatcher.
+
+  **Evidence bar unchanged.** Every declared member has a cross-package consumer
+  reaching it through the slot; engine members without one (e.g. `triggerHooks`,
+  cross-package only in tests) stay off until a caller appears. The registry view
+  (`EngineSchemaRegistryView`) declares exactly the eight members consumers use.
+
+  **`_registry` never leaves the engine package now.** plugin-security's
+  declared-metadata readers (`readDeclared`, permission-set projection, suggested
+  audience bindings) reached ObjectQL's private `_registry` field through `any` —
+  the same private reach `/me/apps` had in B2, five more times. All migrated to
+  the public `registry` getter the contract declares, test doubles included.
+
+  **`IMetadataService` gains `subscribe?` / `loadMany?`** — implemented by
+  `MetadataManager` beside `watch` all along, reached through the slot only via
+  `any` by ObjectQLPlugin's metadata bridge (the re-sync keeping runtime-authored
+  hooks/actions live). With them declared, the bridge's six `metadata` lookups
+  and metadata-protocol's `objectql` lookup carry contract types, and both files
+  leave the grandfather list entirely: baseline **167 → 159 sites, 36 → 34
+  files**.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- c54c822: fix(spec,plugins): sweep the auth/session slot lookups — 31 sites typed, and the user-import metadata reader was pointed at a service that never had the method (#4251)
+
+  Batch B2 of the #4251 sweep: every service-lookup erasure in the auth/session
+  family. `plugin-auth/auth-plugin.ts` (20), `plugin-hono-server/current-user-endpoints.ts`
+  (10) and `plugin-security/security-plugin.ts` (1) now pass the slot's contract
+  type; the ratchet baseline drops **171 → 140 sites, 40 → 37 files**.
+
+  **The yield.** `POST /admin/import-users` resolved the `metadata` slot and probed
+  `metadataService?.getMetaItem` to decide whether to pass the import's field-coercion
+  dependency. `getMetaItem` is a **protocol** method — `ObjectStackProtocolImplementation`,
+  registered by MetadataProtocolPlugin under the `protocol` slot. `MetadataManager`,
+  which occupies `metadata`, has never had it. So the probe was false on every
+  deployment and the dep was never passed: imported rows reached `sys_user`
+  uncoerced, with the branch that says otherwise sitting right there. This is the
+  same shape as #4127's dead `automation.trigger` and #4321's `registerInMemory`
+  probes — a capability the code advertises and the runtime cannot deliver, kept
+  invisible by the `any`. Typing the lookup to `IMetadataService` is what turned it
+  into a compile error. The route reads `protocol` now.
+
+  `/me/apps` reached ObjectQL's **private** `_registry` through `as any` while
+  `/auth/me/permissions`, two handlers up in the same file, read the public
+  `registry` getter over the same field of the same object. Both read the public
+  accessor now; the one test that stubbed `_registry` was pinning the private reach
+  and stubs `registry` instead.
+
+  **Contract, from evidence.** `IDataEngine`'s read methods (`find` / `findOne` /
+  `count` / `aggregate`) declare the trailing `options?: BaseEngineOptions`
+  argument they have always accepted. ObjectQL's own doc explains why it exists:
+  reads once took their context inside the query while writes took it in trailing
+  `options.context`, so the same `{ context }` object was correct as `insert`'s 3rd
+  argument and **silently dropped** as `find`'s — "an intended `isSystem` bypass
+  just vanished". The engine accepts both channels; the contract exposed only the
+  query one, so callers using the trailing channel — the current-user endpoints'
+  permission-set loader among them — could only reach it by erasing the lookup.
+  Adding an optional trailing parameter breaks no implementor (the existing
+  minimal-implementation test proves it) and no caller. `BaseEngineOptions` was
+  already exported, sitting unused under the "legacy/deprecated" heading, which is
+  why the contract went looking and did not find it; it moves up beside the other
+  QueryAST-aligned types with the rationale attached. One new spec test pins the
+  trailing argument at the call site — the position where the old contract rejected it.
+
+  **Where the contract does not reach, the escape hatch is named.** Three slots
+  resist a spec type today and each gets a narrow, documented local interface
+  instead of `any`: `security.permissions` (plugin-security's `PermissionEvaluator`
+  — plugin-hono-server must not depend on an optional plugin), `settings`
+  (service-settings' resolver, same reason), and ObjectQL beyond `IDataEngine`
+  (`registry` / `getSchema` / `registerHook` / `registerMiddleware`). That last one
+  is deliberate scope: the standing record on `getObjectQL` in `@objectstack/runtime`
+  says ObjectQL is genuinely wider than `IDataEngine` and nobody has written the
+  wider contract, so typing the whole thing `IDataEngine` would be "the more
+  comfortable-looking lie". These declarations are what that contract gets written
+  from, and what it deletes.
+
+  No behavior changes beyond the two fixes above.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [fccec22]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [fae74b5]
+- Updated dependencies [366105c]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [f4d7f1d]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [f0d6594]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [99b4392]
+- Updated dependencies [7309c81]
+- Updated dependencies [495019b]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [be7945a]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [6c87cc9]
+- Updated dependencies [af2a095]
+- Updated dependencies [dd5daac]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [0931185]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [68dea0b]
+- Updated dependencies [64f8cbe]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/platform-objects@17.0.0-rc.1
+  - @objectstack/rest@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Major Changes

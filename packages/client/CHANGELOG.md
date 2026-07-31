@@ -1,5 +1,567 @@
 # @objectstack/client
 
+## 17.0.0-rc.1
+
+### Major Changes
+
+- b09d8d9: refactor(data)!: `query.cursor` is removed — no driver ever implemented keyset pagination (#4286 step 4)
+
+  `cursor` promised keyset pagination and nothing served it: the key was accepted
+  and ignored, so every page came back identical — a caller looping "until
+  `hasMore` is false" never terminated. It was Tier A of the #4286 inventory: a
+  shipped public producer (`QueryBuilder.cursor()`) minting a key no executor
+  read.
+
+  **FROM → TO**
+
+  | Was                                       | Now                                                                        |
+  | :---------------------------------------- | :------------------------------------------------------------------------- |
+  | `cursor: { created_at: last.created_at }` | `where: { created_at: { $gt: last.created_at } }` + the matching `orderBy` |
+  | `QueryBuilder.cursor({...})`              | `.where({ created_at: { $gt: ... } }).orderBy('created_at')`               |
+
+  The one-line fix: **delete the key and seek with `where` on your sort key** —
+  every driver already executes that, with canonicalised temporal comparands.
+
+  Mechanics: `retiredKey()` tombstones on both declaration sites
+  (`QuerySchema.cursor` and `EngineQueryOptionsSchema.cursor`, one shared
+  prescription), so authoring the key fails `tsc` and a query still carrying it
+  fails to parse with the fix. `QueryBuilder.cursor()` is deleted. Registered as
+  the protocol-17 semantic migration `query-cursor-retired` (request surface —
+  nothing stored to rewrite). The caller-built `Record<string, unknown>` shape
+  would not survive a real keyset design anyway: a first-class cursor, if ever
+  built, will be a response-minted opaque token (the pattern the
+  metadata-revision / flow-run / notification list endpoints already use — those
+  `cursor` params are unrelated and unchanged).
+
+- b09d8d9: refactor(data)!: `query.distinct` is removed, and with it the mis-wired REST count suppression (#4286 step 4)
+
+  `distinct` promised `SELECT DISTINCT` and no driver ever rendered it — but it
+  was **mis-wired rather than merely dead** (#4286 finding 2, the harsher
+  ADR-0078 class): its only observable effect platform-wide was that the REST
+  list path treated a distinct query as _not countable_, silently degrading
+  `total`/`hasMore` to a page-local estimate while still returning duplicate
+  rows. A caller — or a self-verifying agent — saw the response change and
+  concluded the flag worked. It had a shipped public producer
+  (`QueryBuilder.distinct()`).
+
+  **FROM → TO**
+
+  | Was                                      | Now                                                                               |
+  | :--------------------------------------- | :-------------------------------------------------------------------------------- |
+  | `distinct: true` for unique combinations | `groupBy: ['category']`                                                           |
+  | `distinct: true` + count                 | `aggregations: [{ function: 'count_distinct', field: 'category', alias: '...' }]` |
+  | one column's distinct values             | the SQL/memory drivers' `distinct(object, field)` door (driver-level)             |
+
+  The one-line fix: **delete the key**; deduplicate with `groupBy` /
+  `count_distinct`.
+
+  Mechanics: `retiredKey()` tombstones on both declaration sites
+  (`QuerySchema.distinct` and `EngineQueryOptionsSchema.distinct`, one shared
+  prescription); `QueryBuilder.distinct()` is deleted; registered as the
+  protocol-17 semantic migration `query-distinct-retired`. **Observable REST
+  change (`@objectstack/metadata-protocol`):** the count-suppression branch is
+  deleted — a list request that used to carry `distinct` now gets a real
+  `total`/`hasMore` again (that restoration is the point, not a side effect).
+  The per-aggregation `distinct` flag (`AggregationNode.distinct`) is a
+  different, live member and is untouched.
+
+### Minor Changes
+
+- 195ad76: fix(actions)!: failures speak HTTP — business rejections are 400, success is a single wrap (#3962)
+
+  **BREAKING (raw-HTTP callers of `POST /api/v1/actions/...` only).** The
+  200-with-inner-envelope wire was never a designed contract: no ADR or doc ever
+  specified it, it originated as the route's catch block reusing
+  `deps.success()`, and `/actions` was the only route of 12 that double-wrapped.
+  #3962 classifies it as a bug. Five defects traced back to that one extra layer
+  (the console's green toast on failed actions, `redirectUrl` never firing, a
+  marketplace install reported as installed when it failed, the client-envelope
+  divergence #3927 papered over, and crashes invisible to monitoring).
+
+  The contract now, identical to `/data`:
+
+  | Outcome                                                        |         HTTP          | Body                                                                  |
+  | :------------------------------------------------------------- | :-------------------: | :-------------------------------------------------------------------- |
+  | Ran, returned                                                  |        **200**        | `{success: true, data: <handler return value>}` — single wrap         |
+  | Ran, rejected (business rule / validation)                     |        **400**        | `{success: false, error: {message, code, details: {code?, fields?}}}` |
+  | Never dispatched (unknown / denied / wrong type / unavailable) | 404 / 403 / 400 / 503 | unchanged (#3930/#3951)                                               |
+  | Crashed (`TypeError`, driver class, sandbox timeout)           |        **500**        | unchanged (#3951)                                                     |
+
+  A validation rejection carries `details.code: 'VALIDATION_FAILED'` and
+  `details.fields[]` — the exact payload #3937 fought for, now on the same wire
+  shape `/data` has always used, which `@objectstack/client` normalizes to
+  `err.code` / `err.fields` (#3927). A rejected flow is a 400 with
+  `details.code: 'FLOW_FAILED'`. The crash-vs-rejection discriminator (#3951,
+  error `name`) now selects 400 vs 500.
+
+  `client.actions.invoke` / `invokeGlobal` still never throw: they fold every
+  failure status into `{success: false, error}`, read the single wrap on
+  success, and keep a NARROW legacy heuristic so a current SDK talking to a
+  pre-#3962 server still folds the old double-wrapped 200s correctly.
+
+  **Migration for raw-HTTP third parties:** branch on the HTTP status — a
+  non-2xx is the failure, `error.message` / `error.details` carry the detail; on
+  a 200, `data` is the handler's return value directly (one level less than
+  before). Callers using `@objectstack/client` need no change.
+
+- c2bbd97: fix(actions): reach global actions at their real registration key, and 404 an action that never dispatched (#3913)
+
+  **1 — the registration key and the lookup key disagreed.** Both writers
+  register an objectName-less action under the literal `'global'`: `AppPlugin`
+  (`action.object || 'global'`) and `ObjectQLPlugin.actionObjectKey`. The REST
+  route's fallback probed `'*'`, and `engine.executeAction` is an exact-string
+  `Map` lookup with no wildcard semantics — so the probe could only ever miss:
+
+  ```
+  Action 'log_call' on object '*' not found
+  ```
+
+  `POST /api/v1/actions/global/log_call` worked by **accident** (the path segment
+  happened to spell the registration key); `POST /api/v1/actions//log_call` never
+  worked at all, and neither did falling back from an object-scoped route to a
+  global handler. `'global'` is now the canonical key
+  (`GLOBAL_ACTION_OBJECT_KEY`), the probe order is
+  `[<routed object>, 'global', '*']` for both the REST route and the MCP
+  `run_action` bridge (`actionHandlerObjectKeys` — one list, two surfaces), and a
+  single-segment path (`/actions//:action`) routes at `'global'` instead of
+  400-ing. A handler registered directly under `'*'` still resolves; the doc
+  comments that called `'global'` a "wildcard" are corrected at every site.
+
+  **2 — "no such action" was reported as a success.** The not-found exit called
+  `deps.success(...)`, which always emits `{status: 200, body: {success: true,
+data}}`, so a request naming an action that does not exist came back as:
+
+  ```json
+  {
+    "success": true,
+    "data": {
+      "success": false,
+      "error": "Action 'log_call' on object '*' not found"
+    }
+  }
+  ```
+
+  Every caller that did not hand-unwrap the INNER envelope read the outer
+  `success: true` and reported a success that never happened — including the
+  shipped console, which showed a green toast (fixed on that side in
+  objectui#2963). Nothing **dispatched** there, so it is a **404** now, joining
+  the answers this route already gives a status: 403 denied, 400 wrong action
+  type, 503 unavailable. The miss also names the **routed** object rather than
+  whichever probe ran last (the old fallback said `on object '*'`, an object the
+  caller never asked for).
+
+  A handler that **ran and rejected** is unchanged: HTTP 200 with
+  `data: {success: false, error, code?, fields?}`. That is a business outcome,
+  not a transport error, and #3937 pins it. The line is "did a handler run" —
+  below it the payload, above it the status.
+
+  `client.actions.invoke` / `invokeGlobal` still do **not** throw. `client.fetch`
+  throws on every non-2xx, so `invoke` now catches and folds a dispatch failure
+  into the same `{ success, data?, error? }` result with `error` as a plain
+  string — otherwise the routes that just gained a status would have started
+  propagating exceptions into callers that only ever checked `result.success`.
+
+- 0c4f5b2: `err.code` no longer falls back to the pre-#3842 parking spot (`error.details.code`). The "newer SDK, older server" pairing that read served is not a supported deployment (SDK and server ship as one fixed release group), and the ADR-0112 batch-1 rename changed the code values anyway — a code dug out of an old server's parking spot would match no branch written against the current catalog (#4007). `err.category` / `err.retryable` are now read from inside `error`, where `ApiErrorSchema` declares them; the old top-level read yielded `undefined` against every conformant server (#4006).
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- cbc08eb: fix(client): normalize both server error envelopes so `err.code` / `err.fields` mean one thing (#3918 follow-up)
+
+  Two envelopes are in play and they disagree about where the semantic code and
+  the per-field list live:
+
+  ```
+  @objectstack/rest, flat:
+    { error, code: 'VALIDATION_FAILED', fields: [...] }
+
+  runtime dispatcher, wrapped:
+    { success: false, error: { message, code: 400,
+        details: { code: 'VALIDATION_FAILED', fields: [...] } } }
+  ```
+
+  `error.code` in the **wrapped** form is the HTTP status, not a semantic code.
+  The client read it straight through, so `err.code` was the **number 400** where
+  the flat envelope gave `'VALIDATION_FAILED'` — meaning the branch our own docs
+  teach,
+
+  ```js
+  if (err.code === 'VALIDATION_FAILED') err.fields.forEach(…)
+  ```
+
+  never matched on a dispatcher-served surface, and the field list (put on the
+  wire for those routes by #3918) was unreachable at `err.details.error.details.fields`.
+
+  Now normalized at the throw site:
+
+  - **`err.code` is always the semantic string.** It is read from the flat
+    `code`, else the wrapped `error.details.code`, else a _string_ `error.code` —
+    a numeric value is never reported as a code. The HTTP status is on
+    `err.httpStatus`, where it always was.
+  - **`err.fields` is the per-field list** whenever the server sent one, from
+    either envelope. It is left **unset** (not `[]`) when there is none, so
+    `if (err.fields)` is a safe test for "this failure is field-anchored".
+  - **`err.details`** prefers a top-level `details` (unchanged), then the wrapped
+    envelope's own `details`, then the whole body. The flat envelope has no
+    top-level `details` and so keeps falling through to the whole body exactly as
+    before — only the wrapped shape changes, and only from "the entire response"
+    to the structured object it actually carries.
+
+  **Behaviour change worth noting:** code that read `err.code` from a
+  dispatcher-served route previously got a number and now gets a string (or
+  `undefined` where the server sent no semantic code). Nothing in this repo did —
+  `err.httpStatus` was always the correct source for the status, and remains
+  untouched — but a consumer that branched on `err.code === 400` should move to
+  `err.httpStatus === 400`.
+
+- 03d26f7: fix(runtime,spec)!: the dispatcher's `error.code` is the semantic string it always declared; the HTTP status moves to `httpStatus` (#3842)
+
+  `HttpDispatcher.error()` took the HTTP status as its `code` argument and wrote it
+  straight into the field `ApiErrorSchema` reserves for a semantic string, so
+  `error.code` came back as `400`/`403`/`503` — a number, duplicating the response
+  status and occupying the one slot a caller is meant to branch on. The real code
+  then had to go somewhere else, and did, three somewhere-elses: `details.code`
+  (auth gate, permission denial, anonymous deny), `details.type`
+  (project-membership gate), and `error.type` (`routeNotFound`). Four sites, three
+  parking spots, because the declared one was full.
+
+  **FROM → TO on the wire.** A dispatcher error body
+
+  ```json
+  {
+    "success": false,
+    "error": {
+      "message": "…",
+      "code": 403,
+      "details": { "code": "PERMISSION_DENIED" }
+    }
+  }
+  ```
+
+  is now
+
+  ```json
+  {
+    "success": false,
+    "error": { "code": "PERMISSION_DENIED", "message": "…", "httpStatus": 403 }
+  }
+  ```
+
+  | Reading       | Was                                                        | Now                                               |
+  | ------------- | ---------------------------------------------------------- | ------------------------------------------------- |
+  | semantic code | `error.details.code` / `error.details.type` / `error.type` | `error.code`                                      |
+  | HTTP status   | `error.code`                                               | `error.httpStatus` (or the response status)       |
+  | context       | `error.details` (with the code mixed in)                   | `error.details` (context only, absent when empty) |
+
+  **One-line fix for a direct reader:** replace `body.error.details?.code ??
+body.error.type` with `body.error.code`, and `body.error.code` with
+  `body.error.httpStatus`. **SDK callers need no change** — `ObjectStackClient`
+  already normalised this (`err.code` semantic, `err.httpStatus` numeric) and still
+  reads the old shape, so a client newer than its server is unaffected.
+
+  Every code already on the wire moves **verbatim** — `PERMISSION_DENIED`,
+  `ROUTE_NOT_FOUND`, `PASSWORD_EXPIRED`, `PROJECT_MEMBERSHIP_REQUIRED`,
+  `VALIDATION_FAILED`, `unauthenticated`. This change moves a field; it does not
+  rename anything. Reconciling the repo's two code vocabularies is #3841, and this
+  leaves it exactly one map and one enum to sweep instead of four parking spots.
+
+  A branch with no code of its own is served one derived from the status, via the
+  single declared map `HttpStatusErrorCodeMap` / `standardErrorCodeForHttpStatus`
+  in `@objectstack/spec/api` (`403` → `permission_denied`, `503` →
+  `service_unavailable`, …). Derivation is necessary because `ApiErrorSchema.code`
+  is required; drawing it from `StandardErrorCode` keeps a derived code a
+  catalogued one rather than an invented string.
+
+  **Spec changes:**
+
+  - `ApiErrorSchema` gains optional `httpStatus: number` — the precedent is
+    `EnhancedApiErrorSchema.httpStatus`. Additive.
+  - `StandardErrorCode` gains `method_not_allowed` and `precondition_required`,
+    the two statuses the runtime returns that the enum could not name. Additive.
+  - **Breaking — `DispatcherErrorCode`** was `'404' | '405' | '501' | '503'` (string
+    spellings of HTTP statuses, for matching against the numeric `error.code`). It
+    is now `'ROUTE_NOT_FOUND' | 'METHOD_NOT_ALLOWED' | 'NOT_IMPLEMENTED' |
+'SERVICE_UNAVAILABLE'` — the same four members the removed `error.type` enum
+    declared, moved verbatim. FROM `DispatcherErrorCode.parse('404')` TO
+    `DispatcherErrorCode.parse('ROUTE_NOT_FOUND')`; to match a status, read
+    `error.httpStatus`. TypeScript flags every call site.
+  - **Breaking — `DispatcherErrorResponseSchema`**: `error.code` is `z.string()`
+    (was `z.number().int()`), `error.type` is **removed** (folded into `code`), and
+    `error.httpStatus` / `error.details` are declared. This schema is what
+    legitimised the deviation — it declared the opposite of `ApiErrorSchema` for
+    the same field. FROM `{ code: 404, type: 'ROUTE_NOT_FOUND' }` TO
+    `{ code: 'ROUTE_NOT_FOUND', httpStatus: 404 }`.
+
+  **Also aligned, because they are the same wire surface:** `dispatcher-plugin`'s
+  `errorResponseBase` (the THROWN-error exit) and its inline 404, and the MCP 405.
+  `errorResponseBase` previously discarded a thrown error's `.code` outright — it
+  had nowhere to put it — so the two exits of one surface disagreed about what a
+  caller would see; they now agree. Every body on this surface is built by one
+  helper (`packages/runtime/src/error-envelope.ts`), guarded in both directions by
+  `error-envelope.conformance.test.ts`: each branch driven and parsed against the
+  schema imported from `packages/spec`, plus a source scan so a new branch cannot
+  quietly reintroduce a numeric `code` or a `type`-as-code sibling.
+
+  This deletes the #3687 pin in `http-dispatcher.test.ts`, which asked to be
+  deleted rather than updated once the dispatcher was fixed.
+
+- 239c3a3: fix(spec)!: the #3963 / #4052 / #4158 / #4196 / #4286 retirements land in protocol **17**, not a protocol 18 that this train cannot produce (#4350)
+
+  Ten tombstone prescriptions told authors a key "was removed in `@objectstack/spec` **18**",
+  and — worse — the machine agreed with them: a whole `step18` chain step and two
+  `toMajor: 18` conversions were wired for a major the release train does not reach.
+
+  **17 is what ships.** `latest` is 16.1.0 and `rc` is `17.0.0-rc.0` — 17.0.0 has never been
+  published. `.changeset/pre.json` records `@objectstack/spec` at initialVersion 16.1.0, and
+  changesets computes a pre-mode bump from the last _published_ version: 16.1.0 + `major` =
+  **17.0.0**, released as `17.0.0-rc.N`. `PROTOCOL_VERSION` is `'17.0.0'`, and
+  `protocol-version.test.ts` pins it to the package major, so it cannot unilaterally become 18
+  either. The "18" came from counting up from the in-flight `17.0.0-rc.0` instead of from
+  16.1.0.
+
+  **The prose was the smaller half.** `composeMigrationChain(from, to = PROTOCOL_MAJOR)`
+  filters `m <= toMajor`, so a step keyed 18 was **unreachable**: `os migrate meta --from 16`
+  walked steps 11–17 and silently skipped 18. The same ceiling applies to `composeSpecChanges`,
+  so the generated `spec-changes.json`, `docs/protocol-upgrade-guide.md` and the `spec_changes`
+  MCP tool — the ADR-0087 D4 primary channel — carried **none** of these seven retirements:
+  `query.joins`, `query.windowFunctions` and `BatchOptions.validateOnly` appeared zero times in
+  the committed manifest, and the upgrade guide contained no "18" at all. Authors would have hit
+  the tombstones with no chain hop to run and no upgrade-guide row to read.
+
+  What changed:
+
+  - `step18` is folded into `step17` — its rationale, both `conversionIds`
+    (`stack-api-require-auth-removed`, `flow-node-wait-timeout-keys-removed`) and all six
+    semantic migrations move across, and `MIGRATIONS_BY_MAJOR[18]` is gone. Both conversions
+    become `toMajor: 17` (`migrations.test.ts` requires a conversion's `toMajor` to equal its
+    step's major), and `CONVERSIONS_BY_MAJOR[18]` merges into `[17]`.
+  - All 30 hand-written "18" references become "17": the ten tombstone prescriptions
+    (`query.zod.ts`, `flow.zod.ts`, `rest-server.zod.ts`, `stack.zod.ts`, `protocol.ts`), the
+    `query.test.ts` pin regex that was holding the wrong number in place, the internal comments,
+    the `liveness/query.json` + `liveness/README.md` notes, and the seven unconsumed changesets.
+  - The seven retirements are written into the v17 release notes and upgrade checklist, where
+    they had no entry at all — there is no `v18.mdx` for them to have landed in.
+
+  No behaviour is added or withdrawn: every key retired by #3963, #4052, #4158, #4196 and #4286
+  stays retired, on exactly the terms those changesets describe. What changes is that the
+  prescription now names the version that will actually carry it, and `os migrate meta` actually
+  applies the two stack conversions instead of stepping over them.
+
+- 7309c81: test(runtime,client,metadata): back the remaining suites with in-memory SQLite instead of the mingo driver (#4065)
+
+  Ten test files used `InMemoryDriver` as a convenience backing store — somewhere
+  for rows to go while the suite proved something else (REST routing, datasource
+  auto-connect, the batch `$ref` contract, metadata history). They now run on
+  `SqliteWasmDriver` at `:memory:`, the same engine `@objectstack/verify`'s
+  `bootStack` already gives the dogfood gate: pure JS (no native build, CI-safe on
+  any runner) and real SQL semantics.
+
+  The point is fidelity, not tidiness. Production runs SQL, and mingo differs from
+  it in ways that let a suite pass while the behaviour it stands for is broken.
+  Every failure this migration produced was a fixture defect the memory driver had
+  been absorbing:
+
+  - **Tables were never created.** `driver.create()` on the memory driver is a
+    bare `table.push()` onto an auto-vivified array, so an object registered
+    _after_ `kernel.bootstrap()` — which misses the boot-time schema sync — looked
+    fine. On SQL the first write fails with `no such table`, which the REST error
+    mapper turns into a **404 `OBJECT_NOT_FOUND`**: a routing-shaped symptom for a
+    DDL-shaped cause. Four suites needed an explicit `syncObjectSchema`.
+  - **A missing object declaration read as working.** `notifications.hono.integration`
+    writes `sys_notification`, which `MessagingServicePlugin` does not declare —
+    it is a platform object, and that lean kernel never booted `platform-objects`.
+    Auto-vivification hid the omission entirely. The suite now registers the real
+    `SysNotification` rather than a hand-copied stand-in, so there is still exactly
+    one schema for it (Prime Directive #12).
+  - **`connect()` was optional.** The memory driver needs none; a SQL driver does.
+
+  What deliberately did NOT move: `read-coercion-conformance` keeps its two-driver
+  matrix (proving a stored value reads back as its declared type on _both_ engines
+  is the entire point of that gate), and the suites whose subject IS the memory
+  driver or its wiring — `standalone-stack` (`memory://` scheme),
+  `sqlite-driver-fallback` (the dev step-down), the CLI's driver-label tests, and
+  driver-memory's own suite.
+
+  `datasource-autoconnect` is in that second group as of #4083, which landed a
+  regression test there for exactly the memory-pool property this PR originally
+  proposed to migrate away from. Moving that file to SQLite would have left the
+  new test passing vacuously — a wasm-SQLite pool never writes `.objectstack/` at
+  all — so it stays on the memory driver and keeps guarding what it was written
+  to guard.
+
+  No new coverage is claimed here: each suite asserts exactly what it asserted
+  before, against a more faithful store.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Major Changes

@@ -1,5 +1,662 @@
 # @objectstack/platform-objects
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- 270650f: feat(migrate): a datastore created from empty attests its data migrations at creation (#3438, ADR-0104 2026-07-30 addendum)
+
+  Deployment-level migration flags could only be recorded by running
+  `os migrate`. That left a hole at the other end of a deployment's life: a
+  database created on a version that already ships the migrations started **lax**
+  and stayed lax until someone thought to run a command that, for them, converts
+  nothing and finds nothing. Every new deployment re-entered the warn regime, so
+  the warn regime would never die out — and, since #3459, every new deployment
+  also kept every released file forever.
+
+  A store the platform **creates from empty** now records
+  `adr-0104-file-references` and `adr-0104-value-shapes` at that moment. Nothing
+  to run; enforcement and collection are live from the first boot.
+
+  **This is not version-gating in disguise.** The fact recorded — no legacy value
+  is stored here — is _observed_: the store had no history at all. The platform
+  attests only what it watched itself create, and the test is deliberately
+  strict: every table made by this boot and **none found already present**. One
+  pre-existing table anywhere, one datasource that was already there, one driver
+  that cannot account for its schema sync — any of those and the deployment
+  attests nothing and produces its evidence by scan, exactly as before. "Found
+  empty" and "created empty" are not the same claim, and only the second is an
+  observation.
+
+  **New surfaces.** `IDataDriver.getSchemaSyncStats?()` (optional, purely
+  observational: tables created vs found since connect — implemented by the SQL
+  and in-memory drivers), `engine.wasDatastoreCreatedFromEmpty()`,
+  `attestFreshDatastore()` in `@objectstack/platform-objects/system`, and
+  `VALUE_SHAPES_MIGRATION_ID` / `CREATION_ATTESTED_MIGRATION_IDS` in
+  `@objectstack/spec/system`. Attestation never overwrites an existing flag row
+  and never throws into a boot: a failure leaves the deployment lax, which a
+  migration run can still fix.
+
+  **Upgrading changes nothing for an existing database.** It is non-empty when
+  the platform reaches it, so it is never attested — run
+  `os migrate files-to-references --apply` as before. Importing legacy values
+  into an attested deployment is rejected loudly at the write path;
+  `OS_ALLOW_LAX_MEDIA_VALUES=1` re-opens leniency while you diagnose.
+
+- 68dea0b: feat(platform-objects,service-storage,cli): `sys_migration` is platform infrastructure — registered by `PlatformObjectsPlugin`, not by the storage service (#4243)
+
+  The deployment-level data-migration flag ledger (`sys_migration`, #3617) was
+  registered by `@objectstack/service-storage` as its first consumer. That was
+  deliberate while the file migration was the only consumer, but the ledger now
+  gates storage-independent behaviour too — `os migrate value-shapes` (#4235)
+  and the fresh-datastore attestation (#4215) — and a non-file migration had to
+  boot the whole storage plugin just so the kernel carried the table. Any kernel
+  assembled without storage silently had no ledger at all, which read exactly
+  like "migration not run" (both answer false) while actually meaning "ledger
+  not installed".
+
+  The registration now lives in `PlatformObjectsPlugin`
+  (`@objectstack/platform-objects/plugin`) — the plugin `os serve` already
+  auto-injects into every served kernel — so the ledger exists with the
+  platform, independent of which optional services are composed. The
+  fresh-datastore attestation (#3438, ADR-0104) moves with it: it is ledger
+  bookkeeping, and its old home justified itself as "the service that registers
+  `sys_migration`". Definition ownership is unchanged (`sys_migration` stays in
+  `@objectstack/platform-objects` and in `PLATFORM_OBJECTS_BY_PACKAGE`); the
+  flag helpers and readers are untouched.
+
+  Consequences:
+
+  - `@objectstack/service-storage` no longer contributes `sys_migration` to the
+    manifest and no longer performs the fresh-datastore attestation. An embedder
+    composing `StorageServicePlugin` on a hand-built kernel that relied on it
+    for the ledger must compose `PlatformObjectsPlugin` (the plugin every
+    supported assembly path already includes).
+  - The CLI's `buildDataMigrationPlugins()` no longer boots storage for every
+    gated migration — it registers `PlatformObjectsPlugin` always, and settings
+    - storage only for `os migrate files-to-references` (`{ storage: true }`),
+      the one migration that actually reconciles against the storage adapter.
+
+- 64f8cbe: feat(platform-objects,service-settings,verify): `sys_secret` is platform infrastructure — registered by `PlatformObjectsPlugin`, not by the settings service (#4270)
+
+  The environment's encrypted-secret store (`sys_secret`, ADR-0066 D2/④) was
+  registered by `@objectstack/service-settings`, but it has three producer
+  classes and only one of them is settings: the settings service's encrypted
+  specifiers, the ObjectQL engine's own `secret`-field encryption
+  (`encryptSecretFields`/`resolveSecret` — the generic write path of ANY
+  business object carrying a `Field.secret()`), and the datasource credential
+  binder. Unlike the `sys_migration` precedent (#4243), the failure posture is
+  fail-CLOSED: on a kernel composed without settings, every insert/update of an
+  object with a secret field threw — with an error message that told the
+  operator to "Ensure the platform-objects (sys_secret) are registered", naming
+  a package that did not register it.
+
+  The registration now lives in `PlatformObjectsPlugin`
+  (`@objectstack/platform-objects/plugin`) — the plugin `os serve` already
+  auto-injects into every served kernel — so the store exists with the
+  platform, independent of which optional services are composed, and the
+  engine's fail-closed error message is true. Definition ownership is unchanged
+  (`sys_secret` stays in `@objectstack/platform-objects` and in
+  `PLATFORM_OBJECTS_BY_PACKAGE`); the settings service remains a producer and
+  consumer through its `sys_secret`-backed secret store.
+
+  Consequences:
+
+  - `@objectstack/service-settings` no longer contributes `sys_secret` to the
+    manifest (`settingsObjects` is now `[SysSetting, SysSettingAudit]`). An
+    embedder composing `SettingsServicePlugin` on a hand-built kernel that
+    relied on it for the `sys_secret` table must compose
+    `PlatformObjectsPlugin` (the plugin every supported assembly path already
+    includes). The move REPLACES the registration — nothing registers the
+    object twice.
+  - `@objectstack/verify`'s boot harness now composes `PlatformObjectsPlugin`,
+    mirroring `os serve`'s auto-inject — which also means harness kernels now
+    carry the `sys_migration` ledger + fresh-datastore attestation (#4243) the
+    served assembly always had.
+
+### Patch Changes
+
+- 09e4547: feat(spec)!: reject unknown keys across the app shell and navigation tree (#4001 app step, PR B)
+
+  Closes the last high-traffic authorable surface in the unknown-key strictness
+  ratchet (flow + permission #4071, RLS / sharing / position #4099, approval
+  #4119, App dead-key tombstones #4142). The app shell is the densest
+  hand-authored surface on the platform — a navigation tree is where an author
+  or AI is most likely to write a key from memory — so a silent strip here was
+  the most probable instance of the #3405 trap.
+
+  - **`AppSchema`** and its sub-schemas (`AppBrandingSchema`,
+    `NavigationAreaSchema`, `AppContextSelectorSchema` + its `optionsSource` /
+    `filter` blocks, `NavigationContributionSchema`) are `.strict()`.
+  - **`NavigationItemSchema` becomes a DISCRIMINATED union on `type`.** This is
+    what makes strict readable: a plain union of strict members answers one
+    unknown key with an `invalid_union` aggregate naming all nine branches,
+    while discriminating on `type` first yields a single `unrecognized_keys`
+    issue against the branch the author actually wrote — at an exact path
+    through nested `children` — and a mistyped `type` gets its own "Invalid
+    discriminator value". Each variant carries its own suggestion pool, so a
+    `url` item is never told about `dashboardName`.
+  - **Still OPEN by design:** `PageNavItem.params`, `ComponentNavItem.params`
+    and `ActionNavItem.actionDef.params` — per-target payloads owned by the
+    page / component / action, not by the nav item.
+
+  **A real defect the gate caught, in the platform's own app:** `ACCOUNT_APP`
+  declared `defaultOpen` on three navigation groups. That was never a schema
+  key — `expanded` is — so all three shipped COLLAPSED while their author
+  believed they opened by default. Fixed at the producer (contract-first) and
+  `defaultOpen` / `open` / `collapsed` / `isOpen` now alias to `expanded`.
+
+  **Migration.** Any key now rejected was previously stripped and had no
+  runtime effect. The error carries the fix; mappings include
+  `menu`/`sidebar`/`tabs`/`items` → `navigation`, `title` → `label`,
+  `permissions` → `requiredPermissions`, `sort`/`position` → `order`,
+  `defaultOpen` → `expanded`, `args` → `params` (actionDef), `primary` →
+  `primaryColor`, `url` → `endpoint` (options source), plus wrong-layer
+  pointers: `pages`/`views`/`flows` are not App fields, and a payload named on
+  the wrong variant points at the `type` that owns it.
+
+  The `visibleWhen` → `visible` alias is the load-bearing one: ADR-0089 made
+  `visibleWhen` canonical on view/page schemas, so an author who learned it
+  there would silently lose a nav entry's visibility gate — a capability gate
+  failing open, the worst shape of the silent-strip bug.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- e59786e: fix(spec): five exported symbols resolved to `any` — type the recursive schemas and gate it in CI (#4171)
+
+  A recursive Zod schema needs an explicit annotation to break its circular
+  inference, and five of them took the cheapest one available:
+
+  ```ts
+  export const NavigationItemSchema: z.ZodType<any> = z.lazy(() => …);
+  export type NavigationItem = z.infer<typeof NavigationItemSchema>;   // → any
+  ```
+
+  It compiles, it validates correctly at runtime, and it silently throws the type
+  away. `NavigationItem`, `FormField`, `JoinNode` and `NormalizedFilter` were all
+  `any` on the published surface, plus `FieldNodeSchema` — which had no exported
+  type alias yet, so `z.infer<typeof FieldNodeSchema>` was `any` and
+  `QueryAST['fields']` with it.
+
+  That is worse than a missing export. #4115 tells every consumer that a local
+  declaration under a spec export's name must be replaced by a binding to the
+  spec — and for these, obeying it **replaced a precise type with `any`**.
+  objectui's `NavigationItem` is a 118-line documented interface (`recordId`
+  template variables, `requiresObject` / `requiresService` capability gates,
+  `filters` precedence); every key of it exists in the spec's version, so by every
+  available signal it read as a redundant fork safe to delete. Deleting it swapped
+  a fully-typed interface for `any`, with no compile error anywhere to say so.
+
+  It is hard to catch by inspection because `any` is mutually assignable with
+  everything, so the natural "are these the same type?" check answers _yes_ in both
+  directions and recommends precisely the wrong action. Same failure family as
+  #4075's `[key: string]: any` on `ActionDef`: a type that agrees with everything
+  reads as agreement.
+
+  **Now annotated with the real type**, using the pattern `QueryAST` already
+  follows in `data/query.zod.ts` — infer the non-recursive part, tie the recursive
+  knot in the type, so the keys stay derived from the schema instead of being
+  hand-maintained beside it:
+
+  ```ts
+  const BaseXSchema = z.object({ …every non-recursive key });
+  export type X = z.infer<typeof BaseXSchema> & { children?: X[] };
+  export const XSchema: z.ZodType<X> = z.lazy(() => BaseXSchema.extend({
+    children: z.array(XSchema).optional(),
+  }));
+  ```
+
+  `z.infer` now resolves to the type it should always have been: `NavigationItem`
+  is the nine-branch discriminated union, `FormField` the 30-key form-field
+  contract (with `visibleOn` absent by construction — ADR-0089 D2 folds it into
+  `visibleWhen` at the boundary), `JoinNode` and the newly exported `FieldNode`
+  the query AST nodes, `NormalizedFilter` the normalized filter AST. Runtime
+  validation is unchanged: every schema parses exactly what it parsed before.
+
+  **What the types immediately caught**, none of it visible while they were `any`:
+
+  - `account.app.ts` set `defaultOpen` on three nav groups — a key the spec has
+    never declared. It worked only because objectui's `NavigationRenderer` still
+    falls back to that legacy alias. Fixed at the producer per Prime Directive
+    #12: the canonical key is `expanded`.
+  - The MongoDB driver built its projection with `projection[field] = 1` over
+    `query.fields`, so a relationship `FieldNode` would have keyed the projection
+    on `"[object Object]"`. It now reads the node's field name.
+  - `setup.app.ts`, `studio.app.ts` and `setup-nav.contributions.ts` are annotated
+    with the PARSED `App` / `NavigationContribution` types but omitted
+    `.default()`ed keys (`expanded`, `target`), as did the form fields
+    `metadata-protocol` synthesizes for `getUiView` (`span`). Each now states the
+    default it was relying on, matching what the surrounding literals already do
+    for `active` / `isDefault` / `collapsible` / `collapsed` / `columns`.
+
+  **Gated, not just fixed** (`check:exported-any`, wired into the required
+  `TypeScript Type Check` job). `api-surface.json` records that an export _exists_
+  and never what it _resolves to_, which is how these survived a whole major with
+  every gate green. The new scan reads the built `.d.ts` a consumer's import
+  actually resolves to and fails on any exported type that resolves to `any` — or
+  any exported schema whose output is `any`, the root cause, and the only reason
+  `FieldNodeSchema` was visible at all. Its `KNOWN_ANY` ledger is shrink-only and
+  currently empty. It self-tests against the real zod first, so if the internals it
+  reads are ever renamed the gate fails loudly instead of quietly passing
+  everything forever.
+
+- 20bc1ec: fix(spec,rest): the metadata forms save what they show — form ↔ Zod reconciliation (#3786)
+
+  Every entry in `METADATA_FORM_REGISTRY` is a hand-written `defineForm` layout
+  that names keys of a Zod schema it never imports: two descriptions of one key
+  set, a comment asking the next author to keep them in step, and nothing that
+  fails when they don't. #3786 asked for a sweep of that shape across the repo.
+  **Four of the seventeen forms had already drifted, every one of them silently.**
+
+  The silence is the point. `ObjectSchema` / `FieldSchema` are deliberately not
+  `.strict()`, so a key the schema does not declare parses clean and is stripped
+  on the way to storage — the same ADR-0104 failure class the `field.zod.ts`
+  prune tombstone already describes in prose. An admin toggled a switch in
+  Studio, got no error, and the value never landed.
+
+  **What was broken, from an author's seat:**
+
+  - **Object → Capabilities.** The block bound to `capabilities`; the
+    `ObjectSchema` key is `enable`. All seven toggles (Track history, Searchable,
+    API enabled, Files, Feeds, Activities, Clone) saved nothing.
+  - **Object → Fields.** The inline column grid offered 16 keys `FieldSchema` has
+    never declared. `PII`, `Encrypted`, `Indexed`, `Immutable`, `Filterable`,
+    `Placeholder`, `Validation`/`Error message` and `Starting number` were
+    controls with no storage behind them at all; the rest named keys the schema
+    had **renamed** and the form never followed:
+    `referenceFilter` → `lookupFilters`, `cascadeDelete` → `deleteBehavior`
+    (a three-way enum, not a boolean), `formula` → `expression`,
+    `displayFormat` → `autonumberFormat`, and the flat `summaryType` /
+    `summaryField` pair → the single `summaryOperations` object, which also
+    restores the `object` key the flat pair had no slot for. Roll-ups authored in
+    that grid saved nothing.
+  - **Report → Advanced.** `aria` and `performance` were pruned from
+    `ReportSchema` by #3496; the form kept rendering both.
+  - **Hook / Action → Body.** `memoryMb` was unauthorable — named in
+    `hook.form.ts`'s own doc comment, absent from the list beneath it.
+  - **Page → Interface.** `interfaceConfig.sort` was unauthorable, so a page's
+    default sort order could not be set in Studio at all.
+
+  **No authored metadata changes and nothing you can write is removed.** These
+  were UI controls that never persisted; every corrected key is one `FieldSchema`
+  / `ObjectSchema` already accepted. Metadata authored in YAML/TS was always
+  validated against the real schema and is unaffected. If you had been filling
+  those Studio controls expecting them to stick, they now either work (the
+  renamed five) or are gone rather than lying to you.
+
+  The metadata-form translation bundles are derived from the registry, so all
+  four locales are regenerated. Worth naming what they contained: translated
+  labels, in four languages, for switches that saved nothing — the drift had
+  propagated into a generated artifact and been dutifully translated there.
+
+  **The mechanism.** `metadata-form-zod-reconciliation.test.ts` walks every
+  registered form and reconciles it against `getMetadataTypeSchema()`. The two
+  directions are deliberately asymmetric: **form-only** (a control whose value is
+  discarded) is always a defect and cannot be excused, because no design wants
+  one; **zod-only** is ledgerable with a reason, for a deprecated key held back
+  from new authoring or a curated quick-add subset that defers to a fuller
+  editor. Ledger entries are checked for non-vacuity and for still resolving on
+  both sides, per the #4045 / #4040 discipline. Verified by mutation — re-adding
+  a stripped key, dropping a covered key, and offering a ledgered omission each
+  turn the gate red.
+
+  **New export: `TRANSLATABLE_METADATA_TYPES`** (`@objectstack/spec/system`), the
+  set of metadata types whose labels `translateMetadataDocument` localizes,
+  derived from its dispatch table rather than restated. `@objectstack/rest` had
+  been carrying a hand-copied literal set under a "keep in sync with the type
+  dispatch" comment; it now reads this instead. Registering a translator in spec
+  reaches the REST boundary with nothing else to remember — the second list is
+  deleted rather than checked, which is the better half of derive-or-gate.
+
+  Also corrected: `ActionAiCategorySchema`'s comment claimed it mirrored
+  `ToolCategorySchema` in `ai/tool.zod` and told the next author to update both
+  sides — but #3896 deleted `ToolCategorySchema` along with the inert
+  `tool.category` key it typed. The instruction had been pointing at a source
+  that no longer exists. The enum is canonical now and says so.
+
+- 7ce02eb: feat(spec,objectql): `IObjectQLEngine` — the `objectql` slot's contract exists, the class `implements` it, and the seven consumer-local stand-ins are deleted (#4251 B3)
+
+  ObjectQL registers one instance under two names, and the ledger can finally say
+  what each name means: `data` stays `IDataEngine` (the data plane), `objectql`
+  now resolves to **`IObjectQLEngine`** — the full engine: schema access
+  (`getSchema` / `getObject` / `registry`), actions (`registerAction` /
+  `removeActionsByPackage` / `executeAction`), the hook/middleware seams
+  (`registerHook` / `unregisterHooksByPackage` / `registerFunction` /
+  `registerMiddleware` / `bindHooks`), the first-wins default runners and hook
+  metrics, boot wiring (`registerDriver` / `setDatasourceMapping` /
+  `registerApp`), and the ops probes (`checkDriversHealth` /
+  `wasDatastoreCreatedFromEmpty` / `invalidateDataMigrationFlags`). The ledger
+  test pins the new relation: `objectql` strictly widens `data`, deliberately no
+  longer equal.
+
+  **Why now, and why `implements` is the point.** The honest state for two
+  batches was recorded on `DomainHandlerContext.getObjectQL`: ObjectQL is wider
+  than `IDataEngine`, the wider part had no contract, and typing it `IDataEngine`
+  would be "the more comfortable-looking lie". The interim discipline — each
+  consumer declares the narrow slice it uses — produced seven local surfaces
+  (`AppEngineSurface`, `EngineRegistrySurface`, `EngineExtensionSurface`,
+  `SecurityEngineSurface`, `FreshDatastoreEngine`, the dispatcher's inline
+  `checkDriversHealth` slice, the `getObjectQL: any` itself). Each was honest and
+  each was an UNCHECKED claim: `getService<Surface>('objectql')` is an assertion,
+  so an engine rename would have broken every consumer at runtime with zero
+  compile errors. `ObjectQL implements IObjectQLEngine` converts all of them into
+  one compiler-verified claim. All seven stand-ins are deleted; consumers import
+  the one declaration. `getObjectQL` is typed `Promise<IObjectQLEngine | null>`
+  end to end, closing the oldest documented `any` in the dispatcher.
+
+  **Evidence bar unchanged.** Every declared member has a cross-package consumer
+  reaching it through the slot; engine members without one (e.g. `triggerHooks`,
+  cross-package only in tests) stay off until a caller appears. The registry view
+  (`EngineSchemaRegistryView`) declares exactly the eight members consumers use.
+
+  **`_registry` never leaves the engine package now.** plugin-security's
+  declared-metadata readers (`readDeclared`, permission-set projection, suggested
+  audience bindings) reached ObjectQL's private `_registry` field through `any` —
+  the same private reach `/me/apps` had in B2, five more times. All migrated to
+  the public `registry` getter the contract declares, test doubles included.
+
+  **`IMetadataService` gains `subscribe?` / `loadMany?`** — implemented by
+  `MetadataManager` beside `watch` all along, reached through the slot only via
+  `any` by ObjectQLPlugin's metadata bridge (the re-sync keeping runtime-authored
+  hooks/actions live). With them declared, the bridge's six `metadata` lookups
+  and metadata-protocol's `objectql` lookup carry contract types, and both files
+  leave the grandfather list entirely: baseline **167 → 159 sites, 36 → 34
+  files**.
+
+- d6938bf: fix(spec): the remaining six recursive schemas name both type parameters, and the authoring artifacts stop spelling out defaults (#4195)
+
+  #4221 fixed `NavigationItemSchema` — the worst instance, and the one with a
+  reproducible "`defineApp` compiles `navigation: [42, 'nonsense']`" demo. This
+  finishes the sweep: **six more schemas** had the same shape, and the authoring
+  artifacts that #4171 had to work around can now be typed honestly.
+
+  `z.ZodType` takes `<Output, Input>` and `Input` defaults to `unknown`, so naming
+  only the first parameter leaves `z.input` of anything embedding that schema at
+  `unknown`. Measured with a type probe:
+
+  |                                        | was         | now                       |
+  | -------------------------------------- | ----------- | ------------------------- |
+  | `QueryInput['joins']`                  | `unknown[]` | `JoinNodeInput[]`         |
+  | `QueryInput['fields']`                 | `unknown[]` | `FieldNode[]`             |
+  | `z.input<typeof FormFieldSchema>`      | `unknown`   | `FormFieldInput`          |
+  | `z.input<typeof QuerySchema>`          | `unknown`   | `QueryInput`              |
+  | `z.input<typeof StateNodeSchema>`      | `unknown`   | `StateNodeConfig`         |
+  | `z.input<typeof ValidationRuleSchema>` | `unknown`   | `BaseValidationRuleShape` |
+
+  New exported types: `FormFieldInput`, `JoinNodeInput`, `NavigationContributionInput`.
+  `FilterCondition`, `NormalizedFilter` and `FieldNode` carry no `.default()` or
+  `.transform()`, so their input is their output and the second parameter is the
+  first.
+
+  **The `z.ZodType<T>` single-parameter form is now absent from the codebase.**
+
+  ## 26 hand-written defaults deleted
+
+  This is the half #4221 left on the table. #4171 had to spell out
+  `expanded: false` (×16) and `target: '_self'` (×10) across `setup.app.ts`,
+  `studio.app.ts` and `setup-nav.contributions.ts`, because those artifacts are
+  annotated with the PARSED type where a `.default()`ed key is required — and
+  retyping them to the input surface would have traded eight loud errors for no
+  checking at all.
+
+  With `NavigationItemInput` landed (#4221) and `NavigationContributionInput`
+  added here, they are annotated `AppInput` / `NavigationContributionInput`, the
+  defaults are defaults again, and the literals are checked for the first time.
+  Net across those four files: 21 lines added, 54 removed.
+
+  Verified live, not nominal: a literal omitting `expanded`/`target` compiles, and
+  one writing `defaultOpen` — the non-spec key #4171 found in `account.app.ts` —
+  is a compile error whose suggestion list names `expanded`.
+
+  ## Two typed with a documented caveat
+
+  `StateNodeSchema` and `ValidationRuleSchema` reuse their hand-written type for
+  both parameters: exact on the input side, loose on the output side.
+  `StateNodeConfig` marks `type` optional though `.default('atomic')` makes it
+  always present; `BaseValidationRuleShape` carries a `[key: string]: unknown`
+  index signature. Both were already that loose — input went from `unknown` (types
+  nothing) to a real type, output is untouched. Making them exact means deriving
+  those types from their schemas instead of maintaining them beside one, which is
+  separate work; the caveat is written at each declaration rather than left for a
+  reader to find.
+
+  ## Why there is still no CI gate for this
+
+  Worth recording, since #4195 proposed one: extend `check:exported-any` to fail on
+  "output precise but input `unknown`". Measured after this change — exactly two
+  schemas match, `TranslationItemSchema` and `InlineActionSchema`, and **both are
+  correct**: they are `z.preprocess(...)`, where an `unknown` input is zod's
+  semantics rather than a missing annotation. Separating those from a genuinely
+  missing parameter needs heuristics on emitted type names, and per the rule in
+  that script's own header — zero false positives, so red keeps meaning broken — a
+  gate that cannot be made reliable is worse than none. #4221's
+  `app.nav-type-assertions.ts` is the better pattern where it applies: pin the
+  contract at compile level rather than infer intent from shape.
+
+- d92c72d: fix(lint,runtime,core): the slot-lookup guard sees the split-declaration form — the shape that made the ratchet look cleaner the more it was used (#4251)
+
+  The three selectors from #4321 all key off the erasure and the lookup being in
+  ONE expression. Split them and every selector misses:
+
+  ```ts
+  let ql: any;
+  try {
+    ql = ctx.getService("objectql");
+  } catch {
+    /* optional */
+  }
+  ```
+
+  Selector 1 needs the call inside the declarator (this declarator has no init),
+  selector 2 needs `as`, selector 3 needs a type argument. The contract is erased
+  exactly as in `const ql: any = ctx.getService(…)`.
+
+  **Why this could not wait for the batches.** The baseline's monotonicity check
+  means a file that leaves the grandfather list can never be re-added. So every
+  batch converted more of this shape from "grandfathered" into "lint covers this
+  file and says nothing" — B2 alone moved `plugin-security/security-plugin.ts`
+  into that state. A ratchet that reports a cleaner number the more you sweep is
+  the #4342 failure wearing different clothes, and the fix only gets more
+  expensive per batch shipped.
+
+  **It is a rule, not a fourth selector, and that is the whole finding.** esquery
+  can match `AssignmentExpression:has(CallExpression[…])`, but it cannot tell
+  which declaration the assigned identifier resolves to — so it would equally
+  flag the correctly-typed form this work line exists to produce (`let
+i18nService: II18nService | undefined; i18nService = …`, 8 such sites today in
+  runtime/app-plugin.ts, service-automation and metadata-protocol). Resolving the
+  identifier needs SCOPE analysis. That is cheap and needs no type information, so
+  this stays out of the typed-lint pass the KNOWN RESIDUAL still waits on — but it
+  is a rule, and the earlier "just one more selector" estimate was wrong.
+
+  Verified against exactly that: the rule flags all 16 real sites and none of the
+  8 correctly-typed lookalikes.
+
+  **Scale.** The baseline goes 140 → **169 sites** with the file count unchanged
+  at 37: 29 sites were already inside grandfathered files and simply invisible.
+  16 more could NOT be grandfathered (12 in files earlier batches had cleared, 3
+  in files never listed, 1 the regex sweep had missed) and are typed here —
+  `runtime/app-plugin.ts` ×5, `core/fallbacks/authored-translation-sync.ts` ×2,
+  `plugin-security/security-plugin.ts` ×2, `cloud-connection/{runtime-config,
+marketplace-proxy}-plugin.ts` ×3, `platform-objects/src/plugin.ts` ×2,
+  `runtime/http-dispatcher.ts`, `runtime/domains/ai.ts`. No baseline key was
+  added; the key set still only shrinks.
+
+  Contracts where they exist (`IAIService`, `IJobService`, `IMetadataService`,
+  `II18nService`, `IDataEngine`, `IHttpServer`), named local surfaces where they
+  do not — `AppEngineSurface`, `SecurityEngineSurface`, `RawAppHost`,
+  `EnvRegistrySurface`, `FreshDatastoreEngine`, `AuthoredTranslationSink`. Two of
+  those record something worth naming: `IHttpServer` has no `getRawApp()` (the
+  contract is framework-agnostic and the raw app is Hono's own handle), and
+  ObjectQL's `_defaultBodyRunner` / `_defaultActionRunner` have no public reader
+  at all — the engine attaches them via `(this as any)` and publishes nothing,
+  while `getHookMetricsRecorder()` exists for exactly that question about the
+  metrics recorder. Declared rather than laundered through `any`, and filed.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [65a3a84]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/metadata-core@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Major Changes

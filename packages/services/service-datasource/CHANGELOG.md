@@ -1,5 +1,749 @@
 # @objectstack/service-external-datasource
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- c9d254a: feat(datasource,runtime): kernel teardown disconnects through the one datasource path — and never closes an adopted pool (#3993)
+
+  After the #3826 connect convergence, ADR-0062 D5's "owns connect/disconnect"
+  was half-true: nothing disconnected the `default` (or a declared datasource's
+  pool) on graceful shutdown. `DriverPlugin` never had teardown, `ObjectQLPlugin`
+  teardown never touched drivers, and the kernel's actual teardown phase is
+  `destroy()` — the Plugin contract has no `stop()`, so stray `stop` methods were
+  never called by anything.
+
+  The disconnect half now mirrors the connect half:
+
+  - **`DatasourceConnectionService.disconnect(name, { asDefault })`** resolves
+    the default under its NATURAL name (the same #3826 rule that makes
+    `drivers.get('default')` impossible — the old lookup could never have found
+    it), and honours a new ownership discriminator recorded at connect time.
+  - **`disconnectAll()`** closes exactly the pools THIS service opened —
+    `'connected'` states only. `already-registered` drivers belong to whoever
+    registered them (an `onEnable` bridge, the default's idempotent replay) and
+    are never touched.
+  - **`DatasourceDriverHandle.ownership: 'factory' | 'host'`** is the
+    discriminator. `createPrebuiltDriverFactory` stamps its handles `'host'`:
+    an ADOPTED instance's pool outlives the kernel (the cloud control-plane
+    driver doubles as every environment kernel's proxy base; per-environment
+    drivers are registry-cached across kernel rebuilds), so kernel teardown —
+    including a cloud LRU eviction's `kernel.shutdown()` — clears the retained
+    verdict but NEVER closes the pool. Factory-built instances disconnect as
+    before there was a before.
+  - **`DefaultDatasourcePlugin.destroy()`** and
+    **`DatasourceAdminServicePlugin.destroy()`** wire the sweep at the kernel's
+    real teardown phase, best-effort (a failed disconnect never masks shutdown).
+
+  A welcome side effect: a file-backed `sqlite-wasm` default with
+  `persist: 'on-disconnect'` now actually flushes on graceful shutdown.
+
+  Also flips ADR-0062's status to reflect the completed convergence (#3992):
+  D1 is fully implemented across both repos since cloud#915; the remaining
+  `DriverPlugin` uses are documented named-auxiliary/escape-hatch cases, and the
+  degraded-boot parity guard stays with its role shifted to "the escape hatches
+  must not drift".
+
+- c3bcb42: feat(runtime,datasource): the default-datasource connect seam accepts a host driver factory — adopt pre-built instances without forking the verdict (#3826)
+
+  ADR-0062 D1's open-core convergence (#3869/#3886) left one structural question
+  open: a host whose `default` needs a driver the shared factory cannot build —
+  the cloud distribution's `turso`, or an instance pooled BEYOND one kernel (the
+  cloud control-plane driver doubles as the proxy base of every environment
+  kernel; per-environment drivers are cached across kernel rebuilds) — had only
+  two options, both bad: stay on the legacy pre-built `DriverPlugin` path, whose
+  connect verdict lives in `ObjectQLEngine.init()` (the second implementation
+  #3826 exists to retire), or fork the connect orchestration. Either re-opens the
+  #3741 → #3758 drift this whole line of work is about.
+
+  Two additive pieces close it:
+
+  - **`DefaultDatasourcePlugin` accepts an injected `IDatasourceDriverFactory`**
+    (defaults to the shared open-core factory, byte-for-byte unchanged when
+    omitted). The factory only changes what `create()` returns — the policy-free
+    init connect, `bootCritical` fail-fast, `OS_ALLOW_DRIVER_CONNECT_FAILURE`
+    escape hatch, and the start() replay into retained admin state are identical
+    either way, and the new tests pin that (an adopted instance that cannot
+    connect takes the exact same verdict).
+  - **`createPrebuiltDriverFactory(driver, { driverId?, fallback? })`** in
+    `@objectstack/service-datasource` — the "adopt an existing driver" seam the
+    first #3826 pass found missing, landed AS a factory so it composes into the
+    one connect path instead of becoming a second entry point. `create()` returns
+    the SAME instance every call: construction, pooling, and reuse stay host
+    concerns; only the verdict converges. Not for the common case — a `default`
+    expressible as `{ driver, config }` should stay a plain definition.
+
+  The `@objectstack/verify` dogfood harness now boots through
+  `DefaultDatasourcePlugin` (declared `sqlite-wasm` definition) instead of a
+  pre-built `DriverPlugin` — so the dogfood gate exercises the same declared
+  -default connect path `objectstack dev`/`serve` use, which is the §Risk
+  mitigation ADR-0062 promised ("behind the dogfood gate") and did not yet have.
+  The degraded-boot parity guard stays: `ObjectQLEngine.init()`'s verdict is
+  still live for the boot re-verification, `DriverPlugin` escape-hatch drivers,
+  and the cloud compositions until they converge onto this seam.
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 7bf5349: fix(service-datasource): the datasource-admin 503 names the service the route actually needs (#4225)
+
+  `admin-routes.ts` registered nine service-backed routes behind one hard-coded 503:
+
+  ```ts
+  const unavailable = (res) =>
+    sendError(
+      res,
+      503,
+      "SERVICE_UNAVAILABLE",
+      "The datasource-admin service is not available."
+    );
+  ```
+
+  Six of those routes resolve `datasource-admin`, so the message was right. Three
+  resolve `external-datasource` — `GET /:name/remote-tables`, `POST /:name/test`,
+  `POST /:name/object-draft` — and answered with the same sentence. An operator
+  whose federation service was unwired was told to go look at `datasource-admin`,
+  which was running fine.
+
+  The code was never the bug. `SERVICE_UNAVAILABLE` is correct for all nine:
+  ADR-0112's ledger asks generic conditions to reuse the standard catalog rather
+  than register a per-service 503 synonym, and this module documents that decision
+  inline. Which service is down is carried by `message`, exactly as intended — the
+  `message` was simply wrong on three routes.
+
+  Rather than parameterise the 503 helper and leave the name typed out a second
+  time at each call site, the lookup and the message now come from one argument.
+  The two `adminService()` / `externalService()` resolvers collapse into a single
+  `resolve(res, service, method)` that answers the 503 itself, naming whatever
+  service it just failed to resolve:
+
+  ```ts
+  const svc = resolve(res, "external-datasource", "listRemoteTables");
+  if (!svc) return;
+  ```
+
+  Fixing the three messages needed only the parameter; taking the name from the
+  lookup is what stops a tenth route reintroducing the mismatch. The per-route
+  capability check is preserved — a host may wire a partial implementation, so
+  "the service is registered" and "this route can use it" stay separate facts.
+
+  Wire-visible change, on those three routes only: the 503 body's `error.message`
+  now reads `The external-datasource service is not available.` — the same string
+  `packages/rest/src/external-datasource-routes.ts` already emits for its own
+  surface. Status and `error.code` are unchanged on all nine.
+
+  Each of the nine 503s is now pinned to the service it names, driven through the
+  real `HonoHttpServer` against a context that resolves services **per name**. The
+  mock every existing test used answers the same object for every lookup, which is
+  why nothing could see this: it cannot tell the two services apart. One case
+  covers the operator's actual situation — `datasource-admin` wired and answering
+  200s, `external-datasource` absent — including `POST /:name/test`, where the
+  wired admin service has a `testConnection` of its own and must not answer for the
+  external route.
+
+  Pre-existing: #3843 carried every code string over verbatim and #3973 changed no
+  bytes on the wire.
+
+- 366105c: fix(service-datasource,rest): the last three uncovered datasource routes answer their registered refusal code (#4264)
+
+  #4249 (fixed in #4263) gave the rest surface's two introspection routes a
+  failure contract; this closes the same gap on the three sibling routes it left
+  uncovered. Each had no `catch` around its service call, so a service throw was
+  swallowed by the adapter and surfaced as the pre-#3675 non-envelope
+  `500 { error: 'No response from handler' }` — no `success` flag, no
+  `error.message`, no code to switch on, real cause lost.
+
+  Wire-visible changes — each route now answers `400` in the declared envelope,
+  under the refusal code registered (ADR-0112) for the service it dispatches to,
+  with the service's own message at `error.message`:
+
+  - `GET /api/v1/datasources` (`listDatasources` throw) →
+    `400 DATASOURCE_ADMIN_ERROR` — matching its eight siblings in
+    `service-datasource/admin-routes.ts`, which already answer their catches this
+    way.
+  - `POST /api/v1/datasources/:name/external/refresh-catalog` (`refreshCatalog`
+    throw) and `POST /api/v1/datasources/:name/external/validate` (`validateAll`
+    throw) → `400 EXTERNAL_DATASOURCE_ERROR` — the same code #4249 gave the two
+    introspection routes one block above them.
+
+  The issue left the code choice open (`INTERNAL_ERROR` was the alternative);
+  the registered per-service codes win on consistency: every other catch in both
+  modules — including pure reads — already answers 400 with the service-attributed
+  code, and `refreshCatalog`'s dominant throw class (unknown datasource,
+  unreachable remote, no such schema) is the one #4249 already adjudicated as a
+  400 refusal on `listRemoteTables`. A 500 here would fork the failure contract
+  within a module — the drift #4249 removed.
+
+  No new codes: both were registered in the error-code ledger by #4263. The
+  envelope-conformance suites and the `REFUSALS` pin table gain one row per
+  route.
+
+- bcf1112: fix(service-datasource,rest)!: external-datasource refusals answer their own error code (#4249)
+
+  #4225 / #4234 fixed the 503 `message` on the three routes in
+  `service-datasource/admin-routes.ts` that dispatch to `external-datasource`
+  rather than `datasource-admin`. The identical mis-attribution survived one field
+  over, on the 400 path — and machine-readably: one shared `badRequest` helper
+  hard-coded `DATASOURCE_ADMIN_ERROR`, which the ADR-0112 ledger defines as a
+  refusal _from the datasource-admin service_. So a `no such schema` raised by the
+  external-datasource introspector was reported as datasource-admin's, and where
+  #4225 misled a human reading prose, this misrouted a client switching on
+  `error.code`.
+
+  `EXTERNAL_DATASOURCE_ERROR` is now registered in the error-code ledger — under
+  `@objectstack/service-datasource` and `@objectstack/rest`, the two packages that
+  emit it; per the ledger's own rule the per-package rows are provenance, not
+  identity — and `badRequest` takes the same `ServiceName` the route passed to
+  `resolve` (#4234), so the code, like the 503 message, comes from the service the
+  route actually dispatches to.
+
+  Wire-visible changes:
+
+  - **The three external-datasource routes' 400 `error.code`** —
+    `GET /datasources/:name/remote-tables`, `POST /datasources/:name/test`,
+    `POST /datasources/:name/object-draft` — is now `EXTERNAL_DATASOURCE_ERROR`
+    (was `DATASOURCE_ADMIN_ERROR`). Status, envelope, and `error.message` are
+    unchanged, as is everything on the six datasource-admin routes. No consumer
+    branches on the old code (grepped both repos, all the ADR-0112 sweep forms).
+  - **The rest surface's two introspection routes now have a failure contract at
+    all.** `GET /datasources/:name/external/tables` and
+    `POST /datasources/:name/external/tables/:remote/draft` carried no
+    `try`/`catch`, so the very same service operations that answer 400 through
+    the admin surface surfaced here as the adapter's non-envelope
+    `500 { error: 'No response from handler' }`. They now answer
+    `400 EXTERNAL_DATASOURCE_ERROR` in the declared envelope — one operation, one
+    failure contract, on both paths. (`EXTERNAL_IMPORT_ERROR` on the import route
+    is unchanged: a refused import is a different act from a failed
+    introspection, and its name says so.)
+
+  Why a new registered code rather than reusing one: ADR-0112's ledger asks
+  _generic_ conditions to reuse the standard catalog — that argument carried
+  #4225's 503, where `SERVICE_UNAVAILABLE` is correct for all nine routes and only
+  the free-text `message` named the service. A refusal specific to one service is
+  exactly what registered extension codes are for, and the closed `ErrorCode`
+  union means correcting the attribution had to be a ledger edit. Widening
+  `EXTERNAL_IMPORT_ERROR` to cover introspection was rejected because these are
+  not imports; leaving the throws uncaught was rejected because the adapter's 500
+  is not the declared envelope.
+
+  The conformance rows that pinned the drift move with it, and each surface now
+  pins the refusal code per route the way #4234 pinned the 503 message per route.
+
+  Pre-existing, like #4225: #3843 carried every code string over verbatim.
+
+- 974c6d4: fix(datasource): a `memory` datasource is ephemeral again, and each pool gets its own store (#4083)
+
+  The shared driver factory built `new InMemoryDriver()` for `driver: 'memory'` with
+  no config, so the pool inherited that driver's own `persistence: 'auto'` default —
+  in Node, a file adapter at the **relative, process-global** path
+  `.objectstack/data/memory-driver.json`. Two consequences, neither intended:
+
+  - **It was not ephemeral.** The pool flushed its whole store into the server's
+    working directory (on an unref'd 2s autosave timer, and again at teardown) and
+    reloaded it on the next boot. That is the opposite of what the driver id
+    promises the operator who asks for it — `OS_DATABASE_DRIVER=memory` is
+    documented as _ephemeral, not real SQL_ — and it means a "throwaway" datasource
+    left state in the deploy directory.
+  - **Every memory pool in a process shared one destination.** The default path
+    carries no per-datasource component, so two `driver: 'memory'` datasources
+    loaded and saved the same file: each saw the other's tables, and the last
+    teardown to flush clobbered the other's rows.
+
+  Both were visible as an intermittent test failure. The ADR-0062 D1 federated-read
+  acceptance seeds 2 rows into an auto-connected external memory datasource and
+  reads them back; it returned 2 rows on a clean checkout and 2×N on the Nth run in
+  the same tree — passing in CI (always run #1, always a fresh checkout) and
+  failing locally for anyone who ran it twice. Whether a given run leaked depended
+  on the autosave timer, which is what made it look flaky rather than wrong.
+
+  - The factory now builds the memory pool with **`persistence: false` by default**.
+  - It also **honors the datasource's own `config`**, which was previously dropped
+    entirely: `initialData` and `strictMode` never reached the driver.
+  - When an author _does_ opt into persistence (`config.persistence`), the default
+    destination is **scoped to the datasource** —
+    `.objectstack/data/memory-<name>.json` / `objectstack:memory-db:<name>` — so
+    pools stay independent. An explicit `path`/`key`, or a custom `adapter`, is
+    left exactly as written.
+  - The dev-only sqlite step-down's last-resort in-memory driver
+    (`resolveSqliteDriver`, #2229) is built the same way, making its own
+    "not persistent" contract true.
+
+  `InMemoryDriver`'s documented defaults are unchanged — constructing one directly
+  still auto-detects persistence. Only the datasource-scoped pools this factory
+  builds changed.
+
+  **Migration.** A deployment relying on `driver: 'memory'` state surviving a
+  restart was relying on a bug, and should declare it: set
+  `config: { persistence: 'file' }` on the datasource (now written to a
+  per-datasource file), or use a real driver — `sqlite`/`sqlite-wasm` give durable
+  storage with real SQL. Existing `.objectstack/data/memory-driver.json` files are
+  no longer read; delete them.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- cc2de0e: chore(packaging): 20 packages stop publishing their sources, tests and build tooling (#4248)
+
+  These 20 packages declared no `files` field, so npm fell back to packing the
+  whole package directory. `npm pack --dry-run` on `@objectstack/plugin-webhooks`
+  listed **21 files** — 15 under `src/`, three of them unit tests
+  (`auto-enqueuer.test.ts`, `bootstrap-declared-webhooks.test.ts`, …), plus the
+  build-time `scripts/i18n-extract.config.ts`. `dist/` lands on top of that at
+  publish time rather than instead of it, so consumers were installing the
+  TypeScript sources and the test suite alongside the artifact they asked for.
+
+  Each now declares `"files": ["dist", "README.md"]`, matching the 29 packages
+  that already did. Nothing a consumer imports moves: every `main` / `types` /
+  `exports` target in all 20 already resolved inside `dist/`, which the new
+  `check:published-files` guard verifies rather than assumes. The visible change
+  is a smaller install and a smaller dependency-scanning surface — `npm pack` on
+  `@objectstack/plugin-webhooks` now yields 2 files plus `dist/`.
+
+  The other half of the fix is the gate. Half the packages declaring `files` and
+  half not was the #3786 shape — a hand-copied convention with nothing enforcing
+  it, where whoever forgets the line gets no signal at all. `check:published-files`
+  (new, wired into the always-required `lint` job) holds every non-private
+  workspace package to four invariants: `files` is **declared**; it is
+  **sufficient** (covers every entry point, so tightening a whitelist cannot ship
+  a package that fails to resolve); it is **minimal** (admits no test, test-harness
+  config or build script); and anything beyond `dist` + `README.md` is
+  **registered** with a reason, reconciled in both directions so a stale exemption
+  is an error rather than dead text. `@objectstack/spec` is the one package with
+  registered extras — its `.zod.ts` sources, JSON Schemas, liveness ledgers and
+  `CHANGELOG.md` are product, not build input.
+
+  This also closes an assumption #4206 was resting on. Excluding `<pkg>/scripts/**`
+  from the docs-drift implementation test is sound only while no package publishes
+  `scripts/` as runtime code; that held, but it held because someone read all three
+  offenders by hand. It is now checked on every PR.
+
+- 0931185: fix(rest,service-settings,service-datasource)!: four more route modules emit the declared envelope, and the guard is now shared (#3843)
+
+  #3675 and #3689 moved `service-storage` and `service-i18n` onto the declared
+  response envelope (`BaseResponseSchema` + `ApiErrorSchema`). Each scoped itself
+  to one service, and neither asked whether the same drift existed elsewhere. It
+  did — in four more modules, and in two of them it was the _older_ shape, the one
+  #3675 had already declared wrong:
+
+  | Module                                | before                                                         | now           |
+  | ------------------------------------- | -------------------------------------------------------------- | ------------- |
+  | `service-settings/settings-routes.ts` | nested `error`, no `success` on any of 5 bodies                | full envelope |
+  | `service-datasource/admin-routes.ts`  | `{ error: '<string>' }`, `message` a **sibling**               | full envelope |
+  | `rest/external-datasource-routes.ts`  | `{ error: '<string>' }` + a private `ok`                       | full envelope |
+  | `rest/package-routes.ts`              | 3 of 16 bodies had `success`, 2 failures had no `error` at all | full envelope |
+
+  ## Breaking: where to read things now
+
+  **Success payloads move under `data`.** The keys are unchanged — only their
+  depth. `unwrapResponse` in `ObjectStackClient` returns `body.data` when the flag
+  is present, so every SDK method (`packages.list()`, `datasources.external.*`)
+  resolves to exactly the object it always did. Raw `fetch` callers must add one
+  hop:
+
+  ```
+  GET  /api/v1/datasources            body.datasources     → body.data.datasources
+  GET  /api/v1/datasources/drivers    body.drivers         → body.data.drivers
+  GET  /api/v1/datasources/:name      body.datasource      → body.data.datasource
+  GET  /api/v1/packages               body.packages        → body.data.packages
+  GET  /api/v1/packages/:id           body.package         → body.data.package
+  GET  /api/settings                  body.manifests       → body.data.manifests
+  GET  /api/settings/:ns              body.manifest/.values → body.data.manifest/.values
+  POST /…/external/validate           body.ok, body.results → body.data.ok, body.data.results
+  ```
+
+  `SettingsNamespacePayloadSchema` and friends still describe those payloads
+  exactly; they now describe the envelope's `data` rather than the whole body.
+
+  **Error bodies stop being a string.** `{ error: 'datasource_admin_error',
+message }` → `{ success: false, error: { code: 'datasource_admin_error',
+message } }`. Read `body.error.message`, not `body.message`; read
+  `body.error.code`, not `body.error`. This is the asymmetry #3675 opened on: a
+  caller reading `body.error.message` previously got the real message from the
+  dispatcher and `undefined` from these routes.
+
+  **Two failures that never said why now do.** `DELETE /api/v1/packages/:id`
+  answered a bare `{ success: false }` and a bare
+  `{ success: false, failed, cleanups }`. They are now `PACKAGE_DELETE_FAILED` and
+  `PACKAGE_DELETE_PARTIAL`, with the per-item `failed` / `cleanups` arrays under
+  `error.details`.
+
+  **Codes follow ADR-0112.** #3841 settled the vocabulary while this was in review:
+  `error.code` is SCREAMING_SNAKE and `ApiErrorSchema.code` is now the closed
+  `ErrorCode` union, so an unregistered code fails schema parse. Generic conditions
+  reuse the STANDARD catalog rather than becoming registered synonyms of it, per the
+  ledger's own guidance:
+
+  ```
+  datasource_admin_unavailable  → SERVICE_UNAVAILABLE      (standard)
+  external_service_unavailable  → SERVICE_UNAVAILABLE      (standard)
+  not_found / PACKAGE_NOT_FOUND → RESOURCE_NOT_FOUND       (standard)
+  PUBLISH_FIELDS_MISSING        → MISSING_REQUIRED_FIELD   (standard)
+  INTERNAL                      → INTERNAL_ERROR           (standard)
+  datasource_admin_error        → DATASOURCE_ADMIN_ERROR   (registered)
+  external_import_error         → EXTERNAL_IMPORT_ERROR    (registered)
+  PUBLISH_MANIFEST_INVALID      → PACKAGE_MANIFEST_INVALID (registered)
+  PUBLISH_FAILED                → PACKAGE_PUBLISH_FAILED   (registered)
+  PACKAGE_DELETE_PARTIAL / PACKAGE_DELETE_FAILED / SETTINGS_ACTION_FAILED (registered)
+  ```
+
+  Which service is unavailable is carried by `message`. The seven registered codes are
+  added to `ERROR_CODE_LEDGER` under their owning packages — including a new
+  `@objectstack/service-datasource` entry.
+
+  **`POST /external/validate` keeps its `ok`.** Unlike the `{ ok: true, key }`
+  #3689 retired from storage — a private second word for `success` — this `ok` is a
+  computed verdict over the federated objects (`results.every(r => r.ok)`). The
+  request can succeed while the verdict is false, so the two flags are not the same
+  field; `ok` moves inside `data` rather than being dropped.
+
+  Consumers were taught both shapes first, so the two repos are not coupled by
+  merge order: objectui's `packages` readers were already tolerant
+  (`payload?.data ?? payload`), and its datasource page plus the generic
+  `type: 'api'` action runner now unwrap the envelope and read `error.message`
+  (the latter previously toasted `[object Object]` for any nested error).
+
+  ## The guard is shared now, not copied
+
+  `scripts/check-route-envelope.mjs` + `pnpm check:route-envelope`, wired into
+  `lint.yml` alongside the nine sibling `check:*` guards. Its load-bearing assertion
+  is structural rather than per-route: **it counts the response write sites per
+  module.** When every body goes through the `sendOk` / `sendError` pair that count
+  is fixed at two and does not grow with the route list — so a _future_ route that
+  hand-rolls a body fails the guard. That is the coverage a driven-body test can
+  never give, since it can only drive the routes that existed the day it was
+  written.
+
+  This existed three times already as an open-coded regex block (storage error,
+  storage success, i18n error). Lifting it did more than deduplicate: a per-package
+  scan **structurally cannot notice a module nobody thought to convert**, and going
+  repo-wide found two the moment it ran — neither is in #3843's hand-written survey:
+
+  - `plugin-sharing/share-link-routes.ts` — the fifth drifting module. No body
+    carries `success`, and one answers `{ ok: true }`, the private second word #3689
+    retired from storage. Filed as #3983 and pinned by the guard; converting it is
+    breaking for share-link consumers and needs its own sweep.
+  - `metadata/routes/hmr-routes.ts` — declared **exempt** with a reason (dev-only
+    SSE endpoint, not on the SDK surface), not skipped. Three states, deliberately —
+    conformant / ratcheted / exempt — because that is the honest classification
+    ADR-0049 asks for. A route module the scan finds but the table does not declare
+    is an **error**, never a default: applying `2 / 1 / 1` to an unknown module would
+    let a new one pass by coincidence.
+
+  It also drops the regex for the TypeScript AST, fixing two real bugs the copies
+  had. They stripped comments with `String.replace`, whose line-comment pattern also
+  ate `//` inside string literals and truncated the rest of that line — response
+  writes included. And `.json(` does not mean "write a response": `hmr-routes.ts`
+  calls `c.req.json()` twice to READ a request body, which a textual count reports as
+  two unenveloped responses. Comments and literals are not AST tokens, and
+  request-vs-response is a property of the callee, so both disappear. The script
+  carries a `--self-test` pinning each case — the nine sibling guards have none, but
+  both of these bugs survived a review of the regex version.
+
+  **The i18n ratchet, stated rather than hidden.** `i18n-service-plugin.ts` is
+  declared at `responses: 5, ok: 4, err: 1` with a ratchet pointing at #3973. Its
+  error half _is_ consolidated (#3675), but each of its four read routes builds
+  `{ success: true, data }` inline. Those bodies are correct — that is not envelope
+  drift — but an unconsolidated builder is a weaker guard: a fifth read route could
+  get the shape wrong and only a driven test would notice. The numbers pin today's
+  structure exactly (a new inline body fails) and drop to the conformant `2 / 1 / 1`
+  when #3973 lands.
+
+- d5749d7: refactor(types,rest,services,plugin-sharing): one shared writer for the response envelope, and `error.code` is enforced at compile time (#3973)
+
+  `BaseResponseSchema` declares one envelope for every REST body the platform
+  emits. It declared it once; the code that _wrote_ it was copied per route
+  module. After #3843 and #3983 converted the last drifting one, seven modules
+  each carried their own two-line `sendOk` / `sendError` pair — so the envelope's
+  shape lived in fourteen places rather than one.
+
+  `pnpm check:route-envelope` proved those seven copies agreed, which is why this
+  is a cleanup rather than a bug fix. But a guard proves agreement; it does not
+  create it. An eighth module starts by copying the pair again — not
+  hypothetically: `share-link-routes.ts` was found already drifting by the
+  repo-wide scan, and its drift had broken `client.shareLinks.create()` and
+  `.list()` through `unwrapResponse` (#3983).
+
+  ## What moved
+
+  `sendOk` / `sendError` now live once, in `@objectstack/types`
+  (`response-envelope.ts`), and all seven modules import them:
+
+  | Module                                |
+  | ------------------------------------- |
+  | `service-storage/storage-routes.ts`   |
+  | `service-settings/settings-routes.ts` |
+  | `service-datasource/admin-routes.ts`  |
+  | `rest/external-datasource-routes.ts`  |
+  | `rest/package-routes.ts`              |
+  | `service-i18n/i18n-service-plugin.ts` |
+  | `plugin-sharing/share-link-routes.ts` |
+
+  Placement was the open question in #3973, not design. `packages/spec` is
+  schemas-only (Prime Directive #2), and the callers span `rest`, four
+  `services/*` and one `plugins/*`, which rules out anything depending on them.
+  `@objectstack/types` depends on nothing but `@objectstack/spec`, so every caller
+  can reach it, and it is already where the repo puts a helper the HTTP boundaries
+  share — `looksLikeInternalErrorLeak` (#3867) sits one file over and made the
+  same argument first.
+
+  The builders take a structural `{ status(n), json(body) }`, so the package
+  imports no HTTP contract at all: `IHttpResponse` satisfies it, and so does the
+  `any`-typed `res` the older modules carry.
+
+  ## `error.code` is now checked by the compiler
+
+  All seven copies typed the parameter `code: string`. ADR-0112 (#3841) closed the
+  vocabulary — `ErrorCode` is `StandardErrorCode ∪ ERROR_CODE_LEDGER` — but an
+  invented code was still caught only at runtime, by a conformance suite parsing a
+  driven body, i.e. only on routes some test happened to drive.
+
+  The shared `sendError` types `code` as `ErrorCode`, so an unregistered code now
+  fails to compile, at every call site at once:
+
+  ```ts
+  sendError(res, 400, "NOT_A_REGISTERED_CODE", "invented");
+  // Argument of type '"NOT_A_REGISTERED_CODE"' is not assignable to parameter of type 'ErrorCode'.
+  ```
+
+  This cost no call-site churn: every code the seven modules emit was already
+  registered.
+
+  ## `extra` is closed at the same place
+
+  `sendError`'s last parameter is `Pick<ApiError, 'category' | 'httpStatus' |
+'details' | 'requestId'>` — exactly what `ApiErrorSchema` declares beside `code`
+  and `message`.
+
+  It was `Record<string, unknown>` while `settings-routes` still hung `namespace` /
+  `key` / `reason` / `fields` beside `code`. Those bodies passed every gate anyway:
+  `ApiErrorSchema` is a plain `z.object`, so unknown keys were STRIPPED rather than
+  rejected, and `envelopeViolations` inspects only the body's top level —
+  conformant _by stripping_ rather than by declaration. #4224 moved that module
+  onto `details`, which is what lets the parameter close here. Closing it at the
+  shared builder is the part that lasts: an undeclared sibling is now a compile
+  error in every module at once, rather than a key that quietly evaporates in
+  whichever module reintroduces it.
+
+  ## Nothing changes on the wire
+
+  The seven pairs were identical modulo the optional `status` and `extra`
+  parameters this one unions, and each module's driven conformance suite still
+  parses its real bodies against the real spec schemas. One internal call site was
+  rewritten: `package-routes` passed `details` positionally and now passes
+  `{ details }`, producing the same `error.details` it always did.
+
+  ## The guard got stronger
+
+  `scripts/check-route-envelope.mjs` counts response write sites per module. A
+  module that routes everything through the shared pair builds **none** itself, so
+  the seven now declare `0 / 0 / 0` where they used to declare `2 / 1 / 1`, and the
+  shared pair is pinned separately at `2 / 1 / 1` so the invariant stays total for
+  the surface rather than per-module. What the count asserts is no longer "your two
+  builders are the enveloped ones" but "you have no builders" — and a new route
+  that hand-rolls a body still moves it off zero and fails.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

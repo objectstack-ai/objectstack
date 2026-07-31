@@ -1,5 +1,169 @@
 # @objectstack/plugin-pinyin-search
 
+## 17.0.0-rc.1
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 9881074: fix(batch): the background walks seek instead of counting, so they stop skipping rows (#4363)
+
+  #4363 made a single paged read a partition of its result set. It could not make
+  a _walk_ one: seven background scans paged with a growing `offset` while writing
+  to the very rows they were reading, and an offset counts into a set those writes
+  are changing. Rows slide past the cursor and are never visited.
+
+  That is not a slow page in any of these — it is a wrong answer wearing the shape
+  of a clean run:
+
+  - **`rebuildApproverIndex`** built its desired state by walking
+    `sys_approval_request WHERE status = 'pending'` with no `orderBy` at all, then
+    **deleted** every index row that state did not explain. A skipped request
+    meant an approver silently dropped from someone's queue. (The loop beside it
+    ordered by `created_at` — not unique, so its pages were never a partition
+    either.)
+  - **`verifyFileReferences`** decides which files nothing references. A record it
+    never visits is reported as an unreferenced file.
+  - **`backfillFileReferences`** and the **pinyin companion backfill** rewrite
+    each row they read, so their own writes were shifting the set out from under
+    the cursor. Records were left unconverted and unsearchable by a run that
+    reported success.
+  - **`scanValueShapes`** exists to vouch that no stored value is off-shape, and
+    it opens a migration gate on that evidence.
+
+  All of them now go through `keysetWalk` (`@objectstack/types`): order by a
+  unique key, and seek past the last one instead of counting from the start. A
+  row's key does not move when the row is updated, and cannot be shifted when
+  another is deleted, so the walk is stable under exactly the mutation these
+  functions perform. It is also O(n) rather than O(n²/page) — measured on
+  Postgres over 2M rows, deep pages cost ~1.1 s by offset against ~0.09 s by seek.
+
+  One deliberate non-conversion: the REST **export** stream keeps its offset. It
+  honors a caller-chosen sort, and a keyset walk would have to re-order the export
+  by `id` to seek — changing what the user asked for to fix a cost. Its pages are
+  already a partition since #4363; only the depth cost remains.
+
+  `keysetWalk` merges the cursor with `$and` rather than spreading it into the
+  caller's filter, so a walk whose own `where` constrains the key column
+  (`{ id: { $in: [...] } }`) keeps that constraint instead of having it silently
+  overwritten. When a `max` cap is set it reads one row beyond the cap to tell
+  "the cap stopped us" from "the source ended exactly there" — without that, a
+  walk that read everything still reports `truncated`, and a caller acting on it
+  goes looking for rows that were never withheld.
+
+  The storage suites' fake engines now **throw** on an `offset` instead of serving
+  one, so the conversion is pinned rather than merely passing.
+
+- cc2de0e: chore(packaging): 20 packages stop publishing their sources, tests and build tooling (#4248)
+
+  These 20 packages declared no `files` field, so npm fell back to packing the
+  whole package directory. `npm pack --dry-run` on `@objectstack/plugin-webhooks`
+  listed **21 files** — 15 under `src/`, three of them unit tests
+  (`auto-enqueuer.test.ts`, `bootstrap-declared-webhooks.test.ts`, …), plus the
+  build-time `scripts/i18n-extract.config.ts`. `dist/` lands on top of that at
+  publish time rather than instead of it, so consumers were installing the
+  TypeScript sources and the test suite alongside the artifact they asked for.
+
+  Each now declares `"files": ["dist", "README.md"]`, matching the 29 packages
+  that already did. Nothing a consumer imports moves: every `main` / `types` /
+  `exports` target in all 20 already resolved inside `dist/`, which the new
+  `check:published-files` guard verifies rather than assumes. The visible change
+  is a smaller install and a smaller dependency-scanning surface — `npm pack` on
+  `@objectstack/plugin-webhooks` now yields 2 files plus `dist/`.
+
+  The other half of the fix is the gate. Half the packages declaring `files` and
+  half not was the #3786 shape — a hand-copied convention with nothing enforcing
+  it, where whoever forgets the line gets no signal at all. `check:published-files`
+  (new, wired into the always-required `lint` job) holds every non-private
+  workspace package to four invariants: `files` is **declared**; it is
+  **sufficient** (covers every entry point, so tightening a whitelist cannot ship
+  a package that fails to resolve); it is **minimal** (admits no test, test-harness
+  config or build script); and anything beyond `dist` + `README.md` is
+  **registered** with a reason, reconciled in both directions so a stale exemption
+  is an error rather than dead text. `@objectstack/spec` is the one package with
+  registered extras — its `.zod.ts` sources, JSON Schemas, liveness ledgers and
+  `CHANGELOG.md` are product, not build input.
+
+  This also closes an assumption #4206 was resting on. Excluding `<pkg>/scripts/**`
+  from the docs-drift implementation test is sound only while no package publishes
+  `scripts/` as runtime code; that held, but it held because someone read all three
+  offenders by hand. It is now checked on every PR.
+
+- Updated dependencies [48fcf70]
+- Updated dependencies [3ec8186]
+- Updated dependencies [b1863a5]
+- Updated dependencies [270650f]
+- Updated dependencies [956e7f9]
+- Updated dependencies [3aef718]
+- Updated dependencies [ffb003c]
+- Updated dependencies [32ccb23]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [8d895ff]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [c20b875]
+- Updated dependencies [2a37694]
+- Updated dependencies [3c628ce]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [c39d713]
+- Updated dependencies [91f4c78]
+- Updated dependencies [45dc446]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [39eb01b]
+- Updated dependencies [55bbefc]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [af2a095]
+- Updated dependencies [bf478e1]
+- Updated dependencies [77fadbf]
+- Updated dependencies [5c13368]
+- Updated dependencies [857a6cf]
+- Updated dependencies [d5749d7]
+- Updated dependencies [d92c72d]
+- Updated dependencies [5d21a48]
+- Updated dependencies [e4c2dc8]
+  - @objectstack/objectql@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Patch Changes

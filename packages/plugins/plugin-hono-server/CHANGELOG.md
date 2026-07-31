@@ -1,5 +1,748 @@
 # @objectstack/plugin-hono-server
 
+## 17.0.0-rc.1
+
+### Major Changes
+
+- e5a4d26: feat(plugin-hono-server)!: delete the CRUD/discovery convenience surface and the `registerStandardEndpoints` flag — the plugin is a transport adapter (#4073)
+
+  Completes the retirement. `HonoServerPlugin` now owns the socket, the middleware
+  and the three current-user endpoints, and nothing else. The data and discovery
+  APIs have one owner each: `@objectstack/rest` and the runtime dispatcher
+  (ADR-0076 D11).
+
+  **Removed**
+
+  - `POST/GET /api/v1/data/:object` and `GET /api/v1/data/:object/:id` — the raw
+    C+R surface that delegated straight to ObjectQL.
+  - `GET /api/v1/discovery` and `GET /.well-known/objectstack` — this plugin's
+    third discovery payload, which predated `DiscoverySchema` and could not
+    satisfy it (no `services`, the ADR-0076 D12 source of truth).
+  - The `registerStandardEndpoints` option. It is gone, not defaulted off: passing
+    it is now a type error, and passing it via `as never` mounts nothing.
+
+  **Unaffected**
+
+  - `/auth/me/permissions`, `/auth/me/localization` and `/me/apps` — this plugin
+    is the platform's only supply and they register unconditionally (#4144).
+  - Every composed host: `os serve`, `objectstack dev`, cloud's objectos and every
+    documented composition mount REST and/or the dispatcher, which already served
+    these routes and answered byte-identically with the flag on or off (#4260).
+
+  **Migration** — only a host that mounts `HonoServerPlugin` with neither owner is
+  affected. It now has no data or discovery API, and the boot warns once naming
+  both remedies. Mount `createRestApiPlugin` from `@objectstack/rest` for full
+  CRUD behind the gate stack, or `createDispatcherPlugin` from
+  `@objectstack/runtime`. There is no flag to opt back in.
+
+  **Why** — the surface was duplicate and lesser supply (C+R only, a subset of the
+  gates, a non-conforming discovery payload), and it charged rent: #2567, #3298
+  and #4018 each had to re-implement a platform invariant on it after the fact,
+  because a second implementation of a route is a second place every future
+  invariant must be remembered.
+
+### Minor Changes
+
+- 545d931: fix(plugin-hono-server): the current-user endpoints answer from the kernel that OWNS the request (cloud#927)
+
+  `/api/v1/auth/me/permissions`, `/auth/me/localization` and `/me/apps` resolved
+  their answer from the service locator captured at REGISTRATION time. On a
+  single-environment host that is the only kernel, so it is right. On a
+  **multi-tenant** host it is the routing shell — and identity is not there.
+  cloud's `ArtifactKernelFactory` mounts `AuthPlugin` per environment, and its host
+  kernel deliberately has none ("AuthPlugin is intentionally NOT injected on the
+  host"), so `getService('auth')` threw, the session resolver fell to its catch, and
+  every authenticated tenant caller got `{authenticated:false}`.
+
+  That is worse than an error: objectui's `MePermissionsProvider` reads
+  `authenticated:false` as ANONYMOUS and keeps its permissive default
+  (`return data.authenticated !== true`), because a guest surface has no resolvable
+  permissions by design. So the console's FLS / `apiOperations` hints were
+  systematically wrong — not a bypass (the server still enforces per request), but
+  exactly the client/server divergence `foldWildcardSuperUser` and
+  `clampManagedObjectWrites` exist to close, one layer up.
+
+  These endpoints now consult the host's ADR-0006 **`kernel-resolver`** seam per
+  request — the same seam the runtime dispatcher has used since Phase 5, so
+  multi-tenant routing has one strategy rather than two:
+
+  - **No `kernel-resolver` registered** → unchanged. Single-environment hosts,
+    `os serve`, and the QA conformance host see no difference.
+  - **A kernel** → that kernel's `auth` / `objectql` / `metadata` /
+    `security.permissions` answer.
+  - **`undefined`** → the registration-time locator, which is the seam's contract
+    for an unscoped / control-plane request.
+  - **A throw** → no answer at all: the thrown status when it carries one (cloud's
+    `KernelWarmingError` is 503 + `Retry-After`), else 503
+    `environment_unavailable`. Falling back to the default kernel would hand back a
+    confidently-wrong `{authenticated:false}` that the client fails OPEN on.
+
+  The seam is read **lazily, per request**, never captured at registration — a host
+  may register these routes before `kernel.bootstrap()` (to outrank an
+  `/api/v1/auth/*` wildcard), which is before the plugin that registers the
+  resolver has run its `init()`.
+
+  **FROM → TO for host adapters.** `CurrentUserEndpointsContext` gains an optional
+  `getKernel(): unknown`, the `defaultKernel` argument the seam takes. A
+  `PluginContext` already satisfies it, so hosts that mount `HonoServerPlugin` need
+  no change. A host passing a hand-rolled locator to
+  `registerCurrentUserEndpoints` should add it:
+
+  ```diff
+   registerCurrentUserEndpoints({
+     rawApp: httpServer.getRawApp(),
+  -  ctx: { getService: (n) => kernel.getService(n) },
+  +  ctx: { getService: (n) => kernel.getService(n), getKernel: () => kernel },
+   });
+  ```
+
+  Without it a multi-tenant host cannot be asked which kernel owns the request and
+  keeps the old provenance — a silent downgrade, so it is worth adding even where
+  the host is single-environment today.
+
+- 3c628ce: feat(auth)!: retire the `api.requireAuth` opt-out — anonymous access to object data is always denied (#3963)
+
+  `api.requireAuth: false` let a deployment open its ENTIRE data plane with one
+  config key. It is removed. Auth is a kernel concern, not a deployment posture:
+  anonymous callers are denied on every HTTP surface that reaches object data,
+  unconditionally.
+
+  Every surface that legitimately serves a session-less caller already derives its
+  own narrow authorization from a DECLARATION, so none of them needed the global
+  switch:
+
+  - control plane (`/auth/*`, `/health`, `/ready`, `/discovery`, ADR-0069
+    remediation) — the auth-gate allowlist;
+  - public form submission — `publicFormGrant` (ADR-0056 Option A);
+  - share links — the capability token, validated then read as SYSTEM;
+  - a `book.audience: 'public'` read — the ADR-0046 §6.7 audience gate (#3995);
+  - MCP — an OAuth token or API key.
+
+  **Breaking changes.**
+
+  - `api.requireAuth` is a retired key. It is tombstoned (`retiredKey`) in both
+    `RestApiConfigSchema` and the stack `api` block, so authoring it now fails with
+    a fix-it message rather than being silently stripped (the ADR-0104 / #3733
+    quiet-failure this whole line of work has been closing). `os migrate meta`
+    drops it via the protocol-17 conversion `stack-api-require-auth-removed`.
+  - `shouldDenyAnonymous` (@objectstack/core) no longer takes a `requireAuth`
+    input; it denies any anonymous, non-system caller outside the control-plane
+    allowlist.
+  - A stack that mounts **no auth at all** now FAILS AT BOOT when it would serve a
+    data API (`objectstack serve`, plugin-dev), instead of getting an explicit
+    fail-open. Enable auth (the `auth` tier or AuthPlugin), or run without the data
+    API. There is no anonymous-data carve-out any more — publishing a public
+    surface is done by declaration (see above).
+
+  **Migration.** Delete `api.requireAuth` from the stack config (or run
+  `os migrate meta`). If you were serving data publicly with `requireAuth: false`,
+  replace it with the declaration that fits: a public form view, a share link, or
+  `book.audience: 'public'`. If you have an auth-less stack that intentionally
+  served data, it must now mount auth or stop serving the data API.
+
+- d4720ca: feat(plugin-hono-server): export `registerCurrentUserEndpoints` so a host without the plugin can still supply them (cloud#924)
+
+  `GET /api/v1/auth/me/permissions`, `/api/v1/auth/me/localization` and
+  `/api/v1/me/apps` are the platform's **sole** supply — neither
+  `@objectstack/rest` nor `@objectstack/runtime` registers any `/me/*` route, the
+  objectui console reads the first for its whole permission layer and the second
+  for regional defaults, and `core`'s auth gate allow-lists the last two as
+  endpoints a gated user MUST still reach. #4073/#4079 freed them from the
+  `registerStandardEndpoints` flag, but left the supply welded to
+  `HonoServerPlugin`: a host that stands up a bare `HonoHttpServer` and registers
+  it as `http.server` itself — rather than mounting the plugin — got no provider at
+  all, and the console's FLS / `apiOperations` had no server-side answer on that
+  startup path.
+
+  Registration needs a Hono app and a service locator, not ownership of the
+  listening socket, so it is now a standalone module (`./current-user-endpoints`)
+  that both shapes call:
+
+  ```ts
+  import { registerCurrentUserEndpoints } from "@objectstack/plugin-hono-server";
+
+  const httpServer = new HonoHttpServer();
+  kernel.registerService("http.server", httpServer);
+  registerCurrentUserEndpoints({
+    rawApp: httpServer.getRawApp(),
+    // any { getService, logger } — a PluginContext satisfies it structurally
+    ctx: {
+      getService: (n) => {
+        try {
+          return kernel.getService(n);
+        } catch {
+          return undefined;
+        }
+      },
+    },
+  });
+  ```
+
+  It is **idempotent**: it returns `false` and registers nothing when all three
+  paths are already served, so a host may both call it eagerly on the raw app AND
+  mount the plugin — the plugin's `kernel:ready` registration then no-ops instead
+  of shadowing the host's routes with dead duplicates. Registering early matters,
+  because Hono's only route precedence is first-registration-wins and plugin-auth
+  mounts a `/api/v1/auth/*` wildcard that `/auth/me/*` must outrank.
+
+  **No behaviour change for existing hosts.** `os serve` and every host that mounts
+  `HonoServerPlugin` register the same three routes, in the same `kernel:ready`
+  position, with the same response shapes — the plugin now delegates to the shared
+  registrar instead of owning a private method.
+
+  **Moved exports (same package, same names, no rename).** `foldWildcardSuperUser`,
+  `clampManagedObjectWrites`, `seedSuperUserRestrictedObjects`,
+  `annotateEffectiveApiOperations`, `ManagedSchemaLike` and `ApiExposureSchemaLike`
+  now live in `./current-user-endpoints` alongside the endpoint they shape. Importing
+  them from the package root (`@objectstack/plugin-hono-server`) is unchanged; only a
+  deep import of `.../dist/hono-plugin` would need updating, and the package exposes
+  no such subpath.
+
+- 43ff598: fix(plugin-hono-server): stop gating the current-user endpoints behind `registerStandardEndpoints` (#4073)
+
+  `registerStandardEndpoints` gated two unrelated things behind one flag:
+
+  - **Duplicate supply** — raw `POST/GET /api/v1/data/:object` (create + read
+    only), which `@objectstack/rest` also serves and, registering first, is what
+    actually answers; plus `GET /api/v1/discovery` and
+    `/.well-known/objectstack`, which the dispatcher and REST own and which this
+    surface already cedes to them (#4018).
+  - **Sole supply** — `GET /api/v1/auth/me/permissions`,
+    `/api/v1/auth/me/localization` and `/api/v1/me/apps`. Nothing else in the
+    platform mounts these: neither `@objectstack/rest` nor `@objectstack/runtime`
+    registers any `/me/*` route, the console's entire permission layer reads
+    `/auth/me/permissions`, the console reads `/auth/me/localization` for regional
+    defaults, and `core`'s auth gate allow-lists `/me/apps` + `/me/localization`
+    as endpoints a gated user MUST still reach to bootstrap the remediation UI.
+
+  `os serve` gets all of it only because the flag defaults to `true` — the CLI
+  constructs `new HonoServerPlugin({ port })`. So `registerStandardEndpoints:
+false`, whose documented job is the optional CRUD/discovery convenience surface,
+  silently took the console's permissions and localization down with it.
+
+  The three current-user endpoints now register **unconditionally**, and the flag
+  covers the duplicate half only — what its name and docs always claimed.
+
+  **FROM → TO.** If you set `registerStandardEndpoints: false` and worked around
+  the missing endpoints (proxying `/auth/me/permissions` yourself, or pinning the
+  flag to `true` purely to keep them), you can drop that workaround: the endpoints
+  are now present either way. No route is removed and no response shape changes,
+  so a host that left the flag at its default sees no difference. If you relied on
+  `false` meaning "this plugin mounts no `/api/v1` routes at all", that is no
+  longer true — it never was for `os serve`, which is the only host that shipped
+  the flag's default.
+
+  Also removes three unreferenced `*_ENDPOINT_PRIORITY` constants;
+  `DISCOVERY_ENDPOINT_PRIORITY = 900` in particular implied a route-priority
+  mechanism that does not exist (precedence here is Hono's
+  first-registration-wins).
+
+- 623e555: feat(plugin-hono-server): `registerStandardEndpoints` now defaults to `false` — the deprecated CRUD/discovery convenience surface is opt-in (#4073)
+
+  The flag mounts raw C+R `/api/v1/data/:object` and `/api/v1/discovery` /
+  `/.well-known/objectstack`. Every path it mounts is duplicate — and lesser —
+  supply: C+R only, a subset of the gates, a pre-`DiscoverySchema` discovery
+  payload. `@objectstack/rest` serves full `/data` CRUD behind the whole gate
+  stack, REST/the dispatcher own discovery (#4018 cede), and #4260 pinned that a
+  composed host answers **byte-identically** with the flag on or off. The surface
+  has also been a standing tax: #2567, #3298 and #4018 each had to re-implement a
+  platform invariant here after the fact.
+
+  **FROM → TO**
+
+  - **Composed hosts (REST and/or the dispatcher mounted)** — `os serve`,
+    `objectstack dev`, cloud's objectos, every documented path: **no change**.
+    Those plugins already answer every route this surface covered, and answered
+    them first.
+  - **Bare hosts (HonoServerPlugin only)**: `/api/v1/data/:object`,
+    `/api/v1/discovery` and `/.well-known/objectstack` are **no longer mounted by
+    default**. The boot now logs a warn naming the flag and the remedy instead of
+    leaving a silent 404. Migrate by mounting `createRestApiPlugin` from
+    `@objectstack/rest` — it needs the same `objectql` service this surface
+    already required, and returns full CRUD plus the gate stack — or pass
+    `registerStandardEndpoints: true` to keep the legacy surface during the
+    deprecation window.
+  - The current-user endpoints (`/auth/me/permissions`, `/auth/me/localization`,
+    `/me/apps`) are **unaffected** — they never sat behind this flag (#4144) and
+    register unconditionally.
+
+  The flag is now marked `@deprecated`. Next step per #4073: one release of
+  observation, then `registerDiscoveryAndCrudEndpoints` (and the flag) are deleted
+  and this plugin becomes a pure transport adapter (ADR-0076 D11).
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 4dc14cc: Retire the three `security.*` dev stubs, and refuse to load `plugin-dev` under `NODE_ENV=production` (#4093).
+
+  **The security stubs are gone.** When `@objectstack/plugin-security` was not installed, `plugin-dev` filled its three slots with fakes that inverted the decision each stood in for: `security.permissions.checkObjectPermission()` returned `true` for everything, `security.rls.compileFilter()` returned `null` so no row-level predicate was applied, and `security.fieldMasker.maskResults()` returned rows unmasked. ADR-0076 D12's rule — learned from the analytics shim it retired in #3891 — is that a fallback may degrade features, **never security semantics**; `packages/spec/src/contracts/security-service.ts` says the same from the other side (these three are plugin-security's internals, and access-narrowing answers must fail CLOSED). Since `plugin-dev` loads SecurityPlugin through the same optional dynamic import as everything else, the package merely being absent was enough to swap real RBAC/RLS/masking for allow-all behind a single `warn` line.
+
+  The slots now stay empty — which is what production has without SecurityPlugin, and what every consumer already handles — and the boot log states plainly that RBAC, row-level security and field masking are not being enforced.
+
+  **`plugin-dev` now refuses to initialize under `NODE_ENV=production`.** It is a published package that registers development fakes for every unclaimed core service slot, including ones that report success for work they never did, and it had no environment check of its own: an `objectstack.config.ts` carrying `new DevPlugin()` into a production deploy got the whole fake slate with only a boot log to say so. `init()` now throws there. Set `OS_ALLOW_DEV_PLUGIN=1` if you deliberately want the dev slate under a production `NODE_ENV` (a staging box mimicking prod, a smoke test that pins the variable).
+
+  FROM → TO: a stack that relied on the dev security stubs was not being protected by them — it was being told everything was allowed. Install `@objectstack/plugin-security` to enforce RBAC/RLS/masking, or accept the empty slots (unchanged behaviour on every path that already handled an absent SecurityPlugin). A production process that loaded `plugin-dev` must now either drop it and install the real services, or opt in explicitly with `OS_ALLOW_DEV_PLUGIN=1`.
+
+  Also: `plugin-hono-server`'s `/auth/me/permissions` resolves `security.permissions` and `metadata` through the same guarded lookup its three sibling lookups already used. An unregistered slot makes `getService` throw, which previously landed in the outer catch — the same fail-open response body, but logged as "/auth/me/permissions failed" on every console navigation instead of taking the deliberate `!evaluator` branch.
+
+- 839982e: fix(plugin-hono-server): compute the standalone discovery `routes` from real registrations, and cede to the real owner (#4018)
+
+  `registerStandardEndpoints` served a **fully static** discovery: a hardcoded
+  `routes` table listing `auth` / `packages` / `analytics` / `workflow` /
+  `automation` / `ai` / `notifications` / `i18n` / `storage` / `ui` regardless of
+  what the host actually mounted. A standalone Hono deployment therefore
+  advertised ten route families and 404'd on every one no plugin bridged — the
+  "advertise a route that doesn't exist" class ADR-0076 D12 exists to kill, and
+  the reason this surface disagreed with the two real discovery builders
+  (`HttpDispatcher.getDiscoveryInfo`, `metadata-protocol`'s `getDiscovery`), which
+  both compute per service at runtime.
+
+  Two changes, no new discovery implementation to keep in sync:
+
+  - **Single owner (D11 / OQ#9).** When `@objectstack/rest` or the runtime
+    dispatcher is on the kernel, this surface no longer registers
+    `${prefix}/discovery` — that plugin owns it. Both register during plugin
+    `start()`, i.e. before this `kernel:ready` hook, and Hono is
+    first-registration-wins, so they already shadowed this handler in every
+    composed deployment: the cede changes no served payload, it removes a third
+    one nobody read. `/.well-known/objectstack` is ceded to the dispatcher only
+    (REST never registers it), so a REST-without-dispatcher host keeps the
+    redirect.
+
+  - **Computed, not hardcoded (D12).** When this surface does own `/discovery`,
+    `routes` is derived per request from the app's live route table: a family is
+    advertised iff a route is really registered at or under its base path. A
+    wildcard mounted _above_ the base (global `/*` middleware, `/api/v1/*`) does
+    not count as a mount.
+
+  **What changes for you.** On a standalone `HonoServerPlugin` host (no REST, no
+  dispatcher), `GET /api/v1/discovery` now omits every family nothing mounts —
+  most visibly `routes.metadata`, since `/api/v1/meta` ships with
+  `@objectstack/rest` / the dispatcher. Clients that read a route out of
+  discovery and call it stop getting a 404; `@objectstack/client` falls back to
+  the conventional path for any omitted key, so `client.connect()` is unaffected.
+  Composed deployments (`os serve`, cloud) are unchanged — the dispatcher's
+  service-aware discovery was already the one being served.
+
+- f985b3f: fix(spec,core,cloud-connection,metadata): one HTTP contract, one canonical slot name — and the dead shadow copy that helped cause the false exemption is deleted (#4251)
+
+  **`packages/core/src/contracts/` was a dead near-copy of the real contracts,
+  and it is gone.** The directory (http-server.ts, data-engine.ts, logger.ts) had
+  ZERO importers — no relative import, no subpath export, not a tsup entry;
+  core's barrel has re-exported the `@objectstack/spec/contracts` versions all
+  along ("Re-export contracts from @objectstack/spec for backward
+  compatibility"). But the shadow had already **diverged** from the live
+  contract (spec's `IHttpResponse` grew `write?`/`end?` and `IHttpRequest` grew
+  `rawBody?`; the copy never did), so anyone who grepped their way into it read a
+  stale contract that nothing enforces — the exact both-humans-and-AI failure
+  mode behind the false `http.server` exemption (#4382). Deleting it is
+  zero-risk by construction: nothing could reach it.
+
+  **`http.server` is the canonical slot name, and the ledger now says so.**
+  `ServiceSlotContracts` gains `'http.server': IHttpServer` plus the deprecated
+  `'http-server'` alias entry (same instance — hono-plugin and qa's node-plugin
+  register both two lines apart; cloud's two server entrypoints do the same).
+  Canonical is the only name present on EVERY provider path: runtime's
+  `config.server` path registers no alias, so the three cloud-connection plugins
+  that read the alias alone (marketplace-proxy, runtime-config,
+  marketplace-install-local) found an empty slot there — a live miss, now fixed:
+  all readers go canonical-first with the alias as a fallback that dies with the
+  alias registrations. The registrations themselves are untouched this release;
+  both sites now carry the deprecation note.
+
+  **`getRawApp?(): any` joins `IHttpServer`** — the deliberate framework-handle
+  escape, declared once. Four consumers were each declaring it locally
+  (cloud-connection ×2, metadata's HMR routes, cloud's serverless node-server);
+  those local `RawAppHost`/`HttpServerWithRawApp` types are deleted. The `any`
+  return is deliberate and documented at the single declaration: the handle's
+  real type belongs to the framework, and naming it would give the contract a
+  framework dependency. Adapters are not required to expose it; consumers
+  feature-detect.
+
+  **`IMetadataService.bulkRegister`/`bulkUnregister` declare the write options
+  their implementation has always accepted.** `bulkRegister`'s contract options
+  dropped the `MetadataWriteOptions` half its implementation intersects in
+  (`notify` is destructured on the method's first line); `bulkUnregister`
+  declared no options at all while the manager takes them. Same shape as the
+  `IDataEngine` read-methods gap from B2: a caller typed to the contract could
+  not reach the channel without erasing the lookup. Both additive; no implementor
+  or caller breaks.
+
+  Slot-lookup baseline ratchets 168 → 167 (marketplace-install-local's lookup
+  typed while touched).
+
+- 7ce02eb: feat(spec,objectql): `IObjectQLEngine` — the `objectql` slot's contract exists, the class `implements` it, and the seven consumer-local stand-ins are deleted (#4251 B3)
+
+  ObjectQL registers one instance under two names, and the ledger can finally say
+  what each name means: `data` stays `IDataEngine` (the data plane), `objectql`
+  now resolves to **`IObjectQLEngine`** — the full engine: schema access
+  (`getSchema` / `getObject` / `registry`), actions (`registerAction` /
+  `removeActionsByPackage` / `executeAction`), the hook/middleware seams
+  (`registerHook` / `unregisterHooksByPackage` / `registerFunction` /
+  `registerMiddleware` / `bindHooks`), the first-wins default runners and hook
+  metrics, boot wiring (`registerDriver` / `setDatasourceMapping` /
+  `registerApp`), and the ops probes (`checkDriversHealth` /
+  `wasDatastoreCreatedFromEmpty` / `invalidateDataMigrationFlags`). The ledger
+  test pins the new relation: `objectql` strictly widens `data`, deliberately no
+  longer equal.
+
+  **Why now, and why `implements` is the point.** The honest state for two
+  batches was recorded on `DomainHandlerContext.getObjectQL`: ObjectQL is wider
+  than `IDataEngine`, the wider part had no contract, and typing it `IDataEngine`
+  would be "the more comfortable-looking lie". The interim discipline — each
+  consumer declares the narrow slice it uses — produced seven local surfaces
+  (`AppEngineSurface`, `EngineRegistrySurface`, `EngineExtensionSurface`,
+  `SecurityEngineSurface`, `FreshDatastoreEngine`, the dispatcher's inline
+  `checkDriversHealth` slice, the `getObjectQL: any` itself). Each was honest and
+  each was an UNCHECKED claim: `getService<Surface>('objectql')` is an assertion,
+  so an engine rename would have broken every consumer at runtime with zero
+  compile errors. `ObjectQL implements IObjectQLEngine` converts all of them into
+  one compiler-verified claim. All seven stand-ins are deleted; consumers import
+  the one declaration. `getObjectQL` is typed `Promise<IObjectQLEngine | null>`
+  end to end, closing the oldest documented `any` in the dispatcher.
+
+  **Evidence bar unchanged.** Every declared member has a cross-package consumer
+  reaching it through the slot; engine members without one (e.g. `triggerHooks`,
+  cross-package only in tests) stay off until a caller appears. The registry view
+  (`EngineSchemaRegistryView`) declares exactly the eight members consumers use.
+
+  **`_registry` never leaves the engine package now.** plugin-security's
+  declared-metadata readers (`readDeclared`, permission-set projection, suggested
+  audience bindings) reached ObjectQL's private `_registry` field through `any` —
+  the same private reach `/me/apps` had in B2, five more times. All migrated to
+  the public `registry` getter the contract declares, test doubles included.
+
+  **`IMetadataService` gains `subscribe?` / `loadMany?`** — implemented by
+  `MetadataManager` beside `watch` all along, reached through the slot only via
+  `any` by ObjectQLPlugin's metadata bridge (the re-sync keeping runtime-authored
+  hooks/actions live). With them declared, the bridge's six `metadata` lookups
+  and metadata-protocol's `objectql` lookup carry contract types, and both files
+  leave the grandfather list entirely: baseline **167 → 159 sites, 36 → 34
+  files**.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- c54c822: fix(spec,plugins): sweep the auth/session slot lookups — 31 sites typed, and the user-import metadata reader was pointed at a service that never had the method (#4251)
+
+  Batch B2 of the #4251 sweep: every service-lookup erasure in the auth/session
+  family. `plugin-auth/auth-plugin.ts` (20), `plugin-hono-server/current-user-endpoints.ts`
+  (10) and `plugin-security/security-plugin.ts` (1) now pass the slot's contract
+  type; the ratchet baseline drops **171 → 140 sites, 40 → 37 files**.
+
+  **The yield.** `POST /admin/import-users` resolved the `metadata` slot and probed
+  `metadataService?.getMetaItem` to decide whether to pass the import's field-coercion
+  dependency. `getMetaItem` is a **protocol** method — `ObjectStackProtocolImplementation`,
+  registered by MetadataProtocolPlugin under the `protocol` slot. `MetadataManager`,
+  which occupies `metadata`, has never had it. So the probe was false on every
+  deployment and the dep was never passed: imported rows reached `sys_user`
+  uncoerced, with the branch that says otherwise sitting right there. This is the
+  same shape as #4127's dead `automation.trigger` and #4321's `registerInMemory`
+  probes — a capability the code advertises and the runtime cannot deliver, kept
+  invisible by the `any`. Typing the lookup to `IMetadataService` is what turned it
+  into a compile error. The route reads `protocol` now.
+
+  `/me/apps` reached ObjectQL's **private** `_registry` through `as any` while
+  `/auth/me/permissions`, two handlers up in the same file, read the public
+  `registry` getter over the same field of the same object. Both read the public
+  accessor now; the one test that stubbed `_registry` was pinning the private reach
+  and stubs `registry` instead.
+
+  **Contract, from evidence.** `IDataEngine`'s read methods (`find` / `findOne` /
+  `count` / `aggregate`) declare the trailing `options?: BaseEngineOptions`
+  argument they have always accepted. ObjectQL's own doc explains why it exists:
+  reads once took their context inside the query while writes took it in trailing
+  `options.context`, so the same `{ context }` object was correct as `insert`'s 3rd
+  argument and **silently dropped** as `find`'s — "an intended `isSystem` bypass
+  just vanished". The engine accepts both channels; the contract exposed only the
+  query one, so callers using the trailing channel — the current-user endpoints'
+  permission-set loader among them — could only reach it by erasing the lookup.
+  Adding an optional trailing parameter breaks no implementor (the existing
+  minimal-implementation test proves it) and no caller. `BaseEngineOptions` was
+  already exported, sitting unused under the "legacy/deprecated" heading, which is
+  why the contract went looking and did not find it; it moves up beside the other
+  QueryAST-aligned types with the rationale attached. One new spec test pins the
+  trailing argument at the call site — the position where the old contract rejected it.
+
+  **Where the contract does not reach, the escape hatch is named.** Three slots
+  resist a spec type today and each gets a narrow, documented local interface
+  instead of `any`: `security.permissions` (plugin-security's `PermissionEvaluator`
+  — plugin-hono-server must not depend on an optional plugin), `settings`
+  (service-settings' resolver, same reason), and ObjectQL beyond `IDataEngine`
+  (`registry` / `getSchema` / `registerHook` / `registerMiddleware`). That last one
+  is deliberate scope: the standing record on `getObjectQL` in `@objectstack/runtime`
+  says ObjectQL is genuinely wider than `IDataEngine` and nobody has written the
+  wider contract, so typing the whole thing `IDataEngine` would be "the more
+  comfortable-looking lie". These declarations are what that contract gets written
+  from, and what it deletes.
+
+  No behavior changes beyond the two fixes above.
+
+- 2053714: fix(hono,plugin-hono-server,runtime): one CORS source and one registry key — the last derivable copies from the #3786 sweep
+
+  Re-ran the sweep across all 72 packages. The earlier pass globbed `packages/*/src`,
+  which is one level deep, so it missed everything under `packages/plugins/` and
+  `packages/adapters/` — the "sweep is basically clean" report was based on an
+  incomplete scan.
+
+  **A stale CORS default, on the one description callers actually read.**
+  `HonoCorsOptions.allowHeaders`' TSDoc promised
+  `['Content-Type', 'Authorization', 'X-Requested-With']` "which is sufficient for
+  cookie and bearer-token auth". The real default carries three more:
+  `X-Tenant-ID` and `X-Environment-Id` (multi-tenant routing) and `If-Match` (the
+  OCC token on record PATCHes, objectui#2572). Sizing a custom `allowHeaders`
+  against that sentence drops all three and every cross-origin save fails with
+  "Failed to fetch".
+
+  The instructive part: **three** Hono CORS sites each carried their own copy of
+  the defaults under "keep in sync" comments, and the copies all agreed. What
+  drifted was the _doc_ — the only description with no counterpart to be diffed
+  against, and the only one a caller reads.
+
+  Both defaults are now single constants, `DEFAULT_CORS_ALLOW_HEADERS` and
+  `DEFAULT_CORS_EXPOSE_HEADERS`, exported from `@objectstack/plugin-hono-server`
+  and imported by the adapter (which already depends on it — no new edge). The
+  TSDoc links them rather than restating, and documents an asymmetry it never
+  mentioned: `allowHeaders` REPLACES the default, `exposeHeaders` MERGES with it.
+
+  `hono-plugin.test.ts` stopped stubbing `./adapter` wholesale and keeps the real
+  constants via `importOriginal` — it asserts exact header lists, so a mocked copy
+  would make the test agree with itself rather than with what ships. Verified:
+  removing `If-Match` from the constant fails `should allow If-Match by default`,
+  by name.
+
+  **A third copy, in the public protocol docs.** `content/docs/protocol/kernel/
+http-protocol.mdx` advertised `Access-Control-Allow-Headers: Authorization,
+Content-Type` — two of the six — and methods missing `PUT` and `HEAD`, with no
+  mention of the exposed headers at all. That is the copy an integrator builds a
+  client against: reading it, you would not know `If-Match` is permitted (so you
+  would not attempt OCC) or that `set-auth-token` is readable (so a rotated
+  session would look like a bug). Corrected, with the three non-obvious allowed
+  headers and the two exposed ones explained, and a pointer to the constants as
+  the source of truth.
+
+  **A hand-copied service-registry key.** `runtime`'s share-links domain resolved
+  `'shareLinks'` as a string literal, copied from `SHARE_LINK_SERVICE` — whose own
+  doc-comment says "keep in sync with the SharingPlugin registration". It now
+  imports the constant. A drifted copy resolves nothing, so every share link
+  answers 501 "Sharing is not configured for this environment" on an environment
+  where it is configured perfectly well.
+
+  **Plus a duplicate ledger entry**, which is the same defect one level up:
+  `check-generated.ts` carried two `NO_GENERATOR` entries for
+  `check:strictness-ledger`, because #4203 and #4252 each added one without seeing
+  the other. Functionally harmless (the ledger is read into a `Set`) but it leaves
+  two comments telling overlapping versions of the same story. #4203's is kept —
+  it is the more complete account and it is the PR that fixed the underlying
+  problem.
+
+  Checked and deliberately left alone: `ApprovalStatus` (5 values) and
+  `ApprovalActionKind` (12 values) versus their `plugin-approvals` selects — diffed
+  verbatim, no drift today, still hand-copied across a package boundary.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/observability@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

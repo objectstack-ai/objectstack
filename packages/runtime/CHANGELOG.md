@@ -1,5 +1,2878 @@
 # @objectstack/runtime
 
+## 17.0.0-rc.1
+
+### Major Changes
+
+- 195ad76: fix(actions)!: failures speak HTTP — business rejections are 400, success is a single wrap (#3962)
+
+  **BREAKING (raw-HTTP callers of `POST /api/v1/actions/...` only).** The
+  200-with-inner-envelope wire was never a designed contract: no ADR or doc ever
+  specified it, it originated as the route's catch block reusing
+  `deps.success()`, and `/actions` was the only route of 12 that double-wrapped.
+  #3962 classifies it as a bug. Five defects traced back to that one extra layer
+  (the console's green toast on failed actions, `redirectUrl` never firing, a
+  marketplace install reported as installed when it failed, the client-envelope
+  divergence #3927 papered over, and crashes invisible to monitoring).
+
+  The contract now, identical to `/data`:
+
+  | Outcome                                                        |         HTTP          | Body                                                                  |
+  | :------------------------------------------------------------- | :-------------------: | :-------------------------------------------------------------------- |
+  | Ran, returned                                                  |        **200**        | `{success: true, data: <handler return value>}` — single wrap         |
+  | Ran, rejected (business rule / validation)                     |        **400**        | `{success: false, error: {message, code, details: {code?, fields?}}}` |
+  | Never dispatched (unknown / denied / wrong type / unavailable) | 404 / 403 / 400 / 503 | unchanged (#3930/#3951)                                               |
+  | Crashed (`TypeError`, driver class, sandbox timeout)           |        **500**        | unchanged (#3951)                                                     |
+
+  A validation rejection carries `details.code: 'VALIDATION_FAILED'` and
+  `details.fields[]` — the exact payload #3937 fought for, now on the same wire
+  shape `/data` has always used, which `@objectstack/client` normalizes to
+  `err.code` / `err.fields` (#3927). A rejected flow is a 400 with
+  `details.code: 'FLOW_FAILED'`. The crash-vs-rejection discriminator (#3951,
+  error `name`) now selects 400 vs 500.
+
+  `client.actions.invoke` / `invokeGlobal` still never throw: they fold every
+  failure status into `{success: false, error}`, read the single wrap on
+  success, and keep a NARROW legacy heuristic so a current SDK talking to a
+  pre-#3962 server still folds the old double-wrapped 200s correctly.
+
+  **Migration for raw-HTTP third parties:** branch on the HTTP status — a
+  non-2xx is the failure, `error.message` / `error.details` carry the detail; on
+  a 200, `data` is the handler's return value directly (one level less than
+  before). Callers using `@objectstack/client` need no change.
+
+- 698cbc2: feat(runtime)!: action params are enforced by default, and the opt-in is gone (#3438, ADR-0104 D2)
+
+  A request bag that violates an action's declared `params[]` — a missing
+  `required` param, a value outside its `options`, a scalar where `multiple`
+  declares an array, a non-id where a `reference` declares one, or a key the
+  action never declared — is now **rejected before the handler runs**:
+  `400 VALIDATION_FAILED` on REST, a thrown error on MCP. It used to be logged
+  and passed through.
+
+  ```diff
+  - OS_ACTION_PARAMS_STRICT_ENABLED=1   # removed — enforcement is the default
+  + OS_ALLOW_LAX_ACTION_PARAMS=1        # escape hatch: warn and pass, as before
+  ```
+
+  **What breaks.** Only calls that were _already_ wrong. The declaration was a
+  complete contract that informed nothing but the client dialog, so a bag the
+  server accepted could still have been silently ignored by the handler — which
+  is exactly how a correctly-intended `reference: 'sys_user'` degraded into a
+  paste-a-UUID box (#3405) with a success envelope on top. Those calls now fail
+  loudly instead of quietly. Actions declaring no `params` are untouched, and the
+  dispatcher's own `recordId` / `objectName` are allowlisted
+  (`ACTION_PARAM_BUILTIN_KEYS`), so the keys dispatch itself merges in were never
+  candidates for the unknown-key error.
+
+  **Fixing a rejection** takes one edit at the call site: the message names the
+  offending param and the declared list. If an integration you cannot reach in
+  time is affected, set `OS_ALLOW_LAX_ACTION_PARAMS=1` to restore the old
+  pass-through — the violation still logs once per action, so the drift stays
+  visible rather than becoming invisible again.
+
+  **Why 17.0 rather than a warn window in 17 and the flip in 18.** R3 asked for
+  warn-then-error, and ADR-0104's 2026-07-30 addendum declined it on the merits
+  rather than postponing. What a violation strands is a **caller**, not data: the
+  rejection reaches a developer or an agent who can fix it in one edit, no stored
+  row is made unwritable, and the escape hatch makes it reversible in a restart.
+  Deferring that by a major would have charged every deployment a second upgrade
+  ceremony — 16→17 is already a substantial, tested migration — to postpone a
+  break that costs one edited call. v17 already carries harsher zero-window
+  flips (`allowExport` unset now means denied; an undeclared action handler 404s
+  with no opt-out at all), so holding the milder change to a stricter standard
+  would have been inconsistent rather than cautious.
+
+  For AI and MCP callers specifically — the population D2 was built for — a 400
+  is corrective feedback consumed in-loop, while a server-side warning is
+  feedback nobody ever reads.
+
+  D1's value-shape half went the opposite way for the opposite reason: it rejects
+  on the basis of **stored data**, which an author cannot edit their way out of,
+  so it stays gated per deployment on that deployment's own migration evidence.
+
+- ffb003c: **ADR-0110 — an action's identity is its `name`, and anything executable over a
+  governed surface must have a declaration.**
+
+  `POST /api/v1/actions/:object/:action` resolved the DECLARATION from the URL
+  segment as a `name` but dispatched the HANDLER using that same segment as a
+  registry key. For a target-bound action (`{ name: 'complete_task', target:
+'completeTask' }`) those are different strings, so the two documented callers
+  each worked on exactly the half the other broke: the documented curl resolved
+  the declaration then 404ed, while the Console's `target`-addressed call
+  dispatched fine and resolved no declaration — silently skipping the ADR-0066 D4
+  capability gate and the ADR-0104 param contract (#3935).
+
+  - **D1/D2** — identity is always the declarative `name`; the handler key is
+    derived from the resolved declaration through a rotation now shared with the
+    MCP `run_action` bridge (`resolveActionHandlerKeys`, `executeRegisteredAction`).
+    The REST route previously rotated only the object key, never the handler key.
+  - **D3 (breaking)** — declaration resolution is a trichotomy. A genuinely
+    undeclared handler is **refused (404)** with the `defineAction` to add, rather
+    than executed ungated with system privileges; an unreachable metadata plane is
+    a **503** rather than a silent ungating (`MetadataManager.loadDiagnosed` tells
+    a clean miss from an outage). `OS_ALLOW_UNDECLARED_ACTIONS=1` is the migration
+    valve — it warns on every invocation and is removed in 18.
+  - **D5** — `reconcileActionRegistrations` plus `ObjectQLEngine.listRegisteredActions`
+    power a `kernel:ready` inventory logging every registered-but-undeclared
+    handler (refused at dispatch) and every declared script action bound to no
+    handler — the ADR-0078 converse, mechanised.
+  - **D6** — security-gate strictness is opt-**out** (`OS_ALLOW_*`), never opt-in.
+
+  Apps whose actions are all declared need no changes beyond gaining enforcement
+  of the `requiredPermissions` they already declared.
+
+- 3c628ce: feat(auth)!: retire the `api.requireAuth` opt-out — anonymous access to object data is always denied (#3963)
+
+  `api.requireAuth: false` let a deployment open its ENTIRE data plane with one
+  config key. It is removed. Auth is a kernel concern, not a deployment posture:
+  anonymous callers are denied on every HTTP surface that reaches object data,
+  unconditionally.
+
+  Every surface that legitimately serves a session-less caller already derives its
+  own narrow authorization from a DECLARATION, so none of them needed the global
+  switch:
+
+  - control plane (`/auth/*`, `/health`, `/ready`, `/discovery`, ADR-0069
+    remediation) — the auth-gate allowlist;
+  - public form submission — `publicFormGrant` (ADR-0056 Option A);
+  - share links — the capability token, validated then read as SYSTEM;
+  - a `book.audience: 'public'` read — the ADR-0046 §6.7 audience gate (#3995);
+  - MCP — an OAuth token or API key.
+
+  **Breaking changes.**
+
+  - `api.requireAuth` is a retired key. It is tombstoned (`retiredKey`) in both
+    `RestApiConfigSchema` and the stack `api` block, so authoring it now fails with
+    a fix-it message rather than being silently stripped (the ADR-0104 / #3733
+    quiet-failure this whole line of work has been closing). `os migrate meta`
+    drops it via the protocol-17 conversion `stack-api-require-auth-removed`.
+  - `shouldDenyAnonymous` (@objectstack/core) no longer takes a `requireAuth`
+    input; it denies any anonymous, non-system caller outside the control-plane
+    allowlist.
+  - A stack that mounts **no auth at all** now FAILS AT BOOT when it would serve a
+    data API (`objectstack serve`, plugin-dev), instead of getting an explicit
+    fail-open. Enable auth (the `auth` tier or AuthPlugin), or run without the data
+    API. There is no anonymous-data carve-out any more — publishing a public
+    surface is done by declaration (see above).
+
+  **Migration.** Delete `api.requireAuth` from the stack config (or run
+  `os migrate meta`). If you were serving data publicly with `requireAuth: false`,
+  replace it with the declaration that fits: a public form view, a share link, or
+  `book.audience: 'public'`. If you have an auth-less stack that intentionally
+  served data, it must now mount auth or stop serving the data API.
+
+- 347f460: **[ADR-0110 D3, revised] The undeclared-action refusal has no opt-out —
+  `OS_ALLOW_UNDECLARED_ACTIONS` is removed before 17 ships.**
+
+  D3 as accepted refused an undeclared handler but shipped
+  `OS_ALLOW_UNDECLARED_ACTIONS=1` as a migration valve that ran it anyway,
+  "slated for removal in 18". Removed now, for two reasons:
+
+  - **It contradicts the ruling it accompanies.** A flag that executes an
+    ungoverned, system-elevated handler _is_ the fail-open D3 closes. ADR-0049's
+    trichotomy has no "enforced unless a flag says otherwise" state.
+  - **It had no observed users.** A reconciliation sweep across the platform
+    packages, every example and every plugin found the only `engine.registerAction`
+    call sites are `app-todo`'s eight, all declared. The valve would have shipped
+    a documented way to reopen the gate for a population nobody has ever seen.
+
+  What it was buying is covered without it: the app still boots, every declared
+  action still works, D5's boot inventory names each offender at startup, and the
+  404 names the `defineAction` to add. Migration costs a code change rather than
+  an env var — the correct price for reopening an authorization gate.
+
+  Setting the retired variable has no effect; a regression test pins that, so a
+  stale deployment script fails loudly rather than silently re-opening the gate.
+
+- 8a341a4: A dispatcher domain whose route is mounted but whose implementation is absent answers **501**, not a 404 that blames the route (#4093 follow-up).
+
+  Two different facts were being answered with whatever each domain happened to reach for, and only `mcp` told them apart:
+
+  - **The route is not there.** `/mcp` when the server is disabled for the environment; `/analytics` when the service is unserveable, because `dispatcher-plugin` gates the _mount_ and never registers those paths (#4000). A path the server does not expose is a **404** from the host's own router. **Unchanged** — that half was already right.
+  - **The route is there; the implementation is not.** Every unconditionally-mounted domain. The request reached a handler that had nothing to delegate to. That is **501**, and it is what changes here.
+
+  `/automation` and `/notifications` returned `{ handled: false }`, which looks neutral but lands on the dispatcher plugin's single exit: `404 ROUTE_NOT_FOUND` with the hint _"No handler matched this request. Check the API discovery endpoint for available routes."_ Both halves were false — a handler did match, and discovery correctly does not list the route, so the hint pointed at a page that would never mention it. An operator reads that as a routing bug and goes looking for one that does not exist.
+
+  `/ui` answered **503**, which claims the condition is temporary. An uninstalled MetadataPlugin does not become installed by retrying.
+
+  `/ai` answered **404** for the same mounted-but-unimplemented case.
+
+  The refusal now carries the same remedy sentence discovery reports for that slot (`serviceUnavailableMessage`, shared via `@objectstack/spec/system`), so the wall and the discovery entry cannot drift into naming different fixes — `POST /api/v1/automation` on a stack without the service answers `501 Install @objectstack/service-automation to enable`. `/ai` keeps a local message: its real provider ships outside this workspace as a Cloud/EE package, so the shared table — verified against workspace packages — records no entry and would otherwise describe it as "nothing ships".
+
+  Deliberately unchanged: `analytics`'s route-mount gate (a genuinely absent path); `mcp`'s 404-vs-501 pair, which is the model; the `handled: false` at the END of each domain, which means "no sub-route matched" and is a true 404; `GET /ai/agents`'s empty-list 200, a deliberate courtesy for the console's per-navigation poll; and `/ai`'s `503 routes not yet initialized`, which is a different condition (service present, internal state unready) and may genuinely be transient.
+
+  FROM → TO: requests to `/automation`, `/notifications`, `/ui/*` and `/ai/*` on a deployment lacking the backing service now get `501` (with the package to install) instead of `404`/`503`. Anything branching on the old status should branch on `status >= 400` or read the error code; the capability was equally unavailable before, so no working flow changes. Discovery is unaffected — it already reported these slots `unavailable` and advertised no route for them.
+
+- 8dcc0f5: feat(runtime)!: retire the inert `DriverPluginOptions` — `DriverPlugin` takes `(driver, driverName?)` (#4320)
+
+  `new DriverPlugin(driver, { datasourceName, registerAsDefault })` never did
+  what it promised: both options configured a datasource-registration block in
+  `start()` gated on `metadata.addDatasource`, a method **no metadata service
+  implements** — so the block early-returned on every boot since inception and
+  the options were dead weight (found while typing service lookups for #4251).
+
+  **Migration** — delete the options argument; nothing changes at runtime
+  because nothing ever happened:
+
+  - FROM `new DriverPlugin(driver, { datasourceName: 'x', registerAsDefault: false })`
+    TO `new DriverPlugin(driver)`
+  - FROM `new DriverPlugin(driver, 'name', options)` TO `new DriverPlugin(driver, 'name')`
+  - The string second argument (`new DriverPlugin(driver, 'memory')`) is unchanged.
+
+  If you passed `datasourceName` expecting routing to a named auxiliary driver:
+  that routing never came from the option. It keys off the **driver name** —
+  `DriverPlugin.init()` registers `driver.<name>`, ObjectQL's discovery loop
+  adopts it, and the engine's lifecycle/datasource resolution looks the name up
+  (see the telemetry provision in `os serve` for the pattern: stamp
+  `driver.name`, register the plugin, done). For Setup → Datasources visibility,
+  declare the datasource through `DatasourceConnectionService` /
+  `registerInMemory('datasource', …)` (ADR-0062).
+
+  The `DriverPluginOptions` interface was module-local (never exported from the
+  package root), so the only public break is the constructor's second/third
+  argument shape.
+
+- 5b08389: The `/auth` domain no longer fabricates a login. With no auth service registered it answers **501**; the mock that answered 200 with a made-up session is deleted (#4113).
+
+  `packages/runtime/src/domains/auth.ts` carried a `mockAuthFallback` that answered `POST /auth/sign-up/email`, `/register`, `/sign-in/email`, `/login`, `GET /get-session` and `POST /sign-out` with **200 and a fabricated user plus a 24-hour `mock_token_*` session — for any email and any password, which was never read**. It shipped in `@objectstack/runtime` rather than behind a dev-only plugin, and gated on nothing but an empty `auth` slot, so `os serve --preset minimal` and any embedder that mounts the dispatcher without `@objectstack/plugin-auth` served it.
+
+  It was never a bypass: no session store backs the token, so `resolve-execution-context.ts` still resolved anonymous and `shouldDenyAnonymous` still denied data access. It was worse in a different way — it told the client the one thing a server must never lie about, that it had authenticated someone, while discovery simultaneously reported `auth: unavailable` and advertised no `routes.auth`. Its stated justification ("MSW/browser-only environments") had no consumer in this repository or in `objectui`, whose auth tests mock at the HTTP client layer; the only things pinning it were tests asserting the mock itself.
+
+  ADR-0115 retired this whole class of fabricating fallback inside `plugin-dev`. This was its last surviving member and the only one that shipped to production; the lineage before it — the #3891 analytics shim, #4000's dev stub, the three in #4058/#4086, #4126's security trio — was retired the same way: deleted, not put behind a flag.
+
+  **501 rather than 404**, following `/i18n`, the nearest precedent in shape: a core capability, a dispatcher-owned domain, an optional plugin behind it, and a route discovery already declines to advertise when the slot is empty. The route is mounted; what is missing is the implementation behind it — which is what 501 states and 404 would misdescribe. A wrong-shaped occupant (a service without the contract's `handleRequest`) takes the same 501, which is the sharper case: the slot is filled, so discovery advertises `routes.auth`, and that request previously got a fabricated session.
+
+  FROM → TO: a deployment without an auth service now gets `501 "Auth service not available — register @objectstack/plugin-auth to enable authentication"` on `/api/v1/auth/*` instead of a 200 carrying a session that never worked. Install `@objectstack/plugin-auth` (it is in the default `os serve` preset), or treat the absence as production already required — the 200 never produced a session the identity path accepted, so no working flow depended on it. Front-ends that mocked auth through this fallback should mock at the HTTP client layer or with an MSW handler, as `objectui` already does.
+
+### Minor Changes
+
+- 6e141bc: fix(actions): an action that CRASHED is a 500, not a 200 reporting success:false (#3913 follow-up)
+
+  #3937 settled that a failed action reports in the payload at HTTP 200 — "an
+  action that fails is a normal outcome, not a transport error". That is a
+  statement about the action **rejecting**: a business rule saying no. The same
+  exit was also covering a third case it never argued for.
+
+  A `TypeError` in a handler, a driver blowing up, a sandbox timeout — those are
+  not outcomes the action chose to report, they are the server failing to produce
+  one. Serving them as 200 hid **every handler crash** from the layers that exist
+  to catch server faults: gateway error rates, retry and circuit-breaker policy,
+  APM auto-capture, alerting, `fetch().ok`. For a platform whose main extension
+  surface is customer-authored script bodies, "customer action bodies are
+  throwing" had no signal short of body-parsing at every hop.
+
+  Those are **500** now, through the same `errorFromThrown` exit every other
+  domain catch has used since #3925 — which also means a driver dump finally goes
+  through the internal-error-leak sanitiser (#3867) instead of reaching the client
+  verbatim in a 200 body.
+
+  **Nothing #3937 put in the payload moves.** A rejection and a crash are told
+  apart by the error's NAME, the signal `@objectstack/rest` already uses on this
+  exact distinction ("non-default names (`TypeError: …`) […] signal a genuine
+  script bug rather than a deliberately thrown business rule"):
+
+  | Thrown                                                              | Verdict                   | Wire          |
+  | :------------------------------------------------------------------ | :------------------------ | :------------ |
+  | `new Error(msg)` — a registered handler rejecting                   | rejection                 | 200 + payload |
+  | `SandboxError` with `innerMessage` — a body's deliberate throw      | rejection                 | 200 + payload |
+  | Anything carrying `code` / `fields`, or a `ValidationError` by name | rejection                 | 200 + payload |
+  | A throw with no `name` at all                                       | _not confidently a fault_ | 200 + payload |
+  | `TypeError` / `ReferenceError` / `SqliteError` / a driver's class   | crash                     | **500**       |
+  | `SandboxError` with no `innerMessage` — timeout, capability denial  | crash                     | **500**       |
+
+  Deliberately the narrow direction: only what is _certainly_ a fault moves, and
+  everything uncertain keeps the 200 it has today.
+
+  One related fix in the same exit: an error carrying its own `status` /
+  `statusCode` (a plugin's `FORBIDDEN` with `status: 403`) is now served with it
+  rather than buried in a 200 payload — that status was the one thing the thrower
+  was unambiguous about. Record `ValidationError`s deliberately carry no
+  `.status`, so #3937's cases never reach that branch.
+
+  Documented in `api/error-catalog.mdx` (new **Action Errors** section with the
+  full status table and the two-check pattern a raw `fetch` caller needs) and
+  `ui/actions.mdx`.
+
+- a4e2684: feat(runtime): the sandbox reports an action body's discarded `ctx.record` writes at invocation time (#4345)
+
+  #4362 closed the author-time half of #4345: `action-record-write-discarded`
+  warns when a body assigns to `ctx.record` and the snapshot is provably dead.
+  This is the run-time half, and it exists because a parse cannot reach three
+  things a running action can:
+
+  - **computed keys and aliases** — `ctx.record[k] = v`, `const r = ctx.record;
+r.x = 1`, which the lint deliberately skips rather than guess at;
+  - **a wholesale replacement** — `ctx.record = {…}`;
+  - **bodies no lint ever sees** — metadata authored through Studio or the API
+    never passes through `os validate` / `os lint` / `os compile`.
+
+  The sandbox installs a `set`/`deleteProperty`/`defineProperty` proxy over the
+  snapshot, behind an accessor so a wholesale replacement cannot swap the recorder
+  out, and surfaces the touched keys as `ScriptResult.droppedRecordWrites`.
+  `actionBodyRunnerFactory` logs a warning naming the discarded fields and the
+  `ctx.api.object(...).update(...)` remedy. Writes still work _inside_ the VM, so
+  a body using the snapshot as scratch keeps its reads coherent — only the silence
+  is removed.
+
+  **Only dead writes are reported**, on the same reading #4362 uses: a snapshot
+  that leaves the body as a value may have carried the write with it, so
+
+  ```js
+  ctx.record.stage = "won";
+  await ctx.api.object("crm_deal").update(ctx.record); // lands — stays quiet
+  ```
+
+  is not reported, while a plain property read does not rescue a write (the
+  `ctx.recordId || (ctx.record && ctx.record.id)` guard idiom real action bodies
+  are written with still reports). An `ownKeys` after a write marks the escape.
+  A wrong "discarded" asserts something false about the stored record, which is
+  worse than a miss.
+
+  Hooks carry no `record`, so they install no proxy and pay nothing. `ctx.record`
+  remains read-only; whether the runtime should instead refuse or honour the write
+  is still open — reporting a discard prejudges neither answer.
+
+- c2bbd97: fix(actions): reach global actions at their real registration key, and 404 an action that never dispatched (#3913)
+
+  **1 — the registration key and the lookup key disagreed.** Both writers
+  register an objectName-less action under the literal `'global'`: `AppPlugin`
+  (`action.object || 'global'`) and `ObjectQLPlugin.actionObjectKey`. The REST
+  route's fallback probed `'*'`, and `engine.executeAction` is an exact-string
+  `Map` lookup with no wildcard semantics — so the probe could only ever miss:
+
+  ```
+  Action 'log_call' on object '*' not found
+  ```
+
+  `POST /api/v1/actions/global/log_call` worked by **accident** (the path segment
+  happened to spell the registration key); `POST /api/v1/actions//log_call` never
+  worked at all, and neither did falling back from an object-scoped route to a
+  global handler. `'global'` is now the canonical key
+  (`GLOBAL_ACTION_OBJECT_KEY`), the probe order is
+  `[<routed object>, 'global', '*']` for both the REST route and the MCP
+  `run_action` bridge (`actionHandlerObjectKeys` — one list, two surfaces), and a
+  single-segment path (`/actions//:action`) routes at `'global'` instead of
+  400-ing. A handler registered directly under `'*'` still resolves; the doc
+  comments that called `'global'` a "wildcard" are corrected at every site.
+
+  **2 — "no such action" was reported as a success.** The not-found exit called
+  `deps.success(...)`, which always emits `{status: 200, body: {success: true,
+data}}`, so a request naming an action that does not exist came back as:
+
+  ```json
+  {
+    "success": true,
+    "data": {
+      "success": false,
+      "error": "Action 'log_call' on object '*' not found"
+    }
+  }
+  ```
+
+  Every caller that did not hand-unwrap the INNER envelope read the outer
+  `success: true` and reported a success that never happened — including the
+  shipped console, which showed a green toast (fixed on that side in
+  objectui#2963). Nothing **dispatched** there, so it is a **404** now, joining
+  the answers this route already gives a status: 403 denied, 400 wrong action
+  type, 503 unavailable. The miss also names the **routed** object rather than
+  whichever probe ran last (the old fallback said `on object '*'`, an object the
+  caller never asked for).
+
+  A handler that **ran and rejected** is unchanged: HTTP 200 with
+  `data: {success: false, error, code?, fields?}`. That is a business outcome,
+  not a transport error, and #3937 pins it. The line is "did a handler run" —
+  below it the payload, above it the status.
+
+  `client.actions.invoke` / `invokeGlobal` still do **not** throw. `client.fetch`
+  throws on every non-2xx, so `invoke` now catches and folds a dispatch failure
+  into the same `{ success, data?, error? }` result with `error` as a plain
+  string — otherwise the routes that just gained a status would have started
+  propagating exceptions into callers that only ever checked `result.success`.
+
+- 32ccb23: feat(spec,core,runtime)!: ADR-0112 batch 1 — one error-code vocabulary, SCREAMING_SNAKE, schema-enforced (#3841)
+
+  Settles #3841 per ADR-0112: the top-level `error.code` vocabulary is
+  SCREAMING_SNAKE, in two tiers.
+
+  - **`StandardErrorCode` members renamed in place** (`validation_error` →
+    `VALIDATION_ERROR`, all 53). Breaking for importers that branch on the old
+    lowercase members; the type name and member _meanings_ are unchanged.
+  - **New `ERROR_CODE_LEDGER`** (`@objectstack/spec/api`): service-specific codes
+    (`AUTH_REQUIRED`, `VALIDATION_FAILED`, `ATTACHMENT_DOWNLOAD_DENIED`, …) are
+    registered per owning package. `ErrorCode` = standard ∪ registered.
+  - **`ApiErrorSchema.code` is now `ErrorCode`**, not `z.string()` — an
+    unregistered code fails parse, so the envelope conformance suites assert
+    values, not just shape.
+  - **`FieldErrorSchema.code` widened to `z.string()`** (ADR-0112 D6): field-level
+    codes are a separate vocabulary the enum never described; #3977 owns its real
+    catalog.
+  - **Derived codes changed case on the wire**: `standardErrorCodeForHttpStatus`
+    now yields SCREAMING members (`permission_denied` → `PERMISSION_DENIED`,
+    `method_not_allowed` → `METHOD_NOT_ALLOWED`, …) — this map was #3842's
+    designated one-file sweep point for exactly this decision.
+  - **`ANONYMOUS_DENY_CODE` is `'UNAUTHENTICATED'`** (was `'unauthenticated'`) —
+    the promoted code on anonymous-denied requests and the REST `enforceAuth`
+    body change spelling with it.
+
+  `error-catalog.mdx` and the error-handling guides are rewritten to the single
+  vocabulary; a spec test now locks the catalog page's headings to the enum so
+  they cannot drift apart again. Remaining lowercase emitters (cloud-connection,
+  plugin-auth envelope codes, metadata-protocol, …) are the batch-2 sweep.
+
+- f5a4ef0: refactor!: ADR-0112 batch 2 — sweep the lowercase error-code emitters (#4003)
+
+  Continues #3841 per ADR-0112. Batch 1 (#3988) settled the vocabulary and closed
+  the set; this batch moves the emitters that still spoke lowercase `snake_case`
+  onto it.
+
+  **Wire-visible change.** Error codes on these surfaces change spelling. Generic
+  conditions collapse onto the standard catalog rather than keeping a synonym:
+  `unauthorized`/`unauthenticated` → `UNAUTHENTICATED`, `forbidden` →
+  `PERMISSION_DENIED`, `not_found` → `RESOURCE_NOT_FOUND`, `internal` →
+  `INTERNAL_ERROR`, `unavailable` → `SERVICE_UNAVAILABLE`, `not_supported` →
+  `NOT_IMPLEMENTED`, `bad_request` → `INVALID_REQUEST`. Domain conditions get codes
+  registered in `ERROR_CODE_LEDGER` (`MARKETPLACE_STORAGE_FAILED`,
+  `PLUGIN_MANIFEST_INVALID`, `ITEM_LOCKED`, `DELIVERY_NOT_ELIGIBLE`, …). Swept:
+  `cloud-connection`, `plugin-auth`, `hono`, `metadata-protocol`, `rest`,
+  `service-messaging`, `service-automation`, `trigger-api`.
+
+  Branch on `error.code` values rather than pattern-matching their case: the
+  console's fix for the same rename (objectui#2977) reads codes case-insensitively
+  for exactly this reason, and that is the pattern to copy in your own consumers if
+  you support servers on both sides of the change.
+
+  **Four routes stop putting a code in the message slot.** The webhook redeliver
+  route, the API-trigger webhook, and two `rest` routes answered
+  `{ success: false, error: '<code>', message }` — the code occupying `error`, the
+  declared object envelope nowhere. They now emit `error: { code, message }`, and
+  three API-trigger branches gained a message they never had. Clients reading
+  `body.error` as a string on those routes must read `body.error.code`.
+
+  **`ConnectorErrorCategory` / `ConnectorRetryStrategy`** (ADR-0112 D9a):
+  `@objectstack/spec` exported two mutually incompatible `ErrorCategory` types and
+  two `RetryStrategy` types. The connector-side pair is renamed; importers of the
+  `integration` subpath update the name. Side effect: the api-side `ErrorCategory`
+  and `RetryStrategy` now appear in the generated API reference at all — the name
+  collision had been silently dropping them.
+
+  **`OAUTH_REGISTER_FAILED` replaces an unbounded code source.** The OAuth client
+  registration route put better-auth's arbitrary `body.error` string straight into
+  `error.code`. The code is now ours and the upstream discriminator moved to
+  `details.upstreamError`.
+
+  **Not swept, deliberately.** `sys_metadata_audit.code` keeps its lowercase values
+  (ADR-0112 D6b): it is persisted audit history, and the same column holds
+  non-error outcomes (`ok`, `lock_override`). Diagnostics records that ship inside a
+  200 keep theirs (D6c), as do field-level codes (D6, #3977) and the CLI's
+  `--json` output contract.
+
+  A `check:error-code-casing` CI guard now fails on a new lowercase literal in a
+  code position, since the ledger's casing rule can only police codes that someone
+  registers.
+
+- 0f12193: feat(runtime): mount /analytics routes only when the capability exists (#3891 follow-through, ADR-0076 D11)
+
+  `createDispatcherPlugin` used to mount `POST /analytics/query`,
+  `GET /analytics/meta` and `POST /analytics/sql` on the `IHttpServer`
+  unconditionally — so a deployment without `@objectstack/service-analytics`
+  still had the routes in its table: a `PUT` answered `405` with
+  `Allow: POST`, advertising a method on an API that wasn't there (the `POST`
+  itself answered 404 since #3989).
+
+  The mounts are now capability-conditional. Plugin `start()` runs after the
+  kernel's Phase-1 init, so service presence is authoritative:
+
+  - **single-kernel mode, `analytics` not registered** — the three routes are
+    NOT mounted; every method on `/api/v1/analytics/*` answers the adapter's
+    shared not-found contract (`404 { "error": "Not found" }`), and a boot log
+    names the fix (`Install @objectstack/service-analytics`);
+  - **single-kernel mode, `analytics` registered** — unchanged;
+  - **multi-tenant host** (a `kernel-resolver` is wired) — mounted
+    unconditionally, because mounts are host-global while the analytics service
+    lives in each per-project kernel: capability presence is a per-request
+    question, answered by the analytics domain's existing `handled:false` → 404
+    (new public `HttpDispatcher.isMultiTenantHost()` exposes the mode).
+
+  With this, the `/analytics` API surface exists exactly when the capability is
+  installed — completing the #3891 arc: #3989 emptied the slot (no more
+  unscoped-aggregate shim), #4010 made the body contract strict at the entry,
+  and this change removes the last wire-level residue of the uninstalled API.
+
+- 9b6fe7c: fix(spec,runtime)!: `AnalyticsQueryRequest` is the bare `AnalyticsQuery`; the dispatcher validates `/analytics` bodies at the entry (#3878)
+
+  **Spec.** `AnalyticsQueryRequestSchema` used to describe a
+  `{ cube, query: {...}, format }` ENVELOPE — the dialect of the retired degraded
+  analytics shim (#3891), which the real engine never understood: an envelope
+  body inferred a column-less cube and died as an SQL syntax error
+  (`SELECT  FROM …`) instead of a shape error. The schema now describes what the
+  engine and every real caller actually use — the **bare `AnalyticsQuery`**:
+
+  ```
+  FROM  { "cube": "orders", "query": { "measures": ["count"] }, "format": "json" }
+  TO    { "cube": "orders", "measures": ["count"], "dimensions": [...], "where": {...} }
+  ```
+
+  `cube` + `measures` are required at the top level; `dimensions` / `where` /
+  `timeDimensions` / `order` / `limit` / `offset` / `timezone` sit beside them.
+  The schema is `.strict()`; `query` and `format` are tombstoned (`retiredKey`)
+  so both `tsc` and the parse answer with this exact migration. `format` was
+  never implemented (every response is the JSON envelope) — for CSV/XLSX use the
+  export surface. The removal is registered as two step-17 semantic migrations
+  (`analytics-query-request-envelope-retired`,
+  `analytics-query-request-format-retired`) — it is an HTTP-wire change with no
+  stored metadata to rewrite.
+
+  **Runtime.** `POST /api/v1/analytics/query` and `/analytics/sql` now validate
+  the body against that schema AT THE ENTRY and answer
+  **400 `VALIDATION_FAILED`** with per-field details — including the envelope
+  prescription above, and a bespoke hint that `filters` is not a contract field
+  (the filter field is `where`, the same canonical FilterCondition `find()`
+  takes). Previously a malformed body reached the engine and failed as a 500 SQL
+  syntax error, or had its off-contract filter key silently ignored. A valid
+  body is forwarded to the analytics service byte-identical (validation only —
+  parsing would inject the schema's `timezone: 'UTC'` default and override
+  org-timezone resolution). An uninstalled analytics capability still answers
+  404 before any body inspection (#3891).
+
+- c9d254a: feat(datasource,runtime): kernel teardown disconnects through the one datasource path — and never closes an adopted pool (#3993)
+
+  After the #3826 connect convergence, ADR-0062 D5's "owns connect/disconnect"
+  was half-true: nothing disconnected the `default` (or a declared datasource's
+  pool) on graceful shutdown. `DriverPlugin` never had teardown, `ObjectQLPlugin`
+  teardown never touched drivers, and the kernel's actual teardown phase is
+  `destroy()` — the Plugin contract has no `stop()`, so stray `stop` methods were
+  never called by anything.
+
+  The disconnect half now mirrors the connect half:
+
+  - **`DatasourceConnectionService.disconnect(name, { asDefault })`** resolves
+    the default under its NATURAL name (the same #3826 rule that makes
+    `drivers.get('default')` impossible — the old lookup could never have found
+    it), and honours a new ownership discriminator recorded at connect time.
+  - **`disconnectAll()`** closes exactly the pools THIS service opened —
+    `'connected'` states only. `already-registered` drivers belong to whoever
+    registered them (an `onEnable` bridge, the default's idempotent replay) and
+    are never touched.
+  - **`DatasourceDriverHandle.ownership: 'factory' | 'host'`** is the
+    discriminator. `createPrebuiltDriverFactory` stamps its handles `'host'`:
+    an ADOPTED instance's pool outlives the kernel (the cloud control-plane
+    driver doubles as every environment kernel's proxy base; per-environment
+    drivers are registry-cached across kernel rebuilds), so kernel teardown —
+    including a cloud LRU eviction's `kernel.shutdown()` — clears the retained
+    verdict but NEVER closes the pool. Factory-built instances disconnect as
+    before there was a before.
+  - **`DefaultDatasourcePlugin.destroy()`** and
+    **`DatasourceAdminServicePlugin.destroy()`** wire the sweep at the kernel's
+    real teardown phase, best-effort (a failed disconnect never masks shutdown).
+
+  A welcome side effect: a file-backed `sqlite-wasm` default with
+  `persist: 'on-disconnect'` now actually flushes on graceful shutdown.
+
+  Also flips ADR-0062's status to reflect the completed convergence (#3992):
+  D1 is fully implemented across both repos since cloud#915; the remaining
+  `DriverPlugin` uses are documented named-auxiliary/escape-hatch cases, and the
+  degraded-boot parity guard stays with its role shifted to "the escape hatches
+  must not drift".
+
+- c3bcb42: feat(runtime,datasource): the default-datasource connect seam accepts a host driver factory — adopt pre-built instances without forking the verdict (#3826)
+
+  ADR-0062 D1's open-core convergence (#3869/#3886) left one structural question
+  open: a host whose `default` needs a driver the shared factory cannot build —
+  the cloud distribution's `turso`, or an instance pooled BEYOND one kernel (the
+  cloud control-plane driver doubles as the proxy base of every environment
+  kernel; per-environment drivers are cached across kernel rebuilds) — had only
+  two options, both bad: stay on the legacy pre-built `DriverPlugin` path, whose
+  connect verdict lives in `ObjectQLEngine.init()` (the second implementation
+  #3826 exists to retire), or fork the connect orchestration. Either re-opens the
+  #3741 → #3758 drift this whole line of work is about.
+
+  Two additive pieces close it:
+
+  - **`DefaultDatasourcePlugin` accepts an injected `IDatasourceDriverFactory`**
+    (defaults to the shared open-core factory, byte-for-byte unchanged when
+    omitted). The factory only changes what `create()` returns — the policy-free
+    init connect, `bootCritical` fail-fast, `OS_ALLOW_DRIVER_CONNECT_FAILURE`
+    escape hatch, and the start() replay into retained admin state are identical
+    either way, and the new tests pin that (an adopted instance that cannot
+    connect takes the exact same verdict).
+  - **`createPrebuiltDriverFactory(driver, { driverId?, fallback? })`** in
+    `@objectstack/service-datasource` — the "adopt an existing driver" seam the
+    first #3826 pass found missing, landed AS a factory so it composes into the
+    one connect path instead of becoming a second entry point. `create()` returns
+    the SAME instance every call: construction, pooling, and reuse stay host
+    concerns; only the verdict converges. Not for the common case — a `default`
+    expressible as `{ driver, config }` should stay a plain definition.
+
+  The `@objectstack/verify` dogfood harness now boots through
+  `DefaultDatasourcePlugin` (declared `sqlite-wasm` definition) instead of a
+  pre-built `DriverPlugin` — so the dogfood gate exercises the same declared
+  -default connect path `objectstack dev`/`serve` use, which is the §Risk
+  mitigation ADR-0062 promised ("behind the dogfood gate") and did not yet have.
+  The degraded-boot parity guard stays: `ObjectQLEngine.init()`'s verdict is
+  still live for the boot re-verification, `DriverPlugin` escape-hatch drivers,
+  and the cloud compositions until they converge onto this seam.
+
+- 03d26f7: fix(runtime,spec)!: the dispatcher's `error.code` is the semantic string it always declared; the HTTP status moves to `httpStatus` (#3842)
+
+  `HttpDispatcher.error()` took the HTTP status as its `code` argument and wrote it
+  straight into the field `ApiErrorSchema` reserves for a semantic string, so
+  `error.code` came back as `400`/`403`/`503` — a number, duplicating the response
+  status and occupying the one slot a caller is meant to branch on. The real code
+  then had to go somewhere else, and did, three somewhere-elses: `details.code`
+  (auth gate, permission denial, anonymous deny), `details.type`
+  (project-membership gate), and `error.type` (`routeNotFound`). Four sites, three
+  parking spots, because the declared one was full.
+
+  **FROM → TO on the wire.** A dispatcher error body
+
+  ```json
+  {
+    "success": false,
+    "error": {
+      "message": "…",
+      "code": 403,
+      "details": { "code": "PERMISSION_DENIED" }
+    }
+  }
+  ```
+
+  is now
+
+  ```json
+  {
+    "success": false,
+    "error": { "code": "PERMISSION_DENIED", "message": "…", "httpStatus": 403 }
+  }
+  ```
+
+  | Reading       | Was                                                        | Now                                               |
+  | ------------- | ---------------------------------------------------------- | ------------------------------------------------- |
+  | semantic code | `error.details.code` / `error.details.type` / `error.type` | `error.code`                                      |
+  | HTTP status   | `error.code`                                               | `error.httpStatus` (or the response status)       |
+  | context       | `error.details` (with the code mixed in)                   | `error.details` (context only, absent when empty) |
+
+  **One-line fix for a direct reader:** replace `body.error.details?.code ??
+body.error.type` with `body.error.code`, and `body.error.code` with
+  `body.error.httpStatus`. **SDK callers need no change** — `ObjectStackClient`
+  already normalised this (`err.code` semantic, `err.httpStatus` numeric) and still
+  reads the old shape, so a client newer than its server is unaffected.
+
+  Every code already on the wire moves **verbatim** — `PERMISSION_DENIED`,
+  `ROUTE_NOT_FOUND`, `PASSWORD_EXPIRED`, `PROJECT_MEMBERSHIP_REQUIRED`,
+  `VALIDATION_FAILED`, `unauthenticated`. This change moves a field; it does not
+  rename anything. Reconciling the repo's two code vocabularies is #3841, and this
+  leaves it exactly one map and one enum to sweep instead of four parking spots.
+
+  A branch with no code of its own is served one derived from the status, via the
+  single declared map `HttpStatusErrorCodeMap` / `standardErrorCodeForHttpStatus`
+  in `@objectstack/spec/api` (`403` → `permission_denied`, `503` →
+  `service_unavailable`, …). Derivation is necessary because `ApiErrorSchema.code`
+  is required; drawing it from `StandardErrorCode` keeps a derived code a
+  catalogued one rather than an invented string.
+
+  **Spec changes:**
+
+  - `ApiErrorSchema` gains optional `httpStatus: number` — the precedent is
+    `EnhancedApiErrorSchema.httpStatus`. Additive.
+  - `StandardErrorCode` gains `method_not_allowed` and `precondition_required`,
+    the two statuses the runtime returns that the enum could not name. Additive.
+  - **Breaking — `DispatcherErrorCode`** was `'404' | '405' | '501' | '503'` (string
+    spellings of HTTP statuses, for matching against the numeric `error.code`). It
+    is now `'ROUTE_NOT_FOUND' | 'METHOD_NOT_ALLOWED' | 'NOT_IMPLEMENTED' |
+'SERVICE_UNAVAILABLE'` — the same four members the removed `error.type` enum
+    declared, moved verbatim. FROM `DispatcherErrorCode.parse('404')` TO
+    `DispatcherErrorCode.parse('ROUTE_NOT_FOUND')`; to match a status, read
+    `error.httpStatus`. TypeScript flags every call site.
+  - **Breaking — `DispatcherErrorResponseSchema`**: `error.code` is `z.string()`
+    (was `z.number().int()`), `error.type` is **removed** (folded into `code`), and
+    `error.httpStatus` / `error.details` are declared. This schema is what
+    legitimised the deviation — it declared the opposite of `ApiErrorSchema` for
+    the same field. FROM `{ code: 404, type: 'ROUTE_NOT_FOUND' }` TO
+    `{ code: 'ROUTE_NOT_FOUND', httpStatus: 404 }`.
+
+  **Also aligned, because they are the same wire surface:** `dispatcher-plugin`'s
+  `errorResponseBase` (the THROWN-error exit) and its inline 404, and the MCP 405.
+  `errorResponseBase` previously discarded a thrown error's `.code` outright — it
+  had nowhere to put it — so the two exits of one surface disagreed about what a
+  caller would see; they now agree. Every body on this surface is built by one
+  helper (`packages/runtime/src/error-envelope.ts`), guarded in both directions by
+  `error-envelope.conformance.test.ts`: each branch driven and parsed against the
+  schema imported from `packages/spec`, plus a source scan so a new branch cannot
+  quietly reintroduce a numeric `code` or a `type`-as-code sibling.
+
+  This deletes the #3687 pin in `http-dispatcher.test.ts`, which asked to be
+  deleted rather than updated once the dispatcher was fixed.
+
+- 33a5ff4: `os migrate` no longer touches the database before you confirm, and refuses a
+  SQLite database another process is using (#3917).
+
+  **Nothing is written before the prompt.** `plan` called itself a dry run and
+  `apply` gated on `[y/N]`, but both booted the full plugin set first — and boot
+  schema-sync issued create-table/add-column DDL (plus the artifact's inline seed
+  wrote rows) against the target database before either promise was kept.
+  `SqlDriver` gains `setDeferredDdl` / `previewDeferredSchemaWork` /
+  `flushDeferredSchemaDdl`: while armed, `initObjects` still registers every
+  in-memory map drift detection depends on but records the physical work instead
+  of performing it. Both commands boot with it armed, render the held-back work
+  as a `New (additive)` section of the plan, and `apply` performs it only after
+  confirmation. `os meta resync` / `os migrate files-to-references` keep the old
+  behaviour — they need the tables to exist.
+
+  **Occupancy check.** A live `os dev`/`os serve` holding the same SQLite file is
+  the usual way a migration goes wrong: the migration is transactional and swaps
+  tables inside the file, but the running server keeps prepared statements and a
+  schema cookie the migration invalidates. `os migrate` now probes the target
+  before booting — `PRAGMA locking_mode = EXCLUSIVE` + `BEGIN IMMEDIATE` under
+  `busy_timeout = 0`, which reports `SQLITE_BUSY` when another connection is
+  _attached_, not merely writing. (`wal_checkpoint(TRUNCATE)` only sees an active
+  writer, and `-wal`/`-shm` presence cannot tell a live server from a crashed one;
+  both are encoded as tests.) `apply` refuses with exit 1 — `error: database_busy`
+  under `--json` — unless the new `--force` flag is passed; `plan` warns and
+  continues, since it writes nothing either way. SQLite only: Postgres and MySQL
+  take their own server-side locks.
+
+  `@objectstack/runtime` also exports `resolveStandaloneDatabase()`, so a caller
+  can resolve the database target with the same precedence the boot uses without
+  building the stack, and `createStandaloneStack` accepts `skipSeedData`.
+
+- d13004a: feat(core,runtime): plugin ordering is a declared, kernel-enforced contract (ADR-0116, #4131)
+
+  `kernel.use()` registration order was never a contract — the kernel resolves
+  init/start order from the plugin dependency graph — but a plugin that needed a
+  service at init _when its provider is composed_ while also booting _without_
+  the provider had no way to declare that. `AppPlugin` was the standing example:
+  it grabs `manifest`/`objectql` synchronously in `init()`, declared nothing
+  (a hard dependency would break empty-env / metadata-only / mock-engine
+  kernels), and so its correctness rode on which array slot each caller put it
+  in. That convention failed the same way twice (`DefaultDatasourcePlugin`'s
+  first cut; then #4085, disguised for months as "crashes when the artifact is
+  missing").
+
+  The kernel `Plugin` contract gains three additive fields, enforced by both
+  `ObjectKernel` and `LiteKernel` through one shared implementation
+  (`plugin-order.ts` — the previously duplicated topological sort is unified
+  there):
+
+  - **`optionalDependencies: string[]`** — order-if-present: hoisted ahead
+    exactly like `dependencies` when composed (real topology edges, including
+    cycle detection), silently skipped when absent.
+  - **`requiresServices: string[]`** — services resolved synchronously during
+    `init()` with no fallback. Validated **before Phase 1**: a required service
+    whose only declared provider initializes later fails the boot with an error
+    naming both plugins, both slots, and the fix — before any init side
+    effects. Re-checked immediately before the plugin's own init, where a still-
+    missing service becomes a named composition error exactly where the old
+    bare `Service not found` crash fired.
+  - **`providesServices: string[]`** — services a plugin's `init()`
+    unconditionally registers; powers the validation and the diagnostics.
+
+  Plugins that declare nothing get the diagnosis too: a `getService` miss
+  during Phase 1 now appends which plugin was initializing and — when a
+  composed plugin declares the service — who provides it and how to declare the
+  ordering. The `Service '<name>' not found` prefix and the factory-backed
+  `is async - use await` message are unchanged.
+
+  First adopters: `AppPlugin` declares
+  `optionalDependencies: ['com.objectstack.engine.objectql']` +
+  `requiresServices: ['manifest']` (cleared on the empty-env no-op path), so
+  the #4085 composition — AppPlugin registered before the engine — now boots
+  correctly in every slot; `ObjectQLPlugin` declares
+  `providesServices: ['objectql', 'data', 'manifest', 'lifecycle']` and
+  `MetadataPlugin` declares `providesServices: ['metadata']`.
+
+  Everything is additive — plugins that declare nothing keep their exact
+  ordering semantics; no existing declaration changes meaning.
+
+- a1b61e0: Request bodies are now checked against the schemas the API catalog declares for them (#3899, the request-side dual of #3877).
+
+  **Routes that now answer `400 VALIDATION_FAILED` + `fields[]` for a body violating their declared `requestSchema`** (previously the body was consumed raw, and a malformed one silently executed different semantics):
+
+  - `POST /data/:object/query` — body must be a QueryAST (`FindDataRequestSchema`); a garbage body used to degrade into an unfiltered full read. The path `object` is now pinned into the forwarded query (a body `object` can no longer contradict the path).
+  - `POST /data/:object` / `PATCH /data/:object/:id` — body must be a record object (`CreateDataRequestSchema` / `UpdateDataRequestSchema`).
+  - `POST /data/:object/batch` — body must be a `BatchUpdateRequestSchema` (`operation` + `records[]`).
+  - `POST /data/:object/createMany` — body must be a bare JSON array of records (`CreateManyDataRequestSchema`); `{ records: [...] }` (updateMany's envelope) is rejected with a pointer.
+  - `POST /notifications/read` — body must be `{ ids: string[] }` (`MarkNotificationsReadRequestSchema`); a misnamed key used to become `markRead(userId, [])` — a 200 no-op that never cleared the badge.
+
+  **Dispatcher automation routes now validate their bodies** (no catalog schema; hand-written guards):
+
+  - `POST /automation` and `PUT /automation/:name` require a flow-definition object, and POST requires a non-empty `name` — a mistyped `name` used to register the flow under the key `undefined` and echo 200.
+  - `POST /automation/:name/toggle` is strictly `{ enabled?: boolean }` — `{"enable": false}` (one letter off) used to ENABLE the flow and answer 200 `{enabled: true}`; it is now a 400 naming the offending key. An empty body still means enable.
+
+  **`QuerySchema` now declares the search contract ADR-0061 actually serves** (additive): `search` accepts the canonical bare query string as well as the structured `FullTextSearch` form, and the server-validated `searchFields` narrowing is formally declared. Previously the schema declared only the object form while every surface (and the ADR's own conformance proof) sent the string — drift that surfaced the moment request bodies started being validated.
+
+  **Catalog corrections in `@objectstack/spec` (`plugin-rest-api.zod.ts`)** — documentation-only tables:
+
+  - `DEFAULT_NOTIFICATION_ROUTES` drops the four device/preferences endpoints — those server routes were removed in #3612 (never built), yet the table kept declaring them, `requestSchema` and all.
+  - `DEFAULT_AUTOMATION_ROUTES`' trigger endpoint path is corrected `/trigger` → `/trigger/:name` (the mounted path; the flow name rides the path) and its `AutomationTriggerRequestSchema` declaration is removed — that schema never described this route's wire shape.
+  - `DEFAULT_DATA_CRUD_ROUTES` gains the `POST /:object/query` entry (mounted since forever, previously undeclared), repoints create/update to the schemas the routes actually validate (`CreateDataRequestSchema` / `UpdateDataRequestSchema` — the old `CreateRequestSchema`/`UpdateRequestSchema` names described a `{ data }` envelope the wire never had), and drops `requestSchema` from GET/DELETE entries (path/query-bound inputs; nothing can violate them as a body).
+  - New gates: catalog `requestSchema`/`responseSchema` strings must resolve to real exported Zod schemas, `requestSchema` may only sit on body-carrying methods, and every declared `requestSchema` on a mounted route has a violating-body → 400 conformance case (`packages/rest` + `packages/runtime` request-schema-gate suites).
+
+  Migration: clients that already send the documented shapes are unaffected. If you relied on a malformed body being silently accepted (e.g. posting `{ records: [...] }` to `createMany`, a non-boolean `enabled` to toggle, or an off-schema analytics/query body), fix the request to the declared shape — the 400's `fields[]` names each offending key.
+
+- 3ba8d77: fix(actions): dispatch on the declared action `type` over REST — flow actions are no longer MCP-only (#3915)
+
+  `POST /api/v1/actions/:object/:action` had **no action-type branching at all**.
+  Whatever an action declared, the route went straight to `ql.executeAction` — the
+  script-handler registry — while the MCP `run_action` bridge had implemented the
+  `flow` branch since #2849. The spec is unambiguous that every non-`script` type
+  dispatches on `target` (`packages/spec/src/ui/action.zod.ts`), so a REST/SDK
+  caller who followed it and invoked a `type: 'flow'` action got
+
+  ```
+  Action '' on object '*' not found
+  ```
+
+  and had to know, out of band, to call `POST /api/v1/automation/:target/trigger`
+  itself. Worse for the Studio-authored case: `resyncAuthoredActions` deliberately
+  registers **no** handler for a flow-typed action ("no body (target/flow/url
+  action)"), so there was never anything for the registry to find.
+
+  The two headless surfaces now share one dispatch:
+
+  - **`flow`** → `automation.execute(action.target, …)` via the new
+    `dispatchFlowAction`, which the MCP path now calls too. The caller's identity
+    (`userId` / `positions` / `permissions` / `tenantId`) is forwarded, so a
+    `runAs: 'user'` flow enforces RLS as the invoker instead of falling into the
+    user-less UNSCOPED path (ADR-0049). A flow action on a kernel with no
+    automation service reports **503**, not a `{ success: false }` body.
+  - **`script`** → the handler registry, unchanged. An action with no resolvable
+    declaration is handler-only by definition and keeps that path.
+  - **`url` / `modal` / `form` / `api`** → **400** naming the type and the
+    prescription (for `api`, the `target` endpoint to call directly) instead of a
+    registry miss that reads like the action does not exist.
+
+  The route also resolves **standalone declarations** now — `defineAction`
+  artifacts in the ObjectQL registry and Studio-authored `action` metadata rows,
+  neither of which appears inside any object's `actions[]`. They were invisible
+  to this route before, which is why a flow-typed one could not be dispatched —
+  and, separately, why its `requiredPermissions` were declared-but-unenforced on
+  REST while MCP honoured them. The ADR-0066 D4 gate still runs **before** the
+  type check, so an unauthorized caller learns nothing about how an action
+  dispatches.
+
+  **Migration:** a caller invoking a `url`/`modal`/`form`/`api` action through
+  this endpoint used to receive `{ success: false, error: "Action '' on object
+'*' not found" }` (HTTP 200) and now receives a 400 that says what to call
+  instead. No spec-faithful action changes behavior.
+
+- 4be9d99: fix(runtime,hono,plugin-dev): retire the dispatcher's `/storage` bridge — it never spoke the storage contract (#4087)
+
+  `POST /api/v1/storage/upload` and `GET /api/v1/storage/file/:id` were a
+  dispatcher-side bridge to the `file-storage` service slot, written against a
+  service shape that does not exist:
+
+  - **Upload** called the contract's `upload(key, data, options?)` as
+    `upload(file, { request })` — the parsed file object landed in the `key`
+    slot and `{ request }` in `data`. That is a `TypeError` against every
+    implementation in the repo (`S3StorageAdapter`, `LocalStorageAdapter`,
+    `SwappableStorageService`, plugin-dev's in-memory one), not a
+    near-miss: `Buffer.from({}) → ERR_INVALID_ARG_TYPE`, or an object used as
+    an S3 object key / `path.join` segment.
+  - **Download** branched on `result.url` / `result.redirect` / `result.stream`
+    / `result.mimeType` while the contract's `download(key)` resolves a
+    `Buffer`, so every branch fell through and the route answered a
+    JSON-serialized Buffer.
+
+  Both routes are removed, along with `HttpDispatcher.handleStorage()`, the
+  `/storage` domain registration, the dispatcher-plugin mounts and the two route
+  ledger rows.
+
+  **Migration.** There is nothing to migrate off in practice — neither route
+  could complete a request. (They were reachable: `service-storage` mounts
+  `/storage/upload/presigned`, not `/storage/upload`, so nothing shadowed them.
+  They simply had no caller — no SDK method builds those URLs.)
+  `/api/v1/storage` is `@objectstack/service-storage`'s surface and always was
+  the working one:
+
+  - Upload — FROM `POST /api/v1/storage/upload` TO the presigned protocol
+    (`POST /storage/upload/presigned` → direct `PUT` to the returned URL →
+    `POST /storage/upload/complete`), or `client.storage.upload(file)`, which
+    runs all three steps.
+  - Download — FROM `GET /api/v1/storage/file/:id` TO
+    `GET /storage/files/:fileId/url` (`client.storage.getDownloadUrl(fileId)`)
+    for a signed URL, or `GET /storage/files/:fileId` for a stable browser URL
+    that 302s to it.
+
+  Install `@objectstack/service-storage` to get those routes; without it
+  `/api/v1/storage` now has no handler, which is the same answer every other
+  uninstalled capability gives.
+
+  Two follow-on corrections keep `declared === enforced`:
+
+  - `@objectstack/hono` no longer mounts `app.all('<prefix>/storage/*')`. That
+    wildcard claimed the whole `/storage` subtree for the two dead routes, so
+    every other path under it — service-storage's protocol above all — got the
+    bridge's own 404 rather than falling through. Storage is ordinary catch-all
+    traffic now.
+  - Discovery keeps gating `routes.storage` on `isServiceServeable` — the shared
+    `handlerReady` predicate #4058 step 2 introduced — and plugin-dev's in-memory
+    implementation now self-declares `handlerReady: false`. #4058 deliberately
+    left that one serving because the `/storage` bridge was still there to serve
+    it; with the bridge retired nothing routes HTTP to that slot, so `false` is
+    the honest value — the position `realtime` has held since ADR-0076 D12. The
+    implementation keeps working for in-process callers; it is simply no longer
+    advertised as a reachable HTTP capability.
+
+### Patch Changes
+
+- bc35e00: fix(runtime): action bodies execute under a real execution context — every owner-scoped write no longer dies FORBIDDEN
+
+  An action body's `ctx.api` was never bound. The sandbox's `buildSandboxApi`
+  walked its whole fallback chain — no `actionCtx.api`, and the raw `ObjectQL`
+  engine has no `.object()` (that lives on `ScopedContext`, reachable only via
+  `engine.createContext()`, which the action path never called) — and landed on a
+  repo facade that proxied every call to the engine with **no `context`**.
+  `ctx.engine` had the identical hole.
+
+  Context-less is not "trusted", it is **identity-less**, and identity-less is
+  strictly worse than either coherent posture: plugin-sharing's write gate
+  short-circuits on `!context.userId` (no user to own the record) and its bypass
+  needs `context.isSystem` (never set). So a `type: 'script'` action whose body
+  called `ctx.api.object('crm_case').update(...)` failed with
+  `FORBIDDEN: insufficient privileges to update crm_case` — **as the built-in
+  admin** — while the `[action-audit]` line on the same request announced
+  RLS-bypassing TRUSTED execution. Objects with a `public` sharing model, no
+  owner field, or a bypass listing passed the gate early, so only _some_ actions
+  broke and the defect read as object-dependent flakiness.
+
+  Both dispatch paths (REST `/actions/:object/:action` and MCP `run_action`) now
+  bind `ctx.api` to `engine.createContext(...)` and thread the same envelope
+  through `ctx.engine`, matching what hook bodies already get from the engine's
+  `buildHookApi`. The envelope is the caller's `ExecutionContext` elevated with
+  `isSystem: true` — the posture the action surface already documents and gates
+  for at invoke time (the ADR-0066 D4 capability gate and the `ai.exposed` gate
+  are what admit a body to trusted execution). The caller's fields are spread
+  first, so a body's writes stay attributable (`userId` stamps
+  `created_by`/`updated_by`), org-scoped (`tenantId` stamps the org column and
+  drives driver-level tenant isolation), and joined to an open transaction —
+  rather than the unattributable, org-less rows a bare `{ isSystem: true }` would
+  write.
+
+  No authoring change is required: `ctx.api.object(name)` inside a `body` now
+  does what the docs always said it does. Bodies that worked before (public /
+  owner-less objects) are unaffected apart from their writes now being correctly
+  attributed and org-stamped.
+
+- 48fcf70: **[ADR-0110 D5] The action-governance inventory moves to the engine plugin —
+  AppPlugin never ran it on the platform's own dev path.**
+
+  Dogfooding the inventory with a positive control (an injected undeclared
+  handler) showed the `kernel:ready` hook it hung on never fired under `os dev`:
+  AppPlugin is registered conditionally (`serve.ts` skips it when the host wraps
+  itself; the dev fast path loads apps without it), so the checklist that
+  justifies D3's no-opt-out refusal was never printed where an upgrade most
+  needs it.
+
+  - The addressing vocabulary (`GLOBAL_ACTION_OBJECT_KEY`,
+    `actionHandlerObjectKeys`, `isObjectLessActionKey`,
+    `resolveActionHandlerKeys`) and the reconciliation move into
+    `@objectstack/objectql` — the engine owns the map they describe, and the
+    dependency direction (runtime → objectql) permits no other home.
+    `@objectstack/runtime` re-exports them unchanged, so dispatch, the MCP
+    bridge and existing importers keep reading ONE implementation.
+  - `ObjectQLPlugin` now runs the inventory in its existing `kernel:ready`
+    handler — after `resyncAuthoredActions`, so the audited registry is final —
+    and again on `metadata:reloaded`, fingerprint-suppressed so a reload that
+    changed nothing action-related logs nothing. A Studio edit that orphans or
+    binds a handler updates the report live; the old boot-only snapshot went
+    stale on the first edit.
+  - Verified end-to-end with a programmatic kernel: the injected orphan is
+    named, a clean registry is silent. The `os dev` / `os serve` consoles still
+    swallow ALL plugin boot logs (pre-existing, tracked separately) — on those
+    surfaces the inventory becomes visible once that sink is fixed.
+
+- 0ecc656: feat(lint): an action body's discarded `ctx.record` write warns at author time (#4345)
+
+  `#4344` deliberately left `ctx.record` alone, and said why: an action's
+  `ctx.record` is a plain snapshot (`unwrapProxyToPlain(actionCtx?.record)`) that
+  `boundActionHandler` never writes back — the hook path's
+  `applyMutationsToInput` has no action-side counterpart — so `ctx.record.x = …`
+  is discarded for **declared and undeclared fields alike**. Reporting that
+  through the unknown-field rule would have been actively wrong: flagging only
+  the undeclared half implies the declared half persists, which is the false
+  completion this rule family exists to stop manufacturing. It needed its own
+  finding, and now has one.
+
+  **New rule — `action-record-write-discarded` (advisory).**
+
+  **It is not "flag every `ctx.record.<field>` assignment"** — that would be a
+  false-positive machine, because mutating the snapshot to build a payload is a
+  legitimate idiom:
+
+  ```js
+  ctx.record.stage = "won";
+  await ctx.api.object("crm_deal").update(ctx.record); // the write is LIVE
+  ```
+
+  So the finding requires the write to be **provably dead**: reported only when
+  `ctx.record` never escapes the body as a value. Property reads
+  (`ctx.record.id`) do not rescue a write and do not suppress the finding;
+  handing the object to anything — an argument, an assignment RHS, a spread, a
+  return — does. Aliasing (`const r = ctx.record`) reads as an escape, which is
+  the safe direction: it costs a missed finding, never a false one.
+
+  Truthiness and type tests are **not** escapes, and that distinction is what
+  makes the rule fire on real code rather than almost never. Running it against
+  the showcase app is what surfaced it: `mark_done` opens with
+  `ctx.recordId || (ctx.record && ctx.record.id)`, the defensive idiom action
+  bodies are actually written with, and counting that guard as an escape silenced
+  the finding on the one body in the repo that had a record write. A test reads
+  the reference and yields a boolean — or, for `&&`/`||`/`??`, yields the left
+  operand only when it is falsy, which is null or undefined and persists nothing.
+  Only the LEFT operand is a test: `x || ctx.record` really does evaluate to the
+  object, and still escapes.
+
+  **One suite member, two rule ids.** Both findings fall out of one parse of one
+  source on one surface, so `validateActionBodyWrites` reports both rather than
+  `REFERENCE_INTEGRITY_RULES` growing a second member that would parse every
+  action body again to say two things about the same walk. The alternative —
+  hand-wiring it into the three CLI commands — is the drift that suite exists to
+  end, and `validateReadonlyFlowWrites` is the standing proof: wired into
+  `validate` and `compile`, never into `lint`. The trade-off is written down at
+  both ends rather than left to be rediscovered.
+
+  **The ledger ratchet fired, as designed.** `record-property-assign` joins the
+  shared `HOOK_BODY_WRITE_PATTERNS` — the extractor's shape inventory, not any
+  one rule's — and both existing consumers had to classify it before it could
+  land. That was not cosmetic on the hook side: a `record-property-assign` write
+  carries no `object`, and `validateHookBodyWrites` branched on exactly that to
+  mean "a `ctx.input` write", so the new shape would have been reported as _"the
+  hook writes 'stage' to its input"_. The hook rule now declares its own
+  consumed subset (`HOOK_BODY_WRITE_PATTERN_IDS`) and its exclusion with a
+  reason — a hook sandbox context has no `ctx.record` at all
+  (`buildSandboxContext` never sets it), so the expression throws at run time
+  rather than silently no-op'ing, and a loud failure is not an advisory rule's
+  business.
+
+  `extractHookBodyWriteSet` is the new one-parse entry point, returning the
+  writes plus the `ctxRecordEscapes` signal; `extractHookBodyWrites` stays as a
+  thin projection of it.
+
+  **Boot path.** The action gate's prefilter widens from `api` to `api`-or-
+  `record`, so a body reaching neither still never loads the ~9 MB TypeScript
+  compiler. `lazy-deps.test.ts` pins it — and its header and two case names,
+  which still claimed every lazy dep waited on "a react page", now say which
+  trigger each one pins (typescript has also been loaded by the hook-body gate
+  since #4271).
+
+  `@objectstack/spec` / `@objectstack/runtime`: `ScriptBodySchema`,
+  `ActionSchema.body` and `ScriptContext.record` now state that
+  `ctx.api.object(...)` is the only path that persists anything, and that
+  `ctx.record` is read-only in effect. Doc comments only — no schema or
+  generated-artifact change. Whether the runtime should instead refuse or honour
+  a record write stays open on #4345.
+
+- 0c90ece: fix(actions): the object-less `POST /actions//:action` shape is actually reachable over HTTP (#3913 follow-up)
+
+  #3913 taught `handleActionsRequest` to route a single-segment path — the
+  object-less shape `POST /api/v1/actions//:action` — at the canonical `'global'`
+  key. That code was correct and unit-tested, and **unreachable**: the dispatcher
+  mounts its routes explicitly, `:object` does not match an empty path segment,
+  and no registration covered the `//` form. Over real HTTP the request fell
+  through to Hono's `notFound` and answered a bare `{error: 'Not found'}` with the
+  actions domain never running — so the exact URL #3913 was filed against still
+  did not dispatch.
+
+  The tests could not catch it because they call `dispatcher.handleActions()` /
+  `dispatcher.dispatch()` directly, bypassing the route table. This is the same
+  class of bug `dispatcher-plugin.routes.test.ts` was created for after `/mcp` and
+  `/keys` shipped the same way; the guard now covers the action routes too.
+
+  Found by dogfooding the running showcase app, not by the suite.
+
+  `POST /api/v1/actions//:action` now answers identically to
+  `POST /api/v1/actions/global/:action` — same envelope, same `'global'` key. The
+  object-scoped registrations are untouched and unshadowed (Hono matches the
+  literal `//` without competing with `:object/:action`).
+
+- 6fa1827: fix(runtime): the `/ai/agents` degraded fallback answers in the declared envelope (#4053)
+
+  `GET /ai/agents` was the last unenveloped SDK-addressable route. The framework's
+  degraded fallback — what an open-source runtime with no `service-ai` answers —
+  now returns `{ success: true, data: { agents: [] } }` via `deps.success`, and the
+  route-envelope guard's last ratchet retires with it: **0 ratcheted on both
+  surfaces.**
+
+  ## Why `data: { agents }` and not `data: []`
+
+  #3983 set the precedent that `data` carries the payload directly, and following it
+  here would have looked consistent. It would also have been wrong, and silently so.
+
+  `AiAgentsResponseSchema` is a **declared** payload schema; share-links' `{ links }`
+  was an ad-hoc wrapper with none. So this is the #3843 relocation — the declared
+  payload moves under `data` unchanged, the way `SettingsNamespacePayload` did —
+  rather than a reshape.
+
+  That distinction decides the blast radius. `unwrapResponse` returns `body.data`
+  when a body has a boolean `success` **and** a `data` key, so:
+
+  | conversion                    | `client.ai.agents.list()`           |
+  | ----------------------------- | ----------------------------------- |
+  | `data: { agents }` (this one) | reads `.agents` off it — **works**  |
+  | `data: [...]` (flattened)     | `.agents` is `undefined` → **`[]`** |
+
+  An empty list is not a visible failure on this route. `useAiSurfaceEnabled` gates
+  the entire AI surface on `agents.length > 0`, and an empty catalog is the _correct_
+  answer for a seat-less user (ADR-0068) or a Community-Edition deployment. The
+  broken state and the legitimate one are indistinguishable — no error, no 403, no
+  log.
+
+  ## Consequence: no lockstep
+
+  Because the SDK reads both shapes identically, **each surface converts on its own
+  schedule**. Cloud's `service-ai` still answers unenveloped and keeps working
+  unchanged; objectui already reads all four shapes (objectui#2992). The
+  "three repos in one batch" framing #4053 opened with does not apply to this
+  variant.
+
+  Five tests in `@objectstack/client` pin it, including the road not taken: the
+  flattened body asserts `[]`, so the cost of choosing it is recorded rather than
+  rediscovered.
+
+- 05154a1: Discovery stops telling Cloud/Enterprise deployments that nothing implements `ai` (#4093 follow-up).
+
+  `CORE_SERVICE_PROVIDER` recorded `null` for `ai` because no **workspace** package provides it, and `serviceUnavailableMessage('ai')` therefore produced _"No implementation ships for the 'ai' slot"_. That is false: `@objectstack/service-ai` registers the slot in `objectstack-ai/cloud`. The table conflated "not in this repository" with "does not exist" — the same class of wrong answer the table was introduced to end, one step further out.
+
+  Verified against the cloud repository rather than inferred: `packages/service-ai/src/plugin.ts` calls `ctx.registerService('ai', …)`, and the package is `private: true`, so there is genuinely nothing to install — which is why `null` stays right and an `Install X` sentence would still be wrong. `search`, `workflow` and `graphql` were checked the same way and nothing registers them in either repository, so their `null` and their "nothing ships" sentence are accurate.
+
+  `ai` now carries a `REMEDY_DETAIL` sentence — _"Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation ships in the open framework"_ — the mechanism `ui` already used. Both discovery (`services.ai.message`) and the `/ai` 501 body report it.
+
+  This **removes** code: `/ai`'s domain had a local message override, added because the shared sentence was wrong there. Correcting the table fixed the domain _and_ discovery, which the override could never reach, so the override and `capabilityUnavailable`'s `message?` parameter are both gone. A slot whose sentence is wrong needs the table corrected, not a local exception.
+
+  Also corrected: three places still describing `/ai`'s absent-service answer as a 404 (`docs/api/client-sdk.mdx`, `docs/releases/v17.mdx`, and a comment in `packages/client`'s URL-conformance test) — stale since that answer became 501.
+
+  FROM → TO: `services.ai.message` and the `/ai/*` 501 body change text. Nothing branches on either — `status` and `enabled` are the contract, the message is prose for humans and agents.
+
+- fce14ab: fix(runtime): the `callData('query')` ObjectQL fallback serves the caller's query instead of dropping it (#4386)
+
+  When the protocol service is unavailable (lean assemblies, MCP multi-env with
+  a raw driver), the fallback passed only `{ context }` to `ql.find` — the
+  caller's `where`/`orderBy`/`limit` never left the function, and the ENTIRE
+  table came back as an ordinary-looking `{ records, total }`. The sibling
+  `get`/`update`/`delete` fallbacks all built a proper `where`; `query` was the
+  only verb whose fallback forgot the request.
+
+  The fallback now forwards the canonical QueryAST keys both possible
+  recipients execute (`where`, `fields`, `orderBy`, `limit`, `offset` — engine
+  option bag and raw-driver QueryAST are aligned by design), drops a
+  caller-supplied `context` (server-derived only, matching `findData`), and
+  refuses with 501 anything it cannot reproduce without the protocol layer —
+  wire spellings needing fold/lowering (`sort`, `select`, `skip`, `populate`)
+  and capabilities a raw driver would silently drop (`search`, `expand`). The
+  protocol path is unchanged and keeps accepting wire spellings.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 7309c81: fix(runtime,cli): `projectRoot` reaches the metadata repository; stop compiling tests into the CLI's dist (#4065)
+
+  Two defects behind the last of #4065's stray `.objectstack/` directories — the
+  one under `packages/cli/`. Neither is cosmetic.
+
+  **1. `projectRoot` only got half the stack.** `createStandaloneStack`'s
+  `projectRoot` is documented as scoping a boot's on-disk state to the project
+  folder "so different examples / apps don't share a single database by accident",
+  and it did redirect the default sqlite database. But it was never passed to
+  `MetadataPlugin`, whose `FileSystemRepository` kept rooting at `process.cwd()`.
+  So one "project root" meant two different directories: a boot pointed at project
+  A wrote `A/.objectstack/data/` and `<cwd>/.objectstack/metadata/`. It now
+  forwards `rootDir`, and `bootSchemaStack` accepts a `projectRoot` to pass down
+  (defaulting to `process.cwd()`, which is right for every real `os migrate` — the
+  CLI runs from the project directory). The two migrate integration suites, which
+  build a fixture project in a tempdir, now scope their boots to it.
+
+  **2. The CLI compiled its own tests into `dist/` — and vitest ran them.**
+  `tsconfig.build.json` included all of `src` with no exclude, so every
+  `src/**/*.test.ts` was emitted as `dist/**/*.test.js`. Two consequences:
+
+  - `files: ["dist"]` **published** them.
+  - This package has no vitest config, so `vitest run` collected the compiled
+    copies alongside the sources: **81 test files and 849 tests where the sources
+    hold 58 and 581**. Every `src/` test also ran as a stale `dist/` twin built
+    from whatever the source said at the last build.
+
+  That is not just noise — it silently defeats edits. A fix to a source test
+  appeared not to work, because the run was still executing the pre-fix compiled
+  duplicate; that is exactly how the `.objectstack` residue survived a correct
+  fix long enough to look like a different bug. It also means a source test could
+  be edited to pass while its stale twin kept asserting the old behaviour, and
+  neither would be obviously wrong. Test files are now excluded from the build.
+
+  No other package is affected: the rest build with `tsup`, which emits only
+  declared entry points. Verified by scanning every `packages/*/dist` for
+  `*.test.js` — the CLI was the only hit.
+
+- 41dcda3: fix(spec,runtime,service-automation): `IAutomationService` declares the connector registry it already serves (#4127)
+
+  The fourth and last of the dispatcher call sites #4127 found calling a method its
+  contract never declared. The first three shipped in #4143; this one was held back
+  because the fix is a **type move**, not a type addition — `ConnectorDescriptor`
+  was declared in `@objectstack/service-automation`'s engine, which is one
+  _implementation_ of `IAutomationService`. A contract cannot name a type that
+  lives inside its own implementation, so `getConnectorDescriptors` could not be
+  declared at all until the type had a home in the spec.
+
+  **`IAutomationService` += `getConnectorDescriptors?()`.** It is the sibling of
+  `getActionDescriptors`, which the contract has declared since ADR-0018: the two
+  fill the flow designer's `connector_action` node together — node vocabulary from
+  one, the connector → action → input pickers from the other. Only one of them was
+  written down. `GET /api/v1/automation/connectors` has served the other since
+  ADR-0022 by probing for the method and then re-typing its own result as `any` to
+  filter on `?type=`, which is a filter on a field the type system did not know
+  existed — one typo from silently matching nothing and answering an empty
+  registry, which is also what this route legitimately returns when the method is
+  absent, so the failure had no distinguishable symptom.
+
+  Optional for the same reason `getActionDescriptors` is: a connector registry is a
+  capability of the flow-engine implementation, not a property of every automation
+  slot. A script-runner filling the slot has no connectors to describe, and the
+  route answers an empty registry rather than a 404 — the `handlerReady` posture
+  does not apply, since the slot is serveable and only this capability is absent.
+
+  **`ConnectorDescriptor` / `ConnectorActionDescriptor` / `ConnectorOrigin` /
+  `ConnectorState` move to `@objectstack/spec/integration`**, beside the ADR-0097
+  provider contract, for the reason that file already states about itself: they are
+  pure types, so a connector plugin — or a designer client, or the dispatcher —
+  speaks about registered connectors depending only on the spec, with no runtime
+  coupling to the engine. `ConnectorOrigin` is ADR-0097 §4 vocabulary and
+  `ConnectorState` is #3017 vocabulary; neither was ever engine-private in meaning,
+  only in location.
+
+  Nothing is renamed and no shape changes. `@objectstack/service-automation`
+  imports the four back and re-exports them from its index — the same names, from
+  the same entry point — so every existing importer compiles unchanged.
+  `ConnectorState` joins that re-export, which it should have been in all along: it
+  is a required field of the descriptor the index has always exported.
+
+  **The test fixture had already drifted, which is the concrete cost.** The
+  dispatcher's connector mock declared `{ name, label, type, actions }` and omitted
+  `origin` and `state` — both **required** on `ConnectorDescriptor`, and both the
+  fields a designer reads to tell a live declarative instance from a plugin one
+  (ADR-0097 §4), or a dispatchable connector from a degraded one that is listed
+  honestly rather than hidden (#3017). Nothing caught it, because an undeclared
+  return type cannot be checked against. The fixture is typed now, so it cannot
+  drift again, and a new test pins that `origin` / `state` / `degradedReason`
+  survive the hop through the route rather than only `name` and `type`.
+
+  Verified: `@objectstack/spec` **7089 tests / 272 files** (2 new contract tests),
+  `@objectstack/service-automation` **457 / 41**, `@objectstack/runtime`
+  **218 http-dispatcher tests** (1 new), `tsc --noEmit`, `pnpm lint`, the liveness
+  and empty-state gates, and the three generated-artifact gates — all clean.
+
+- a225ef5: fix(runtime,webhooks): the path object wins on /data/:object/query, and the webhook envelope owns its keys (#3946)
+
+  Follow-up sweep for the shape behind #3897 and #3933 — a trusted, server-derived
+  value written into an object literal with a caller-controlled bag spread OVER
+  it. Both of those were in the same block of REST code, so the pattern was swept
+  across all 1313 non-test TypeScript files in `packages/`. Nine candidate sites;
+  one real, one worth hardening, seven verified clean (recorded in #3946 so the
+  next sweep does not re-litigate them).
+
+  **`POST /data/:object/query` (runtime dispatcher).** The `/data` domain built
+  `{ object: objectName, ...body }`, so `{"object":"other", …}` in the body moved
+  the read to a different object than the URL named.
+
+  This is NOT an authorization bypass, and the tests pin why: `callData` gates
+  API exposure on `params.object`, so the gate followed the body and agreed with
+  the read — an object hidden by `apiEnabled: false` was refused either way. What
+  broke is that the URL stopped describing the operation (audit trails, logs, and
+  anything keyed on the request path saw object A while object B was read), and
+  that one endpoint spoke a second dialect of the contract the REST side had just
+  standardised on: the path object wins. The other handlers in that file never had
+  the problem — they nest caller data (`data: body`, `query: normalized`) instead
+  of splatting it, and the GET-by-id branch already allowlists its query params
+  against exactly this pollution.
+
+  **Webhook delivery envelope.** `auto-enqueuer` built
+  `{ object, recordId, action, timestamp, ...payload }`, letting an event payload
+  rewrite the envelope a subscriber receives. Behaviour-neutral for the engine's
+  own publishers — `data.record.*` payloads are `{ recordId, after, changes }`
+  with record fields nested under `after`, so none of those four keys collide
+  today — but the shape was wrong, and the `payload.id` fallback right above it
+  suggests publishers that flatten record fields do exist. Envelope keys are
+  written last now.
+
+- c20b875: **Correct the stale premise left behind by #4012: the degraded-boot stderr copy
+  survives the operator's LOG LEVEL, not `os serve`'s boot-quiet window.**
+
+  `emitDegradedBootBanner` writes the `OS_ALLOW_DRIVER_CONNECT_FAILURE` banner to
+  stderr in addition to `logger.warn`, and every comment and test name explaining
+  why cited the same reason: `os serve` swallowed all of stdout while the kernel
+  booted, and `Logger` routes `warn` to stdout. #4012 fixed that — the boot window
+  now buffers and replays `warn`-and-above — which retires the _stated_
+  justification for a duplicate that is nonetheless still load-bearing:
+
+  `Logger.write()` returns before touching a stream when the record is below
+  `config.level`, so at `--log-level error`, `fatal` or `silent` the banner's
+  `logger.warn` reaches **no** stream at all. A production host at `error` is
+  exactly the deployment this escape hatch exists for, and exactly where a
+  logger-only banner would vanish. Removing the stderr copy on the strength of
+  #4012 would therefore have been a regression — so this documents the reason that
+  is still true, in the places someone would read before deleting it:
+  `degraded-boot.ts`, the engine's emit site, and all three parity tests
+  (objectql, runtime, service-datasource), which are renamed off "which `os serve`
+  boot-quiet cannot swallow" to "which the operator log level cannot filter away".
+
+  The objectql parity test now proves the claim instead of asserting around it: it
+  drives a **real** `ObjectLogger` at `level: 'error'` and requires the banner on
+  stderr _and_ nothing on stdout. Set the level to `warn` and it fails — so the
+  test is pinned to the level filter rather than passing for any reason.
+
+  Also corrected in the same sweep, all comment-only, all previously overstating
+  what #4012 had not yet fixed:
+
+  - the automation wiring summary (`format.ts`, `serve.ts`, its test) claimed the
+    boot window swallowed the engine's binding warnings. Its real justification is
+    stronger and unchanged: a flow that silently fails to arm emits **no** log line
+    at any level, so binding state has to be read off the live engine — absence of
+    a warning was never evidence of a bound flow.
+  - the seed summary (`seed-summary.ts`, `format.ts`, its test) and `AppPlugin`'s
+    seed-outcome note attributed the silence to the boot window; the operative
+    gate is that `SeedLoader`'s result logs are `info`, under the default `warn`.
+
+  No behavior changes.
+
+- 0373d52: Both discovery builders now derive the `data` service entry from the implementation in the slot, closing the hardcoded "kernel-provided" block (#4130).
+
+  #4089 computed `metadata`; `data` was the last entry that judged itself, reporting `status: 'available'` and `handlerReady: true` unconditionally. That was true — but by a convention in a different package, not by anything either builder checked: ObjectQL is the slot's only producer, and plugin-dev always loads `ObjectQLPlugin` as a child, so plugin-dev's `data` stub (`find()` returns `[]`, `insert()` mints an id and stores nothing) never reaches the slot. A second producer, or a trimmed dev config, and the hardcode starts lying about the platform's most load-bearing capability.
+
+  Both builders now read the registered service's `__serviceInfo`:
+
+  - a real engine carries no marker ⇒ `available` + `handlerReady: true`, byte-identical to the hardcode it replaces (verified on a real kernel boot);
+  - a self-declared stub ⇒ its own `status` and `message`, with `handlerReady: false` (the default for `stub`), so a consumer that gates on `handlerReady` stops treating an empty query engine as a real one.
+
+  `handlerReady` is derived here rather than pinned `true` as it is for `metadata`, because the two routes differ: `/meta` answers from the protocol whatever fills the metadata slot, while `/data` needs the `protocol` or an objectql-shaped service and 503s without them — and the only stack where a stub occupies the `data` slot is one where ObjectQL never registered. No routing, gating or dispatch behavior changes: the `data` domain resolves its engine directly and never consulted this slot.
+
+- 4f30943: Both discovery builders now compute the `metadata` service entry from the implementation that fills the slot, instead of hardcoding opposite verdicts for it (#4089).
+
+  `metadata` sat in a "kernel-provided (always available)" block above the loop that reads `__serviceInfo`, hardcoded separately in each builder — and the two disagreed about the same slot:
+
+  - `@objectstack/runtime`'s dispatcher declared it permanently `status: 'degraded'` with `message: 'In-memory registry; DB persistence pending'`, so a stack with `MetadataPlugin` and a real `sys_metadata` table was still reported as having no persistence.
+  - `@objectstack/metadata-protocol` declared the same slot permanently `status: 'available'`, so the kernel's in-memory fallback (`createMemoryMetadata`, auto-registered when no metadata plugin is present) read exactly like a persisted registry — the `__serviceInfo` marker #4058 gave it went unread here.
+
+  Both now read the registered service's `__serviceInfo` (via `readServiceSelfInfo`) and report what it declares:
+
+  - kernel in-memory fallback, or plugin-dev's dev registry → `status: 'degraded'` plus that implementation's own `message`, which names what is missing and what to install.
+  - `MetadataPlugin` (or any implementation carrying no marker) → `status: 'available'` with no message.
+
+  `handlerReady: true` is now stated unconditionally on both sides: it answers "is `/api/v1/meta` mounted?", and that route is served by the protocol whichever implementation occupies the slot — a degraded service in it does not unmount the route. Nothing about routing, gating, or dispatch changes; consumers that treat `status` as a capability claim (AI agents, the console) simply stop being told two different things by two hosts.
+
+- 86a71d1: Discovery's "install this to enable" now names a package that exists (#4093 follow-up).
+
+  Discovery tells a consumer two things about an absent capability: that it is absent, and what to do about it. The first has been carefully honest since #2462/#4000. The second was invented from the slot name.
+
+  The dispatcher templated `Install a ${slot} plugin to enable` across twelve slots, and `metadata-protocol` carried a hand-written table in which **ten of fifteen entries named a package that does not exist** — `plugin-redis`, `plugin-bullmq`, `job-scheduler`, `plugin-notifications`, `plugin-storage`, `plugin-automation`, `ui-plugin`, plus `plugin-ai`, `plugin-search` and `plugin-workflow` for slots nothing implements at all. That value is also surfaced as discovery's `provider`.
+
+  A remedy naming a package that cannot be installed is a dead end handed to someone at the exact moment they are trying to fix their stack — and an agent reading discovery cannot tell it apart from a package it should install. It is the same `declared ≠ enforced` failure this lineage has been closing, one level over: not "does the capability exist" but "is the fix real".
+
+  `CORE_SERVICE_PROVIDER` and `serviceUnavailableMessage()` in `@objectstack/spec/system` are now the one place that sentence is written, and both discovery builders read them, so the two hosts cannot tell a consumer to install different things (the drift #4089 and #4130 closed for the `metadata` and `data` entries). Entries were verified against what actually calls `registerService` for each slot rather than against name similarity — which is how `notification` turned out to be filled by `@objectstack/service-messaging`, the one slot whose package shares no word with its name.
+
+  Four slots — `ai`, `search`, `workflow`, `graphql` — have no implementation anywhere, so they now say so instead of naming a plausible package. `ui` keeps the fuller sentence it got in #4146 (`/ui` is served by the `protocol` service; nothing registers the `ui` slot), and that sentence now reaches both builders instead of one.
+
+  `scripts/check-service-providers.mjs` (wired into the lint workflow as `check:service-providers`) fails CI when a named package is not a real workspace package, or when a `CoreServiceName` slot has no entry — so a rename or a deletion cannot leave a stale instruction behind.
+
+  FROM → TO: `services.<slot>.message` and `services.<slot>.provider` change text for most unavailable slots. Anything matching on the old `Install a <slot> plugin to enable` wording should match on `status: 'unavailable'` instead — the status field is the contract; the message is prose for humans and agents.
+
+- d5c75e2: fix(spec,runtime,service-i18n): the dispatcher domains and their service contracts describe the same surface (#4127)
+
+  #4087 retired a `/storage` bridge that called `upload(key, data, options?)` as
+  `upload(file, { request })` — a shape no implementation has. Sweeping the other
+  dispatcher domains against `packages/spec/src/contracts/*` found the mirror-image
+  gap in three places: the call site and the implementation agreed, and the
+  **contract** was the thing that had never been written down. Each one was worked
+  around at the call site with `typeof x.foo === 'function'` — a duck-type is what
+  "the contract does not cover this" looks like when nobody fixes the contract.
+
+  Fixed at the contract, per Prime Directive #12.
+
+  **`INotificationService` — the inbox half.** `listInbox` / `markRead` /
+  `markAllRead` now exist, with `InboxQuery` / `InboxNotification` /
+  `InboxListResult` / `MarkReadResult`. Three SDK-expressed routes
+  (`notifications.list` / `.markRead` / `.markAllRead`) have rested on them all
+  along, implemented by `service-messaging`, while this contract described only
+  `send`. The cost was not theoretical: the dev notification stub implements
+  exactly `send` and `sendBatch` **because it followed the contract**, so the one
+  implementation written to spec was the one the dispatcher had to duck-type past.
+
+  They are optional, and the probe stays: an inbox needs a durable store, and a
+  send-only provider (SMTP, Twilio, a Slack webhook) fills the slot legitimately
+  without one. `handlerReady` cannot express that — the slot is serveable, one
+  capability of it is absent. The `/notifications` domain now takes
+  `INotificationService` instead of `as any`, and each write route probes its own
+  method rather than riding the entry `listInbox` check (they are separately
+  optional, so "has an inbox to read" never implied "has read-state to write").
+
+  **`II18nService.getFieldLabels`.** Both serving surfaces — the dispatcher's
+  `/i18n/labels/:object/:locale` and service-i18n's own mount — probed for it and
+  both documented it as "optional on `II18nService`", which was not true. It is
+  now. service-i18n's probe loses two casts with it (one through
+  `Record<string, unknown>`, one re-declaring the signature inline).
+
+  **`IAutomationService.getFlowRuntimeStates`** + the `FlowRuntimeState` type.
+  `GET /automation/_status` (and the CLI boot summary, and the
+  `kernel:bootstrapped` audit) already called it while the contract stopped at
+  `listFlows(): string[]`. The dispatcher's inline cast declared it as
+  `{ name, enabled, bound }` — a third copy of the shape and a narrower one than
+  the engine returns, dropping the `status` / `triggerType` / `object` fields that
+  say WHY a flow is unbound.
+
+  Two runtime fixes fell out of the same sweep:
+
+  - **`POST /automation/trigger/:name` now builds a real `AutomationContext`.**
+    It passed the raw HTTP body to `execute(name, body)`, so the
+    `{ recordId, objectName, params }` translation never ran and — the sharper
+    half — no caller identity was forwarded. A flow's default `runAs` is `'user'`,
+    and a `runAs:'user'` run whose trigger resolved no user has its data
+    operations REFUSED (#3760, fail-closed), so `client.automation.trigger()`
+    could not run a data-touching flow at all while `POST /:name/trigger` could.
+    service-automation's own comment claims "most trigger surfaces (REST action /
+    trigger endpoint) already resolve the full envelope"; for this endpoint it was
+    not true. Both routes share one context builder now.
+  - **The dead `automationService.trigger(...)` probe is gone.** Nothing in the
+    repo has ever implemented `trigger` on the automation slot and the contract
+    never declared it, so the branch was unreachable on every deployment and its
+    `execute` "fallback" was the route. Declaring `trigger?` would have blessed a
+    second name for `execute`; the dead branch is deleted instead.
+
+  No migration. Every added contract member is optional, so existing
+  implementations stay valid; the two runtime fixes only make routes that were
+  failing or degraded behave like their working twins.
+
+- bb192c4: Gate every dispatcher service domain on `handlerReady` instead of on slot occupancy (#4058 step 2).
+
+  #4000 made the `/analytics` domain execute ADR-0076 D12's third conclusion ("consumers treat only `handlerReady: true` as a real capability"); every other domain still gated on "is a service registered", so a self-declared stub occupying `automation` / `notification` / `ai` / `file-storage` / `i18n` was called like a real implementation and its fabricated answer went out as a 200. Step 1 (#4082) made the two kinds of dev implementation distinguishable; this is the gate that reads the distinction.
+
+  - The `/analytics`, `/automation`, `/notifications`, `/ai`, `/storage` and `/i18n` domains, the route-mount gate, discovery's `routes`/`features`, and the metadata-protocol builder's route advertisement now share one predicate (`isServiceServeable`): a slot whose occupant self-declares `handlerReady: false` is answered exactly as an empty slot is — the domain's existing 404, or the explicit 501 `/storage` and `/i18n` use. One predicate, so what is advertised and what is served cannot disagree.
+  - `handlerReady`, not `status`, is the test. An implementation that declares `degraded` defaults to `handlerReady: true` and keeps serving — which is why the in-memory `file-storage` and `i18n` implementations are unaffected.
+  - `discovery.services.*` stays presence-gated: a registered stub still reports `{ enabled: true, status: 'stub', handlerReady: false }` (with no `route`), which says strictly more than collapsing it to `unavailable` would.
+  - `/ai` improves for the stub case: an occupied-but-unserveable slot used to fall through to a 503 "AI service routes not yet initialized" and lose the `GET /ai/agents` empty-list answer the console polls for on every navigation. Both are restored.
+
+  No change for a host whose services are real implementations. If you register your own stub under one of those six slots and relied on the dispatcher calling it, either drop the `handlerReady: false` self-declaration (declare `degraded` if it genuinely serves) or install the real service. Not gated, deliberately: `/data`, `/meta`, `/auth` and the security path — their dev stubs back the dev stack's own core loop, and gating them would 404 the dev stack itself.
+
+- 98e7cc7: fix(runtime): dispatcher error exits serve VALIDATION_FAILED as 400 with `fields[]` (#3918)
+
+  `ValidationError` — what objectql's record and rule validators throw — carries
+  `.code = 'VALIDATION_FAILED'` and `.fields[]`, one entry per offending field. It
+  deliberately carries no `.status`, no `.statusCode`, and no `.issues`: it is a
+  plain domain error, and deciding it means "400" is the HTTP boundary's job.
+  `@objectstack/rest` has always done that (`mapDataError` → 400 with `fields[]`).
+  The runtime dispatcher's two error exits did not, because each read exactly the
+  properties this error lacks:
+
+  - **`HttpDispatcher.errorFromThrown`** (the RETURNED-error path — `/meta` save,
+    `/packages` publish, …) fell back to the caller's `fallbackStatus` for want of
+    a `.status`, and built its structured `details` from `.issues` alone, so
+    `fields[]` was dropped.
+  - **`dispatcher-plugin`'s `errorResponseBase`** (the THROWN-error path — every
+    route the plugin mounts: `/analytics`, `/packages`, `/i18n`, `/storage`,
+    `/automation`, `/auth`, `/notifications`, `/mcp`, …) took the same 500
+    fallback, and its body was only `{message, code}`. Landing on 5xx then dragged
+    the message through the #3867 leak sanitiser, so a user typing a bad email
+    address got back a **500 "Internal server error"** — no status a client could
+    act on, no message worth showing, and nothing to attach to the input.
+
+  Both exits now recognise the shape and answer the way rest-server does: **status
+  400**, with the error's `fields[]` passed through verbatim in `details`
+  alongside `code: 'VALIDATION_FAILED'`. Any surface the dispatcher serves can
+  therefore highlight the specific field the user got wrong, the way a form served
+  by `/data` already could.
+
+  Matched by duck-typing on `code === 'VALIDATION_FAILED' || name ===
+'ValidationError'` — the same both-ways predicate `mapDataError` uses — so a
+  hook or service that throws `{ code: 'VALIDATION_FAILED', fields }` by hand is
+  served identically, and the runtime takes no dependency on objectql. An explicit
+  `.status` / `.statusCode` on the error still wins: 400 is supplied only as the
+  fallback that was previously 500. Non-validation errors are untouched — same
+  status, same message sanitising, same `details`, and `errorResponseBase` still
+  emits the exact two-key body it always did.
+
+- 4cf7c61: fix(runtime): route every domain `catch` through `errorFromThrown` so status and `fields[]` survive (#3918 follow-up)
+
+  #3867 taught `dispatcher-plugin`'s `errorResponseBase` to read an error's
+  `status` (not just `statusCode`), and #3918 taught
+  `HttpDispatcher.errorFromThrown` the `VALIDATION_FAILED` shape. Both fixes were
+  invisible to a whole tier of handlers underneath them: the domain modules each
+  caught their own errors and called `deps.error(e.message, e.statusCode || 500)`
+  directly, bypassing `errorFromThrown` entirely — 13 call sites, 9 of them in
+  `/packages` alone.
+
+  The consequence on `/packages`, `/meta/_drafts`, `/ui`, `/security` and the
+  `/mcp` transport:
+
+  - **A deliberate status was downgraded to 500.** Every protocol-layer domain
+    error in this codebase carries its HTTP status as `status`, not `statusCode`
+    (`OBJECT_NOT_FOUND`, `RECORD_NOT_FOUND`, `CLONE_DISABLED`, plugin-sharing's
+    `FORBIDDEN`, …) — the exact read #3867 fixed one tier up. So a 404 these
+    routes meant to return arrived as a 500, and the message was dragged through
+    the 5xx leak sanitiser on the way out.
+  - **A `ValidationError` still lost its `fields[]`** and its 400, re-opening
+    #3918 on precisely the routes it was filed against.
+
+  Every one of those catches now calls `deps.errorFromThrown(e, …)`, so both
+  fixes finally reach the routes that need them. Deliberate per-route fallbacks
+  are preserved rather than flattened to 500: the `/meta` save fallback keeps
+  **501** (that branch is reached only when the protocol has no `saveMetaItem`,
+  so "unsupported" is the honest default) and the `/meta` two-part lookup keeps
+  **404** — but a validation failure on either now answers 400 with its fields
+  instead of being swallowed by the fallback.
+
+  `domains/keys.ts` is deliberately **not** converted: it discards the underlying
+  error on purpose, because the message could echo row contents. Its literal
+  `'Failed to create API key'` is the correct answer there and stays.
+
+  No behaviour change for errors that already carried `statusCode` — that read is
+  preserved, only widened.
+
+- b5f9397: fix(sharing,runtime): a `sort` passed straight to the engine never ordered anything; migrate every in-repo engine call to canonical QueryAST keys (#4346)
+
+  Two changes with different weights, from one sweep of every in-repo engine
+  call site that still speaks a deprecated alias.
+
+  **The bug — three dropped sorts.** #4346 made the engine fold `filter`→`where`
+  and `top`→`limit` on all six methods. The other four pairs in
+  `RPC_QUERY_ALIAS_SLOTS` (`select`, `sort`, `skip`, `populate`) are folded at
+  the RPC/wire layer only — their values need shape lowering that belongs to
+  those layers — and a **direct `engine.find()` never crosses that layer**. Three
+  call sites passed `sort` there, so it rode onto the AST untouched, every
+  driver's `Array.isArray(query.orderBy)` guard declined to emit an ORDER BY, and
+  the query returned an ordinary-looking, arbitrarily-ordered result:
+
+  | call site                           | asked for                                         | actually got                |
+  | ----------------------------------- | ------------------------------------------------- | --------------------------- |
+  | `share-link-routes.ts`              | shared AI conversation messages, `created_at asc` | messages in arbitrary order |
+  | `runtime/domains/share-links.ts`    | same route, runtime-domain copy                   | same                        |
+  | `share-link-service.ts` `listLinks` | the 200 most recent share links                   | an arbitrary 200            |
+
+  All three combine the dropped sort with a `limit` — the "latest N" shape whose
+  failure #4226 spelled out: an unapplied sort returns rows in arbitrary order,
+  which `limit` then slices into an arbitrary page. #4226 fixed that in the wire
+  normalizer; these calls sit one layer below it. `listLinks` had no test at all,
+  which is why it went unnoticed. Now pinned — on the option bag the engine
+  receives, not on row order, because the failure is that the key never becomes
+  `orderBy` and a fake engine honouring either spelling would pass either way.
+
+  **The cleanup — 27 no-op renames.** Every remaining in-repo engine call passing
+  `filter` now passes `where` (approvals 5, auth 2, reports 6, sharing 11,
+  webhooks 2, plus the one `filters` in a spec doc example). These are strict
+  no-ops since #4346 folds the alias — the point is that the framework stops
+  depending on a spelling it asks users to migrate off, which is a prerequisite
+  for ever retiring the aliases. Service-level `filter` PARAMETERS (each
+  service's own public API, e.g. `listRequests(filter)`) are deliberately
+  untouched — those are not engine option bags.
+
+  Two of the renamed calls were live victims of the #4346 bug rather than
+  cosmetic: `auth-manager`'s `stampIdentitySource` read the table's first row via
+  `findOne({filter})` and counted the whole table via `count({filter})`, so a
+  federated sign-in never stamped `source: 'idp_provisioned'`. #4346 already
+  corrected the behaviour; this makes the call say what it means.
+
+- 385c4b0: fix(actions): seed a flow action's params with the row id, like the trigger route does (#3915 follow-up)
+
+  #3915 gave the REST `/actions/:object/:action` route its flow dispatch and
+  documented it as "equivalent to `POST /api/v1/automation/:target/trigger`,
+  without having to know the flow name". A real run showed that claim did not
+  hold: the params bag carried the subject record's fields — so `id` — but never
+  `recordId`. The CRM's own `crm_convert_lead` action declares
+  `recordIdParam: 'recordId'` and its flow reads `{recordId}`, so invoking it
+  through the actions endpoint reached the automation engine and then died at its
+  first node:
+
+  ```
+  Flow 'crm_convert_lead_wizard' failed: Node 'get_lead' failed: get_record:
+  refusing to run — 1 filter condition(s) resolved to nothing … `{recordId}` (at id)
+  ```
+
+  while the identical run through `/automation/crm_convert_lead_wizard/trigger`
+  paused normally on its first screen. Only a live invocation surfaced it — the
+  unit tests mock `automation.execute`, so they pinned the call shape without
+  noticing the bag was missing the key flows actually read.
+
+  `dispatchFlowAction` now seeds the row id under the same keys
+  `domains/automation.ts` seeds for the trigger route — `recordId` and the
+  `<objectName>Id` camelCase alias — plus the action's own declared
+  `recordIdParam` (sourced from `recordIdField`, default `id`) when it names a
+  third key. Explicit action params still win over every seed, and the seeding
+  applies to the MCP `run_action` path too, which shared the same gap. A declared
+  `recordIdParam` that no dispatcher honoured was the `declared ≠ enforced` shape
+  in miniature.
+
+- 45dc446: Every in-memory fallback and dev stub now self-describes with the standard `__serviceInfo` descriptor, classified by what it actually is (#4058 step 1).
+
+  ADR-0076 D12 gave services one way to say "I am not the real thing", but the producers never converged on it:
+
+  - The kernel's own fallbacks (`createMemoryCache` / `Queue` / `Job` / `I18n` / `Metadata`) carried `_fallback: true` — a marker **no** consumer recognized, `readServiceSelfInfo` included — so both discovery builders reported them as fully `available`.
+  - `plugin-dev` marked all of its implementations with the same `_dev: true`, normalized to `status: 'stub', handlerReady: false`. That declared a working in-memory search index exactly as fake as an AI stub returning invented text.
+
+  Both now carry `__serviceInfo`, split by a rule that holds across the whole set:
+
+  - **`degraded`** — really does the work, with reduced capability: `cache`, `queue`, `job`, `file-storage`, `search`, `i18n`, `metadata`, `workflow`, `realtime`. Its answers are true answers; the `message` names what is missing (no persistence, no scheduling timer, no state-machine validation, …).
+  - **`stub`** — the answer is fabricated: `ai`, `automation`, `notification`, `data`, `auth`, `security.permissions`, `security.rls`, `security.fieldMasker`. Never to be mistaken for a capability.
+
+  `handlerReady: false` is set independently wherever no HTTP handler serves the slot (`cache` / `queue` / `job` / `realtime`, and every `stub`).
+
+  Discovery output changes accordingly — a kernel fallback that used to report `status: 'available'` now reports `degraded` with an explanatory message. No routing, gating, or dispatch behavior changes: every dispatcher domain still resolves services exactly as before. Consumers reading `discovery.services.*` get the truth instead of a uniform claim.
+
+  For anything that duck-typed the old markers: `svc._fallback` / `svc._dev` → `readServiceSelfInfo(svc)` from `@objectstack/spec/api` (the legacy `_dev` key is still understood by that reader, so third-party stubs carrying it keep working).
+
+- 507b92a: fix(spec,objectql,rest,runtime): field-validation messages answer in the caller's language, named by the field's label (#3957)
+
+  The write path built every built-in validation message by concatenating the **API
+  field name** into a **hardcoded English** template. Those strings are what the
+  Console toast, the CSV-import row report, the CLI and any custom client display
+  verbatim, so a Chinese-locale user importing a bad row read:
+
+  ```
+  第 1 行:penalty_amount must be ≥ 0
+  ```
+
+  …for a field declared `label: '处罚金额'` with a full `zh-CN` bundle loaded. The
+  form layer localized the _same_ constraint correctly (the browser's native
+  `min`), so the language flipped depending on which layer caught the value.
+
+  **Three things changed.**
+
+  1. **The message is rendered in the caller's locale** from a built-in catalog
+     (`BUILTIN_VALIDATION_MESSAGES`, `@objectstack/spec/system`) shipping `en`,
+     `zh-CN`, `ja-JP`, `es-ES` — the same four locales as the platform bundles.
+     The locale comes from `ExecutionContext.locale`, whose contract already read
+     "Drives message catalogs"; this is the consumer that makes that true. Both
+     HTTP entries (REST server, runtime dispatcher) now resolve it from the
+     request's `Accept-Language` / `?locale` first, falling back to the workspace
+     `localization.locale` — so a rejection message and the field labels around it
+     can no longer disagree.
+
+  2. **The field is named by its label, never the API name**: translation bundle
+     (`objects.<obj>.fields.<f>.label`) → declared `label` → API name as the last
+     resort. `FieldValidationError.field` still carries the API name so a form can
+     focus the right input.
+
+  3. **The constraint is exposed as data**, so a client can format its own text
+     instead of parsing the sentence:
+     `{ field, code, message, label, constraint: { min: 0 } }`. This rides
+     ADR-0114's existing `constraint` / `value` positions on `FieldErrorSchema`
+     (`constraint` tightens from `unknown` to `Record<string, unknown>`) rather
+     than adding a parallel payload — `label` is the only new field. The bag
+     carries `min`/`max`/`minLength`/`maxLength`/`actual`/`allowed`/`type`, and the
+     message templates interpolate from exactly those keys.
+
+  Covered end-to-end, not only in the validator: single and batch insert,
+  single-id and multi-row update, ADR-0113's clear-out rejection, the object-level
+  rule evaluator's own built-in messages (`requiredWhen`, per-option gating,
+  state-machine fallbacks), and the importer's cell-coercion, required pre-check
+  and #3956 bound pre-check messages — all of which land in the same row report.
+
+  **What this changes for consumers.**
+
+  - `code` is unchanged (ADR-0114's `FieldErrorCode`) and remains the thing to
+    match on. Message keys are finer-grained than codes — `invalid_datetime`,
+    `invalid_option_value`, `required_cleared` are rendering detail and never reach
+    the wire — so localization never splits the client-facing vocabulary.
+  - `message` **text changes**: it is localized, and it names the field by label
+    even in English (`Budget must be ≥ 0`, not `budget must be ≥ 0`). Anything
+    asserting on the old English string should match `code` (and now
+    `constraint`) instead.
+  - An author-written validation-rule `message` is never touched — it is already
+    in the language its author chose.
+  - A deployment can override any built-in message with a `translation` item
+    defining `validation.field.<messageKey>` (e.g.
+    `validation.field.min_value: '{{label}}不得小于 {{min}} 元'`).
+  - The importer's reference-failure message no longer names the target object's
+    API name (`no sys_user matches "…"`): naming internal identifiers is the
+    defect being fixed, and the column plus the offending value are what an
+    importer can act on.
+
+- 99b4392: Advertise `mcp` in `/discovery` only when it is actually serveable (#4024).
+
+  Both discovery producers gated the `/mcp` route on `isMcpServerEnabled()` alone.
+  The stated justification was a lockstep — `os serve` auto-loads plugin-mcp from
+  the same flag, so on that path advertised did imply mounted. But the lockstep is
+  a property of the CLI, not of the dispatcher: `@objectstack/rest` has no
+  `@objectstack/mcp` dependency, mounts no `/mcp` route and performs no auto-load,
+  so a host that embedded it without plugin-mcp advertised `/mcp` in `/discovery`
+  and then answered 501 on it — the `declared ≠ enforced` failure #3369 forbids,
+  and a broken contract for third-party clients that read `/discovery` to decide
+  what exists.
+
+  Both producers now require the flag AND a serveable MCP service. The runtime
+  dispatcher gates on the handler's own predicate (`typeof
+mcp.handleHttpRequest === 'function'`), so a wrong-shaped service can't
+  over-promise either. `@objectstack/rest` probes via the per-request kernel or the
+  single-env `serviceExistsProvider`; when it genuinely cannot probe it keeps the
+  prior flag-only answer rather than hiding a working endpoint (fail-open,
+  ADR-0057 D10). The `os serve` / `os dev` path is unchanged — it loads the plugin,
+  so the service resolves and `/mcp` is still advertised.
+
+  Also exercises the `mcp: false` seam in `route-parity.integration.test.ts`, which
+  had existed unused since the file was written: `bootServe()` was only ever called
+  with no args or `{ notification: false }`. The one capability whose advertisement
+  was not service-presence gated was also the one whose absence was never tested.
+
+- 39eb01b: fix(runtime,cli,types): `os migrate` and the dev runtime now share one `__search` companion schema view (#3955)
+
+  On a zh-locale deployment the dev runtime provisions the hidden `__search`
+  pinyin companion column (ADR-0098) on every eligible object, but the
+  `os migrate plan`/`apply` boot went through `createStandaloneStack`, which
+  never derived the locale-gated pinyin decision from the compiled artifact.
+  Its metadata therefore lacked every companion column, and `migrate plan`
+  reported each live `__search` column of a dev-created database as a
+  destructive orphan — with `--allow-destructive` as the printed remediation,
+  which would have dropped live feature columns.
+
+  - `@objectstack/types`: new `collectConfiguredLocales(i18n)` and
+    `stampSearchPinyinEnabled(i18n)` — the single resolve-and-stamp helper for
+    `OS_SEARCH_PINYIN_ENABLED`. An explicit env value still wins; only a
+    positive locale-derived decision is stamped.
+  - `@objectstack/runtime`: `createStandaloneStack` stamps the decision from
+    the artifact's `i18n` before any plugin constructs a `SchemaRegistry`, and
+    surfaces `i18n` on its result like `requires`/`objects`/`manifest`.
+  - `@objectstack/cli`: the `serve`/`dev` boot now stamps through the same
+    shared helper (behaviour unchanged), so create/serve and plan/apply cannot
+    compute different schema views of the same source tree.
+
+  A fresh CLI-created database is now also born with the same `__search`
+  columns the dev runtime would provision, instead of acquiring them on the
+  next dev boot.
+
+- 7ce02eb: feat(spec,objectql): `IObjectQLEngine` — the `objectql` slot's contract exists, the class `implements` it, and the seven consumer-local stand-ins are deleted (#4251 B3)
+
+  ObjectQL registers one instance under two names, and the ledger can finally say
+  what each name means: `data` stays `IDataEngine` (the data plane), `objectql`
+  now resolves to **`IObjectQLEngine`** — the full engine: schema access
+  (`getSchema` / `getObject` / `registry`), actions (`registerAction` /
+  `removeActionsByPackage` / `executeAction`), the hook/middleware seams
+  (`registerHook` / `unregisterHooksByPackage` / `registerFunction` /
+  `registerMiddleware` / `bindHooks`), the first-wins default runners and hook
+  metrics, boot wiring (`registerDriver` / `setDatasourceMapping` /
+  `registerApp`), and the ops probes (`checkDriversHealth` /
+  `wasDatastoreCreatedFromEmpty` / `invalidateDataMigrationFlags`). The ledger
+  test pins the new relation: `objectql` strictly widens `data`, deliberately no
+  longer equal.
+
+  **Why now, and why `implements` is the point.** The honest state for two
+  batches was recorded on `DomainHandlerContext.getObjectQL`: ObjectQL is wider
+  than `IDataEngine`, the wider part had no contract, and typing it `IDataEngine`
+  would be "the more comfortable-looking lie". The interim discipline — each
+  consumer declares the narrow slice it uses — produced seven local surfaces
+  (`AppEngineSurface`, `EngineRegistrySurface`, `EngineExtensionSurface`,
+  `SecurityEngineSurface`, `FreshDatastoreEngine`, the dispatcher's inline
+  `checkDriversHealth` slice, the `getObjectQL: any` itself). Each was honest and
+  each was an UNCHECKED claim: `getService<Surface>('objectql')` is an assertion,
+  so an engine rename would have broken every consumer at runtime with zero
+  compile errors. `ObjectQL implements IObjectQLEngine` converts all of them into
+  one compiler-verified claim. All seven stand-ins are deleted; consumers import
+  the one declaration. `getObjectQL` is typed `Promise<IObjectQLEngine | null>`
+  end to end, closing the oldest documented `any` in the dispatcher.
+
+  **Evidence bar unchanged.** Every declared member has a cross-package consumer
+  reaching it through the slot; engine members without one (e.g. `triggerHooks`,
+  cross-package only in tests) stay off until a caller appears. The registry view
+  (`EngineSchemaRegistryView`) declares exactly the eight members consumers use.
+
+  **`_registry` never leaves the engine package now.** plugin-security's
+  declared-metadata readers (`readDeclared`, permission-set projection, suggested
+  audience bindings) reached ObjectQL's private `_registry` field through `any` —
+  the same private reach `/me/apps` had in B2, five more times. All migrated to
+  the public `registry` getter the contract declares, test doubles included.
+
+  **`IMetadataService` gains `subscribe?` / `loadMany?`** — implemented by
+  `MetadataManager` beside `watch` all along, reached through the slot only via
+  `any` by ObjectQLPlugin's metadata bridge (the re-sync keeping runtime-authored
+  hooks/actions live). With them declared, the bridge's six `metadata` lookups
+  and metadata-protocol's `objectql` lookup carry contract types, and both files
+  leave the grandfather list entirely: baseline **167 → 159 sites, 36 → 34
+  files**.
+
+- 2cb6d3c: fix(spec,runtime): `resolveService` returns the slot's contract too, and the `: any` escapes on core slots are gone (#4127)
+
+  Batch 2 of the #4127 gate. #4168 typed `getService` — easy, because every one of
+  its call sites already passed a `CoreServiceName`. `resolveService` is the mixed
+  one, and it is where the remaining `any` lived.
+
+  **Overloads split it exactly where the evidence does.** A `CoreServiceName`
+  resolves to the slot's contract; anything else keeps `any`:
+
+  - **Core slots, however written.** 17 call sites address a core slot with a bare
+    literal — `'metadata'` ×10, `'automation'` ×3, `'auth'` ×3, `'ai'` — rather
+    than `CoreServiceName.enum.*`. The same slot was being addressed two ways;
+    both resolve to the contract now, with no edit to the call sites.
+  - **Everything else** — `protocol` (×22), `objectql` (×9), `mcp`,
+    `kernel-resolver`, `security`, `scope-manager`. Real services with no
+    `CoreServiceName` entry and no written contract. They keep `any` rather than
+    being given a shape here that nothing verifies: **that `any` is where the
+    ledger honestly ends**, and writing those contracts is its own change.
+
+  **The typing was being erased at three call sites, and that is the actual
+  finding.** A `const x: any = await deps.resolveService('auth', …)` defeats every
+  bit of this — the annotation wins, and #4168's work does nothing there. Sweeping
+  for the pattern found three on core slots:
+
+  **`/mcp` ×2 — two more undeclared methods.** The domain calls
+  `authService?.getMcpResourceUrl?.()` and `?.getMcpResourceMetadataUrl?.()`.
+  `AuthManager` implements both (and plugin-auth uses them internally);
+  `IAuthService` declared neither. Classic #4127 shape — call site and
+  implementation agree, the contract is the thing nobody wrote.
+
+  The `: any` + optional-chaining combination made this _worse_ than the earlier
+  gaps, not better: it made the call invisible to the type system **and**
+  accidentally safe. An absent method returns `undefined`, so the skill route
+  silently fell back to deriving an MCP URL from the request host — meaning a real
+  disagreement between the auth service's canonical value and the derived one
+  would have looked exactly like normal operation. The whole point of
+  `getMcpResourceUrl` is that it comes off the auth `basePath` so the two _cannot_
+  disagree about the API prefix; the route's own comment says "the auth service
+  owns the canonical value".
+
+  Both are declared optional: an auth provider without MCP/OAuth support fills the
+  slot legitimately, and `getMcpResourceMetadataUrl` returning `null` (OAuth track
+  off — AS disabled or the origin fails the OAuth 2.1 transport rule) stays
+  distinct from the method being absent.
+
+  **`/packages` ×1 —** `const metadata: any = await deps.getService(…metadata)`,
+  feeding `new SeedLoaderService(ql, metadata, …)`. Annotation dropped; it
+  typechecks against `IMetadataService` now. Its neighbours `protocol` and `ql`
+  keep their `any` for the honest reason above.
+
+  No other core-slot lookup is annotated away — the sweep is exhaustive over
+  `domains/*.ts`.
+
+  Verified: `@objectstack/runtime` **937 tests / 65 files**, `@objectstack/spec`
+  **7112 / 273** (3 new on the auth contract), adapter-hono **73**; `tsc --noEmit`
+  on spec, runtime, downstream-contract and all four examples; `pnpm lint`; all
+  nine `check:*` gates. `api-surface.json` is unchanged — the two additions are
+  interface MEMBERS, not new exports.
+
+- a3cb9c8: Retire the dev-mode `analytics` stub, and make the dispatcher gate `/analytics` on `handlerReady` rather than on service presence (#4000).
+
+  Retiring the degraded analytics shim (#3891) made an empty `analytics` slot the honest signal: `/api/v1/analytics/*` 404s and discovery reports `unavailable`. `plugin-dev` refilled that slot with a stub, which re-created the retired shape in dev mode — the dispatcher gated on "is a service registered", so the stub was called like a real engine and its empty result came back as a 200.
+
+  - `plugin-dev` no longer registers an `analytics` dev stub; the slot stays empty (`NO_DEV_STUB_SERVICES`). Every other dev stub is unchanged.
+  - The `/analytics` domain, its route-mount gate, and discovery's `routes`/`features` now share one predicate (`isAnalyticsServiceServeable`): a service that self-declares `handlerReady: false` (ADR-0076 D12 — `__serviceInfo`, or plugin-dev's legacy `_dev: true`) is treated as an empty slot. A `degraded` implementation that genuinely serves requests keeps serving; `discovery.services.analytics` still reports a registered stub as `status: 'stub'`, which says more than `unavailable` would.
+
+  FROM → TO for dev setups that relied on the stub answering `POST /api/v1/analytics/query` with `{ rows: [], fields: [] }`: install the real engine — `@objectstack/service-analytics` runs an InMemory strategy and needs no database of its own. Nothing else changes; hosts that already install it (including `os serve`, where `analytics` is in `ALWAYS_ON_CAPABILITIES`) are unaffected.
+
+- a2266a6: fix(spec,data): the five RPC query aliases resolve by ONE fold — spec table, not per-reader prose (#3795)
+
+  `RpcQueryOptionsSchema` accepts five legacy aliases next to their canonical
+  QueryAST keys and stated the precedence in prose only ("the normalizer uses
+  the new key"). With no fold in the schema, every reader re-implemented it —
+  the #3713 condition — and the two readers disagreed:
+
+  | pair                  | spec prose | runtime dispatcher | metadata-protocol             |
+  | --------------------- | ---------- | ------------------ | ----------------------------- |
+  | `where` > `filter`    | canonical  | canonical          | **alias consulted first**     |
+  | `fields` > `select`   | canonical  | canonical          | **alias clobbered canonical** |
+  | `offset` > `skip`     | canonical  | canonical          | **alias clobbered canonical** |
+  | `expand` > `populate` | canonical  | —                  | **alias consulted first**     |
+  | `orderBy` > `sort`    | canonical  | canonical          | canonical                     |
+
+  Four of five inverted in `protocol.ts`, so `?select=a&fields=b` answered
+  `[a]` on one path and `[b]` on the other — reachable from a plain HTTP
+  request.
+
+  **The mapping now lives once, in the spec** (`RPC_QUERY_ALIAS_SLOTS` +
+  `foldQueryAliasSlots`, both exported), under the rule #4181 already
+  established for the filter pair:
+
+  - an **alias alone** folds into its canonical key — `filter`→`where`,
+    `select`→`fields`, `sort`→`orderBy`, `skip`→`offset`, `populate`→`expand` —
+    and the alias key is **dropped from the parsed output**;
+  - **both spellings, same value**: redundant, tolerated, alias dropped;
+  - **both spellings, different values**: irreconcilable — picking a winner IS
+    the silent drop — so the parse fails (schema) / the request is `400
+INVALID_REQUEST` (wire), naming the spellings and the canonical key;
+  - an explicit **`null` spelling is a withdrawal**, never a conflict: a null
+    alias is dropped silently, a null canonical keeps its slot-specific answer.
+
+  `RpcQueryOptionsSchema` and the four `filter`-mixin option schemas
+  (update/delete/count/aggregate requests) apply the fold as a parse transform,
+  so parsed output speaks canonical keys only — a TS consumer reading
+  `parsed.query.populate` now **fails to compile** instead of silently reading
+  `undefined` (the #3742 / #3764 shape, one layer down; hence the minor). The
+  protocol normalizer folds raw wire input by the same table (extended with the
+  wire-only `filters` / `$filter` / `$expand` spellings), and the runtime
+  dispatcher's second copy of the fold is deleted outright.
+
+  **Authoring/callers unchanged for the supported cases**: every alias alone
+  keeps working on every path, and identical duplicates still pass. What
+  changes is mixed vocabularies with **different** values — previously answered
+  differently per route, now refused loudly on all of them — and a direct
+  `expand: [names]` array on `POST /data/:object/query`, which used to be read
+  by its indices ("Unknown field '0'") and now lowers to the expand record like
+  `populate` always did.
+
+- 5c13368: feat(objectql,runtime): the default-runner setters are first-wins, and the private-field probes that used to enforce that are gone (#4251)
+
+  `setDefaultBodyRunner` / `setDefaultActionRunner` now enforce their own
+  documented contract — "the runtime layer sets this once per engine" — by
+  keeping the first runner and returning `false` for any later call. Public
+  accessors `getDefaultBodyRunner()` / `getDefaultActionRunner()` join them, and
+  the fields become real `private` members instead of `(this as any)` attachments.
+
+  Before this, the invariant lived in the CALLERS: AppPlugin probed the engine's
+  private `_defaultBodyRunner` / `_defaultActionRunner` fields through `any` to
+  avoid clobbering another AppPlugin's runner on a shared kernel — an invariant
+  owned by every caller and enforced by none, and a private reach that a field
+  rename would have broken silently (the guard reads `undefined`, every AppPlugin
+  reinstalls). The engine's own `bindHooks` fallback and ObjectQLPlugin's
+  authored-action re-sync read the same fields the same way. All three read the
+  public accessors now; the only remaining `_default*` mentions in the repo are
+  comments and test doubles.
+
+  Caller audit before the semantics change: every setter call site either owns a
+  fresh engine (the sandbox and hook-binder tests) or wants exactly
+  keep-the-first (AppPlugin) — nobody replaces a runner on a live engine. Return
+  type `void` → `boolean` is additive; AppPlugin uses it to keep its "Installed
+  default … runner" log truthful (skipped when the engine kept an earlier one).
+
+  Pinned in hook-binder tests: second install refused end-to-end (the first
+  runner is the one that executes) and the accessors expose exactly what was
+  kept.
+
+- 1d5dc46: fix(runtime): carry `code` / `fields[]` across the sandbox boundary so form actions can anchor validation errors (#3918 follow-up)
+
+  Found by dogfooding the merged #3918 chain against a running app. Submitting a
+  record that fails validation through a form **action** came back as:
+
+  ```
+  HTTP 200
+  { "success": true, "data": { "success": false,
+                               "error": "ValidationError: issued_on is required" } }
+  ```
+
+  No status a client could branch on, no code, no `fields[]`. The chain's
+  dispatcher fixes could not help: the field list was already gone before any
+  dispatcher exit ran. It was lost at the QuickJS boundary, twice —
+
+  1. **host → VM.** `vm.newError({ name, message })` dropped every other property,
+     so a body reaching a record `ValidationError` through
+     `ctx.api.object(x).update(...)` saw bare prose.
+  2. **VM → host.** The wrapper's reject handler flattened the error to the string
+     `<name>: <message>` before the host ever saw it.
+
+  Both hops now carry an explicit **allowlist** — `code` and `fields` — alongside
+  the message, and `SandboxError` exposes them as `.code` / `.fields`. The
+  allowlist is a security boundary, not a style choice: host errors routinely hang
+  driver state, connection details or whole record payloads off themselves, and
+  anything crossing INTO the VM is readable by untrusted sandboxed code. Copying
+  the error's own enumerable keys would leak all of it.
+
+  `/actions` then surfaces them, so a form can highlight the offending input:
+
+  ```
+  HTTP 200
+  { "success": true, "data": { "success": false,
+                               "error": "ValidationError: issued_on is required",
+                               "code": "VALIDATION_FAILED",
+                               "fields": [ { "field": "issued_on", "code": "required", … } ] } }
+  ```
+
+  **The `/actions` wire contract is deliberately unchanged.** The status stays
+  200 and `success: false` remains the failure signal: that route has always
+  reported business failure in the payload (an action that "fails" is a normal
+  outcome, not a transport error) and every caller branches on `data.success`.
+  Making it a 4xx would be a break in exchange for a strictly additive fix, so the
+  fix is additive — `code` and `fields` are simply omitted when absent, and a
+  caller that ignores them sees exactly what it saw before.
+
+  Message channels are byte-identical: `SandboxError.message` keeps the
+  `<kind> '<name>' threw:` debug wrapper for server logs and `.innerMessage` stays
+  the plain business text a toast shows. The structured payload rides alongside
+  them, never instead of them.
+
+  Also adds `dispatcher-validation-error.real.test.ts`, which pins both dispatcher
+  exits against the **real** objectql `ValidationError` rather than a hand-built
+  fixture — including its deliberate absence of `.status`, the assumption the
+  whole #3918 fix rests on. The existing fixture-based tests restate that contract;
+  these check it, so a future change to the class fails a test instead of quietly
+  regressing production.
+
+- 627b188: fix(seed-loader): count reference fields dropped from rows that were still written
+
+  The loader had two failure outcomes and only counted one. A record it cannot
+  write is counted in `errored`. But an unusable **reference value** (an object
+  where a natural key belongs, an array on a single-value field) is removed from
+  the record — never written as NULL, which would sever an existing link on
+  upsert replay — and the row is written **without it**. Nothing counted that.
+
+  So a load that quietly severed N associations reported `totalErrored: 0`, and
+  every count-driven surface read clean. The CLI boot banner — the one seed signal
+  that survives `os dev`'s boot-quiet window and the default `warn` level — printed
+  `showcase 42 rows`, and the warn line said `0 dropped record(s)`: true, and
+  useless ([#3932](https://github.com/objectstack-ai/objectstack/issues/3932)).
+
+  `SeedLoadResult.referencesDropped` and `SeedLoaderSummary.totalReferencesDropped`
+  now count it. It is deliberately **not** folded into `errored` — the row _was_
+  written, so that would break the `inserted + updated + skipped` reconciliation
+  against `total`. The banner names it separately:
+
+  ```
+  ⚠ Seeds:   showcase 42 ok / 3 lost links ⚠
+  ```
+
+  Both counters are additive with a `0` default, so an existing producer or
+  consumer of `SeedLoaderResult` is unaffected.
+
+- 857a6cf: fix(cli,core,metadata,runtime): `os serve` boots with no compiled artifact — the platform does not need an application to start (#4085)
+
+  The artifact (`dist/objectstack.json`) defines an **application**. ObjectStack is
+  a development platform, so it has to start without one — but `os serve
+objectstack.config.ts` died during boot whenever the artifact was absent:
+
+  ```
+    Loading objectstack.config.ts...
+  [StandaloneStack] artifact read FAILED: path='…/dist/objectstack.json' error=ENOENT…
+
+    ✗ Service 'manifest' is async - use await
+  ```
+
+  Exit 1 — on a **known-good app** (`examples/app-todo` fails the same way with
+  only its `dist/objectstack.json` moved aside), and on every freshly authored
+  project between `os init` and its first `os compile`. The message named neither
+  the missing artifact nor a fix, so it read as an internal kernel fault.
+
+  Three separate faults, each of which alone was enough to refuse the boot:
+
+  - **`serve` registered the config-derived `AppPlugin` before the stack's own
+    `plugins[]`.** Registration order _is_ the kernel's init/start order, and that
+    slot sits ahead of `ObjectQLPlugin` (which registers `manifest`/`objectql`) and
+    `DefaultDatasourcePlugin` (which connects the database the app seeds through).
+    The wrap is now **appended** to `plugins[]`, the same slot
+    `createStandaloneStack` gives its artifact-derived `AppPlugin` — so config-boot
+    and artifact-boot share one plugin order. The artifact path never hit this,
+    which is exactly what made a plugin-**order** bug look artifact-related.
+
+  - **`ctx.getService()` reported a never-registered service as "is async".**
+    `PluginLoader.getService` is an `async` method, so its return value is _always_
+    a Promise and its internal "not found" rejection can never surface
+    synchronously — the kernel read the answer off that Promise and told every
+    caller to `await` a service that did not exist, while the `not found` branch
+    below it was unreachable. It now decides from the registry: absent ⇒
+    `[Kernel] Service 'x' not found`, registered-but-uninstantiated ⇒ the unchanged
+    `Service 'x' is async - use await`. The same crash now reads
+    `[Kernel] Service 'manifest' not found`, which points at the layer that is
+    actually wrong.
+
+  - **`MetadataPlugin` treated an absent `local-file` artifact as fatal.**
+    `createStandaloneStack` always points it at `dist/objectstack.json`, so a stack
+    with no app at all could not boot. A **missing** local artifact is now "nothing
+    compiled yet": it logs, starts empty, and leaves the artifact watcher armed, so
+    a later `os compile` hydrates the running server. The tolerance is
+    ENOENT-only — a malformed or unreadable artifact stays fatal — and
+    `bootstrap: 'artifact-only'` (sealed runtime, where the artifact _is_ the
+    deployment) keeps failing loudly rather than silently serving an empty runtime.
+
+  `[StandaloneStack] artifact read FAILED … ENOENT` is likewise no longer shouted
+  at callers for whom "no artifact" is a healthy state; a present-but-unusable
+  artifact keeps the loud warning.
+
+  Pinned by an e2e pair that drives the real `os serve` with **no `os compile`
+  anywhere**: an app defined only by `objectstack.config.ts` (asserting its object
+  is in the started plugin set, not merely that boot survived) and a bare
+  `export default {}` platform. The #4012 fixture drops the `os compile` this bug
+  had forced on it.
+
+- 1e38158: fix(cli,runtime): an artifact you NAMED and a boot input you don't have are different failures — say which (#4110 follow-up, #4131 step 1)
+
+  Three corrections, all from the same principle: a platform may boot with no
+  application (#4085), and that says nothing about how a MISSING NAMED INPUT
+  should be read.
+
+  - **A named-but-missing artifact boots empty and silently.** #4110 made an
+    absent artifact non-fatal all the way down — right for the conventional
+    `<cwd>/dist/objectstack.json`, which is just "not compiled yet". But
+    `OS_ARTIFACT_PATH` / `{ artifactPath }` skip the existence check by design, so
+    the tolerance reached them too: `OS_ARTIFACT_PATH=/nope os serve` printed
+    "booting from artifact", reached `Server is ready`, and named the missing path
+    NOWHERE in its output (serve's boot-quiet window drops the loader's calm
+    line). `createDefaultHostConfig` — the boot with no config, where the artifact
+    IS the deployment — now rejects a named local artifact that does not exist,
+    naming both the path and which source named it. The loader keeps its
+    tolerance, so the config-boot path #4085 fixed is untouched.
+
+  - **"Configuration file not found" never said where it looked.** The two things
+    that actually happen are a typo'd filename and the wrong working directory,
+    and the second is the common one. It now names the config path, the artifact
+    path, and that `OS_ARTIFACT_PATH` is unset — and still refuses rather than
+    inventing a zero-object platform, pointing at `objectstack start` for a boot
+    that is app-less on purpose.
+
+  - **That refusal was being truncated.** `this.exit(1)` unwinds to oclif's
+    `process.exit`, which does not drain a piped stdout, so a diagnostic split
+    across several `console.log` calls loses its tail — measured: only the first
+    two lines of the new message survived a pipe, i.e. exactly the part that says
+    where to look went missing. Both of `serve`'s pre-flight refusals now emit one
+    write. Caught by the e2e added here, not by review.
+
+  Also corrects the plugin-ordering claims in `createStandaloneStack` and in the
+  test that pinned them: the comment said the datasource plugin's array position
+  "MUST precede ObjectQLPlugin: its start() connects the default driver", and the
+  test asserted that index with the same rationale. The connect happens in
+  `init()`, and the kernel resolves order from the dependency graph — which hoists
+  ObjectQLPlugin ahead of the datasource plugin (measured: 6 slots earlier), the
+  reverse of what the slot reads as. The test now pins the declared dependency
+  that actually orders the two inits, which deleting the array position cannot
+  break and deleting the declaration does. #4131 tracks making the AppPlugin end
+  of that contract enforced rather than conventional.
+
+- 65a3a84: fix(runtime,spec): guard the service-lookup typing with a lint rule — which immediately found the project-membership gate not gating (#4127)
+
+  Batch 4 of the #4127 gate. #4168/#4176/#4202 made a slot lookup return the
+  slot's contract. Nothing protected that: an `any` annotation on the **result**
+  switches the checking back off for that call site, silently, with no test
+  failing and no visual difference from code that has it. Three such sites already
+  existed and were found by grep — the same unrepeatable sweep this work replaced.
+
+  **The rule** bans `: any` / `as any` on a `resolveService` / `getService` /
+  `getRequestKernelService` result. Slots with no written contract (`protocol`,
+  `mcp`, `kernel-resolver`, `scope-manager`) are exempted **by name, centrally**,
+  in `eslint.config.mjs` — not by inline disables, because `pnpm lint` runs
+  `--no-inline-config` and ignores those on purpose. The effect is the one worth
+  having: a deliberate gap is a reviewed line in one file, a careless one is a
+  build failure, and they stop looking identical in the code.
+
+  **Its first run found a live fail-open.** `enforceProjectMembership` read the
+  session as `authService?.api?.getSession?.(…)` with no `getApi()` fallback — the
+  only one of the codebase's three `.api` readers without it. `plugin-auth`
+  registers `AuthManager`, which has **no `.api` member at all**. So the read
+  yielded `undefined`, `userId` stayed unset, and the function returned at its
+  "anonymous — upstream auth will decide" line **before ever querying
+  `sys_environment_member`**. A signed-in non-member passed the gate, on every
+  deployment with project scoping on — which is where the flag defaults to true.
+  Anonymous callers were still denied elsewhere (#2567/#3963), so this was
+  specifically the signed-in-non-member case.
+
+  The existing test for that gate mocked auth as `{ api: { getSession } }` — the
+  legacy shape the shipped provider does not have — so it was green throughout.
+  That is the **fourth** test in this work line found encoding a contract nobody
+  implements, after batch 1's three `auth.handler` mocks and batch 3's
+  `status: 'open'`. The new test uses the `getApi()` shape and fails against the
+  pre-fix code.
+
+  **Also found by the rule**, all the same #4127 shape (implemented, called,
+  undeclared) and all now declared: `IAuthService` gains `api`, `getApi`,
+  `isAuthGateActive` and `verifyMcpAccessToken`; `IMetadataService` gains `load`
+  and `loadDiagnosed`. `getApi`'s return type is the **evidenced subset** —
+  `getSession({headers})` and the three fields callers read — not a re-declaration
+  of better-auth's handle, which belongs to that library.
+
+  **And the pattern's real root:** the lookup facade returning `any` was
+  re-declared in **three** places. Batches 1-3 typed `DomainHandlerDeps` and left
+  `ActionExecutionDeps` and `resolve-execution-context`'s `ResolveOptions` still
+  saying `any` — so the copy that stayed untyped was the way around all the
+  others, and it is where the auth reads lived. All three are typed now.
+
+  Completing the interface: `getRequestKernelService` gets the same overload split
+  (its one caller resolves the same `objectql` slot the `resolveService` fallback
+  beside it does, so the two arms of one expression had different types), and
+  share-links' `getEngine` loses a `Promise<any>` return annotation — a **third**
+  erasure syntax after `: any` and `as any`, and one this AST rule cannot see.
+  That residual is documented in the config.
+
+  `getObjectQL` **stays** `any`, deliberately, with the reason recorded: it exists
+  to reach ObjectQL's surface beyond `IDataEngine` (`registry`, `executeAction`),
+  which has no contract. Typing it `IDataEngine` would be the comfortable-looking
+  lie.
+
+  Verified: `@objectstack/runtime` **952 tests / 67 files**, `@objectstack/spec`
+  **7147 / 275**, plugin-auth **579**, rest **512**; `tsc --noEmit` on spec,
+  runtime, downstream-contract and all four examples; `pnpm lint` (with
+  `--no-inline-config`); all nine `check:*` gates.
+
+- de6daa5: fix(runtime)!: the /share-links dispatcher domain stops emitting a duplicate `link`/`links` beside `data` (#4038)
+
+  The producer-side other half of #3983. That PR moved the sharing plugin's routes
+  onto the declared envelope; this removes the compatibility shim the dispatcher
+  twin had been carrying _because_ that surface answered bare.
+
+  Create and list answered with the payload under **two** keys:
+
+  ```ts
+  { success: true, data: link,  link  }   // POST /share-links
+  { success: true, data: links, links }   // GET  /share-links
+  ```
+
+  The duplicate existed so readers predating the envelope kept working — which is
+  why objectui's `ShareDialog` reads `body.links ?? body.data`. Once #3983 made both
+  surfaces answer `data`, that first branch had no producer left, and the duplicate
+  had no reader in **any** repo:
+
+  - **framework** — no consumer of these routes at all
+  - **objectui** — `ShareDialog` already falls through to `body.data`
+  - **cloud** — swept: it only _registers_ `SharingServicePlugin` into per-environment
+    kernels with `registerShareLinkRoutes: false` so this dispatcher serves the paths.
+    It never calls them and never reads a body. That sweep is what #4038 was waiting
+    on, and it came back clean.
+
+  ## Shape
+
+  | route               | was                               | now                        |
+  | ------------------- | --------------------------------- | -------------------------- |
+  | `POST /share-links` | `{ success, data: link, link }`   | `{ success, data: link }`  |
+  | `GET /share-links`  | `{ success, data: links, links }` | `{ success, data: links }` |
+
+  `data` is unchanged in both — only the duplicate key is gone. Anything reading
+  `body.data`, or going through `ObjectStackClient.unwrapResponse`, sees no
+  difference. A raw reader of the top-level `body.link` / `body.links` must move to
+  `body.data`.
+
+  The list route now routes through `deps.success(...)` like the domain's other
+  three. Create stays hand-built, because `deps.success` hardcodes status 200 and
+  this route is a **201** — the same reason `/keys` hand-builds its own 201, and the
+  same shape it uses.
+
+  ## Guard
+
+  `scripts/check-route-envelope.mjs` does not and cannot cover this file: it scans
+  route modules that write via `res.json(...)`, while dispatcher domains return
+  `{ status, body }` for a central sender. So the drift was invisible to it by
+  construction. Three tests in `domain-handler-registry.test.ts` cover it instead —
+  two per-route, plus a general one asserting no success body carries a top-level
+  key outside `success` / `data` / `meta`. Restoring the duplicates fails all three.
+
+- bca935b: fix(spec,runtime): the slot→contract ledger extends past `CoreServiceName`, and `/security` stops passing unvalidated input to the security service (#4127)
+
+  Batch 3 of the #4127 gate, after #4168 (`getService`) and #4176 (`resolveService`).
+
+  Three slots — `security`, `shareLinks`, `objectql` — each had a written
+  contract, a provider registering them, and call sites already inside the
+  contract. The only missing link was that the slot name was not a
+  `CoreServiceName` member, so nothing could connect them and all three sat behind
+  `as any`.
+
+  **The ledger extends past the enum rather than the enum growing.** The two
+  answer different questions, and conflating them is what left these untyped:
+  `CoreServiceName` answers _"what happens at boot when this slot is empty?"_ — it
+  sits beside `ServiceCriticality` and drives startup orchestration and discovery,
+  so adding a member changes runtime behaviour and is effectively permanent. The
+  ledger answers _"what shape occupies this slot?"_ — pure type information. These
+  three need only the second, so `ServiceSlotContracts extends CoreServiceContracts`
+  adds them there and `resolveService` keys on `keyof ServiceSlotContracts`. Zero
+  runtime effect. If one is later promoted to a genuine core service, its entry
+  moves up and nothing else changes.
+
+  Evidence, as always, before an entry: `plugin-security` registers `security` and
+  `ISecurityService`'s own doc names that registration; `plugin-sharing` registers
+  `ShareLinkService`, which declares `implements IShareLinkService`; and `objectql`
+  is an **alias of `data`** — `packages/objectql`'s plugin registers the _same
+  instance_ under both names two lines apart, so one object was resolving as
+  `IDataEngine` through one name and `any` through the other. `protocol` (22 call
+  sites) and `mcp` have no written contract and stay unmapped.
+
+  **Turning it on found four things, all on the `/security` admin surface:**
+
+  1. **Request input reached the security service unvalidated.** `?status=` was
+     `String(query.status)` — any string — handed to a method whose contract
+     declares exactly three values, and from there into the query's `where`
+     clause. Not an injection (the `where` is structured, never interpolated), but
+     `?status=garbage` matched no row and returned an empty list, which reads as
+     "there are no suggestions" rather than "that is not a status". Now a 400.
+
+  2. **A test pinned that bug as expected behaviour.** The existing case asserted
+     `status: 'open'` — not one of the three declared values — reached the service
+     and returned 200. It proved the delegate carried _a filter_ and nothing about
+     that filter being a status. Same shape as batch 1's `auth.handler` mocks:
+     coverage in appearance, a wrong contract in substance.
+
+  3. **and 4. Two writes could not prove they had a caller.**
+     `confirmAudienceBindingSuggestion`/`dismissAudienceBindingSuggestion` declare
+     `callerContext: SecurityContext` non-optionally — deliberately, since the
+     read beside them declares it optional — and the domain passed a possibly-
+     `undefined` execution context.
+
+     **This was not a live hole**, and the distinction matters: with no execution
+     context `shouldDenyAnonymous` already denied, because it sees no
+     `userId`/`isSystem` and its allowlist arm needs a non-empty `path` this seam
+     never passes, so it fell through to `return true`. What it never did was
+     narrow `ec` itself — it only read `ec?.userId`. Checking `ec` directly is
+     behaviour-preserving and makes the invariant legible to the compiler and the
+     next reader.
+
+  The `?status=` rejection is the one **behaviour change**: an unknown status was
+  a silent empty list and is now a 400 naming the accepted values. The accepted
+  set is a `Record` keyed on the contract type, so adding a status to the contract
+  leaves a key missing and renaming one leaves a key excess — either fails to
+  compile, where a plain array would have drifted silently.
+
+  Verified: `@objectstack/runtime` **945 tests / 66 files** (+8), `@objectstack/spec`
+  **7141 / 274** (+29), plugin-security **677**, plugin-sharing **225**;
+  `tsc --noEmit` on spec, runtime, downstream-contract and all four examples;
+  `pnpm lint`; all nine `check:*` gates.
+
+- d92c72d: fix(lint,runtime,core): the slot-lookup guard sees the split-declaration form — the shape that made the ratchet look cleaner the more it was used (#4251)
+
+  The three selectors from #4321 all key off the erasure and the lookup being in
+  ONE expression. Split them and every selector misses:
+
+  ```ts
+  let ql: any;
+  try {
+    ql = ctx.getService("objectql");
+  } catch {
+    /* optional */
+  }
+  ```
+
+  Selector 1 needs the call inside the declarator (this declarator has no init),
+  selector 2 needs `as`, selector 3 needs a type argument. The contract is erased
+  exactly as in `const ql: any = ctx.getService(…)`.
+
+  **Why this could not wait for the batches.** The baseline's monotonicity check
+  means a file that leaves the grandfather list can never be re-added. So every
+  batch converted more of this shape from "grandfathered" into "lint covers this
+  file and says nothing" — B2 alone moved `plugin-security/security-plugin.ts`
+  into that state. A ratchet that reports a cleaner number the more you sweep is
+  the #4342 failure wearing different clothes, and the fix only gets more
+  expensive per batch shipped.
+
+  **It is a rule, not a fourth selector, and that is the whole finding.** esquery
+  can match `AssignmentExpression:has(CallExpression[…])`, but it cannot tell
+  which declaration the assigned identifier resolves to — so it would equally
+  flag the correctly-typed form this work line exists to produce (`let
+i18nService: II18nService | undefined; i18nService = …`, 8 such sites today in
+  runtime/app-plugin.ts, service-automation and metadata-protocol). Resolving the
+  identifier needs SCOPE analysis. That is cheap and needs no type information, so
+  this stays out of the typed-lint pass the KNOWN RESIDUAL still waits on — but it
+  is a rule, and the earlier "just one more selector" estimate was wrong.
+
+  Verified against exactly that: the rule flags all 16 real sites and none of the
+  8 correctly-typed lookalikes.
+
+  **Scale.** The baseline goes 140 → **169 sites** with the file count unchanged
+  at 37: 29 sites were already inside grandfathered files and simply invisible.
+  16 more could NOT be grandfathered (12 in files earlier batches had cleared, 3
+  in files never listed, 1 the regex sweep had missed) and are typed here —
+  `runtime/app-plugin.ts` ×5, `core/fallbacks/authored-translation-sync.ts` ×2,
+  `plugin-security/security-plugin.ts` ×2, `cloud-connection/{runtime-config,
+marketplace-proxy}-plugin.ts` ×3, `platform-objects/src/plugin.ts` ×2,
+  `runtime/http-dispatcher.ts`, `runtime/domains/ai.ts`. No baseline key was
+  added; the key set still only shrinks.
+
+  Contracts where they exist (`IAIService`, `IJobService`, `IMetadataService`,
+  `II18nService`, `IDataEngine`, `IHttpServer`), named local surfaces where they
+  do not — `AppEngineSurface`, `SecurityEngineSurface`, `RawAppHost`,
+  `EnvRegistrySurface`, `FreshDatastoreEngine`, `AuthoredTranslationSink`. Two of
+  those record something worth naming: `IHttpServer` has no `getRawApp()` (the
+  contract is framework-agnostic and the raw app is Hono's own handle), and
+  ObjectQL's `_defaultBodyRunner` / `_defaultActionRunner` have no public reader
+  at all — the engine attaches them via `(this as any)` and publishes nothing,
+  while `getHookMetricsRecorder()` exists for exactly that question about the
+  metrics recorder. Declared rather than laundered through `any`, and filed.
+
+- 8dcc0f5: fix(spec,runtime): the service-lookup `any` guard now sees the type-argument form, and its scope stops at nothing under `packages/` (#4251)
+
+  The #4127/#4214 rule banned `: any` and `as any` on a service-lookup result but
+  not `getService<any>('data')` — the form the codebase actually used (80 sites,
+  zero matches), erasing the slot contract identically. And the rule's `files`
+  covered only `packages/runtime`, leaving the composition roots (rest,
+  plugins/_, services/_) that hold most lookups unlinted. Both gaps closed: a
+  third AST selector catches the type-argument form, the scope is now all of
+  `packages/`, and the 40 not-yet-swept files are grandfathered in a visible,
+  shrinking ratchet list (`SLOT_LOOKUP_UNSWEPT`) — enumerated at 180 sites by
+  running the widened rule with the list emptied. `http.server` joins
+  `UNCONTRACTED_SLOTS` (three providers, no written contract).
+
+  Typing the three in-scope runtime sites surfaced its first yield: both
+  `addDatasource` datasource-registration branches (DefaultDatasourcePlugin,
+  DriverPlugin) probed a method **no metadata service implements**, so they had
+  never run on any boot — deleted rather than typed against a phantom shape. The
+  inert `DriverPluginOptions` they configured are tracked in #4320.
+  `registerInMemory('datasource', …)` is the actual visibility path (#3827).
+
+  Contract members declared from evidence, both optional: `IDataEngine` gains
+  `getDefaultDriverName?()` / `getDriverByName?()` (ObjectQL's driver registry —
+  the surface `os migrate` and serve's storage detection reach through
+  `driver.<name>` services), `IMetadataService` gains `registerInMemory?()`
+  (MetadataManager's boot-time seeding primitive). Callers that supplied `<any>`
+  to these lookups should pass the slot's contract type instead — or nothing:
+  an unmapped slot deliberately resolves to `unknown`, not `any`.
+
+- 75b9e51: fix(spec,runtime): a service-slot lookup returns the slot's contract, not `any` — and it immediately found two more gaps (#4127)
+
+  #4127's most valuable item was the one it did not do: "**给这个类别加个 gate**".
+  The four contract gaps it catalogued were found by a human sweeping the
+  dispatcher by hand. A sweep is not repeatable, and this one was not complete —
+  see `/auth` below.
+
+  The root was one line:
+
+  ```ts
+  // domain-handler-registry.ts
+  getService(name: string): any;   // ← every domain's service handle
+  ```
+
+  Against `any`, a domain calling a method its contract declares and a domain
+  calling a method nobody declares typecheck identically. That is what let #4087
+  ship a `/storage` handler passing two arguments no implementation takes, and
+  what hid #4127's four.
+
+  **`CoreServiceContracts` — the slot → contract ledger.** `CoreServiceName` named
+  the slots and `contracts/*` described them; nothing connected the two. It does
+  now, and `getService<K>(name: K)` resolves through it, so a call outside the
+  contract is a **compile error at the call site**.
+
+  An entry is a claim, so entries are only made where the binding is evidenced —
+  by the provider that registers the slot (`service-storage` → `file-storage`,
+  `objectql` → `data`, whose own comment reads "ObjectQL implements IDataEngine"),
+  or by dispatcher work that proved it (#4143/#4150 for `automation`,
+  `notification`, `i18n`). **`ui` is deliberately unmapped**: the slot exists and
+  `domains/ui.ts` serves it, but no `IUiService` was ever written. An unmapped slot
+  resolves to `unknown`, not `any` — it must be cast deliberately, so the gap stays
+  legible instead of looking checked.
+
+  **Two findings, within minutes of turning it on:**
+
+  **`/auth` called a method that does not exist.** `domains/auth.ts` probed
+  `authService.handler(request, response)`. `IAuthService` declares
+  `handleRequest(request): Promise<Response>`; `AuthManager` implements exactly
+  that and has no `handler`. The probe was false on every deployment — #4143's dead
+  `automation.trigger` again. **#4127's manual sweep never mentions `/auth`**,
+  neither in its gap list nor in its "扫干净的" list: the file the compiler flagged
+  first is the one the human pass skipped entirely.
+
+  Not a live hole: the Hono adapter calls `handleRequest` itself and only falls
+  through to the dispatcher when no usable auth service answered, so nothing was
+  served by the mock in that deployment. But reading the contract makes the branch
+  reachable for the first time — a host calling `handleAuth` directly WITH an auth
+  service registered used to get `mockAuthFallback`'s `mock_<uuid>` session instead
+  of real authentication, and now gets the auth service.
+
+  **`POST /analytics/sql` invoked an optional method unguarded.** `generateSql?` is
+  optional on `IAnalyticsService` — unlike `query`/`getMeta` beside it — and the
+  call had no probe, so a provider without it answers a 500 from `TypeError`
+  instead of saying the capability is absent. service-analytics implements it,
+  which is why nothing noticed; the contract permits a provider that does not, and
+  this slot is multi-provider by design. It answers `handled: false` now, the same
+  404 the file's entry gate already gives for absent analytics capability.
+
+  **`isServiceServeable` is a type guard now** (`svc is NonNullable<T>`). Every
+  domain already calls it first on a resolved slot, so one predicate narrows away
+  the `undefined` for the whole handler body — the null check and the capability
+  check were always the same check.
+
+  **The test-side hole, closed for this batch.** #4127's last section predicted it:
+  the mocks are written to what the handler wants, so handler and test agree with
+  each other and with no implementation. **Three** tests across two files mocked
+  `{ handler }` for auth — including one whose entire subject was the _resolution
+  path_, so it proved the lookup worked and nothing about the call. `ContractMock<T>`
+  (`Partial<Record<keyof T, unknown>>`) now guards the mocks: keys are checked
+  against the contract, signatures deliberately left `unknown` so `vi.fn()` does not
+  force everything back to `as any`. The automation mock's `trigger` — genuinely
+  not on the contract — stays as an explicit, labelled negative control outside the
+  checked literal, because a test asserting the route _never_ calls it is the point.
+
+  Nothing is renamed and no runtime behavior changes except the two fixes above.
+  The 12 domains not calling `getService` are untouched; `resolveService` (which
+  also takes non-`CoreServiceName` names like `protocol` and `objectql`) is
+  deliberately left for a later batch rather than widened here.
+
+  Verified: `@objectstack/runtime` **933 tests / 65 files**, `@objectstack/spec`
+  **7095 / 272** (6 new, pinning the map against the enum in both directions),
+  service-automation **457**, service-analytics **413**, service-messaging **137**,
+  service-i18n **62**, adapter-hono **73**; `tsc --noEmit` on spec, runtime,
+  downstream-contract and all four examples; `pnpm lint`; and all nine
+  `@objectstack/spec` `check:*` gates — clean.
+
+- 77a77fd: test(runtime): correct the #4073 evidence — the `registerStandardEndpoints` flip IS a no-op for a composed host
+
+  #4192 added a test concluding that turning the flag off makes `/api/v1/data/:object`
+  a 404, and blocked the #4073 retirement on it. That conclusion was wrong.
+
+  It mounted `createRestApiPlugin({})` against a STUB `objectql` service. REST
+  generates CRUD from the object registry, so it needs a real engine — driver plus
+  registered objects — and its own `api.api` config. Under-provisioned it serves
+  nothing, which says nothing about REST.
+
+  Provisioned the way `client.environment-scoping.test.ts` does it (that suite runs
+  `registerStandardEndpoints: false` and asserts `GET /api/v1/data/task` → 200 from
+  REST), `/data/:object`, `/discovery` and `/.well-known/objectstack` all return
+  byte-identical responses with the flag on and off.
+
+  The test now asserts that parity directly rather than a status code, because a
+  status was what misled it: `/data/task` answers 404 `OBJECT_NOT_FOUND` here — the
+  engine's answer, i.e. a route that WORKS — where a routing miss would be
+  `{"error":"Not found"}`. A separate assertion pins that the compared routes are
+  live, so parity cannot be satisfied by two identical misses.
+
+  No production code changes. The default is untouched: flipping it is still a real
+  change for a BARE host mounting neither REST nor the dispatcher, and that is an
+  API decision, not one this test makes.
+
+- d82f8c0: test(runtime): pin who actually serves `/data` and `/discovery`, blocking the #4073 default flip on evidence
+
+  #4073 plans to retire `registerStandardEndpoints` by flipping its default to
+  `false`, on the premise that everything it mounts is duplicate supply. Booted for
+  real — real `HonoServerPlugin`, real dispatcher, real `createRestApiPlugin`, real
+  listener, in `serve.ts`'s registration order — that premise holds for only one
+  half of the surface:
+
+  - **`/discovery` + `/.well-known/objectstack` — safe.** They cede by an explicit
+    `kernel.hasPlugin(rest|dispatcher)` check (#4018), so the dispatcher's computed
+    payload answers whether the flag is on or off. Order-independent.
+  - **`/data/:object` — not safe.** There is no cede, and the shadowing was
+    asserted purely on "REST registers first and wins". With the flag OFF the path
+    returns **404**, with REST mounted or not. The flag's raw surface is the only
+    thing answering it in every composition this harness can boot.
+
+  So the flip is not the no-op the plan describes. This adds the harness that says
+  so, asserting the current matrix, so the next attempt has to confront it rather
+  than re-derive the assumption. No production code changes.
+
+- 2053714: fix(hono,plugin-hono-server,runtime): one CORS source and one registry key — the last derivable copies from the #3786 sweep
+
+  Re-ran the sweep across all 72 packages. The earlier pass globbed `packages/*/src`,
+  which is one level deep, so it missed everything under `packages/plugins/` and
+  `packages/adapters/` — the "sweep is basically clean" report was based on an
+  incomplete scan.
+
+  **A stale CORS default, on the one description callers actually read.**
+  `HonoCorsOptions.allowHeaders`' TSDoc promised
+  `['Content-Type', 'Authorization', 'X-Requested-With']` "which is sufficient for
+  cookie and bearer-token auth". The real default carries three more:
+  `X-Tenant-ID` and `X-Environment-Id` (multi-tenant routing) and `If-Match` (the
+  OCC token on record PATCHes, objectui#2572). Sizing a custom `allowHeaders`
+  against that sentence drops all three and every cross-origin save fails with
+  "Failed to fetch".
+
+  The instructive part: **three** Hono CORS sites each carried their own copy of
+  the defaults under "keep in sync" comments, and the copies all agreed. What
+  drifted was the _doc_ — the only description with no counterpart to be diffed
+  against, and the only one a caller reads.
+
+  Both defaults are now single constants, `DEFAULT_CORS_ALLOW_HEADERS` and
+  `DEFAULT_CORS_EXPOSE_HEADERS`, exported from `@objectstack/plugin-hono-server`
+  and imported by the adapter (which already depends on it — no new edge). The
+  TSDoc links them rather than restating, and documents an asymmetry it never
+  mentioned: `allowHeaders` REPLACES the default, `exposeHeaders` MERGES with it.
+
+  `hono-plugin.test.ts` stopped stubbing `./adapter` wholesale and keeps the real
+  constants via `importOriginal` — it asserts exact header lists, so a mocked copy
+  would make the test agree with itself rather than with what ships. Verified:
+  removing `If-Match` from the constant fails `should allow If-Match by default`,
+  by name.
+
+  **A third copy, in the public protocol docs.** `content/docs/protocol/kernel/
+http-protocol.mdx` advertised `Access-Control-Allow-Headers: Authorization,
+Content-Type` — two of the six — and methods missing `PUT` and `HEAD`, with no
+  mention of the exposed headers at all. That is the copy an integrator builds a
+  client against: reading it, you would not know `If-Match` is permitted (so you
+  would not attempt OCC) or that `set-auth-token` is readable (so a rotated
+  session would look like a bug). Corrected, with the three non-obvious allowed
+  headers and the two exposed ones explained, and a pointer to the constants as
+  the source of truth.
+
+  **A hand-copied service-registry key.** `runtime`'s share-links domain resolved
+  `'shareLinks'` as a string literal, copied from `SHARE_LINK_SERVICE` — whose own
+  doc-comment says "keep in sync with the SharingPlugin registration". It now
+  imports the constant. A drifted copy resolves nothing, so every share link
+  answers 501 "Sharing is not configured for this environment" on an environment
+  where it is configured perfectly well.
+
+  **Plus a duplicate ledger entry**, which is the same defect one level up:
+  `check-generated.ts` carried two `NO_GENERATOR` entries for
+  `check:strictness-ledger`, because #4203 and #4252 each added one without seeing
+  the other. Functionally harmless (the ledger is read into a `Set`) but it leaves
+  two comments telling overlapping versions of the same story. #4203's is kept —
+  it is the more complete account and it is the PR that fixed the underlying
+  problem.
+
+  Checked and deliberately left alone: `ApprovalStatus` (5 values) and
+  `ApprovalActionKind` (12 values) versus their `plugin-approvals` selects — diffed
+  verbatim, no drift today, still hand-copied across a package boundary.
+
+- 7309c81: test(runtime,client,metadata): back the remaining suites with in-memory SQLite instead of the mingo driver (#4065)
+
+  Ten test files used `InMemoryDriver` as a convenience backing store — somewhere
+  for rows to go while the suite proved something else (REST routing, datasource
+  auto-connect, the batch `$ref` contract, metadata history). They now run on
+  `SqliteWasmDriver` at `:memory:`, the same engine `@objectstack/verify`'s
+  `bootStack` already gives the dogfood gate: pure JS (no native build, CI-safe on
+  any runner) and real SQL semantics.
+
+  The point is fidelity, not tidiness. Production runs SQL, and mingo differs from
+  it in ways that let a suite pass while the behaviour it stands for is broken.
+  Every failure this migration produced was a fixture defect the memory driver had
+  been absorbing:
+
+  - **Tables were never created.** `driver.create()` on the memory driver is a
+    bare `table.push()` onto an auto-vivified array, so an object registered
+    _after_ `kernel.bootstrap()` — which misses the boot-time schema sync — looked
+    fine. On SQL the first write fails with `no such table`, which the REST error
+    mapper turns into a **404 `OBJECT_NOT_FOUND`**: a routing-shaped symptom for a
+    DDL-shaped cause. Four suites needed an explicit `syncObjectSchema`.
+  - **A missing object declaration read as working.** `notifications.hono.integration`
+    writes `sys_notification`, which `MessagingServicePlugin` does not declare —
+    it is a platform object, and that lean kernel never booted `platform-objects`.
+    Auto-vivification hid the omission entirely. The suite now registers the real
+    `SysNotification` rather than a hand-copied stand-in, so there is still exactly
+    one schema for it (Prime Directive #12).
+  - **`connect()` was optional.** The memory driver needs none; a SQL driver does.
+
+  What deliberately did NOT move: `read-coercion-conformance` keeps its two-driver
+  matrix (proving a stored value reads back as its declared type on _both_ engines
+  is the entire point of that gate), and the suites whose subject IS the memory
+  driver or its wiring — `standalone-stack` (`memory://` scheme),
+  `sqlite-driver-fallback` (the dev step-down), the CLI's driver-label tests, and
+  driver-memory's own suite.
+
+  `datasource-autoconnect` is in that second group as of #4083, which landed a
+  regression test there for exactly the memory-pool property this PR originally
+  proposed to migrate away from. Moving that file to SQLite would have left the
+  new test passing vacuously — a wasm-SQLite pool never writes `.objectstack/` at
+  all — so it stays on the memory driver and keeps guarding what it was written
+  to guard.
+
+  No new coverage is claimed here: each suite asserts exactly what it asserted
+  before, against a more faithful store.
+
+- 43fc039: Discovery's `/ui` advertisement reads what `/ui` reads: the `protocol` service, not the vestigial `ui` slot (#4093).
+
+  `domains/ui.ts` serves `GET /ui/view/:object` off the `protocol` service and 503s without it; the `ui` core-service slot never enters that decision, and nothing in the platform registers a `ui` service — plugin-dev's shapeless placeholder was its only occupant ever, and ADR-0115 retired it. Gating `routes.ui` on slot presence was therefore wrong in both directions: a dev boot with the placeholder but no protocol advertised a route that could only 503, and every boot without a placeholder — production always, and all dev boots post-ADR-0115 — hid a route that serves fine.
+
+  `routes.ui` and `services.ui` now gate on `typeof protocol?.getUiView === 'function'` — the domain handler's own guard, byte for byte, the same rule the `mcp` advertisement follows. `services.ui` reports the serving implementation (provider `metadata-protocol`, honoring any `__serviceInfo` it declares), and the unavailable message names the actual remedy — register MetadataPlugin (`@objectstack/metadata-protocol`) — instead of "install a ui plugin", which names a plugin that does not exist.
+
+  FROM → TO: `routes.ui` / `services.ui` may newly appear in deployments where the protocol service is registered (the route always served there; discovery just never said so) and newly disappear in protocol-less boots (it never worked there). No handler behavior changes.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [48fcf70]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [3ec8186]
+- Updated dependencies [b1863a5]
+- Updated dependencies [270650f]
+- Updated dependencies [956e7f9]
+- Updated dependencies [3aef718]
+- Updated dependencies [ffb003c]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [bb1ce2e]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [ea24593]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [fccec22]
+- Updated dependencies [2af1988]
+- Updated dependencies [b3a2318]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [fae74b5]
+- Updated dependencies [7bf5349]
+- Updated dependencies [366105c]
+- Updated dependencies [c9d254a]
+- Updated dependencies [42e3b01]
+- Updated dependencies [c8124e5]
+- Updated dependencies [9e8f04d]
+- Updated dependencies [39eb01b]
+- Updated dependencies [c3bcb42]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [f4d7f1d]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [0373d52]
+- Updated dependencies [4f30943]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [bb192c4]
+- Updated dependencies [9881074]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [c39d713]
+- Updated dependencies [dc530b4]
+- Updated dependencies [f0d6594]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [6f98c2d]
+- Updated dependencies [a4a9944]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [10575f3]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [99b4392]
+- Updated dependencies [974c6d4]
+- Updated dependencies [7309c81]
+- Updated dependencies [495019b]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [ac6c0be]
+- Updated dependencies [90c2b15]
+- Updated dependencies [33a5ff4]
+- Updated dependencies [9e01213]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [55bbefc]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [3fe0ff1]
+- Updated dependencies [be7945a]
+- Updated dependencies [cc2de0e]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [4475c59]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [f5fe061]
+- Updated dependencies [6c87cc9]
+- Updated dependencies [af2a095]
+- Updated dependencies [bf478e1]
+- Updated dependencies [dd5daac]
+- Updated dependencies [ec796d5]
+- Updated dependencies [77fadbf]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [0931185]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [5c13368]
+- Updated dependencies [8d5bb5a]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [a62bd9e]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [c53aa53]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [3245174]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [7309c81]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [4965bfa]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/objectql@17.0.0-rc.1
+  - @objectstack/driver-memory@17.0.0-rc.1
+  - @objectstack/driver-sql@17.0.0-rc.1
+  - @objectstack/metadata@17.0.0-rc.1
+  - @objectstack/plugin-security@17.0.0-rc.1
+  - @objectstack/rest@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/plugin-auth@17.0.0-rc.1
+  - @objectstack/metadata-protocol@17.0.0-rc.1
+  - @objectstack/metadata-core@17.0.0-rc.1
+  - @objectstack/formula@17.0.0-rc.1
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.1
+  - @objectstack/observability@17.0.0-rc.1
+  - @objectstack/service-cluster@17.0.0-rc.1
+  - @objectstack/service-datasource@17.0.0-rc.1
+  - @objectstack/service-i18n@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

@@ -1,5 +1,1403 @@
 # @objectstack/rest
 
+## 17.0.0-rc.1
+
+### Major Changes
+
+- 3c628ce: feat(auth)!: retire the `api.requireAuth` opt-out — anonymous access to object data is always denied (#3963)
+
+  `api.requireAuth: false` let a deployment open its ENTIRE data plane with one
+  config key. It is removed. Auth is a kernel concern, not a deployment posture:
+  anonymous callers are denied on every HTTP surface that reaches object data,
+  unconditionally.
+
+  Every surface that legitimately serves a session-less caller already derives its
+  own narrow authorization from a DECLARATION, so none of them needed the global
+  switch:
+
+  - control plane (`/auth/*`, `/health`, `/ready`, `/discovery`, ADR-0069
+    remediation) — the auth-gate allowlist;
+  - public form submission — `publicFormGrant` (ADR-0056 Option A);
+  - share links — the capability token, validated then read as SYSTEM;
+  - a `book.audience: 'public'` read — the ADR-0046 §6.7 audience gate (#3995);
+  - MCP — an OAuth token or API key.
+
+  **Breaking changes.**
+
+  - `api.requireAuth` is a retired key. It is tombstoned (`retiredKey`) in both
+    `RestApiConfigSchema` and the stack `api` block, so authoring it now fails with
+    a fix-it message rather than being silently stripped (the ADR-0104 / #3733
+    quiet-failure this whole line of work has been closing). `os migrate meta`
+    drops it via the protocol-17 conversion `stack-api-require-auth-removed`.
+  - `shouldDenyAnonymous` (@objectstack/core) no longer takes a `requireAuth`
+    input; it denies any anonymous, non-system caller outside the control-plane
+    allowlist.
+  - A stack that mounts **no auth at all** now FAILS AT BOOT when it would serve a
+    data API (`objectstack serve`, plugin-dev), instead of getting an explicit
+    fail-open. Enable auth (the `auth` tier or AuthPlugin), or run without the data
+    API. There is no anonymous-data carve-out any more — publishing a public
+    surface is done by declaration (see above).
+
+  **Migration.** Delete `api.requireAuth` from the stack config (or run
+  `os migrate meta`). If you were serving data publicly with `requireAuth: false`,
+  replace it with the declaration that fits: a public form view, a share link, or
+  `book.audience: 'public'`. If you have an auth-less stack that intentionally
+  served data, it must now mount auth or stop serving the data API.
+
+### Minor Changes
+
+- c1dcacd: fix(sharing)!: the share-management surface gains the authorization layer it never had (ADR-0111 P0, #3902)
+
+  Record sharing shipped as a data layer with no authorization of its own: every
+  `/data/:object/:id/shares` and `/sharing/rules` route authenticated the caller
+  and then ran the service under `SYSTEM_CTX` — any signed-in user could revoke
+  anyone's share, enumerate who-can-see-what, write self-grants, and define /
+  evaluate org-wide sharing rules. ADR-0111's P0 rulings land here:
+
+  - **D1/D2** — `ISharingService.canManageShares(object, recordId, context)`:
+    system, the record's owner, or a holder of Modify All Data (probed via the
+    new fail-closed `ISecurityService.hasWriteBypass`). Enforced in the SERVICE,
+    so every caller is covered; without plugin-security it fails closed to
+    owner-only.
+  - **D4** — `revoke` is symmetric with grant, validates the share belongs to the
+    URL's record (`NOT_FOUND` on mismatch), and refuses non-`manual` rows
+    (`CONFLICT` — a rule-materialised grant would be resurrected by the next
+    reconcile).
+  - **D5** — `listShares` is management-gated (invisible record → `NOT_FOUND`,
+    visible-but-not-manager → `PERMISSION_DENIED`), and the open
+    `/data/sys_record_share` read surface is self-scoped: non-admin callers see
+    only rows naming them as recipient or grantor.
+  - **D6** — the whole `/sharing/rules` surface (list/create/get/delete/evaluate)
+    requires the new **`manage_sharing`** capability (D9; seeded into
+    `admin_full_access`, `manage_platform_settings` honoured as the legacy
+    equivalent), enforced in `SharingRuleService`.
+  - **D7** — no inert grants: `recipientType` is narrowed to `user` (the only
+    type any gate enforces), grants on objects the sharing gates never consult
+    (public model, no `owner_id`, bypass, `controlled_by_parent`) fail with
+    `SHARING_NOT_ENABLED` (422), and the manual upsert keys on
+    `(object, record, recipient, source)` so manual and rule rows coexist.
+
+  **Breaking** for callers that relied on the missing gate: unauthorized share
+  management now fails with 403/404/409/422 instead of silently succeeding, and
+  `ISharingService.revoke` gained an optional `scope` parameter. The verb
+  boundary (edit ≠ delete, ADR-0111 D3) is NOT in this change — it lands as the
+  separate P1.
+
+- f5a4ef0: refactor!: ADR-0112 batch 2 — sweep the lowercase error-code emitters (#4003)
+
+  Continues #3841 per ADR-0112. Batch 1 (#3988) settled the vocabulary and closed
+  the set; this batch moves the emitters that still spoke lowercase `snake_case`
+  onto it.
+
+  **Wire-visible change.** Error codes on these surfaces change spelling. Generic
+  conditions collapse onto the standard catalog rather than keeping a synonym:
+  `unauthorized`/`unauthenticated` → `UNAUTHENTICATED`, `forbidden` →
+  `PERMISSION_DENIED`, `not_found` → `RESOURCE_NOT_FOUND`, `internal` →
+  `INTERNAL_ERROR`, `unavailable` → `SERVICE_UNAVAILABLE`, `not_supported` →
+  `NOT_IMPLEMENTED`, `bad_request` → `INVALID_REQUEST`. Domain conditions get codes
+  registered in `ERROR_CODE_LEDGER` (`MARKETPLACE_STORAGE_FAILED`,
+  `PLUGIN_MANIFEST_INVALID`, `ITEM_LOCKED`, `DELIVERY_NOT_ELIGIBLE`, …). Swept:
+  `cloud-connection`, `plugin-auth`, `hono`, `metadata-protocol`, `rest`,
+  `service-messaging`, `service-automation`, `trigger-api`.
+
+  Branch on `error.code` values rather than pattern-matching their case: the
+  console's fix for the same rename (objectui#2977) reads codes case-insensitively
+  for exactly this reason, and that is the pattern to copy in your own consumers if
+  you support servers on both sides of the change.
+
+  **Four routes stop putting a code in the message slot.** The webhook redeliver
+  route, the API-trigger webhook, and two `rest` routes answered
+  `{ success: false, error: '<code>', message }` — the code occupying `error`, the
+  declared object envelope nowhere. They now emit `error: { code, message }`, and
+  three API-trigger branches gained a message they never had. Clients reading
+  `body.error` as a string on those routes must read `body.error.code`.
+
+  **`ConnectorErrorCategory` / `ConnectorRetryStrategy`** (ADR-0112 D9a):
+  `@objectstack/spec` exported two mutually incompatible `ErrorCategory` types and
+  two `RetryStrategy` types. The connector-side pair is renamed; importers of the
+  `integration` subpath update the name. Side effect: the api-side `ErrorCategory`
+  and `RetryStrategy` now appear in the generated API reference at all — the name
+  collision had been silently dropping them.
+
+  **`OAUTH_REGISTER_FAILED` replaces an unbounded code source.** The OAuth client
+  registration route put better-auth's arbitrary `body.error` string straight into
+  `error.code`. The code is now ours and the upstream discriminator moved to
+  `details.upstreamError`.
+
+  **Not swept, deliberately.** `sys_metadata_audit.code` keeps its lowercase values
+  (ADR-0112 D6b): it is persisted audit history, and the same column holds
+  non-error outcomes (`ok`, `lock_override`). Diagnostics records that ship inside a
+  200 keep theirs (D6c), as do field-level codes (D6, #3977) and the CLI's
+  `--json` output contract.
+
+  A `check:error-code-casing` CI guard now fails on a new lowercase literal in a
+  code position, since the ledger's casing rule can only police codes that someone
+  registers.
+
+- 7d7521f: feat(spec,rest,objectql)!: a closed field-level error catalog, and Zod stops leaking onto the wire (#3977)
+
+  Settles the vocabulary ADR-0112 D6 deferred, per [ADR-0114](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0114-field-level-error-code-catalog.md).
+
+  **`FieldErrorCode` — a closed, lowercase catalog.** 27 members covering what the
+  six emitters already emit. `FieldErrorSchema.code` tightens from `z.string()` to
+  this enum, so a validation body's per-field codes are validated for the first time.
+  `FieldValidationError.code` (objectql) and `FieldCoerceError.code` (rest) stop
+  being a hand-listed union and a bare `string` respectively and reference the
+  catalog, so the three cannot drift apart.
+
+  Lowercase is deliberate, not an oversight against ADR-0112's SCREAMING_SNAKE: a
+  top-level code names the condition the _request_ hit, while a field-level code
+  names the _constraint_ the value violated — and constraints are declared in the
+  metadata's own snake_case, so `max_length` the code and `max_length: 50` the
+  property are the same word on purpose.
+
+  **Zod issue codes no longer reach the wire (wire-visible).** Routes that validate
+  with Zod passed its vocabulary straight through, so `fields[]` spoke a different
+  language depending on which route served it, and `too_small` was ambiguous between
+  a short string, a small number and a short array. `zodIssuesToFields` now maps
+  using Zod's `origin`/`format`:
+
+  | Was                                               | Now                                                |
+  | :------------------------------------------------ | :------------------------------------------------- |
+  | `too_small`                                       | `min_length` / `min_value` / `min_items`           |
+  | `too_big`                                         | `max_length` / `max_value` / `max_items`           |
+  | `invalid_format`                                  | `invalid_email` / `invalid_url` / `invalid_format` |
+  | `invalid_value`                                   | `invalid_option`                                   |
+  | `unrecognized_keys`                               | `unknown_field`                                    |
+  | `invalid_union`, `invalid_element`, `invalid_key` | `invalid_shape`                                    |
+
+  **A missing required property now reports `required`, not `invalid_type`.** Zod
+  spells "absent" as a type mismatch against `undefined`, so passing it through made
+  a form mark a _missing_ input as the wrong _type_. The two are indistinguishable on
+  the issue alone, so the mapper takes the parsed input as an optional argument and
+  walks the issue path; a caller that cannot supply it keeps `invalid_type` rather
+  than guessing.
+
+  **`unknown_param` → `unknown_field`.** `ActionParamIssue.code` references the
+  catalog instead of its own literal union; the `param` key beside it already says
+  what was addressed.
+
+  **Not changed:** `EnhancedApiErrorSchema.fieldErrors` keeps its name even though
+  every producer emits `fields`. Retiring an authorable key needs a tombstone plus a
+  migration (ADR-0104's contract guard), so it lands on its own — the property now
+  carries a banner saying which name the wire uses.
+
+- 789ad63: fix(spec,rest): the batch-size cap is enforced now, and each bulk endpoint has one Zod source (#3939)
+
+  `max 200` was declared in four places and enforced in one.
+
+  `batch.zod.ts` put `.min(1).max(200)` on `BatchUpdateRequestSchema`,
+  `UpdateManyRequestSchema` and `DeleteManyRequestSchema`, and the docs repeated
+  it — but no per-object bulk route validated against those schemas, so
+  `createMany` / `updateMany` / `deleteMany` / `/data/:object/batch` all accepted
+  an unbounded list. The only route that capped anything was the cross-object
+  `/batch`, and it checked the _configured_ `maxBatchSize` rather than the
+  hardcoded 200 — so even the one enforcement point disagreed with the schema.
+
+  That stopped being cosmetic with #3897, which made `deleteMany` delete per id by
+  primary key (so `deleteBehavior` cascades run and every row gets its own
+  result). A 10k-id body is now 10k sequential engine round-trips inside a single
+  request, where before it was one statement that mostly failed anyway.
+
+  **The cap moved to the routes, and the schemas gave it up.** Batch size is
+  deployment policy — `RestServerConfig.batch.maxBatchSize`, 1..1000, default 200
+  — so a hardcoded bound in the spec could only ever be a second, wrong answer
+  (a deployment raising the limit to 500 would still have been refused at 200).
+  All five bulk routes now call one `enforceBatchSize` helper with the configured
+  value and answer with one envelope:
+
+  ```json
+  {
+    "error": "Batch too large: 500 records (max 200)",
+    "code": "BATCH_TOO_LARGE",
+    "count": 500,
+    "max": 200,
+    "object": "account"
+  }
+  ```
+
+  The cross-object route is included: it used to answer with a bare `error` string
+  and no `code` for a client to key on.
+
+  **One Zod source per bulk endpoint (Prime Directive #7).** Each of these
+  endpoints had _two_ schemas, and they had already drifted into disagreeing about
+  more than counts: `UpdateManyRequestSchema` described its rows with
+  `BatchRecordSchema`, whose `id` and `data` are optional because the generic
+  `/batch` route serves create (no id) and delete (no data) through the same
+  shape — so the declared contract accepted `{}` rows that `updateManyData`, which
+  reads `record.id` and `record.data` unconditionally, could never process. The
+  enforced shape lived in the _other_ copy, in `protocol.zod.ts`.
+
+  The wire body is now the single source (`UpdateManyRequestSchema` /
+  `DeleteManyRequestSchema`, with the new `UpdateManyRecordSchema` for a row), and
+  the protocol schemas are that plus the `object` the route takes from the URL
+  path (#3933) — `UpdateManyRequestSchema.extend({ object })`. The derivation runs
+  that direction because `protocol.zod` already imports `batch.zod`; the reverse
+  would be a cycle.
+
+  **Behaviour changes.**
+
+  - A bulk request over the configured cap is `400 BATCH_TOO_LARGE` instead of
+    being executed. Deployments that were quietly relying on unbounded batches
+    should raise `batch.maxBatchSize` (up to 1000) rather than discover the cap in
+    production.
+  - `.min(1)` is gone with `.max(200)`: an empty batch is a no-op returning
+    `total: 0`, which is what these routes already did, rather than a validation
+    error the schema claimed but nothing raised.
+  - `UpdateManyRequest` now types (and validates) `records` as
+    `{ id: string; data: Record<string, unknown> }[]`. Callers already had to send
+    that — the route has validated the strict shape since #3933 — but the declared
+    type was looser.
+  - New export: `UpdateManyRecordSchema` / `UpdateManyRecord`.
+
+- fccec22: fix(rest): bulk writes bind to the object in the path, not the one in the body (#3933)
+
+  `POST /data/:object/updateMany` spread the request body over the value it had
+  just taken from the URL:
+
+  ```js
+  const result = await p.updateManyData!({
+      object: req.params.object,   // trusted, written first
+      ...req.body,                 // …and spread over it
+      ...
+  });
+  ```
+
+  The gate on the line above reads the PATH object — `enforceApiAccess` starts
+  with `const objectName = req?.params?.object` — so `enable.apiEnabled` /
+  `enable.apiMethods` (ADR-0049 / #1889) was enforced on the object in the URL
+  while the object named in the body got written. Measured on a stock CRM dev
+  deployment: `POST /data/crm_account/updateMany` with
+  `{"object":"crm_contact", "records":[…]}` returned `succeeded: 1` and changed
+  the `crm_contact` row. Point the URL at any exposed object, name a hidden one in
+  the body, and the gate clears the wrong object every time.
+
+  This is not a row-authorization bypass — the engine middleware still evaluates
+  RLS/FLS against the object actually written, and `assertObjectRegistered` (#3770)
+  still resolves it. What it defeats is the object-level exposure policy, the layer
+  ADR-0049 exists to make enforceable rather than advisory.
+
+  The path object is now written LAST, after the body, so the object the gate
+  cleared is the object that gets written — a property of the code rather than of
+  the caller declining to send that key. The body is parsed against
+  `UpdateManyDataRequestSchema` first, which (Zod strips unknown keys) also stops a
+  body `context` from becoming the execution context on a deployment where none
+  resolves — `requireAuth: false` plus an anonymous caller, the one case where the
+  trailing `...(context ? { context } : {})` has nothing to overwrite it with.
+
+  `deleteMany` gets the same ordering: #3897 moved it behind a schema parse, but
+  fed that parse `{ object: req.params.object, ...req.body }` — still body-wins.
+  `createMany` (`records: req.body || []`) and `batch` (`request: req.body`) never
+  splatted the body at the top level and are unaffected.
+
+  **Behaviour change.** A malformed `updateMany` body is now `400
+VALIDATION_FAILED` naming the offending path, instead of reaching the protocol
+  and failing further in. A body `object` key is ignored rather than honoured.
+
+- f4d7f1d: fix(metadata-protocol,rest): the id list is the only thing deleteMany can select on (#3897)
+
+  `deleteManyData` built the predicate its endpoint is named after and then spread
+  the caller's `options` **over** it:
+
+  ```js
+  return this.engine.delete(request.object, {
+    where: { id: { $in: request.ids } },
+    ...request.options, // ← lands after `where`, so it can replace it
+  });
+  ```
+
+  `request.options` is caller-supplied — `POST /data/:object/deleteMany` splatted
+  the whole request body into the protocol request (`{ object, ...req.body }`) —
+  so one body key rewrote the operation:
+
+  ```json
+  { "ids": ["a"], "options": { "multi": true, "where": {} } }
+  ```
+
+  reached `engine.delete` as an unscoped bulk delete. The engine's write
+  middleware still composes RLS/sharing predicates onto the AST, so the blast
+  radius is not automatically the whole table: it is **everything the caller is
+  allowed to delete**. For an ordinary user with delete permission that is the
+  difference between the 3 records they asked for and every record they can see;
+  measured on a stock CRM dev deployment, that payload against one id removed all
+  8 rows in the object and returned the raw driver count (`8`). The same spread
+  also accepted `context`, i.e. a forged principal wherever the route is reachable
+  without auth.
+
+  **The id set is now authoritative, structurally.** The engine options are built
+  from the validated id list and nothing else — caller `options` is a
+  `BatchOptions` bag (`atomic` / `returnRecords` / `continueOnError` /
+  `validateOnly`) that carries nothing `engine.delete` consumes, so merging it
+  could only ever smuggle in engine keys. Ids must be scalars, so an operator
+  object (`{"ids":[{"$ne":null}]}`) cannot reach `where.id` either; a malformed
+  list is a `400 VALIDATION_FAILED` instead of a wider delete. The REST route
+  parses the body against `DeleteManyDataRequestSchema` first, one hop earlier —
+  Zod object schemas strip unknown keys, so `options.where`, top-level `where` and
+  a body `context` no longer survive the ingress at all.
+
+  **The endpoint also works now.** `deleteManyData` never set `multi`, so a
+  correctly-formed `{"ids":[…]}` hit the engine's
+  `'Delete requires an ID or options.multi=true'` throw — only the requests that
+  triggered the override above ever completed. Deletes now go one id at a time by
+  primary key, the same shape `batchData`'s `delete` case uses, which closes two
+  gaps behind that: the bulk branch skips `cascadeDeleteRelations`, so
+  `deleteBehavior` (`cascade` / `set_null` / `restrict`) was not honoured for the
+  rows it removed; and the declared `BatchUpdateResponse` contract (per-record
+  `results`, `atomic`, `continueOnError`) was unimplementable from a bulk row
+  count. Both are delivered rather than declared.
+
+  **Behaviour change.** The endpoint returns a `BatchUpdateResponse`
+  (`{ success, operation, total, succeeded, failed, results }`) where it
+  previously returned the driver's raw delete count — on the paths where it
+  returned anything at all. The caller's execution context is threaded to every
+  delete, so RLS/FLS now run under the caller here as they do on the single-record
+  route.
+
+- 507b92a: fix(spec,objectql,rest,runtime): field-validation messages answer in the caller's language, named by the field's label (#3957)
+
+  The write path built every built-in validation message by concatenating the **API
+  field name** into a **hardcoded English** template. Those strings are what the
+  Console toast, the CSV-import row report, the CLI and any custom client display
+  verbatim, so a Chinese-locale user importing a bad row read:
+
+  ```
+  第 1 行:penalty_amount must be ≥ 0
+  ```
+
+  …for a field declared `label: '处罚金额'` with a full `zh-CN` bundle loaded. The
+  form layer localized the _same_ constraint correctly (the browser's native
+  `min`), so the language flipped depending on which layer caught the value.
+
+  **Three things changed.**
+
+  1. **The message is rendered in the caller's locale** from a built-in catalog
+     (`BUILTIN_VALIDATION_MESSAGES`, `@objectstack/spec/system`) shipping `en`,
+     `zh-CN`, `ja-JP`, `es-ES` — the same four locales as the platform bundles.
+     The locale comes from `ExecutionContext.locale`, whose contract already read
+     "Drives message catalogs"; this is the consumer that makes that true. Both
+     HTTP entries (REST server, runtime dispatcher) now resolve it from the
+     request's `Accept-Language` / `?locale` first, falling back to the workspace
+     `localization.locale` — so a rejection message and the field labels around it
+     can no longer disagree.
+
+  2. **The field is named by its label, never the API name**: translation bundle
+     (`objects.<obj>.fields.<f>.label`) → declared `label` → API name as the last
+     resort. `FieldValidationError.field` still carries the API name so a form can
+     focus the right input.
+
+  3. **The constraint is exposed as data**, so a client can format its own text
+     instead of parsing the sentence:
+     `{ field, code, message, label, constraint: { min: 0 } }`. This rides
+     ADR-0114's existing `constraint` / `value` positions on `FieldErrorSchema`
+     (`constraint` tightens from `unknown` to `Record<string, unknown>`) rather
+     than adding a parallel payload — `label` is the only new field. The bag
+     carries `min`/`max`/`minLength`/`maxLength`/`actual`/`allowed`/`type`, and the
+     message templates interpolate from exactly those keys.
+
+  Covered end-to-end, not only in the validator: single and batch insert,
+  single-id and multi-row update, ADR-0113's clear-out rejection, the object-level
+  rule evaluator's own built-in messages (`requiredWhen`, per-option gating,
+  state-machine fallbacks), and the importer's cell-coercion, required pre-check
+  and #3956 bound pre-check messages — all of which land in the same row report.
+
+  **What this changes for consumers.**
+
+  - `code` is unchanged (ADR-0114's `FieldErrorCode`) and remains the thing to
+    match on. Message keys are finer-grained than codes — `invalid_datetime`,
+    `invalid_option_value`, `required_cleared` are rendering detail and never reach
+    the wire — so localization never splits the client-facing vocabulary.
+  - `message` **text changes**: it is localized, and it names the field by label
+    even in English (`Budget must be ≥ 0`, not `budget must be ≥ 0`). Anything
+    asserting on the old English string should match `code` (and now
+    `constraint`) instead.
+  - An author-written validation-rule `message` is never touched — it is already
+    in the language its author chose.
+  - A deployment can override any built-in message with a `translation` item
+    defining `validation.field.<messageKey>` (e.g.
+    `validation.field.min_value: '{{label}}不得小于 {{min}} 元'`).
+  - The importer's reference-failure message no longer names the target object's
+    API name (`no sys_user matches "…"`): naming internal identifiers is the
+    defect being fixed, and the column plus the offending value are what an
+    importer can act on.
+
+- be7945a: feat(rest): `audience: 'public'` publishes a book anonymously on a secure-by-default deployment (#3963)
+
+  `book.audience: 'public'` was a declared per-book capability that in practice
+  required the deployment to open its **entire** data plane. The `/meta` umbrella
+  gate refused every anonymous caller unless `api.requireAuth` was `false`, so a
+  `public` book was only ever reachable inside a globally-public deployment — the
+  audience model was _re-narrowing_ what that flag had already opened, not granting
+  anything of its own. ADR-0046 §6.7 recorded exactly that as ground truth ("the
+  gate is the optional global `requireAuth` … not the handler").
+
+  The exemption is now derived from the declaration, the same shape ADR-0056
+  Option A chose for public form submission (`publicFormGrant`): the umbrella gate
+  admits an anonymous **GET** of the book/doc read surface, and the §6.7 audience
+  gate inside the handler is what authorizes it.
+
+  Narrow in three independent ways:
+
+  1. **Only when no execution context resolved.** An authenticated caller still
+     goes through `enforceAuth` unchanged, so the ADR-0069 auth-policy gate
+     (expired password, enforced MFA) keeps governing a gated session's book reads.
+  2. **Only GET, only book/doc.** `GET /meta/:type`, `GET /meta/:type/:name` (type
+     `book` or `doc`, either spelling — #3984) and `GET /meta/book/:name/tree`.
+     Every other type stays 401 for anonymous, writes stay 401, and `GET /meta`
+     itself stays 401. The predicate keys on the REGISTERED route path plus the
+     normalized `:type`, so a route added later cannot fall into it by accident.
+  3. **Reachability, not authorization.** `audienceAllows` admits `'public'` only;
+     `org` and `{ permissionSet }` books require `caller.authenticated` and
+     unresolvable holdings fail closed, so an anonymous read of a gated book is
+     still `401`.
+
+  A deployment can now publish a public manual with `requireAuth: true` — which is
+  the prerequisite for retiring that flag entirely (#3963 step 2). ADR-0046 §6.7
+  carries an amendment recording the new gate; its SEO and tenant-from-host
+  reasoning is unchanged, having never depended on the flag.
+
+- a1b61e0: Request bodies are now checked against the schemas the API catalog declares for them (#3899, the request-side dual of #3877).
+
+  **Routes that now answer `400 VALIDATION_FAILED` + `fields[]` for a body violating their declared `requestSchema`** (previously the body was consumed raw, and a malformed one silently executed different semantics):
+
+  - `POST /data/:object/query` — body must be a QueryAST (`FindDataRequestSchema`); a garbage body used to degrade into an unfiltered full read. The path `object` is now pinned into the forwarded query (a body `object` can no longer contradict the path).
+  - `POST /data/:object` / `PATCH /data/:object/:id` — body must be a record object (`CreateDataRequestSchema` / `UpdateDataRequestSchema`).
+  - `POST /data/:object/batch` — body must be a `BatchUpdateRequestSchema` (`operation` + `records[]`).
+  - `POST /data/:object/createMany` — body must be a bare JSON array of records (`CreateManyDataRequestSchema`); `{ records: [...] }` (updateMany's envelope) is rejected with a pointer.
+  - `POST /notifications/read` — body must be `{ ids: string[] }` (`MarkNotificationsReadRequestSchema`); a misnamed key used to become `markRead(userId, [])` — a 200 no-op that never cleared the badge.
+
+  **Dispatcher automation routes now validate their bodies** (no catalog schema; hand-written guards):
+
+  - `POST /automation` and `PUT /automation/:name` require a flow-definition object, and POST requires a non-empty `name` — a mistyped `name` used to register the flow under the key `undefined` and echo 200.
+  - `POST /automation/:name/toggle` is strictly `{ enabled?: boolean }` — `{"enable": false}` (one letter off) used to ENABLE the flow and answer 200 `{enabled: true}`; it is now a 400 naming the offending key. An empty body still means enable.
+
+  **`QuerySchema` now declares the search contract ADR-0061 actually serves** (additive): `search` accepts the canonical bare query string as well as the structured `FullTextSearch` form, and the server-validated `searchFields` narrowing is formally declared. Previously the schema declared only the object form while every surface (and the ADR's own conformance proof) sent the string — drift that surfaced the moment request bodies started being validated.
+
+  **Catalog corrections in `@objectstack/spec` (`plugin-rest-api.zod.ts`)** — documentation-only tables:
+
+  - `DEFAULT_NOTIFICATION_ROUTES` drops the four device/preferences endpoints — those server routes were removed in #3612 (never built), yet the table kept declaring them, `requestSchema` and all.
+  - `DEFAULT_AUTOMATION_ROUTES`' trigger endpoint path is corrected `/trigger` → `/trigger/:name` (the mounted path; the flow name rides the path) and its `AutomationTriggerRequestSchema` declaration is removed — that schema never described this route's wire shape.
+  - `DEFAULT_DATA_CRUD_ROUTES` gains the `POST /:object/query` entry (mounted since forever, previously undeclared), repoints create/update to the schemas the routes actually validate (`CreateDataRequestSchema` / `UpdateDataRequestSchema` — the old `CreateRequestSchema`/`UpdateRequestSchema` names described a `{ data }` envelope the wire never had), and drops `requestSchema` from GET/DELETE entries (path/query-bound inputs; nothing can violate them as a body).
+  - New gates: catalog `requestSchema`/`responseSchema` strings must resolve to real exported Zod schemas, `requestSchema` may only sit on body-carrying methods, and every declared `requestSchema` on a mounted route has a violating-body → 400 conformance case (`packages/rest` + `packages/runtime` request-schema-gate suites).
+
+  Migration: clients that already send the documented shapes are unaffected. If you relied on a malformed body being silently accepted (e.g. posting `{ records: [...] }` to `createMany`, a non-boolean `enabled` to toggle, or an off-schema analytics/query body), fix the request to the declared shape — the 400's `fields[]` names each offending key.
+
+### Patch Changes
+
+- 8d895ff: feat(spec,objectql,rest): publish the audit-provenance and import-coercion vocabularies (#3786, #4173)
+
+  Two more hand-copied lists retired the same way, each replaced by one spec
+  export and derivation at every consumer.
+
+  **`AUDIT_PROVENANCE_FIELDS`** (`@objectstack/spec/data`, with the
+  `AuditProvenanceField` type) — the four columns `applySystemFields` injects on
+  every audit-tracked object: `created_at`, `created_by`, `updated_at`,
+  `updated_by`. That four-name list existed in at least four copies across two
+  repos: the registry's injection if-chain, the rule-validator's `preserveAudit`
+  allowlist ("Kept in sync with the registry's auto-injected audit fields" — by
+  nothing), and two objectui render surfaces. Now:
+
+  - the registry's injection is table-driven, keyed by the tuple with a
+    `satisfies Record<AuditProvenanceField, …>` clause — a name added to the spec
+    without a column definition (or vice versa) is a compile error, the
+    `APPROVER_VALUE_BINDINGS` discipline;
+  - the rule-validator's `AUDIT_TIMELINE_FIELDS` derives from the same tuple;
+  - `FIELD_GROUP_SYSTEM_FIELDS`' audit prefix derives from it too — one
+    declaration even inside the file that hosts both;
+  - objectui's `AUDIT_FIELD_BY_ROLE` already pins itself by subset assertion and
+    can import the tuple directly once this release is published.
+
+  Injection behaviour is byte-identical — a conformance test pins every injected
+  column's shape against the pre-refactor definitions.
+
+  **`IMPORT_BOOLEAN_TRUE_TOKENS` / `IMPORT_BOOLEAN_FALSE_TOKENS` /
+  `IMPORT_REFERENCE_TYPES`** (`@objectstack/spec/data`) — the `/import` coercion
+  vocabulary #4173 asked for. The server's `import-coerce.ts` now derives its
+  `BOOL_TRUE` / `BOOL_FALSE` / `REFERENCE_TYPES` from these instead of owning
+  them privately, and objectui's Import Wizard preview — which re-checks the same
+  contract client-side so a cell is flagged red exactly when the server would
+  reject it — can retire its pinned-inventory mirror once this release is
+  published (the retirement path is written in that file's own header).
+  `IMPORT_REFERENCE_TYPES` ships with the legacy `'reference'` spelling included,
+  retiring the `+ 'reference'` literal both ends carried separately. The tables'
+  own discipline is tested: sets disjoint, every token pre-normalized
+  (lower-case, trimmed), and the Chinese / check-mark spreadsheet-reality tokens
+  pinned by name.
+
+  No behaviour change anywhere: every derived value is byte-identical to the
+  literal it replaces.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- fae74b5: fix(rest): give the bare 501 error exits a machine `code` (#4067)
+
+  Most REST error exits already carry a typed `code` (`VALIDATION_FAILED`,
+  `BATCH_NOT_ATOMIC`, `BATCH_TOO_LARGE`, `PERMISSION_DENIED`), and the clone /
+  search 501s already answer `{ error, code: 'NOT_IMPLEMENTED' }`. Four 501 exits
+  still returned a bare `{ error: '<string>' }` with no code, so a client could
+  only key on the prose:
+
+  - the cross-object transactional batch route (`POST {basePath}/batch`) when the
+    runtime has no `transaction()` — the last untyped exit on that route, whose
+    siblings (`BATCH_NOT_ATOMIC`, `VALIDATION_FAILED`, the `enforceBatchSize`
+    `BATCH_TOO_LARGE`) were already typed by the #3897 / #3933 / #3939 line;
+  - the two `saveMetaItem`-unsupported exits;
+  - the UI-view-resolution-unsupported exit.
+
+  Each now carries `code: 'NOT_IMPLEMENTED'`, matching the clone / search 501s.
+  Additive only — the `error` message is unchanged and no status changes — so
+  existing clients are unaffected; new ones can branch on the code.
+
+- 366105c: fix(service-datasource,rest): the last three uncovered datasource routes answer their registered refusal code (#4264)
+
+  #4249 (fixed in #4263) gave the rest surface's two introspection routes a
+  failure contract; this closes the same gap on the three sibling routes it left
+  uncovered. Each had no `catch` around its service call, so a service throw was
+  swallowed by the adapter and surfaced as the pre-#3675 non-envelope
+  `500 { error: 'No response from handler' }` — no `success` flag, no
+  `error.message`, no code to switch on, real cause lost.
+
+  Wire-visible changes — each route now answers `400` in the declared envelope,
+  under the refusal code registered (ADR-0112) for the service it dispatches to,
+  with the service's own message at `error.message`:
+
+  - `GET /api/v1/datasources` (`listDatasources` throw) →
+    `400 DATASOURCE_ADMIN_ERROR` — matching its eight siblings in
+    `service-datasource/admin-routes.ts`, which already answer their catches this
+    way.
+  - `POST /api/v1/datasources/:name/external/refresh-catalog` (`refreshCatalog`
+    throw) and `POST /api/v1/datasources/:name/external/validate` (`validateAll`
+    throw) → `400 EXTERNAL_DATASOURCE_ERROR` — the same code #4249 gave the two
+    introspection routes one block above them.
+
+  The issue left the code choice open (`INTERNAL_ERROR` was the alternative);
+  the registered per-service codes win on consistency: every other catch in both
+  modules — including pure reads — already answers 400 with the service-attributed
+  code, and `refreshCatalog`'s dominant throw class (unknown datasource,
+  unreachable remote, no such schema) is the one #4249 already adjudicated as a
+  400 refusal on `listRemoteTables`. A 500 here would fork the failure contract
+  within a module — the drift #4249 removed.
+
+  No new codes: both were registered in the error-code ledger by #4263. The
+  envelope-conformance suites and the `REFUSALS` pin table gain one row per
+  route.
+
+- f0d6594: fix(rest): `GET /data/:object/export` honours a `search` term
+
+  The streaming export route accepted `filter` and `orderby` but had no way to
+  carry the term a user had typed into the list's search box. So exporting after
+  a search downloaded the **unsearched superset** — more rows than the screen
+  showed, in a file that looks authoritative, with nothing indicating the
+  difference. The route's own comment claimed the opposite: that it "mirrors the
+  active view's filter + sort so the exported file matches what the user sees".
+
+  Same family as a dropped filter (objectstack#3948, objectstack#4181): a
+  plausible answer that is quietly broader than the one asked for.
+
+  Two new query params, both matching the list endpoint's semantics:
+
+  - `search=<term>` — folded into `findData` as `$search`, so it **composes**
+    with `filter` (`{ $and: [filter, search] }`) rather than replacing it. Empty
+    or whitespace-only terms are ignored rather than applied as a blank predicate.
+  - `searchFields=a,b` — the ADR-0061 override for which fields the term scans.
+    Only meaningful alongside `search`, and intersected with the object's allowed
+    searchable set by the engine, exactly as on the list endpoint.
+
+  Unknown query params on this route were already ignored, so a client that sends
+  `search` to an older server gets today's behaviour rather than an error.
+
+  Covered by `export-integration.test.ts` against the real engine + protocol: the
+  composition case is built so each half alone returns a different non-empty
+  result and only "both applied" returns none. Reverting the route change fails 4
+  of the tests. The file's in-memory driver also learned `$or` / `$contains` —
+  without them a search predicate is a silent no-op and an "it filtered"
+  assertion would pass for the wrong reason.
+
+- bcf1112: fix(service-datasource,rest)!: external-datasource refusals answer their own error code (#4249)
+
+  #4225 / #4234 fixed the 503 `message` on the three routes in
+  `service-datasource/admin-routes.ts` that dispatch to `external-datasource`
+  rather than `datasource-admin`. The identical mis-attribution survived one field
+  over, on the 400 path — and machine-readably: one shared `badRequest` helper
+  hard-coded `DATASOURCE_ADMIN_ERROR`, which the ADR-0112 ledger defines as a
+  refusal _from the datasource-admin service_. So a `no such schema` raised by the
+  external-datasource introspector was reported as datasource-admin's, and where
+  #4225 misled a human reading prose, this misrouted a client switching on
+  `error.code`.
+
+  `EXTERNAL_DATASOURCE_ERROR` is now registered in the error-code ledger — under
+  `@objectstack/service-datasource` and `@objectstack/rest`, the two packages that
+  emit it; per the ledger's own rule the per-package rows are provenance, not
+  identity — and `badRequest` takes the same `ServiceName` the route passed to
+  `resolve` (#4234), so the code, like the 503 message, comes from the service the
+  route actually dispatches to.
+
+  Wire-visible changes:
+
+  - **The three external-datasource routes' 400 `error.code`** —
+    `GET /datasources/:name/remote-tables`, `POST /datasources/:name/test`,
+    `POST /datasources/:name/object-draft` — is now `EXTERNAL_DATASOURCE_ERROR`
+    (was `DATASOURCE_ADMIN_ERROR`). Status, envelope, and `error.message` are
+    unchanged, as is everything on the six datasource-admin routes. No consumer
+    branches on the old code (grepped both repos, all the ADR-0112 sweep forms).
+  - **The rest surface's two introspection routes now have a failure contract at
+    all.** `GET /datasources/:name/external/tables` and
+    `POST /datasources/:name/external/tables/:remote/draft` carried no
+    `try`/`catch`, so the very same service operations that answer 400 through
+    the admin surface surfaced here as the adapter's non-envelope
+    `500 { error: 'No response from handler' }`. They now answer
+    `400 EXTERNAL_DATASOURCE_ERROR` in the declared envelope — one operation, one
+    failure contract, on both paths. (`EXTERNAL_IMPORT_ERROR` on the import route
+    is unchanged: a refused import is a different act from a failed
+    introspection, and its name says so.)
+
+  Why a new registered code rather than reusing one: ADR-0112's ledger asks
+  _generic_ conditions to reuse the standard catalog — that argument carried
+  #4225's 503, where `SERVICE_UNAVAILABLE` is correct for all nine routes and only
+  the free-text `message` named the service. A refusal specific to one service is
+  exactly what registered extension codes are for, and the closed `ErrorCode`
+  union means correcting the attribution had to be a ledger edit. Widening
+  `EXTERNAL_IMPORT_ERROR` to cover introspection was rejected because these are
+  not imports; leaving the throws uncaught was rejected because the adapter's 500
+  is not the declared envelope.
+
+  The conformance rows that pinned the drift move with it, and each surface now
+  pins the refusal code per route the way #4234 pinned the 503 message per route.
+
+  Pre-existing, like #4225: #3843 carried every code string over verbatim.
+
+- 99b4392: Advertise `mcp` in `/discovery` only when it is actually serveable (#4024).
+
+  Both discovery producers gated the `/mcp` route on `isMcpServerEnabled()` alone.
+  The stated justification was a lockstep — `os serve` auto-loads plugin-mcp from
+  the same flag, so on that path advertised did imply mounted. But the lockstep is
+  a property of the CLI, not of the dispatcher: `@objectstack/rest` has no
+  `@objectstack/mcp` dependency, mounts no `/mcp` route and performs no auto-load,
+  so a host that embedded it without plugin-mcp advertised `/mcp` in `/discovery`
+  and then answered 501 on it — the `declared ≠ enforced` failure #3369 forbids,
+  and a broken contract for third-party clients that read `/discovery` to decide
+  what exists.
+
+  Both producers now require the flag AND a serveable MCP service. The runtime
+  dispatcher gates on the handler's own predicate (`typeof
+mcp.handleHttpRequest === 'function'`), so a wrong-shaped service can't
+  over-promise either. `@objectstack/rest` probes via the per-request kernel or the
+  single-env `serviceExistsProvider`; when it genuinely cannot probe it keeps the
+  prior flag-only answer rather than hiding a working endpoint (fail-open,
+  ADR-0057 D10). The `os serve` / `os dev` path is unchanged — it loads the plugin,
+  so the service resolves and `/mcp` is still advertised.
+
+  Also exercises the `mcp: false` seam in `route-parity.integration.test.ts`, which
+  had existed unused since the file was written: `bootServe()` was only ever called
+  with no args or `{ notification: false }`. The one capability whose advertisement
+  was not service-presence gated was also the one whose absence was never tested.
+
+- 495019b: fix(rest): the /meta per-type gates are enforced on both spellings of the type segment (#3984)
+
+  Every per-type filter on `GET /meta/:type` and `GET /meta/:type/:name` compared
+  `req.params.type` to a literal SINGULAR name, while the protocol's `getMetaItems`
+  normalizes singular↔plural and serves either. Prime Directive #3 makes plural the
+  canonical REST spelling, so the form a client is most likely to use —
+  `/api/v1/meta/books` — reached the handler with every gate skipped.
+
+  Three of those gates are authorization:
+
+  - **ADR-0046 §6.7 book / doc audience** (three sites: the list, the single-item
+    read, and the doc effective-audience union). `GET /meta/books` returned a
+    `{ permissionSet }`-gated book — an _Admin Guide_ — to a caller who does not
+    hold the set, and `GET /meta/books/admin_guide` answered `200` where the
+    singular spelling answers `401`. On a publicly-served deployment the same skip
+    handed an `org` book to an anonymous reader.
+  - **App RBAC filter** — hides privileged apps (Studio, Setup) and gated nav
+    entries from callers without the grants. `GET /meta/apps` skipped it.
+  - **Dashboard `requiresService` gate** (ADR-0057 D10). `GET /meta/dashboards`
+    skipped it.
+
+  The remaining spelling-sensitive branches are behavioural rather than
+  authorization — doc i18n locale collapse, and the list-response `content` strip —
+  and were inconsistent between the two spellings for the same reason.
+
+  Each handler now normalizes the type ONCE (`RestServer.metaTypeSingular`, backed
+  by the same `PLURAL_TO_SINGULAR` table the protocol uses) and every gate keys on
+  that value, so the two spellings of one route can no longer diverge. Found while
+  scoping #3963.
+
+- 20bc1ec: fix(spec,rest): the metadata forms save what they show — form ↔ Zod reconciliation (#3786)
+
+  Every entry in `METADATA_FORM_REGISTRY` is a hand-written `defineForm` layout
+  that names keys of a Zod schema it never imports: two descriptions of one key
+  set, a comment asking the next author to keep them in step, and nothing that
+  fails when they don't. #3786 asked for a sweep of that shape across the repo.
+  **Four of the seventeen forms had already drifted, every one of them silently.**
+
+  The silence is the point. `ObjectSchema` / `FieldSchema` are deliberately not
+  `.strict()`, so a key the schema does not declare parses clean and is stripped
+  on the way to storage — the same ADR-0104 failure class the `field.zod.ts`
+  prune tombstone already describes in prose. An admin toggled a switch in
+  Studio, got no error, and the value never landed.
+
+  **What was broken, from an author's seat:**
+
+  - **Object → Capabilities.** The block bound to `capabilities`; the
+    `ObjectSchema` key is `enable`. All seven toggles (Track history, Searchable,
+    API enabled, Files, Feeds, Activities, Clone) saved nothing.
+  - **Object → Fields.** The inline column grid offered 16 keys `FieldSchema` has
+    never declared. `PII`, `Encrypted`, `Indexed`, `Immutable`, `Filterable`,
+    `Placeholder`, `Validation`/`Error message` and `Starting number` were
+    controls with no storage behind them at all; the rest named keys the schema
+    had **renamed** and the form never followed:
+    `referenceFilter` → `lookupFilters`, `cascadeDelete` → `deleteBehavior`
+    (a three-way enum, not a boolean), `formula` → `expression`,
+    `displayFormat` → `autonumberFormat`, and the flat `summaryType` /
+    `summaryField` pair → the single `summaryOperations` object, which also
+    restores the `object` key the flat pair had no slot for. Roll-ups authored in
+    that grid saved nothing.
+  - **Report → Advanced.** `aria` and `performance` were pruned from
+    `ReportSchema` by #3496; the form kept rendering both.
+  - **Hook / Action → Body.** `memoryMb` was unauthorable — named in
+    `hook.form.ts`'s own doc comment, absent from the list beneath it.
+  - **Page → Interface.** `interfaceConfig.sort` was unauthorable, so a page's
+    default sort order could not be set in Studio at all.
+
+  **No authored metadata changes and nothing you can write is removed.** These
+  were UI controls that never persisted; every corrected key is one `FieldSchema`
+  / `ObjectSchema` already accepted. Metadata authored in YAML/TS was always
+  validated against the real schema and is unaffected. If you had been filling
+  those Studio controls expecting them to stick, they now either work (the
+  renamed five) or are gone rather than lying to you.
+
+  The metadata-form translation bundles are derived from the registry, so all
+  four locales are regenerated. Worth naming what they contained: translated
+  labels, in four languages, for switches that saved nothing — the drift had
+  propagated into a generated artifact and been dutifully translated there.
+
+  **The mechanism.** `metadata-form-zod-reconciliation.test.ts` walks every
+  registered form and reconciles it against `getMetadataTypeSchema()`. The two
+  directions are deliberately asymmetric: **form-only** (a control whose value is
+  discarded) is always a defect and cannot be excused, because no design wants
+  one; **zod-only** is ledgerable with a reason, for a deprecated key held back
+  from new authoring or a curated quick-add subset that defers to a fuller
+  editor. Ledger entries are checked for non-vacuity and for still resolving on
+  both sides, per the #4045 / #4040 discipline. Verified by mutation — re-adding
+  a stripped key, dropping a covered key, and offering a ledgered omission each
+  turn the gate red.
+
+  **New export: `TRANSLATABLE_METADATA_TYPES`** (`@objectstack/spec/system`), the
+  set of metadata types whose labels `translateMetadataDocument` localizes,
+  derived from its dispatch table rather than restated. `@objectstack/rest` had
+  been carrying a hand-copied literal set under a "keep in sync with the type
+  dispatch" comment; it now reads this instead. Registering a translator in spec
+  reaches the REST boundary with nothing else to remember — the second list is
+  deleted rather than checked, which is the better half of derive-or-gate.
+
+  Also corrected: `ActionAiCategorySchema`'s comment claimed it mirrored
+  `ToolCategorySchema` in `ai/tool.zod` and told the next author to update both
+  sides — but #3896 deleted `ToolCategorySchema` along with the inert
+  `tool.category` key it typed. The instruction had been pointing at a source
+  that no longer exists. The enum is canonical now and says so.
+
+- 6c87cc9: fix(data): a filter the server cannot apply is rejected, not silently ignored (#4181)
+
+  `GET /api/v1/data/:object?filter={status:done` — one missing quote — answered
+  `200` with the **unfiltered** page. The JSON-parse tolerance
+  (`catch { /* keep as-is */ }`) left the raw string on `where`, a shape no
+  driver consumes, so the filter was dropped whole and the response was
+  byte-for-byte a successful unfiltered query. The worst failure direction in
+  this family: #4134 returned nothing, #4164 dropped one predicate, this
+  returned everything.
+
+  The sibling `GET /data/:object/export` route had rejected the same input since
+  it was written — the list path was the outlier. That guard now lives in the
+  shared normalizer, so `GET /data/:object`, `POST /data/:object/query` and the
+  runtime dispatcher all give one answer:
+
+  - Unparseable JSON → `400 INVALID_FILTER`, naming the parameter and stating the
+    filter was not applied.
+  - Parses but is not a filter (`?filter=5`, `?filter="done"`, `?filter=null`) →
+    same rejection; usable JSON is not a usable filter.
+  - Blank `?filter=` → treated as absent, as before. No error.
+  - `filter` / `filters` / `$filter` / `where` are four spellings of ONE slot.
+    Sending two with **different** values used to run one and discard the rest
+    silently; it is now `400 INVALID_REQUEST` (each value is a valid filter — the
+    _request_ is ambiguous, so it does not share the malformed-filter code).
+    Redundant identical spellings pass.
+  - `orderby` on the export route gets the same treatment — a sort that cannot be
+    parsed is refused rather than dropped (lower stakes than a filter: the row set
+    is unchanged, but a caller taking "latest N" got an arbitrary N).
+
+  **One wire code for one condition.** #4121 landed `400 INVALID_FILTER` for
+  malformed filter _arrays_ on this same code path while this fix was in flight;
+  the non-array rejections above use that code too, so a caller asking "did my
+  filter run?" never has to know which branch caught it. The export route's
+  filter guard moves from `INVALID_REQUEST` to `INVALID_FILTER` to match — a wire
+  change on an existing route, and the reason it is worth making is that a client
+  otherwise has to handle two codes for one condition depending on which URL it
+  called. The route's `orderby` guard keeps `INVALID_REQUEST` (it is not a
+  filter).
+
+  **What changes for callers:** requests carrying a malformed filter now fail
+  loudly instead of receiving every record. Every valid filter shape — JSON
+  string, live object, `FilterCondition` AST array, and all four alias spellings
+  used alone — is unaffected.
+
+- af2a095: fix(data): `searchFields` / `groupBy` / `aggregations` naming a field that does not exist are rejected, not silently degraded (#4254)
+
+  #4226 closed `sort` / `select` / `expand`; with the filter axis (#4134 / #4164 /
+  #4181 / #4121) that made four field-naming read axes that either apply or fail.
+  The same machine kept leaking on the remaining three, and each failure corrupted
+  something the closed axes never touched:
+
+  ```
+  search=alpha&searchFields=no_such  -> 200  MORE rows than the narrowing allowed
+  groupBy=[no_such]                  -> 200  [{no_such: null, n: <true count>}]  N groups collapsed into 1
+  sum(no_such)                       -> 200  0 — indistinguishable from a real zero
+  ```
+
+  Each is now refused at the shared normalizer, so `GET /data/:object`,
+  `POST /data/:object/query`, the export route and the runtime dispatcher give
+  one answer instead of four.
+
+  - **`searchFields` → `400 INVALID_FIELD`.** The `select` failure with the sign
+    flipped outward: the engine dropped unknown names and, when that emptied the
+    override, fell back to the FULL searchable set — so a parameter that exists
+    only to narrow a search widened it, and it changed which ROWS came back, not
+    just which columns. Its only in-framework caller is `GET /data/:object/export`
+    — the route whose `search` support just shipped so exports would stop
+    downloading "the unsearched superset … in a file that looks authoritative";
+    a typo'd `searchFields` did exactly that, one parameter over. Three causes,
+    three messages, because the fixes differ (the split #4226 drew on expand): a
+    name that is no field is a request typo; a REAL field outside the searchable
+    set needs the object changed (its message names the declared
+    `searchableFields` or the auto-default's type rule, whichever applies); and
+    a `searchableFields` entry that names no field is a STALE DECLARATION — a
+    bug on the object, called out as such because clients (objectui's list
+    search) echo the declaration verbatim. The allowed set is resolved by the
+    same `@objectstack/spec/data` function the engine's search expansion
+    consumes (`resolveSearchFieldResolution`, moved from objectql), so the gate
+    cannot drift from what search actually scans.
+  - **`groupBy` → `400 INVALID_FIELD`.** The in-memory aggregation path projects
+    an unknown column as `null` for every row, so all rows landed in ONE bucket
+    whose count is the true row count — structurally perfect, identical to "this
+    column really holds a single value". A chart draws one bar; nothing says the
+    grouping never ran. Native SQL aggregation errors on the same input, so which
+    backend a deployment sits on decided the answer — the "two routes, opposite
+    answers" split, one axis over.
+  - **`aggregations` → `400 INVALID_FIELD`.** `sum(<typo>)` folded a column of
+    `undefined` to `0` — the exact number an empty quarter produces, in reports
+    whose whole job is to be believed (`avg`/`min`/`max` answered `null` the same
+    way). `count` with no `field` (or the `'*'` sentinel) is the one legitimate
+    field-less form and passes.
+  - **Unreadable SHAPES on the aggregation axes → `400 INVALID_QUERY`** — the
+    standard-catalog code that had no emitter since it was written, like
+    `INVALID_SORT` before #4226. A string `groupBy`, an entry naming no field, a
+    function or `dateGranularity` outside the spec enums, a missing `alias`: each
+    slipped past the `Array.isArray` routing guard (rows returned UNGROUPED) or
+    computed a silent placeholder (`null` results, a column keyed `"undefined"`,
+    one bucket per raw value under an unknown granularity).
+
+  Tiering is unchanged from #4226: registry + field map present → authoritative;
+  no registry / no field map / legacy array field map → the NAME gates skip (shape
+  gates still apply — they need no schema). The engine's own tolerance is
+  untouched: internal callers reaching `engine.find()` / `engine.aggregate()`
+  directly are unaffected. `@objectstack/rest` also stops logging
+  `INVALID_FILTER` / `INVALID_SORT` / `INVALID_QUERY` rejections as
+  "[REST] Unhandled error" — they are client mistakes the response already
+  explains, as `INVALID_FIELD` always was.
+
+  Requests that name real fields are unaffected.
+
+- dd5daac: fix(data): reject unknown list query parameters instead of reading them as zero-matching field filters (#4134)
+
+  `GET /api/v1/data/:object` reads any parameter it does not reserve as a
+  field-level equality filter — that is what makes `?status=done` shorthand for
+  `?filter={"status":"done"}`. When the name matched **no** field the resulting
+  predicate could only ever match nothing, so `?pageSize=5` on a 10-row object
+  returned `200` + `total: 0`: structurally valid, and indistinguishable from
+  "this object is empty". The write path already rejected the same unknown name
+  loudly (`400 INVALID_FIELD`), so one piece of knowledge — does this field
+  exist — was enforced on write and silently zeroed on read.
+
+  The read path now answers the same way, in the same envelope:
+
+  ```json
+  {
+    "error": "Unknown field 'pageSize' on object 'showcase_task'. Query parameters that are not reserved are read as field filters, so an unknown name can only match zero records. Did you mean the 'top' query parameter (OData spelling '$top')?",
+    "code": "INVALID_FIELD",
+    "field": "pageSize",
+    "object": "showcase_task"
+  }
+  ```
+
+  The rejection carries a suggestion — the canonical parameter for a known
+  dialect (`pageSize` / `perPage` / `page` / `sortBy` / `q` → `top` / `skip` /
+  `sort` / `search`), or the closest real field name when it reads like a typo —
+  and fires whether or not an explicit `filter` rode along, so the failure never
+  depends on which other parameters were sent.
+
+  **What changes for callers:** a request sending a parameter that names no field
+  now gets a `400` where it used to get an empty `200`. Page size is `top` /
+  `$top` / `limit`; page offset is `skip` / `$skip` / `offset`. Every documented
+  parameter, every `$`-prefixed OData alias, and the full `QueryAST` body of
+  `POST /data/:object/query` are unaffected. An object with a field named after a
+  reserved parameter (`count`, `cursor`, `object`, `top`, `search`, …) filters it
+  through the explicit form: `?filter={"count":3}`.
+
+- 0931185: fix(rest,service-settings,service-datasource)!: four more route modules emit the declared envelope, and the guard is now shared (#3843)
+
+  #3675 and #3689 moved `service-storage` and `service-i18n` onto the declared
+  response envelope (`BaseResponseSchema` + `ApiErrorSchema`). Each scoped itself
+  to one service, and neither asked whether the same drift existed elsewhere. It
+  did — in four more modules, and in two of them it was the _older_ shape, the one
+  #3675 had already declared wrong:
+
+  | Module                                | before                                                         | now           |
+  | ------------------------------------- | -------------------------------------------------------------- | ------------- |
+  | `service-settings/settings-routes.ts` | nested `error`, no `success` on any of 5 bodies                | full envelope |
+  | `service-datasource/admin-routes.ts`  | `{ error: '<string>' }`, `message` a **sibling**               | full envelope |
+  | `rest/external-datasource-routes.ts`  | `{ error: '<string>' }` + a private `ok`                       | full envelope |
+  | `rest/package-routes.ts`              | 3 of 16 bodies had `success`, 2 failures had no `error` at all | full envelope |
+
+  ## Breaking: where to read things now
+
+  **Success payloads move under `data`.** The keys are unchanged — only their
+  depth. `unwrapResponse` in `ObjectStackClient` returns `body.data` when the flag
+  is present, so every SDK method (`packages.list()`, `datasources.external.*`)
+  resolves to exactly the object it always did. Raw `fetch` callers must add one
+  hop:
+
+  ```
+  GET  /api/v1/datasources            body.datasources     → body.data.datasources
+  GET  /api/v1/datasources/drivers    body.drivers         → body.data.drivers
+  GET  /api/v1/datasources/:name      body.datasource      → body.data.datasource
+  GET  /api/v1/packages               body.packages        → body.data.packages
+  GET  /api/v1/packages/:id           body.package         → body.data.package
+  GET  /api/settings                  body.manifests       → body.data.manifests
+  GET  /api/settings/:ns              body.manifest/.values → body.data.manifest/.values
+  POST /…/external/validate           body.ok, body.results → body.data.ok, body.data.results
+  ```
+
+  `SettingsNamespacePayloadSchema` and friends still describe those payloads
+  exactly; they now describe the envelope's `data` rather than the whole body.
+
+  **Error bodies stop being a string.** `{ error: 'datasource_admin_error',
+message }` → `{ success: false, error: { code: 'datasource_admin_error',
+message } }`. Read `body.error.message`, not `body.message`; read
+  `body.error.code`, not `body.error`. This is the asymmetry #3675 opened on: a
+  caller reading `body.error.message` previously got the real message from the
+  dispatcher and `undefined` from these routes.
+
+  **Two failures that never said why now do.** `DELETE /api/v1/packages/:id`
+  answered a bare `{ success: false }` and a bare
+  `{ success: false, failed, cleanups }`. They are now `PACKAGE_DELETE_FAILED` and
+  `PACKAGE_DELETE_PARTIAL`, with the per-item `failed` / `cleanups` arrays under
+  `error.details`.
+
+  **Codes follow ADR-0112.** #3841 settled the vocabulary while this was in review:
+  `error.code` is SCREAMING_SNAKE and `ApiErrorSchema.code` is now the closed
+  `ErrorCode` union, so an unregistered code fails schema parse. Generic conditions
+  reuse the STANDARD catalog rather than becoming registered synonyms of it, per the
+  ledger's own guidance:
+
+  ```
+  datasource_admin_unavailable  → SERVICE_UNAVAILABLE      (standard)
+  external_service_unavailable  → SERVICE_UNAVAILABLE      (standard)
+  not_found / PACKAGE_NOT_FOUND → RESOURCE_NOT_FOUND       (standard)
+  PUBLISH_FIELDS_MISSING        → MISSING_REQUIRED_FIELD   (standard)
+  INTERNAL                      → INTERNAL_ERROR           (standard)
+  datasource_admin_error        → DATASOURCE_ADMIN_ERROR   (registered)
+  external_import_error         → EXTERNAL_IMPORT_ERROR    (registered)
+  PUBLISH_MANIFEST_INVALID      → PACKAGE_MANIFEST_INVALID (registered)
+  PUBLISH_FAILED                → PACKAGE_PUBLISH_FAILED   (registered)
+  PACKAGE_DELETE_PARTIAL / PACKAGE_DELETE_FAILED / SETTINGS_ACTION_FAILED (registered)
+  ```
+
+  Which service is unavailable is carried by `message`. The seven registered codes are
+  added to `ERROR_CODE_LEDGER` under their owning packages — including a new
+  `@objectstack/service-datasource` entry.
+
+  **`POST /external/validate` keeps its `ok`.** Unlike the `{ ok: true, key }`
+  #3689 retired from storage — a private second word for `success` — this `ok` is a
+  computed verdict over the federated objects (`results.every(r => r.ok)`). The
+  request can succeed while the verdict is false, so the two flags are not the same
+  field; `ok` moves inside `data` rather than being dropped.
+
+  Consumers were taught both shapes first, so the two repos are not coupled by
+  merge order: objectui's `packages` readers were already tolerant
+  (`payload?.data ?? payload`), and its datasource page plus the generic
+  `type: 'api'` action runner now unwrap the envelope and read `error.message`
+  (the latter previously toasted `[object Object]` for any nested error).
+
+  ## The guard is shared now, not copied
+
+  `scripts/check-route-envelope.mjs` + `pnpm check:route-envelope`, wired into
+  `lint.yml` alongside the nine sibling `check:*` guards. Its load-bearing assertion
+  is structural rather than per-route: **it counts the response write sites per
+  module.** When every body goes through the `sendOk` / `sendError` pair that count
+  is fixed at two and does not grow with the route list — so a _future_ route that
+  hand-rolls a body fails the guard. That is the coverage a driven-body test can
+  never give, since it can only drive the routes that existed the day it was
+  written.
+
+  This existed three times already as an open-coded regex block (storage error,
+  storage success, i18n error). Lifting it did more than deduplicate: a per-package
+  scan **structurally cannot notice a module nobody thought to convert**, and going
+  repo-wide found two the moment it ran — neither is in #3843's hand-written survey:
+
+  - `plugin-sharing/share-link-routes.ts` — the fifth drifting module. No body
+    carries `success`, and one answers `{ ok: true }`, the private second word #3689
+    retired from storage. Filed as #3983 and pinned by the guard; converting it is
+    breaking for share-link consumers and needs its own sweep.
+  - `metadata/routes/hmr-routes.ts` — declared **exempt** with a reason (dev-only
+    SSE endpoint, not on the SDK surface), not skipped. Three states, deliberately —
+    conformant / ratcheted / exempt — because that is the honest classification
+    ADR-0049 asks for. A route module the scan finds but the table does not declare
+    is an **error**, never a default: applying `2 / 1 / 1` to an unknown module would
+    let a new one pass by coincidence.
+
+  It also drops the regex for the TypeScript AST, fixing two real bugs the copies
+  had. They stripped comments with `String.replace`, whose line-comment pattern also
+  ate `//` inside string literals and truncated the rest of that line — response
+  writes included. And `.json(` does not mean "write a response": `hmr-routes.ts`
+  calls `c.req.json()` twice to READ a request body, which a textual count reports as
+  two unenveloped responses. Comments and literals are not AST tokens, and
+  request-vs-response is a property of the callee, so both disappear. The script
+  carries a `--self-test` pinning each case — the nine sibling guards have none, but
+  both of these bugs survived a review of the regex version.
+
+  **The i18n ratchet, stated rather than hidden.** `i18n-service-plugin.ts` is
+  declared at `responses: 5, ok: 4, err: 1` with a ratchet pointing at #3973. Its
+  error half _is_ consolidated (#3675), but each of its four read routes builds
+  `{ success: true, data }` inline. Those bodies are correct — that is not envelope
+  drift — but an unconsolidated builder is a weaker guard: a fifth read route could
+  get the shape wrong and only a driven test would notice. The numbers pin today's
+  structure exactly (a new inline body fails) and drop to the conformant `2 / 1 / 1`
+  when #3973 lands.
+
+- d5749d7: refactor(types,rest,services,plugin-sharing): one shared writer for the response envelope, and `error.code` is enforced at compile time (#3973)
+
+  `BaseResponseSchema` declares one envelope for every REST body the platform
+  emits. It declared it once; the code that _wrote_ it was copied per route
+  module. After #3843 and #3983 converted the last drifting one, seven modules
+  each carried their own two-line `sendOk` / `sendError` pair — so the envelope's
+  shape lived in fourteen places rather than one.
+
+  `pnpm check:route-envelope` proved those seven copies agreed, which is why this
+  is a cleanup rather than a bug fix. But a guard proves agreement; it does not
+  create it. An eighth module starts by copying the pair again — not
+  hypothetically: `share-link-routes.ts` was found already drifting by the
+  repo-wide scan, and its drift had broken `client.shareLinks.create()` and
+  `.list()` through `unwrapResponse` (#3983).
+
+  ## What moved
+
+  `sendOk` / `sendError` now live once, in `@objectstack/types`
+  (`response-envelope.ts`), and all seven modules import them:
+
+  | Module                                |
+  | ------------------------------------- |
+  | `service-storage/storage-routes.ts`   |
+  | `service-settings/settings-routes.ts` |
+  | `service-datasource/admin-routes.ts`  |
+  | `rest/external-datasource-routes.ts`  |
+  | `rest/package-routes.ts`              |
+  | `service-i18n/i18n-service-plugin.ts` |
+  | `plugin-sharing/share-link-routes.ts` |
+
+  Placement was the open question in #3973, not design. `packages/spec` is
+  schemas-only (Prime Directive #2), and the callers span `rest`, four
+  `services/*` and one `plugins/*`, which rules out anything depending on them.
+  `@objectstack/types` depends on nothing but `@objectstack/spec`, so every caller
+  can reach it, and it is already where the repo puts a helper the HTTP boundaries
+  share — `looksLikeInternalErrorLeak` (#3867) sits one file over and made the
+  same argument first.
+
+  The builders take a structural `{ status(n), json(body) }`, so the package
+  imports no HTTP contract at all: `IHttpResponse` satisfies it, and so does the
+  `any`-typed `res` the older modules carry.
+
+  ## `error.code` is now checked by the compiler
+
+  All seven copies typed the parameter `code: string`. ADR-0112 (#3841) closed the
+  vocabulary — `ErrorCode` is `StandardErrorCode ∪ ERROR_CODE_LEDGER` — but an
+  invented code was still caught only at runtime, by a conformance suite parsing a
+  driven body, i.e. only on routes some test happened to drive.
+
+  The shared `sendError` types `code` as `ErrorCode`, so an unregistered code now
+  fails to compile, at every call site at once:
+
+  ```ts
+  sendError(res, 400, "NOT_A_REGISTERED_CODE", "invented");
+  // Argument of type '"NOT_A_REGISTERED_CODE"' is not assignable to parameter of type 'ErrorCode'.
+  ```
+
+  This cost no call-site churn: every code the seven modules emit was already
+  registered.
+
+  ## `extra` is closed at the same place
+
+  `sendError`'s last parameter is `Pick<ApiError, 'category' | 'httpStatus' |
+'details' | 'requestId'>` — exactly what `ApiErrorSchema` declares beside `code`
+  and `message`.
+
+  It was `Record<string, unknown>` while `settings-routes` still hung `namespace` /
+  `key` / `reason` / `fields` beside `code`. Those bodies passed every gate anyway:
+  `ApiErrorSchema` is a plain `z.object`, so unknown keys were STRIPPED rather than
+  rejected, and `envelopeViolations` inspects only the body's top level —
+  conformant _by stripping_ rather than by declaration. #4224 moved that module
+  onto `details`, which is what lets the parameter close here. Closing it at the
+  shared builder is the part that lasts: an undeclared sibling is now a compile
+  error in every module at once, rather than a key that quietly evaporates in
+  whichever module reintroduces it.
+
+  ## Nothing changes on the wire
+
+  The seven pairs were identical modulo the optional `status` and `extra`
+  parameters this one unions, and each module's driven conformance suite still
+  parses its real bodies against the real spec schemas. One internal call site was
+  rewritten: `package-routes` passed `details` positionally and now passes
+  `{ details }`, producing the same `error.details` it always did.
+
+  ## The guard got stronger
+
+  `scripts/check-route-envelope.mjs` counts response write sites per module. A
+  module that routes everything through the shared pair builds **none** itself, so
+  the seven now declare `0 / 0 / 0` where they used to declare `2 / 1 / 1`, and the
+  shared pair is pinned separately at `2 / 1 / 1` so the invariant stays total for
+  the surface rather than per-module. What the count asserts is no longer "your two
+  builders are the enveloped ones" but "you have no builders" — and a new route
+  that hand-rolls a body still moves it off zero and fails.
+
+- ccd9397: fix(security)!: a sharing rule with no criteria now shares NOTHING instead of every record (#3896)
+
+  `SharingRuleSchema` has always required `condition`, and its doc is explicit
+  that a predicate the compiler cannot lower is _"skipped and logged — never
+  seeded as a permissive match-all (ADR-0049)"_. The declared/seed path honoured
+  that. The two other ways to create a rule did not:
+
+  - **`POST {basePath}/sharing/rules`** plucks its body field-by-field into
+    `SharingRuleService.defineRule`, which validated `name` / `label` / `object` /
+    `recipientType` / `recipientId` — and not `criteria`. A missing, `null`, or
+    **misspelled** key (`criterias`) was stored as `criteria_json: null`, answered
+    `201` with no warning, and evaluated as
+    `find(object, { filter: {}, context: SYSTEM_CTX })`: every record of the
+    object, up to 5000, granted to the recipient. Triggering it took a typo, not
+    an attacker.
+  - **Authoring a rule in Setup** is a direct `sys_sharing_rule` insert, which
+    never reaches `defineRule` at all.
+
+  Empty criteria is now rejected everywhere a rule can be written, and — because
+  rules created before this gate are already in the table — the evaluator refuses
+  to act on one regardless of how it got there.
+
+  - **`defineRule` rejects a match-all criteria** with
+    `VALIDATION_FAILED: criteria is required …`, alongside its other required
+    fields. Covers the REST endpoint, programmatic callers, and the seeder.
+    Rejected shapes: missing / `null` / `''` / `{}` / `[]` / `{ $and: [] }` /
+    unparsable JSON (e.g. a CEL source typed into the Criteria box).
+  - **The evaluator matches nothing** for such a rule and logs why, so a row
+    stored before this release under-shares instead of over-sharing: the next
+    reconcile _revokes_ the grants it had materialised. Both evaluation paths are
+    covered — the bulk `evaluateRule` and the per-record write-hook path.
+  - **`bindRuleCriteriaGuard`** fails `sys_sharing_rule` inserts with no
+    criteria as a field-level `VALIDATION_FAILED` (a 400 naming `criteria_json`),
+    so the Setup path reports the problem instead of saving an inert rule
+    (ADR-0078). Updates are checked only when the patch supplies
+    `criteria_json` — switching an over-broad legacy rule off must not require
+    inventing a criteria for it first.
+  - **The seed bootstrap's "empty condition = match-all" branch is gone**: a
+    missing or empty `condition` is now skipped and logged like any other
+    non-lowerable one.
+  - `POST {basePath}/sharing/rules` also accepts `criteria_json` as an alias for
+    `criteria`, matching the snake_case aliases the endpoint already takes for
+    `object_name` / `recipient_type` / `access_level`.
+
+  **Migration.** There is no "share every record" sharing rule, and there never
+  usefully was one — the shape existed only as a failure mode. A rule that
+  relied on it must state its predicate (`criteria: { stage: 'won' }`), or, if
+  the object really should be readable by everyone, use the object's
+  organization-wide default (`sharingModel`) instead. Rules already stored with
+  a null `criteria_json` need no data migration: they stop granting on the next
+  evaluation and their existing grants are revoked.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [68dea0b]
+- Updated dependencies [64f8cbe]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/platform-objects@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/observability@17.0.0-rc.1
+  - @objectstack/service-package@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

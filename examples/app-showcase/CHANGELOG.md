@@ -1,5 +1,281 @@
 # @objectstack/example-showcase
 
+## 0.3.14-rc.1
+
+### Patch Changes
+
+- e8d0c21: feat(spec): `FormSection.pane` — explicit split-pane placement (objectui#2153 follow-up)
+
+  A `type: 'split'` form view had no way to say which pane a section renders in:
+  the renderer hardcoded "first section left, everything else right". That
+  positional rule is invisible in the metadata — nothing in the JSON records the
+  assignment — so reordering sections silently moved them across the divider, and
+  an author (human or AI) could not place two sections side by side on the left at
+  all.
+
+  `FormSectionSchema` gains an optional `pane: 'primary' | 'secondary'`:
+
+  - **Explicit and per-section**, so placement survives reordering and an agent
+    editing the view can see — and must preserve — where each section lives.
+  - **Omitted → the legacy rule** (first section `primary`, others `secondary`),
+    so existing keyless metadata keeps its exact layout.
+  - **Split-only, enforced loudly**: a `FormViewSchema` refinement rejects `pane`
+    on any other form type at parse (covering the legacy `groups` alias and the
+    defaulted `type: 'simple'`). "Accepted but ignored" is the failure mode this
+    key must never have — a silent no-op reads as working, especially to an AI
+    author. zod 4 keeps refinements through `.extend()`, so the flattened
+    runtime-overlay variant in `ViewMetadataSchema` enforces it too.
+  - Strict two-value enum, not free text — a typo (`'left'`) is a parse error.
+
+  The `'split'` type's enum comment claimed "Master-Detail split"; master-detail
+  already has two homes (`subforms` on the form, related lists on record pages),
+  so the comment now states split's actual, non-redundant meaning: side-by-side
+  resizable panes with sections placed via `section.pane`.
+
+  The showcase task form's `split` view previously declared a single section —
+  which renders as a plain (unsplit) form — and now demonstrates the feature:
+  two sections with explicit panes.
+
+  Renderer support ships in ObjectUI (`SplitForm` → `FormSchema.fieldPanes`,
+  whose pane keys are already named `primary`/`secondary` — a 1:1 mapping).
+
+- d6bfb3d: refactor(spec)!: remove the RLS-policy `priority` key — it promised conflict resolution that cannot exist (#3896 audit)
+
+  `RowLevelSecurityPolicySchema.priority` was documented as _"Policy priority for
+  conflict resolution"_. The 2026-07-30 security-subset liveness re-verification
+  found that **nothing ever read it** — and, stronger, that nothing ever could:
+  applicable policies **OR-combine** (any match allows access, most permissive
+  wins — the schema's own describe said so), so there is never a conflict to
+  order and evaluation order cannot change an outcome. A semantically-void knob
+  on a security policy is worse than dead: an author — very often an AI
+  (ADR-0033) — reads it as a precedence lever and reasons about policy
+  interactions that do not exist.
+
+  Removed per the `tool.requiresConfirmation` (#3715) / `DynamicLoadingConfig`
+  (#3950) precedent, inside the v17 breaking window:
+
+  - **Tombstoned, not silently stripped** (`retiredKey`, #3855 pattern): an
+    authored `priority` fails `tsc` (the input type is `never`) and rejects at
+    parse with the prescription itself — _"policies OR-combine (most permissive
+    wins), so there is no conflict to order. Delete the key — policy outcomes are
+    unchanged."_
+  - **ADR-0087 D2 conversion + D3 chain step** (`permission-rls-priority-removed`):
+    `os migrate meta` deletes the key from authored sources mechanically — a pure
+    lossless delete, no semantic residue. spec-changes.json and the protocol
+    upgrade guide carry the entry.
+  - The policy factory helpers (`ownerPolicy`, `tenantPolicy`, …), the showcase
+    example's permission sets, and `content/docs/permissions/rls.mdx` no longer
+    author it; the docs table's `enabled` row now states the (since-enforced)
+    contract instead.
+  - Liveness ledger entry updated to record the removal; the tombstone and entry
+    age out ~two majors from now.
+
+  Dropping the key changes **no policy outcome anywhere** — that impossibility of
+  effect is the entire reason for the removal.
+
+- Updated dependencies [bc35e00]
+- Updated dependencies [6a67d7a]
+- Updated dependencies [6e141bc]
+- Updated dependencies [48fcf70]
+- Updated dependencies [0ecc656]
+- Updated dependencies [a4e2684]
+- Updated dependencies [06772eb]
+- Updated dependencies [0c90ece]
+- Updated dependencies [195ad76]
+- Updated dependencies [c2bbd97]
+- Updated dependencies [698cbc2]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [ffb003c]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [6fa1827]
+- Updated dependencies [05154a1]
+- Updated dependencies [0f12193]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [fce14ab]
+- Updated dependencies [2e836de]
+- Updated dependencies [7309c81]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [a225ef5]
+- Updated dependencies [7bf5349]
+- Updated dependencies [366105c]
+- Updated dependencies [c9d254a]
+- Updated dependencies [42e3b01]
+- Updated dependencies [c8124e5]
+- Updated dependencies [39eb01b]
+- Updated dependencies [c3bcb42]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [217e2e6]
+- Updated dependencies [0373d52]
+- Updated dependencies [4f30943]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [bb192c4]
+- Updated dependencies [98e7cc7]
+- Updated dependencies [4cf7c61]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [347f460]
+- Updated dependencies [8a341a4]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [6f98c2d]
+- Updated dependencies [385c4b0]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [ac1cc8c]
+- Updated dependencies [99b4392]
+- Updated dependencies [974c6d4]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [33a5ff4]
+- Updated dependencies [9e01213]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [3fe0ff1]
+- Updated dependencies [cc2de0e]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [3ba8d77]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [a3cb9c8]
+- Updated dependencies [e87fea1]
+- Updated dependencies [4be9d99]
+- Updated dependencies [c65e529]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [5b08389]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [0931185]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [5c13368]
+- Updated dependencies [1d5dc46]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [1e38158]
+- Updated dependencies [65a3a84]
+- Updated dependencies [de6daa5]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [c53aa53]
+- Updated dependencies [6f23667]
+- Updated dependencies [77a77fd]
+- Updated dependencies [d82f8c0]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [2053714]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [7309c81]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [43fc039]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/runtime@17.0.0-rc.1
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/driver-sql@17.0.0-rc.1
+  - @objectstack/cloud-connection@17.0.0-rc.1
+  - @objectstack/connector-mcp@17.0.0-rc.1
+  - @objectstack/connector-openapi@17.0.0-rc.1
+  - @objectstack/connector-rest@17.0.0-rc.1
+  - @objectstack/connector-slack@17.0.0-rc.1
+  - @objectstack/service-datasource@17.0.0-rc.1
+
 ## 0.3.14-rc.0
 
 ### Patch Changes

@@ -1,5 +1,642 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- 99ffc04: fix(analytics)!: a measure emits what it declares, instead of `COUNT(*)` (#4157)
+
+  `NativeSQLStrategy.resolveMeasureSql` answered `COUNT(*)` to three different
+  questions it could not otherwise answer — each time aliased under the name the
+  caller asked for, so the result looked like an answer:
+
+  1. **A measure the cube does not declare.** `lookupMember`'s synthetic
+     relation fallback is dimension-only, so any undeclared or mistyped measure
+     name landed here. `measures: ['revenue']` against a cube without it returned
+     `COUNT(*) AS "revenue"` — a row count presented as revenue.
+  2. **A `number`/`string`/`boolean` metric.** `AggregationMetricType` documents
+     these as _"Custom SQL expression returning a number / string / boolean"_: the
+     measure's `sql` **is** the computation — a ratio, a `CASE`, a window
+     function. The expression was discarded and replaced by a row count.
+  3. **An unrecognised `type`.** Same silent substitution.
+
+  Now: an undeclared measure and an unrecognised type **throw**, naming the
+  declared measures and both accepted vocabularies respectively; a custom-
+  expression type emits its expression unwrapped. The six aggregates are
+  unchanged.
+
+  **A dot no longer implies a relationship hop.** `qualifyAndRegisterJoin` split
+  any dotted string into a join chain, so the expression `SUM(account.amount)`
+  became `"SUM(account"."amount)"` _plus_ a `LEFT JOIN "SUM(account"` — invalid
+  SQL naming a table that does not exist. Harmless only while the result was
+  being thrown away for `COUNT(*)`; emitting the expression makes it matter. A
+  dotted string is now treated as a path only when every segment is a bare
+  identifier, so `account.amount` still lowers to a qualified column and a join,
+  and an expression is emitted as written. That also fixes the same mangling for
+  an _aggregate_ measure whose `sql` is an expression — `type: 'sum'` with
+  `sql: 'SUM(account.amount)'` was producing the same garbage.
+
+  **Breaking, narrowly.** Two inputs that used to produce SQL now raise: a query
+  naming an undeclared measure, and a cube measure with a type outside
+  `AggregationMetricType`. Both were returning a wrong number rather than data,
+  so nothing correct can depend on them — but a caller that was silently getting
+  row counts will now see an error, which is the point. This is the trade #3948
+  settled for the drivers.
+
+  Datasets are unaffected: `aggregateToMetricType` only ever emits an
+  `AggregationFunction` member, so a compiled dataset never had a
+  custom-expression measure or an unknown type. The reachable path is a
+  hand-authored Cube.
+
+  `metric-type-coverage.test.ts` asserts the aggregate and expression sets
+  _partition_ `AggregationMetricType`, so a tenth metric type fails a test rather
+  than reaching the throw. Both sets are named, not derived as each other's
+  complement — deriving would classify a new _aggregate_ as an expression and emit
+  a bare column, a different silent wrong answer.
+
+  Verified: **460 tests across 35 files** green, including the four suites that
+  assert `COUNT(*)` — all of them use a _declared_ `type: 'count'` metric, so none
+  relied on a fallback. The 14 new tests were confirmed to fail against the old
+  behaviour (6 of 10 in the behaviour suite) before the fix.
+
+### Patch Changes
+
+- b4be309: fix(analytics): a new spec aggregate can no longer silently return a row count
+
+  Track C item 4 of objectstack-ai/objectui#2945 — _"`AggregationFunction`: three
+  places in lockstep"_. They agreed only by coincidence, and the failure mode when
+  they stopped agreeing was silent wrong numbers.
+
+  The three:
+
+  1. `AggregationFunction` (`@objectstack/spec/data`) — eight members, what an
+     author may declare as a dataset measure's `aggregate`.
+  2. `UNSUPPORTED_AGGREGATES` (`dataset-compiler.ts`) — `array_agg`/`string_agg`,
+     rejected at compile time with a clear error.
+  3. The aggregate `switch` in `native-sql-strategy.ts` — six cases, then
+     `default: return 'COUNT(*)'`.
+
+  8 − 2 = 6 = the six cases, today. Add a ninth member to the spec — `median`,
+  `percentile`, anything — and it would:
+
+  - pass the compiler's gate, since it is not in `UNSUPPORTED_AGGREGATES`;
+  - be **advertised as supported** by that gate's error message, which listed
+    `count, sum, avg, min, max, count_distinct` as hand-written prose — a third
+    copy of the vocabulary;
+  - reach the strategy's `switch`, match no case, and fall to
+    `default: COUNT(*)`.
+
+  The author asks for a median and gets a row count. No error, no log, wrong
+  figures on a dashboard — the same silent-wrong-answer shape as the filter
+  operators in #3948, in the analytics SQL builder.
+
+  **The fix is derivation plus a guard, with no behaviour change.** The `switch`
+  becomes `AGGREGATE_SQL`, a table whose coverage is assertable; the error
+  message's prose list becomes `SUPPORTED_AGGREGATES`, derived as
+  `AggregationFunction.options` minus `UNSUPPORTED_AGGREGATES`; and
+  `aggregation-lockstep.test.ts` asserts the arithmetic — the lowered set equals
+  the admitted set, every spec member is either lowered or explicitly rejected,
+  nothing is both, and the rejection list names only aggregates the spec has.
+
+  Verified by adding a hypothetical `median` to the spec, which now fails three
+  assertions naming it, including _"these would fall through to the COUNT(_)
+  fallback and return a row count"\*. Before this change the same edit was green.
+
+  Nothing is narrowed and no SQL changes: the same six aggregates lower to the
+  same six expressions, and the `COUNT(*)` fallback still catches everything else.
+
+  **Reported, not fixed:** that fallback is also reached by a measure whose `type`
+  is `number`/`string`/`boolean` — a custom SQL _expression_, per
+  `AggregationMetricType` — whose expression is then replaced by a row count.
+  Datasets cannot produce one (`aggregateToMetricType` only ever returns an
+  `AggregationFunction` member), so it is reachable only from a hand-authored
+  Cube. Emitting `col` instead is a behavioural change in an analytics SQL path
+  and deserves its own change with its own tests; the strategy's doc comment now
+  records it.
+
+- 7a55913: fix(service-analytics): a `$between` analytics filter no longer vanishes from the query (ADR-0053 D-A3.1)
+
+  A dashboard widget or dataset whose filter used `$between` was querying **every
+  row**. `normalizeAnalyticsFilters` maps Mongo-style operators onto the internal
+  pipeline form, `$between` was missing from that map, and an unmapped operator is
+  skipped — so the predicate was silently dropped from the compiled WHERE clause.
+  Both strategies read that normalizer, so both the raw-SQL and the ObjectQL
+  aggregate paths were affected. The symptom is #3650's: a chart that draws the
+  whole dataset instead of the requested window, with nothing in the SQL to
+  suggest a filter was ever asked for.
+
+  `$between [min, max]` now lowers to its two bounds (`gte` + `lte`) instead of
+  gaining an operator of its own, so a range's max inherits the calendar-day
+  whole-day rule (#3777) from each strategy's existing upper-bound handling —
+  `NativeSQLStrategy` compiles a bare-day upper bound half-open itself, and the
+  ObjectQL path gets the same rule from the driver — rather than needing a second
+  implementation to keep in step. A malformed `$between` (not a two-element
+  array) now throws instead of being dropped, matching the stance driver-memory
+  took for the same shape in #3948: an unbounded read is exactly the failure this
+  prevents, and it is indistinguishable from a legitimately wide query.
+
+  Found by giving the temporal conformance matrix its missing sixth consumer
+  (`native-sql-temporal-conformance.test.ts`), which executes the shared cases
+  against a real SQLite engine and asserts row ids — a dropped predicate is
+  invisible to the SQL-string assertions the strategy's other suites use.
+
+- 7a55913: fix(service-analytics): every authorable filter operator now reaches the query (#4128)
+
+  Closes the cause behind the `$between` defect rather than just that instance.
+  `normalizeAnalyticsFilters` skipped any operator missing from its map, and a
+  skipped predicate does not narrow a query — it **widens** it: the compiled SQL
+  stays valid and returns rows the author excluded. Four operators from the
+  spec's authorable vocabulary sat in that state, plus one that was mapped
+  incorrectly.
+
+  - **`$startsWith` / `$endsWith`** were dropped entirely. Both strategies now
+    compile them — anchored `LIKE 'x%'` / `LIKE '%x'` on the raw-SQL path, and
+    the canonical `$startsWith` / `$endsWith` operators (which every driver
+    implements directly) on the ObjectQL path, so an anchored match does not
+    depend on regex dialect.
+  - **`$null`** was dropped. It is the shape the console emits for an "is empty"
+    / "is not empty" filter, so such a widget was showing every row. Now compiles
+    to `IS NULL` / `IS NOT NULL` per its boolean.
+  - **`$exists`** was mapped value-_independently_ to `set`, so `{$exists: false}`
+    compiled to `IS NOT NULL` — the exact inverse of what it asks for. It and
+    `$null` are now resolved explicitly, because a key→name map cannot express an
+    operator whose meaning flips with its value.
+  - **`$notContains`** reached the ObjectQL strategy, which had no arm for it and
+    fell through to a `default` returning a bare value — compiling "does not
+    contain x" as "**equals** x".
+  - **Unknown operators now throw** on both surfaces instead of being silently
+    dropped (normalizer) or reinterpreted as an equality (ObjectQL strategy). An
+    operator outside the vocabulary is a caller error, and a loud one beats a
+    silently widened read — the call driver-memory made for the same shape in
+    #3948.
+
+  Still declared as a gap, but no longer a silent one: `$or` / `$not` are skipped,
+  since expressing them needs a recursive WHERE builder rather than the flat
+  array the strategies consume.
+
+  Cover is `filter-operator-coverage.test.ts`, which runs the whole vocabulary
+  against a real SQLite engine and asserts **row ids** — six of its cases fail
+  without this change. A dropped predicate is invisible to the SQL-string
+  assertions the strategies' other suites use, which is how these survived.
+
+- f5ab1c7: fix(service-analytics): a `$or` / `$not` filter no longer vanishes from an analytics query (#4128 follow-up)
+
+  The last of the silently-dropped filter family. `normalizeAnalyticsFilters`
+  produced a flat **array**, which cannot carry a disjunction, so both strategies
+  skipped `$or` and `$not` outright — a widget or dataset whose filter used
+  either compiled a WHERE clause that simply did not contain it, and drew every
+  row. That is #3650's symptom, and unlike a rejected query it looks like a
+  working chart.
+
+  The normalizer now produces a **tree** (`normalizeAnalyticsFilterTree`), and
+  each strategy compiles it the way its own backend expresses a disjunction:
+
+  - **`NativeSQLStrategy`** builds the WHERE recursively, routing every leaf
+    through its existing clause emitter — so the storage-form coercion and the
+    calendar-day upper-bound rule (#3777) apply at every depth, including inside
+    an `$or`. Parentheses are explicit rather than relying on SQL precedence.
+  - **`ObjectQLStrategy`** hands `$or` / `$not` to the engine, which speaks them
+    natively. AND-ed leaves still merge per field exactly as before, so a query
+    without combinators produces byte-identical engine input.
+  - **`/analytics/sql`** renders the same tree, so the echoed statement keeps
+    reproducing what executes rather than showing a conjunction where the engine
+    runs a disjunction.
+  - The **cross-object envelope check** now sees members nested inside an `$or`.
+    It rejects cross-object filters, so a member it could not see was a filter it
+    could not reject.
+
+  Empty `$and` / `$or` arrays now throw instead of being ignored, matching the
+  fail-closed stance of `read-scope-sql.ts` — the compiler in this same package
+  that has always handled the full tree, and whose semantics the tree walker now
+  mirrors deliberately.
+
+  Cover is `native-sql-filter-logic-conformance.test.ts`, which runs the shared
+  combinator table (`FILTER_LOGIC_CASES`, #3774) against a real SQLite engine and
+  asserts row ids. The analytics raw-SQL path now stands beside `driver-sql`,
+  `driver-memory`, `formula` and `read-scope-sql` under that one standard; 14 of
+  its 17 cases fail without this change.
+
+- 3abd233: fix(analytics): project a `timeDimensions` bucket into the result rows and fields (#4033)
+
+  An analytics query that buckets by `timeDimensions` alone grouped correctly —
+  the echoed SQL read `date_trunc('month', due_date) AS "due_date"` — but the row
+  mapper and `buildFieldMeta` both enumerated `query.dimensions` only, so the
+  bucket never reached the caller: rows carried just the measures and `fields`
+  never mentioned the dimension. A trend chart got N values and no x-axis. The
+  same query written with `dimensions: ['due_date']` was unaffected, which is why
+  it went unnoticed.
+
+  Grouping, row mapping and field metadata now derive the projected set from one
+  `projectedDimensions()` helper — `dimensions` plus every _granular_
+  `timeDimensions` entry not already among them. A `timeDimensions` entry without
+  a granularity contributes only its `dateRange` predicate and stays out of the
+  projection, so no phantom column is declared.
+
+- 0af50a3: fix(driver-sql,service-analytics): a bare-day upper bound covers the whole day on `Field.datetime` (#3777)
+
+  A bare `YYYY-MM-DD` comparand anchors to midnight UTC. That is right for a
+  lower bound and was silently wrong for an upper one: the dashboard date-range
+  filter compiles `{ $gte: from, $lte: to }` with bare-day bounds, so on a
+  `datetime` column every row created after 00:00 of the `to` day vanished from
+  the result — no error, the chart renders, the numbers are just smaller. The
+  default configuration hit it: the filter's default field is `created_at`
+  (a system-injected `Field.datetime`) and 7 of the 13 presets end "today".
+
+  The translation is operator-sensitive and half-open, applied at every
+  comparison emitter:
+
+  - `SqlDriver` (and `SqliteWasmDriver` by inheritance): `$lte`/`<=` with a
+    bare-day comparand on a `datetime` column compiles to `< next-day-midnight`
+    in the column's storage form; `$between [min, max]` with a bare-day max
+    decomposes to `>= min AND < next-day(max)`. Both the plain and the
+    legacy-repair (mixed-storage) column paths, both `where` spellings.
+  - `NativeSQLStrategy`: `dateRange` windows and `lte` filters bind `< next-day`
+    instead of an inclusive `BETWEEN`/`<=` when the bound is a bare day.
+  - The `/analytics/sql` rendering and the dataset preview evaluator apply the
+    same rule, so the echoed SQL and drafted numbers reproduce execution.
+
+  `@objectstack/core` gains the shared primitive `nextUtcCalendarDay(value)`:
+  the next calendar day of a valid bare `YYYY-MM-DD` (else `null` — instants,
+  `Date`s and impossible days are never widened).
+
+  Unchanged on purpose, per the semantics table on #3777: `date`/`time` columns
+  (`<= day` is already whole-day-correct there), full-ISO/`Date` comparands
+  (instant semantics), and `$gte`/`$gt`/`$lt` (midnight anchoring is correct for
+  those). No authored metadata changes: a dashboard's existing
+  `{ $gte, $lte }` window now simply includes its final day.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- c8124e5: fix(driver-sql): give `Field.datetime` one UTC storage form per dialect (#3912, #3942)
+
+  Any window filter on a `Field.datetime` column returned an empty set on SQLite —
+  a dashboard `dateRange: last_30_days` on `created_date` read 0 while 29 matching
+  rows existed.
+
+  There was never a storage _convention_, only a description of what better-sqlite3
+  happened to do with a bound JS `Date`. Nothing enforced it — `formatInput`
+  deliberately left `datetime` untouched — so the form was decided by whichever
+  writer got there first: a JS `Date` landed as INTEGER epoch ms, while a REST/JSON
+  write (JSON has no `Date` type), a `defaultValue: 'NOW()'` slot, and the
+  platform's own `created_at` / `updated_at` all landed as ISO **TEXT**. One column
+  held both forms while the read path coerced comparands to epoch ms purely from
+  the _declared_ type. On SQLite's type ordering (`INTEGER < TEXT`) a two-sided
+  window collapsed to zero rows, and a one-sided `>=` matched every TEXT row
+  regardless of the bound.
+
+  `Field.datetime` now has one canonical instant per dialect, produced by one
+  function applied on write **and** to every filter comparand, so the two sides of
+  a comparison cannot disagree about shape:
+
+  - **SQLite** — `YYYY-MM-DDTHH:MM:SS.sssZ` text. Lexicographic order _is_
+    chronological order, so range filters and `ORDER BY` read the column directly
+    and can use an index; `strftime` parses it, so the date-bucket expression needs
+    no CASE.
+  - **Postgres** — `timestamptz`, unchanged. The fix here is on the write and
+    comparand side: a zone-naive write was previously resolved against the
+    _server's_ timezone (measured 8 hours off on `Asia/Shanghai`), and an
+    un-anchored `YYYY-MM-DD` comparand meant the server's local midnight, so the
+    identical query over the identical instant landed a row on a different calendar
+    day than SQLite did.
+  - **MySQL** — `DATETIME(3)` instead of `TIMESTAMP`, a connection pinned to UTC on
+    both the mysql2 and the server layer, and a MySQL-spelled bind carrying the
+    same UTC wall clock. MySQL accepts neither the `T` separator nor the `Z` suffix
+    in a datetime literal, so datetime writes over REST had always failed outright;
+    `TIMESTAMP` additionally truncated milliseconds and could not store an instant
+    outside 1970..2038.
+
+  Existing rows converge at schema sync. Both migrations are allowed to fail: they
+  log, mark nothing, and the read paths keep a repair expression, so an un-migrated
+  column still compares and buckets **correctly** — just unindexed. Neither can
+  repair instants the old timezone-ambiguous write path recorded wrongly; they
+  preserve what is on disk.
+
+  Also closes #3928 (datetime `ORDER BY` mis-sorted on mixed storage) by
+  construction. Rationale is recorded as ADR-0053 addendum D-B1..D-B4.
+
+  The analytics change is additive: a `coerceTemporalFilterColumn` companion to the
+  existing `coerceTemporalFilterValue` hook, so a raw-SQL strategy can normalise the
+  column side too. Absent hook → byte-identical SQL.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- f752ee3: feat(analytics): order the time axis by default, and give reports a sort declaration (#3916)
+
+  A matrix report with a date dimension across rendered its columns in arbitrary
+  order — `2026-07-01, 2026-07-05, …, 2026-07-02`. Declaring `dateGranularity` on
+  the dataset dimension made the bucket keys _sortable_ (`2026-07`, `2026-Q3`)
+  without making anything _sort_ them, and the report author had no way to ask:
+  `DatasetSelection.order` existed on the wire, but `ReportSchema` had no ordering
+  field at all (dashboard widgets had their own `options.sortBy` channel; reports
+  did not). Nothing in the chain supplied an order either — `resolveOrdering`
+  returned `undefined` unless the selection carried one explicitly, the ObjectQL
+  aggregate path has no ordering grammar so its buckets came back in Map-insertion
+  order, and the pivot builds its column headers in row-arrival order.
+
+  - **A selected time dimension is now chronological by default.** When a
+    selection states no `order` (and no `limit`, whose own fallback already
+    ordered by every dimension), each selected dimension the cube types as `time`
+    defaults to ASCENDING, in selection order. Bucket keys are minted sort-stable
+    precisely so this works — `2026-07` sorts after `2026-06`, `2026-Q3` after
+    `2026-Q1`. This lands on both strategy paths: a real `ORDER BY` where native
+    SQL serves the query, and the executor's post-pass where a date-bucketed query
+    is handed to the ObjectQL path. Null / empty buckets stay last, as everywhere
+    else. Deliberately narrow: only time dimensions get a default, so grids with
+    nothing wrong with them are not reordered.
+  - **Reports can declare an ordering.** `ReportSchema.order` (and
+    `blocks[].order` for a `joined` report) is a list of `{ by, direction }` sort
+    keys, most significant first — an array, not a `Record`, because key order is
+    the contract and JSON object key order should not have to be. `by` must name a
+    dimension the report groups by (`rows` / `columns`) or a measure it displays
+    (`values`); anything else fails at authoring time rather than becoming an
+    ordering that silently does nothing. Duplicate keys are rejected. A `joined`
+    report orders per block — declaring `order` on the container is an error.
+    `reportSelectionOrder()` lowers the list into the `DatasetSelection.order` a
+    renderer posts, and returns `undefined` for an empty list so the runtime's own
+    defaults still apply.
+
+  An explicit `order` still wins outright — the chronological default is a
+  default, not a policy, so "newest month first" is one declaration away.
+
+  `report.order` ships as `planned` + `authorWarn` in the liveness ledger: the
+  framework half is complete and live (schema, lowering helper, executor), but
+  objectui's `DatasetReportRenderer` does not yet carry `report.order` into the
+  selection it posts. The default time-axis ordering needs no renderer change and
+  is live now.
+
+- b3a3d83: feat(spec): a shared temporal conformance matrix, and the `$between` gap it found (ADR-0053 D-A3, #4081)
+
+  `@objectstack/spec/data` gains `TEMPORAL_ROWS` and `TEMPORAL_CASES` — the
+  single set of temporal filter cases every backend is checked against, the twin
+  of the existing `FILTER_LOGIC_CASES`. Five backends consume it and assert **row
+  results**: `driver-sql` (and, through the live-dialect CI job, real Postgres and
+  MySQL), `driver-memory`, `driver-mongodb` (real MongoDB), the analytics preview
+  evaluator, and `formula`'s RLS write-side `check`.
+
+  This is the regression backstop ADR-0053 D-A3 has asked for since 2026-06 and
+  the last of its decisions to be actioned. Four separate incidents — #3650,
+  #3773, #3777, #4047 — were each found by a human by accident, and each left a
+  suite proving only its own issue against its own fixture. Nothing held the
+  backends to one standard, so the fifth divergence had nowhere to fail.
+
+  **`service-analytics` — a real fix the matrix found on its first run.** The
+  draft-preview evaluator had no `$between` case, so it fell through to its
+  permissive `default` and matched **every** row: a drafted dashboard carrying a
+  range filter charted the entire dataset, then changed its numbers at publish —
+  the exact continuity the preview exists to provide. It now evaluates
+  `$between`, sharing the upper-bound helper with `$lte` so the whole-day
+  calendar-day rule (#3777) applies to a range's max as well.
+
+  Also recorded (ADR-0053 D-A3.1): `$gt` with a bare-day comparand on a
+  `datetime` column cannot agree between typed and type-blind backends, and the
+  gap is irreducible without field types. It is asserted in the shared matrix on
+  `date` only, with the `datetime` cell left to the typed drivers' own suites,
+  rather than papered over.
+
+- 35accbf: feat(spec): promote the temporal storage hooks onto the IDataDriver contract (ADR-0053 D-A2)
+
+  `temporalFilterValue` and `temporalFilterColumnSql` — the pair that closed
+  #3912's storage-form drift — were duck-typed: analytics probed
+  `typeof driver.x === 'function'` against a locally-invented interface, and
+  nothing at the type level said a driver must implement both or neither. The
+  lesson of #3912 is precisely that coercing the comparand without normalising
+  the column reintroduces half the bug, so a driver implementing one hook alone
+  would silently regress.
+
+  Both are now optional members of `IDataDriver`
+  (`@objectstack/spec/contracts`), documented as a pair with "absent = identity"
+  semantics for drivers whose storage form is the wire form (memory, mongo).
+  `SqlDriver implements IDataDriver`, so its signatures are compile-checked from
+  here on; analytics derives its driver seam by `Pick`-ing the contract instead
+  of a local duck type. Runtime `typeof` guards remain — that is the correct way
+  to consume an optional contract member — but the shape they guard now has one
+  authoritative definition.
+
+  No runtime behaviour change. ADR-0053 D-A2 is recorded as resolved.
+
+- e4c2dc8: Order temporal operands correctly when one side is a JS `Date` on the two
+  type-blind filter backends (ADR-0053 D-A3 / #4191).
+
+  `utcInstantMs` joins `nextUtcCalendarDay` in `@objectstack/spec/data`
+  (re-exported from `@objectstack/core`): it reads the UTC instant a temporal
+  operand denotes, accepting only unambiguous spellings — a `Date`, epoch ms, a
+  bare `YYYY-MM-DD`, and an ISO timestamp with or without an explicit zone (a
+  zone-naive one being UTC, per D-B2) — and returning `null` for everything
+  else, notably a bare wall clock, which denotes no instant.
+
+  Both type-blind evaluators now use it to compare a `Date` against wire text,
+  which JS relational operators cannot do: `<` and friends coerce with hint
+  `number`, so the `Date` becomes its epoch and the string becomes `NaN`.
+
+  - `formula`'s `matchesFilterCondition` (the RLS write-side `check`) dropped
+    every `Date`-valued row in 10 of the 16 shared conformance cases. The
+    post-image is the caller's raw write payload, so an SDK write of
+    `new Date()` hit this directly, and fail-closed turned it into a **denied
+    write**.
+  - `service-analytics`' preview evaluator diverged on the same 10 cases in
+    BOTH directions, because `String(new Date())` sorts after every `'2026-…'`
+    comparand — a drafted chart both lost rows and gained ones, then changed
+    its numbers at publish. Rows from a mongo-backed dataset arrive as BSON
+    `Date`s, so this was reachable in normal use.
+
+  Comparisons that did not involve a `Date` are unchanged.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

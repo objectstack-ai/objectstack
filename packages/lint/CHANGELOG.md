@@ -1,5 +1,1125 @@
 # @objectstack/lint
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- 6a67d7a: feat(lint): L2 action-body writes to undeclared fields warn at author time (#4271)
+
+  The write-set lint that #4305 gave L2 hook bodies now covers the other surface
+  that carries one. An action body is the same artefact: the same
+  `HookBodySchema` union, parsed by the same `HookBodySchema.safeParse` in
+  `actionBodyRunnerFactory`, run in the same QuickJS sandbox. So it fails the
+  same way — `ctx.api.object('crm_deal').update({ stag: 'won' })` inside an
+  action reaches the driver unfiltered, and the outcome splits by driver: on SQL
+  the stray column fails the whole call with a driver-level error far from the
+  authoring site, and on a schemaless driver the stray key is persisted. Half
+  the surface was still blind.
+
+  **New rule — `action-body-write-unknown-field` (advisory).** Wired into
+  `REFERENCE_INTEGRITY_RULES`, so `os validate`, `os lint` and `os compile` all
+  report it; it never blocks a build. Both places the runtime reads actions from
+  are walked — top-level `actions` and `objects[].actions` — and a
+  `defineStack`-merged action, which lives in both, is reported once at its
+  authored path. That dedupe is by VALUE (bound object + name + body source), not
+  by object identity the way `collectBundleActions` can afford: the suite runs on
+  the schema-PARSED stack, and parsing rebuilds every node, so the two copies
+  arrive as distinct objects that are merely equal. An identity check passes a
+  shared-reference unit fixture and then reports the showcase app's one warning
+  twice — which is exactly what it did before the end-to-end run caught it.
+
+  **Only the `ctx.api` write family carries over, and that is the point.** An
+  action's `ctx.input` is its PARAMS bag (`input: unwrapProxyToPlain(actionCtx
+?.params)`), not a record, so resolving those names against object fields would
+  flag every correctly-named parameter — a pure false-positive machine, and a
+  false positive kills an advisory lint. `ctx.record` is not a write surface
+  either: the runner hands the body a plain snapshot and never writes it back, so
+  `ctx.record.x = …` is discarded for _declared_ and undeclared fields alike —
+  a different defect from "the unknown column vanishes", and flagging only its
+  undeclared half would imply the declared half persists.
+
+  So the rule ships a declared **partition** of the shared
+  `HOOK_BODY_WRITE_PATTERNS` rather than a second ledger:
+  `ACTION_BODY_WRITE_PATTERN_IDS` (today: `api-crud-literal`) and
+  `ACTION_BODY_WRITE_EXCLUSIONS` (`input-property-assign`,
+  `input-object-assign`), each exclusion carrying its reason. The two halves are
+  tested to cover the shared ledger exactly, so a fourth pattern landing on the
+  hook side fails this rule's test until someone classifies it — silence is not a
+  decision. Every applicable pattern is additionally proved end-to-end through
+  the full validator (prefilter, pattern filter and field check included), and
+  every exclusion is proved to be about applicability rather than an
+  unextractable shape: the shared extractor still sees it, and this rule still
+  reports nothing for it.
+
+  One extractor, one field index, one implicit-field set, shared with the hook
+  rule rather than copied. The action rule is the same check on the other body
+  surface, so a second copy of `IMPLICIT_FIELDS` would drift exactly the way the
+  five hand-copied system-field lists #4330 collapsed did.
+
+  The lint stays off the kernel boot path, and lands one notch tighter than the
+  hook side: the only applicable pattern is rooted at `ctx.api`, so an action
+  body that never mentions it does not even parse, let alone load the ~9 MB
+  TypeScript compiler. Guarded by `lazy-deps.test.ts`.
+
+  `@objectstack/spec`: `ScriptBodySchema` and `ActionSchema.body` now point at
+  the action-side rule and spell out that `ctx.input` (params) and `ctx.record`
+  (a discarded snapshot) are not record-write surfaces — doc comments only, no
+  schema or generated-artifact change.
+
+- 0ecc656: feat(lint): an action body's discarded `ctx.record` write warns at author time (#4345)
+
+  `#4344` deliberately left `ctx.record` alone, and said why: an action's
+  `ctx.record` is a plain snapshot (`unwrapProxyToPlain(actionCtx?.record)`) that
+  `boundActionHandler` never writes back — the hook path's
+  `applyMutationsToInput` has no action-side counterpart — so `ctx.record.x = …`
+  is discarded for **declared and undeclared fields alike**. Reporting that
+  through the unknown-field rule would have been actively wrong: flagging only
+  the undeclared half implies the declared half persists, which is the false
+  completion this rule family exists to stop manufacturing. It needed its own
+  finding, and now has one.
+
+  **New rule — `action-record-write-discarded` (advisory).**
+
+  **It is not "flag every `ctx.record.<field>` assignment"** — that would be a
+  false-positive machine, because mutating the snapshot to build a payload is a
+  legitimate idiom:
+
+  ```js
+  ctx.record.stage = "won";
+  await ctx.api.object("crm_deal").update(ctx.record); // the write is LIVE
+  ```
+
+  So the finding requires the write to be **provably dead**: reported only when
+  `ctx.record` never escapes the body as a value. Property reads
+  (`ctx.record.id`) do not rescue a write and do not suppress the finding;
+  handing the object to anything — an argument, an assignment RHS, a spread, a
+  return — does. Aliasing (`const r = ctx.record`) reads as an escape, which is
+  the safe direction: it costs a missed finding, never a false one.
+
+  Truthiness and type tests are **not** escapes, and that distinction is what
+  makes the rule fire on real code rather than almost never. Running it against
+  the showcase app is what surfaced it: `mark_done` opens with
+  `ctx.recordId || (ctx.record && ctx.record.id)`, the defensive idiom action
+  bodies are actually written with, and counting that guard as an escape silenced
+  the finding on the one body in the repo that had a record write. A test reads
+  the reference and yields a boolean — or, for `&&`/`||`/`??`, yields the left
+  operand only when it is falsy, which is null or undefined and persists nothing.
+  Only the LEFT operand is a test: `x || ctx.record` really does evaluate to the
+  object, and still escapes.
+
+  **One suite member, two rule ids.** Both findings fall out of one parse of one
+  source on one surface, so `validateActionBodyWrites` reports both rather than
+  `REFERENCE_INTEGRITY_RULES` growing a second member that would parse every
+  action body again to say two things about the same walk. The alternative —
+  hand-wiring it into the three CLI commands — is the drift that suite exists to
+  end, and `validateReadonlyFlowWrites` is the standing proof: wired into
+  `validate` and `compile`, never into `lint`. The trade-off is written down at
+  both ends rather than left to be rediscovered.
+
+  **The ledger ratchet fired, as designed.** `record-property-assign` joins the
+  shared `HOOK_BODY_WRITE_PATTERNS` — the extractor's shape inventory, not any
+  one rule's — and both existing consumers had to classify it before it could
+  land. That was not cosmetic on the hook side: a `record-property-assign` write
+  carries no `object`, and `validateHookBodyWrites` branched on exactly that to
+  mean "a `ctx.input` write", so the new shape would have been reported as _"the
+  hook writes 'stage' to its input"_. The hook rule now declares its own
+  consumed subset (`HOOK_BODY_WRITE_PATTERN_IDS`) and its exclusion with a
+  reason — a hook sandbox context has no `ctx.record` at all
+  (`buildSandboxContext` never sets it), so the expression throws at run time
+  rather than silently no-op'ing, and a loud failure is not an advisory rule's
+  business.
+
+  `extractHookBodyWriteSet` is the new one-parse entry point, returning the
+  writes plus the `ctxRecordEscapes` signal; `extractHookBodyWrites` stays as a
+  thin projection of it.
+
+  **Boot path.** The action gate's prefilter widens from `api` to `api`-or-
+  `record`, so a body reaching neither still never loads the ~9 MB TypeScript
+  compiler. `lazy-deps.test.ts` pins it — and its header and two case names,
+  which still claimed every lazy dep waited on "a react page", now say which
+  trigger each one pins (typescript has also been loaded by the hook-body gate
+  since #4271).
+
+  `@objectstack/spec` / `@objectstack/runtime`: `ScriptBodySchema`,
+  `ActionSchema.body` and `ScriptContext.record` now state that
+  `ctx.api.object(...)` is the only path that persists anything, and that
+  `ctx.record` is read-only in effect. Doc comments only — no schema or
+  generated-artifact change. Whether the runtime should instead refuse or honour
+  a record write stays open on #4345.
+
+- e4c61a7: Validate the expression slots a flow node's `configSchema` declares (#4027).
+
+  A node type's designer `configSchema` and the keys its validators traverse were
+  two unreconciled lists. Both the engine's `registerFlow` pass and the author-time
+  `objectstack validate` pass hardcoded `config.condition` / `edge.condition` and
+  assumed every other node string was a `{var}` template — so a declared expression
+  property outside that hardcoded set was validated by nobody.
+
+  That is how #3528 shipped. `screen.fields[].visibleWhen` has been on the `screen`
+  descriptor since #3304, typed `xExpression: 'expression'` (bare CEL) and offered
+  to authors in Studio, but no validator traversed it. An app authored the
+  predicate in the _other_ dialect — `'{createOpportunity} == true'` — and it passed
+  `tsc`, `objectstack validate` and registration in silence. Because `required` _is_
+  enforced, a field the author had made conditional rendered unconditionally and
+  blocked Submit on an input the user was never shown: the run paused forever and no
+  resume was ever issued.
+
+  Now:
+
+  - **`FLOW_NODE_EXPRESSION_PATHS`** (`@objectstack/spec`) is the declared ledger of
+    expression-bearing node config paths, each recording the dialect it takes.
+  - **Both validators read it.** A malformed `visibleWhen` is a located, quoted
+    error at `registerFlow` _and_ at `objectstack validate` — `node 'screen_1'
+(screen) screen field visibleWhen at config.fields[1].visibleWhen`.
+  - **A reconciliation ratchet** derives the expression properties from the live
+    descriptors and fails CI in both directions: a new `xExpression` property with
+    no ledger entry, or a stale entry no descriptor declares. It walks every
+    registered builtin, not just `screen`.
+
+  Dialects are recorded rather than assumed because there are three, and two of them
+  disagree about braces: bare CEL (`{…}` is the #1491 brace-trap), single-brace
+  `{var}` flow interpolation (`{…}` is correct), and the ADR-0032 §3 double-brace
+  text template. Only bare-CEL slots are checked — `loop.collection` and
+  `map.collection` are recorded as `flow-template` and deliberately left alone,
+  since no validator implements their dialect and checking them under either of the
+  other two would reject every currently-valid flow.
+
+  `ActionDescriptor.configSchema`'s TSDoc no longer claims `registerFlow()`
+  validates `config` against it. It never did: `FlowNodeSchema.config` is
+  `z.record(z.unknown())`, so types, `required`, `enum` and unknown keys are still
+  unenforced. The doc now states exactly what is checked and what is designer-facing
+  only, so nothing relies on a guard that does not exist.
+
+- cc60165: feat(lint): a flow `update_record` node writing an undeclared field gates the build (#4271)
+
+  The write-set family #4305 (hooks) and #4344 (actions) opened had a third
+  surface, and it was the one the docs had spent the longest recommending as the
+  safe alternative to the other two. A flow `update_record` node whose
+  `config.fields` names a field the target object never declares was caught by
+  **nothing**: `validate-readonly-flow-writes.ts` walks that exact map and
+  explicitly stepped over the unknown key (`if (!meta) continue; // a
+form/field-layout lint concern` — a referral to a rule that does not check
+  writes), and `validate-flow-template-paths.ts` checks the `{record.<path>}`
+  READ tokens interpolated into node config, never the write-side key. So the
+  surface `hook-bodies.mdx` pointed authors at — "prefer a flow `update_record`
+  node, whose structural `fields` config is checked" — was the least checked of
+  the three.
+
+  **New rule — `flow-node-write-unknown-field`, and it is an `error`.** Wired into
+  `REFERENCE_INTEGRITY_RULES`, so `os validate`, `os lint` and `os compile` report
+  it at once (one more place than the hand-wired readonly rule next door reaches).
+
+  **Why it gates where its two siblings advise.** The hook and action rules are
+  advisory because they PARSE JavaScript: the finding is only as good as the
+  extractor, and a false positive kills an advisory lint. Nothing here is parsed —
+  `config.fields` is a literal map next to a literal `objectName`, the same
+  certainty `flow-update-readonly-field` already gates on one config key over. A
+  rule that errors on a write the engine _strips_ while only warning on a write
+  that names no column at all would be incoherent in the same `fields` map.
+
+  And the runtime consequence is not the benign "consumer skips the unknown name
+  and renders the rest" that keeps `page-field-unknown` / `form-field-unknown`
+  advisory. Both halves were measured, not inferred:
+
+  - Through the engine, an undeclared key reaches `driver.update` verbatim — the
+    flow executor calls the data engine directly, the UPDATE path strips only
+    readonly/readonlyWhen, and the SQL driver's `formatInput` /
+    `applyWriteColumnMap` pass an unrecognized key straight through (`m[k] ?? k`).
+  - On SQLite/knex it becomes `update "deal" set "name" = 'n2', "stagee" = 'won' …
+→ no such column: stagee`. The statement is rejected **whole**: `name` —
+    spelled correctly, in the same payload — does not land either, and the step
+    fails with a driver error naming a column, far from the authoring mistake.
+  - On a schemaless datasource nothing rejects it, so the stray key is persisted
+    into a column the object never declares, where no schema-driven read returns
+    it.
+
+  That is the call `validate-searchable-fields` makes for a stale entry and
+  `validate-flow-template-paths` makes for a filter-position token: gate when the
+  miss breaks or corrupts the operation, advise when it merely narrows the output.
+
+  **One field index and one implicit-field set across all three surfaces.**
+  `indexObjectFields` and `IMPLICIT_FIELDS` are imported from the hook rule rather
+  than copied, so the three rules cannot drift on what is writable without being
+  authored — the shape #4330 collapsed one package over.
+
+  Every skip exists so the gate only ever fires on a certainty, and each is
+  silent: a templated `objectName`, a non-literal `fields` map, an object this
+  stack does not define, an object that declares no fields at all (external /
+  datasource-introspected schemas, the same skip `validate-searchable-fields`
+  takes), and dotted keys (a nested-path write, not a top-level column). `runAs`
+  is deliberately NOT consulted, unlike the readonly rule that skips
+  `runAs:'system'` — an elevated identity bypasses the readonly strip, but no run
+  identity conjures a column.
+
+  **Scope is declared as data, not left as silence.** `FLOW_WRITE_NODE_TYPES`
+  (today `update_record`) and `FLOW_WRITE_NODE_TYPES_DEFERRED` (`create_record`,
+  with its reason) are partition-tested against the CRUD node types that carry a
+  `fields` write map — derived behaviourally from the spec's executor-written
+  config schemas, not restated — so a node type that grows one later fails that
+  test until someone classifies it.
+
+  `@objectstack/spec`: `ScriptBodySchema`'s "prefer a flow `update_record` node,
+  whose structural `fields` config is error-checked" note now names the rule that
+  makes it true. Doc comment only — no schema or generated-artifact change.
+
+  Docs: #4355 had just rewritten `automation/hook-bodies.mdx` to record this gap
+  honestly — "**Prefer a flow `update_record` node when the write set is fixed —
+  but not for _this_ check** … writing a field the object never declares is
+  currently reported by nothing at all. On that one axis an L2 body is now the
+  better-checked surface." That bullet, and the matching note in
+  `automation/hooks.mdx`, are the two sentences this change makes false. Both now
+  say the axis has flipped back — and why the flow side lands a level _stronger_
+  than the body side rather than merely level with it.
+
+- c1d44f7: feat(lint): L2 hook-body writes to undeclared fields warn at author time (#4271)
+
+  An L2 (`language:'js'`) hook body that writes a field the target object never
+  declares — `ctx.input.amout = 0`, `ctx.api.object('deal').update({ stag: … })`
+  — runs clean in the QuickJS sandbox and reaches the driver **unfiltered**:
+  `applyMutationsToInput` is a plain `Object.assign`, and the write-path
+  validator walks declared fields on insert and skips a key it has no field def
+  for on update. What happens next depends on the driver, and neither half is
+  acceptable:
+
+  - **SQL** — the stray column enters the statement and the **whole write fails**
+    with a driver-level error (`table deal has no column named stagee`). The
+    write is lost, and the error surfaces far from the mistake that caused it.
+  - **Schemaless** (memory, MongoDB) — the driver spreads the payload, so the
+    stray key **is** persisted: an undeclared column nothing downstream reads.
+
+  No diagnostic anywhere, and nothing at the authoring site either way — the
+  #4001 "the mistake is invisible where it is made" family. The read side
+  (`hook.condition`) and the capability surface were already statically checked;
+  the write side was the one blind face, and `hook-body.zod.ts` carried it as an
+  **accepted gap**.
+
+  **New rule — `hook-body-write-unknown-field` (advisory).** `@objectstack/lint`
+  now parses each L2 body (TypeScript parser; parsed, never executed, never
+  type-checked) and resolves its literal writes against the target object's
+  declared + system fields. An unknown field warns with a did-you-mean. Wired
+  into `REFERENCE_INTEGRITY_RULES`, so `os validate`, `os lint` and `os compile`
+  all report it; it never blocks a build.
+
+  The recognized write shapes are declared as data — `HOOK_BODY_WRITE_PATTERNS`,
+  each entry carrying a canonical example that a reconciliation test round-trips
+  through the real extractor, so a pattern cannot be declared-but-unverified
+  (#3528's death). v1 ships three:
+
+  - `ctx.input.<field> = …` / `ctx.input['<field>'] ⟨op⟩= …` → the hook's own
+    target object(s); flat-input envelope keys (`id`/`options`/`ast`/`data`) are
+    never treated as record fields.
+  - `Object.assign(ctx.input, { <field>: … })` → same target.
+  - `ctx.api.object('<object>').insert|create|update({…})` / `.updateById(id, {…})`
+    → the named object, at the **real** `ObjectRepository` payload positions
+    (`update(data)` — the payload is argument 0, not `update(id, data)`).
+
+  Everything statically unknowable is skipped silently, favouring missed findings
+  over false ones: computed keys, spreads, non-literal payloads, dynamic object
+  names, wildcard-target (`object:'*'`) input writes, cross-package targets,
+  aliased input (`const doc = ctx.input`), and multi-target hooks where the field
+  exists on _some_ target (the body may branch per object — only an
+  everywhere-miss warns).
+
+  The lint stays off the kernel boot path: the TypeScript compiler loads lazily,
+  only when a hook actually carries a JS body (same contract as the react-page
+  gates, guarded by `lazy-deps.test.ts`).
+
+  `@objectstack/spec`: the `ScriptBodySchema` header's "write-set opacity —
+  accepted static-analysis gap" note now points at the lint instead, and spells
+  out what remains opaque so the warning's absence is not read as proof of
+  correctness.
+
+- 3eb1b2b: feat(lint): every field-bearing prop on a React page block resolves against the
+  object it names
+
+  #4329 closed ONE of them — `<ListView searchableFields>` — by running the
+  metadata rule's core from the gate that owns React block props. That prop was an
+  instance, not the class: every other prop a `kind:'react'` page binds BY FIELD
+  NAME shipped exactly as typed, the same silent drift `page-field-unknown`
+  already closes for the page-component `properties` bag one surface over.
+
+  `validate-react-page-props` now resolves all of them:
+
+  - `<ListView>` `fields` / `columns` / `sort` / `grouping` / `userFilters` /
+    `hiddenFields` / `fieldOrder` / `filterableFields`
+  - `<ObjectForm>` `fields`, `initialValues` KEYS, `sections[].fields[]`
+  - `<RecordHighlights>` / `<RecordDetails>` / `<RecordPath>` /
+    `<RecordRelatedList>` — via the SAME `COMPONENT_FIELD_SPECS` table the
+    metadata surface uses, keyed by the block's `schemaType`, so the two surfaces
+    agree by construction rather than by two lists that happen to match
+  - `<Block type="…">` — the escape hatch reaches the same table by the type the
+    author writes, so it is checked instead of being a hole
+
+  Findings carry the metadata rule's id (`page-field-unknown`) at its advisory
+  severity, because the consumer behaves the same way: an unknown name is skipped
+  and the rest renders.
+
+  **A FILTER position gates instead.** `<ListView filters>` / `<ObjectChart
+filter>` name fields in a QUERY, and an unknown column there is not a skipped
+  column: the predicate can never match, `SqlDriver` swallows the driver's
+  "no such column" and returns `[]`, and the surface renders an empty list that
+  looks exactly like "there is no data" — the silent zero `filter-token-unknown`
+  and `validate-flow-template-paths`' filter-position call both gate on. Those
+  are reported as `error`.
+
+  Filter positions are also resolved INDEPENDENTLY of each other, unlike every
+  other value this gate reads. `filters={['status', '=', stage]}` — a static field
+  beside a React-state value — is the shape a react page actually writes, and the
+  all-or-nothing static reader skipped the whole array, including the one position
+  that was knowable.
+
+  Everything else is unchanged: a value from a variable, a call, or behind a
+  spread is unresolvable rather than wrong and is skipped silently (ADR-0072 D1),
+  as are cross-package objects, objects with no authored field map, dotted
+  relationship paths, and registry-injected system columns.
+
+  ### Breaking: `<RecordRelatedList objectName>` is the RELATED object, as the spec always said
+
+  `RecordRelatedListProps.objectName` is the related (child) object — that is what
+  `record:related_list` means on every metadata surface, what
+  `validate-page-field-bindings` resolves its `columns` against, and what the one
+  registry component behind both surfaces consumes. The React overlay declared
+  `objectName` a SECOND time and glossed it "The parent object", and the generated
+  contract publishes the overlay's description in place of the schema's — so the
+  react surface both contradicted the spec and lost any way to name the object it
+  renders.
+
+  FROM → TO for a page authored against the old gloss:
+
+  ```diff
+  - <RecordRelatedList objectName="account"  recordId={id} relationshipField="account_id" columns={['name','total']} />
+  + <RecordRelatedList objectName="invoice"  recordId={id} relationshipField="account_id" columns={['name','total']} />
+  ```
+
+  `objectName` names the CHILD object being listed; the parent record stays bound
+  by `recordId`, and `relationshipField` is the child's field pointing back at it.
+  The lint above reports the old spelling (the child's columns and its FK do not
+  resolve against the parent). `objectName` is now also published as required, as
+  the schema declares it.
+
+  The class is closed as well as the instance: `REACT_OVERLAY_SHADOWS` in
+  `@objectstack/spec/ui` ledgers every overlay prop that restates a spec-schema
+  prop, and a test asserts the ledger equals the real collision set — so the next
+  overlay entry that silently redefines a schema prop fails a test instead of
+  shipping a second dialect.
+
+- 9555b07: feat(lint): `<ListView searchableFields>` on a react page is checked against
+  the bound object's fields (#4329)
+
+  #4328's `searchable-field-unknown` gates a stale `searchableFields` entry on
+  the metadata surfaces — an object's own ADR-0061 declaration, its built-in
+  named list views, and a `defineView` aggregate's default `list` / named
+  `listViews`. It did not cover the react page surface: `ListView` declares
+  `searchableFields` as a dataProp, so a `kind:'react'` page could write
+  `<ListView searchableFields={['renamed_field']}>` and nothing resolved the
+  name. The failure is the one #4328 documents — the engine's
+  `resolveSearchFields` silently filters the stale name out, so the search scans
+  a narrower set than the page asked for, or (once every entry is stale) falls
+  through to the auto-default and scans a wider one; and once the REST read path
+  validates the `$searchFields` override (#4254), the prop objectui echoes
+  verbatim becomes a `400 INVALID_FIELD` on that list.
+
+  The check lives in `validate-react-page-props` — the gate that already parses
+  the page's real JSX — and runs on `<ListView>` usages whose `objectName` and
+  `searchableFields` are static literals, under the same rule id and severity
+  (`searchable-field-unknown`, `error`) as the metadata surfaces. It is not a
+  re-implementation: `validate-searchable-fields` now exports its core
+  (`indexObjectSearchTargets` + `checkSearchableFieldList`), and the react gate
+  runs that, so the two surfaces agree on what counts as a field by construction
+  — same three skips (an object this stack does not define, an object with no
+  authored field map, registry-injected system columns derived from the spec's
+  own declarations), same dotted-path strictness (search matches the field map
+  by exact string, so `owner_id.name` is flagged, not exempted).
+
+  JSX-specific seams follow the gate's existing rules: a value that comes from a
+  variable, a call, or a spread is not knowable at build time and is skipped
+  silently — an unresolvable binding is not a wrong one (ADR-0072 D1).
+
+- 7967133: feat(lint): a `searchableFields` entry naming no field is caught at authoring
+  time, not at request time
+
+  `searchableFields` is `z.array(z.string())` in both `object.zod.ts` and the
+  list-view schema, so nothing ever checked that an entry resolves to anything.
+  Rename a field and the old name stays behind — Zod-valid, shipped, pointing at
+  a column that no longer exists.
+
+  The engine tolerates it, which is exactly what kept the drift invisible:
+  `resolveSearchFields` filters the declaration down to fields that exist
+  (`searchableFields?.filter((f) => all[f])`) and says nothing. The tolerance
+  fails in the direction nobody expects:
+
+  - **some entries stale** → `$search` scans a NARROWER set than the object
+    declares. Records that should match do not, and the response is
+    indistinguishable from "no such record";
+  - **every entry stale** → the filtered set is empty, so resolution falls
+    through to the AUTO-DEFAULT (name/title + short-text fields). A declaration
+    whose whole purpose is to CHOOSE the searchable set ends up selecting one the
+    author never wrote — the "asked narrower, answered wider" inversion #4226
+    closed on the projection axis.
+
+  It also stops being quiet downstream. Clients echo the declaration verbatim as
+  the `$searchFields` override (objectui's list search sends
+  `schema.searchableFields`), so once the REST read path validates that override
+  against the object (#4254), a stale entry the engine had been silently skipping
+  becomes a `400 INVALID_FIELD` on every list search for that object — a
+  request-time break whose cause is an authoring typo made long before.
+
+  **New rule — `searchable-field-unknown` (gating).** Wired into
+  `REFERENCE_INTEGRITY_RULES`, so it runs on `os validate`, `os lint` and
+  `os compile` with no CLI edit. It covers the object's own ADR-0061 declaration
+  and the list views that narrow it (`objects[].listViews`, a `defineView`
+  default `list`, and named `listViews`), resolving each entry against the bound
+  object's declared fields.
+
+  `error`, not the advisory level the other field-existence rules use
+  (`page-field-unknown`, `form-field-unknown`, `semantic-role-field-unknown` are
+  all warnings). Those describe a consumer that SKIPS an unknown name and renders
+  the rest; this describes a declaration that either selects the wrong set or
+  refuses the request outright — the same call `validate-flow-template-paths`
+  makes for a filter-position token, where the miss widens the query instead of
+  shrinking the page.
+
+  Existence only: a field that exists but is an odd search target (a `json`
+  column) is NOT flagged — an explicit `searchableFields` is authoritative, so
+  declaring one is a choice, not drift. Three skips keep false positives near zero
+  (ADR-0072 D1): an object this stack does not define, an object with no authored
+  field map (external / datasource-introspected), and registry-injected system
+  columns — the last derived from the spec's own `FIELD_GROUP_SYSTEM_FIELDS` and
+  `SystemFieldName` rather than hand-copied, since this package already carries
+  five slightly-different copies of that list.
+
+  Dotted paths are the one place this rule is stricter than its siblings. They
+  skip `owner_id.name` because the query engine resolves the traversal; search
+  does not — `resolveSearchFields` matches the field map by exact string, so a
+  dotted entry is dropped exactly like a typo, and it is the spelling most likely
+  borrowed from `select`/`sort`. It is flagged, with its own fix hint.
+
+### Patch Changes
+
+- 78caf51: fix(lint): the write-set diagnostics describe what the runtime actually does (#4271)
+
+  `hook-body-write-unknown-field` and `action-body-write-unknown-field` told
+  authors the undeclared column "silently never lands in the stored record".
+  Measured on `main`, that is wrong in **both** directions. Nothing between the
+  body and the driver filters the key — `applyMutationsToInput` is a plain
+  `Object.assign`, and `validateRecord` walks declared fields on insert and
+  `continue`s past a key with no field def on update — so the driver decides:
+
+  - **SQL** — the stray column enters the statement and the **whole write
+    fails** with a driver-level error (`table deal has no column named stagee`).
+    Nothing is stored, so the correctly-spelled fields of that row are lost too,
+    and the error names a column far from the body that wrote it.
+  - **Schemaless** (memory, MongoDB — both spread the payload without consulting
+    the declared field set) — the stray key **is** persisted, as an undeclared
+    column nothing downstream reads.
+
+  A lint that misdescribes the failure it is warning about teaches the wrong
+  debugging instinct: an author told the value silently vanishes will not connect
+  the driver error they actually see to the typo that caused it, and on a
+  schemaless driver will not go looking for the stray key that is really there.
+  All three messages now state the split, matching the "What still happens at
+  runtime" description #4355 gave `content/docs/automation/hook-bodies.mdx`.
+
+  Both outcomes are pinned by a new integration test —
+  `runtime/src/sandbox/undeclared-field-write-driver-split.integration.test.ts`.
+  Its insert cases run the full chain (real QuickJS sandbox, real hook body, real
+  engine, real driver against a real SQLite table), so "reaches the driver
+  unfiltered" is proved rather than asserted: if anything on that path ever
+  learns to filter, the SQL half stops throwing and the test goes red. The rule
+  headers, the `ScriptBodySchema` / `ActionSchema.body` notes and the two
+  still-unreleased #4271 changesets are corrected to match. #4355 fixed the
+  prose docs; this is the same correction on the surfaces that ship in the
+  packages — the diagnostic an author actually reads, and a test that pins it.
+
+  `@objectstack/spec`: doc comments only — no schema or generated-artifact change.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 38182ff: feat(lint): `flow-node-write-unknown-field` covers `create_record` too (#4271)
+
+  #4369 shipped the flow write-set gate on `update_record` alone and parked
+  `create_record` in `FLOW_WRITE_NODE_TYPES_DEFERRED` with its reason — a gating
+  rule earning its severity one measured surface at a time, recorded as data
+  rather than left as silence. This measures the other half and moves it across.
+
+  **The INSERT path fails the same way, one notch harder.** Same literal
+  `config.fields` map, same `objectName` binding, same journey to the driver — the
+  engine hands an undeclared key to `driver.create` verbatim, alongside the audit
+  stamps. On SQLite/knex it becomes `table deal has no column named stagee` and
+  the statement is rejected whole, so the correctly named fields in the same
+  payload never land either. The extra harm is what does _not_ exist afterwards:
+  the row is never created, so every later node reading `{<node>.id}` from that
+  node's `outputVariable` is working from a record that was never written. An
+  `update_record` failure at least leaves the record intact.
+
+  So the message now names that consequence on `create_record` and only there —
+  "…and the record is never created at all" — instead of one sentence blurred to
+  fit both.
+
+  Nothing else moves: same rule id, same `error` severity, the same silent bails
+  (templated `objectName`, non-literal `fields`, cross-package objects, objects
+  declaring no fields, dotted keys), and `runAs` is still not consulted. Each skip
+  is now pinned on the create surface as well as the update one, so the two node
+  types cannot drift into different behaviour.
+
+  **`FLOW_WRITE_NODE_TYPES_DEFERRED` is now empty and deliberately kept.** The
+  partition test derives the full `fields`-write-map set behaviourally from the
+  spec's executor-written config schemas, so a node type that grows one later
+  belongs to neither list and fails that test until someone classifies it.
+  Deleting the empty array would turn that forced decision back into a default.
+
+  Two non-members are now excluded on the shape of their failure rather than by
+  omission, both stated in the module header and one pinned by a test:
+  `get_record.fields` is a projection (`z.array(z.string())`) — a READ, where an
+  unknown entry narrows the selection instead of breaking the statement — and
+  `screen.defaults` is forwarded into the `ScreenSpec` the client renders, so an
+  unknown key is a prefill the renderer ignores. That inert "skips it and renders
+  the rest" case is exactly what this rule's `error` severity is defined against.
+
+  Verified against the repo's own apps: app-crm, app-todo and app-showcase all
+  still validate clean with `create_record` covered — including crm's
+  convert-lead flow, which creates an account and an opportunity before updating
+  the lead.
+
+- af5b96b: fix(lint): flow rules see into try_catch / loop / parallel regions (#4380)
+
+  Every lint rule that inspects flow nodes had hand-written the same one-liner —
+
+  ```ts
+  const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
+  ```
+
+  — and every one of them was therefore blind to the same thing.
+  `FlowRegionSchema` holds a full `nodes: z.array(FlowNodeSchema)`, and four
+  config slots carry one: `try_catch.config.try` / `.catch`, `loop.config.body`,
+  and `parallel.config.branches[].nodes`. Regions nest arbitrarily. Move a node
+  into any of them and the checking stayed behind.
+
+  Measured before the fix, the same bad nodes at the top level vs inside a
+  `try_catch`:
+
+  | rule                                            | severity      | flat | nested              |
+  | :---------------------------------------------- | :------------ | :--- | :------------------ |
+  | `flow-node-write-unknown-field`                 | error         | 1    | **0**               |
+  | `flow-update-readonly-field`                    | error         | 1    | **0**               |
+  | `approval-approver-*`                           | error/warning | 1    | **0**               |
+  | `flow-template-unknown-field` (filter position) | error         | 1    | **1, as a warning** |
+
+  **The last row is the one a reader would not predict.**
+  `validate-flow-template-paths` scans a node's whole `config` for string leaves,
+  so it still _saw_ tokens inside a region — but its `filter`-position split only
+  looks at the top level of the node it was handed. A nested filter token lost its
+  position, so the #3810 finding ("this node cannot run — an erased condition
+  WIDENS the query") silently degraded to an advisory warning, reported against
+  the wrapping `try_catch` instead of the `get_record` that is broken:
+
+  ```
+  FLAT     error  	flow "f" node "get_record"	flows[0].nodes[1]
+  NESTED   warning	flow "f" node "try_catch"  	flows[0].nodes[1]
+  ```
+
+  Being visible is not the same as being judged correctly. That is worse than a
+  clean miss: a yellow line reads as "checked and merely advisory".
+
+  **One shared walk, not five.** `flow-walk.ts` — the flow-side counterpart of the
+  existing `page-walk.ts`, and here for the same stated reason: getting the
+  traversal right is subtle enough that duplicating it has already produced dead
+  rules. `walkFlowNodes(flow, flowPath)` yields every node with its real config
+  path (`flows[0].nodes[1].config.catch.nodes[0]`), a region breadcrumb for
+  diagnostics (`try_catch "Guard" › catch`), and depth. Four rules now route
+  through it: the two flow write rules, the template-path rule, and the approval
+  rule.
+
+  Findings now land on the node that is actually wrong, which is the point — a
+  path pointing at the container is not actionable in a flow with several regions.
+
+  **The double-count trap is handled, not left to each caller.** A container node
+  is walked too (it has its own config worth checking — a `loop`'s `collection`, a
+  `try_catch`'s `retry`), but its `config` physically contains every descendant,
+  so a rule that scans config recursively would report each nested finding twice.
+  `WalkedFlowNode.localConfig` is the container's config with region slots
+  removed; the recursive scanner uses it, and a test pins that a nested token is
+  reported once while the container's own `collection` token still is.
+
+  `REGION_SLOTS` is declared as data and pinned against the spec's own
+  region-bearing config schemas — derived behaviourally (a slot is one that
+  accepts `{nodes: […]}`), not restated — so a fifth construct fails that test
+  instead of becoming a fifth silent blind spot. A `MAX_REGION_DEPTH` cap keeps a
+  hand-authored (pre-parse) stack from hanging a lint.
+
+  Verified end to end: nested now matches flat on every rule, including the
+  restored `error` severity. app-showcase ships an `update_record` inside a
+  `catch` branch (`showcase_resilient_sync`) that had never been checked by
+  anything — it is correct, so validation stays clean, and breaking its field name
+  on purpose now fails `os validate` with
+  `flows[24].nodes[1].config.catch.nodes[0].config.fields.sync_statuss` and the
+  region trail `try_catch "Push with retry" › catch › node "Flag Sync Failure"`.
+
+- 7d80695: fix(lint): an object declaring no fields is unjudgeable, not "has no such field" (#4383)
+
+  `hook-body-write-unknown-field` and `action-body-write-unknown-field` reported
+  **every** field write to an object that declares no `fields` — an external
+  object, or a datasource-introspected schema whose columns are resolved at
+  runtime. Measured before the fix:
+
+  ```
+  hook  : ["hook-body-write-unknown-field / warning"]     ← false
+  action: ["action-body-write-unknown-field / warning"]   ← false
+  flow  : []                                              ← correct
+  ```
+
+  `indexObjectFields` returns an **empty Set** for such an object rather than
+  `undefined`, and both rules only asked "is this object in the stack?" —
+  `targetSets.every((s) => s !== undefined)` and `if (!known) continue`. An empty
+  Set is neither undefined nor falsy, so it became the answer to `has(field)`,
+  and the answer is always `false`.
+
+  That field map is not empty, it is **unknown**. The distinction already existed
+  in two other rules of the same family, each with its reason written down —
+  `validate-searchable-fields` skip #2 and `validate-flow-node-writes` (#4369,
+  which added the guard because it gates). Two of four had it; the drift shape
+  #3583 and #4330 exist to remove.
+
+  **Fixed once, not twice.** The guard now lives in a shared
+  `judgeableFieldsOf(index, objectName)` that returns the declared names only when
+  they are a sound basis for a "resolves to nothing" judgement, and `undefined`
+  for both unjudgeable cases — cross-package objects and fields-less ones. All
+  three write-set rules route their lookups through it, so a fourth cannot repeat
+  the omission. It is internal to the family (not re-exported from the package
+  barrel), same as `indexObjectFields` and `IMPLICIT_FIELDS`.
+
+  One semantic call worth naming: a **multi-target** hook where only _some_
+  targets are judgeable is now skipped entirely. The `ctx.input` finding fires
+  only when a field is missing from EVERY target, and an unjudgeable target is one
+  the field might well exist on — so judging the remainder would assert "missing
+  everywhere" on evidence that does not cover everywhere. Consistent with the
+  rule's stated asymmetry: prefer a missed finding to a false one.
+
+  No behaviour change for objects that declare fields: an unknown field on a
+  normal object still warns exactly as before, pinned by a test placed next to
+  each new skip so the guard cannot swallow the real finding.
+
+- ade7be4: fix(lint): the seven system-field exemption lists derive from the spec's declarations (#4330)
+
+  Five rules in `@objectstack/lint` each carried their own hand-copy of
+  "registry-injected columns present on almost every object but absent from
+  authored `fields`" — and they had already drifted from one another (two more
+  copies had appeared by the time the fix landed). This is the shape #3786
+  removed from the audit-provenance family, rebuilt one package over: the same
+  list, maintained in parallel, each under a comment asking to be kept in sync
+  with one of the others.
+
+  The package now has one module, `system-fields.ts`, whose `SYSTEM_FIELDS` is
+  DERIVED from the spec's two declarations — `FIELD_GROUP_SYSTEM_FIELDS`
+  (`@objectstack/spec/data`) and `SystemFieldName` (`@objectstack/spec/system`)
+  — and all seven field-resolving rules consume it. A pin test holds the
+  boundary in both directions: the set contains exactly the two declarations'
+  union, and none of the rule-local exemptions.
+
+  Two deliberate behavior consequences, both in the permissive direction the
+  rules' own comments argue for (over-inclusion costs at worst a missed
+  warning; under-inclusion costs a false one):
+
+  - `widget-bindings`, `page-field-bindings` and `react-page-props` now also
+    exempt `is_deleted`;
+  - `flow-template-paths` now also exempts `user_id`.
+
+  Names that are NOT system columns in the spec's sense (`name`, `owner`,
+  `record_type`, and the legacy physical spellings `_id` / `space`) stay
+  rule-local next to the reason each rule exempts them, instead of widening
+  every rule: `name` in particular is an ordinary authored field on most
+  objects, and exempting it package-wide would stop the field-existence rules
+  from catching a reference to a field the object genuinely does not have.
+
+- 8db4587: fix(lint,cli): `os lint` / `os compile` 不再放行一个 `os validate` 会拒绝的 react 页面
+
+  `validateReactPageProps` 只手工接在 `os validate` 上,另外两个命令从来没跑过它。
+  在 showcase 的 react 页面上植入一处 gating 违规(`<ListView filters={['no_such_col','=',stage]}>`
+  —— 谓词命中不了任何行,列表回空,和「本来就没数据」无法区分)实测:
+
+  ```
+                os lint      os compile     os validate
+    修复前      exit 0 放行   exit 0 放行    exit 1 拒绝
+    修复后      exit 1 拒绝   exit 1 拒绝    exit 1 拒绝
+  ```
+
+  这条规则在 #4340 之后已经是**整个 react 页面表面唯一**的字段解析闸门:
+  `<ListView>` 的 columns/fields/sort/grouping/userFilters、`<ObjectForm>` 的
+  fields/initialValues/sections/subforms、`record:*` 一族(与元数据表面共用同一张
+  `COMPONENT_FIELD_SPECS`)、`<ObjectChart>` 的 aggregate/axes、以及 `searchableFields`。
+  漏接不是少几条警告 —— 而是这些绑定在 build 路径上**完全没人看**,包括其中会 gate 的那些。
+
+  现接入 `REFERENCE_INTEGRITY_RULES`,`os validate` 里那处手工接线随之删除,三个命令的
+  答案由构造保证一致。这正是 suite 设立要终结的漂移(#3583 §5 D5),也是
+  `validateReadonlyFlowWrites` 在 #4394 里刚走过的同一条路 —— 那次的教训是
+  「一张 map、两个检查、两套命令集合」,这次是「一次 JSX parse、七个 rule id、
+  一套命令集合」。
+
+  规则行为零变化:id、严重级、文案都不动;喂进去的输入也不变(`os validate` 原本就
+  传 `result.data`,suite 拿到的是同一个)。`#4402` 的接线守卫会在下一次有人想再手工
+  接一条规则时直接报错。
+
+  `validateReactPageProps` 沿用 `validateHookBodyWrites` / `validateActionBodyWrites`
+  的惰性约定:只有真的存在 `kind:'react'` 页面时才加载 TypeScript 编译器。
+
+- 7fec5d6: fix(lint,cli): `os lint` no longer passes a flow the other two commands refuse
+
+  `validateReadonlyFlowWrites` was hand-wired into `os validate` and `os compile`
+  and never into `os lint`. Measured on the showcase app with one planted
+  violation — a `runAs:'user'` `update_record` writing a static-`readonly` field:
+
+  |        | `os lint`           | `os validate`    |
+  | ------ | ------------------- | ---------------- |
+  | before | **exit 0 — passed** | exit 1 — refused |
+  | after  | exit 1 — refused    | exit 1 — refused |
+
+  That rule **gates** (a static `readonly` + literal field is a certain no-op:
+  the engine strips it from the UPDATE payload while the step still reports
+  success, #2948/#3425), so the divergence was not a missing warning — `os lint`
+  green-lit a build `os validate` stops.
+
+  It now joins `REFERENCE_INTEGRITY_RULES`, and both hand-wired call sites are
+  deleted with it, so the three commands share one answer by construction rather
+  than by three people remembering. This is the drift the suite was created to end
+  (#3583 §5 D5) and which its own header cited this rule as the standing proof of.
+
+  Two things made the wiring indefensible rather than merely untidy:
+
+  - `validateFlowNodeWrites` (#4369) walks the **same** `config.fields` map to ask
+    the other half of the question — "does this field exist?" against "is it
+    writable?" — and is already a suite member. One map, two checks, two different
+    command sets.
+  - The two hand-wired sites did not even agree with each other on their input:
+    `validate` passed the PRE-parse `normalized` stack, `compile` the POST-parse
+    `result.data`. Verified equivalent for this rule before collapsing them onto
+    the suite's post-parse input, so no finding is lost.
+
+  No rule behaviour changes: same ids, same severities, same messages.
+
+- 31e0be9: Flow metadata is canonicalized inside structured regions, not just at the top level (#4347).
+
+  `registerFlow` canonicalizes a stored flow through three passes — the ADR-0087 conversion
+  table, `FlowSchema.parse`, and the ADR-0032 predicate validation — and every one of them
+  walked `flow.nodes` / `flow.edges` only. An ADR-0031 container keeps a whole sub-graph in
+  its open `config` (`loop.config.body`, `parallel.config.branches[]`,
+  `try_catch.config.try`/`.catch`), so all three stopped at the container and metadata came
+  out **position-dependent**: the same node converted at the top level and did not one level
+  in, and the same predicate was stored as a `{ dialect: 'cel', source }` envelope on a
+  top-level edge and left a bare string on a loop-body edge.
+
+  The reporting app shipped three sweeps whose gates never opened. Each run reported
+  `success: true`, queried correctly, selected exactly the right records, and then did
+  nothing — which is indistinguishable from "this sweep had no work to do" unless you assert
+  on records written.
+
+  - **`mapFlowNodes` recurses into regions**, to any depth. Every conversion in the table now
+    reaches a nested node, which matters most for the two that change behaviour rather than
+    spelling: a `webhook` / `http_request` callout inside a loop body kept a type no executor
+    owns (the run failed), and a `delete_record` kept `config.filters`, leaving the canonical
+    `filter` the executor reads absent — the erased-condition hazard
+    `flow-node-crud-filter-alias` exists to prevent. Notice paths carry the region
+    (`flows[0].nodes[3].config.body.nodes[1].config.filter`), so the warning points at the
+    node to edit.
+  - **New `normalizeControlFlowRegions`**, called at the load seam after
+    `validateControlFlow`: each region is parsed through its own schema (recursively — regions
+    nest), so nested edges and nodes carry the same canonical shapes as top-level ones. A
+    region that does not parse is left untouched; rejecting one stays `validateControlFlow`'s
+    job, so which flows register is unchanged.
+  - **New `collectFlowGraphs`** yields a flow's own graph plus every nested region, each with
+    a scope label. Both predicate validators iterate it instead of `flow.nodes` — the engine's
+    `validateFlowExpressions` and `@objectstack/lint`'s author-time
+    `validateStackExpressions` — so the `{record.x}` brace-trap they exist to catch is now
+    caught inside a loop body too, naming the region (`loop 'sweep' body · edge 'b1' …`). It
+    used to pass `objectstack validate`, pass registration, and fail at run time with the
+    diagnostic suppressed.
+
+  The container executors already parse their own config at run time (`parseNodeConfig`,
+  #4277), so a nested predicate did evaluate correctly on current `main` — what was still
+  wrong is everything that reads a region _without_ re-parsing it (the Studio designer,
+  `getFlow`, the version history), and every conversion, none of which the executors replay.
+
+  Also hardened, per the issue's secondary finding: `evaluateCondition`'s legacy `{var}`
+  template path **refuses an unresolved dotted reference** instead of comparing it as a
+  string. `'oppRecord.amount > 500000'` was compared `'oppRecord.amount' > '500000'` — `'o'`
+  against `'5'` — so it was constantly true regardless of the amount: silently wrong in the
+  _true_ direction, a gate that reports success while never gating. It now throws with the
+  source and the fix (a CEL envelope, or brace the reference if the `{var}` dialect was
+  meant), the same "never swallow a broken predicate" rule ADR-0032 §1c set for the CEL path.
+  The `try { … } catch { return false }` around that block went with it: nothing in it throws,
+  so it guarded nothing and would have swallowed the new refusal straight back into the silent
+  wrong answer. Bare-word comparisons (`'{status} == active'`) and `{var}` templates are
+  unchanged — only dotted references, which substitution can never leave behind, are refused.
+
+- 4bfd455: One declaration of where ADR-0031 regions live (#4401).
+
+  A region is a sub-graph inside `FlowNodeSchema.config`, an open `z.record`. Nothing in the
+  type system says which key on which node type holds one, so every pass that needs to reach
+  a region node has to be told — and within one week three of them were told separately, by
+  two changes that were each correct on their own:
+
+  | pass                                                                        | package | table it carried    |
+  | --------------------------------------------------------------------------- | ------- | ------------------- |
+  | `mapFlowNodes` (ADR-0087 conversions)                                       | `spec`  | `FLOW_REGION_SLOTS` |
+  | `validateControlFlow` / `normalizeControlFlowRegions` / `collectFlowGraphs` | `spec`  | `regionSlotsOf`     |
+  | `walkFlowNodes` (lint flow rules)                                           | `lint`  | `REGION_SLOTS`      |
+
+  Each pinned its own copy with its own reconciliation test. So every copy was protected from
+  drifting away from the schemas, and **nothing would have failed if the copies drifted from
+  each other** — while adding a fourth construct meant editing three places, and missing one
+  reproduces exactly the silent blind spot #4347 and #4380 were both filed about.
+
+  - New `@objectstack/spec/automation` export `FLOW_REGION_SLOTS` (plus the
+    `FLOW_REGION_SLOTS_BY_TYPE` / `FLOW_REGION_CONFIG_KEYS` views) is now the only statement
+    of the fact. It lives in an **import-free** module so `spec/conversions/walk.ts` can read
+    it and stay the pure shape walker it was written as; mapping a slot onto the Zod schema
+    its value parses as stays in `control-flow.zod.ts`, which is schema business.
+  - The three reconciliation tests collapse into one, `region-slots.test.ts`, keeping the
+    strongest of them: it derives each construct's region keys **behaviourally**, by asking
+    the config schema what it actually accepts in a region shape, rather than reading names
+    off `.shape`. It also probes every other exported `*ConfigSchema`, so a new
+    region-bearing construct cannot be added without either declaring its slots or failing
+    here.
+
+  The three **walks** are deliberately left separate. They take different inputs (parsed
+  `FlowNodeParsed` vs raw authored records), yield different units (a graph, a node, a
+  copy-on-write rewritten tree), and the lint one formats human diagnostic trails from node
+  labels — consumer logic, not protocol (Prime Directive #2). Merging them would trade a
+  duplicated four-line table for a walker that serves nobody well. Only the fact they all
+  need is shared.
+
+  No behaviour change: every existing test passes unchanged, which is the point of the
+  exercise.
+
+- 1bd2795: feat(spec,lint): the `ui` vocabularies admit what the renderers implement, and derive instead of restating (objectui#2945)
+
+  Additions-only follow-up to the vocabulary audit
+  (objectstack-ai/objectui#2901, #2945). Nothing here narrows a vocabulary, so no
+  already-stored metadata changes meaning — three of the four `ui/` enums that had
+  drifted from what is actually implemented, plus the fork that drift had made
+  invisible.
+
+  **`ChartTypeSchema` admits `combo`.** The taxonomy could not name the one chart
+  family the rest of `chart.zod.ts` is written for: `ChartSeriesSchema.type`
+  exists to override a series' type — its doc comment literally says _"combo
+  charts"_ — and `ChartSeriesSchema.yAxis` binds a series to the left or right
+  axis, which is only meaningful for mixed marks. objectui's renderer draws it
+  distinctly (mixed bar/line/area on dual axes, per-series type) and had to carry
+  `combo` in a local fork of this list, whose own comment claimed to mirror it.
+
+  **`WidgetActionTypeSchema` is `ActionType`.** The two disagreed by one member,
+  `form`, and the disagreement was backwards: a dashboard header or widget action
+  button dispatches through the same `ActionRunner` that implements `form` —
+  objectui's `DashboardRenderer` deliberately routes everything except a raw `url`
+  into it, so a `flow` header action works (#3528). The narrower enum therefore
+  rejected at validation exactly what the shared dispatcher then executes.
+  Derived, so the next type the runner implements needs one edit, not two.
+
+  **`ListChartConfigSchema.chartType` is `ChartTypeSchema.extract([...])`.** Same
+  five members as before — a de-duplication, not a widening. A member renamed in
+  the taxonomy now fails at build time instead of leaving a second list quietly
+  disagreeing.
+
+  **`@objectstack/lint`'s chart-family set is derived from the taxonomy.**
+  `validate-widget-bindings` decides which widgets need a `chartConfig` measure
+  mapping from a hand-written list of families, and its omissions fail in the
+  worst direction: an unlisted family reads as _"not a chart"_, so a widget
+  missing its mapping **passes** validation. `combo` was exactly that case —
+  verified by pinning the old list back, where a `combo` widget with no
+  `chartConfig` produced zero findings. The set is now the taxonomy minus an
+  explicit `MEASURE_EXEMPT_CHART_TYPES` (single-value and tabular families), so a
+  family added to the spec is covered without editing the rule.
+
+  Guards: `packages/spec/src/ui/vocabulary-derivation.test.ts` asserts both
+  derivations still hold (a restated list fails silently — it keeps validating,
+  just not what the other list says), and the lint suite now walks every
+  multi-series family in the taxonomy rather than a list of its own.
+
+  A third ratchet already existed and did its job: `app-showcase`'s coverage test
+  requires a gallery widget for every distinctly-renderable `ChartType`, and it
+  failed the moment `combo` was admitted. The Chart Gallery dashboard now
+  demonstrates it — a task count as bars on the left axis, an average as a line on
+  the right, which is the configuration `series[].type` / `series[].yAxis` exist
+  for.
+
+  `ActionType` deliberately does **not** gain `navigation`, which the audit
+  suggested. `ActionRunner.executeNavigation` is a strictly weaker
+  `executeUrl` — no `${param.X}` interpolation, no `apiBase` promotion, no
+  `openIn` — differing only by a `replace` option, and its one live producer is
+  the SDUI `element:button` `action` prop, which `ElementButtonPropsSchema` does
+  not model at all. Promoting the name would add a second spelling of _navigate_
+  to a closed authorable vocabulary (members cannot be removed later) without
+  closing the gap that actually exists. Tracked separately.
+
+  Verified: `@objectstack/spec` **6944 tests / 267 files**, `@objectstack/lint`
+  **544 tests / 37 files**, both green; `tsc --noEmit` clean on both.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [cc2de0e]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [65a3a84]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [4965bfa]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/formula@17.0.0-rc.1
+  - @objectstack/sdui-parser@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

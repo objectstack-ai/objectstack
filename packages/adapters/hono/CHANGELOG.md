@@ -1,5 +1,322 @@
 # @objectstack/hono
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- f5a4ef0: refactor!: ADR-0112 batch 2 — sweep the lowercase error-code emitters (#4003)
+
+  Continues #3841 per ADR-0112. Batch 1 (#3988) settled the vocabulary and closed
+  the set; this batch moves the emitters that still spoke lowercase `snake_case`
+  onto it.
+
+  **Wire-visible change.** Error codes on these surfaces change spelling. Generic
+  conditions collapse onto the standard catalog rather than keeping a synonym:
+  `unauthorized`/`unauthenticated` → `UNAUTHENTICATED`, `forbidden` →
+  `PERMISSION_DENIED`, `not_found` → `RESOURCE_NOT_FOUND`, `internal` →
+  `INTERNAL_ERROR`, `unavailable` → `SERVICE_UNAVAILABLE`, `not_supported` →
+  `NOT_IMPLEMENTED`, `bad_request` → `INVALID_REQUEST`. Domain conditions get codes
+  registered in `ERROR_CODE_LEDGER` (`MARKETPLACE_STORAGE_FAILED`,
+  `PLUGIN_MANIFEST_INVALID`, `ITEM_LOCKED`, `DELIVERY_NOT_ELIGIBLE`, …). Swept:
+  `cloud-connection`, `plugin-auth`, `hono`, `metadata-protocol`, `rest`,
+  `service-messaging`, `service-automation`, `trigger-api`.
+
+  Branch on `error.code` values rather than pattern-matching their case: the
+  console's fix for the same rename (objectui#2977) reads codes case-insensitively
+  for exactly this reason, and that is the pattern to copy in your own consumers if
+  you support servers on both sides of the change.
+
+  **Four routes stop putting a code in the message slot.** The webhook redeliver
+  route, the API-trigger webhook, and two `rest` routes answered
+  `{ success: false, error: '<code>', message }` — the code occupying `error`, the
+  declared object envelope nowhere. They now emit `error: { code, message }`, and
+  three API-trigger branches gained a message they never had. Clients reading
+  `body.error` as a string on those routes must read `body.error.code`.
+
+  **`ConnectorErrorCategory` / `ConnectorRetryStrategy`** (ADR-0112 D9a):
+  `@objectstack/spec` exported two mutually incompatible `ErrorCategory` types and
+  two `RetryStrategy` types. The connector-side pair is renamed; importers of the
+  `integration` subpath update the name. Side effect: the api-side `ErrorCategory`
+  and `RetryStrategy` now appear in the generated API reference at all — the name
+  collision had been silently dropping them.
+
+  **`OAUTH_REGISTER_FAILED` replaces an unbounded code source.** The OAuth client
+  registration route put better-auth's arbitrary `body.error` string straight into
+  `error.code`. The code is now ours and the upstream discriminator moved to
+  `details.upstreamError`.
+
+  **Not swept, deliberately.** `sys_metadata_audit.code` keeps its lowercase values
+  (ADR-0112 D6b): it is persisted audit history, and the same column holds
+  non-error outcomes (`ok`, `lock_override`). Diagnostics records that ship inside a
+  200 keep theirs (D6c), as do field-level codes (D6, #3977) and the CLI's
+  `--json` output contract.
+
+  A `check:error-code-casing` CI guard now fails on a new lowercase literal in a
+  code position, since the ledger's casing rule can only police codes that someone
+  registers.
+
+- 4be9d99: fix(runtime,hono,plugin-dev): retire the dispatcher's `/storage` bridge — it never spoke the storage contract (#4087)
+
+  `POST /api/v1/storage/upload` and `GET /api/v1/storage/file/:id` were a
+  dispatcher-side bridge to the `file-storage` service slot, written against a
+  service shape that does not exist:
+
+  - **Upload** called the contract's `upload(key, data, options?)` as
+    `upload(file, { request })` — the parsed file object landed in the `key`
+    slot and `{ request }` in `data`. That is a `TypeError` against every
+    implementation in the repo (`S3StorageAdapter`, `LocalStorageAdapter`,
+    `SwappableStorageService`, plugin-dev's in-memory one), not a
+    near-miss: `Buffer.from({}) → ERR_INVALID_ARG_TYPE`, or an object used as
+    an S3 object key / `path.join` segment.
+  - **Download** branched on `result.url` / `result.redirect` / `result.stream`
+    / `result.mimeType` while the contract's `download(key)` resolves a
+    `Buffer`, so every branch fell through and the route answered a
+    JSON-serialized Buffer.
+
+  Both routes are removed, along with `HttpDispatcher.handleStorage()`, the
+  `/storage` domain registration, the dispatcher-plugin mounts and the two route
+  ledger rows.
+
+  **Migration.** There is nothing to migrate off in practice — neither route
+  could complete a request. (They were reachable: `service-storage` mounts
+  `/storage/upload/presigned`, not `/storage/upload`, so nothing shadowed them.
+  They simply had no caller — no SDK method builds those URLs.)
+  `/api/v1/storage` is `@objectstack/service-storage`'s surface and always was
+  the working one:
+
+  - Upload — FROM `POST /api/v1/storage/upload` TO the presigned protocol
+    (`POST /storage/upload/presigned` → direct `PUT` to the returned URL →
+    `POST /storage/upload/complete`), or `client.storage.upload(file)`, which
+    runs all three steps.
+  - Download — FROM `GET /api/v1/storage/file/:id` TO
+    `GET /storage/files/:fileId/url` (`client.storage.getDownloadUrl(fileId)`)
+    for a signed URL, or `GET /storage/files/:fileId` for a stable browser URL
+    that 302s to it.
+
+  Install `@objectstack/service-storage` to get those routes; without it
+  `/api/v1/storage` now has no handler, which is the same answer every other
+  uninstalled capability gives.
+
+  Two follow-on corrections keep `declared === enforced`:
+
+  - `@objectstack/hono` no longer mounts `app.all('<prefix>/storage/*')`. That
+    wildcard claimed the whole `/storage` subtree for the two dead routes, so
+    every other path under it — service-storage's protocol above all — got the
+    bridge's own 404 rather than falling through. Storage is ordinary catch-all
+    traffic now.
+  - Discovery keeps gating `routes.storage` on `isServiceServeable` — the shared
+    `handlerReady` predicate #4058 step 2 introduced — and plugin-dev's in-memory
+    implementation now self-declares `handlerReady: false`. #4058 deliberately
+    left that one serving because the `/storage` bridge was still there to serve
+    it; with the bridge retired nothing routes HTTP to that slot, so `false` is
+    the honest value — the position `realtime` has held since ADR-0076 D12. The
+    implementation keeps working for in-process callers; it is simply no longer
+    advertised as a reachable HTTP capability.
+
+### Patch Changes
+
+- 554ff92: fix(adapters/hono): the auth wildcard yields paths the auth service does not own (#4117)
+
+  `app.all('${prefix}/auth/*')` claimed a whole namespace and was **terminal**: it
+  returned the auth service's response unconditionally, including better-auth's 404
+  for a path it does not implement, and the legacy `handleAuth` bridge's own
+  `handled: false` 404. That is the #4088 shape, found by #4116's enumeration after
+  manual greps had missed it.
+
+  A 404 from better-auth, or `handled: false` from the dispatcher, now means "not
+  this mount's path" and the handler yields. The predicate is the dispatcher's own
+  `handled` flag wherever one exists — an explicit ownership answer beats inferring
+  one from a status; only the better-auth hand-off lacks such a flag, and there the
+  404 is the signal, as in #4092.
+
+  **What changes on the wire.** An unowned path under `${prefix}/auth/*` used to get
+  a 404 built by this mount. It now continues to the `${prefix}/*` dispatcher
+  catch-all and gets a real, gate-carrying `dispatch()` attempt, so a domain handler
+  registered for such a path becomes reachable — this adapter's actual extension
+  mechanism. When nothing anywhere claims the path the reply is still the same
+  enveloped `{ success: false, error: { message: 'Not Found', code: 404 } }`. Paths
+  the auth service does own are untouched, and a 401/403 from it is never treated as
+  a disclaimer of ownership.
+
+  No configuration changes and no new routes.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 2053714: fix(hono,plugin-hono-server,runtime): one CORS source and one registry key — the last derivable copies from the #3786 sweep
+
+  Re-ran the sweep across all 72 packages. The earlier pass globbed `packages/*/src`,
+  which is one level deep, so it missed everything under `packages/plugins/` and
+  `packages/adapters/` — the "sweep is basically clean" report was based on an
+  incomplete scan.
+
+  **A stale CORS default, on the one description callers actually read.**
+  `HonoCorsOptions.allowHeaders`' TSDoc promised
+  `['Content-Type', 'Authorization', 'X-Requested-With']` "which is sufficient for
+  cookie and bearer-token auth". The real default carries three more:
+  `X-Tenant-ID` and `X-Environment-Id` (multi-tenant routing) and `If-Match` (the
+  OCC token on record PATCHes, objectui#2572). Sizing a custom `allowHeaders`
+  against that sentence drops all three and every cross-origin save fails with
+  "Failed to fetch".
+
+  The instructive part: **three** Hono CORS sites each carried their own copy of
+  the defaults under "keep in sync" comments, and the copies all agreed. What
+  drifted was the _doc_ — the only description with no counterpart to be diffed
+  against, and the only one a caller reads.
+
+  Both defaults are now single constants, `DEFAULT_CORS_ALLOW_HEADERS` and
+  `DEFAULT_CORS_EXPOSE_HEADERS`, exported from `@objectstack/plugin-hono-server`
+  and imported by the adapter (which already depends on it — no new edge). The
+  TSDoc links them rather than restating, and documents an asymmetry it never
+  mentioned: `allowHeaders` REPLACES the default, `exposeHeaders` MERGES with it.
+
+  `hono-plugin.test.ts` stopped stubbing `./adapter` wholesale and keeps the real
+  constants via `importOriginal` — it asserts exact header lists, so a mocked copy
+  would make the test agree with itself rather than with what ships. Verified:
+  removing `If-Match` from the constant fails `should allow If-Match by default`,
+  by name.
+
+  **A third copy, in the public protocol docs.** `content/docs/protocol/kernel/
+http-protocol.mdx` advertised `Access-Control-Allow-Headers: Authorization,
+Content-Type` — two of the six — and methods missing `PUT` and `HEAD`, with no
+  mention of the exposed headers at all. That is the copy an integrator builds a
+  client against: reading it, you would not know `If-Match` is permitted (so you
+  would not attempt OCC) or that `set-auth-token` is readable (so a rotated
+  session would look like a bug). Corrected, with the three non-obvious allowed
+  headers and the two exposed ones explained, and a pointer to the constants as
+  the source of truth.
+
+  **A hand-copied service-registry key.** `runtime`'s share-links domain resolved
+  `'shareLinks'` as a string literal, copied from `SHARE_LINK_SERVICE` — whose own
+  doc-comment says "keep in sync with the SharingPlugin registration". It now
+  imports the constant. A drifted copy resolves nothing, so every share link
+  answers 501 "Sharing is not configured for this environment" on an environment
+  where it is configured perfectly well.
+
+  **Plus a duplicate ledger entry**, which is the same defect one level up:
+  `check-generated.ts` carried two `NO_GENERATOR` entries for
+  `check:strictness-ledger`, because #4203 and #4252 each added one without seeing
+  the other. Functionally harmless (the ledger is read into a `Set`) but it leaves
+  two comments telling overlapping versions of the same story. #4203's is kept —
+  it is the more complete account and it is the PR that fixed the underlying
+  problem.
+
+  Checked and deliberately left alone: `ApprovalStatus` (5 values) and
+  `ApprovalActionKind` (12 values) versus their `plugin-approvals` selects — diffed
+  verbatim, no drift today, still hand-copied across a package boundary.
+
+- Updated dependencies [bc35e00]
+- Updated dependencies [6e141bc]
+- Updated dependencies [48fcf70]
+- Updated dependencies [0ecc656]
+- Updated dependencies [a4e2684]
+- Updated dependencies [0c90ece]
+- Updated dependencies [195ad76]
+- Updated dependencies [c2bbd97]
+- Updated dependencies [698cbc2]
+- Updated dependencies [ffb003c]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [6fa1827]
+- Updated dependencies [05154a1]
+- Updated dependencies [0f12193]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [fce14ab]
+- Updated dependencies [2e836de]
+- Updated dependencies [7309c81]
+- Updated dependencies [41dcda3]
+- Updated dependencies [545d931]
+- Updated dependencies [a225ef5]
+- Updated dependencies [c9d254a]
+- Updated dependencies [c3bcb42]
+- Updated dependencies [c20b875]
+- Updated dependencies [2a37694]
+- Updated dependencies [4dc14cc]
+- Updated dependencies [0373d52]
+- Updated dependencies [4f30943]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [bb192c4]
+- Updated dependencies [98e7cc7]
+- Updated dependencies [4cf7c61]
+- Updated dependencies [3c628ce]
+- Updated dependencies [347f460]
+- Updated dependencies [8a341a4]
+- Updated dependencies [b5f9397]
+- Updated dependencies [385c4b0]
+- Updated dependencies [45dc446]
+- Updated dependencies [d4720ca]
+- Updated dependencies [43ff598]
+- Updated dependencies [e5a4d26]
+- Updated dependencies [839982e]
+- Updated dependencies [623e555]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9881074]
+- Updated dependencies [507b92a]
+- Updated dependencies [99b4392]
+- Updated dependencies [33a5ff4]
+- Updated dependencies [39eb01b]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [3ba8d77]
+- Updated dependencies [a3cb9c8]
+- Updated dependencies [4be9d99]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [5b08389]
+- Updated dependencies [a2266a6]
+- Updated dependencies [5c13368]
+- Updated dependencies [1d5dc46]
+- Updated dependencies [627b188]
+- Updated dependencies [857a6cf]
+- Updated dependencies [1e38158]
+- Updated dependencies [65a3a84]
+- Updated dependencies [de6daa5]
+- Updated dependencies [d5749d7]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [77a77fd]
+- Updated dependencies [d82f8c0]
+- Updated dependencies [2053714]
+- Updated dependencies [7309c81]
+- Updated dependencies [43fc039]
+  - @objectstack/runtime@17.0.0-rc.1
+  - @objectstack/plugin-hono-server@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Patch Changes

@@ -1,5 +1,702 @@
 # @objectstack/core
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- 32ccb23: feat(spec,core,runtime)!: ADR-0112 batch 1 — one error-code vocabulary, SCREAMING_SNAKE, schema-enforced (#3841)
+
+  Settles #3841 per ADR-0112: the top-level `error.code` vocabulary is
+  SCREAMING_SNAKE, in two tiers.
+
+  - **`StandardErrorCode` members renamed in place** (`validation_error` →
+    `VALIDATION_ERROR`, all 53). Breaking for importers that branch on the old
+    lowercase members; the type name and member _meanings_ are unchanged.
+  - **New `ERROR_CODE_LEDGER`** (`@objectstack/spec/api`): service-specific codes
+    (`AUTH_REQUIRED`, `VALIDATION_FAILED`, `ATTACHMENT_DOWNLOAD_DENIED`, …) are
+    registered per owning package. `ErrorCode` = standard ∪ registered.
+  - **`ApiErrorSchema.code` is now `ErrorCode`**, not `z.string()` — an
+    unregistered code fails parse, so the envelope conformance suites assert
+    values, not just shape.
+  - **`FieldErrorSchema.code` widened to `z.string()`** (ADR-0112 D6): field-level
+    codes are a separate vocabulary the enum never described; #3977 owns its real
+    catalog.
+  - **Derived codes changed case on the wire**: `standardErrorCodeForHttpStatus`
+    now yields SCREAMING members (`permission_denied` → `PERMISSION_DENIED`,
+    `method_not_allowed` → `METHOD_NOT_ALLOWED`, …) — this map was #3842's
+    designated one-file sweep point for exactly this decision.
+  - **`ANONYMOUS_DENY_CODE` is `'UNAUTHENTICATED'`** (was `'unauthenticated'`) —
+    the promoted code on anonymous-denied requests and the REST `enforceAuth`
+    body change spelling with it.
+
+  `error-catalog.mdx` and the error-handling guides are rewritten to the single
+  vocabulary; a spec test now locks the catalog page's headings to the enum so
+  they cannot drift apart again. Remaining lowercase emitters (cloud-connection,
+  plugin-auth envelope codes, metadata-protocol, …) are the batch-2 sweep.
+
+- 0af50a3: fix(driver-sql,service-analytics): a bare-day upper bound covers the whole day on `Field.datetime` (#3777)
+
+  A bare `YYYY-MM-DD` comparand anchors to midnight UTC. That is right for a
+  lower bound and was silently wrong for an upper one: the dashboard date-range
+  filter compiles `{ $gte: from, $lte: to }` with bare-day bounds, so on a
+  `datetime` column every row created after 00:00 of the `to` day vanished from
+  the result — no error, the chart renders, the numbers are just smaller. The
+  default configuration hit it: the filter's default field is `created_at`
+  (a system-injected `Field.datetime`) and 7 of the 13 presets end "today".
+
+  The translation is operator-sensitive and half-open, applied at every
+  comparison emitter:
+
+  - `SqlDriver` (and `SqliteWasmDriver` by inheritance): `$lte`/`<=` with a
+    bare-day comparand on a `datetime` column compiles to `< next-day-midnight`
+    in the column's storage form; `$between [min, max]` with a bare-day max
+    decomposes to `>= min AND < next-day(max)`. Both the plain and the
+    legacy-repair (mixed-storage) column paths, both `where` spellings.
+  - `NativeSQLStrategy`: `dateRange` windows and `lte` filters bind `< next-day`
+    instead of an inclusive `BETWEEN`/`<=` when the bound is a bare day.
+  - The `/analytics/sql` rendering and the dataset preview evaluator apply the
+    same rule, so the echoed SQL and drafted numbers reproduce execution.
+
+  `@objectstack/core` gains the shared primitive `nextUtcCalendarDay(value)`:
+  the next calendar day of a valid bare `YYYY-MM-DD` (else `null` — instants,
+  `Date`s and impossible days are never widened).
+
+  Unchanged on purpose, per the semantics table on #3777: `date`/`time` columns
+  (`<= day` is already whole-day-correct there), full-ISO/`Date` comparands
+  (instant semantics), and `$gte`/`$gt`/`$lt` (midnight anchoring is correct for
+  those). No authored metadata changes: a dashboard's existing
+  `{ $gte, $lte }` window now simply includes its final day.
+
+- 3c628ce: feat(auth)!: retire the `api.requireAuth` opt-out — anonymous access to object data is always denied (#3963)
+
+  `api.requireAuth: false` let a deployment open its ENTIRE data plane with one
+  config key. It is removed. Auth is a kernel concern, not a deployment posture:
+  anonymous callers are denied on every HTTP surface that reaches object data,
+  unconditionally.
+
+  Every surface that legitimately serves a session-less caller already derives its
+  own narrow authorization from a DECLARATION, so none of them needed the global
+  switch:
+
+  - control plane (`/auth/*`, `/health`, `/ready`, `/discovery`, ADR-0069
+    remediation) — the auth-gate allowlist;
+  - public form submission — `publicFormGrant` (ADR-0056 Option A);
+  - share links — the capability token, validated then read as SYSTEM;
+  - a `book.audience: 'public'` read — the ADR-0046 §6.7 audience gate (#3995);
+  - MCP — an OAuth token or API key.
+
+  **Breaking changes.**
+
+  - `api.requireAuth` is a retired key. It is tombstoned (`retiredKey`) in both
+    `RestApiConfigSchema` and the stack `api` block, so authoring it now fails with
+    a fix-it message rather than being silently stripped (the ADR-0104 / #3733
+    quiet-failure this whole line of work has been closing). `os migrate meta`
+    drops it via the protocol-17 conversion `stack-api-require-auth-removed`.
+  - `shouldDenyAnonymous` (@objectstack/core) no longer takes a `requireAuth`
+    input; it denies any anonymous, non-system caller outside the control-plane
+    allowlist.
+  - A stack that mounts **no auth at all** now FAILS AT BOOT when it would serve a
+    data API (`objectstack serve`, plugin-dev), instead of getting an explicit
+    fail-open. Enable auth (the `auth` tier or AuthPlugin), or run without the data
+    API. There is no anonymous-data carve-out any more — publishing a public
+    surface is done by declaration (see above).
+
+  **Migration.** Delete `api.requireAuth` from the stack config (or run
+  `os migrate meta`). If you were serving data publicly with `requireAuth: false`,
+  replace it with the declaration that fits: a public form view, a share link, or
+  `book.audience: 'public'`. If you have an auth-less stack that intentionally
+  served data, it must now mount auth or stop serving the data API.
+
+- d13004a: feat(core,runtime): plugin ordering is a declared, kernel-enforced contract (ADR-0116, #4131)
+
+  `kernel.use()` registration order was never a contract — the kernel resolves
+  init/start order from the plugin dependency graph — but a plugin that needed a
+  service at init _when its provider is composed_ while also booting _without_
+  the provider had no way to declare that. `AppPlugin` was the standing example:
+  it grabs `manifest`/`objectql` synchronously in `init()`, declared nothing
+  (a hard dependency would break empty-env / metadata-only / mock-engine
+  kernels), and so its correctness rode on which array slot each caller put it
+  in. That convention failed the same way twice (`DefaultDatasourcePlugin`'s
+  first cut; then #4085, disguised for months as "crashes when the artifact is
+  missing").
+
+  The kernel `Plugin` contract gains three additive fields, enforced by both
+  `ObjectKernel` and `LiteKernel` through one shared implementation
+  (`plugin-order.ts` — the previously duplicated topological sort is unified
+  there):
+
+  - **`optionalDependencies: string[]`** — order-if-present: hoisted ahead
+    exactly like `dependencies` when composed (real topology edges, including
+    cycle detection), silently skipped when absent.
+  - **`requiresServices: string[]`** — services resolved synchronously during
+    `init()` with no fallback. Validated **before Phase 1**: a required service
+    whose only declared provider initializes later fails the boot with an error
+    naming both plugins, both slots, and the fix — before any init side
+    effects. Re-checked immediately before the plugin's own init, where a still-
+    missing service becomes a named composition error exactly where the old
+    bare `Service not found` crash fired.
+  - **`providesServices: string[]`** — services a plugin's `init()`
+    unconditionally registers; powers the validation and the diagnostics.
+
+  Plugins that declare nothing get the diagnosis too: a `getService` miss
+  during Phase 1 now appends which plugin was initializing and — when a
+  composed plugin declares the service — who provides it and how to declare the
+  ordering. The `Service '<name>' not found` prefix and the factory-backed
+  `is async - use await` message are unchanged.
+
+  First adopters: `AppPlugin` declares
+  `optionalDependencies: ['com.objectstack.engine.objectql']` +
+  `requiresServices: ['manifest']` (cleared on the empty-env no-op path), so
+  the #4085 composition — AppPlugin registered before the engine — now boots
+  correctly in every slot; `ObjectQLPlugin` declares
+  `providesServices: ['objectql', 'data', 'manifest', 'lifecycle']` and
+  `MetadataPlugin` declares `providesServices: ['metadata']`.
+
+  Everything is additive — plugins that declare nothing keep their exact
+  ordering semantics; no existing declaration changes meaning.
+
+- e4c2dc8: Order temporal operands correctly when one side is a JS `Date` on the two
+  type-blind filter backends (ADR-0053 D-A3 / #4191).
+
+  `utcInstantMs` joins `nextUtcCalendarDay` in `@objectstack/spec/data`
+  (re-exported from `@objectstack/core`): it reads the UTC instant a temporal
+  operand denotes, accepting only unambiguous spellings — a `Date`, epoch ms, a
+  bare `YYYY-MM-DD`, and an ISO timestamp with or without an explicit zone (a
+  zone-naive one being UTC, per D-B2) — and returning `null` for everything
+  else, notably a bare wall clock, which denotes no instant.
+
+  Both type-blind evaluators now use it to compare a `Date` against wire text,
+  which JS relational operators cannot do: `<` and friends coerce with hint
+  `number`, so the `Date` becomes its epoch and the string becomes `NaN`.
+
+  - `formula`'s `matchesFilterCondition` (the RLS write-side `check`) dropped
+    every `Date`-valued row in 10 of the 16 shared conformance cases. The
+    post-image is the caller's raw write payload, so an SDK write of
+    `new Date()` hit this directly, and fail-closed turned it into a **denied
+    write**.
+  - `service-analytics`' preview evaluator diverged on the same 10 cases in
+    BOTH directions, because `String(new Date())` sorts after every `'2026-…'`
+    comparand — a drafted chart both lost rows and gained ones, then changed
+    its numbers at publish. Rows from a mongo-backed dataset arrive as BSON
+    `Date`s, so this was reachable in normal use.
+
+  Comparisons that did not involve a `Date` are unchanged.
+
+### Patch Changes
+
+- 2af1988: fix(formula,spec,core): the RLS write-side `check` evaluator honours calendar-day upper bounds (ADR-0053 D-D)
+
+  `@objectstack/formula`'s `matchesFilterCondition` — the evaluator behind RLS
+  write-side `check` policies (ADR-0058 D4) — compared a bare `YYYY-MM-DD` `$lte`
+  bound literally. On a `datetime` post-image that meant a policy of the shape
+  `{ signed_on: { $lte: '{today}' } }` **denied every write made after 00:00**:
+  the write-side twin of the read-side data loss #3777 fixed, and the last of the
+  platform's filter backends that disagreed about what a bare day means as a
+  bound.
+
+  `$lte` and a `$between` max now evaluate half-open against the next calendar
+  day, matching the SQL compiler, the memory and mongo drivers, and the analytics
+  preview evaluator. Unchanged, per the same semantics table: full-ISO bounds keep
+  exact-instant semantics, `$gte`/`$gt`/`$lt` keep their midnight anchoring, and a
+  plain `YYYY-MM-DD` value compares identically (string ordering makes the two
+  forms equivalent). The evaluator stays fail-closed on a null bound.
+
+  **Where the rule now lives.** `nextUtcCalendarDay` moved from
+  `@objectstack/core` to `@objectstack/spec/data` — beside `date-macros.zod.ts`,
+  whose vocabulary it interprets. `formula` cannot depend on `core`, and a second
+  copy of the rule is exactly the divergence #3777 catalogued; `spec` is the one
+  package all six consumers already depend on, so this adds no dependency edge.
+
+  No import changes are required: `@objectstack/core` re-exports the symbol, so
+  existing `import { nextUtcCalendarDay } from '@objectstack/core'` keeps working.
+  New code should prefer `@objectstack/spec/data`.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 45dc446: Every in-memory fallback and dev stub now self-describes with the standard `__serviceInfo` descriptor, classified by what it actually is (#4058 step 1).
+
+  ADR-0076 D12 gave services one way to say "I am not the real thing", but the producers never converged on it:
+
+  - The kernel's own fallbacks (`createMemoryCache` / `Queue` / `Job` / `I18n` / `Metadata`) carried `_fallback: true` — a marker **no** consumer recognized, `readServiceSelfInfo` included — so both discovery builders reported them as fully `available`.
+  - `plugin-dev` marked all of its implementations with the same `_dev: true`, normalized to `status: 'stub', handlerReady: false`. That declared a working in-memory search index exactly as fake as an AI stub returning invented text.
+
+  Both now carry `__serviceInfo`, split by a rule that holds across the whole set:
+
+  - **`degraded`** — really does the work, with reduced capability: `cache`, `queue`, `job`, `file-storage`, `search`, `i18n`, `metadata`, `workflow`, `realtime`. Its answers are true answers; the `message` names what is missing (no persistence, no scheduling timer, no state-machine validation, …).
+  - **`stub`** — the answer is fabricated: `ai`, `automation`, `notification`, `data`, `auth`, `security.permissions`, `security.rls`, `security.fieldMasker`. Never to be mistaken for a capability.
+
+  `handlerReady: false` is set independently wherever no HTTP handler serves the slot (`cache` / `queue` / `job` / `realtime`, and every `stub`).
+
+  Discovery output changes accordingly — a kernel fallback that used to report `status: 'available'` now reports `degraded` with an explanatory message. No routing, gating, or dispatch behavior changes: every dispatcher domain still resolves services exactly as before. Consumers reading `discovery.services.*` get the truth instead of a uniform claim.
+
+  For anything that duck-typed the old markers: `svc._fallback` / `svc._dev` → `readServiceSelfInfo(svc)` from `@objectstack/spec/api` (the legacy `_dev` key is still understood by that reader, so third-party stubs carrying it keep working).
+
+- f985b3f: fix(spec,core,cloud-connection,metadata): one HTTP contract, one canonical slot name — and the dead shadow copy that helped cause the false exemption is deleted (#4251)
+
+  **`packages/core/src/contracts/` was a dead near-copy of the real contracts,
+  and it is gone.** The directory (http-server.ts, data-engine.ts, logger.ts) had
+  ZERO importers — no relative import, no subpath export, not a tsup entry;
+  core's barrel has re-exported the `@objectstack/spec/contracts` versions all
+  along ("Re-export contracts from @objectstack/spec for backward
+  compatibility"). But the shadow had already **diverged** from the live
+  contract (spec's `IHttpResponse` grew `write?`/`end?` and `IHttpRequest` grew
+  `rawBody?`; the copy never did), so anyone who grepped their way into it read a
+  stale contract that nothing enforces — the exact both-humans-and-AI failure
+  mode behind the false `http.server` exemption (#4382). Deleting it is
+  zero-risk by construction: nothing could reach it.
+
+  **`http.server` is the canonical slot name, and the ledger now says so.**
+  `ServiceSlotContracts` gains `'http.server': IHttpServer` plus the deprecated
+  `'http-server'` alias entry (same instance — hono-plugin and qa's node-plugin
+  register both two lines apart; cloud's two server entrypoints do the same).
+  Canonical is the only name present on EVERY provider path: runtime's
+  `config.server` path registers no alias, so the three cloud-connection plugins
+  that read the alias alone (marketplace-proxy, runtime-config,
+  marketplace-install-local) found an empty slot there — a live miss, now fixed:
+  all readers go canonical-first with the alias as a fallback that dies with the
+  alias registrations. The registrations themselves are untouched this release;
+  both sites now carry the deprecation note.
+
+  **`getRawApp?(): any` joins `IHttpServer`** — the deliberate framework-handle
+  escape, declared once. Four consumers were each declaring it locally
+  (cloud-connection ×2, metadata's HMR routes, cloud's serverless node-server);
+  those local `RawAppHost`/`HttpServerWithRawApp` types are deleted. The `any`
+  return is deliberate and documented at the single declaration: the handle's
+  real type belongs to the framework, and naming it would give the contract a
+  framework dependency. Adapters are not required to expose it; consumers
+  feature-detect.
+
+  **`IMetadataService.bulkRegister`/`bulkUnregister` declare the write options
+  their implementation has always accepted.** `bulkRegister`'s contract options
+  dropped the `MetadataWriteOptions` half its implementation intersects in
+  (`notify` is destructured on the method's first line); `bulkUnregister`
+  declared no options at all while the manager takes them. Same shape as the
+  `IDataEngine` read-methods gap from B2: a caller typed to the contract could
+  not reach the channel without erasing the lookup. Both additive; no implementor
+  or caller breaks.
+
+  Slot-lookup baseline ratchets 168 → 167 (marketplace-install-local's lookup
+  typed while touched).
+
+- 7777e8f: fix(spec)!: retire the never-built typed-event system; the lifecycle registry now lists the events that actually fire (#4212 follow-up)
+
+  The lifecycle-event surface promised a typed-event system that was never
+  built, in three layers. `kernel/plugin-lifecycle-events.zod.ts` shipped ten
+  payload schemas (`PluginRegisteredEvent`, `PluginErrorEvent`,
+  `HookTriggeredEvent`, `KernelReadyEvent`, …) and a 21-name
+  `PluginLifecycleEventType` enum — zero consumers for every export, and the
+  enum was wrong in both directions: 17 names nothing fires, 10 real events
+  missing. `contracts/plugin-lifecycle-events.ts` declared the same 17 dead
+  names in `IPluginLifecycleEvents` next to 5 real ones, plus an
+  `ITypedEventEmitter` interface nothing implements. All of it read as a
+  promise; anyone who coded against it (hooking `plugin:started`, awaiting
+  `plugin:error`) registered a handler that could never fire, with no error
+  saying so — the same silent-drop shape as the #4212 lifecycle-hook family.
+
+  Removed, with zero consumers verified repo-wide:
+
+  - `kernel/plugin-lifecycle-events.zod.ts` and every export: `EventPhase`,
+    `PluginEventBase`, `PluginRegisteredEvent`, `PluginLifecyclePhaseEvent`,
+    `PluginErrorEvent`, `ServiceRegisteredEvent`, `ServiceUnregisteredEvent`,
+    `HookRegisteredEvent`, `HookTriggeredEvent`, `KernelEventBase`,
+    `KernelReadyEvent`, `KernelShutdownEvent`, `PluginLifecycleEventType`
+    (schemas and inferred types).
+  - `ITypedEventEmitter` from `contracts/plugin-lifecycle-events.ts`.
+  - The 17 never-fired names from `IPluginLifecycleEvents`.
+
+  `IPluginLifecycleEvents` is now the registry of the **14 events with a real
+  emitter** — `kernel:{ready,bootstrapped,listening,shutdown}`, `app:seeded`,
+  `metadata:reloaded` (payload `metadata` now optional, matching the documented
+  contract), `external.schema.drift`, `ai:routes`, `auth:configure`, and the
+  `{service}:ready` convention family (`mcp`, `automation`, `analytics`,
+  `external-datasource`, `datasource-admin`) — each payload as observed at its
+  fire site. A new `LifecycleEventName` union types
+  `PluginContext.hook`/`trigger` in `@objectstack/core` as
+  `LifecycleEventName | (string & {})`: known names autocomplete, custom
+  cross-plugin names stay legal, existing callers compile unchanged. A pinning
+  test asserts two-way equality between the interface keys and the fire-site
+  inventory.
+
+  FROM → TO:
+
+  - `PluginLifecycleEventType` → `LifecycleEventName` (the union of names that
+    fire). There is no runtime enum; the bus is open by design.
+  - Event payload schemas (`KernelReadyEvent`, `PluginErrorEvent`, …) → the
+    payload tuples on `IPluginLifecycleEvents`. No wire format existed or
+    exists; payloads are in-process arguments.
+  - `ITypedEventEmitter` → `PluginContext.hook`/`trigger` (the emitter that
+    actually exists).
+  - Handlers for the 17 dead names → delete them; they never ran. For plugin
+    phase observation use the boot report (ADR-0084); for per-plugin errors the
+    kernel throws/logs at the failing phase.
+
+  Plain deletion rather than `retiredKey()` tombstones, per the #4233
+  precedent: these keys were never authorable — they described runtime event
+  payload records no config author can write, so the silent-strip class the
+  authorable-surface ratchet guards against is vacuous. Its baseline entries
+  and the `json-schema.manifest.json` keys are dropped deliberately in this PR.
+  No ADR-0087 conversion: no stack metadata names these types; there is nothing
+  for `os migrate meta` to rewrite.
+
+- 7ce02eb: feat(spec,objectql): `IObjectQLEngine` — the `objectql` slot's contract exists, the class `implements` it, and the seven consumer-local stand-ins are deleted (#4251 B3)
+
+  ObjectQL registers one instance under two names, and the ledger can finally say
+  what each name means: `data` stays `IDataEngine` (the data plane), `objectql`
+  now resolves to **`IObjectQLEngine`** — the full engine: schema access
+  (`getSchema` / `getObject` / `registry`), actions (`registerAction` /
+  `removeActionsByPackage` / `executeAction`), the hook/middleware seams
+  (`registerHook` / `unregisterHooksByPackage` / `registerFunction` /
+  `registerMiddleware` / `bindHooks`), the first-wins default runners and hook
+  metrics, boot wiring (`registerDriver` / `setDatasourceMapping` /
+  `registerApp`), and the ops probes (`checkDriversHealth` /
+  `wasDatastoreCreatedFromEmpty` / `invalidateDataMigrationFlags`). The ledger
+  test pins the new relation: `objectql` strictly widens `data`, deliberately no
+  longer equal.
+
+  **Why now, and why `implements` is the point.** The honest state for two
+  batches was recorded on `DomainHandlerContext.getObjectQL`: ObjectQL is wider
+  than `IDataEngine`, the wider part had no contract, and typing it `IDataEngine`
+  would be "the more comfortable-looking lie". The interim discipline — each
+  consumer declares the narrow slice it uses — produced seven local surfaces
+  (`AppEngineSurface`, `EngineRegistrySurface`, `EngineExtensionSurface`,
+  `SecurityEngineSurface`, `FreshDatastoreEngine`, the dispatcher's inline
+  `checkDriversHealth` slice, the `getObjectQL: any` itself). Each was honest and
+  each was an UNCHECKED claim: `getService<Surface>('objectql')` is an assertion,
+  so an engine rename would have broken every consumer at runtime with zero
+  compile errors. `ObjectQL implements IObjectQLEngine` converts all of them into
+  one compiler-verified claim. All seven stand-ins are deleted; consumers import
+  the one declaration. `getObjectQL` is typed `Promise<IObjectQLEngine | null>`
+  end to end, closing the oldest documented `any` in the dispatcher.
+
+  **Evidence bar unchanged.** Every declared member has a cross-package consumer
+  reaching it through the slot; engine members without one (e.g. `triggerHooks`,
+  cross-package only in tests) stay off until a caller appears. The registry view
+  (`EngineSchemaRegistryView`) declares exactly the eight members consumers use.
+
+  **`_registry` never leaves the engine package now.** plugin-security's
+  declared-metadata readers (`readDeclared`, permission-set projection, suggested
+  audience bindings) reached ObjectQL's private `_registry` field through `any` —
+  the same private reach `/me/apps` had in B2, five more times. All migrated to
+  the public `registry` getter the contract declares, test doubles included.
+
+  **`IMetadataService` gains `subscribe?` / `loadMany?`** — implemented by
+  `MetadataManager` beside `watch` all along, reached through the slot only via
+  `any` by ObjectQLPlugin's metadata bridge (the re-sync keeping runtime-authored
+  hooks/actions live). With them declared, the bridge's six `metadata` lookups
+  and metadata-protocol's `objectql` lookup carry contract types, and both files
+  leave the grandfather list entirely: baseline **167 → 159 sites, 36 → 34
+  files**.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- 857a6cf: fix(cli,core,metadata,runtime): `os serve` boots with no compiled artifact — the platform does not need an application to start (#4085)
+
+  The artifact (`dist/objectstack.json`) defines an **application**. ObjectStack is
+  a development platform, so it has to start without one — but `os serve
+objectstack.config.ts` died during boot whenever the artifact was absent:
+
+  ```
+    Loading objectstack.config.ts...
+  [StandaloneStack] artifact read FAILED: path='…/dist/objectstack.json' error=ENOENT…
+
+    ✗ Service 'manifest' is async - use await
+  ```
+
+  Exit 1 — on a **known-good app** (`examples/app-todo` fails the same way with
+  only its `dist/objectstack.json` moved aside), and on every freshly authored
+  project between `os init` and its first `os compile`. The message named neither
+  the missing artifact nor a fix, so it read as an internal kernel fault.
+
+  Three separate faults, each of which alone was enough to refuse the boot:
+
+  - **`serve` registered the config-derived `AppPlugin` before the stack's own
+    `plugins[]`.** Registration order _is_ the kernel's init/start order, and that
+    slot sits ahead of `ObjectQLPlugin` (which registers `manifest`/`objectql`) and
+    `DefaultDatasourcePlugin` (which connects the database the app seeds through).
+    The wrap is now **appended** to `plugins[]`, the same slot
+    `createStandaloneStack` gives its artifact-derived `AppPlugin` — so config-boot
+    and artifact-boot share one plugin order. The artifact path never hit this,
+    which is exactly what made a plugin-**order** bug look artifact-related.
+
+  - **`ctx.getService()` reported a never-registered service as "is async".**
+    `PluginLoader.getService` is an `async` method, so its return value is _always_
+    a Promise and its internal "not found" rejection can never surface
+    synchronously — the kernel read the answer off that Promise and told every
+    caller to `await` a service that did not exist, while the `not found` branch
+    below it was unreachable. It now decides from the registry: absent ⇒
+    `[Kernel] Service 'x' not found`, registered-but-uninstantiated ⇒ the unchanged
+    `Service 'x' is async - use await`. The same crash now reads
+    `[Kernel] Service 'manifest' not found`, which points at the layer that is
+    actually wrong.
+
+  - **`MetadataPlugin` treated an absent `local-file` artifact as fatal.**
+    `createStandaloneStack` always points it at `dist/objectstack.json`, so a stack
+    with no app at all could not boot. A **missing** local artifact is now "nothing
+    compiled yet": it logs, starts empty, and leaves the artifact watcher armed, so
+    a later `os compile` hydrates the running server. The tolerance is
+    ENOENT-only — a malformed or unreadable artifact stays fatal — and
+    `bootstrap: 'artifact-only'` (sealed runtime, where the artifact _is_ the
+    deployment) keeps failing loudly rather than silently serving an empty runtime.
+
+  `[StandaloneStack] artifact read FAILED … ENOENT` is likewise no longer shouted
+  at callers for whom "no artifact" is a healthy state; a present-but-unusable
+  artifact keeps the loud warning.
+
+  Pinned by an e2e pair that drives the real `os serve` with **no `os compile`
+  anywhere**: an app defined only by `objectstack.config.ts` (asserting its object
+  is in the started plugin set, not merely that boot survived) and a bare
+  `export default {}` platform. The #4012 fixture drops the `os compile` this bug
+  had forced on it.
+
+- d92c72d: fix(lint,runtime,core): the slot-lookup guard sees the split-declaration form — the shape that made the ratchet look cleaner the more it was used (#4251)
+
+  The three selectors from #4321 all key off the erasure and the lookup being in
+  ONE expression. Split them and every selector misses:
+
+  ```ts
+  let ql: any;
+  try {
+    ql = ctx.getService("objectql");
+  } catch {
+    /* optional */
+  }
+  ```
+
+  Selector 1 needs the call inside the declarator (this declarator has no init),
+  selector 2 needs `as`, selector 3 needs a type argument. The contract is erased
+  exactly as in `const ql: any = ctx.getService(…)`.
+
+  **Why this could not wait for the batches.** The baseline's monotonicity check
+  means a file that leaves the grandfather list can never be re-added. So every
+  batch converted more of this shape from "grandfathered" into "lint covers this
+  file and says nothing" — B2 alone moved `plugin-security/security-plugin.ts`
+  into that state. A ratchet that reports a cleaner number the more you sweep is
+  the #4342 failure wearing different clothes, and the fix only gets more
+  expensive per batch shipped.
+
+  **It is a rule, not a fourth selector, and that is the whole finding.** esquery
+  can match `AssignmentExpression:has(CallExpression[…])`, but it cannot tell
+  which declaration the assigned identifier resolves to — so it would equally
+  flag the correctly-typed form this work line exists to produce (`let
+i18nService: II18nService | undefined; i18nService = …`, 8 such sites today in
+  runtime/app-plugin.ts, service-automation and metadata-protocol). Resolving the
+  identifier needs SCOPE analysis. That is cheap and needs no type information, so
+  this stays out of the typed-lint pass the KNOWN RESIDUAL still waits on — but it
+  is a rule, and the earlier "just one more selector" estimate was wrong.
+
+  Verified against exactly that: the rule flags all 16 real sites and none of the
+  8 correctly-typed lookalikes.
+
+  **Scale.** The baseline goes 140 → **169 sites** with the file count unchanged
+  at 37: 29 sites were already inside grandfathered files and simply invisible.
+  16 more could NOT be grandfathered (12 in files earlier batches had cleared, 3
+  in files never listed, 1 the regex sweep had missed) and are typed here —
+  `runtime/app-plugin.ts` ×5, `core/fallbacks/authored-translation-sync.ts` ×2,
+  `plugin-security/security-plugin.ts` ×2, `cloud-connection/{runtime-config,
+marketplace-proxy}-plugin.ts` ×3, `platform-objects/src/plugin.ts` ×2,
+  `runtime/http-dispatcher.ts`, `runtime/domains/ai.ts`. No baseline key was
+  added; the key set still only shrinks.
+
+  Contracts where they exist (`IAIService`, `IJobService`, `IMetadataService`,
+  `II18nService`, `IDataEngine`, `IHttpServer`), named local surfaces where they
+  do not — `AppEngineSurface`, `SecurityEngineSurface`, `RawAppHost`,
+  `EnvRegistrySurface`, `FreshDatastoreEngine`, `AuthoredTranslationSink`. Two of
+  those record something worth naming: `IHttpServer` has no `getRawApp()` (the
+  contract is framework-agnostic and the raw app is Hono's own handle), and
+  ObjectQL's `_defaultBodyRunner` / `_defaultActionRunner` have no public reader
+  at all — the engine attaches them via `(this as any)` and publishes nothing,
+  while `getHookMetricsRecorder()` exists for exactly that question about the
+  metrics recorder. Declared rather than laundered through `any`, and filed.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [65a3a84]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

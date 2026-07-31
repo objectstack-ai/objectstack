@@ -1,5 +1,369 @@
 # @objectstack/driver-sqlite-wasm
 
+## 17.0.0-rc.1
+
+### Patch Changes
+
+- 0af50a3: fix(driver-sql,service-analytics): a bare-day upper bound covers the whole day on `Field.datetime` (#3777)
+
+  A bare `YYYY-MM-DD` comparand anchors to midnight UTC. That is right for a
+  lower bound and was silently wrong for an upper one: the dashboard date-range
+  filter compiles `{ $gte: from, $lte: to }` with bare-day bounds, so on a
+  `datetime` column every row created after 00:00 of the `to` day vanished from
+  the result — no error, the chart renders, the numbers are just smaller. The
+  default configuration hit it: the filter's default field is `created_at`
+  (a system-injected `Field.datetime`) and 7 of the 13 presets end "today".
+
+  The translation is operator-sensitive and half-open, applied at every
+  comparison emitter:
+
+  - `SqlDriver` (and `SqliteWasmDriver` by inheritance): `$lte`/`<=` with a
+    bare-day comparand on a `datetime` column compiles to `< next-day-midnight`
+    in the column's storage form; `$between [min, max]` with a bare-day max
+    decomposes to `>= min AND < next-day(max)`. Both the plain and the
+    legacy-repair (mixed-storage) column paths, both `where` spellings.
+  - `NativeSQLStrategy`: `dateRange` windows and `lte` filters bind `< next-day`
+    instead of an inclusive `BETWEEN`/`<=` when the bound is a bare day.
+  - The `/analytics/sql` rendering and the dataset preview evaluator apply the
+    same rule, so the echoed SQL and drafted numbers reproduce execution.
+
+  `@objectstack/core` gains the shared primitive `nextUtcCalendarDay(value)`:
+  the next calendar day of a valid bare `YYYY-MM-DD` (else `null` — instants,
+  `Date`s and impossible days are never widened).
+
+  Unchanged on purpose, per the semantics table on #3777: `date`/`time` columns
+  (`<= day` is already whole-day-correct there), full-ISO/`Date` comparands
+  (instant semantics), and `$gte`/`$gt`/`$lt` (midnight anchoring is correct for
+  those). No authored metadata changes: a dashboard's existing
+  `{ $gte, $lte }` window now simply includes its final day.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 9881074: test(drivers): the "held to by a gate" claim now has a gate behind it (#4363)
+
+  Three changesets — filter combinator semantics (#3774), temporal storage form
+  (ADR-0053), deterministic paged reads (objectui#3106 / #4363) — each introduced
+  a shared case-set in `@objectstack/spec/data` with some version of the claim
+  that a future driver "is held to this by a gate rather than by remembering it".
+
+  There was no gate. The case-sets are exports sitting in a package; nothing
+  obliged a driver to import them. Measured on `main`, the matrix had three holes:
+  `driver-sqlite-wasm` ran neither pagination case-set, and neither it nor
+  `driver-mongodb` ran the filter-logic one — including a hole in the very
+  case-set whose changeset made the claim.
+
+  `scripts/check-driver-conformance.mjs` (`pnpm check:driver-conformance`, wired
+  into lint.yml's required job) makes the hole the failure. Every
+  (driver × case-set) cell is covered — some file under the package's `src/`
+  imports _and drives_ the case-set's marker export — or carries a measured
+  DEBT/EXEMPT entry, reconciled in both directions. A third direction, CLASSIFIED,
+  holds the other end: a new `*-conformance.ts` fixture nobody classified fails
+  the run rather than starting life uncovered, which is the direction that
+  actually rots (#4203). It caught an unclassified `TEMPORAL_TIME_CASES` on its
+  first run.
+
+  `driver-sqlite-wasm` gains the pagination suite the gate found missing. It
+  inherits `SqlDriver`'s ORDER BY construction, so nothing is re-implemented —
+  what the suite pins is that the clause survives a different _engine_: this
+  driver swaps knex's transport for a custom sql.js dialect that compiles,
+  executes and marshals every row through its own path, and a dialect that
+  reordered or dropped the trailing `ORDER BY id` would fail in no other suite.
+
+  The two filter-logic holes are ledgered as DEBT rather than fixed here, with
+  their reasons printed on every run and tracked in #4405. The mongodb row is the
+  substantive one: `translateFilter` is an independent FilterCondition backend —
+  the fifth, and the one #3774 never enrolled when it counted "the four".
+
+- 4384921: fix(spec,drivers): `bypassTenantAudit` becomes a declared driver option, and `findOne` stops accepting a bare id (#4311)
+
+  Three drivers built with `tsup` and tested with `vitest`, so no `tsc` had ever
+  read them. Onboarding them to the #4311 type-check ratchet surfaced 292 errors,
+  and most of what looked like sloppy test fixtures was the types being wrong.
+
+  **`DriverOptions.bypassTenantAudit` is now declared.** It has been live for a
+  long time without being on the schema: `SqlDriver.auditMissingTenant` reads it
+  to suppress the "tenant-scoped write without `tenantId`" warning, the driver's
+  own warning text tells callers to set it, `ObjectQLEngine` sets it for
+  system-context calls, and `service-settings` / `service-datasource` pass it on
+  every global-scope write. Because the schema never had it, the driver read it
+  through `(options as any)` and no caller was type-checked. The declaration
+  states the limit as well: it silences a diagnostic and MUST NOT change which
+  rows a write touches — suppressing an audit warning is not a permission.
+
+  The same cast covered `timezone`, `tenantId`, `tenantIds` and `preserveAudit`,
+  all long since declared. Those reads now go through `DriverOptions`, so the next
+  undeclared option fails the build instead of hiding behind an existing cast.
+
+  **`SqlDriver.findOne(object, id)` is removed.** An undeclared
+  `typeof query === 'string' | 'number'` branch accepted a bare id. It was on no
+  contract, nothing outside that package's own tests used it, and the other two
+  drivers answered the identical call differently — `MemoryDriver` spreads the
+  string into `{0:'t',1:'1'}`, `MongoDBDriver` reads `query.where` as `undefined`
+  and returns an arbitrary row. It also bypassed the shared `findRows()` path, so
+  it skipped field selection, temporal coercion, unknown-column recovery and the
+  `singleRowLookup` ORDER BY decision. Spell an id lookup as the query it is:
+
+  ```ts
+  -(await driver.findOne("task", "t1"));
+  +(await driver.findOne("task", { object: "task", where: { id: "t1" } }));
+  ```
+
+  **`SqlDriver.initObjects` declares the `tenancy` it consumes.** Each object is
+  fed to `computeAndRecordTenantField`, which reads `obj.tenancy` to pick the
+  tenant column and to set or clear the sticky explicit-opt-out — but the
+  parameter type listed only `{ name, fields }`, so a caller that spelled the key
+  correctly was rejected while the driver read it anyway.
+  `registerExternalObject` already had it.
+
+  **`AnalyticsQueryInput` joins `AnalyticsQuery`.** `timezone` is
+  `.default('UTC')`, so the parsed type requires it and an authored literal does
+  not have it — the same two-tier split `QueryInput`/`QueryAST` already names on
+  the query side. `InMemoryDriver.create`/`bulkCreate` also declare their
+  `IDataDriver` return types; without them TS inferred the literal the method
+  builds and every other column of the created row disappeared from the caller's
+  view.
+
+  One silent runtime bug fell out of the same pass: a driver test asked for
+  `orderBy: [['id', 'asc']]`, the driver reads `item.field`, a tuple has none, and
+  the sort never reached SQL. The tuple spelling appears nowhere else.
+
+- c53aa53: File-backed SQLite now runs `journal_mode = WAL` (#3941).
+
+  `SqlDriver.connect()` set `auto_vacuum` and left the journal mode alone, so
+  every ObjectStack SQLite database ran SQLite's built-in default — a rollback
+  journal. That is the worst mode for the shape this platform actually has, which
+  is **several processes on one file**: a dev server, `os migrate`,
+  `os meta resync`, a test run. Measured, on the same file:
+
+  |                                                | rollback journal                                   | WAL                                                               |
+  | :--------------------------------------------- | :------------------------------------------------- | :---------------------------------------------------------------- |
+  | writer while another process holds a read open | `SQLITE_BUSY` — committing needs an exclusive lock | proceeds                                                          |
+  | idle attached connection visible to SQL        | no — a lock lasts only as long as its transaction  | yes (`locking_mode = EXCLUSIVE` + `BEGIN IMMEDIATE` reports busy) |
+
+  The second row is why the `os migrate` occupancy check had to inspect file
+  descriptors to see a live server at all (#3940): under a rollback journal there
+  was nothing in the database to see. That signal stays — it names the process,
+  which WAL's lock probe cannot — but the SQL probe is now authoritative for
+  databases ObjectStack created rather than a fallback that was blind in practice.
+  Concurrent _writers_ still serialize; SQLite allows one at a time in any mode.
+
+  Journal mode is a persistent property of the file, so an existing database is
+  converted in place on the next connect (a header change — no rows are touched)
+  and stays converted. Two consequences to plan for:
+
+  - `app.db-wal` / `app.db-shm` exist beside the database while a connection is
+    attached, and `app.db-wal` can hold committed transactions. A clean shutdown
+    checkpoints them away; a naive copy of `app.db` alone while a server runs does
+    not. Use `sqlite3 app.db ".backup …"`.
+  - **WAL does not work on network filesystems** (NFS/SMB). Opt out with
+    `OS_DATABASE_SQLITE_JOURNAL_MODE=delete`, or per datasource with
+    `sqliteJournalMode: 'delete'` in the driver config (which outranks the env
+    var). Either form _applies_ `delete`, so it also converts a database that
+    already adopted WAL back — skipping would have stranded it.
+
+  Nothing here fails a boot, and nothing is assumed: `PRAGMA journal_mode = X`
+  answers with the mode actually in force rather than raising on refusal, so the
+  reply is read back; and because a filesystem can accept WAL and then fail the
+  first read _through_ it, the mode is proven with a read and rolled back to
+  `delete` if that fails — with a warning naming the file and the escape hatch.
+  `synchronous` is untouched, so durability is exactly what it was. `:memory:`
+  databases are left alone, as is `auto_vacuum = INCREMENTAL`, which keeps
+  reclaiming under WAL (ADR-0057).
+
+  `os db clean` now counts `-wal` / `-shm` as part of the database when it measures
+  what a `VACUUM` reclaimed, so bytes that were sitting in the log do not read as a
+  reclaim of zero.
+
+  `@objectstack/driver-sqlite-wasm` deliberately stays out of WAL. Its live
+  database is in the WASM heap and what reaches disk is a byte image it exports, so
+  nothing reads the database across processes and the pragma buys it nothing —
+  while still being a persistent header change in the operator's file. sql.js
+  _accepts_ the pragma (its VFS is memory-backed), so this had to be declared
+  rather than discovered.
+
+  It also now parks a `-wal` left behind by an unclean native-driver exit rather
+  than loading the image beside it: wasm SQLite cannot read that log, and leaving
+  it next to a freshly rewritten image would let a later real SQLite replay frames
+  that no longer belong to it. The warning names the file it parked and how to
+  recover what was in it.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [42e3b01]
+- Updated dependencies [c8124e5]
+- Updated dependencies [39eb01b]
+- Updated dependencies [a1a4140]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [6f98c2d]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [33a5ff4]
+- Updated dependencies [9e01213]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [3fe0ff1]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [c53aa53]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/driver-sql@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Patch Changes

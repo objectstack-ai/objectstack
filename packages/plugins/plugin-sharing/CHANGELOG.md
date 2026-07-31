@@ -1,5 +1,638 @@
 # @objectstack/plugin-sharing
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- 1ea6bce: feat(sharing): hierarchy managers may manage shares within their write DEPTH (ADR-0111 D1 DEPTH)
+
+  `canManageShares` gains its named DEPTH extension: a caller whose effective
+  WRITE scope on the object is a hierarchy scope (`unit` / `unit_and_below` /
+  `own_and_reports`) may now manage shares on a record whose owner falls within
+  that scope's owner set — the same set the write filter and `canEdit` already
+  honour, resolved by the enterprise `hierarchy-scope-resolver`. This lets a
+  manager grant/revoke/list shares on a subordinate's record, matching
+  Salesforce (roles above the owner) and Dataverse (the `Share` privilege's BU
+  depth), without expanding the MVP owner + Modify-All authority.
+
+  - New `ISecurityService.resolveWriteScope(object, context)` — the effective
+    write scope, resolved by the same evaluator the CRUD middleware uses; fails
+    closed to `own`. Mirrored on the sharing plugin's structural probe.
+  - The gate honours only the three hierarchy scopes. `org` from the probe is
+    deliberately ignored: it means both a genuine Modify-All holder (already
+    granted via `hasWriteBypass`) AND the fail-OPEN "no permission set mentions
+    this object" default, so honouring it here would reopen the hole
+    `hasWriteBypass` was chosen to avoid.
+  - Fails closed with no security service or no enterprise resolver — the open
+    edition stays owner + Modify-All, exactly as before.
+
+- e5e8b10: feat(sharing): a record's share-manager may revoke any share-link on that record (ADR-0111 D8)
+
+  `ShareLinkService.revokeLink` was creator-or-system only, so a record's owner or
+  a Modify-All admin could not kill a link someone else minted on their record —
+  their record's exposure, but not their link to revoke. Revoke authority now
+  also admits a record **share-manager**, probed via the sharing service's
+  late-bound `canManageShares` (owner / `modifyAllRecords`). The probe fails
+  closed: a deployment without it (or a throwing probe) keeps the pre-D8
+  creator-only behaviour. Mint authority is unchanged and now documented as the
+  D8 decision it always enforced — the object's `publicSharing` opt-in AND the
+  caller's visibility of the record.
+
+- c1dcacd: fix(sharing)!: the share-management surface gains the authorization layer it never had (ADR-0111 P0, #3902)
+
+  Record sharing shipped as a data layer with no authorization of its own: every
+  `/data/:object/:id/shares` and `/sharing/rules` route authenticated the caller
+  and then ran the service under `SYSTEM_CTX` — any signed-in user could revoke
+  anyone's share, enumerate who-can-see-what, write self-grants, and define /
+  evaluate org-wide sharing rules. ADR-0111's P0 rulings land here:
+
+  - **D1/D2** — `ISharingService.canManageShares(object, recordId, context)`:
+    system, the record's owner, or a holder of Modify All Data (probed via the
+    new fail-closed `ISecurityService.hasWriteBypass`). Enforced in the SERVICE,
+    so every caller is covered; without plugin-security it fails closed to
+    owner-only.
+  - **D4** — `revoke` is symmetric with grant, validates the share belongs to the
+    URL's record (`NOT_FOUND` on mismatch), and refuses non-`manual` rows
+    (`CONFLICT` — a rule-materialised grant would be resurrected by the next
+    reconcile).
+  - **D5** — `listShares` is management-gated (invisible record → `NOT_FOUND`,
+    visible-but-not-manager → `PERMISSION_DENIED`), and the open
+    `/data/sys_record_share` read surface is self-scoped: non-admin callers see
+    only rows naming them as recipient or grantor.
+  - **D6** — the whole `/sharing/rules` surface (list/create/get/delete/evaluate)
+    requires the new **`manage_sharing`** capability (D9; seeded into
+    `admin_full_access`, `manage_platform_settings` honoured as the legacy
+    equivalent), enforced in `SharingRuleService`.
+  - **D7** — no inert grants: `recipientType` is narrowed to `user` (the only
+    type any gate enforces), grants on objects the sharing gates never consult
+    (public model, no `owner_id`, bypass, `controlled_by_parent`) fail with
+    `SHARING_NOT_ENABLED` (422), and the manual upsert keys on
+    `(object, record, recipient, source)` so manual and rule rows coexist.
+
+  **Breaking** for callers that relied on the missing gate: unauthorized share
+  management now fails with 403/404/409/422 instead of silently succeeding, and
+  `ISharingService.revoke` gained an optional `scope` parameter. The verb
+  boundary (edit ≠ delete, ADR-0111 D3) is NOT in this change — it lands as the
+  separate P1.
+
+- ad303ed: fix(sharing)!: an edit-level share no longer grants delete (ADR-0111 D3, the verb boundary)
+
+  `update` and `delete` shared one `canEdit` gate, and `canEdit` accepts an
+  `edit`-level share — so one "edit" grant silently conferred delete, the
+  opposite error from the retired `full` level. A share widens _which rows_ a
+  principal reaches, never _which verbs_ they may use (Salesforce Read/Write
+  cannot delete; Dataverse `Delete` is a distinct privilege; Odoo splits
+  `write`/`unlink`).
+
+  - `ISharingService.canDelete(object, recordId, context)` — ownership (widened
+    by write DEPTH) or the `modifyAllRecords` super-user bypass ONLY; an `edit`
+    or legacy `full` share does not confer it. `canEdit` is unchanged (the
+    update gate, share included).
+  - `SharingService.buildWriteFilter` takes a `verb` parameter: a bulk
+    `delete({multi:true})` scopes to the owner/DEPTH set alone (no share
+    widening), while a bulk `update` keeps it.
+  - The sharing middleware routes `delete` through `canDelete` and logs a
+    specific fail-closed reason on denial (ADR-0111 D10).
+  - `/security/explain` consults `canDelete` for a `delete` operation, so the
+    record-level explanation matches enforcement.
+
+  **Breaking**: a caller who could delete a record _only_ through an edit-level
+  share (and holds object-level delete CRUD) can no longer delete it — delete now
+  requires ownership, write depth, or Modify All Data. No new delete access level
+  is introduced; a future per-record delete grant would be a capability mask
+  AND-ed with object CRUD, not a fourth share level.
+
+- ccd9397: fix(security)!: a sharing rule with no criteria now shares NOTHING instead of every record (#3896)
+
+  `SharingRuleSchema` has always required `condition`, and its doc is explicit
+  that a predicate the compiler cannot lower is _"skipped and logged — never
+  seeded as a permissive match-all (ADR-0049)"_. The declared/seed path honoured
+  that. The two other ways to create a rule did not:
+
+  - **`POST {basePath}/sharing/rules`** plucks its body field-by-field into
+    `SharingRuleService.defineRule`, which validated `name` / `label` / `object` /
+    `recipientType` / `recipientId` — and not `criteria`. A missing, `null`, or
+    **misspelled** key (`criterias`) was stored as `criteria_json: null`, answered
+    `201` with no warning, and evaluated as
+    `find(object, { filter: {}, context: SYSTEM_CTX })`: every record of the
+    object, up to 5000, granted to the recipient. Triggering it took a typo, not
+    an attacker.
+  - **Authoring a rule in Setup** is a direct `sys_sharing_rule` insert, which
+    never reaches `defineRule` at all.
+
+  Empty criteria is now rejected everywhere a rule can be written, and — because
+  rules created before this gate are already in the table — the evaluator refuses
+  to act on one regardless of how it got there.
+
+  - **`defineRule` rejects a match-all criteria** with
+    `VALIDATION_FAILED: criteria is required …`, alongside its other required
+    fields. Covers the REST endpoint, programmatic callers, and the seeder.
+    Rejected shapes: missing / `null` / `''` / `{}` / `[]` / `{ $and: [] }` /
+    unparsable JSON (e.g. a CEL source typed into the Criteria box).
+  - **The evaluator matches nothing** for such a rule and logs why, so a row
+    stored before this release under-shares instead of over-sharing: the next
+    reconcile _revokes_ the grants it had materialised. Both evaluation paths are
+    covered — the bulk `evaluateRule` and the per-record write-hook path.
+  - **`bindRuleCriteriaGuard`** fails `sys_sharing_rule` inserts with no
+    criteria as a field-level `VALIDATION_FAILED` (a 400 naming `criteria_json`),
+    so the Setup path reports the problem instead of saving an inert rule
+    (ADR-0078). Updates are checked only when the patch supplies
+    `criteria_json` — switching an over-broad legacy rule off must not require
+    inventing a criteria for it first.
+  - **The seed bootstrap's "empty condition = match-all" branch is gone**: a
+    missing or empty `condition` is now skipped and logged like any other
+    non-lowerable one.
+  - `POST {basePath}/sharing/rules` also accepts `criteria_json` as an alias for
+    `criteria`, matching the snake_case aliases the endpoint already takes for
+    `object_name` / `recipient_type` / `access_level`.
+
+  **Migration.** There is no "share every record" sharing rule, and there never
+  usefully was one — the shape existed only as a failure mode. A rule that
+  relied on it must state its predicate (`criteria: { stage: 'won' }`), or, if
+  the object really should be readable by everyone, use the object's
+  organization-wide default (`sharingModel`) instead. Rules already stored with
+  a null `criteria_json` need no data migration: they stop granting on the next
+  evaluation and their existing grants are revoked.
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 7df7c64: feat(sharing): `sys_sharing_rule.criteria_json` is declaratively required (ADR-0113 P2)
+
+  The field the ADR was written for: `required: true` as the write contract —
+  insert must provide, update may not null out, legacy null rows rest, an admin
+  can still `active: false` an over-broad legacy rule. Deliberately NO
+  `storage.notNull`: deployed tenants' legacy nulls are the case the split
+  exists for. The Setup form's required marker and client validation now derive
+  from the declaration.
+
+  Not breaking: a rule without criteria was already rejected by the #3929 hook
+  guard; the guard narrows to the non-null match-all shapes `required` cannot
+  express ('{}', vacuous $and/$or, unparsable JSON), `defineRule` keeps the API
+  seam, and the evaluator stays fail-closed (ADR-0049).
+
+- b5f9397: fix(sharing,runtime): a `sort` passed straight to the engine never ordered anything; migrate every in-repo engine call to canonical QueryAST keys (#4346)
+
+  Two changes with different weights, from one sweep of every in-repo engine
+  call site that still speaks a deprecated alias.
+
+  **The bug — three dropped sorts.** #4346 made the engine fold `filter`→`where`
+  and `top`→`limit` on all six methods. The other four pairs in
+  `RPC_QUERY_ALIAS_SLOTS` (`select`, `sort`, `skip`, `populate`) are folded at
+  the RPC/wire layer only — their values need shape lowering that belongs to
+  those layers — and a **direct `engine.find()` never crosses that layer**. Three
+  call sites passed `sort` there, so it rode onto the AST untouched, every
+  driver's `Array.isArray(query.orderBy)` guard declined to emit an ORDER BY, and
+  the query returned an ordinary-looking, arbitrarily-ordered result:
+
+  | call site                           | asked for                                         | actually got                |
+  | ----------------------------------- | ------------------------------------------------- | --------------------------- |
+  | `share-link-routes.ts`              | shared AI conversation messages, `created_at asc` | messages in arbitrary order |
+  | `runtime/domains/share-links.ts`    | same route, runtime-domain copy                   | same                        |
+  | `share-link-service.ts` `listLinks` | the 200 most recent share links                   | an arbitrary 200            |
+
+  All three combine the dropped sort with a `limit` — the "latest N" shape whose
+  failure #4226 spelled out: an unapplied sort returns rows in arbitrary order,
+  which `limit` then slices into an arbitrary page. #4226 fixed that in the wire
+  normalizer; these calls sit one layer below it. `listLinks` had no test at all,
+  which is why it went unnoticed. Now pinned — on the option bag the engine
+  receives, not on row order, because the failure is that the key never becomes
+  `orderBy` and a fake engine honouring either spelling would pass either way.
+
+  **The cleanup — 27 no-op renames.** Every remaining in-repo engine call passing
+  `filter` now passes `where` (approvals 5, auth 2, reports 6, sharing 11,
+  webhooks 2, plus the one `filters` in a spec doc example). These are strict
+  no-ops since #4346 folds the alias — the point is that the framework stops
+  depending on a spelling it asks users to migrate off, which is a prerequisite
+  for ever retiring the aliases. Service-level `filter` PARAMETERS (each
+  service's own public API, e.g. `listRequests(filter)`) are deliberately
+  untouched — those are not engine option bags.
+
+  Two of the renamed calls were live victims of the #4346 bug rather than
+  cosmetic: `auth-manager`'s `stampIdentitySource` read the table's first row via
+  `findOne({filter})` and counted the whole table via `count({filter})`, so a
+  federated sign-in never stamped `source: 'idp_provisioned'`. #4346 already
+  corrected the behaviour; this makes the call say what it means.
+
+- 71af9f5: fix(sharing): the criteria-less-rule warn is once per rule per process, plus one boot aggregate (#3929 follow-up)
+
+  Pre-dedup the fail-closed evaluator warned on EVERY pass — per evaluation and
+  per reconciled write — so one legacy criteria-less rule could dominate a
+  deployment's log. Enforcement is unchanged (such a rule still matches
+  nothing and its grants are revoked on reconcile); the warn now fires once
+  per rule per process, and the boot backfill emits a single operator-facing
+  aggregate (count + rule names + the fix: repair the criteria or set
+  active: false).
+
+- cc2de0e: chore(packaging): 20 packages stop publishing their sources, tests and build tooling (#4248)
+
+  These 20 packages declared no `files` field, so npm fell back to packing the
+  whole package directory. `npm pack --dry-run` on `@objectstack/plugin-webhooks`
+  listed **21 files** — 15 under `src/`, three of them unit tests
+  (`auto-enqueuer.test.ts`, `bootstrap-declared-webhooks.test.ts`, …), plus the
+  build-time `scripts/i18n-extract.config.ts`. `dist/` lands on top of that at
+  publish time rather than instead of it, so consumers were installing the
+  TypeScript sources and the test suite alongside the artifact they asked for.
+
+  Each now declares `"files": ["dist", "README.md"]`, matching the 29 packages
+  that already did. Nothing a consumer imports moves: every `main` / `types` /
+  `exports` target in all 20 already resolved inside `dist/`, which the new
+  `check:published-files` guard verifies rather than assumes. The visible change
+  is a smaller install and a smaller dependency-scanning surface — `npm pack` on
+  `@objectstack/plugin-webhooks` now yields 2 files plus `dist/`.
+
+  The other half of the fix is the gate. Half the packages declaring `files` and
+  half not was the #3786 shape — a hand-copied convention with nothing enforcing
+  it, where whoever forgets the line gets no signal at all. `check:published-files`
+  (new, wired into the always-required `lint` job) holds every non-private
+  workspace package to four invariants: `files` is **declared**; it is
+  **sufficient** (covers every entry point, so tightening a whitelist cannot ship
+  a package that fails to resolve); it is **minimal** (admits no test, test-harness
+  config or build script); and anything beyond `dist` + `README.md` is
+  **registered** with a reason, reconciled in both directions so a stale exemption
+  is an error rather than dead text. `@objectstack/spec` is the one package with
+  registered extras — its `.zod.ts` sources, JSON Schemas, liveness ledgers and
+  `CHANGELOG.md` are product, not build input.
+
+  This also closes an assumption #4206 was resting on. Excluding `<pkg>/scripts/**`
+  from the docs-drift implementation test is sound only while no package publishes
+  `scripts/` as runtime code; that held, but it held because someone read all three
+  offenders by hand. It is now checked on every PR.
+
+- 4580597: fix(plugin-sharing)!: the share-link routes emit the declared envelope, and the last ratchet retires (#3983)
+
+  The fifth and final drifting route module. Unlike the four in #3843, this one was
+  not found by reading — `scripts/check-route-envelope.mjs` surfaced it the moment
+  that scan went repo-wide, which is the whole argument for a repo-wide guard over
+  per-package copies. It also turned out to be the one where the drift had actually
+  **broken shipped SDK methods**, not merely mis-shaped a body.
+
+  ## Two SDK methods did not work on this surface
+
+  Three of these routes are `disposition: 'sdk'` in `runtime/src/route-ledger.ts`,
+  and `ObjectStackClient.unwrapResponse` decides a body is an envelope by finding a
+  boolean `success`. With no flag it hands back the body verbatim:
+
+  | method                | documented / typed as          | actually returned                           |
+  | --------------------- | ------------------------------ | ------------------------------------------- |
+  | `shareLinks.create()` | "the link row (incl. `token`)" | `{ link: … }` — so `.token` was `undefined` |
+  | `shareLinks.list()`   | `Promise<any[]>`               | `{ links: [] }` — so `.map()` threw         |
+
+  `packages/client/src/admin-surfaces.test.ts` mocks all three as
+  `{ success: true, data: <payload> }`. The SDK was written and tested against the
+  **dispatcher's** shape and only ever worked there.
+
+  ## This is a convergence, not a redesign
+
+  `runtime/src/domains/share-links.ts` serves the same five paths, and for cloud's
+  per-environment kernels it is the _designed primary_ surface
+  (`registerShareLinkRoutes: false`). It has always answered in the declared
+  envelope. The plugin now answers identically:
+
+  | route                            | was                              | now                                     |
+  | -------------------------------- | -------------------------------- | --------------------------------------- |
+  | `POST /share-links`              | `{ link }`                       | `{ success: true, data: link }`         |
+  | `GET /share-links`               | `{ links }`                      | `{ success: true, data: link[] }`       |
+  | `DELETE /share-links/:idOrToken` | `{ ok: true }`                   | `{ success: true, data: { ok: true } }` |
+  | `GET /:token/resolve`            | `{ record, link, redactFields }` | `{ success: true, data: { … } }`        |
+  | `GET /:token/messages`           | `{ data: rows }`                 | `{ success: true, data: rows }`         |
+  | errors                           | `{ error: { code, message } }`   | `{ success: false, error: { … } }`      |
+
+  `data` carries each payload **directly** — `data: links`, not `data: { links }`.
+  That is what makes `unwrapResponse` return the same value on both surfaces, and
+  it is what the SDK already expected.
+
+  ## Breaking: raw `fetch` callers add one hop
+
+  SDK callers get the fix for free (two of them go from broken to working). Direct
+  body readers add `.data`:
+
+  ```diff
+  - const { links } = await (await fetch('/api/v1/share-links')).json();
+  + const { data: links } = await (await fetch('/api/v1/share-links')).json();
+  ```
+
+  `{ ok: true }` on revoke survives, but as the payload rather than as the body: at
+  the top level it was a second word for `success`, which #3689 retired from
+  storage; under `data` it is what the dispatcher already returned.
+
+  The `error` half was already nested `{ code, message }` — #3675's changeset cited
+  this module as the good example of that — so only the `success` flag is new there.
+  All eleven codes were already SCREAMING_SNAKE and registered, so ADR-0112 needs
+  nothing.
+
+  ## Consumers
+
+  Swept, and the result is smaller than #3983 assumed. The framework has **zero**
+  consumers of these routes. In objectui, `ShareDialog` was already dual-shape
+  tolerant on all three routes it calls (`body.links ?? body.data`,
+  `created.link ?? created.data`, and revoke never reads the body) — it needs no
+  change, and it carried that tolerance precisely _because_ both shapes existed in
+  the fleet.
+
+  `SharedRecordPage` did need one fix, and it is the kind a shape-swap would have
+  missed: it renamed the wire's `redactFields` to `redactedFields` only on the
+  _bare_ branch, so on the already-enveloped dispatcher path the "fields are hidden
+  by the owner" notice never rendered. Converting this surface would have spread
+  that to every share page. Fixed in objectui#2980, which merges first.
+
+  ## Guard
+
+  **7 conformant / 0 ratcheted / 1 exempt**, from 6 / 1 / 1. The ratchet mechanism
+  stays for the next module that needs it.
+
+  `privateOk` also got narrowed to what its own doc always claimed — a literal `ok`
+  at the **top** of a body, where it competes with `success`. The same literal
+  inside `data` is payload, which is what a conformant revoke returns. Four
+  self-test assertions pin both readings.
+
+- d5749d7: refactor(types,rest,services,plugin-sharing): one shared writer for the response envelope, and `error.code` is enforced at compile time (#3973)
+
+  `BaseResponseSchema` declares one envelope for every REST body the platform
+  emits. It declared it once; the code that _wrote_ it was copied per route
+  module. After #3843 and #3983 converted the last drifting one, seven modules
+  each carried their own two-line `sendOk` / `sendError` pair — so the envelope's
+  shape lived in fourteen places rather than one.
+
+  `pnpm check:route-envelope` proved those seven copies agreed, which is why this
+  is a cleanup rather than a bug fix. But a guard proves agreement; it does not
+  create it. An eighth module starts by copying the pair again — not
+  hypothetically: `share-link-routes.ts` was found already drifting by the
+  repo-wide scan, and its drift had broken `client.shareLinks.create()` and
+  `.list()` through `unwrapResponse` (#3983).
+
+  ## What moved
+
+  `sendOk` / `sendError` now live once, in `@objectstack/types`
+  (`response-envelope.ts`), and all seven modules import them:
+
+  | Module                                |
+  | ------------------------------------- |
+  | `service-storage/storage-routes.ts`   |
+  | `service-settings/settings-routes.ts` |
+  | `service-datasource/admin-routes.ts`  |
+  | `rest/external-datasource-routes.ts`  |
+  | `rest/package-routes.ts`              |
+  | `service-i18n/i18n-service-plugin.ts` |
+  | `plugin-sharing/share-link-routes.ts` |
+
+  Placement was the open question in #3973, not design. `packages/spec` is
+  schemas-only (Prime Directive #2), and the callers span `rest`, four
+  `services/*` and one `plugins/*`, which rules out anything depending on them.
+  `@objectstack/types` depends on nothing but `@objectstack/spec`, so every caller
+  can reach it, and it is already where the repo puts a helper the HTTP boundaries
+  share — `looksLikeInternalErrorLeak` (#3867) sits one file over and made the
+  same argument first.
+
+  The builders take a structural `{ status(n), json(body) }`, so the package
+  imports no HTTP contract at all: `IHttpResponse` satisfies it, and so does the
+  `any`-typed `res` the older modules carry.
+
+  ## `error.code` is now checked by the compiler
+
+  All seven copies typed the parameter `code: string`. ADR-0112 (#3841) closed the
+  vocabulary — `ErrorCode` is `StandardErrorCode ∪ ERROR_CODE_LEDGER` — but an
+  invented code was still caught only at runtime, by a conformance suite parsing a
+  driven body, i.e. only on routes some test happened to drive.
+
+  The shared `sendError` types `code` as `ErrorCode`, so an unregistered code now
+  fails to compile, at every call site at once:
+
+  ```ts
+  sendError(res, 400, "NOT_A_REGISTERED_CODE", "invented");
+  // Argument of type '"NOT_A_REGISTERED_CODE"' is not assignable to parameter of type 'ErrorCode'.
+  ```
+
+  This cost no call-site churn: every code the seven modules emit was already
+  registered.
+
+  ## `extra` is closed at the same place
+
+  `sendError`'s last parameter is `Pick<ApiError, 'category' | 'httpStatus' |
+'details' | 'requestId'>` — exactly what `ApiErrorSchema` declares beside `code`
+  and `message`.
+
+  It was `Record<string, unknown>` while `settings-routes` still hung `namespace` /
+  `key` / `reason` / `fields` beside `code`. Those bodies passed every gate anyway:
+  `ApiErrorSchema` is a plain `z.object`, so unknown keys were STRIPPED rather than
+  rejected, and `envelopeViolations` inspects only the body's top level —
+  conformant _by stripping_ rather than by declaration. #4224 moved that module
+  onto `details`, which is what lets the parameter close here. Closing it at the
+  shared builder is the part that lasts: an undeclared sibling is now a compile
+  error in every module at once, rather than a key that quietly evaporates in
+  whichever module reintroduces it.
+
+  ## Nothing changes on the wire
+
+  The seven pairs were identical modulo the optional `status` and `extra`
+  parameters this one unions, and each module's driven conformance suite still
+  parses its real bodies against the real spec schemas. One internal call site was
+  rewritten: `package-routes` passed `details` positionally and now passes
+  `{ details }`, producing the same `error.details` it always did.
+
+  ## The guard got stronger
+
+  `scripts/check-route-envelope.mjs` counts response write sites per module. A
+  module that routes everything through the shared pair builds **none** itself, so
+  the seven now declare `0 / 0 / 0` where they used to declare `2 / 1 / 1`, and the
+  shared pair is pinned separately at `2 / 1 / 1` so the invariant stays total for
+  the surface rather than per-module. What the count asserts is no longer "your two
+  builders are the enveloped ones" but "you have no builders" — and a new route
+  that hand-rolls a body still moves it off zero and fails.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [48fcf70]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [3ec8186]
+- Updated dependencies [b1863a5]
+- Updated dependencies [270650f]
+- Updated dependencies [956e7f9]
+- Updated dependencies [3aef718]
+- Updated dependencies [ffb003c]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [c39d713]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [55bbefc]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [cc2de0e]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [bf478e1]
+- Updated dependencies [ec796d5]
+- Updated dependencies [77fadbf]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [5c13368]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [68dea0b]
+- Updated dependencies [64f8cbe]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [4965bfa]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/objectql@17.0.0-rc.1
+  - @objectstack/platform-objects@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/formula@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

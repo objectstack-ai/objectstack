@@ -1,5 +1,1352 @@
 # @objectstack/objectql
 
+## 17.0.0-rc.1
+
+### Major Changes
+
+- 2d3e255: feat!: ADR-0113 — `required` is a write contract; the column constraint becomes the explicit `storage.notNull`
+
+  `field.required` bound three meanings to one knob (write check, `NOT NULL` DDL,
+  drift expectation), so tightening any invariant on a deployed object was a
+  destructive migration blocked by the very legacy nulls that motivated it — the
+  reason `criteria_json`'s mandatory-in-substance contract lived in three
+  imperative guards instead of one declaration.
+
+  Split, with the **non-regression invariant** as the unifying rule — _a write
+  may not take a record from compliant to violating; a pre-existing violation
+  does not block writes that leave it in place_:
+
+  - `required: true` = the write contract, uniformly on new and deployed objects:
+    insert must provide; **an update PATCHing `null` into a required field is now
+    rejected** (it silently passed before); omitted fields never block, so legacy
+    null rows rest. The column stays nullable.
+  - `storage: { notNull: true }` = the explicit physical constraint, owning the
+    DDL (`sql-driver` `createColumn`) and the destructive drift ceremony.
+    Orthogonal to `required` — all four combinations are legitimate, including
+    the engine-populated column (`storage.notNull` without `required`).
+  - `requiredWhen` inherits the same invariant: flipping the condition true
+    without providing the field is rejected (the write _creates_ the violation);
+    a row violating since before the rule tightened no longer locks out
+    unrelated edits (#3929's objection, cured). `storage.notNull` ×
+    `requiredWhen` rejects at parse (`FieldSchema.superRefine`).
+  - **Pre-17 sources keep their exact meaning** via the migration-chain-only
+    `field-required-notnull-explicit` conversion: `os migrate meta` stamps
+    `storage.notNull` onto every previously-required field — writing down what
+    the old text already meant. The loader never infers semantics from the
+    physical column.
+  - Drift compares nullability against `storage.notNull`; a column stricter than
+    its declaration is `needs_confirm` (never auto-applied — dev auto-reconcile
+    no longer silently strips a stray `NOT NULL`), and silent when the field is
+    write-gated by `required`.
+
+- 55bbefc: fix(objectql)!: retire the dead `ObjectQLEngine.use()` plugin path (#4212 follow-up)
+
+  `ObjectQLEngine.use(manifestPart, runtimePart)` was the engine's own plugin
+  loader: register a manifest, then dispatch the runtime part's `onEnable` with
+  an `ObjectQLHostContext`. **Nothing calls it** — not the kernel (plugins go
+  through `kernel.use()` → `init`/`start`), not the CLI, not a test, not an
+  example, repo-wide. Its `onEnable` dispatch is the engine-level twin of the
+  #4212 disease: a lifecycle entry point that reads as a contract and never
+  runs. The _app-bundle_ `onEnable` module export is a different, real contract
+  (dispatched by AppPlugin at boot) and is unchanged.
+
+  Removed:
+
+  - `ObjectQLEngine.use()`.
+  - `ObjectQLHostContext` (exported from `@objectstack/objectql` and
+    `@objectstack/objectql/core`) — constructed only inside the dead method.
+  - The engine's private `hostContext` field — its only read outside the dead
+    method was the constructor's `logger` extraction, which stays; the
+    constructor signature is unchanged (`new ObjectQL({ logger })` keeps
+    working, as does `ObjectQLPlugin`'s `hostContext` option that feeds it).
+
+  FROM → TO:
+
+  - `engine.use(manifest)` → `engine.registerApp(manifest)` (the alive half —
+    the manifest service and ObjectQLPlugin already route through it).
+  - `engine.use(_, { onEnable })` → a kernel plugin: `kernel.use({ name,
+init(ctx) { … } })`; the engine is `ctx.getService('objectql')`, drivers
+    register via `engine.registerDriver()`.
+  - `ObjectQLHostContext` → no replacement; the type described the context of
+    a hook that never fired.
+
+- 77fadbf: fix(metadata-protocol,objectql)!: retire the degraded analytics shim — the `analytics` slot stays empty without service-analytics (#3891, #3878)
+
+  The protocol assembly (`assembleMetadataProtocol`, used by both
+  `MetadataProtocolPlugin` and `ObjectQLPlugin`'s built-in mode) used to register
+  a lightweight `analytics` fallback so `POST /api/v1/analytics/query` kept
+  answering on installs without `@objectstack/service-analytics`. That fallback
+  is **removed**, and with it the facade methods that existed only to serve it:
+  `ObjectStackProtocolImplementation.analyticsQuery` / `getAnalyticsMeta` (the
+  class no longer implements `AnalyticsProtocol`).
+
+  Why removal instead of repair (#3891):
+
+  - **It dropped the caller's ExecutionContext at the door.** The dispatcher
+    passes `context.executionContext` (#2852), but the shim's `query` was
+    unary — aggregation reached `engine.aggregate` with no context, the security
+    middleware's empty-principal branch waved it through, and **no RLS or tenant
+    predicate was injected**. An authenticated caller got a 200 with rows RLS
+    would hide.
+  - **It ignored the contract filter.** `AnalyticsQuery`'s canonical filter field
+    is `where`; the shim read only a non-contract `filters` key, so a
+    spec-conformant filtered request silently returned a full-table aggregate.
+  - **Every security gate had to be built twice** (#3770 on the shim vs
+    #3867/#3875 on the real engine) — the "duplicates logic only, harmless"
+    assessment in ADR-0076 D10 did not survive contact with reality.
+
+  `getDiscovery()` stops hardcoding analytics as an always-on kernel service —
+  the entry is now computed from the service registry like every other optional
+  service (`enabled: false, status: 'unavailable'` and **no advertised route**
+  when absent), which also removes the pre-#2462 discovery lie the shim was
+  originally invented to make true.
+
+  **Migration.** Deployments that relied on the fallback (programmatic
+  `createStandaloneStack()` / `createObjectQLKernel()` embeds, hosts whose bundle
+  doesn't require `analytics`): install `@objectstack/service-analytics` and
+  mount `AnalyticsServicePlugin` — the real, context-aware engine. Without it,
+  `/api/v1/analytics/*` now answers **404 ROUTE_NOT_FOUND** (previously: 200 with
+  unscoped, unfiltered aggregates) and discovery reports
+  `analytics: { enabled: false, status: 'unavailable' }`. Callers of
+  `protocol.analyticsQuery(...)` / `protocol.getAnalyticsMeta(...)` must use the
+  `analytics` service (`kernel.getService('analytics')`) instead. `os serve`
+  default/full presets and managed environments already force the real engine and
+  are unaffected.
+
+### Minor Changes
+
+- 48fcf70: **[ADR-0110 D5] The action-governance inventory moves to the engine plugin —
+  AppPlugin never ran it on the platform's own dev path.**
+
+  Dogfooding the inventory with a positive control (an injected undeclared
+  handler) showed the `kernel:ready` hook it hung on never fired under `os dev`:
+  AppPlugin is registered conditionally (`serve.ts` skips it when the host wraps
+  itself; the dev fast path loads apps without it), so the checklist that
+  justifies D3's no-opt-out refusal was never printed where an upgrade most
+  needs it.
+
+  - The addressing vocabulary (`GLOBAL_ACTION_OBJECT_KEY`,
+    `actionHandlerObjectKeys`, `isObjectLessActionKey`,
+    `resolveActionHandlerKeys`) and the reconciliation move into
+    `@objectstack/objectql` — the engine owns the map they describe, and the
+    dependency direction (runtime → objectql) permits no other home.
+    `@objectstack/runtime` re-exports them unchanged, so dispatch, the MCP
+    bridge and existing importers keep reading ONE implementation.
+  - `ObjectQLPlugin` now runs the inventory in its existing `kernel:ready`
+    handler — after `resyncAuthoredActions`, so the audited registry is final —
+    and again on `metadata:reloaded`, fingerprint-suppressed so a reload that
+    changed nothing action-related logs nothing. A Studio edit that orphans or
+    binds a handler updates the report live; the old boot-only snapshot went
+    stale on the first edit.
+  - Verified end-to-end with a programmatic kernel: the injected orphan is
+    named, a clean registry is silent. The `os dev` / `os serve` consoles still
+    swallow ALL plugin boot logs (pre-existing, tracked separately) — on those
+    surfaces the inventory becomes visible once that sink is fixed.
+
+- b1863a5: feat(objectql): `engine.isFileReferencesMigrationVerified()` is public — one memoized flag read for both in-process consumers (#3459 PR-5b)
+
+  The memoized per-deployment read of the `adr-0104-file-references` migration
+  flag was private to the engine's media value-shape enforcement. The storage
+  service's release path now asks the same question — may a released field file
+  be tombstoned? — so the method is public and the release hooks reach it as an
+  optional duck-typed member (an older engine or a test fake reads as "not
+  verified", failing closed). One read, one invalidation
+  (`invalidateDataMigrationFlags()`), no way for the two consumers to see
+  different answers.
+
+- 270650f: feat(migrate): a datastore created from empty attests its data migrations at creation (#3438, ADR-0104 2026-07-30 addendum)
+
+  Deployment-level migration flags could only be recorded by running
+  `os migrate`. That left a hole at the other end of a deployment's life: a
+  database created on a version that already ships the migrations started **lax**
+  and stayed lax until someone thought to run a command that, for them, converts
+  nothing and finds nothing. Every new deployment re-entered the warn regime, so
+  the warn regime would never die out — and, since #3459, every new deployment
+  also kept every released file forever.
+
+  A store the platform **creates from empty** now records
+  `adr-0104-file-references` and `adr-0104-value-shapes` at that moment. Nothing
+  to run; enforcement and collection are live from the first boot.
+
+  **This is not version-gating in disguise.** The fact recorded — no legacy value
+  is stored here — is _observed_: the store had no history at all. The platform
+  attests only what it watched itself create, and the test is deliberately
+  strict: every table made by this boot and **none found already present**. One
+  pre-existing table anywhere, one datasource that was already there, one driver
+  that cannot account for its schema sync — any of those and the deployment
+  attests nothing and produces its evidence by scan, exactly as before. "Found
+  empty" and "created empty" are not the same claim, and only the second is an
+  observation.
+
+  **New surfaces.** `IDataDriver.getSchemaSyncStats?()` (optional, purely
+  observational: tables created vs found since connect — implemented by the SQL
+  and in-memory drivers), `engine.wasDatastoreCreatedFromEmpty()`,
+  `attestFreshDatastore()` in `@objectstack/platform-objects/system`, and
+  `VALUE_SHAPES_MIGRATION_ID` / `CREATION_ATTESTED_MIGRATION_IDS` in
+  `@objectstack/spec/system`. Attestation never overwrites an existing flag row
+  and never throws into a boot: a failure leaves the deployment lax, which a
+  migration run can still fix.
+
+  **Upgrading changes nothing for an existing database.** It is non-empty when
+  the platform reaches it, so it is never attested — run
+  `os migrate files-to-references --apply` as before. Importing legacy values
+  into an attested deployment is rejected loudly at the write path;
+  `OS_ALLOW_LAX_MEDIA_VALUES=1` re-opens leniency while you diagnose.
+
+- 3aef718: feat(migrate): `os migrate value-shapes` — the per-deployment gate for reference and structured-JSON value shapes (#3438)
+
+  The second of ADR-0104 D1's two evidence gates. Media value shapes already
+  enforce once a deployment has verified its file migration (#3681); the
+  reference (`lookup` / `master_detail` / `user` / `tree`) and structured-JSON
+  (`location` / `address` / `composite` / `repeater` / `record` / `vector`)
+  classes now get a gate of their own.
+
+  ```bash
+  os migrate value-shapes           # scan: reports, writes nothing
+  os migrate value-shapes --apply   # scan + record the deployment flag when clean
+  ```
+
+  The run walks every stored value of those classes against
+  `valueSchemaFor(field, 'stored')` — the same predicate the write path enforces,
+  imported rather than re-derived — and, at zero violations, records
+  `sys_migration { id: 'adr-0104-value-shapes', verified_at, blocking: 0 }`.
+  Strict enforcement of these classes reads **that row**, never the platform
+  version, so upgrading changes nothing until a deployment produces its own
+  evidence.
+
+  **There is no backfill, deliberately.** The file migration converts legacy
+  values because the platform narrowed that storage form and owes the conversion.
+  A malformed `location` is application data whose correct value only its author
+  knows, so this run reports and prescribes — naming the object, field, type,
+  count, offending record ids and the parse issue — and the operator fixes and
+  re-runs. With nothing to convert, `--apply`'s only write is the flag row, which
+  keeps the #3617 invariant trivially: a dry run changes nothing, and whether a
+  run changed this deployment's posture never depends on what it found.
+
+  **A separate flag from the file migration**, because it attests a separate
+  fact. That flag says file values were migrated and their ownership reconciled;
+  it says nothing about whether a `lookup` id or a `location` payload is well
+  formed. Gating these classes on it would be borrowing evidence for a fact it
+  does not cover.
+
+  - New escape hatch **`OS_ALLOW_LAX_VALUE_SHAPES=1`** returns a verified
+    deployment to warnings, with the same precedence as its media sibling: the
+    opt-out beats `OS_DATA_VALUE_SHAPE_STRICT_ENABLED`, which beats the flag.
+    Wrongly staying lenient costs a warning; wrongly enforcing stops a working
+    app from writing.
+  - `@objectstack/spec/system` exports `VALUE_SHAPES_MIGRATION_ID`.
+  - `@objectstack/objectql` exports `scanValueShapes`, `valueShapeScanPassed`
+    and `formatValueShapeScanReport`. The scanner is read-only and does **not**
+    record the flag: readers of a migration flag use the spec contract, only
+    writers depend on `@objectstack/platform-objects`, so the composition lives
+    with the CLI command rather than inverting the engine's dependencies.
+  - `validateRecord` gains `valueShapeStrict`, the sibling of
+    `mediaValueShapeStrict`. Both default to `false`: a caller that cannot say
+    stays lenient, so nothing starts rejecting merely because the evidence was
+    unavailable.
+
+  **Nothing changes for an existing deployment until it runs the command.** A
+  scan that is truncated, or that cannot read an object, fails the gate even with
+  zero violations found — "none in the part we read" is not the claim the flag
+  makes.
+
+- ffb003c: **ADR-0110 — an action's identity is its `name`, and anything executable over a
+  governed surface must have a declaration.**
+
+  `POST /api/v1/actions/:object/:action` resolved the DECLARATION from the URL
+  segment as a `name` but dispatched the HANDLER using that same segment as a
+  registry key. For a target-bound action (`{ name: 'complete_task', target:
+'completeTask' }`) those are different strings, so the two documented callers
+  each worked on exactly the half the other broke: the documented curl resolved
+  the declaration then 404ed, while the Console's `target`-addressed call
+  dispatched fine and resolved no declaration — silently skipping the ADR-0066 D4
+  capability gate and the ADR-0104 param contract (#3935).
+
+  - **D1/D2** — identity is always the declarative `name`; the handler key is
+    derived from the resolved declaration through a rotation now shared with the
+    MCP `run_action` bridge (`resolveActionHandlerKeys`, `executeRegisteredAction`).
+    The REST route previously rotated only the object key, never the handler key.
+  - **D3 (breaking)** — declaration resolution is a trichotomy. A genuinely
+    undeclared handler is **refused (404)** with the `defineAction` to add, rather
+    than executed ungated with system privileges; an unreachable metadata plane is
+    a **503** rather than a silent ungating (`MetadataManager.loadDiagnosed` tells
+    a clean miss from an outage). `OS_ALLOW_UNDECLARED_ACTIONS=1` is the migration
+    valve — it warns on every invocation and is removed in 18.
+  - **D5** — `reconcileActionRegistrations` plus `ObjectQLEngine.listRegisteredActions`
+    power a `kernel:ready` inventory logging every registered-but-undeclared
+    handler (refused at dispatch) and every declared script action bound to no
+    handler — the ADR-0078 converse, mechanised.
+  - **D6** — security-gate strictness is opt-**out** (`OS_ALLOW_*`), never opt-in.
+
+  Apps whose actions are all declared need no changes beyond gaining enforcement
+  of the `requiredPermissions` they already declared.
+
+- 7d7521f: feat(spec,rest,objectql)!: a closed field-level error catalog, and Zod stops leaking onto the wire (#3977)
+
+  Settles the vocabulary ADR-0112 D6 deferred, per [ADR-0114](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0114-field-level-error-code-catalog.md).
+
+  **`FieldErrorCode` — a closed, lowercase catalog.** 27 members covering what the
+  six emitters already emit. `FieldErrorSchema.code` tightens from `z.string()` to
+  this enum, so a validation body's per-field codes are validated for the first time.
+  `FieldValidationError.code` (objectql) and `FieldCoerceError.code` (rest) stop
+  being a hand-listed union and a bare `string` respectively and reference the
+  catalog, so the three cannot drift apart.
+
+  Lowercase is deliberate, not an oversight against ADR-0112's SCREAMING_SNAKE: a
+  top-level code names the condition the _request_ hit, while a field-level code
+  names the _constraint_ the value violated — and constraints are declared in the
+  metadata's own snake_case, so `max_length` the code and `max_length: 50` the
+  property are the same word on purpose.
+
+  **Zod issue codes no longer reach the wire (wire-visible).** Routes that validate
+  with Zod passed its vocabulary straight through, so `fields[]` spoke a different
+  language depending on which route served it, and `too_small` was ambiguous between
+  a short string, a small number and a short array. `zodIssuesToFields` now maps
+  using Zod's `origin`/`format`:
+
+  | Was                                               | Now                                                |
+  | :------------------------------------------------ | :------------------------------------------------- |
+  | `too_small`                                       | `min_length` / `min_value` / `min_items`           |
+  | `too_big`                                         | `max_length` / `max_value` / `max_items`           |
+  | `invalid_format`                                  | `invalid_email` / `invalid_url` / `invalid_format` |
+  | `invalid_value`                                   | `invalid_option`                                   |
+  | `unrecognized_keys`                               | `unknown_field`                                    |
+  | `invalid_union`, `invalid_element`, `invalid_key` | `invalid_shape`                                    |
+
+  **A missing required property now reports `required`, not `invalid_type`.** Zod
+  spells "absent" as a type mismatch against `undefined`, so passing it through made
+  a form mark a _missing_ input as the wrong _type_. The two are indistinguishable on
+  the issue alone, so the mapper takes the parsed input as an optional argument and
+  walks the issue path; a caller that cannot supply it keeps `invalid_type` rather
+  than guessing.
+
+  **`unknown_param` → `unknown_field`.** `ActionParamIssue.code` references the
+  catalog instead of its own literal union; the `param` key beside it already says
+  what was addressed.
+
+  **Not changed:** `EnhancedApiErrorSchema.fieldErrors` keeps its name even though
+  every producer emits `fields`. Retiring an authorable key needs a tombstone plus a
+  migration (ADR-0104's contract guard), so it lands on its own — the property now
+  carries a banner saying which name the wire uses.
+
+- ab9fb5c: A hook with an empty `object` target is refused instead of silently widened to the wildcard.
+
+  `HookSchema.object` had no emptiness constraint, so `''`, `[]` and `['']` all parsed. The binder's `normalizeObjects` then mapped the first two to `['*']` — the engine's match-everything sentinel — so a hook whose target was left blank registered on **every** object in the tenant, on every event it listed, with no diagnostic anywhere. `['']` failed the other way, registering on an object name nothing matches: a hook that could never fire (ADR-0078). Both shapes are now refused, at parse time and again in the binder (which accepts unparsed input, so the guard has to hold in both places). The error names the two spellings that work and the wildcard the blank silently became. A wildcard hook stays legitimate — it just has to be spelled `'*'`, so it is a choice visible in a diff.
+
+  Also fixes `bindHooksToEngine`'s `strict` option, which is documented as "fail fast on misconfiguration" but never threw: the per-hook `try`/`catch` swallowed the throw its own strict branch raised, recording the failure twice and carrying on. Under `strict` a bind failure is now fatal, as advertised.
+
+- 507b92a: fix(spec,objectql,rest,runtime): field-validation messages answer in the caller's language, named by the field's label (#3957)
+
+  The write path built every built-in validation message by concatenating the **API
+  field name** into a **hardcoded English** template. Those strings are what the
+  Console toast, the CSV-import row report, the CLI and any custom client display
+  verbatim, so a Chinese-locale user importing a bad row read:
+
+  ```
+  第 1 行:penalty_amount must be ≥ 0
+  ```
+
+  …for a field declared `label: '处罚金额'` with a full `zh-CN` bundle loaded. The
+  form layer localized the _same_ constraint correctly (the browser's native
+  `min`), so the language flipped depending on which layer caught the value.
+
+  **Three things changed.**
+
+  1. **The message is rendered in the caller's locale** from a built-in catalog
+     (`BUILTIN_VALIDATION_MESSAGES`, `@objectstack/spec/system`) shipping `en`,
+     `zh-CN`, `ja-JP`, `es-ES` — the same four locales as the platform bundles.
+     The locale comes from `ExecutionContext.locale`, whose contract already read
+     "Drives message catalogs"; this is the consumer that makes that true. Both
+     HTTP entries (REST server, runtime dispatcher) now resolve it from the
+     request's `Accept-Language` / `?locale` first, falling back to the workspace
+     `localization.locale` — so a rejection message and the field labels around it
+     can no longer disagree.
+
+  2. **The field is named by its label, never the API name**: translation bundle
+     (`objects.<obj>.fields.<f>.label`) → declared `label` → API name as the last
+     resort. `FieldValidationError.field` still carries the API name so a form can
+     focus the right input.
+
+  3. **The constraint is exposed as data**, so a client can format its own text
+     instead of parsing the sentence:
+     `{ field, code, message, label, constraint: { min: 0 } }`. This rides
+     ADR-0114's existing `constraint` / `value` positions on `FieldErrorSchema`
+     (`constraint` tightens from `unknown` to `Record<string, unknown>`) rather
+     than adding a parallel payload — `label` is the only new field. The bag
+     carries `min`/`max`/`minLength`/`maxLength`/`actual`/`allowed`/`type`, and the
+     message templates interpolate from exactly those keys.
+
+  Covered end-to-end, not only in the validator: single and batch insert,
+  single-id and multi-row update, ADR-0113's clear-out rejection, the object-level
+  rule evaluator's own built-in messages (`requiredWhen`, per-option gating,
+  state-machine fallbacks), and the importer's cell-coercion, required pre-check
+  and #3956 bound pre-check messages — all of which land in the same row report.
+
+  **What this changes for consumers.**
+
+  - `code` is unchanged (ADR-0114's `FieldErrorCode`) and remains the thing to
+    match on. Message keys are finer-grained than codes — `invalid_datetime`,
+    `invalid_option_value`, `required_cleared` are rendering detail and never reach
+    the wire — so localization never splits the client-facing vocabulary.
+  - `message` **text changes**: it is localized, and it names the field by label
+    even in English (`Budget must be ≥ 0`, not `budget must be ≥ 0`). Anything
+    asserting on the old English string should match `code` (and now
+    `constraint`) instead.
+  - An author-written validation-rule `message` is never touched — it is already
+    in the language its author chose.
+  - A deployment can override any built-in message with a `translation` item
+    defining `validation.field.<messageKey>` (e.g.
+    `validation.field.min_value: '{{label}}不得小于 {{min}} 元'`).
+  - The importer's reference-failure message no longer names the target object's
+    API name (`no sys_user matches "…"`): naming internal identifiers is the
+    defect being fixed, and the column plus the offending value are what an
+    importer can act on.
+
+- b09d8d9: feat(objectql)!: `query.having` is enforced — the engine applies it after aggregation (#4286 step 3, ADR-0049 resolved to enforce)
+
+  `having` had been declared on the request surface since AST v2 and executed by
+  nothing. #4286 finding 1 showed the gap was structural: `engine.aggregate()`
+  rebuilt the driver AST with exactly `object`/`where`/`groupBy`/`aggregations`,
+  so even a driver that _did_ implement HAVING could never have received it, and
+  the one wire path (`findData`'s aggregate branch) dropped the clause too. It
+  was the strongest enforce candidate of the #4286 set — the clause every
+  SQL-literate author (human or model) expects to work next to
+  `groupBy`/`aggregations` — and it is now live end to end:
+
+  - **Engine-owned, both paths.** `applyHaving()`
+    (`packages/objectql/src/having-filter.ts`) runs AFTER aggregation on the
+    native-driver path and the in-memory fallback alike — the same
+    correct-first / optimize-later two-tier shape date bucketing uses. Native
+    SQL `HAVING` pushdown can come later behind a driver capability flag without
+    changing semantics.
+  - **Namespace: the aggregated row's own columns** — aggregation aliases
+    (`order_count`, `total`) and groupBy projections — with the ordinary
+    FilterCondition operators plus `$and`/`$or`/`$not`.
+  - **An unknown operator rejects loudly.** Ignoring one (as tolerant matchers
+    do) would silently return unfiltered aggregates — the exact ADR-0078
+    silently-inert failure enforcement exists to end.
+  - **The wire path forwards it.** `findData`'s aggregate branch passes
+    `having` through, and `EngineAggregateOptionsSchema` now declares it.
+  - The FLS predicate guard already walked `having` references
+    (`predicate-guard.ts`), which is what made enforcement safe to turn on.
+
+  No migration needed: queries that carried `having` before were silently
+  returning every group; they now filter as written. A caller who depended on
+  the clause being _ignored_ (sending `having` and expecting unfiltered
+  results) sees the corrected behavior — that is the enforcement, not a
+  regression.
+
+- 5c13368: feat(objectql,runtime): the default-runner setters are first-wins, and the private-field probes that used to enforce that are gone (#4251)
+
+  `setDefaultBodyRunner` / `setDefaultActionRunner` now enforce their own
+  documented contract — "the runtime layer sets this once per engine" — by
+  keeping the first runner and returning `false` for any later call. Public
+  accessors `getDefaultBodyRunner()` / `getDefaultActionRunner()` join them, and
+  the fields become real `private` members instead of `(this as any)` attachments.
+
+  Before this, the invariant lived in the CALLERS: AppPlugin probed the engine's
+  private `_defaultBodyRunner` / `_defaultActionRunner` fields through `any` to
+  avoid clobbering another AppPlugin's runner on a shared kernel — an invariant
+  owned by every caller and enforced by none, and a private reach that a field
+  rename would have broken silently (the guard reads `undefined`, every AppPlugin
+  reinstalls). The engine's own `bindHooks` fallback and ObjectQLPlugin's
+  authored-action re-sync read the same fields the same way. All three read the
+  public accessors now; the only remaining `_default*` mentions in the repo are
+  comments and test doubles.
+
+  Caller audit before the semantics change: every setter call site either owns a
+  fresh engine (the sandbox and hook-binder tests) or wants exactly
+  keep-the-first (AppPlugin) — nobody replaces a runner on a live engine. Return
+  type `void` → `boolean` is additive; AppPlugin uses it to keep its "Installed
+  default … runner" log truthful (skipped when the engine kept an earlier one).
+
+  Pinned in hook-binder tests: second install refused end-to-end (the first
+  runner is the one that executes) and the accessors expose exactly what was
+  kept.
+
+### Patch Changes
+
+- 3ec8186: feat(migrate,objectql): the upgrade path names the data migrations that are still open here (#3438, ADR-0104 2026-07-30)
+
+  Both value-shape gates fail toward leniency: a deployment that never runs its
+  migration keeps warning instead of rejecting, and keeps every released file
+  forever. That default is right — and completely silent, so the gate could sit
+  open for the life of a deployment without anyone learning that one command ends
+  it. A gate nobody is told about is served by nobody.
+
+  Two announcements, each where an upgrade actually looks:
+
+  - **`os migrate meta --from 16`** now ends by naming the data migrations a
+    chain crossing into 17 leaves behind — `files-to-references`, `value-shapes`
+    — with what each unlocks, scoped to the field classes the author's own
+    metadata declares (an app with no media field is never told about the file
+    migration). `--json` carries the same list as `dataMigrations`. The command
+    reads no database, so it reports what remains _to do_, never what a given
+    deployment has _done_.
+  - **The server logs one line per open gate at boot**, naming the command that
+    closes it. Only the lax posture announces itself — a verified gate already
+    logs that it is enforcing, and an app declaring neither class of field costs
+    nothing and says nothing. This is the half that can speak to a deployment's
+    actual data, because it is the half with the database.
+
+  Nothing about enforcement changes: same gates, same flags, same fail-toward-
+  leniency default. The advisory runs on `kernel:bootstrapped` rather than
+  `kernel:ready`, deliberately — the answer depends on the storage service's own
+  ready handler, which registers `sys_migration` and may attest a store it just
+  created, and racing it would tell a brand-new deployment its gates are open
+  moments after they closed.
+
+- 956e7f9: fix(objectql): the boot gate announcement stops firing where it is false, and stops counting fields nothing enforces (#3438)
+
+  The startup line that names an open value-shape gate (#4253) fired on every
+  deployment there is, and said something untrue on any deployment that had
+  already settled the question with an environment switch. Both are the same
+  failure — an advisory that speaks where it does not apply is how readers learn
+  to ignore it — and neither is reachable from the suite that shipped with it,
+  because `engine.test.ts` mocks the registry away and a mocked registry hands
+  the engine exactly the fields the test wrote.
+
+  `objectHasCoveredValueField` — the dormancy short-circuit that is supposed to
+  spare an object with no covered field the flag query — tested raw type
+  membership, while the real registry INJECTS covered-type fields into every
+  object it registers: `organization_id` and `owner_id` (both `system`),
+  `created_by` and `updated_by` (both in `SKIP_FIELDS`), four `lookup`s.
+  `validateRecord` skips every one of them before it reaches the value-shape
+  check, so the short-circuit answered `true` for literally every object, never
+  fired, and its WeakMap memoized a constant. Counting is now by the validator's
+  own `isScannableValueShapeField`, the predicate the scanner already imports —
+  three readings of "a covered field" drifting by one clause is how a gate ends
+  up governing fields nothing enforces.
+
+  The announcement also consulted no environment switch, while both postures it
+  reports on short-circuit ahead of the deployment flag. Under
+  `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` enforcement is already on for both
+  classes, so "checked but NOT enforced here" was simply false; under either
+  opt-out the operator chose leniency deliberately, so naming a migration that
+  cannot change what they get is noise. Each gate now consults its own pair
+  (`mediaPostureSetByEnv` / `valueShapePostureSetByEnv`, siblings for the reason
+  `mediaStrictEffective` and `valueShapeStrictEffective` are siblings), since the
+  opt-outs are per-class while the opt-in opens both. Cheapest test first, so a
+  kernel with nothing to say still reaches no flag query.
+
+  Enforcement is unchanged: same gates, same flags, same default. The flag read
+  was already memoized per process, so what this corrects is the property
+  ADR-0104 states, not a user-visible cost.
+
+- 8d895ff: feat(spec,objectql,rest): publish the audit-provenance and import-coercion vocabularies (#3786, #4173)
+
+  Two more hand-copied lists retired the same way, each replaced by one spec
+  export and derivation at every consumer.
+
+  **`AUDIT_PROVENANCE_FIELDS`** (`@objectstack/spec/data`, with the
+  `AuditProvenanceField` type) — the four columns `applySystemFields` injects on
+  every audit-tracked object: `created_at`, `created_by`, `updated_at`,
+  `updated_by`. That four-name list existed in at least four copies across two
+  repos: the registry's injection if-chain, the rule-validator's `preserveAudit`
+  allowlist ("Kept in sync with the registry's auto-injected audit fields" — by
+  nothing), and two objectui render surfaces. Now:
+
+  - the registry's injection is table-driven, keyed by the tuple with a
+    `satisfies Record<AuditProvenanceField, …>` clause — a name added to the spec
+    without a column definition (or vice versa) is a compile error, the
+    `APPROVER_VALUE_BINDINGS` discipline;
+  - the rule-validator's `AUDIT_TIMELINE_FIELDS` derives from the same tuple;
+  - `FIELD_GROUP_SYSTEM_FIELDS`' audit prefix derives from it too — one
+    declaration even inside the file that hosts both;
+  - objectui's `AUDIT_FIELD_BY_ROLE` already pins itself by subset assertion and
+    can import the tuple directly once this release is published.
+
+  Injection behaviour is byte-identical — a conformance test pins every injected
+  column's shape against the pre-refactor definitions.
+
+  **`IMPORT_BOOLEAN_TRUE_TOKENS` / `IMPORT_BOOLEAN_FALSE_TOKENS` /
+  `IMPORT_REFERENCE_TYPES`** (`@objectstack/spec/data`) — the `/import` coercion
+  vocabulary #4173 asked for. The server's `import-coerce.ts` now derives its
+  `BOOL_TRUE` / `BOOL_FALSE` / `REFERENCE_TYPES` from these instead of owning
+  them privately, and objectui's Import Wizard preview — which re-checks the same
+  contract client-side so a cell is flagged red exactly when the server would
+  reject it — can retire its pinned-inventory mirror once this release is
+  published (the retirement path is written in that file's own header).
+  `IMPORT_REFERENCE_TYPES` ships with the legacy `'reference'` spelling included,
+  retiring the `+ 'reference'` literal both ends carried separately. The tables'
+  own discipline is tested: sets disjoint, every token pre-normalized
+  (lower-case, trimmed), and the Chinese / check-mark spreadsheet-reality tokens
+  pinned by name.
+
+  No behaviour change anywhere: every derived value is byte-identical to the
+  literal it replaces.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- c20b875: **Correct the stale premise left behind by #4012: the degraded-boot stderr copy
+  survives the operator's LOG LEVEL, not `os serve`'s boot-quiet window.**
+
+  `emitDegradedBootBanner` writes the `OS_ALLOW_DRIVER_CONNECT_FAILURE` banner to
+  stderr in addition to `logger.warn`, and every comment and test name explaining
+  why cited the same reason: `os serve` swallowed all of stdout while the kernel
+  booted, and `Logger` routes `warn` to stdout. #4012 fixed that — the boot window
+  now buffers and replays `warn`-and-above — which retires the _stated_
+  justification for a duplicate that is nonetheless still load-bearing:
+
+  `Logger.write()` returns before touching a stream when the record is below
+  `config.level`, so at `--log-level error`, `fatal` or `silent` the banner's
+  `logger.warn` reaches **no** stream at all. A production host at `error` is
+  exactly the deployment this escape hatch exists for, and exactly where a
+  logger-only banner would vanish. Removing the stderr copy on the strength of
+  #4012 would therefore have been a regression — so this documents the reason that
+  is still true, in the places someone would read before deleting it:
+  `degraded-boot.ts`, the engine's emit site, and all three parity tests
+  (objectql, runtime, service-datasource), which are renamed off "which `os serve`
+  boot-quiet cannot swallow" to "which the operator log level cannot filter away".
+
+  The objectql parity test now proves the claim instead of asserting around it: it
+  drives a **real** `ObjectLogger` at `level: 'error'` and requires the banner on
+  stderr _and_ nothing on stdout. Set the level to `warn` and it fails — so the
+  test is pinned to the level filter rather than passing for any reason.
+
+  Also corrected in the same sweep, all comment-only, all previously overstating
+  what #4012 had not yet fixed:
+
+  - the automation wiring summary (`format.ts`, `serve.ts`, its test) claimed the
+    boot window swallowed the engine's binding warnings. Its real justification is
+    stronger and unchanged: a flow that silently fails to arm emits **no** log line
+    at any level, so binding state has to be read off the live engine — absence of
+    a warning was never evidence of a bound flow.
+  - the seed summary (`seed-summary.ts`, `format.ts`, its test) and `AppPlugin`'s
+    seed-outcome note attributed the silence to the boot window; the operative
+    gate is that `SeedLoader`'s result logs are `info`, under the default `warn`.
+
+  No behavior changes.
+
+- ed77493: fix(objectql,spec): `filter` folds to `where` on EVERY engine method, and `top`/`limit` joins the #3795 slot table (#4346)
+
+  The `filter` → `where` fold that #3795 settled at the protocol layer existed
+  at the **engine** layer in exactly one of six methods. `ObjectQL.find()`
+  folded it; `findOne`/`count`/`update`/`delete`/`aggregate` passed the option
+  bag through with `ast.where === undefined`, which every driver reads as "no
+  predicate" — so a caller filtering with `{ filter }` silently matched EVERY
+  row:
+
+  | call                                 | before                  | after          |
+  | ------------------------------------ | ----------------------- | -------------- |
+  | `findOne({filter: {status:'done'}})` | first row of the table  | a matching row |
+  | `count({filter})`                    | whole-table count       | matching count |
+  | `update(data, {filter, multi:true})` | **every row rewritten** | matching rows  |
+  | `delete({filter, multi:true})`       | **table emptied**       | matching rows  |
+  | `aggregate({filter, …})`             | aggregated all rows     | matching rows  |
+
+  This was reachable, not theoretical: the deprecated
+  `DataEngine{Query,Update,Delete,Count,Aggregate}OptionsSchema` contracts all
+  declare `filter`, `ScopedContext`/`ObjectRepository` (the cross-object API
+  handed to L2 hook bodies) forwards its argument verbatim, and the spec's own
+  hook documentation taught the broken call
+  (`users.findOne({ filter: { role: 'admin' } })` — now corrected to `where`).
+
+  Every engine entry point now folds through the spec's own #3795 machinery
+  (`RPC_QUERY_ALIAS_SLOTS` + `foldQueryAliasSlots`) instead of `find`'s
+  hand-rolled copy, under the #4181 rule: an alias alone folds, redundant
+  identical spellings collapse, DIFFERENT values for one slot throw
+  ("Send exactly one") instead of silently picking a winner, and an explicit
+  `null` alias is a withdrawal.
+
+  **The sixth pair.** `top` → `limit` — the pair the #3795 scope note excluded
+  as "the OData layer" — joins `RPC_QUERY_ALIAS_SLOTS`. The protocol normalizer
+  folded it BACKWARDS (`options.limit = Number(options.top)` — the alias
+  overwrote the canonical key) while `engine.find` folded it canonical-wins, so
+  `{top: 1, limit: 3}` answered 1 over HTTP and 3 through a direct engine call.
+  All three readers (wire normalizer, RPC schema parse, engine) now resolve the
+  pair identically: `top` alone still limits, a conflicting `{top, limit}` is
+  refused.
+
+  Behavior change to note: option bags that previously smuggled conflicting
+  spellings (`{where: X, filter: Y}`, `{top: 1, limit: 3}`) are now refused
+  loudly on every path instead of silently resolving differently per layer.
+  Pinned per method, write paths included — a regression here is silent and
+  destructive, and the class went unnoticed precisely because `find` was the
+  only method anyone thought to check.
+
+- 58a03d2: fix(objectql,spec,metadata-protocol,service-queue): engine option bags are now a closed contract — unknown keys throw instead of silently doing nothing (#4371 option 2)
+
+  The engine declares `Engine*OptionsSchema` but never parses it at runtime, so
+  any option key outside the contract — a typo (`orderby`), a retired key
+  (`cursor`), a wire-protocol leftover (`object`, `count`), a key that only
+  works on other methods (`tenantId` on `count`) — rode along and was silently
+  ignored. All six methods now reject non-null unknown keys, naming the legal
+  set; retired keys (`cursor`/`distinct`) quote their #4286 tombstone; `null`
+  stays a withdrawal.
+
+  Per-method legal keys = the method's schema keys plus the documented extras:
+  `searchFields` (now declared on `EngineQueryOptionsSchema` — it was read by
+  the engine's `$search` expansion and sent by the protocol layer all along),
+  `onFieldsDropped` on `update` (contract-declared write observability), and
+  the driver pass-through keys (`transaction`, `tenantId`, `tenantIds`,
+  `timezone`, `bypassTenantAudit`, `preserveAudit`) on `find`/`findOne`/
+  `update`/`delete` — the methods whose bag actually reaches driver options.
+  `count`/`aggregate` never forward their bag, so pass-through keys there are
+  rejected rather than accepted-and-ignored. A drift pin holds the sets equal
+  to the schemas.
+
+  Also closed in the same sweep:
+
+  - A bag-level `object` key used to OVERRIDE the resolved object on the query
+    AST (`{ object, ...query }` spread order), splitting `ast.object` from the
+    table actually queried. The AST now keeps the resolved name; a direct call
+    passing `object` is rejected, and the protocol layer refuses a POST-body
+    `object` that contradicts the route (400 `QUERY_OBJECT_MISMATCH`) instead
+    of picking a winner.
+  - `findData` no longer leaks protocol-layer vocabulary (`object`, `count`,
+    `joins`, `windowFunctions`, `cursor`, `distinct`, non-aggregate `having`)
+    onto the engine bag.
+  - Nested expand ASTs (`expand: { rel: { sort } }`) reject the four wire-only
+    spellings exactly like the top-level bag (#4371 option 1 did the top level).
+  - The engine's OData-spelling reads (`$search`/`$searchFields`) are gone —
+    the protocol normalizes to the bare keys; a direct call passing them now
+    throws instead of half-working on one method.
+  - `DbQueueAdapter.purge`/`purgeFailed` passed `{ id }` — a key the engine
+    never read, so purge deleted NOTHING (each delete threw into a warn-level
+    catch) and purgeFailed always threw. Both now pass `{ where: { id } }`;
+    the test fake's `delete` no longer accepts the signature the real engine
+    rejects.
+
+  Migration for direct engine callers (wire/HTTP callers are unaffected): pass
+  only the keys your method's `Engine*OptionsSchema` declares (plus the extras
+  above). Anything else previously did nothing — delete it, or move it to the
+  layer that owns it.
+
+- c39d713: fix(objectql): a direct engine call carrying `sort`/`select`/`skip`/`populate` now throws instead of silently dropping the parameter (#4371)
+
+  The engine folds `filter`→`where` and `top`→`limit` itself (#4346); the other
+  four pairs in `RPC_QUERY_ALIAS_SLOTS` fold at the RPC/protocol layer only,
+  because their value shapes need lowering (`sort`'s `{field: 'asc'}` record
+  form, `populate`'s name list) that belongs there. A **direct** `engine.find()`
+  / `findOne()` never crosses that layer, so one of those keys used to ride the
+  AST verbatim, drivers read only the canonical name, and the request succeeded
+  with the parameter discarded — `sort` + `limit` ("the latest N") silently
+  returning an arbitrary N. Three shipped instances were fixed in #4370, and a
+  fourth sat in the engine's own autonumber seeding (`select` — now `fields`).
+
+  `find`/`findOne` now reject a non-null wire-only spelling with an error naming
+  the canonical key and shape, e.g.:
+
+  > `find('task') does not accept 'sort': 'sort' is a wire spelling of
+'orderBy', folded by the RPC/protocol layer — a direct engine call bypasses
+that fold, so the value would be silently dropped, not applied. Pass
+'orderBy' (SortNode[]: [{ field, order: 'asc' | 'desc' }]) instead.`
+
+  Migration for direct engine callers (HTTP/RPC callers are unaffected — the
+  wire fold is unchanged): `select: [...]` → `fields: [...]`;
+  `sort: {f: 'asc'}` or `sort: [{field, order}]` → `orderBy: [{field, order}]`;
+  `skip: n` → `offset: n`; `populate: ['rel']` → `expand: {rel: {object: 'rel'}}`.
+  An explicit `null` under a wire spelling remains a withdrawal (ignored), and
+  the where-only methods (`update`/`delete`/`count`/`aggregate`) are unchanged —
+  their contracts honour no sort/projection/pagination in either spelling
+  (unknown-key enforcement there is #4371's follow-up scope).
+
+- 91f4c78: fix(automation,objectql,spec): attribute `runAs:'system'` flow writes to the flow in the audit log (#4366)
+
+  A `runAs:'system'` flow's data writes carried no attribution at all: the run
+  context resolved to `{ isSystem: true }` with no `userId` and no service
+  principal, so the audit writer recorded `user_id=null, actor=null` and the
+  record-history UI rendered every such row as "Unknown user" — business users
+  read the flow's own status mirror as data corruption.
+
+  The `svc:*` attribution channel (ADR-0014 D2, `ExecutionContext.actor`) already
+  existed for exactly this class of writer; it was simply never wired end-to-end:
+
+  - **service-automation** — `resolveRunContext` now stamps `flowName` alongside
+    `runAs`/`flowRunId`, and `resolveRunDataContext` labels a `runAs:'system'`
+    run's data context `actor: 'svc:flow:<flowName>'` (fallback
+    `svc:flow:automation`). Attribution only — no security middleware keys on it.
+  - **objectql** — `buildSession` propagates `ExecutionContext.actor` onto the
+    hook session, closing the gap that left the audit writer's
+    `userId ?? session.actor` fallback unreachable from the engine path.
+  - **spec** — `AutomationContext.flowName` (engine-stamped, provenance) and the
+    hook session's optional `actor` field document the contract.
+
+  No behavior change for user-attributed writes: `userId` still wins wherever it
+  is present.
+
+- 9881074: fix(batch): the background walks seek instead of counting, so they stop skipping rows (#4363)
+
+  #4363 made a single paged read a partition of its result set. It could not make
+  a _walk_ one: seven background scans paged with a growing `offset` while writing
+  to the very rows they were reading, and an offset counts into a set those writes
+  are changing. Rows slide past the cursor and are never visited.
+
+  That is not a slow page in any of these — it is a wrong answer wearing the shape
+  of a clean run:
+
+  - **`rebuildApproverIndex`** built its desired state by walking
+    `sys_approval_request WHERE status = 'pending'` with no `orderBy` at all, then
+    **deleted** every index row that state did not explain. A skipped request
+    meant an approver silently dropped from someone's queue. (The loop beside it
+    ordered by `created_at` — not unique, so its pages were never a partition
+    either.)
+  - **`verifyFileReferences`** decides which files nothing references. A record it
+    never visits is reported as an unreferenced file.
+  - **`backfillFileReferences`** and the **pinyin companion backfill** rewrite
+    each row they read, so their own writes were shifting the set out from under
+    the cursor. Records were left unconverted and unsearchable by a run that
+    reported success.
+  - **`scanValueShapes`** exists to vouch that no stored value is off-shape, and
+    it opens a migration gate on that evidence.
+
+  All of them now go through `keysetWalk` (`@objectstack/types`): order by a
+  unique key, and seek past the last one instead of counting from the start. A
+  row's key does not move when the row is updated, and cannot be shifted when
+  another is deleted, so the walk is stable under exactly the mutation these
+  functions perform. It is also O(n) rather than O(n²/page) — measured on
+  Postgres over 2M rows, deep pages cost ~1.1 s by offset against ~0.09 s by seek.
+
+  One deliberate non-conversion: the REST **export** stream keeps its offset. It
+  honors a caller-chosen sort, and a keyset walk would have to re-order the export
+  by `id` to seek — changing what the user asked for to fix a cost. Its pages are
+  already a partition since #4363; only the depth cost remains.
+
+  `keysetWalk` merges the cursor with `$and` rather than spreading it into the
+  caller's filter, so a walk whose own `where` constrains the key column
+  (`{ id: { $in: [...] } }`) keeps that constraint instead of having it silently
+  overwritten. When a `max` cap is set it reads one row beyond the cap to tell
+  "the cap stopped us" from "the source ended exactly there" — without that, a
+  walk that read everything still reports `truncated`, and a caller acting on it
+  goes looking for rows that were never withheld.
+
+  The storage suites' fake engines now **throw** on an `offset` instead of serving
+  one, so the conversion is pinned rather than merely passing.
+
+- 7ce02eb: feat(spec,objectql): `IObjectQLEngine` — the `objectql` slot's contract exists, the class `implements` it, and the seven consumer-local stand-ins are deleted (#4251 B3)
+
+  ObjectQL registers one instance under two names, and the ledger can finally say
+  what each name means: `data` stays `IDataEngine` (the data plane), `objectql`
+  now resolves to **`IObjectQLEngine`** — the full engine: schema access
+  (`getSchema` / `getObject` / `registry`), actions (`registerAction` /
+  `removeActionsByPackage` / `executeAction`), the hook/middleware seams
+  (`registerHook` / `unregisterHooksByPackage` / `registerFunction` /
+  `registerMiddleware` / `bindHooks`), the first-wins default runners and hook
+  metrics, boot wiring (`registerDriver` / `setDatasourceMapping` /
+  `registerApp`), and the ops probes (`checkDriversHealth` /
+  `wasDatastoreCreatedFromEmpty` / `invalidateDataMigrationFlags`). The ledger
+  test pins the new relation: `objectql` strictly widens `data`, deliberately no
+  longer equal.
+
+  **Why now, and why `implements` is the point.** The honest state for two
+  batches was recorded on `DomainHandlerContext.getObjectQL`: ObjectQL is wider
+  than `IDataEngine`, the wider part had no contract, and typing it `IDataEngine`
+  would be "the more comfortable-looking lie". The interim discipline — each
+  consumer declares the narrow slice it uses — produced seven local surfaces
+  (`AppEngineSurface`, `EngineRegistrySurface`, `EngineExtensionSurface`,
+  `SecurityEngineSurface`, `FreshDatastoreEngine`, the dispatcher's inline
+  `checkDriversHealth` slice, the `getObjectQL: any` itself). Each was honest and
+  each was an UNCHECKED claim: `getService<Surface>('objectql')` is an assertion,
+  so an engine rename would have broken every consumer at runtime with zero
+  compile errors. `ObjectQL implements IObjectQLEngine` converts all of them into
+  one compiler-verified claim. All seven stand-ins are deleted; consumers import
+  the one declaration. `getObjectQL` is typed `Promise<IObjectQLEngine | null>`
+  end to end, closing the oldest documented `any` in the dispatcher.
+
+  **Evidence bar unchanged.** Every declared member has a cross-package consumer
+  reaching it through the slot; engine members without one (e.g. `triggerHooks`,
+  cross-package only in tests) stay off until a caller appears. The registry view
+  (`EngineSchemaRegistryView`) declares exactly the eight members consumers use.
+
+  **`_registry` never leaves the engine package now.** plugin-security's
+  declared-metadata readers (`readDeclared`, permission-set projection, suggested
+  audience bindings) reached ObjectQL's private `_registry` field through `any` —
+  the same private reach `/me/apps` had in B2, five more times. All migrated to
+  the public `registry` getter the contract declares, test doubles included.
+
+  **`IMetadataService` gains `subscribe?` / `loadMany?`** — implemented by
+  `MetadataManager` beside `watch` all along, reached through the slot only via
+  `any` by ObjectQLPlugin's metadata bridge (the re-sync keeping runtime-authored
+  hooks/actions live). With them declared, the bridge's six `metadata` lookups
+  and metadata-protocol's `objectql` lookup carry contract types, and both files
+  leave the grandfather list entirely: baseline **167 → 159 sites, 36 → 34
+  files**.
+
+- d13004a: feat(core,runtime): plugin ordering is a declared, kernel-enforced contract (ADR-0116, #4131)
+
+  `kernel.use()` registration order was never a contract — the kernel resolves
+  init/start order from the plugin dependency graph — but a plugin that needed a
+  service at init _when its provider is composed_ while also booting _without_
+  the provider had no way to declare that. `AppPlugin` was the standing example:
+  it grabs `manifest`/`objectql` synchronously in `init()`, declared nothing
+  (a hard dependency would break empty-env / metadata-only / mock-engine
+  kernels), and so its correctness rode on which array slot each caller put it
+  in. That convention failed the same way twice (`DefaultDatasourcePlugin`'s
+  first cut; then #4085, disguised for months as "crashes when the artifact is
+  missing").
+
+  The kernel `Plugin` contract gains three additive fields, enforced by both
+  `ObjectKernel` and `LiteKernel` through one shared implementation
+  (`plugin-order.ts` — the previously duplicated topological sort is unified
+  there):
+
+  - **`optionalDependencies: string[]`** — order-if-present: hoisted ahead
+    exactly like `dependencies` when composed (real topology edges, including
+    cycle detection), silently skipped when absent.
+  - **`requiresServices: string[]`** — services resolved synchronously during
+    `init()` with no fallback. Validated **before Phase 1**: a required service
+    whose only declared provider initializes later fails the boot with an error
+    naming both plugins, both slots, and the fix — before any init side
+    effects. Re-checked immediately before the plugin's own init, where a still-
+    missing service becomes a named composition error exactly where the old
+    bare `Service not found` crash fired.
+  - **`providesServices: string[]`** — services a plugin's `init()`
+    unconditionally registers; powers the validation and the diagnostics.
+
+  Plugins that declare nothing get the diagnosis too: a `getService` miss
+  during Phase 1 now appends which plugin was initializing and — when a
+  composed plugin declares the service — who provides it and how to declare the
+  ordering. The `Service '<name>' not found` prefix and the factory-backed
+  `is async - use await` message are unchanged.
+
+  First adopters: `AppPlugin` declares
+  `optionalDependencies: ['com.objectstack.engine.objectql']` +
+  `requiresServices: ['manifest']` (cleared on the empty-env no-op path), so
+  the #4085 composition — AppPlugin registered before the engine — now boots
+  correctly in every slot; `ObjectQLPlugin` declares
+  `providesServices: ['objectql', 'data', 'manifest', 'lifecycle']` and
+  `MetadataPlugin` declares `providesServices: ['metadata']`.
+
+  Everything is additive — plugins that declare nothing keep their exact
+  ordering semantics; no existing declaration changes meaning.
+
+- 8675db6: refactor(data)!: a select-list entry is a field name — the nested-select object form is removed (#4196)
+
+  `FieldNode` declared two forms for one entry of `QueryAST['fields']`:
+
+  ```ts
+  type FieldNode =
+    | string // "name"
+    | { field: string; fields?: FieldNode[]; alias?: string }; // nested select
+  ```
+
+  The object form was **declared-but-inert**. Nothing produced it, and nothing
+  read `.fields` or `.alias` — every consumer on the path treats the list as
+  `string[]`: `objectql`'s formula projection and its two known-field filters,
+  `driver-sql`'s `select()`, `driver-memory`'s `projectFields`. `driver-mongodb`
+  keyed its projection with the entry itself, so an object entry asked for a
+  column literally named `"[object Object]"`, and the REST ingress stringified
+  each entry before comparing it to the field map, so the same entry came back as
+  `400 INVALID_FIELD: Unknown field '[object Object]'` — a rejection naming
+  something the caller never wrote. An author who wrote
+  `fields: [{ field: 'owner', fields: ['name'] }]` got it accepted by validation
+  and then dropped or mangled, depending on the driver (ADR-0078 silently-inert
+  declaration; ADR-0049 enforce-or-remove).
+
+  The capability the object form described is already served, by a different key.
+  Removing the second spelling rather than lowering it into the first is Prime
+  Directive #12: one capability, one contract.
+
+  **FROM → TO**
+
+  | Was                                                               | Now                                                              |
+  | :---------------------------------------------------------------- | :--------------------------------------------------------------- |
+  | `fields: [{ field: 'owner', fields: ['name'] }]`                  | `expand: { owner: { object: 'user', fields: ['name'] } }`        |
+  | `fields: [{ field: 'owner' }]`                                    | `fields: ['owner']`                                              |
+  | `fields: [{ field: 'owner', fields: ['name'] }]`, one column only | `fields: ['owner.name']` (dotted path)                           |
+  | `fields: [{ field: 'total', alias: 't' }]`                        | `aggregations` / `windowFunctions` — they carry the live `alias` |
+
+  The one-line fix: **a `fields[]` entry is a string.** Move nested selection to
+  `expand`, which the engine resolves through batch `$in` queries (default max
+  depth 3).
+
+  There is no `os migrate meta` step, and deliberately so: `QueryAST` is a request
+  shape, never stored in stack metadata, so the chain has no source to rewrite. It
+  is registered as an ADR-0087 D3 **semantic** migration
+  (`query-field-node-object-form-retired`) on the protocol-17 step instead — the
+  `EnhancedApiError.fieldErrors` / `BatchOptions.validateOnly` precedent. Callers
+  move their own select lists, and both channels tell them how:
+
+  - **The parse.** `FieldNodeSchema` narrows to `z.string()` with an error map that
+    answers an object entry with the prescription above, not "expected string,
+    received object". `z.input` becomes `string`, so `tsc` fails at the authoring
+    site first.
+  - **The ingress.** `assertProjectionFieldsExist` judges the entry's _shape_
+    before consulting the object's field map — it is wrong about the shape, not
+    about this object, and a registry-less host would otherwise pass it to a driver
+    that cannot read it. The 400 now names the retired form instead of the field
+    `"[object Object]"`.
+
+  No runtime behaviour changes for anything that ever worked; the defensive
+  unwrapping the drivers had grown against a shape nothing sends goes with it.
+
+- af2a095: fix(data): `searchFields` / `groupBy` / `aggregations` naming a field that does not exist are rejected, not silently degraded (#4254)
+
+  #4226 closed `sort` / `select` / `expand`; with the filter axis (#4134 / #4164 /
+  #4181 / #4121) that made four field-naming read axes that either apply or fail.
+  The same machine kept leaking on the remaining three, and each failure corrupted
+  something the closed axes never touched:
+
+  ```
+  search=alpha&searchFields=no_such  -> 200  MORE rows than the narrowing allowed
+  groupBy=[no_such]                  -> 200  [{no_such: null, n: <true count>}]  N groups collapsed into 1
+  sum(no_such)                       -> 200  0 — indistinguishable from a real zero
+  ```
+
+  Each is now refused at the shared normalizer, so `GET /data/:object`,
+  `POST /data/:object/query`, the export route and the runtime dispatcher give
+  one answer instead of four.
+
+  - **`searchFields` → `400 INVALID_FIELD`.** The `select` failure with the sign
+    flipped outward: the engine dropped unknown names and, when that emptied the
+    override, fell back to the FULL searchable set — so a parameter that exists
+    only to narrow a search widened it, and it changed which ROWS came back, not
+    just which columns. Its only in-framework caller is `GET /data/:object/export`
+    — the route whose `search` support just shipped so exports would stop
+    downloading "the unsearched superset … in a file that looks authoritative";
+    a typo'd `searchFields` did exactly that, one parameter over. Three causes,
+    three messages, because the fixes differ (the split #4226 drew on expand): a
+    name that is no field is a request typo; a REAL field outside the searchable
+    set needs the object changed (its message names the declared
+    `searchableFields` or the auto-default's type rule, whichever applies); and
+    a `searchableFields` entry that names no field is a STALE DECLARATION — a
+    bug on the object, called out as such because clients (objectui's list
+    search) echo the declaration verbatim. The allowed set is resolved by the
+    same `@objectstack/spec/data` function the engine's search expansion
+    consumes (`resolveSearchFieldResolution`, moved from objectql), so the gate
+    cannot drift from what search actually scans.
+  - **`groupBy` → `400 INVALID_FIELD`.** The in-memory aggregation path projects
+    an unknown column as `null` for every row, so all rows landed in ONE bucket
+    whose count is the true row count — structurally perfect, identical to "this
+    column really holds a single value". A chart draws one bar; nothing says the
+    grouping never ran. Native SQL aggregation errors on the same input, so which
+    backend a deployment sits on decided the answer — the "two routes, opposite
+    answers" split, one axis over.
+  - **`aggregations` → `400 INVALID_FIELD`.** `sum(<typo>)` folded a column of
+    `undefined` to `0` — the exact number an empty quarter produces, in reports
+    whose whole job is to be believed (`avg`/`min`/`max` answered `null` the same
+    way). `count` with no `field` (or the `'*'` sentinel) is the one legitimate
+    field-less form and passes.
+  - **Unreadable SHAPES on the aggregation axes → `400 INVALID_QUERY`** — the
+    standard-catalog code that had no emitter since it was written, like
+    `INVALID_SORT` before #4226. A string `groupBy`, an entry naming no field, a
+    function or `dateGranularity` outside the spec enums, a missing `alias`: each
+    slipped past the `Array.isArray` routing guard (rows returned UNGROUPED) or
+    computed a silent placeholder (`null` results, a column keyed `"undefined"`,
+    one bucket per raw value under an unknown granularity).
+
+  Tiering is unchanged from #4226: registry + field map present → authoritative;
+  no registry / no field map / legacy array field map → the NAME gates skip (shape
+  gates still apply — they need no schema). The engine's own tolerance is
+  untouched: internal callers reaching `engine.find()` / `engine.aggregate()`
+  directly are unaffected. `@objectstack/rest` also stops logging
+  `INVALID_FILTER` / `INVALID_SORT` / `INVALID_QUERY` rejections as
+  "[REST] Unhandled error" — they are client mistakes the response already
+  explains, as `INVALID_FIELD` always was.
+
+  Requests that name real fields are unaffected.
+
+- bf478e1: fix(data): `sort` / `select` / `expand` naming a field that does not exist are rejected, not silently dropped (#4226)
+
+  The list path has four axes on which a caller names a field. `filter` was
+  closed over #4134 / #4164 / #4181 / #4121 — a filter the server cannot apply is
+  now a 400, never a 200 over the wrong rows. The other three still leaked, all
+  answering `200`:
+
+  ```
+  sort=no_such_field   -> 200  CAEBD          byte-identical to "no sort at all"
+  select=no_such_field -> 200  <every field>   asked for one column, got all of them
+  expand=no_such_rel   -> 200  <no such key>   no relation, no complaint
+  ```
+
+  Each is now refused at the shared normalizer, so `GET /data/:object`,
+  `GET /data/:object/:id`, `POST /data/:object/query`, the export route and the
+  runtime dispatcher give one answer instead of five.
+
+  - **`sort` → `400 INVALID_SORT`.** The row set is unchanged, so this is not
+    #4181's "returned everything" — it is worse in one specific way: `sort` +
+    `top` is how a caller asks for "the latest N", and a dropped sort makes that
+    an arbitrary N that nothing in the response reveals. This is the list half of
+    the bug #4181 fixed on the export route's `orderby`. `INVALID_SORT` had sat
+    in the standard catalog since it was written with no emitter.
+  - **`select` → `400 INVALID_FIELD`.** `engine.find()` drops unknown columns
+    (deliberate `SELECT *` tolerance) and then falls back to `*` when that empties
+    the projection, and the two compose into `?select=<typo>` asking for ONE
+    column and receiving EVERY column — a parameter whose purpose is to return
+    less, failing by returning more, against both FLS and data minimisation. The
+    partially-unknown case (`?select=title,no_such`) is refused on the same terms:
+    half a projection is not the one that was asked for, and the tolerant reading
+    would have to explain why `?status=<typo>` is a 400 and `?select=<typo>` is
+    not, on one endpoint, about one field map.
+  - **`expand` → `400 INVALID_FIELD`.** The lightest of the three — same rows,
+    same columns, the relation simply is not there — but the response cannot be
+    told apart from "every foreign key is null", and the client renders raw ids
+    where names belong. A name that is no field at all and a name that is a field
+    holding no reference (`?expand=title`) get different messages, since the fixes
+    differ.
+
+  **Sorts that were silently never applied now are.** Two wire spellings reached
+  the normalizer and fell through it untouched, and every driver then declined
+  them (`SqlDriver` guards its ORDER BY with `Array.isArray(orderBy)`): the
+  client SDK's own declared `orderBy: string[]`, and the `{field: direction}` map
+  that `GET /data/:object/export`, `GET /data/import/jobs` and objectui's calendar
+  all emit. Both are now folded to `SortNode[]` — so the import-job history, which
+  has asked for `created_at desc` since it was written and served insertion order,
+  sorts. A sort shape that still cannot be read (a number, an entry naming no
+  field, a direction that is neither `asc` nor `desc`) is `400 INVALID_SORT`
+  rather than a silent no-op.
+
+  **`$expand` of a `tree` field works.** `REFERENCE_VALUE_TYPES` lists `tree`
+  among the types whose value "points at another record … the related record
+  object in expanded form", and objectui requests it, but
+  `engine.expandRelatedRecords` tested membership with a hand-copied `!==` chain
+  that omitted it — so a hierarchy field came back as a raw parent id. The loop
+  now reads the shared spec set, which is also what the new expand gate validates
+  against, so the gate cannot admit a field the engine then skips.
+
+  **What changes for callers:** requests naming a non-existent field in `sort`,
+  `select` or `expand` now fail loudly instead of receiving an unsorted, widened
+  or unexpanded response. Every axis naming real fields is unaffected. The
+  engine's own tolerance is untouched — it guards internal callers (hooks, flows,
+  expand sub-reads, registry-less hosts) that never pass through this ingress,
+  the same tiering the object-existence and unknown-field gates already use.
+
+- 5d21a48: feat(spec,metadata-protocol,metadata,objectql,service-automation): stored metadata replays the full conversion chain at rehydration (#3903)
+
+  Every mechanism the platform has for evolving the metadata contract — schema
+  transforms, the ADR-0087 D2 conversion layer, the D3 migration chain, the
+  protocol-17 tombstones — operated on **authored source** only. Metadata **at
+  rest** (`sys_metadata` rows written by Studio or the runtime authoring APIs)
+  was rehydrated unparsed and unconverted, so the authored and stored contracts
+  silently diverged: a pre-17 row carrying `conditionalRequired` or `execute`
+  read as whatever each ad-hoc consumer happened to do with it.
+
+  **New spec primitive — `applyConversionsToStoredItem(type, item, options?)`**
+  (exported from the package root). Wraps one stored item of a given metadata
+  type and replays the **full** conversion chain over it — `retiredFromLoadPath`
+  entries included, because retirement is an _authoring-surface_ event: the
+  window exists to teach a live author, and a row at rest has no author to
+  teach. Idempotent, never throws, never validates.
+
+  Wired at every stored-row rehydration seam:
+
+  - `metadata-protocol`: `loadMetaFromDb`, `getMetaItems` (active + draft
+    preview), `getMetaItem` (active + draft), `getMetaItemLayered`, and
+    `duplicatePackage` (a copy re-saves through the schema gate, so legacy
+    sources now duplicate successfully — and the copy is canonical).
+  - `metadata`: the DatabaseLoader's live-row reads (`load` / `loadMany`).
+    History reads stay verbatim — history records what was written.
+  - `objectql`: the authored-action / authored-hook direct table reads, so
+    runtime-authored actions stored with the removed `execute` alias dispatch
+    via `target` again.
+  - `service-automation`: `AutomationEngine.registerFlow` now passes
+    `includeRetired` — stored flows keep canonicalizing after their conversions
+    graduate out of the load window. (The generic metadata seams deliberately
+    skip `type: 'flow'`: flow conversions carry the open-namespace conflict
+    guard, which needs this engine's live executor registry.)
+
+  **Boot hydration diagnoses instead of shrugging.** `loadMetaFromDb` now
+  returns `{ loaded, errors, invalid }`: each row is validated against its
+  type's spec schema _after_ conversion, and a genuine contract violation is
+  counted and warned with a stable `[metadata_spec_invalid]` marker — but still
+  registered, deliberately: refusing at boot would unhook live tables and make
+  the row unlistable and unfixable in Studio. The write path (`saveMetaItem` → 422) and the read-side `_diagnostics` envelope remain the enforcing gates; the
+  `SchemaRegistry.registerItem` validation hook is now documented as exactly
+  that diagnostic.
+
+  **Retired accommodation.** With the chain running on every stored read path,
+  the rule-validator's `requiredWhen ?? conditionalRequired` fallback — kept in
+  #3883 with a retirement promise that had no mechanism — is deleted. If you
+  call `evaluateValidationRules` directly with raw legacy field definitions,
+  convert them first (`applyConversionsToStoredItem('object', def)`) or author
+  `requiredWhen`; the platform's own read paths already hand you canonical
+  shapes.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [f4d7f1d]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [0373d52]
+- Updated dependencies [4f30943]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [bb192c4]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [a4a9944]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [cc2de0e]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [4475c59]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [f5fe061]
+- Updated dependencies [6c87cc9]
+- Updated dependencies [af2a095]
+- Updated dependencies [bf478e1]
+- Updated dependencies [dd5daac]
+- Updated dependencies [ec796d5]
+- Updated dependencies [77fadbf]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [8d5bb5a]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [a62bd9e]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [3245174]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [4965bfa]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/metadata-protocol@17.0.0-rc.1
+  - @objectstack/metadata-core@17.0.0-rc.1
+  - @objectstack/formula@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

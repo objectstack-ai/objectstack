@@ -1,5 +1,63 @@
 # create-objectstack
 
+## 17.0.0-rc.1
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 7309c81: chore(cli,create-objectstack): scaffolds no longer name a driver (#4065)
+
+  `os init` and the `create-objectstack` blank template both listed
+  `@objectstack/driver-memory` in the generated `dependencies`. It was the only
+  driver named, which read as an endorsement — "this is the driver your app runs
+  on" — when it is in fact the **last-resort rung** of the dev step-down (native
+  `better-sqlite3` → WASM SQLite → mingo). A new project's first impression of the
+  data layer should not be the engine that enforces no primary keys, no
+  uniqueness, no `NOT NULL` and no column types.
+
+  It was also redundant: `@objectstack/runtime` already depends on `driver-sql`,
+  `driver-sqlite-wasm` and `driver-memory`, and every script in both scaffolds runs
+  through the CLI, which carries all four. Removing the line changes nothing a
+  generated project can do — `objectstack dev` still resolves SQLite by default,
+  and `OS_DATABASE_URL` still selects Postgres / MySQL / MongoDB.
+
+  Docs updated to match: the "packages you depend on" table in _Your first project_
+  no longer lists a driver row (it now says where drivers come from), and the
+  Memory Driver section of _Database Drivers_ documents the opt-in persistence
+  default, carries a migration callout for the old `'auto'` behaviour, and points
+  test authors at in-memory SQLite. That section also claimed "Data is lost when
+  the process exits", which was simply false while `'auto'` was the default — it
+  wrote a file into the working directory.
+
 ## 17.0.0-rc.0
 
 ### Major Changes

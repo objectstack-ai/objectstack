@@ -1,5 +1,1167 @@
 # @objectstack/service-automation
 
+## 17.0.0-rc.1
+
+### Major Changes
+
+- a648e96: fix(spec,service-automation)!: `errorHandling.maxRetries` has one default, and `strategy: 'retry'` states its count (#4247)
+
+  `flow.errorHandling.maxRetries` was declared twice, with different values:
+
+  - **spec** — `FlowSchema` (`automation/flow.zod.ts`): `.default(0)`
+  - **engine** — `retryExecution` (`service-automation/src/engine.ts`):
+    `errorHandling.maxRetries ?? 3`
+
+  `??` fires only on `undefined`, so the winner was decided by the ROUTE a flow
+  took into the engine, not by what its author wrote:
+
+  | Path                                            | `errorHandling.maxRetries` | Retries |
+  | :---------------------------------------------- | :------------------------- | ------: |
+  | parsed by `FlowSchema` (`.default(0)` fills it) | `0`                        |   **0** |
+  | object built by hand and fed to the engine      | `undefined`                |   **3** |
+
+  One authored intent — "I didn't write a count" — two behaviors. The neighbouring
+  `retryDelayMs ?? 1000` / `backoffMultiplier ?? 1` agreed with their `.default()`s;
+  only `maxRetries` disagreed, which reads as a schema default changed from 3 to 0
+  without the engine following, not as a deliberate two-track design.
+
+  **The engine keeps no defaults of its own.** `retryExecution` now takes the
+  parsed `NonNullable<FlowParsed['errorHandling']>` and destructures all five
+  knobs — no `??`. This is safe because `AutomationEngine.flows` only ever holds
+  `FlowSchema.parse` output (`registerFlow` parses; the version-history rollback
+  re-seats an already-parsed snapshot), and it is what keeps a second set of
+  defaults from growing back: a knob the spec stops defaulting becomes a compile
+  error rather than a silent engine-side guess. Per Prime Directive #12 the spec
+  is the one contract; a consumer-side fallback is a second de-facto one.
+
+  **BREAKING — `strategy: 'retry'` now requires `maxRetries` >= 1.** With the
+  engine's copy gone, an unstated count is unambiguously `0`, and `'retry'` with 0
+  attempts runs the flow once and stops — i.e. `strategy: 'fail'` wearing another
+  label, a declared capability the runtime does not deliver (Prime Directive #10
+  corollary). Rather than pick 0 or 3 on the author's behalf, `FlowSchema` refuses
+  the combination in both spellings (omitted → defaulted 0, and an explicit 0),
+  with the prescription in the message. A retry re-runs the **whole flow from the
+  start** — records created again, callouts fired again — which is not a number to
+  guess for someone.
+
+  FROM → TO:
+
+  - `errorHandling: { strategy: 'retry' }` → `errorHandling: { strategy: 'retry', maxRetries: 3 }`
+    (or `strategy: 'fail'` if no retry was intended — that is what it did).
+  - `errorHandling: { strategy: 'retry', maxRetries: 0 }` → same choice, spelled out.
+
+  Unaffected: `maxRetries: 0` under `strategy: 'fail'` / `'continue'` (neither
+  reads it, and a fully spelled-out block stays legal), flows with no
+  `errorHandling` at all, and every flow that already states a count — including
+  the `try_catch` node's own `config.retry`, which is a separate per-region policy
+  (`control-flow.zod.ts`) and is unchanged.
+
+### Minor Changes
+
+- f5a4ef0: refactor!: ADR-0112 batch 2 — sweep the lowercase error-code emitters (#4003)
+
+  Continues #3841 per ADR-0112. Batch 1 (#3988) settled the vocabulary and closed
+  the set; this batch moves the emitters that still spoke lowercase `snake_case`
+  onto it.
+
+  **Wire-visible change.** Error codes on these surfaces change spelling. Generic
+  conditions collapse onto the standard catalog rather than keeping a synonym:
+  `unauthorized`/`unauthenticated` → `UNAUTHENTICATED`, `forbidden` →
+  `PERMISSION_DENIED`, `not_found` → `RESOURCE_NOT_FOUND`, `internal` →
+  `INTERNAL_ERROR`, `unavailable` → `SERVICE_UNAVAILABLE`, `not_supported` →
+  `NOT_IMPLEMENTED`, `bad_request` → `INVALID_REQUEST`. Domain conditions get codes
+  registered in `ERROR_CODE_LEDGER` (`MARKETPLACE_STORAGE_FAILED`,
+  `PLUGIN_MANIFEST_INVALID`, `ITEM_LOCKED`, `DELIVERY_NOT_ELIGIBLE`, …). Swept:
+  `cloud-connection`, `plugin-auth`, `hono`, `metadata-protocol`, `rest`,
+  `service-messaging`, `service-automation`, `trigger-api`.
+
+  Branch on `error.code` values rather than pattern-matching their case: the
+  console's fix for the same rename (objectui#2977) reads codes case-insensitively
+  for exactly this reason, and that is the pattern to copy in your own consumers if
+  you support servers on both sides of the change.
+
+  **Four routes stop putting a code in the message slot.** The webhook redeliver
+  route, the API-trigger webhook, and two `rest` routes answered
+  `{ success: false, error: '<code>', message }` — the code occupying `error`, the
+  declared object envelope nowhere. They now emit `error: { code, message }`, and
+  three API-trigger branches gained a message they never had. Clients reading
+  `body.error` as a string on those routes must read `body.error.code`.
+
+  **`ConnectorErrorCategory` / `ConnectorRetryStrategy`** (ADR-0112 D9a):
+  `@objectstack/spec` exported two mutually incompatible `ErrorCategory` types and
+  two `RetryStrategy` types. The connector-side pair is renamed; importers of the
+  `integration` subpath update the name. Side effect: the api-side `ErrorCategory`
+  and `RetryStrategy` now appear in the generated API reference at all — the name
+  collision had been silently dropping them.
+
+  **`OAUTH_REGISTER_FAILED` replaces an unbounded code source.** The OAuth client
+  registration route put better-auth's arbitrary `body.error` string straight into
+  `error.code`. The code is now ours and the upstream discriminator moved to
+  `details.upstreamError`.
+
+  **Not swept, deliberately.** `sys_metadata_audit.code` keeps its lowercase values
+  (ADR-0112 D6b): it is persisted audit history, and the same column holds
+  non-error outcomes (`ok`, `lock_override`). Diagnostics records that ship inside a
+  200 keep theirs (D6c), as do field-level codes (D6, #3977) and the CLI's
+  `--json` output contract.
+
+  A `check:error-code-casing` CI guard now fails on a new lowercase literal in a
+  code position, since the ledger's casing rule can only police codes that someone
+  registers.
+
+- 62a789b: Reconcile the remaining flat builtins' declared config against what their
+  executors read (#4045 — the CRUD / screen / map step, after notify / http /
+  connector in #4210).
+
+  **Six executor-derived Zod contracts.** `GetRecordConfigSchema`,
+  `CreateRecordConfigSchema`, `UpdateRecordConfigSchema`,
+  `DeleteRecordConfigSchema`, `ScreenConfigSchema` (+ `ScreenFieldConfigSchema`)
+  and `MapConfigSchema` in `automation/builtin-node-config.zod.ts`, each written
+  by reading the executor rather than transcribing the descriptor literal, so the
+  new bidirectional ledger test is evidence rather than a tautology. Contract
+  exports only — nothing parses with them yet (#4045 step 3b, gated on the #4059
+  warning data).
+
+  **Seven capabilities the executors honour are now authorable.** Each was read
+  by the executor and offered by no form — online or offline — so it was reachable
+  only by hand-written metadata:
+
+  - `get_record.fields` — the query projection, passed straight into
+    `find`/`findOne`;
+  - `screen.recordId` — the record `mode: 'edit'` opens; the form declared the
+    edit mode while offering no way to name its target;
+  - `screen.fields[].options` / `defaultValue` / `placeholder` — all three
+    forwarded into the ScreenSpec the client renders, so a select field's choices
+    could not be authored in Studio at all. Same nested repeater position as the
+    `visibleWhen` gap #3528 was filed for;
+  - `map.indexVariable` and `map.input` — the index binding and the per-item
+    subflow params.
+
+  **`map`'s undeclared `flow` alias graduates to the conversion layer.** The
+  executor carried `cfg.flowName ?? cfg.flow` for a spelling no schema ever
+  described — the `notify.source` shape (Prime Directive #12). The bare fallback
+  is deleted and `flow-node-map-flow-alias` (protocol 17, retires at 18) renames
+  it at load, including the `AutomationEngine.registerFlow` rehydration seam.
+
+  **`assignment` is pinned as deliberately un-reconcilable**, with the reason on
+  record: with no `assignments` wrapper its top-level config keys ARE the author's
+  variable names, so no fixed key set can describe it and a catchall Zod would
+  reconcile vacuously. What the ledger pins instead is that the form offers
+  exactly the canonical `assignments` map and that the map stays open.
+
+  With this, every builtin that publishes a `configSchema` is reconciled against
+  its executor, and the ones that publish none each have a recorded reason.
+
+- b07d829: feat(automation,spec): flow executors `parse()` their config, and undeclared config keys reject at registration (#4277)
+
+  The #4045 reconciliation left every flat builtin with a Zod config contract that
+  nothing enforced, and #4059 left `registerFlow` warning about undeclared keys it
+  could not yet safely reject. #4277 installs both halves of the enforcement:
+
+  **1. Executors parse their config (execute time).** The 12 contract-carrying
+  builtins — `get_record` / `create_record` / `update_record` / `delete_record`,
+  `screen`, `map`, `notify`, `http`, `loop` / `parallel` / `try_catch` — now run
+  `node.config` through their Zod contract before executing
+  (`service-automation/builtin/parse-config.ts`). A type or missing-`required`
+  violation refuses the node as a **guard** (`errorClass: 'guard'`, not routable
+  via `fault` edges — config is metadata; re-running changes nothing), naming
+  every violated path. `{token}` templates stay legal: string-typed slots parse
+  the raw template, and `http` — whose executor reads the interpolated config —
+  parses POST-interpolation, where a whole-token template has already resolved to
+  its value's real type. Exemption: a legacy flat-graph `loop` (no `config.body`)
+  predates the ADR-0031 construct and is not parsed.
+
+  **2. Undeclared config keys are rejected at `registerFlow` (registration
+  time).** The #4059 warning is now an error: a config key the node type's
+  descriptor `configSchema` does not declare fails registration, with the exact
+  path, the declared key set, a did-you-mean, and — for keys with documented
+  history (`screen.visibleIf`, `create_record`/`update_record.fieldValues`) — a
+  per-key tombstone (the `UNKNOWN_KEY_GUIDANCE` pattern). Unchanged exemptions:
+  `assignment` is exempt wholesale (its top-level keys ARE the author's variable
+  names), schemaless types (`decision`/`script`/`wait`/`subflow`/
+  `connector_action`) declare nothing so nothing can be undeclared, and keyValue
+  maps stop the walk (their keys are author data). Every `registerFlow` call site
+  already try/catches per flow, so a bad stored flow is skipped loudly at boot,
+  never a crashed kernel.
+
+  **Contract fix folded in:** `LoopConfigSchema.collection` is now
+  `z.union([z.string().min(1), z.array(z.unknown())])` — the executor has always
+  accepted an inline array (shared resolve logic with `map.collection`, which
+  already declared the union), so the string-only declaration under-declared what
+  it reads.
+
+  **Migration.** If a flow stops registering: the error names the undeclared key
+  and its path — rename it to the declared key it meant (`visibleIf` →
+  `visibleWhen`, `fieldValues` → `fields`), or delete it (an undeclared key was
+  never read, so removing it changes no behavior). If an executor of yours
+  genuinely reads the key, declare it on the node type's descriptor
+  `configSchema`. If a node starts refusing at run time: the refusal names each
+  violated path against the contract — fix the value's type or supply the missing
+  required key (e.g. `get_record` `limit` must be a number; `screen`
+  `fields[].options` entries are `{ value, label }` objects; `notify` requires
+  `recipients` + `title`). Retry-policy defaults now come from the contract: a
+  `try_catch` `retry` block that omits `retryDelayMs` gets the documented 1000ms
+  base delay where the executor historically used 0.
+
+- a47ac06: feat(spec,automation): graduate the seven flow-node config key aliases into the conversion layer — the `readAliasedConfig` shim retires with them (#3796)
+
+  `FlowNodeSchema.config` is an unconstrained record, so the executors were the
+  only statement of which config key is canonical — and seven deprecated aliases
+  lived there as tolerance the spec never declared: one behind the
+  `readAliasedConfig` deprecation shim (warned, ledgered), six as open-coded
+  `??` fallbacks (no warning, no ledger, no retirement path). All seven now
+  graduate into the ADR-0087 D2 conversion layer as protocol-17 **live-window**
+  entries: a stored flow authored with an alias is rewritten to the canonical
+  key at load — `defineStack` / `validate` / `lint` and the
+  `AutomationEngine.registerFlow` rehydration seam alike — with a structured
+  `ConversionNotice` per rewrite, and the executors read the canonical keys
+  only. The shim (`service-automation/src/builtin/config-aliases.ts`) is empty
+  and deleted.
+
+  FROM → TO (per node type; conversion entry in parentheses):
+
+  - `get_record`/`create_record`/`update_record`/`delete_record`:
+    `config.object` → `config.objectName` (`flow-node-crud-object-alias`)
+  - `notify`: `config.to` → `config.recipients`, `config.subject` →
+    `config.title`, `config.body` → `config.message`, `config.url` →
+    `config.actionUrl` (`flow-node-notify-config-aliases`)
+  - `script`: `config.functionName` → `config.function`, `config.input` →
+    `config.inputs` (`flow-node-script-config-aliases`)
+
+  One-line fix: rename the key in your flow source — values are unchanged; `os
+migrate meta --from 16` rewrites all seven mechanically. Until then nothing
+  breaks: the protocol-17 loader accepts and converts the old shape (window
+  retires in 18).
+
+  `actionUrl` (not `url`) is the deliberate canonical of its pair, resolving a
+  contradiction where the notify descriptor documented `url` as canonical while
+  the executor, tests, and examples preferred `actionUrl`: the whole downstream
+  chain already uses that name (`sys_notification.action_url`, the
+  channel-dispatch contract, the REST notification read model), and `url`
+  elsewhere in the platform means "HTTP endpoint to call" (`http` node,
+  webhooks) — a different concept from this in-app click-through target. The
+  executor precedence already put `actionUrl` first, so the choice is
+  behaviour-preserving; the `notify` descriptor's `configSchema` now documents
+  `actionUrl`.
+
+  Callers that hand a node config **directly** to an executor (bypassing
+  `registerFlow`) no longer get alias resolution — build the config with the
+  canonical keys.
+
+- e4c61a7: Validate the expression slots a flow node's `configSchema` declares (#4027).
+
+  A node type's designer `configSchema` and the keys its validators traverse were
+  two unreconciled lists. Both the engine's `registerFlow` pass and the author-time
+  `objectstack validate` pass hardcoded `config.condition` / `edge.condition` and
+  assumed every other node string was a `{var}` template — so a declared expression
+  property outside that hardcoded set was validated by nobody.
+
+  That is how #3528 shipped. `screen.fields[].visibleWhen` has been on the `screen`
+  descriptor since #3304, typed `xExpression: 'expression'` (bare CEL) and offered
+  to authors in Studio, but no validator traversed it. An app authored the
+  predicate in the _other_ dialect — `'{createOpportunity} == true'` — and it passed
+  `tsc`, `objectstack validate` and registration in silence. Because `required` _is_
+  enforced, a field the author had made conditional rendered unconditionally and
+  blocked Submit on an input the user was never shown: the run paused forever and no
+  resume was ever issued.
+
+  Now:
+
+  - **`FLOW_NODE_EXPRESSION_PATHS`** (`@objectstack/spec`) is the declared ledger of
+    expression-bearing node config paths, each recording the dialect it takes.
+  - **Both validators read it.** A malformed `visibleWhen` is a located, quoted
+    error at `registerFlow` _and_ at `objectstack validate` — `node 'screen_1'
+(screen) screen field visibleWhen at config.fields[1].visibleWhen`.
+  - **A reconciliation ratchet** derives the expression properties from the live
+    descriptors and fails CI in both directions: a new `xExpression` property with
+    no ledger entry, or a stale entry no descriptor declares. It walks every
+    registered builtin, not just `screen`.
+
+  Dialects are recorded rather than assumed because there are three, and two of them
+  disagree about braces: bare CEL (`{…}` is the #1491 brace-trap), single-brace
+  `{var}` flow interpolation (`{…}` is correct), and the ADR-0032 §3 double-brace
+  text template. Only bare-CEL slots are checked — `loop.collection` and
+  `map.collection` are recorded as `flow-template` and deliberately left alone,
+  since no validator implements their dialect and checking them under either of the
+  other two would reject every currently-valid flow.
+
+  `ActionDescriptor.configSchema`'s TSDoc no longer claims `registerFlow()`
+  validates `config` against it. It never did: `FlowNodeSchema.config` is
+  `z.record(z.unknown())`, so types, `required`, `enum` and unknown keys are still
+  unenforced. The doc now states exactly what is checked and what is designer-facing
+  only, so nothing relies on a guard that does not exist.
+
+- 081aa6f: feat(spec,service-automation): every flow run reports what it actually did — selected / acted / skipped (#4354)
+
+  `success: true` never meant "it did its job". A scheduled sweep that selects
+  thirty records and writes none is, from outside, **identical** to one with
+  nothing to do: same green status, same empty output, same silence, same schedule
+  tomorrow. There was no signal anywhere that separated "nothing to do" from
+  "broken".
+
+  That is not theoretical. #4347 left three hotcrm production flows completely
+  inert — the stalled-deal sweep found every stalled deal and nudged nobody, the
+  renewal sweep booked nothing, the campaign action enrolled no leads. They ran
+  daily, on time, green, for as long as they had existed, and were caught only by
+  adding tests that assert on records written. Automation is exactly the category
+  where nobody is watching: a UI bug files a ticket within the hour, a dead sweep
+  files nothing, and the longer it runs the more normal the silence looks.
+
+  **Every terminal run now carries a `FlowRunSummary`** — on the
+  `AutomationResult`, on the run in `listRuns` / `getRun`, in the log, and in the
+  database:
+
+  ```
+  [automation] run flow=stalled_deal_sweep run=run_a1b2 status=completed durationMs=142 selected=30 acted=0 skipped=30 gate=check_stalled->send_nudge:30
+  ```
+
+  - `selected` — records read by the run's data nodes
+  - `acted` — records created / updated / deleted, plus effects dispatched
+    (notifications delivered)
+  - `skipped` — node executions a closed gate prevented, one per loop iteration
+    whose conditional edge evaluated false
+  - `nodes[]` — per-node terminal status with `runs` / `failures` / `skipped`
+  - `gates[]` — which gates closed and how often, most-skipped first
+
+  **The counts are declared, not sniffed.** Executors report
+  `NodeExecutionResult.metrics`, because only the node knows what its result
+  _means_: `update_record`'s is a row count on a bulk write and a record on a by-id
+  one, `delete_record`'s can be a boolean, `notify`'s is a delivery count. An
+  engine inferring from output shapes would be guessing, and a machine-readable
+  count that guesses is worse than none. A node that touches no records
+  (`decision`, `assignment`) reports nothing — absent is not `0`.
+
+  **The gate is named.** A conditional out-edge that evaluates false now records a
+  `skipped` step tagged with the gate that closed. That event previously left no
+  trace at all, which is why #4347 was invisible: the flow selected every row and
+  the loop-body edge never opened. A skipped step is explicitly _not_ a run — the
+  ADR-0044 re-entry guard, per-node `runs`, and node status all exclude it, so a
+  new observability signal cannot change execution semantics.
+
+  **Queryable, so it can be alerted on rather than noticed.**
+  `sys_automation_run` gains `selected_count` / `acted_count` / `skipped_count`
+  columns plus a `summary_json` breakdown:
+
+  ```typescript
+  const suspect = await engine.find("sys_automation_run", {
+    where: { status: "completed", selected_count: { $gt: 0 }, acted_count: 0 },
+    orderBy: [{ field: "started_at", order: "desc" }],
+  });
+  ```
+
+  `selected > 0 && acted == 0` over consecutive runs is a near-perfect
+  broken-sweep detector. Columns, not JSON: an operator can only alert on what is
+  filterable. Rows written before this carry `null`, never `0` — "not measured"
+  must not read as "measured zero", or every legacy row is a false alarm the first
+  time someone writes that query.
+
+  Two details that decide whether the numbers can be trusted. The summary is
+  folded from the **full** step log before history compaction, so a
+  5000-iteration sweep does not silently report the ~200 steps that fit in
+  `steps_json`; and rehydration reads the persisted `summary_json` rather than
+  re-folding those compacted steps. A `subflow` rolls its child's totals into its
+  parent, so a sweep that delegates its writes is not read as inert — the child
+  keeps its own run row, and the parent's summary answers "what did this run
+  cause".
+
+  Additive throughout: `summary` is optional everywhere it appears, existing runs
+  and stores keep working, and no execution behaviour changes. The one-line log
+  defaults to `info` — a line nobody sees at their production level is the same
+  non-signal this closes — with `AutomationServicePlugin`'s
+  `runSummaryLog: 'debug' | 'off'` to turn the volume down on a very
+  high-frequency flow without turning the measurement off.
+
+  New spec exports: `FlowRunSummarySchema`, `FlowRunNodeSummarySchema`,
+  `FlowRunGateSummarySchema`, `ExecutionStepMetricsSchema`,
+  `ExecutionStepSkipReasonSchema` (+ inferred types); `ExecutionLog.summary` and
+  `ExecutionStepLog.metrics` / `.skippedBy`. `service-automation` exports
+  `summarizeRun` / `formatRunSummaryLine` so a host building its own surface
+  reuses the platform's definition instead of re-deriving one.
+
+  Does not fix #4347 itself — this is the instrument that would have caught it.
+
+  Verified: `@objectstack/service-automation` **522 tests / 46 files** (23 new),
+  `@objectstack/spec` **7165 / 279** (5 new), `@objectstack/runtime` **974 / 68**,
+  `@objectstack/plugin-approvals` **330 / 13**; all eight `@objectstack/spec`
+  `check:generated` gates plus `check:liveness` and `check:exported-any`; and
+  `tsc --noEmit` on service-automation at its ledgered 2 pre-existing errors.
+
+- d25a0ec: feat(spec,service-automation): a run says when its `acted` count is incomplete, instead of guessing (#4354)
+
+  #4354 shipped `selected` / `acted` counts on every flow run, sourced from the
+  executors that know what they did. Four node types were left out — and the gap
+  was not cosmetic: `connector_action`, `http` and `script` are how a flow acts on
+  anything _outside_ the platform, so a sweep whose whole job runs through them
+  reported `acted: 0` and looked exactly like the dead sweep the counter exists to
+  find. A detector that fires on healthy runs is worse than no detector: operators
+  tune it out, and then it is not watching the flows that really did stop.
+
+  Closing it needed a third answer, because for two of those nodes the platform
+  genuinely cannot know:
+
+  **`connector_action` — unknowable, and now it says so.**
+  `ConnectorActionDescriptor` declares `key` / `label` / `description` /
+  `inputSchema` / `outputSchema` and _nothing_ about whether the action reads or
+  writes, so `crm.push_opportunity` and `crm.lookup_account` are the same shape to
+  the runtime. `acted: 0` understates the create; `acted: 1` overstates the
+  lookup and makes the alert never fire — #4354's original bug, one layer out.
+  The executor reports `metrics: { unmeasuredEffect: true }` instead, and the run
+  carries an `unmeasured` tally. Filed #4395 to let a connector declare its effect
+  kind, which would turn this into a real count.
+
+  **`http` — knowable, and now counted.** The method says it:
+  `GET`/`HEAD`/`OPTIONS` report a real `acted: 0` (a read cannot write); a mutating
+  call the upstream accepted reports `acted: 1`; `durable: true` reports `acted: 1`
+  because the outbox row is a durable effect this run caused. A mutating call that
+  was _rejected or timed out_ reports `unmeasured` — a 500 can arrive after the
+  write landed, and claiming zero there would let a run swear it changed nothing
+  when it had.
+
+  **`script` — deliberately unchanged.** A registered function is contractually
+  pure ("Data I/O stays on the flow graph — the function itself does no writes"),
+  so every write it causes is a downstream node counting itself and "reports no
+  record metrics" is accurate rather than a guess. Nothing _enforces_ that purity,
+  so a function that writes behind the platform's back under-reports its run —
+  filed as #4396 rather than papered over here, because a blanket
+  `unmeasuredEffect` on `script` would suppress the signal on every flow that
+  calls any function in order to accommodate one contract violation.
+
+  **The alert gains a clause.** `selected > 0 AND acted = 0` becomes
+  `selected > 0 AND acted = 0 AND unmeasured = 0`, and `sys_automation_run` gains
+  an `unmeasured_count` column to serve it. Without that third clause the alert
+  fires on every healthy connector-driven flow. The log line gains
+  `unmeasured=N` — only when non-zero, since its _presence_ is what a reader must
+  not miss: `acted=0` on a line that also says `unmeasured=3` means "cannot tell",
+  not "did nothing".
+
+  `unmeasured` propagates through `subflow` and `map` roll-ups (and through
+  `creditChildRun` for a child that paused), so a parent whose child dispatched an
+  uncountable effect knows its own `acted` is incomplete. N uncountable effects in
+  a child collapse to one flag on the parent's step — the child keeps the real
+  count in its own run row, and the question this feeds is boolean.
+
+  `FlowRunSummary.unmeasured` is optional and `undefined` is **not** `0`: a run
+  recorded before this existed did not track uncountable effects at all, and
+  defaulting it to zero would tell an operator "fully measured" about a run nobody
+  measured. Same rule the `null` count columns already follow.
+
+  Additive: new optional fields only, no new exports, no execution behaviour
+  changes.
+
+  Verified: `@objectstack/service-automation` **546 tests / 47 files** (21 new),
+  `@objectstack/spec` **7193 / 281** (2 new); all 8 `check:generated` gates plus
+  the seven pure audits (liveness, empty-state, variant-docs, strictness-ledger,
+  react-conformance, skill-examples, exported-any); `check:nul-bytes` and eslint
+  clean.
+
+- 4965bfa: Warn on flow-node `config` keys the node type does not declare (#4045).
+
+  `FlowNodeSchema.config` is `z.record(z.unknown())`, so a misspelled or invented
+  config key was accepted in total silence: `visibleIf` instead of `visibleWhen`
+  registered cleanly, was never read, and the only symptom was a feature that quietly
+  did not happen. That diagnostic vacuum is what made #3528 take three passes and two
+  wrong diagnoses to resolve.
+
+  `registerFlow` now compares each node's `config` against its descriptor's
+  `configSchema` and warns on anything undeclared, located and with the declared set
+  listed:
+
+  ```
+  [flow 'lead_conversion'] node 'screen_1' (screen): unknown config key `visibleIf`
+    at config.fields[0].visibleIf — It is not declared by this node type's
+    configSchema, so nothing reads it. Declared here: name, label, type, required,
+    visibleWhen.
+  ```
+
+  The walk descends where the schema declares structure and **stops at free-form
+  keyValue maps**, whose keys are author data (`filter: { status: 'stale' }`).
+  Descending matters: the #3528 typo class lives _inside_ the `screen` field
+  repeater, so a top-level-only comparison would miss the exact mistake this exists
+  to catch.
+
+  **Warn, never reject.** An undeclared key is an author typo, a key the executor
+  genuinely reads that its hand-written `configSchema` never declared (`notify.source`
+  was exactly this), or dead config. Only 4 of the 13 schema-carrying builtins have
+  been audited for the second population, so hard-failing would gamble on the other
+  nine. Tightening to an error is a later, per-key decision once this warning has
+  measured the real distribution. Nothing about the published `configSchema` changes,
+  so no consumer sees a different shape.
+
+  `@objectstack/formula` now exports `nearestName`, the edit-distance helper already
+  used for unknown-field and unknown-role suggestions, so "did you mean?"
+  diagnostics share one threshold. It is deliberately a bonus rather than the
+  mechanism — `visibleIf` → `visibleWhen` is distance 4 against a threshold of 3, so
+  the declared set is always listed instead of only as a fallback.
+
+  Also fixes the first real finding from the new check: `showcase_inquiry_purge`'s
+  `get_record` node carried `mode: 'records'`, which no executor reads, with a comment
+  crediting it for behaviour that `limit > 1` actually produces.
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 41dcda3: fix(spec,runtime,service-automation): `IAutomationService` declares the connector registry it already serves (#4127)
+
+  The fourth and last of the dispatcher call sites #4127 found calling a method its
+  contract never declared. The first three shipped in #4143; this one was held back
+  because the fix is a **type move**, not a type addition — `ConnectorDescriptor`
+  was declared in `@objectstack/service-automation`'s engine, which is one
+  _implementation_ of `IAutomationService`. A contract cannot name a type that
+  lives inside its own implementation, so `getConnectorDescriptors` could not be
+  declared at all until the type had a home in the spec.
+
+  **`IAutomationService` += `getConnectorDescriptors?()`.** It is the sibling of
+  `getActionDescriptors`, which the contract has declared since ADR-0018: the two
+  fill the flow designer's `connector_action` node together — node vocabulary from
+  one, the connector → action → input pickers from the other. Only one of them was
+  written down. `GET /api/v1/automation/connectors` has served the other since
+  ADR-0022 by probing for the method and then re-typing its own result as `any` to
+  filter on `?type=`, which is a filter on a field the type system did not know
+  existed — one typo from silently matching nothing and answering an empty
+  registry, which is also what this route legitimately returns when the method is
+  absent, so the failure had no distinguishable symptom.
+
+  Optional for the same reason `getActionDescriptors` is: a connector registry is a
+  capability of the flow-engine implementation, not a property of every automation
+  slot. A script-runner filling the slot has no connectors to describe, and the
+  route answers an empty registry rather than a 404 — the `handlerReady` posture
+  does not apply, since the slot is serveable and only this capability is absent.
+
+  **`ConnectorDescriptor` / `ConnectorActionDescriptor` / `ConnectorOrigin` /
+  `ConnectorState` move to `@objectstack/spec/integration`**, beside the ADR-0097
+  provider contract, for the reason that file already states about itself: they are
+  pure types, so a connector plugin — or a designer client, or the dispatcher —
+  speaks about registered connectors depending only on the spec, with no runtime
+  coupling to the engine. `ConnectorOrigin` is ADR-0097 §4 vocabulary and
+  `ConnectorState` is #3017 vocabulary; neither was ever engine-private in meaning,
+  only in location.
+
+  Nothing is renamed and no shape changes. `@objectstack/service-automation`
+  imports the four back and re-exports them from its index — the same names, from
+  the same entry point — so every existing importer compiles unchanged.
+  `ConnectorState` joins that re-export, which it should have been in all along: it
+  is a required field of the descriptor the index has always exported.
+
+  **The test fixture had already drifted, which is the concrete cost.** The
+  dispatcher's connector mock declared `{ name, label, type, actions }` and omitted
+  `origin` and `state` — both **required** on `ConnectorDescriptor`, and both the
+  fields a designer reads to tell a live declarative instance from a plugin one
+  (ADR-0097 §4), or a dispatchable connector from a degraded one that is listed
+  honestly rather than hidden (#3017). Nothing caught it, because an undeclared
+  return type cannot be checked against. The fixture is typed now, so it cannot
+  drift again, and a new test pins that `origin` / `state` / `degradedReason`
+  survive the hop through the route rather than only `name` and `type`.
+
+  Verified: `@objectstack/spec` **7089 tests / 272 files** (2 new contract tests),
+  `@objectstack/service-automation` **457 / 41**, `@objectstack/runtime`
+  **218 http-dispatcher tests** (1 new), `tsc --noEmit`, `pnpm lint`, the liveness
+  and empty-state gates, and the three generated-artifact gates — all clean.
+
+- 91f4c78: fix(automation,objectql,spec): attribute `runAs:'system'` flow writes to the flow in the audit log (#4366)
+
+  A `runAs:'system'` flow's data writes carried no attribution at all: the run
+  context resolved to `{ isSystem: true }` with no `userId` and no service
+  principal, so the audit writer recorded `user_id=null, actor=null` and the
+  record-history UI rendered every such row as "Unknown user" — business users
+  read the flow's own status mirror as data corruption.
+
+  The `svc:*` attribution channel (ADR-0014 D2, `ExecutionContext.actor`) already
+  existed for exactly this class of writer; it was simply never wired end-to-end:
+
+  - **service-automation** — `resolveRunContext` now stamps `flowName` alongside
+    `runAs`/`flowRunId`, and `resolveRunDataContext` labels a `runAs:'system'`
+    run's data context `actor: 'svc:flow:<flowName>'` (fallback
+    `svc:flow:automation`). Attribution only — no security middleware keys on it.
+  - **objectql** — `buildSession` propagates `ExecutionContext.actor` onto the
+    hook session, closing the gap that left the audit writer's
+    `userId ?? session.actor` fallback unreachable from the engine path.
+  - **spec** — `AutomationContext.flowName` (engine-stamped, provenance) and the
+    hook session's optional `actor` field document the contract.
+
+  No behavior change for user-attributed writes: `userId` still wins wherever it
+  is present.
+
+- 011b386: Reconcile the flat IO nodes' declared config against what their executors read
+  (#4045 — the notify / http / connector step of the declared-vs-read worklist).
+
+  **`notify` / `http` gain executor-derived Zod contracts.**
+  `NotifyConfigSchema` and `HttpConfigSchema` (`automation/io-node-config.zod.ts`)
+  were written by reading the executors — not by transcribing the descriptors'
+  hand-written `configSchema` literals — and a new ledger test
+  (`io-node-form-zod-ledger.test.ts`) compares the two key sets bidirectionally.
+  Because the sides are independently written, agreement is evidence rather than
+  tautology: a key survives only if the form offers it AND the executor reads it.
+  Both nodes reconcile clean, with no deliberately-shallow ledger — their configs
+  are flat and fully closed. Like the control-flow config Zods, these are contract
+  exports: no engine path parses with them yet (that is #4045 step 3b, gated on
+  the #4059 warning data).
+
+  **`connector_action`'s mis-rooted `configSchema` is retired — it broke
+  schema-driven authoring.** The executor reads only the declared
+  `FlowNodeSchema.connectorConfig` sibling block, but the descriptor published a
+  `configSchema` declaring `connectorId`/`actionId`/`input` as `config` keys. A
+  published `configSchema` describes `node.config` by contract, and the Studio
+  inspector derives its property form from it — rooting every field at
+  `config.<key>` and replacing the client's hand-written `connectorConfig` form
+  (with its connector/action pickers). So authoring a connector node against a
+  live backend wrote the trio where nothing reads it, and the node refused to
+  dispatch. The descriptor now publishes no `configSchema` (joining `wait`'s
+  deliberately-schemaless class), which drops the online designer back onto the
+  correct sibling-block form with no client change.
+
+  **Stored flows that carry the mis-taught shape are healed at load.** A new
+  ADR-0087 D2 conversion, `flow-node-connector-config-lift` (protocol 17, retires
+  at 18), lifts `config.{connectorId,actionId,input}` onto the declared
+  `connectorConfig` block — including the `AutomationEngine.registerFlow`
+  rehydration seam. Declared keys win (the loose counterpart stays shadowed), and
+  a lift that cannot complete the required `connectorId`+`actionId` pair leaves
+  the node untouched, so a step-time refusal never becomes a load failure.
+
+  **`connectorConfig.input` is now optional**, matching what was always true: the
+  executor dispatches with `input ?? {}` and the designer's keyValue editor omits
+  an empty map entirely — so the required `input` declared in the spec turned a
+  no-input connector action into a `registerFlow` parse failure nothing
+  downstream asked for.
+
+- 01e124d: Graduate `notify`'s nested `source: { object, id }` into the conversion layer (#4045).
+
+  The `notify` executor tolerated a second spelling of its click-through target with
+  a bare consumer-side fallback:
+
+  ```ts
+  const object = toStr(interpolate(cfg.sourceObject ?? src?.object, …));
+  ```
+
+  Its own doc comment named `sourceObject`/`sourceId` **canonical** (they mirror the
+  `sys_notification.source_object`/`source_id` columns), so the nested form was an
+  alias tolerated by exactly the mechanism Prime Directive #12 calls debt — and the
+  one alias on this executor that #3796 missed when it moved `to`/`subject`/`body`/
+  `url` into `flow-node-notify-config-aliases`.
+
+  It now graduates the same way `filters` → `filter` and `object` → `objectName`
+  did: the conversion lifts it onto the canonical pair at load — including the
+  `AutomationEngine.registerFlow` rehydration seam — and the executor's fallback is
+  deleted, so no consumer-side dialect tolerance survives and the alias is declared,
+  tested and retirable on schedule (it rides the existing entry's window, retiring
+  at 18).
+
+  Unlike the four renames this is a **1→2 destructuring**, which the pair mechanism
+  cannot express, so it is a small custom transform. It mirrors the `??` precedence
+  exactly: a canonical key already present wins and its nested counterpart is left
+  shadowed, matching how a shadowed alias is treated elsewhere. `source` is dropped
+  once at least one part is lifted; a `source` that is not an object, or carries
+  neither key, is left untouched rather than silently deleted.
+
+  No behaviour change for authors — both spellings keep working, and a
+  half-specified target is still dropped rather than emitting a dead deep-link.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- 31e0be9: Flow metadata is canonicalized inside structured regions, not just at the top level (#4347).
+
+  `registerFlow` canonicalizes a stored flow through three passes — the ADR-0087 conversion
+  table, `FlowSchema.parse`, and the ADR-0032 predicate validation — and every one of them
+  walked `flow.nodes` / `flow.edges` only. An ADR-0031 container keeps a whole sub-graph in
+  its open `config` (`loop.config.body`, `parallel.config.branches[]`,
+  `try_catch.config.try`/`.catch`), so all three stopped at the container and metadata came
+  out **position-dependent**: the same node converted at the top level and did not one level
+  in, and the same predicate was stored as a `{ dialect: 'cel', source }` envelope on a
+  top-level edge and left a bare string on a loop-body edge.
+
+  The reporting app shipped three sweeps whose gates never opened. Each run reported
+  `success: true`, queried correctly, selected exactly the right records, and then did
+  nothing — which is indistinguishable from "this sweep had no work to do" unless you assert
+  on records written.
+
+  - **`mapFlowNodes` recurses into regions**, to any depth. Every conversion in the table now
+    reaches a nested node, which matters most for the two that change behaviour rather than
+    spelling: a `webhook` / `http_request` callout inside a loop body kept a type no executor
+    owns (the run failed), and a `delete_record` kept `config.filters`, leaving the canonical
+    `filter` the executor reads absent — the erased-condition hazard
+    `flow-node-crud-filter-alias` exists to prevent. Notice paths carry the region
+    (`flows[0].nodes[3].config.body.nodes[1].config.filter`), so the warning points at the
+    node to edit.
+  - **New `normalizeControlFlowRegions`**, called at the load seam after
+    `validateControlFlow`: each region is parsed through its own schema (recursively — regions
+    nest), so nested edges and nodes carry the same canonical shapes as top-level ones. A
+    region that does not parse is left untouched; rejecting one stays `validateControlFlow`'s
+    job, so which flows register is unchanged.
+  - **New `collectFlowGraphs`** yields a flow's own graph plus every nested region, each with
+    a scope label. Both predicate validators iterate it instead of `flow.nodes` — the engine's
+    `validateFlowExpressions` and `@objectstack/lint`'s author-time
+    `validateStackExpressions` — so the `{record.x}` brace-trap they exist to catch is now
+    caught inside a loop body too, naming the region (`loop 'sweep' body · edge 'b1' …`). It
+    used to pass `objectstack validate`, pass registration, and fail at run time with the
+    diagnostic suppressed.
+
+  The container executors already parse their own config at run time (`parseNodeConfig`,
+  #4277), so a nested predicate did evaluate correctly on current `main` — what was still
+  wrong is everything that reads a region _without_ re-parsing it (the Studio designer,
+  `getFlow`, the version history), and every conversion, none of which the executors replay.
+
+  Also hardened, per the issue's secondary finding: `evaluateCondition`'s legacy `{var}`
+  template path **refuses an unresolved dotted reference** instead of comparing it as a
+  string. `'oppRecord.amount > 500000'` was compared `'oppRecord.amount' > '500000'` — `'o'`
+  against `'5'` — so it was constantly true regardless of the amount: silently wrong in the
+  _true_ direction, a gate that reports success while never gating. It now throws with the
+  source and the fix (a CEL envelope, or brace the reference if the `{var}` dialect was
+  meant), the same "never swallow a broken predicate" rule ADR-0032 §1c set for the CEL path.
+  The `try { … } catch { return false }` around that block went with it: nothing in it throws,
+  so it guarded nothing and would have swallowed the new refusal straight back into the silent
+  wrong answer. Bare-word comparisons (`'{status} == active'`) and `{var}` templates are
+  unchanged — only dotted references, which substitution can never leave behind, are refused.
+
+- ffd2ce2: `registerFlow`'s remaining validators cover structured regions (#4389).
+
+  #4347 closed the conversion and predicate halves of "metadata behaves differently
+  depending on how deep it sits". Three validators were left walking `flow.nodes` only, so
+  the same class stayed open one layer over: an ADR-0031 container keeps a whole sub-graph
+  in its open `config`, and each of these checked _part_ of the flow while reporting on all
+  of it.
+
+  - **`validateControlFlow` recurses.** A container nested inside another container's region
+    was never validated at registration — it reached run time, where `runRegion` →
+    `findRegionEntry` throws mid-iteration, after the enclosing loop has begun and its side
+    effects have landed. This cannot break a working flow: everything newly rejected was
+    already guaranteed to throw on execution. It also closes cycle detection over nested
+    regions, since region bodies are cycle-checked by `analyzeRegion` here rather than by
+    `detectCycles`.
+  - **`validateNodeTypes` covers region nodes.** Soft-fail. A node in a `loop` body is as
+    executable as one beside it, so the warning that exists to predict `NO_EXECUTOR` went
+    quiet on exactly the nodes whose run-time failure is hardest to place.
+  - **`validateNodeConfigKeys` covers region nodes.** Hard-fail. `visibleIf` is the typo
+    #4277 exists to catch, and moving the node into a region restored the silence #4277
+    closed. Violations carry the region (`loop 'sweep' body · node 'w' …`). No
+    double-reporting from the container side: all three container descriptors declare their
+    region slot as a bare `nodes: { type: 'array' }` with no `items`, so the schema-lockstep
+    walk stops there instead of descending twice.
+
+  **Measured before extending the two hard-fail checks**, since widening a rejecting
+  validator is a behaviour change rather than a bugfix: registering every flow in
+  `app-showcase`, `app-crm` and `app-todo` through the real `registerFlow` and re-running
+  each validator's own code over all 9 region graphs produced **0 new findings**. Nothing
+  that registers today stops registering, so the checks land at their existing severity
+  rather than staged through a warning window.
+
+  `validateNodeInputSchemas` is deliberately **not** extended. It declares 0 uses across all
+  159 example flow nodes, and its check compares a config value's runtime type against the
+  declared one — so extending it would newly fail a region node carrying a `{var}` template
+  string in a `number`-typed slot, which is a live authoring shape. Widening a check with a
+  known false-positive mode and no demonstrated reader is not worth it; the traversal gap is
+  noted on #4389 instead.
+
+- 239c3a3: fix(spec)!: the #3963 / #4052 / #4158 / #4196 / #4286 retirements land in protocol **17**, not a protocol 18 that this train cannot produce (#4350)
+
+  Ten tombstone prescriptions told authors a key "was removed in `@objectstack/spec` **18**",
+  and — worse — the machine agreed with them: a whole `step18` chain step and two
+  `toMajor: 18` conversions were wired for a major the release train does not reach.
+
+  **17 is what ships.** `latest` is 16.1.0 and `rc` is `17.0.0-rc.0` — 17.0.0 has never been
+  published. `.changeset/pre.json` records `@objectstack/spec` at initialVersion 16.1.0, and
+  changesets computes a pre-mode bump from the last _published_ version: 16.1.0 + `major` =
+  **17.0.0**, released as `17.0.0-rc.N`. `PROTOCOL_VERSION` is `'17.0.0'`, and
+  `protocol-version.test.ts` pins it to the package major, so it cannot unilaterally become 18
+  either. The "18" came from counting up from the in-flight `17.0.0-rc.0` instead of from
+  16.1.0.
+
+  **The prose was the smaller half.** `composeMigrationChain(from, to = PROTOCOL_MAJOR)`
+  filters `m <= toMajor`, so a step keyed 18 was **unreachable**: `os migrate meta --from 16`
+  walked steps 11–17 and silently skipped 18. The same ceiling applies to `composeSpecChanges`,
+  so the generated `spec-changes.json`, `docs/protocol-upgrade-guide.md` and the `spec_changes`
+  MCP tool — the ADR-0087 D4 primary channel — carried **none** of these seven retirements:
+  `query.joins`, `query.windowFunctions` and `BatchOptions.validateOnly` appeared zero times in
+  the committed manifest, and the upgrade guide contained no "18" at all. Authors would have hit
+  the tombstones with no chain hop to run and no upgrade-guide row to read.
+
+  What changed:
+
+  - `step18` is folded into `step17` — its rationale, both `conversionIds`
+    (`stack-api-require-auth-removed`, `flow-node-wait-timeout-keys-removed`) and all six
+    semantic migrations move across, and `MIGRATIONS_BY_MAJOR[18]` is gone. Both conversions
+    become `toMajor: 17` (`migrations.test.ts` requires a conversion's `toMajor` to equal its
+    step's major), and `CONVERSIONS_BY_MAJOR[18]` merges into `[17]`.
+  - All 30 hand-written "18" references become "17": the ten tombstone prescriptions
+    (`query.zod.ts`, `flow.zod.ts`, `rest-server.zod.ts`, `stack.zod.ts`, `protocol.ts`), the
+    `query.test.ts` pin regex that was holding the wrong number in place, the internal comments,
+    the `liveness/query.json` + `liveness/README.md` notes, and the seven unconsumed changesets.
+  - The seven retirements are written into the v17 release notes and upgrade checklist, where
+    they had no entry at all — there is no `v18.mdx` for them to have landed in.
+
+  No behaviour is added or withdrawn: every key retired by #3963, #4052, #4158, #4196 and #4286
+  stays retired, on exactly the terms those changesets describe. What changes is that the
+  prescription now names the version that will actually carry it, and `os migrate meta` actually
+  applies the two stack conversions instead of stepping over them.
+
+- 667b83e: feat(spec,automation): publish executor-derived config contracts for the schemaless flow nodes (#4278)
+
+  The five descriptor-schemaless builtins (`decision` / `script` / `subflow` /
+  `wait` / `connector_action`) deliberately publish no `configSchema`, so their
+  Studio form lives only in objectui's hand-written `FLOW_NODE_CONFIG` table —
+  and nothing reconciled that table against the executors. `script` had drifted:
+  the form offered an `outputVariables` key nothing reads, two `actionType`
+  options (`sms` / `notification`) that fail every run, a no-op default (`code`),
+  and could not author the `function` / `inputs` / `outputVariable` path that
+  works.
+
+  New in `@objectstack/spec/automation` — contract exports only. Unlike their
+  `builtin-node-config.zod.ts` siblings, which #4277 wired into execute-time
+  parsing, no engine path `parse()`s node config with these: `script`'s legal key
+  set depends on `actionType` and `decision` may branch purely on edge
+  predicates, so a flat parse would either reject valid shapes or check nothing.
+  Their enforcement is the objectui reconciliation test.
+
+  - `ScriptConfigSchema` / `SubflowConfigSchema` / `DecisionConfigSchema` (+
+    `DecisionConditionSchema`) — written from the executors in
+    `service-automation`, the machine-readable half of the cross-repo
+    reconciliation objectui's `flow-node-config` test now performs. `wait` and
+    `connector_action` need no new schema — their contracts are the existing
+    `FlowNodeSchema` sibling blocks (`waitEventConfig` / `connectorConfig`).
+  - `SCRIPT_BUILTIN_ACTION_TYPES` (`['email', 'slack']`) and
+    `SCRIPT_INVOKE_FUNCTION_ACTION_TYPE` (`'invoke_function'`) — the `script`
+    executor now builds its dispatch set from the published constant, so the
+    designer's options, the dispatch set, and the "not a built-in action"
+    failure message can no longer disagree.
+
+  Undeclared-alias graduation in the same change (Prime Directive #12, the
+  `map.flow` path): the `subflow` executor's bare `cfg.flowName ?? cfg.flow`
+  fallback is deleted, replaced by the ADR-0087 D2 conversion
+  `flow-node-subflow-flow-alias` — a stored `subflow` node authored with
+  `config.flow` is rewritten to the canonical `config.flowName` at load
+  (including the `AutomationEngine.registerFlow` rehydration seam). FROM
+  `config.flow` TO `config.flowName`; one-line fix for hand-maintained sources:
+  rename the key.
+
+- 5d21a48: feat(spec,metadata-protocol,metadata,objectql,service-automation): stored metadata replays the full conversion chain at rehydration (#3903)
+
+  Every mechanism the platform has for evolving the metadata contract — schema
+  transforms, the ADR-0087 D2 conversion layer, the D3 migration chain, the
+  protocol-17 tombstones — operated on **authored source** only. Metadata **at
+  rest** (`sys_metadata` rows written by Studio or the runtime authoring APIs)
+  was rehydrated unparsed and unconverted, so the authored and stored contracts
+  silently diverged: a pre-17 row carrying `conditionalRequired` or `execute`
+  read as whatever each ad-hoc consumer happened to do with it.
+
+  **New spec primitive — `applyConversionsToStoredItem(type, item, options?)`**
+  (exported from the package root). Wraps one stored item of a given metadata
+  type and replays the **full** conversion chain over it — `retiredFromLoadPath`
+  entries included, because retirement is an _authoring-surface_ event: the
+  window exists to teach a live author, and a row at rest has no author to
+  teach. Idempotent, never throws, never validates.
+
+  Wired at every stored-row rehydration seam:
+
+  - `metadata-protocol`: `loadMetaFromDb`, `getMetaItems` (active + draft
+    preview), `getMetaItem` (active + draft), `getMetaItemLayered`, and
+    `duplicatePackage` (a copy re-saves through the schema gate, so legacy
+    sources now duplicate successfully — and the copy is canonical).
+  - `metadata`: the DatabaseLoader's live-row reads (`load` / `loadMany`).
+    History reads stay verbatim — history records what was written.
+  - `objectql`: the authored-action / authored-hook direct table reads, so
+    runtime-authored actions stored with the removed `execute` alias dispatch
+    via `target` again.
+  - `service-automation`: `AutomationEngine.registerFlow` now passes
+    `includeRetired` — stored flows keep canonicalizing after their conversions
+    graduate out of the load window. (The generic metadata seams deliberately
+    skip `type: 'flow'`: flow conversions carry the open-namespace conflict
+    guard, which needs this engine's live executor registry.)
+
+  **Boot hydration diagnoses instead of shrugging.** `loadMetaFromDb` now
+  returns `{ loaded, errors, invalid }`: each row is validated against its
+  type's spec schema _after_ conversion, and a genuine contract violation is
+  counted and warned with a stable `[metadata_spec_invalid]` marker — but still
+  registered, deliberately: refusing at boot would unhook live tables and make
+  the row unlistable and unfixable in Studio. The write path (`saveMetaItem` → 422) and the read-side `_diagnostics` envelope remain the enforcing gates; the
+  `SchemaRegistry.registerItem` validation hook is now documented as exactly
+  that diagnostic.
+
+  **Retired accommodation.** With the chain running on every stored read path,
+  the rule-validator's `requiredWhen ?? conditionalRequired` fallback — kept in
+  #3883 with a retirement promise that had no mechanism — is deleted. If you
+  call `evaluateValidationRules` directly with raw legacy field definitions,
+  convert them first (`applyConversionsToStoredItem('object', def)`) or author
+  `requiredWhen`; the platform's own read paths already hand you canonical
+  shapes.
+
+- 9b702dc: The `wait` executor reads its declared contract only; the loose `config` back door graduates into the conversion layer (#4045).
+
+  `wait` keeps its contract in `waitEventConfig` — a declared, `.describe()`-annotated
+  block on `FlowNodeSchema` that is in the authorable-field list, reaches the generated
+  reference, and is what the showcase actually authors. Its descriptor publishes no
+  `configSchema`, which is by design rather than the gap it first looks like.
+
+  The executor nevertheless also read six loose `config` keys behind `wec.X ?? loose.X`,
+  two of them (`duration`, `signal`) spellings the spec never declared anywhere. That is
+  the `notify.source` shape #4050 retired: a second de-facto contract announced only by a
+  code comment, so an author who wrote it got a flow that worked forever and was never
+  steered to the declared spelling (PD #12). Not hypothetical: the showcase's own
+  `wait_revision` node authored it (`config: { eventType: 'signal', signalName: … }`) and
+  moves to the declared block here.
+
+  - New ADR-0087 D2 conversion `flow-node-wait-event-config-lift` lifts
+    `config.{eventType,timerDuration,duration,timeoutMs,signalName,signal}` onto the
+    declared `waitEventConfig` block, in the executor's own `??` precedence — a declared
+    value wins and its loose counterpart is left shadowed, exactly as `renameConfigKey`
+    treats a shadowed alias.
+  - `eventType` is stamped `'timer'` whenever the lift would otherwise leave the block
+    without one. This is load-bearing: the loader parses the **converted** flow
+    (`applyConversionsToFlow` → `FlowSchema.parse`) and `waitEventConfig.eventType` is
+    required once the block exists — so a stored flow carrying only
+    `config: { duration: 'PT1M' }` would have gone from working to failing to load.
+    `'timer'` is the exact default the executor applied to that shape.
+  - The executor's six `?? loose.*` fallbacks are deleted. The surviving `?? 'timer'` is
+    not one: `waitEventConfig` is itself optional, and a wait node without one is a valid
+    timer wait.
+
+  Verified at the real seam: the new executor tests author the legacy shape and go through
+  `registerFlow`, which is what applies the conversion, so they prove the graduation
+  end-to-end on a legacy source rather than only that the executor stopped looking. A
+  negative control pins the `eventType` default — deleting it from the converted output
+  makes `FlowSchema.parse` throw.
+
+  Two things this deliberately does **not** change, filed as #4158 rather than fixed in
+  passing: `waitEventConfig.timeoutMs` is declared as a timeout guard but read as a timer
+  duration, and `waitEventConfig.onTimeout` has zero readers anywhere — so `wait` has no
+  timeout implementation at all, while the showcase authors `onTimeout: 'continue'`.
+  Implementing or retracting that is a behaviour change, not a contract cleanup.
+
+- ab16331: feat(spec)!: retire `waitEventConfig.timeoutMs` / `.onTimeout` — `wait` never had a timeout (#4158)
+
+  Both keys described a timeout and neither delivered one, so protocol 17 removes the pair
+  rather than leaving a promise the runtime does not keep (PD #10).
+
+  - **`onTimeout`** had **zero** readers. No path ever inspected it, so neither `'fail'` nor
+    `'continue'` ever happened — and its `.default('fail')` stamped a decision nothing made
+    onto every wait node. The showcase set `onTimeout: 'continue'`, which did nothing.
+  - **`timeoutMs`** said _"maximum wait time before timeout"_ while its only reader used it
+    as the timer **duration** when `timerDuration` was absent. It did something, just not
+    what it claimed.
+
+  Together they declared a timeout `wait` does not have: a run resumes when its timer
+  elapses or its signal arrives, never on a deadline. Real timeout semantics are left
+  unimplemented deliberately — they should be built to a requirement, not retrofitted to
+  fit two keys that happened to be declared.
+
+  `timeoutMs` **converts to `timerDuration`** rather than being dropped, because that is
+  what it did. It is stringified on the way: the target is `z.string()` while `timeoutMs`
+  was `z.number()`, and `parseIsoDuration` reads a bare numeric string as milliseconds — so
+  `timeoutMs: 60000` and `timerDuration: '60000'` are the same wait. Moving the number
+  unstringified would have produced a block that no longer parses, which a test pins. With
+  `timerDuration` already set it is dropped instead: the executor's `??` never looked past
+  the duration, so it was already dead metadata.
+
+  Both leave the **load path** (`retiredFromLoadPath`), which is the registry's existing
+  split: a key retired for being _renamed_ keeps a load window, because punishing an author
+  for a spelling nobody warned them about is pointless; a key that **misdescribed itself**
+  does not, because silently absorbing it lets the author keep believing they configured a
+  timeout. That is why `api.requireAuth`, the tool/app/flow inert keys and RLS `priority`
+  all left it too. The migration chain converts stored sources mechanically; the schema
+  tombstones name the replacement.
+
+  One fixture interaction worth recording: the #4045 lift fixture used
+  `waitEventConfig.timeoutMs` to demonstrate its fourth ledger entry, and the fixture
+  harness replays the whole table — so its `after` described an end state protocol 17 makes
+  unreachable. It now lifts `eventType` instead. The harness caught this itself.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [cc2de0e]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [4965bfa]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/formula@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Major Changes

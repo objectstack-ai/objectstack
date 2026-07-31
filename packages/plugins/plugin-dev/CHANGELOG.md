@@ -1,5 +1,573 @@
 # @objectstack/plugin-dev
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- 4dc14cc: Retire the three `security.*` dev stubs, and refuse to load `plugin-dev` under `NODE_ENV=production` (#4093).
+
+  **The security stubs are gone.** When `@objectstack/plugin-security` was not installed, `plugin-dev` filled its three slots with fakes that inverted the decision each stood in for: `security.permissions.checkObjectPermission()` returned `true` for everything, `security.rls.compileFilter()` returned `null` so no row-level predicate was applied, and `security.fieldMasker.maskResults()` returned rows unmasked. ADR-0076 D12's rule — learned from the analytics shim it retired in #3891 — is that a fallback may degrade features, **never security semantics**; `packages/spec/src/contracts/security-service.ts` says the same from the other side (these three are plugin-security's internals, and access-narrowing answers must fail CLOSED). Since `plugin-dev` loads SecurityPlugin through the same optional dynamic import as everything else, the package merely being absent was enough to swap real RBAC/RLS/masking for allow-all behind a single `warn` line.
+
+  The slots now stay empty — which is what production has without SecurityPlugin, and what every consumer already handles — and the boot log states plainly that RBAC, row-level security and field masking are not being enforced.
+
+  **`plugin-dev` now refuses to initialize under `NODE_ENV=production`.** It is a published package that registers development fakes for every unclaimed core service slot, including ones that report success for work they never did, and it had no environment check of its own: an `objectstack.config.ts` carrying `new DevPlugin()` into a production deploy got the whole fake slate with only a boot log to say so. `init()` now throws there. Set `OS_ALLOW_DEV_PLUGIN=1` if you deliberately want the dev slate under a production `NODE_ENV` (a staging box mimicking prod, a smoke test that pins the variable).
+
+  FROM → TO: a stack that relied on the dev security stubs was not being protected by them — it was being told everything was allowed. Install `@objectstack/plugin-security` to enforce RBAC/RLS/masking, or accept the empty slots (unchanged behaviour on every path that already handled an absent SecurityPlugin). A production process that loaded `plugin-dev` must now either drop it and install the real services, or opt in explicitly with `OS_ALLOW_DEV_PLUGIN=1`.
+
+  Also: `plugin-hono-server`'s `/auth/me/permissions` resolves `security.permissions` and `metadata` through the same guarded lookup its three sibling lookups already used. An unregistered slot makes `getService` throw, which previously landed in the outer catch — the same fail-open response body, but logged as "/auth/me/permissions failed" on every console navigation instead of taking the deliberate `!evaluator` branch.
+
+- 3c628ce: feat(auth)!: retire the `api.requireAuth` opt-out — anonymous access to object data is always denied (#3963)
+
+  `api.requireAuth: false` let a deployment open its ENTIRE data plane with one
+  config key. It is removed. Auth is a kernel concern, not a deployment posture:
+  anonymous callers are denied on every HTTP surface that reaches object data,
+  unconditionally.
+
+  Every surface that legitimately serves a session-less caller already derives its
+  own narrow authorization from a DECLARATION, so none of them needed the global
+  switch:
+
+  - control plane (`/auth/*`, `/health`, `/ready`, `/discovery`, ADR-0069
+    remediation) — the auth-gate allowlist;
+  - public form submission — `publicFormGrant` (ADR-0056 Option A);
+  - share links — the capability token, validated then read as SYSTEM;
+  - a `book.audience: 'public'` read — the ADR-0046 §6.7 audience gate (#3995);
+  - MCP — an OAuth token or API key.
+
+  **Breaking changes.**
+
+  - `api.requireAuth` is a retired key. It is tombstoned (`retiredKey`) in both
+    `RestApiConfigSchema` and the stack `api` block, so authoring it now fails with
+    a fix-it message rather than being silently stripped (the ADR-0104 / #3733
+    quiet-failure this whole line of work has been closing). `os migrate meta`
+    drops it via the protocol-17 conversion `stack-api-require-auth-removed`.
+  - `shouldDenyAnonymous` (@objectstack/core) no longer takes a `requireAuth`
+    input; it denies any anonymous, non-system caller outside the control-plane
+    allowlist.
+  - A stack that mounts **no auth at all** now FAILS AT BOOT when it would serve a
+    data API (`objectstack serve`, plugin-dev), instead of getting an explicit
+    fail-open. Enable auth (the `auth` tier or AuthPlugin), or run without the data
+    API. There is no anonymous-data carve-out any more — publishing a public
+    surface is done by declaration (see above).
+
+  **Migration.** Delete `api.requireAuth` from the stack config (or run
+  `os migrate meta`). If you were serving data publicly with `requireAuth: false`,
+  replace it with the declaration that fits: a public form view, a share link, or
+  `book.audience: 'public'`. If you have an auth-less stack that intentionally
+  served data, it must now mount auth or stop serving the data API.
+
+- d0d7464: feat(plugin-dev)!: the stub table is retired — DevPlugin assembles real plugins and registers no service implementations of its own (ADR-0115, #4093, #4104).
+
+  DevPlugin used to fill every core-service slot no real plugin occupied with a dev stub. Every one of those stubs is gone. A slot nothing fills now stays EMPTY, exactly as in production: routes answer 404/501, discovery reports `unavailable`, and in-process consumers must handle absence — which production already required of them. FROM → TO per retired slot:
+
+  | Slot                               | The stub did                                                | Instead                                                                                                                                                                                                                                   |
+  | :--------------------------------- | :---------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `security.permissions`             | allow-all `checkObjectPermission()`                         | install `@objectstack/plugin-security` (already part of the default assembly)                                                                                                                                                             |
+  | `security.rls`                     | compiled no row filter                                      | same — `plugin-security`                                                                                                                                                                                                                  |
+  | `security.fieldMasker`             | returned results unmasked                                   | same — `plugin-security`                                                                                                                                                                                                                  |
+  | `auth`                             | `verify()` accepted everyone as admin                       | install `@objectstack/plugin-auth` (already part of the default assembly)                                                                                                                                                                 |
+  | `data`                             | accepted writes, stored nothing                             | install `@objectstack/objectql` (already part of the default assembly)                                                                                                                                                                    |
+  | `ui`                               | shapeless `{}` placeholder                                  | nothing consumed it; handle the absent slot                                                                                                                                                                                               |
+  | `ai`                               | placeholder chat/complete answers                           | install a real AI service                                                                                                                                                                                                                 |
+  | `automation`                       | `execute()` reported success without running                | install an automation engine plugin                                                                                                                                                                                                       |
+  | `notification`                     | claimed "sent", delivered nothing                           | install a notification service                                                                                                                                                                                                            |
+  | `file-storage`                     | in-memory files lost on restart                             | `@objectstack/service-storage` — now auto-wired by DevPlugin when installed (local-disk adapter)                                                                                                                                          |
+  | `realtime`                         | in-process pub/sub copy                                     | `@objectstack/service-realtime` — now auto-wired by DevPlugin when installed (its default in-memory adapter)                                                                                                                              |
+  | `search`                           | in-memory substring index                                   | no consumer resolves this slot; a future search service ships its own dev strategy                                                                                                                                                        |
+  | `workflow`                         | unvalidated state transitions                               | no consumer resolves this slot; a future workflow service ships its own dev strategy                                                                                                                                                      |
+  | `metadata`                         | a second hand-written copy of core's `createMemoryMetadata` | no behavior change — the kernel pre-injects core's fallback for empty core slots (`CORE_FALLBACK_FACTORIES`), and ObjectQL registers the real metadata service in the default assembly                                                    |
+  | `cache` / `queue` / `job` / `i18n` | re-registered core's `createMemory*` fallbacks              | no behavior change — the kernel pre-injects the same core fallbacks automatically; install `@objectstack/service-cache` / `service-queue` / `service-job` for real engines, and i18n auto-wires from the stack's translations (unchanged) |
+
+  Also new, from the same ADR:
+
+  - **Production guard** (first shipped with the security-trio subset): `DevPlugin.init()` throws when `NODE_ENV === 'production'` — the assembly is built around a well-known default auth secret and a seeded dev admin. Escape hatch: `OS_ALLOW_DEV_PLUGIN=1`.
+  - **Assembly auto-wire**: `@objectstack/service-storage` and `@objectstack/service-realtime` are wired as optional child plugins when installed (both ship with DevPlugin's dependencies), so dev keeps working file storage and realtime through real implementations.
+  - `options.services` keys for the retired stubs are accepted and ignored; `'file-storage'` / `'realtime'` now toggle the real service wiring.
+
+  One-line fix for an upgrading stack: if something you called in dev now throws "service not found" or 404s, that call was consuming a fabricated answer — install the real service for that slot (table above), or make the caller tolerate absence the way it already must in production.
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 2a37694: fix(plugin-dev,types): the production escape hatch stops being silent (#3900)
+
+  `DevPlugin.init()` refuses to run under `NODE_ENV=production` (ADR-0115 D6), and
+  `OS_ALLOW_DEV_PLUGIN` overrides that refusal. As shipped, the override returned
+  early with **no output at all**: the process ran the development assembly while
+  every log line and the ready banner read like an ordinary production start.
+
+  That reproduces, one level up, the defect the guard exists to close. The guard's
+  own precedent says so — `OS_ALLOW_DEGRADED_TENANCY` boots degraded _and brands
+  it everywhere an operator looks_, and `OS_ALLOW_DRIVER_CONNECT_FAILURE`'s
+  contract is "logged loudly at startup". An escape hatch that says nothing leaves
+  the operator's only evidence of a degraded state in an env var they may not have
+  set themselves.
+
+  **The override now brands itself, twice.** A warning at `init()` — emitted
+  before any assembly work, so it survives an assembly step that later throws —
+  and a repeat on the ready banner, which is the surface an operator actually
+  reads:
+
+  ```
+  ⚠ DEV ASSEMBLY UNDER NODE_ENV=production (OS_ALLOW_DEV_PLUGIN is set) — the boot
+    guard was explicitly overridden. This process is running the DEVELOPMENT
+    assembly, which is not hardened for production traffic (ADR-0115 D6).
+      • Auth secret is the default published inside @objectstack/plugin-dev. It is
+        public, so anyone can mint a session this stack accepts. Pass `authSecret`
+        explicitly.
+      • Data goes to the in-memory driver with persistence disabled — every record
+        is lost when this process exits.
+  ```
+
+  Only hazards that are live for _that_ configuration are named: the secret line
+  is suppressed when the operator passed their own `authSecret`, and the driver
+  line when the `driver` toggle is off. The dev-admin seed is deliberately absent
+  — `plugin-auth`'s `maybeSeedDevAdmin` is hard-gated to
+  `NODE_ENV === 'development'` and cannot fire on this path, so warning about it
+  would spend the attention the real hazards need.
+
+  **New export — `resolveAllowDevPlugin()` (`@objectstack/types`).** The flag moves
+  off a bare `process.env['OS_ALLOW_DEV_PLUGIN'] === '1'` and joins the
+  `OS_ALLOW_*` family's shared truthy vocabulary, next to
+  `resolveAllowDegradedTenancy` / `resolveAllowDriverConnectFailure`.
+
+  FROM → TO for operators: `OS_ALLOW_DEV_PLUGIN=1` keeps working unchanged.
+  `OS_ALLOW_DEV_PLUGIN=true` (and `on` / `yes`, case-insensitive, surrounding
+  whitespace ignored) **now takes effect** where the strict comparison previously
+  ignored it and failed the boot. That is a widening, in the direction an operator
+  setting the flag already intended; falsy and unrecognised values still refuse to
+  boot, and unset still means "fail fast". If you were relying on
+  `OS_ALLOW_DEV_PLUGIN=true` being inert as a way to keep the guard armed, unset
+  the variable instead.
+
+  No change to the refusal path, which this issue re-verified end to end:
+  `kernel.use()` only registers, `initPluginWithTimeout` does not catch,
+  `bootstrap()` rethrows, and `os serve`'s outer handler prints the message and
+  exits `1`. The `throw` is genuinely fatal here, so it needs none of the
+  `process.exit(1)` the tenancy guard required for sitting inside a broad `catch`.
+
+- 45dc446: Every in-memory fallback and dev stub now self-describes with the standard `__serviceInfo` descriptor, classified by what it actually is (#4058 step 1).
+
+  ADR-0076 D12 gave services one way to say "I am not the real thing", but the producers never converged on it:
+
+  - The kernel's own fallbacks (`createMemoryCache` / `Queue` / `Job` / `I18n` / `Metadata`) carried `_fallback: true` — a marker **no** consumer recognized, `readServiceSelfInfo` included — so both discovery builders reported them as fully `available`.
+  - `plugin-dev` marked all of its implementations with the same `_dev: true`, normalized to `status: 'stub', handlerReady: false`. That declared a working in-memory search index exactly as fake as an AI stub returning invented text.
+
+  Both now carry `__serviceInfo`, split by a rule that holds across the whole set:
+
+  - **`degraded`** — really does the work, with reduced capability: `cache`, `queue`, `job`, `file-storage`, `search`, `i18n`, `metadata`, `workflow`, `realtime`. Its answers are true answers; the `message` names what is missing (no persistence, no scheduling timer, no state-machine validation, …).
+  - **`stub`** — the answer is fabricated: `ai`, `automation`, `notification`, `data`, `auth`, `security.permissions`, `security.rls`, `security.fieldMasker`. Never to be mistaken for a capability.
+
+  `handlerReady: false` is set independently wherever no HTTP handler serves the slot (`cache` / `queue` / `job` / `realtime`, and every `stub`).
+
+  Discovery output changes accordingly — a kernel fallback that used to report `status: 'available'` now reports `degraded` with an explanatory message. No routing, gating, or dispatch behavior changes: every dispatcher domain still resolves services exactly as before. Consumers reading `discovery.services.*` get the truth instead of a uniform claim.
+
+  For anything that duck-typed the old markers: `svc._fallback` / `svc._dev` → `readServiceSelfInfo(svc)` from `@objectstack/spec/api` (the legacy `_dev` key is still understood by that reader, so third-party stubs carrying it keep working).
+
+- 7309c81: fix(driver-memory,spec): persistence is opt-in again — `new InMemoryDriver()` is pure in-memory (#4065)
+
+  `InMemoryDriverConfig.persistence` defaulted to `'auto'`, and in Node.js `'auto'`
+  means **file**. So a bare `new InMemoryDriver()` — the shape every caller in this
+  repo used — silently wrote `.objectstack/data/memory-driver.json` into the process
+  CWD and reloaded it on the next boot. The default is now `false`.
+
+  **This restores the accepted design rather than replacing it.** #815, the issue
+  that introduced the persistence capability, specified it as opt-in in requirement
+  \#1 — "默认情况下不启用持久化（纯内存，行为不变）" — and listed
+  `new InMemoryDriver()` under "纯内存" in its own config examples. The `'auto'`
+  default was a drift from that spec.
+
+  What let the drift survive is worth naming, because it is not "there was no
+  test". `MemoryConfigSchema` _did_ pin the default, and asserted `'auto'`; the
+  driver honoured `'auto'`; so spec and implementation agreed, and the pair looked
+  verified. What nothing checked was whether the value they agreed on was the one
+  #815 accepted. The driver's own `persistence.test.ts` could not have caught it
+  either — every case there passes `persistence` explicitly, so the omitted-value
+  path was untested on the implementation side. Both sides are now covered: three
+  behavioural tests in `persistence.test.ts` (no CWD write, no cross-instance row
+  carry-over, opt-in still persists) and the flipped schema assertion.
+
+  **The symptom this fixes.** `packages/runtime/src/datasource-autoconnect.test.ts`
+  seeds two rows with fixed ids and asserts the exact set. Run 1 passed and wrote
+  the rows to disk; run 2 loaded them back, appended two more, and failed with four
+  rows; run N had 2N. CI never saw it — every job is a fresh clone, so every CI run
+  is run 1 — but `pnpm test` twice in one working tree could only ever go green
+  once. The persisted file's `created_at` values, one pair per run, were the proof.
+
+  (#4083 fixed that particular suite from the factory side, and its regression
+  test is kept as-is. The blast radius was wider than one suite, though: **every**
+  bare `new InMemoryDriver()` inherited the default, so any code path constructing
+  one directly wrote to its working directory. Unit tests should not have write
+  side effects on the CWD at all.)
+
+  **Migrating.** Callers that want durability now ask for it:
+
+  ```ts
+  new InMemoryDriver(); // pure in-memory (new default)
+  new InMemoryDriver({ persistence: "file" }); // Node.js, durable across restarts
+  new InMemoryDriver({ persistence: "local" }); // browser, durable across reloads
+  new InMemoryDriver({ persistence: "auto" }); // previous default behaviour
+  ```
+
+  The `'auto'` / `'file'` / `'local'` / custom-adapter paths are unchanged; only
+  the value used when `persistence` is omitted moved.
+
+  **Relationship to #4083.** That issue fixed the same hazard one consumer at a
+  time, and landed first: `createDefaultDatasourceDriverFactory` now passes
+  `persistence: false` for a declared `{ driver: 'memory' }` datasource and scopes
+  an opted-in destination _per datasource_, and the dev sqlite step-down's
+  last-resort rung passes `false` too. Both are kept exactly as #4083 wrote them.
+  This change closes the half they deliberately left open — a directly-constructed
+  `new InMemoryDriver()` — which is the path that still wrote into the working
+  directory of whatever process happened to build one.
+
+  The two are complementary, not redundant. #4083's per-datasource scoping is
+  still the only thing that expands `'auto'`/`'file'`/`'local'` into a destination
+  carrying the datasource name, so two pools that DO opt in never alias one file;
+  its explicit `false` becomes belt-and-braces, which is the right posture for a
+  path that must never persist.
+
+  `DevPlugin`'s driver is now explicitly `persistence: false`, matching the cache,
+  queue, job, i18n, storage and search stubs it ships beside — it was the one piece
+  of that stack that quietly outlived the process.
+
+  **One claim trimmed, no behaviour attached.** The class docstring called this a
+  "production-ready implementation of the ObjectStack Driver Protocol". It stores
+  no constraints at all — `create()` is a `table.push()` and `syncSchema()` only
+  allocates an array — so there is no primary key, uniqueness, `NOT NULL`, foreign
+  key or column typing, and `bulkCreate` lands duplicate ids where a SQL driver
+  raises a violation (the second finding in #4065). The docstring now says so, and
+  points test authors at in-memory SQLite. Per Prime Directive #10 the fix for
+  `declared ≠ enforced` is to implement it, trim the claim, or file it; with this
+  driver moving to maintenance-only the claim is what goes.
+
+- a3cb9c8: Retire the dev-mode `analytics` stub, and make the dispatcher gate `/analytics` on `handlerReady` rather than on service presence (#4000).
+
+  Retiring the degraded analytics shim (#3891) made an empty `analytics` slot the honest signal: `/api/v1/analytics/*` 404s and discovery reports `unavailable`. `plugin-dev` refilled that slot with a stub, which re-created the retired shape in dev mode — the dispatcher gated on "is a service registered", so the stub was called like a real engine and its empty result came back as a 200.
+
+  - `plugin-dev` no longer registers an `analytics` dev stub; the slot stays empty (`NO_DEV_STUB_SERVICES`). Every other dev stub is unchanged.
+  - The `/analytics` domain, its route-mount gate, and discovery's `routes`/`features` now share one predicate (`isAnalyticsServiceServeable`): a service that self-declares `handlerReady: false` (ADR-0076 D12 — `__serviceInfo`, or plugin-dev's legacy `_dev: true`) is treated as an empty slot. A `degraded` implementation that genuinely serves requests keeps serving; `discovery.services.analytics` still reports a registered stub as `status: 'stub'`, which says more than `unavailable` would.
+
+  FROM → TO for dev setups that relied on the stub answering `POST /api/v1/analytics/query` with `{ rows: [], fields: [] }`: install the real engine — `@objectstack/service-analytics` runs an InMemory strategy and needs no database of its own. Nothing else changes; hosts that already install it (including `os serve`, where `analytics` is in `ALWAYS_ON_CAPABILITIES`) are unaffected.
+
+- 4be9d99: fix(runtime,hono,plugin-dev): retire the dispatcher's `/storage` bridge — it never spoke the storage contract (#4087)
+
+  `POST /api/v1/storage/upload` and `GET /api/v1/storage/file/:id` were a
+  dispatcher-side bridge to the `file-storage` service slot, written against a
+  service shape that does not exist:
+
+  - **Upload** called the contract's `upload(key, data, options?)` as
+    `upload(file, { request })` — the parsed file object landed in the `key`
+    slot and `{ request }` in `data`. That is a `TypeError` against every
+    implementation in the repo (`S3StorageAdapter`, `LocalStorageAdapter`,
+    `SwappableStorageService`, plugin-dev's in-memory one), not a
+    near-miss: `Buffer.from({}) → ERR_INVALID_ARG_TYPE`, or an object used as
+    an S3 object key / `path.join` segment.
+  - **Download** branched on `result.url` / `result.redirect` / `result.stream`
+    / `result.mimeType` while the contract's `download(key)` resolves a
+    `Buffer`, so every branch fell through and the route answered a
+    JSON-serialized Buffer.
+
+  Both routes are removed, along with `HttpDispatcher.handleStorage()`, the
+  `/storage` domain registration, the dispatcher-plugin mounts and the two route
+  ledger rows.
+
+  **Migration.** There is nothing to migrate off in practice — neither route
+  could complete a request. (They were reachable: `service-storage` mounts
+  `/storage/upload/presigned`, not `/storage/upload`, so nothing shadowed them.
+  They simply had no caller — no SDK method builds those URLs.)
+  `/api/v1/storage` is `@objectstack/service-storage`'s surface and always was
+  the working one:
+
+  - Upload — FROM `POST /api/v1/storage/upload` TO the presigned protocol
+    (`POST /storage/upload/presigned` → direct `PUT` to the returned URL →
+    `POST /storage/upload/complete`), or `client.storage.upload(file)`, which
+    runs all three steps.
+  - Download — FROM `GET /api/v1/storage/file/:id` TO
+    `GET /storage/files/:fileId/url` (`client.storage.getDownloadUrl(fileId)`)
+    for a signed URL, or `GET /storage/files/:fileId` for a stable browser URL
+    that 302s to it.
+
+  Install `@objectstack/service-storage` to get those routes; without it
+  `/api/v1/storage` now has no handler, which is the same answer every other
+  uninstalled capability gives.
+
+  Two follow-on corrections keep `declared === enforced`:
+
+  - `@objectstack/hono` no longer mounts `app.all('<prefix>/storage/*')`. That
+    wildcard claimed the whole `/storage` subtree for the two dead routes, so
+    every other path under it — service-storage's protocol above all — got the
+    bridge's own 404 rather than falling through. Storage is ordinary catch-all
+    traffic now.
+  - Discovery keeps gating `routes.storage` on `isServiceServeable` — the shared
+    `handlerReady` predicate #4058 step 2 introduced — and plugin-dev's in-memory
+    implementation now self-declares `handlerReady: false`. #4058 deliberately
+    left that one serving because the `/storage` bridge was still there to serve
+    it; with the bridge retired nothing routes HTTP to that slot, so `false` is
+    the honest value — the position `realtime` has held since ADR-0076 D12. The
+    implementation keeps working for in-process callers; it is simply no longer
+    advertised as a reachable HTTP capability.
+
+- Updated dependencies [bc35e00]
+- Updated dependencies [6a67d7a]
+- Updated dependencies [6e141bc]
+- Updated dependencies [48fcf70]
+- Updated dependencies [0ecc656]
+- Updated dependencies [a4e2684]
+- Updated dependencies [06772eb]
+- Updated dependencies [0c90ece]
+- Updated dependencies [195ad76]
+- Updated dependencies [c2bbd97]
+- Updated dependencies [3ec8186]
+- Updated dependencies [698cbc2]
+- Updated dependencies [b1863a5]
+- Updated dependencies [b1863a5]
+- Updated dependencies [270650f]
+- Updated dependencies [956e7f9]
+- Updated dependencies [3aef718]
+- Updated dependencies [ffb003c]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [bb1ce2e]
+- Updated dependencies [6fa1827]
+- Updated dependencies [05154a1]
+- Updated dependencies [0f12193]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [ea24593]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [fccec22]
+- Updated dependencies [2af1988]
+- Updated dependencies [b3a2318]
+- Updated dependencies [0af50a3]
+- Updated dependencies [fce14ab]
+- Updated dependencies [2e836de]
+- Updated dependencies [7309c81]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [fae74b5]
+- Updated dependencies [545d931]
+- Updated dependencies [a225ef5]
+- Updated dependencies [366105c]
+- Updated dependencies [c9d254a]
+- Updated dependencies [c8124e5]
+- Updated dependencies [9e8f04d]
+- Updated dependencies [c3bcb42]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [f4d7f1d]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [4dc14cc]
+- Updated dependencies [0373d52]
+- Updated dependencies [4f30943]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [bb192c4]
+- Updated dependencies [98e7cc7]
+- Updated dependencies [4cf7c61]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [347f460]
+- Updated dependencies [8a341a4]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [c39d713]
+- Updated dependencies [dc530b4]
+- Updated dependencies [f0d6594]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [6f98c2d]
+- Updated dependencies [385c4b0]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [d4720ca]
+- Updated dependencies [43ff598]
+- Updated dependencies [e5a4d26]
+- Updated dependencies [839982e]
+- Updated dependencies [623e555]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [99b4392]
+- Updated dependencies [7309c81]
+- Updated dependencies [495019b]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [33a5ff4]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [55bbefc]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [be7945a]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [3ba8d77]
+- Updated dependencies [6c87cc9]
+- Updated dependencies [af2a095]
+- Updated dependencies [bf478e1]
+- Updated dependencies [dd5daac]
+- Updated dependencies [ec796d5]
+- Updated dependencies [77fadbf]
+- Updated dependencies [a3cb9c8]
+- Updated dependencies [e87fea1]
+- Updated dependencies [4be9d99]
+- Updated dependencies [c65e529]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [5b08389]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [0931185]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [5c13368]
+- Updated dependencies [1d5dc46]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [1e38158]
+- Updated dependencies [65a3a84]
+- Updated dependencies [de6daa5]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [77a77fd]
+- Updated dependencies [d82f8c0]
+- Updated dependencies [efcd68c]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [2053714]
+- Updated dependencies [68dea0b]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [7309c81]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [43fc039]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/runtime@17.0.0-rc.1
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/objectql@17.0.0-rc.1
+  - @objectstack/service-storage@17.0.0-rc.1
+  - @objectstack/driver-memory@17.0.0-rc.1
+  - @objectstack/plugin-security@17.0.0-rc.1
+  - @objectstack/rest@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/plugin-auth@17.0.0-rc.1
+  - @objectstack/account@17.0.0-rc.1
+  - @objectstack/plugin-hono-server@17.0.0-rc.1
+  - @objectstack/service-i18n@17.0.0-rc.1
+  - @objectstack/service-realtime@17.0.0-rc.1
+  - @objectstack/setup@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Patch Changes

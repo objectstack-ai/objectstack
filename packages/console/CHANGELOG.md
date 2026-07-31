@@ -1,5 +1,234 @@
 # @objectstack/console
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- 302e972: Console (objectui) refreshed to `7d9734d5e321`. Frontend changes in this range:
+
+  - feat(core): say which column identity key won, out loud (#3104 PR3) (#3124)
+  - fix(detail): Attachments become a peer tab with a live count badge, and their copy is translated (objectstack#4358) (#3123)
+  - fix(console,app-shell): readable reassign hand-off + "System" label for svc:\* audit actors (objectstack#4365, objectstack#4366) (#3121)
+  - fix(fields): lookup multi-value hydration batches via $in and shows loading instead of the empty placeholder (#3108) (#3120)
+  - fix(list,grid,detail,tree,core): every column resolver reads one key (#3104 PR2) (#3122)
+  - fix(core,list): 列身份归一到 ingestion chokepoint — 一列一个身份 (#3104 PR1) (#3119)
+  - fix(detail): a related list has one sorting semantics instead of two (#3106) (#3113)
+  - feat(components,grid,list): a column-header sort orders the whole list, not the page you can see (#3106) (#3112)
+  - fix(data-objectstack): a string `$orderby` reaches the server as a sort, not a list of character indices (#3106) (#3109)
+  - fix(types,core): the `*Validation` five derive from spec 17, and the engine stops disagreeing with the server (#3103) (#3107)
+  - fix(app-shell): lookup-param helpText only renders when the param actually degraded to a raw-id input (#3094) (#3095)
+  - fix(form): numeric/boolean option values survive selection typed (#3090 PR3b) (#3100)
+  - fix(list,detail): sorting a lookup column stops ordering by an invisible key (#3096) (#3102)
+  - feat(flow-designer): the script node's form authors what the executor runs (framework#4278) (#3099)
+  - fix(form): declare the runtime field metadata slot, ban the spec FormField misimport (#3090 PR3a) (#3097)
+  - fix(console): LocalizationFetchProvider retries a transient /me/localization failure (#3098)
+  - fix(app-shell,i18n): drop the developer-voiced default form subtitle (#3093)
+  - fix(form): spec-vocabulary fields stop crashing the standalone form; every surface names the boundary (#3090) (#3092)
+  - fix(form): harden the spec↔runtime form-field chokepoint, derive SelectOption, complete FormFieldSchema (#3090) (#3091)
+  - fix(types,layout): navigation metadata stops losing the spec fields the renderer already honours (objectstack#4115) (#3088)
+
+  objectui range: `bebaebd39ace...7d9734d5e321`
+
+- 4580597: Console (objectui) refreshed to `96ee72e85439`. Frontend changes in this range:
+
+  - fix(console): render the redaction notice on the enveloped resolve body (objectstack#3983) (#2980)
+  - feat(sdui): guard the public contract against silent drift (#2979)
+  - fix(sdui): lazy public blocks reach a kind:'react' page scope; ReactRunner keeps its errors (#2976)
+  - fix(list,data): bridge every spec view operator onto the filter AST (#2901) (#2974)
+  - fix(errors): error-code branches survive the framework's ADR-0112 rename (objectstack#3841) (#2977)
+  - fix(fields): a select no longer wipes itself when its value outruns its options (#2968) (#2969)
+  - fix(approvals): decision outputs reach both decision surfaces (#2955) (#2961)
+
+  objectui range: `e651c936870e...96ee72e85439`
+
+- eb9230c: Console (objectui) refreshed to `a136322f8723`. Frontend changes in this range:
+
+  - fix(app-shell)!: a modal action is client-side only — drop the server fallthrough (objectstack#3959) (#2973)
+  - fix(app-shell)!: the server-action URL identifies an action by `name`, not `target` (ADR-0110 D1) (#2970)
+  - fix(form): a server rejection that names fields now marks those fields (#2966)
+  - fix(actions): one source for the /actions envelope rule, and redirectUrl finally works (#2967)
+  - fix(actions): apply the ADR-0066 D4 capability gate on every action surface (framework#3923) (#2965)
+  - fix(detail): multi-value lookup is selectable in inline edit (#2957)
+  - fix(actions): a failed server action no longer reports as success (green toast) (#2963)
+  - fix(fields): the criteria builder stops calling an empty criteria "All records" (#2962)
+  - feat(report): carry a report's `order` into the dataset selection (framework#3916) (#2964)
+  - feat(views): the list toolbar speaks one vocabulary — `userActions` (#2890) (#2948)
+
+  objectui range: `4a4829d0ef39...a136322f8723`
+
+  **Release-critical for v17.** The previous pin (`4a4829d0ef39`) predates the
+  ADR-0110 D1 client fix, so the console it builds still posts `action.target`
+  to `/api/v1/actions/:object/:action`. Against a v17 server — which resolves
+  the declaration by `name` and refuses an unresolvable one (D3) — every
+  target-bound script action would return 404 from the shipped console. The
+  lockstep the ADR called for is enforced by THIS pin, not by merging the
+  objectui PR, so v17 must not ship without this bump.
+
+- 29e5a0e: Console (objectui) refreshed to `bebaebd39ace`. Frontend changes in this range:
+
+  - fix(console): marketplace read cloud errors seven different ways — two break on the conversion, two are broken today (cloud#944) (#3086)
+  - feat(console): settings validation errors render against the fields that caused them (objectstack#4224 follow-up) (#3083)
+  - fix(notifications): the config, position and action variant are read instead of forked or ignored (#3014 follow-up) (#3085)
+  - fix(data-objectstack,core): an object filter no longer depends on whether the query expands a lookup (#3084)
+  - fix(app-shell): a published configSchema can no longer delete a node's sibling-block editors (objectstack#4045) (#3082)
+  - fix(view,list,core): a view's filter no longer disappears, or arrives as a predicate on columns that don't exist (#3081)
+  - fix(console): read the SETTINGS_LOCKED key from `error.details`, tolerating both shapes (objectstack#4224) (#3079)
+  - fix(list,data-objectstack,types): exporting a searched list no longer downloads the unsearched superset (#3078)
+  - fix(types,app-shell): one ObjectPermission, and the preview stops hiding three of its fields (objectstack#4115) (#3077)
+  - fix(notifications): the spec `icon` is read instead of stored and ignored (#3014 follow-up) (#3076)
+  - fix(plugin-grid): bulk-action params render the shared form field widgets — lookup errors get Retry, sys_user params get the PeoplePicker (#3064, ADR-0059) (#3073)
+  - feat(app-shell): the console mounts the notification surfaces (#3014 follow-up) (#3075)
+  - fix(data-objectstack): a view's own filter no longer vanishes when the user adds one (#3072)
+  - feat(notifications): each spec displayType gets its own presentation (#3014) (#3071)
+  - fix(grid): evaluate a bulk action's `visible` per selected record (#3067) (#3070)
+  - feat(sdui): curate the page:_, element:_ and action:\* families into the public contract (#3069)
+  - fix(list,i18n): a 400 from the server no longer reads as "check your connection" (#3066)
+  - feat(page,element): declare inputs for the eight configurable page:_/element:_ blocks (#3065)
+  - fix(app-shell,plugin-grid,i18n): autonumber/readonly fields become match-only import targets so "update if the record number exists" works (#3061)
+  - fix(types): Page/App/Dashboard validate the spec's own fields instead of passing them through (objectstack#4115 group C) (#3063)
+  - fix(plugin-form,i18n): form edit saves send If-Match and surface 409 conflicts instead of silently overwriting (#3060)
+  - fix(console): 403 blamed on the network, ⌘K search capped at 8 objects, nav gating fields inert (#3044)
+  - fix(grid): a bulk delete / by-name action clears the row checkboxes too (#3056) (#3058)
+  - fix(types,detail): derive five spec-named symbols instead of forking them (objectstack#4115) (#3057)
+  - fix(grid): drop the `bulkEnabled` derivation — the spec key is a tombstone (#3002) (#3053)
+  - fix(permissions,console): retry a transient /me/permissions failure instead of stranding the app on its loading state (#3050) (#3052)
+  - fix(test-setup): stop shadowing ten real registrations, and declare page:header's inputs (#3051)
+  - fix(scripts): --check reports real divergence instead of calling all 46 components "modified" (#3049)
+  - fix(view): the chart view gets a label and an icon in the view switcher (#2916) (#3040)
+  - feat(form): SplitForm honours the spec's new `FormSection.pane` (#3041)
+  - fix(types,layout): nav item type 'component' joins NavigationItemType and its zod enum (#2918) (#3039)
+  - fix(registry): prefix every namespaced key exactly once, in every namespace (#3037)
+  - fix(scripts): shadcn-sync refuses to silently delete local edits, and compiles the package after it writes (#3035)
+  - fix(scripts): shadcn-sync rewrites the registry paths Shadcn actually serves, and refuses to write a file when it cannot (#3033)
+  - fix(grid,types): an object-declared bulk action runs over the selected records (#3002) (#3031)
+  - fix(form): a wizard with `allowSkip` no longer submits past the fields you skipped (#3030)
+  - fix(components): resizable is a diverged file, not a synced one — stop the sync from breaking the build, and finish the v4 migration in it (#3029)
+  - feat(studio): a page button created in Studio can be given an action (#2997) (#3028)
+  - feat(record): declare inputs for the seven configurable record:\* blocks, and curate six (#3027)
+  - feat(eslint): ban dynamic imports in test hooks, and convert the last 33 sites (#3026)
+
+  objectui range: `96ee72e85439...bebaebd39ace`
+
+- bec0f9a: Console (objectui) backfill for `2cb8d78e24ad...c6cfdf1288b6` — the one refresh in
+  the v17 window that landed with no changeset.
+
+  `scripts/bump-objectui.sh` emits a `@objectstack/console` changeset on every bump
+  precisely so a SHA move leaves a trace (see `docs/releases-maintenance.md`). One
+  bump in this window did not, so 25 commits — including two breaking ones — were
+  absent from the release history and from the curated v17 page. This entry records
+  them after the fact; it declares no new SHA move (`.objectui-sha` already points
+  past this range at `4a4829d0ef39`).
+
+  Frontend changes in this range:
+
+  - feat(react)!: trim dead device/preference delegates from useClientNotifications (objectstack#3612 companion) (#2862)
+  - feat(types)!: drop the ObjectStack/ObjectOS/ObjectQL/ObjectUI Capabilities re-exports (#2860)
+  - feat: gate detail/form edit & delete on the server's effective operation set (framework#3546) (#2832)
+  - feat(app-shell): approver values become record lookups (framework#3508) (#2834)
+  - feat(console): group tenancy posture affordances — org switcher as write context + org attribution (ADR-0105 Phase 1) (#2858)
+  - feat(console): i18n the system-settings hub (objectui#2851 P2) (#2859)
+  - fix(dashboard,charts): resolve `{current_user_id}` in widget filters (framework#3574) (#2857)
+  - fix(grid): validate email format in the import preview (objectstack#3566) (#2840)
+  - fix(fields): consistent image-field rendering + click-to-zoom (#2836) (#2837)
+  - fix(app-shell): stop the flow-node repeater from committing during render (#2838) (#2839)
+
+  Plus 15 dependency bumps, three of them major for the Console's own build:
+  `maplibre-gl` 5→6, `chalk` 5→6, `jsdom` 29→30 (dev).
+
+  objectui range: `2cb8d78e24ad...c6cfdf1288b6`
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 60110bb: Console (objectui) backfill for `96ee72e85439...bebaebd39ace` — the 27 fix
+  commits that refresh's changeset did not enumerate.
+
+  `scripts/bump-objectui.sh` emits a `@objectstack/console` changeset on every
+  bump precisely so a SHA move leaves a trace (see `docs/releases-maintenance.md`),
+  and the `console-bebaebd39ace.md` entry it wrote covers only the tail of its own
+  range: the range holds **94** first-parent commits, the enumeration lists 40,
+  and its oldest entry is #3026. Everything that merged earlier inside the same
+  range went unrecorded — in the release history and in the curated v17 page.
+  This is the second instance of the failure `console-c6cfdf1288b6-backfill.md`
+  records; it declares no SHA move (`.objectui-sha` already points at
+  `7d9734d5e321`, past this range).
+
+  The 27 are all `fix`, hence `patch`. Several are data-loss fixes an upgrading
+  Console user feels immediately:
+
+  - fix(form): a tabbed/sectioned modal keeps every tab's values (#2959, #2153) (#2987)
+  - fix(form): a split form keeps BOTH panels' values (#2153) (#3012)
+  - fix(form): a defaultValues change no longer discards the field being filled (#2982) (#2991)
+  - fix(components): apply new form defaultValues in the commit that renders them (#3001)
+  - fix(plugin-form): block page unload while a modal/drawer form has unsaved input (#2998)
+  - fix(plugin-form): swapping recordId no longer leaves the previous record on screen (#3005)
+  - fix(plugin-form): a wizard that ends on a field-less review step can finish (#2986)
+  - fix(form): a tabbed/split form honours the form view's own `columns` (#3018)
+  - fix(console): a flow or action that failed under HTTP 200 stops reporting success (#2958) (#2995)
+  - fix(grid): a legacy string row action runs instead of green-toasting a no-op (#2960) (#2996)
+  - fix(spec-parity): render the six Tier-1 spec values right instead of silently wrong (#2941) (#2993)
+  - fix(spec-parity): the Tier-2 spec values render instead of validating into nothing (#2942) (#3008)
+  - fix(spec-parity): the Tier-3 spec values render instead of red-boxing (#2943) (#3011)
+  - fix(view,components): the spec→FilterBuilder operator table covers the whole view vocabulary (#2945) (#2989)
+  - fix(view): the spec→FilterBuilder map follows the four operators #2942 added (#3022)
+  - fix(charts): a spec `series[].type` draws, and a spec-shape `series` plots at all (#2945) (#3004)
+  - fix(charts): say so when rows carry no category key, instead of drawing an empty axis (#3007)
+  - fix(analytics): a missing analytics capability no longer renders as an empty KPI (objectstack#3891) (#2981)
+  - fix(chatbot): read the agent catalog in the declared envelope too (objectstack#4053) (#2992)
+  - fix(sdui): a react page keeps its state; a source that exports nothing fails loudly (#2984)
+  - fix(sdui): a kind:'html' page can use lazily-registered blocks, and recovers when one registers late (#2988)
+  - fix(sdui): stop the react page's "no adapter yet" fallback churning its provider context (#3000)
+  - fix(sdui): the curated contract lists record:line_items, the tag that actually resolves (#3006)
+  - fix(record): register the record:\* blocks under one key, prefixed once (#3023)
+  - fix(plugin-list,plugin-grid): drop undeliverable formats from the export menu (#2999)
+  - fix(components): a stacked resizable group gets a divider, not a 1px sliver (#3024)
+  - fix(components,app-shell): the last two `direction` props follow v4's rename to `orientation` (#3025)
+
+  Also in the range and deliberately not listed here: the refactor/chore/test/
+  build/ci PRs the bump script's fix/feat filter excludes by design — including
+  three breaking-flagged refactors already reflected in the spec-side work
+  (#2990 the `execute` alias deleted from the action runner, objectstack#3856;
+  #3003 action sub-vocabularies derived from spec, and #3020 authoring types
+  become input types, both objectstack#4074).
+
+  objectui range: `96ee72e85439...bebaebd39ace`
+
+- 6fd0786: Console (objectui) refreshed to `e651c936870e`. Frontend changes in this range:
+
+  - fix(app-shell): unwrap the declared response envelope on the datasource page and the api-action runner (objectstack#3843) (#2972)
+  - fix(actions): read objectstack#3962's single-wrapped /actions responses (#2971)
+
+  objectui range: `a136322f8723...e651c936870e`
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

@@ -1,5 +1,1452 @@
 # @objectstack/cli
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- 3aef718: feat(migrate): `os migrate value-shapes` — the per-deployment gate for reference and structured-JSON value shapes (#3438)
+
+  The second of ADR-0104 D1's two evidence gates. Media value shapes already
+  enforce once a deployment has verified its file migration (#3681); the
+  reference (`lookup` / `master_detail` / `user` / `tree`) and structured-JSON
+  (`location` / `address` / `composite` / `repeater` / `record` / `vector`)
+  classes now get a gate of their own.
+
+  ```bash
+  os migrate value-shapes           # scan: reports, writes nothing
+  os migrate value-shapes --apply   # scan + record the deployment flag when clean
+  ```
+
+  The run walks every stored value of those classes against
+  `valueSchemaFor(field, 'stored')` — the same predicate the write path enforces,
+  imported rather than re-derived — and, at zero violations, records
+  `sys_migration { id: 'adr-0104-value-shapes', verified_at, blocking: 0 }`.
+  Strict enforcement of these classes reads **that row**, never the platform
+  version, so upgrading changes nothing until a deployment produces its own
+  evidence.
+
+  **There is no backfill, deliberately.** The file migration converts legacy
+  values because the platform narrowed that storage form and owes the conversion.
+  A malformed `location` is application data whose correct value only its author
+  knows, so this run reports and prescribes — naming the object, field, type,
+  count, offending record ids and the parse issue — and the operator fixes and
+  re-runs. With nothing to convert, `--apply`'s only write is the flag row, which
+  keeps the #3617 invariant trivially: a dry run changes nothing, and whether a
+  run changed this deployment's posture never depends on what it found.
+
+  **A separate flag from the file migration**, because it attests a separate
+  fact. That flag says file values were migrated and their ownership reconciled;
+  it says nothing about whether a `lookup` id or a `location` payload is well
+  formed. Gating these classes on it would be borrowing evidence for a fact it
+  does not cover.
+
+  - New escape hatch **`OS_ALLOW_LAX_VALUE_SHAPES=1`** returns a verified
+    deployment to warnings, with the same precedence as its media sibling: the
+    opt-out beats `OS_DATA_VALUE_SHAPE_STRICT_ENABLED`, which beats the flag.
+    Wrongly staying lenient costs a warning; wrongly enforcing stops a working
+    app from writing.
+  - `@objectstack/spec/system` exports `VALUE_SHAPES_MIGRATION_ID`.
+  - `@objectstack/objectql` exports `scanValueShapes`, `valueShapeScanPassed`
+    and `formatValueShapeScanReport`. The scanner is read-only and does **not**
+    record the flag: readers of a migration flag use the spec contract, only
+    writers depend on `@objectstack/platform-objects`, so the composition lives
+    with the CLI command rather than inverting the engine's dependencies.
+  - `validateRecord` gains `valueShapeStrict`, the sibling of
+    `mediaValueShapeStrict`. Both default to `false`: a caller that cannot say
+    stays lenient, so nothing starts rejecting merely because the evidence was
+    unavailable.
+
+  **Nothing changes for an existing deployment until it runs the command.** A
+  scan that is truncated, or that cannot read an object, fails the gate even with
+  zero violations found — "none in the part we read" is not the claim the flag
+  makes.
+
+- 3c628ce: feat(auth)!: retire the `api.requireAuth` opt-out — anonymous access to object data is always denied (#3963)
+
+  `api.requireAuth: false` let a deployment open its ENTIRE data plane with one
+  config key. It is removed. Auth is a kernel concern, not a deployment posture:
+  anonymous callers are denied on every HTTP surface that reaches object data,
+  unconditionally.
+
+  Every surface that legitimately serves a session-less caller already derives its
+  own narrow authorization from a DECLARATION, so none of them needed the global
+  switch:
+
+  - control plane (`/auth/*`, `/health`, `/ready`, `/discovery`, ADR-0069
+    remediation) — the auth-gate allowlist;
+  - public form submission — `publicFormGrant` (ADR-0056 Option A);
+  - share links — the capability token, validated then read as SYSTEM;
+  - a `book.audience: 'public'` read — the ADR-0046 §6.7 audience gate (#3995);
+  - MCP — an OAuth token or API key.
+
+  **Breaking changes.**
+
+  - `api.requireAuth` is a retired key. It is tombstoned (`retiredKey`) in both
+    `RestApiConfigSchema` and the stack `api` block, so authoring it now fails with
+    a fix-it message rather than being silently stripped (the ADR-0104 / #3733
+    quiet-failure this whole line of work has been closing). `os migrate meta`
+    drops it via the protocol-17 conversion `stack-api-require-auth-removed`.
+  - `shouldDenyAnonymous` (@objectstack/core) no longer takes a `requireAuth`
+    input; it denies any anonymous, non-system caller outside the control-plane
+    allowlist.
+  - A stack that mounts **no auth at all** now FAILS AT BOOT when it would serve a
+    data API (`objectstack serve`, plugin-dev), instead of getting an explicit
+    fail-open. Enable auth (the `auth` tier or AuthPlugin), or run without the data
+    API. There is no anonymous-data carve-out any more — publishing a public
+    surface is done by declaration (see above).
+
+  **Migration.** Delete `api.requireAuth` from the stack config (or run
+  `os migrate meta`). If you were serving data publicly with `requireAuth: false`,
+  replace it with the declaration that fits: a public form view, a share link, or
+  `book.audience: 'public'`. If you have an auth-less stack that intentionally
+  served data, it must now mount auth or stop serving the data API.
+
+- 33a5ff4: `os migrate` no longer touches the database before you confirm, and refuses a
+  SQLite database another process is using (#3917).
+
+  **Nothing is written before the prompt.** `plan` called itself a dry run and
+  `apply` gated on `[y/N]`, but both booted the full plugin set first — and boot
+  schema-sync issued create-table/add-column DDL (plus the artifact's inline seed
+  wrote rows) against the target database before either promise was kept.
+  `SqlDriver` gains `setDeferredDdl` / `previewDeferredSchemaWork` /
+  `flushDeferredSchemaDdl`: while armed, `initObjects` still registers every
+  in-memory map drift detection depends on but records the physical work instead
+  of performing it. Both commands boot with it armed, render the held-back work
+  as a `New (additive)` section of the plan, and `apply` performs it only after
+  confirmation. `os meta resync` / `os migrate files-to-references` keep the old
+  behaviour — they need the tables to exist.
+
+  **Occupancy check.** A live `os dev`/`os serve` holding the same SQLite file is
+  the usual way a migration goes wrong: the migration is transactional and swaps
+  tables inside the file, but the running server keeps prepared statements and a
+  schema cookie the migration invalidates. `os migrate` now probes the target
+  before booting — `PRAGMA locking_mode = EXCLUSIVE` + `BEGIN IMMEDIATE` under
+  `busy_timeout = 0`, which reports `SQLITE_BUSY` when another connection is
+  _attached_, not merely writing. (`wal_checkpoint(TRUNCATE)` only sees an active
+  writer, and `-wal`/`-shm` presence cannot tell a live server from a crashed one;
+  both are encoded as tests.) `apply` refuses with exit 1 — `error: database_busy`
+  under `--json` — unless the new `--force` flag is passed; `plan` warns and
+  continues, since it writes nothing either way. SQLite only: Postgres and MySQL
+  take their own server-side locks.
+
+  `@objectstack/runtime` also exports `resolveStandaloneDatabase()`, so a caller
+  can resolve the database target with the same precedence the boot uses without
+  building the stack, and `createStandaloneStack` accepts `skipSeedData`.
+
+### Patch Changes
+
+- 3ec8186: feat(migrate,objectql): the upgrade path names the data migrations that are still open here (#3438, ADR-0104 2026-07-30)
+
+  Both value-shape gates fail toward leniency: a deployment that never runs its
+  migration keeps warning instead of rejecting, and keeps every released file
+  forever. That default is right — and completely silent, so the gate could sit
+  open for the life of a deployment without anyone learning that one command ends
+  it. A gate nobody is told about is served by nobody.
+
+  Two announcements, each where an upgrade actually looks:
+
+  - **`os migrate meta --from 16`** now ends by naming the data migrations a
+    chain crossing into 17 leaves behind — `files-to-references`, `value-shapes`
+    — with what each unlocks, scoped to the field classes the author's own
+    metadata declares (an app with no media field is never told about the file
+    migration). `--json` carries the same list as `dataMigrations`. The command
+    reads no database, so it reports what remains _to do_, never what a given
+    deployment has _done_.
+  - **The server logs one line per open gate at boot**, naming the command that
+    closes it. Only the lax posture announces itself — a verified gate already
+    logs that it is enforcing, and an app declaring neither class of field costs
+    nothing and says nothing. This is the half that can speak to a deployment's
+    actual data, because it is the half with the database.
+
+  Nothing about enforcement changes: same gates, same flags, same fail-toward-
+  leniency default. The advisory runs on `kernel:bootstrapped` rather than
+  `kernel:ready`, deliberately — the answer depends on the storage service's own
+  ready handler, which registers `sys_migration` and may attest a store it just
+  created, and racing it would tell a brand-new deployment its gates are open
+  moments after they closed.
+
+- 49c9a1a: **A config-booted app no longer loses its `onEnable` — every `script` action's
+  handler reaches the engine again instead of 404'ing at dispatch (#4095).**
+
+  `os serve <config>` calls `createStandaloneStack()`, which reads
+  `dist/objectstack.json` and returns a ready-made `AppPlugin` for the app. That
+  satisfied serve's "does the host already wrap itself with an AppPlugin?" guard,
+  so the `new AppPlugin(config)` built from the LOADED MODULE — the only one
+  carrying the module's `onEnable` — was skipped. A JSON artifact cannot hold a
+  function, so the app booted with all of its metadata and none of its code.
+
+  On `examples/app-todo` that meant eight declared `script` actions, zero
+  registered handlers, and every button answering
+  `404 Action 'complete_task' on object 'todo_task' not found`. The example is
+  correctly authored: it declares `target: 'completeTask'`, registers
+  `todo_task:completeTask`, and exports `onEnable`. serve carried that hook intact
+  all the way to the branch that discarded it.
+
+  Serve now grafts the module's executable members onto the app bundle already
+  registered, rather than dropping them with the wrap:
+
+  - Only members `AppPlugin` actually executes travel — `onEnable` and the
+    `functions` map that string-named hook/job handlers resolve against. (`onDisable`
+    is deliberately excluded: it is declared in `packages/spec` but no kernel,
+    runtime or service ever calls it, so grafting it would wire a hook nothing
+    runs.)
+  - The artifact stays the metadata source of truth. Neither side is a superset —
+    the artifact carries compile-time enrichment the config never has (ADR-0046
+    packaged docs, which serve already grafts the other way) — so this moves code
+    only, and never metadata.
+  - Targeting is by `manifest.id`, so a host composing several `AppPlugin`s can
+    never have one app's handlers attached to another. With no id to match, it
+    falls back to the single app bundle present and refuses when there are several.
+  - A bundle's own value always wins, so a host that wrapped itself on purpose is
+    untouched.
+  - Code that finds no bundle to land on is now reported with a boot warning naming
+    the consequence ("they 404 at dispatch") instead of vanishing. That silent drop
+    is what hid this.
+
+  Verified end to end on `examples/app-todo`: `POST /api/v1/actions/todo_task/complete_task`
+  went from `404 RESOURCE_NOT_FOUND` to `{"success":true}`, `export_csv` now returns
+  real CSV, and the `[action-governance]` boot warning naming all eight actions is
+  gone. 14 unit cases pin the graft and — as importantly — the cases where it must
+  refuse; one end-to-end case boots a real stack through `bin/run-dev.js` and fails
+  against the pre-fix command.
+
+  Note that `os serve <config>` still cannot boot at all when `dist/objectstack.json`
+  is absent (#4085, `Service 'manifest' is async - use await`). That was verified to
+  be a **separate** defect on the other side of the same fork, not this one: the
+  failure reproduces unchanged with this fix applied.
+
+- c6c0d05: fix(cli): the boot merge no longer discards the authored `api` block (#4002)
+
+  `objectstack serve` (and `dev`, which spawns it) assembled the effective config as
+  `{ ...authored, ...bootResult }`. `createStandaloneStack()` /
+  `createDefaultHostConfig()` return an `api` block carrying only the
+  environment-scoping decision — `{ enableProjectScoping: false, projectResolution:
+'none' }` — and under a shallow spread that object REPLACED the author's entire
+  `api`, silently dropping every key it did not itself set.
+
+  Two of those keys are live knobs the CLI reads a few lines later:
+
+  - **`api.requireAuth`** — the documented one-line opt-out for serving data
+    publicly (ADR-0056 D2; the v12 migration note presents it as the whole
+    migration). Authoring it did nothing: the value never reached the REST or
+    dispatcher plugin, so anonymous requests kept getting `401` **and** the boot
+    warning that exists to make a fail-open posture visible never fired either.
+  - **`api.enforceProjectMembership`** — the ADR-0024 D9 opt-out from the
+    `sys_environment_member` 403 gate. Silently fell back to the dispatcher default.
+
+  `api` now merges per key, via a small pure `mergeBootConfig` helper: the author's
+  declarations survive, and the boot builder still wins on the keys it actually
+  decides (environment scoping is not the author's call on a standalone host).
+  Every other top-level key keeps the previous whole-value semantics — the
+  artifact-serve path deliberately serves the boot result's `objects` /
+  `permissions` / `manifest` / `plugins`, so those are untouched.
+
+  The auth-less carve-out was never affected and is unchanged: it lives in the
+  `?? ((tierEnabled('auth') || hasAuthPlugin) ? true : false)` fallback, which fired
+  precisely _because_ the authored value had gone missing. Only an explicitly
+  authored value was lost.
+
+  Verified end to end: with `api: { requireAuth: false }` on the CRM example, an
+  anonymous `POST /data/crm_account/query` returned `401` before and returns records
+  after. Worth knowing what the working flag does — the same anonymous caller can
+  then read `sys_user` — which is the flag's documented meaning ("serve data
+  publicly"), and the argument for retiring it (#3963).
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 7309c81: fix(runtime,cli): `projectRoot` reaches the metadata repository; stop compiling tests into the CLI's dist (#4065)
+
+  Two defects behind the last of #4065's stray `.objectstack/` directories — the
+  one under `packages/cli/`. Neither is cosmetic.
+
+  **1. `projectRoot` only got half the stack.** `createStandaloneStack`'s
+  `projectRoot` is documented as scoping a boot's on-disk state to the project
+  folder "so different examples / apps don't share a single database by accident",
+  and it did redirect the default sqlite database. But it was never passed to
+  `MetadataPlugin`, whose `FileSystemRepository` kept rooting at `process.cwd()`.
+  So one "project root" meant two different directories: a boot pointed at project
+  A wrote `A/.objectstack/data/` and `<cwd>/.objectstack/metadata/`. It now
+  forwards `rootDir`, and `bootSchemaStack` accepts a `projectRoot` to pass down
+  (defaulting to `process.cwd()`, which is right for every real `os migrate` — the
+  CLI runs from the project directory). The two migrate integration suites, which
+  build a fixture project in a tempdir, now scope their boots to it.
+
+  **2. The CLI compiled its own tests into `dist/` — and vitest ran them.**
+  `tsconfig.build.json` included all of `src` with no exclude, so every
+  `src/**/*.test.ts` was emitted as `dist/**/*.test.js`. Two consequences:
+
+  - `files: ["dist"]` **published** them.
+  - This package has no vitest config, so `vitest run` collected the compiled
+    copies alongside the sources: **81 test files and 849 tests where the sources
+    hold 58 and 581**. Every `src/` test also ran as a stale `dist/` twin built
+    from whatever the source said at the last build.
+
+  That is not just noise — it silently defeats edits. A fix to a source test
+  appeared not to work, because the run was still executing the pre-fix compiled
+  duplicate; that is exactly how the `.objectstack` residue survived a correct
+  fix long enough to look like a different bug. It also means a source test could
+  be edited to pass while its stale twin kept asserting the old behaviour, and
+  neither would be obviously wrong. Test files are now excluded from the build.
+
+  No other package is affected: the rest build with `tsup`, which emits only
+  declared entry points. Verified by scanning every `packages/*/dist` for
+  `*.test.js` — the CLI was the only hit.
+
+- c20b875: **Correct the stale premise left behind by #4012: the degraded-boot stderr copy
+  survives the operator's LOG LEVEL, not `os serve`'s boot-quiet window.**
+
+  `emitDegradedBootBanner` writes the `OS_ALLOW_DRIVER_CONNECT_FAILURE` banner to
+  stderr in addition to `logger.warn`, and every comment and test name explaining
+  why cited the same reason: `os serve` swallowed all of stdout while the kernel
+  booted, and `Logger` routes `warn` to stdout. #4012 fixed that — the boot window
+  now buffers and replays `warn`-and-above — which retires the _stated_
+  justification for a duplicate that is nonetheless still load-bearing:
+
+  `Logger.write()` returns before touching a stream when the record is below
+  `config.level`, so at `--log-level error`, `fatal` or `silent` the banner's
+  `logger.warn` reaches **no** stream at all. A production host at `error` is
+  exactly the deployment this escape hatch exists for, and exactly where a
+  logger-only banner would vanish. Removing the stderr copy on the strength of
+  #4012 would therefore have been a regression — so this documents the reason that
+  is still true, in the places someone would read before deleting it:
+  `degraded-boot.ts`, the engine's emit site, and all three parity tests
+  (objectql, runtime, service-datasource), which are renamed off "which `os serve`
+  boot-quiet cannot swallow" to "which the operator log level cannot filter away".
+
+  The objectql parity test now proves the claim instead of asserting around it: it
+  drives a **real** `ObjectLogger` at `level: 'error'` and requires the banner on
+  stderr _and_ nothing on stdout. Set the level to `warn` and it fails — so the
+  test is pinned to the level filter rather than passing for any reason.
+
+  Also corrected in the same sweep, all comment-only, all previously overstating
+  what #4012 had not yet fixed:
+
+  - the automation wiring summary (`format.ts`, `serve.ts`, its test) claimed the
+    boot window swallowed the engine's binding warnings. Its real justification is
+    stronger and unchanged: a flow that silently fails to arm emits **no** log line
+    at any level, so binding state has to be read off the live engine — absence of
+    a warning was never evidence of a bound flow.
+  - the seed summary (`seed-summary.ts`, `format.ts`, its test) and `AppPlugin`'s
+    seed-outcome note attributed the silence to the boot window; the operative
+    gate is that `SeedLoader`'s result logs are `info`, under the default `warn`.
+
+  No behavior changes.
+
+- 9774b78: fix(driver-sql): `Field.time` gets a canonical storage form — `HH:MM:SS[.fff]` wall-clock text on every dialect (#3994)
+
+  `Field.time` repeated the pre-#3912 `Field.datetime` pattern: writes were never
+  normalised and only reads were repaired, so one SQLite column accumulated bare
+  time-of-day TEXT, full-timestamp TEXT and INTEGER epoch ms side by side.
+  `find()` looked right; everything that compared the STORED form was wrong —
+  measured: a business-hours window filter silently dropped 4 of 7 rows, ORDER BY
+  sorted 14:30 before 08:00, a full-ISO write failed the statement outright on
+  both Postgres and MySQL, a bound `Date` stored a process-timezone wall clock on
+  pg, MySQL's bare `TIME` rounded `…00.500` up to `…01`, and a `NOW()` default
+  resolved against three different clocks on the three dialects.
+
+  The #3912→#3942→#3954 construction, transplanted (ADR-0053 D-C1..D-C3):
+
+  - One `canonicalTimeOfDay` — `HH:MM:SS`, `.fff` only when non-zero; `Date`/
+    epoch/full-timestamp fold to the UTC time-of-day — applied on write
+    (`formatInput`), to filter comparands (`coerceFilterValue`, and thereby the
+    `temporalFilterValue` contract hook) and on read (`toTimeOnly`).
+  - SQLite: legacy columns converge at schema sync (`backfillCanonicalTimes`,
+    same `IS NOT`-guarded UPDATE, same log-and-swallow policy); until then the
+    filter paths wrap the column in the repair expression — correct, just
+    unindexed. `os migrate plan` lists the work as `normalize_time_storage` with
+    a row count.
+  - MySQL: new time columns are `TIME(3)`; legacy `TIME(0)` columns widen at
+    schema sync (`migrateMysqlTimeColumns`, plan kind `widen_time_columns`),
+    since zero-precision TIME _rounds_ fractional writes.
+  - `NOW()` defaults read the UTC clock on every dialect (Postgres previously
+    used the server zone, MySQL the inserting session's zone — and MySQL 8.0
+    rejects a plain `CURRENT_TIMESTAMP` default on TIME entirely).
+  - `distinct()`/`aggregate()` present time columns exactly as `find()` does.
+
+  `HH:MM:SS` writes round-trip byte-identically (the field-zoo `f_time`
+  contract); a minutes-only `HH:MM` now completes to `HH:MM:00`, and uninterpretable
+  values still pass through untouched.
+
+- 9a4932a: fix(cli,spec): i18n coverage actually gates view labels — the `defineView()` container is no longer skipped (#4123)
+
+  `i18n/missing-view` had **zero producers**. `collectExpectedEntries` recognized
+  two view shapes and the compiled config is neither:
+
+  1. **Object-nested `listViews`** — objects do not carry `listViews` once
+     compiled (0 across every example).
+  2. **Top-level named views** — guarded by `if (!view?.name) continue`.
+
+  `defineView()` emits the aggregated View **container**, `{ list, listViews,
+formViews }`, which per spec (`view.zod.ts`) has **no top-level `name`**: it is
+  keyed implicitly by its target object at `list.data.object`, exactly as
+  objectql's `resolveMetadataItemName` resolves it. So the guard rejected the
+  spec's own container shape, and with it every view in every example — 64 view
+  strings that the ratchet reported as fully covered.
+
+  The walker now handles the container, emitting under the same
+  `objects.<object>._views.<view>.*` convention the runtime resolver reads
+  (`viewLabel` in `@object-ui/i18n`) and the shipped platform bundles already
+  carry. An unnamed default `list` resolves under `_views.list`, matching the
+  console's `primary.name || 'list'`. `formViews` stays uncovered — form views
+  have no counterpart in that resolver convention, so keys for them would expect
+  translations nothing reads.
+
+  `StrictObjectTranslation` gains the `_views` slot that
+  `ObjectTranslationDataSchema` already permits. Without it, `satisfies
+StrictObjectTranslation<…>` rejects the very translations the gate now asks
+  for.
+
+  The newly surfaced strings are **translated, not ratcheted** (the precedent set
+  when the object-less action landed): `check-i18n-coverage` stays at 665 with
+  none new.
+
+- ec36ba8: feat(cli): lint the contradictory uniqueness double-declaration (#3991)
+
+  New advisory rule `unique/double-declaration`, reported by `os lint` and
+  `os build`. It fires when one column carries BOTH a field-level `unique: true`
+  and an object-level single-column unique index:
+
+  ```ts
+  email: Field.email({ unique: true }),           // per-tenant since #3696
+  indexes: [{ fields: ['email'], unique: true }], // platform-wide, verbatim
+  ```
+
+  The two spellings deliberately mean different things (see `IndexSchema`), and
+  each is legitimate alone. Together on one column they never are:
+
+  - On a **tenant-scoped** object they contradict. The stricter one wins
+    physically, so the global index enforces uniqueness and the per-tenant
+    composite becomes a constraint nothing can trip — one of the two authored
+    intents is silently discarded. Worse, it hides the #3696 semantic change:
+    the switch from global to per-tenant has _no observable effect_ while the
+    declared index still enforces the old behaviour, so the author never learns
+    their tenancy model and their real constraint disagree — until a second
+    tenant reuses the value and is rejected.
+  - On a **tenancy-less** object they are the same index declared twice.
+
+  Tenancy is deliberately not inferred at authoring time (`organization_id` is
+  injected by the kernel at registration, not authored), so the message names
+  both readings and the fix spells out the choice: `unique: 'global'` plus
+  dropping the index for platform-wide, or dropping the index for per-tenant
+  (or writing it out as `fields: ['organization_id', 'email']`).
+
+  A field already declared `unique: 'global'` is exempt — the index restates
+  that intent rather than losing it. Advisory only: the artifact is well-defined,
+  so this never fails a build.
+
+- 675566f: Make the `os migrate` occupancy check actually fire, and extend it to
+  `files-to-references` (#3917 follow-up).
+
+  The check shipped in #3924 relied on a SQL lock probe
+  (`PRAGMA locking_mode = EXCLUSIVE` + `BEGIN IMMEDIATE`), which is correct on a
+  WAL database — and blind on the journal mode the platform actually uses.
+  ObjectStack's sqlite driver runs `journal_mode = delete`, where an idle
+  connection holds no lock at all, so dogfooding against a real `os serve`
+  holding a real project database showed `os migrate apply` reporting the
+  database idle and running the migration unannounced: exactly the scenario the
+  check was added to prevent. The unit tests missed it because they built their
+  fixtures in WAL mode.
+
+  The probe now leads with the signal that survives every journal mode: which
+  processes hold the file open (`/proc` on Linux, `lsof` on macOS). It also names
+  them — `is in use — it is open in pid 12367 (node)` — which is the actionable
+  part. The SQL probe is kept as a second signal for WAL databases on platforms
+  where process inspection is unavailable or the holder belongs to another user;
+  either signal firing counts as busy.
+
+  `os migrate files-to-references --apply` now takes the same gate (and the same
+  `--force` escape hatch). It rewrites rows rather than schema, so a concurrent
+  writer on the same file is at least as dangerous there; a dry run only warns,
+  since its counts shift under a live writer but it writes nothing itself.
+
+- 9e01213: fix(cli,driver-sql): `os migrate plan` lists the datetime storage convergence (#3954)
+
+  The datetime canonicalisation (#3912/#3942) added two steps to `initObjects`'
+  physical path: a row-rewriting backfill on SQLite and a `TIMESTAMP` →
+  `DATETIME(3)` column rebuild on MySQL. Both already respected the DDL deferral,
+  so `plan` performed neither and `apply` performed both — the behaviour was never
+  wrong. The reporting was.
+
+  `PendingSchemaWork` could only express `create_table` / `add_columns`, so an
+  operator saw a plan listing two added columns, confirmed it, and `apply`
+  additionally rewrote every row of a datetime column — or took a metadata lock to
+  rebuild one on a large table. The plan promises to show what apply will do.
+
+  - `PendingSchemaWork.kind` gains `normalize_datetime_storage` and
+    `widen_datetime_columns`, plus an optional `rows` carrying how much data the
+    step touches: row-writes for the backfill, the table's size for the rebuild —
+    the number that decides "now" versus "in a maintenance window".
+  - `previewDeferredSchemaWork()` measures both without performing either, reusing
+    the exact predicate each migration uses (the backfill's whole `WHERE`, the
+    widening's own `information_schema` filter) so the plan and the apply cannot
+    name different sets. A probe that cannot run is swallowed to "unlisted", never
+    to a failed plan.
+  - The CLI renders them under their own heading rather than folding them into the
+    additive section, whose "created when you apply" framing carries an implicit
+    promise that the work is never data-losing. `summarizePendingSchemaWork` — the
+    line read just before typing `y` — never omits in-place work.
+
+- 39eb01b: fix(runtime,cli,types): `os migrate` and the dev runtime now share one `__search` companion schema view (#3955)
+
+  On a zh-locale deployment the dev runtime provisions the hidden `__search`
+  pinyin companion column (ADR-0098) on every eligible object, but the
+  `os migrate plan`/`apply` boot went through `createStandaloneStack`, which
+  never derived the locale-gated pinyin decision from the compiled artifact.
+  Its metadata therefore lacked every companion column, and `migrate plan`
+  reported each live `__search` column of a dev-created database as a
+  destructive orphan — with `--allow-destructive` as the printed remediation,
+  which would have dropped live feature columns.
+
+  - `@objectstack/types`: new `collectConfiguredLocales(i18n)` and
+    `stampSearchPinyinEnabled(i18n)` — the single resolve-and-stamp helper for
+    `OS_SEARCH_PINYIN_ENABLED`. An explicit env value still wins; only a
+    positive locale-derived decision is stamped.
+  - `@objectstack/runtime`: `createStandaloneStack` stamps the decision from
+    the artifact's `i18n` before any plugin constructs a `SchemaRegistry`, and
+    surfaces `i18n` on its result like `requires`/`objects`/`manifest`.
+  - `@objectstack/cli`: the `serve`/`dev` boot now stamps through the same
+    shared helper (behaviour unchanged), so create/serve and plan/apply cannot
+    compute different schema views of the same source tree.
+
+  A fresh CLI-created database is now also born with the same `__search`
+  columns the dev runtime would provision, instead of acquiring them on the
+  next dev boot.
+
+- 7733604: feat(spec,cli): publish the foundational capability slate so every runtime reads one list (#3786, cloud#925)
+
+  `Serve.ALWAYS_ON_CAPABILITIES` — the capabilities auto-added to every app's
+  `requires` outside `--preset minimal` — was declared in the CLI, under a comment
+  noting that "cloud / multi-environment hosts (which live in a separate
+  distribution) mirror this list on their per-project kernels."
+
+  Nothing made that true, and they had already diverged. Cloud's per-tenant slate
+  was missing **`sms`, `messaging` and `analytics`**, so an app that worked under
+  `objectstack serve` could lose `notify` deliveries and dataset previews once
+  hosted — silently, with no error anywhere. The framework's own comment on
+  `analytics` spells out the failure mode it was made always-on to prevent:
+  "Without it the dataset preview + dashboard/report analytics widgets silently
+  no-op."
+
+  **New export: `PLATFORM_ALWAYS_ON_CAPABILITIES`** (`@objectstack/spec`, and
+  `@objectstack/spec/kernel`). The slate and its per-entry rationale now live
+  beside `PLATFORM_CAPABILITY_PROVIDERS` — the map published for exactly this
+  reason one release earlier, "so cloud's objectos-runtime and the framework CLI
+  classify a `requires` token identically". `Serve.ALWAYS_ON_CAPABILITIES` is now
+  a re-export of it, kept as a stable handle for existing callers rather than
+  deleted: one declaration, two readers.
+
+  Four assertions make the single declaration trustworthy for both of them — the
+  slate is frozen, deduped and non-empty; its foundational prefix
+  (`queue, job, cache, settings, email, storage`) is pinned, because mount order
+  matters when services bind to each other during `kernel:ready`; every member is
+  a real `PLATFORM_CAPABILITY_TOKENS` entry; every member has a declared provider;
+  and every member is `edition: 'open'`, since a floor the open distribution
+  cannot mount is not a floor. Verified by mutation: an unknown token, an
+  enterprise-edition token, and a reordered prefix each turn the gate red.
+
+  **No behaviour change.** The published slate is byte-identical to the list the
+  CLI already had, and `serve-defaults.test.ts` / `serve-capability-vocabulary.test.ts`
+  pass unchanged. What changes is that there is now something to derive from:
+  cloud's hosted runtime can drop its copy and read this instead, which is the
+  follow-up cloud#925 left open — it lands there once the `.objectstack-sha` pin
+  moves past this release.
+
+- 8db4587: fix(lint,cli): `os lint` / `os compile` 不再放行一个 `os validate` 会拒绝的 react 页面
+
+  `validateReactPageProps` 只手工接在 `os validate` 上,另外两个命令从来没跑过它。
+  在 showcase 的 react 页面上植入一处 gating 违规(`<ListView filters={['no_such_col','=',stage]}>`
+  —— 谓词命中不了任何行,列表回空,和「本来就没数据」无法区分)实测:
+
+  ```
+                os lint      os compile     os validate
+    修复前      exit 0 放行   exit 0 放行    exit 1 拒绝
+    修复后      exit 1 拒绝   exit 1 拒绝    exit 1 拒绝
+  ```
+
+  这条规则在 #4340 之后已经是**整个 react 页面表面唯一**的字段解析闸门:
+  `<ListView>` 的 columns/fields/sort/grouping/userFilters、`<ObjectForm>` 的
+  fields/initialValues/sections/subforms、`record:*` 一族(与元数据表面共用同一张
+  `COMPONENT_FIELD_SPECS`)、`<ObjectChart>` 的 aggregate/axes、以及 `searchableFields`。
+  漏接不是少几条警告 —— 而是这些绑定在 build 路径上**完全没人看**,包括其中会 gate 的那些。
+
+  现接入 `REFERENCE_INTEGRITY_RULES`,`os validate` 里那处手工接线随之删除,三个命令的
+  答案由构造保证一致。这正是 suite 设立要终结的漂移(#3583 §5 D5),也是
+  `validateReadonlyFlowWrites` 在 #4394 里刚走过的同一条路 —— 那次的教训是
+  「一张 map、两个检查、两套命令集合」,这次是「一次 JSX parse、七个 rule id、
+  一套命令集合」。
+
+  规则行为零变化:id、严重级、文案都不动;喂进去的输入也不变(`os validate` 原本就
+  传 `result.data`,suite 拿到的是同一个)。`#4402` 的接线守卫会在下一次有人想再手工
+  接一条规则时直接报错。
+
+  `validateReactPageProps` 沿用 `validateHookBodyWrites` / `validateActionBodyWrites`
+  的惰性约定:只有真的存在 `kind:'react'` 页面时才加载 TypeScript 编译器。
+
+- 7fec5d6: fix(lint,cli): `os lint` no longer passes a flow the other two commands refuse
+
+  `validateReadonlyFlowWrites` was hand-wired into `os validate` and `os compile`
+  and never into `os lint`. Measured on the showcase app with one planted
+  violation — a `runAs:'user'` `update_record` writing a static-`readonly` field:
+
+  |        | `os lint`           | `os validate`    |
+  | ------ | ------------------- | ---------------- |
+  | before | **exit 0 — passed** | exit 1 — refused |
+  | after  | exit 1 — refused    | exit 1 — refused |
+
+  That rule **gates** (a static `readonly` + literal field is a certain no-op:
+  the engine strips it from the UPDATE payload while the step still reports
+  success, #2948/#3425), so the divergence was not a missing warning — `os lint`
+  green-lit a build `os validate` stops.
+
+  It now joins `REFERENCE_INTEGRITY_RULES`, and both hand-wired call sites are
+  deleted with it, so the three commands share one answer by construction rather
+  than by three people remembering. This is the drift the suite was created to end
+  (#3583 §5 D5) and which its own header cited this rule as the standing proof of.
+
+  Two things made the wiring indefensible rather than merely untidy:
+
+  - `validateFlowNodeWrites` (#4369) walks the **same** `config.fields` map to ask
+    the other half of the question — "does this field exist?" against "is it
+    writable?" — and is already a suite member. One map, two checks, two different
+    command sets.
+  - The two hand-wired sites did not even agree with each other on their input:
+    `validate` passed the PRE-parse `normalized` stack, `compile` the POST-parse
+    `result.data`. Verified equivalent for this rule before collapsing them onto
+    the suite's post-parse input, so no finding is lost.
+
+  No rule behaviour changes: same ids, same severities, same messages.
+
+- 8dcc0f5: feat(runtime)!: retire the inert `DriverPluginOptions` — `DriverPlugin` takes `(driver, driverName?)` (#4320)
+
+  `new DriverPlugin(driver, { datasourceName, registerAsDefault })` never did
+  what it promised: both options configured a datasource-registration block in
+  `start()` gated on `metadata.addDatasource`, a method **no metadata service
+  implements** — so the block early-returned on every boot since inception and
+  the options were dead weight (found while typing service lookups for #4251).
+
+  **Migration** — delete the options argument; nothing changes at runtime
+  because nothing ever happened:
+
+  - FROM `new DriverPlugin(driver, { datasourceName: 'x', registerAsDefault: false })`
+    TO `new DriverPlugin(driver)`
+  - FROM `new DriverPlugin(driver, 'name', options)` TO `new DriverPlugin(driver, 'name')`
+  - The string second argument (`new DriverPlugin(driver, 'memory')`) is unchanged.
+
+  If you passed `datasourceName` expecting routing to a named auxiliary driver:
+  that routing never came from the option. It keys off the **driver name** —
+  `DriverPlugin.init()` registers `driver.<name>`, ObjectQL's discovery loop
+  adopts it, and the engine's lifecycle/datasource resolution looks the name up
+  (see the telemetry provision in `os serve` for the pattern: stamp
+  `driver.name`, register the plugin, done). For Setup → Datasources visibility,
+  declare the datasource through `DatasourceConnectionService` /
+  `registerInMemory('datasource', …)` (ADR-0062).
+
+  The `DriverPluginOptions` interface was module-local (never exported from the
+  package root), so the only public break is the constructor's second/third
+  argument shape.
+
+- 7309c81: chore(cli,create-objectstack): scaffolds no longer name a driver (#4065)
+
+  `os init` and the `create-objectstack` blank template both listed
+  `@objectstack/driver-memory` in the generated `dependencies`. It was the only
+  driver named, which read as an endorsement — "this is the driver your app runs
+  on" — when it is in fact the **last-resort rung** of the dev step-down (native
+  `better-sqlite3` → WASM SQLite → mingo). A new project's first impression of the
+  data layer should not be the engine that enforces no primary keys, no
+  uniqueness, no `NOT NULL` and no column types.
+
+  It was also redundant: `@objectstack/runtime` already depends on `driver-sql`,
+  `driver-sqlite-wasm` and `driver-memory`, and every script in both scaffolds runs
+  through the CLI, which carries all four. Removing the line changes nothing a
+  generated project can do — `objectstack dev` still resolves SQLite by default,
+  and `OS_DATABASE_URL` still selects Postgres / MySQL / MongoDB.
+
+  Docs updated to match: the "packages you depend on" table in _Your first project_
+  no longer lists a driver row (it now says where drivers come from), and the
+  Memory Driver section of _Database Drivers_ documents the opt-in persistence
+  default, carries a migration callout for the old `'auto'` behaviour, and points
+  test authors at in-memory SQLite. That section also claimed "Data is lost when
+  the process exits", which was simply false while `'auto'` was the default — it
+  wrote a file into the working directory.
+
+- 627b188: fix(seed-loader): count reference fields dropped from rows that were still written
+
+  The loader had two failure outcomes and only counted one. A record it cannot
+  write is counted in `errored`. But an unusable **reference value** (an object
+  where a natural key belongs, an array on a single-value field) is removed from
+  the record — never written as NULL, which would sever an existing link on
+  upsert replay — and the row is written **without it**. Nothing counted that.
+
+  So a load that quietly severed N associations reported `totalErrored: 0`, and
+  every count-driven surface read clean. The CLI boot banner — the one seed signal
+  that survives `os dev`'s boot-quiet window and the default `warn` level — printed
+  `showcase 42 rows`, and the warn line said `0 dropped record(s)`: true, and
+  useless ([#3932](https://github.com/objectstack-ai/objectstack/issues/3932)).
+
+  `SeedLoadResult.referencesDropped` and `SeedLoaderSummary.totalReferencesDropped`
+  now count it. It is deliberately **not** folded into `errored` — the row _was_
+  written, so that would break the `inserted + updated + skipped` reconciliation
+  against `total`. The banner names it separately:
+
+  ```
+  ⚠ Seeds:   showcase 42 ok / 3 lost links ⚠
+  ```
+
+  Both counters are additive with a `0` default, so an existing producer or
+  consumer of `SeedLoaderResult` is unaffected.
+
+- 7ac1995: **`os dev` / `os serve` stop swallowing every plugin boot-phase log line — the
+  boot-quiet window buffers instead of discarding (#4012).**
+
+  `serve` blanks stdout while the kernel boots so the startup banner is readable,
+  and dropped what it intercepted. `ObjectLogger` routes `debug`/`info`/`warn` to
+  **stdout** — only `error`/`fatal` go to stderr — so that one line swallowed
+  every boot-phase `logger.warn` any plugin emits: the ADR-0110 D5
+  `[action-governance]` inventory, the automation engine's binding warnings,
+  every degraded-boot notice. `os dev` spawns `serve` with inherited stdio, so a
+  single drain blinded both entrypoints at every log level, and it inverted the
+  flag's own promise — the default is `warn` precisely "so flow/hook execution
+  failures surface (ADR-0032)". Data-phase logging was unaffected, which is why
+  the hole survived: `--log-level debug` printed thousands of lines with none
+  from boot.
+
+  - The intercepted bytes now land in a line-oriented, bounded `BootLogCapture`
+    that classifies each line against `ObjectLogger`'s pretty/text/json
+    renderings and retains only records at `warn` or above, so buffer size tracks
+    a boot's warnings rather than its chattiness. The startup chatter the window
+    exists to hide is still dropped.
+  - Retained records replay under the banner, beside the automation and seed
+    summaries that exist for exactly this reason — and on the two exits that
+    never reach the banner: `OS_MIGRATE_AND_EXIT` (a deploy pipeline must not
+    lose a degraded-boot warning) and serve's error path, where a boot that died
+    is when its warnings matter most.
+  - `--verbose` / `--log-level debug|info` no longer open the window at all.
+    Buffering a stream the operator explicitly asked to watch would be the flag
+    defeating itself.
+
+  On `examples/app-todo`, `os serve` went from 25 lines with zero WARN among them
+  to surfacing five boot warnings, including the `[action-governance]` line
+  naming all eight unbound actions. This closes the loop the D5 inventory
+  changeset left open: the inventory was already emitted correctly and is now
+  visible on the platform's own dev loop.
+
+- 857a6cf: fix(cli,core,metadata,runtime): `os serve` boots with no compiled artifact — the platform does not need an application to start (#4085)
+
+  The artifact (`dist/objectstack.json`) defines an **application**. ObjectStack is
+  a development platform, so it has to start without one — but `os serve
+objectstack.config.ts` died during boot whenever the artifact was absent:
+
+  ```
+    Loading objectstack.config.ts...
+  [StandaloneStack] artifact read FAILED: path='…/dist/objectstack.json' error=ENOENT…
+
+    ✗ Service 'manifest' is async - use await
+  ```
+
+  Exit 1 — on a **known-good app** (`examples/app-todo` fails the same way with
+  only its `dist/objectstack.json` moved aside), and on every freshly authored
+  project between `os init` and its first `os compile`. The message named neither
+  the missing artifact nor a fix, so it read as an internal kernel fault.
+
+  Three separate faults, each of which alone was enough to refuse the boot:
+
+  - **`serve` registered the config-derived `AppPlugin` before the stack's own
+    `plugins[]`.** Registration order _is_ the kernel's init/start order, and that
+    slot sits ahead of `ObjectQLPlugin` (which registers `manifest`/`objectql`) and
+    `DefaultDatasourcePlugin` (which connects the database the app seeds through).
+    The wrap is now **appended** to `plugins[]`, the same slot
+    `createStandaloneStack` gives its artifact-derived `AppPlugin` — so config-boot
+    and artifact-boot share one plugin order. The artifact path never hit this,
+    which is exactly what made a plugin-**order** bug look artifact-related.
+
+  - **`ctx.getService()` reported a never-registered service as "is async".**
+    `PluginLoader.getService` is an `async` method, so its return value is _always_
+    a Promise and its internal "not found" rejection can never surface
+    synchronously — the kernel read the answer off that Promise and told every
+    caller to `await` a service that did not exist, while the `not found` branch
+    below it was unreachable. It now decides from the registry: absent ⇒
+    `[Kernel] Service 'x' not found`, registered-but-uninstantiated ⇒ the unchanged
+    `Service 'x' is async - use await`. The same crash now reads
+    `[Kernel] Service 'manifest' not found`, which points at the layer that is
+    actually wrong.
+
+  - **`MetadataPlugin` treated an absent `local-file` artifact as fatal.**
+    `createStandaloneStack` always points it at `dist/objectstack.json`, so a stack
+    with no app at all could not boot. A **missing** local artifact is now "nothing
+    compiled yet": it logs, starts empty, and leaves the artifact watcher armed, so
+    a later `os compile` hydrates the running server. The tolerance is
+    ENOENT-only — a malformed or unreadable artifact stays fatal — and
+    `bootstrap: 'artifact-only'` (sealed runtime, where the artifact _is_ the
+    deployment) keeps failing loudly rather than silently serving an empty runtime.
+
+  `[StandaloneStack] artifact read FAILED … ENOENT` is likewise no longer shouted
+  at callers for whom "no artifact" is a healthy state; a present-but-unusable
+  artifact keeps the loud warning.
+
+  Pinned by an e2e pair that drives the real `os serve` with **no `os compile`
+  anywhere**: an app defined only by `objectstack.config.ts` (asserting its object
+  is in the started plugin set, not merely that boot survived) and a bare
+  `export default {}` platform. The #4012 fixture drops the `os compile` this bug
+  had forced on it.
+
+- 1e38158: fix(cli,runtime): an artifact you NAMED and a boot input you don't have are different failures — say which (#4110 follow-up, #4131 step 1)
+
+  Three corrections, all from the same principle: a platform may boot with no
+  application (#4085), and that says nothing about how a MISSING NAMED INPUT
+  should be read.
+
+  - **A named-but-missing artifact boots empty and silently.** #4110 made an
+    absent artifact non-fatal all the way down — right for the conventional
+    `<cwd>/dist/objectstack.json`, which is just "not compiled yet". But
+    `OS_ARTIFACT_PATH` / `{ artifactPath }` skip the existence check by design, so
+    the tolerance reached them too: `OS_ARTIFACT_PATH=/nope os serve` printed
+    "booting from artifact", reached `Server is ready`, and named the missing path
+    NOWHERE in its output (serve's boot-quiet window drops the loader's calm
+    line). `createDefaultHostConfig` — the boot with no config, where the artifact
+    IS the deployment — now rejects a named local artifact that does not exist,
+    naming both the path and which source named it. The loader keeps its
+    tolerance, so the config-boot path #4085 fixed is untouched.
+
+  - **"Configuration file not found" never said where it looked.** The two things
+    that actually happen are a typo'd filename and the wrong working directory,
+    and the second is the common one. It now names the config path, the artifact
+    path, and that `OS_ARTIFACT_PATH` is unset — and still refuses rather than
+    inventing a zero-object platform, pointing at `objectstack start` for a boot
+    that is app-less on purpose.
+
+  - **That refusal was being truncated.** `this.exit(1)` unwinds to oclif's
+    `process.exit`, which does not drain a piped stdout, so a diagnostic split
+    across several `console.log` calls loses its tail — measured: only the first
+    two lines of the new message survived a pipe, i.e. exactly the part that says
+    where to look went missing. Both of `serve`'s pre-flight refusals now emit one
+    write. Caught by the e2e added here, not by review.
+
+  Also corrects the plugin-ordering claims in `createStandaloneStack` and in the
+  test that pinned them: the comment said the datasource plugin's array position
+  "MUST precede ObjectQLPlugin: its start() connects the default driver", and the
+  test asserted that index with the same rationale. The connect happens in
+  `init()`, and the kernel resolves order from the dependency graph — which hoists
+  ObjectQLPlugin ahead of the datasource plugin (measured: 6 slots earlier), the
+  reverse of what the slot reads as. The test now pins the declared dependency
+  that actually orders the two inits, which deleting the array position cannot
+  break and deleting the declaration does. #4131 tracks making the AppPlugin end
+  of that contract enforced rather than conventional.
+
+- c53aa53: File-backed SQLite now runs `journal_mode = WAL` (#3941).
+
+  `SqlDriver.connect()` set `auto_vacuum` and left the journal mode alone, so
+  every ObjectStack SQLite database ran SQLite's built-in default — a rollback
+  journal. That is the worst mode for the shape this platform actually has, which
+  is **several processes on one file**: a dev server, `os migrate`,
+  `os meta resync`, a test run. Measured, on the same file:
+
+  |                                                | rollback journal                                   | WAL                                                               |
+  | :--------------------------------------------- | :------------------------------------------------- | :---------------------------------------------------------------- |
+  | writer while another process holds a read open | `SQLITE_BUSY` — committing needs an exclusive lock | proceeds                                                          |
+  | idle attached connection visible to SQL        | no — a lock lasts only as long as its transaction  | yes (`locking_mode = EXCLUSIVE` + `BEGIN IMMEDIATE` reports busy) |
+
+  The second row is why the `os migrate` occupancy check had to inspect file
+  descriptors to see a live server at all (#3940): under a rollback journal there
+  was nothing in the database to see. That signal stays — it names the process,
+  which WAL's lock probe cannot — but the SQL probe is now authoritative for
+  databases ObjectStack created rather than a fallback that was blind in practice.
+  Concurrent _writers_ still serialize; SQLite allows one at a time in any mode.
+
+  Journal mode is a persistent property of the file, so an existing database is
+  converted in place on the next connect (a header change — no rows are touched)
+  and stays converted. Two consequences to plan for:
+
+  - `app.db-wal` / `app.db-shm` exist beside the database while a connection is
+    attached, and `app.db-wal` can hold committed transactions. A clean shutdown
+    checkpoints them away; a naive copy of `app.db` alone while a server runs does
+    not. Use `sqlite3 app.db ".backup …"`.
+  - **WAL does not work on network filesystems** (NFS/SMB). Opt out with
+    `OS_DATABASE_SQLITE_JOURNAL_MODE=delete`, or per datasource with
+    `sqliteJournalMode: 'delete'` in the driver config (which outranks the env
+    var). Either form _applies_ `delete`, so it also converts a database that
+    already adopted WAL back — skipping would have stranded it.
+
+  Nothing here fails a boot, and nothing is assumed: `PRAGMA journal_mode = X`
+  answers with the mode actually in force rather than raising on refusal, so the
+  reply is read back; and because a filesystem can accept WAL and then fail the
+  first read _through_ it, the mode is proven with a read and rolled back to
+  `delete` if that fails — with a warning naming the file and the escape hatch.
+  `synchronous` is untouched, so durability is exactly what it was. `:memory:`
+  databases are left alone, as is `auto_vacuum = INCREMENTAL`, which keeps
+  reclaiming under WAL (ADR-0057).
+
+  `os db clean` now counts `-wal` / `-shm` as part of the database when it measures
+  what a `VACUUM` reclaimed, so bytes that were sitting in the log do not read as a
+  reclaim of zero.
+
+  `@objectstack/driver-sqlite-wasm` deliberately stays out of WAL. Its live
+  database is in the WASM heap and what reaches disk is a byte image it exports, so
+  nothing reads the database across processes and the pragma buys it nothing —
+  while still being a persistent header change in the operator's file. sql.js
+  _accepts_ the pragma (its VFS is memory-backed), so this had to be declared
+  rather than discovered.
+
+  It also now parks a `-wal` left behind by an unclean native-driver exit rather
+  than loading the image beside it: wasm SQLite cannot read that log, and leaving
+  it next to a freshly rewritten image would let a later real SQLite replay frames
+  that no longer belong to it. The warning names the file it parked and how to
+  recover what was in it.
+
+- 6f23667: **`config.storage` is not a stack key, and an undeclared top-level key now says
+  so instead of vanishing (#4167).**
+
+  `os serve` read `config.storage` and forwarded it to `StorageServicePlugin`.
+  It could almost never arrive: `ObjectStackDefinitionSchema` does not declare
+  `storage`, and is not `.strict()`, so `defineStack` — which every documented
+  authoring path and every compiled artifact goes through — strips the key before
+  `serve` runs. The one combination that reached the branch (a bare-object config
+  on the config-boot path) then carried the `driver`/`root` spelling the plugin
+  does not read either, so it did nothing there too.
+
+  The result was one authoring key that worked on a single unreachable-in-practice
+  path and disappeared silently everywhere else. A host writing
+  `storage: { driver: 's3', … }` believed it had configured S3 and got local disk.
+
+  - **`serve` no longer reads it.** `resolveStorageCapabilityArg` takes only the
+    env root; the production warning stops naming `config.storage` and names the
+    two channels that work — `OS_STORAGE_*` and Setup → Settings, the latter being
+    the one with proper credential handling.
+  - **The undeclared-key lint now covers the stack's own top-level keys.** New
+    `lintUnknownStackKeys(rawStack, stackSchema)`, wired into `defineStack`,
+    `os validate` and `os compile` beside the existing walker. `storage` gets a
+    prescriptive entry naming both channels and why a stack definition is the
+    wrong home for a credential — it would commit it to git and to any published
+    artifact. An ordinary misspelling still gets the edit-distance suggestion
+    (`datasource` → `datasources`).
+  - **`os migrate files-to-references` shares the resolver.** It built
+    `{ driver: 'local', root }` — the same dead keys — so its adapter used
+    `./storage` while the server writes under `.objectstack/data/uploads` since
+    #4096. That command reconciles what records claim against what storage holds,
+    so a disagreeing root reconciled against the wrong tree.
+
+  **`onEnable` is exempt, and the exemption has one owner.** `onEnable` is a
+  function, so `ObjectStackDefinitionSchema` cannot declare it and
+  `dist/objectstack.json` cannot carry it — but it is not lost: `AppPlugin` calls
+  it off the authored bundle, and the artifact-boot path grafts it back (#4095).
+  "Not declared" and "dropped at load" are different claims, and this is the
+  surface where they come apart. New `STACK_RUNTIME_MEMBERS` in `@objectstack/spec`
+  names the members the runtime honours off the bundle; the lint treats them as
+  declared, and the CLI's `GRAFTABLE_RUNTIME_MEMBERS` is now **derived** from it
+  rather than restating it, so the list that decides what gets grafted and the
+  list that decides what the lint stays quiet about cannot drift. `onDisable` is
+  deliberately not on it — nothing calls it, so a value written there really does
+  go nowhere and the lint should say so.
+
+  Additive: `lintUnknownAuthoringKeys` keeps its signature. The new pass is a
+  separate export rather than a fold into that walker for two reasons. The walker
+  iterates metadata COLLECTIONS, so a stack whose only mistake is at the envelope
+  level — no objects, no pages, nothing to iterate — walks clean; and the stack
+  schema has to be INJECTED, because `stack.zod.ts` imports the lint module and
+  importing back would close a cycle. A separate export keeps that requirement
+  visible: a call site either asks for the coverage or does not, and its absence
+  shows up in a diff. An optional parameter would be the same silent-loss shape
+  this rule family exists to report. It follows the walker's posture rule — only a
+  schema that STRIPS unknown keys is linted, so if the stack schema ever graduates
+  to `.strict()` the parse takes over and this goes quiet.
+
+  Verified end to end: authoring `storage:` through `defineStack` warns at load,
+  and `os compile` reports it for configs that skip `defineStack`.
+
+  Nothing is being taken away that worked. `storage` was never in the schema, is
+  not documented anywhere, and has no consumer in `objectstack-ai/cloud` (checked).
+  Whether the platform should eventually grow a real in-stack storage declaration
+  is a separate question — if so it should follow `datasources`, which solves
+  credentials by referencing `sys_secret` rather than inlining them, and that
+  deserves an ADR rather than a resurrected undeclared key.
+
+- efcd68c: **The storage adapter stops being rebuilt and re-pointed on every boot, and the
+  "files may be unreachable" warning stops firing at a healthy server (#4096).**
+
+  Every `os dev` / `os serve` boot printed:
+
+  ```
+  WARN StorageServicePlugin: storage adapter swapped (LocalStorageAdapter →
+  LocalStorageAdapter). Existing files were NOT migrated and may be unreachable
+  through the new adapter.
+  ```
+
+  The warning was telling the truth. `serve` constructed the plugin with
+  `{ driver: 'local', root }` — and `StorageServicePluginOptions` declares
+  neither key. Both were dropped silently, so the plugin applied its own
+  `./storage` default, `OS_STORAGE_ROOT` changed nothing, and uploads landed in a
+  directory nobody named. The `storage` settings namespace then corrected the root
+  on its first read (its manifest default is `./.objectstack/data/uploads`),
+  genuinely moving the backing store — every boot, forever.
+
+  Three fixes, because there were three defects:
+
+  - **`serve` now passes options the plugin reads** — `{ adapter: 'local',
+local: { rootDir } }`. `OS_STORAGE_ROOT` takes effect, and local uploads land
+    under `.objectstack/data/uploads` from the first byte instead of `./storage`.
+    Extracted as `resolveStorageCapabilityArg` so the option SHAPE is pinned by
+    tests: a mismatch like this type-checks fine and does nothing at runtime.
+  - **A swap is skipped when nothing changed.** The plugin records what the
+    running adapter points at and compares resolved configurations, instead of
+    rebuilding whenever the settings namespace held any value at all — which is
+    every boot once that namespace has persisted its own defaults.
+  - **The warning now means what it says.** It fires when the BACKING STORE moved
+    (kind change, different root, different bucket/region/endpoint), not merely
+    when the adapter object was replaced. A credential rotation swaps the adapter
+    so the new key takes effect and logs at info: same bucket, nothing stranded.
+    A swap from a caller that resolved no target still warns — ignorance must not
+    silence it.
+
+  Path spellings are normalised, so the platform writing the same default two ways
+  (`./.objectstack/data/uploads` in the settings manifest,
+  `.objectstack/data/uploads` in the CLI) is no longer read as a migration between
+  a directory and itself.
+
+  Verified on `examples/app-todo`: the boot-diagnostics block went from four
+  warnings to three, with the storage line gone and `./storage` no longer created.
+  19 unit cases cover the target resolver and the swap/warn split (including the
+  refusals), 4 plugin-level cases pin what a boot does and says, and 7 pin the CLI
+  option shape.
+
+  `config.storage` authored with the `driver`/`root` dialect is still forwarded
+  verbatim and still not read by the plugin — the same mismatch one layer up.
+  Correcting it means deciding whether the plugin accepts that dialect or the
+  config schema is wrong, so it is filed rather than papered over with a lenient
+  alias here (AGENTS.md Prime Directive #12).
+
+- 68dea0b: feat(platform-objects,service-storage,cli): `sys_migration` is platform infrastructure — registered by `PlatformObjectsPlugin`, not by the storage service (#4243)
+
+  The deployment-level data-migration flag ledger (`sys_migration`, #3617) was
+  registered by `@objectstack/service-storage` as its first consumer. That was
+  deliberate while the file migration was the only consumer, but the ledger now
+  gates storage-independent behaviour too — `os migrate value-shapes` (#4235)
+  and the fresh-datastore attestation (#4215) — and a non-file migration had to
+  boot the whole storage plugin just so the kernel carried the table. Any kernel
+  assembled without storage silently had no ledger at all, which read exactly
+  like "migration not run" (both answer false) while actually meaning "ledger
+  not installed".
+
+  The registration now lives in `PlatformObjectsPlugin`
+  (`@objectstack/platform-objects/plugin`) — the plugin `os serve` already
+  auto-injects into every served kernel — so the ledger exists with the
+  platform, independent of which optional services are composed. The
+  fresh-datastore attestation (#3438, ADR-0104) moves with it: it is ledger
+  bookkeeping, and its old home justified itself as "the service that registers
+  `sys_migration`". Definition ownership is unchanged (`sys_migration` stays in
+  `@objectstack/platform-objects` and in `PLATFORM_OBJECTS_BY_PACKAGE`); the
+  flag helpers and readers are untouched.
+
+  Consequences:
+
+  - `@objectstack/service-storage` no longer contributes `sys_migration` to the
+    manifest and no longer performs the fresh-datastore attestation. An embedder
+    composing `StorageServicePlugin` on a hand-built kernel that relied on it
+    for the ledger must compose `PlatformObjectsPlugin` (the plugin every
+    supported assembly path already includes).
+  - The CLI's `buildDataMigrationPlugins()` no longer boots storage for every
+    gated migration — it registers `PlatformObjectsPlugin` always, and settings
+    - storage only for `os migrate files-to-references` (`{ storage: true }`),
+      the one migration that actually reconciles against the storage adapter.
+
+- 1ddf479: `os init` scaffolds now stamp `engines: { protocol: '^<current major>' }` into the
+  generated `objectstack.config.ts` (all three templates), so newly authored packages
+  participate in the ADR-0087 load-time protocol handshake instead of being admitted
+  under the "no-range" grandfathering warning. The bundled example apps (`app-todo`,
+  `app-crm`, `app-showcase`) now declare the same range. (#4097)
+- 8186a70: feat(spec,cli): report the authored object/field keys that get silently dropped (#3786)
+
+  `ObjectSchema` and `FieldSchema` are deliberately not `.strict()`, so a key they
+  do not declare **parses clean and is stripped on the way to storage**. No error,
+  no warning — the author configured something and it simply is not there. That is
+  the ADR-0104 failure class the `FieldSchema` prune tombstone already describes in
+  prose, and #4120 found five live instances of it inside `@objectstack/spec`
+  itself: a `pii` toggle, an `indexed` toggle and a `cascadeDelete` select that had
+  been rendering in Studio for releases while saving nothing.
+
+  **New rule — `lintUnknownAuthoringKeys` (advisory).** Every authored key an
+  object or field sets that its schema does not declare is now reported, naming the
+  path, the key, and what to do about it:
+
+  ```
+  defineStack: objects.crm_case.fields.owner.pii: 'pii' is not a declared field key,
+    so its value is dropped at load — the `dataQuality` governance family was pruned
+    in 2026-06 as dead in both layers — it enforced nothing.
+  defineStack: objects.crm_case.capabilities: 'capabilities' is not a declared object
+    key, so its value is dropped at load — did you mean 'enable'?
+  ```
+
+  Two guidance tables carry the difference between a **rename** (`formula` →
+  `expression`, `cascadeDelete` → `deleteBehavior`, `capabilities` → `enable`, …)
+  and a **retirement** with no successor (`pii`, `indexed`, `encrypted`,
+  `startingNumber`, …). A retirement deliberately suppresses the edit-distance
+  fallback: `pii` is three edits from `min`, and "did you mean min?" reads as real
+  advice while being nonsense. Plain typos still get the fallback (`requred` →
+  `required`). Every entry was found in the wild, and a test asserts each rename
+  target is a key the schema really declares — so the advice cannot rot into
+  pointers at keys that no longer exist.
+
+  **It never rejects.** Making these two schemas strict is the destination — the
+  enforce side of ADR-0049, and the tier programme #4001 began on the flow and
+  permission schemas. But `object` and `field` are the two most-authored surfaces
+  in the protocol, so flipping them rejects metadata that parses today: a migration
+  event for every consumer, and one that deserves to be scheduled on evidence
+  rather than guessed at. This produces that evidence and costs nobody a migration.
+
+  Wired into every layer that performs the discard, all **pre-parse** (the parse is
+  what eats the key, so after it there is nothing left to report):
+
+  - **`defineStack`** — warns on the console, once per distinct path, in strict
+    _and_ non-strict mode, since the key is dropped either way.
+  - **`os validate`** — a non-blocking warning, and included in `--json` output
+    rather than computed and discarded.
+  - **`os build` / `os compile`** — the same non-blocking warning. `defineStack`
+    already covers configs authored through it; this catches the ones that skip it
+    (a plain object default-export, `strict: false`), which would otherwise emit an
+    artifact with the key quietly gone.
+
+  Verified against the three first-party example apps (`app-todo`, `app-crm`,
+  `app-showcase`): all clean, no false positives.
+
+  New exports from `@objectstack/spec` (root and `/data`): `lintUnknownAuthoringKeys`,
+  `formatUnknownAuthoringKey`, `FIELD_KEY_GUIDANCE`, `OBJECT_KEY_GUIDANCE`, and the
+  `UnknownAuthoringKeyFinding` / `AuthoringKeySurface` types. No authoring change is
+  required by this release: metadata that loaded before still loads, unchanged.
+
+- Updated dependencies [bc35e00]
+- Updated dependencies [6a67d7a]
+- Updated dependencies [6e141bc]
+- Updated dependencies [48fcf70]
+- Updated dependencies [0ecc656]
+- Updated dependencies [a4e2684]
+- Updated dependencies [06772eb]
+- Updated dependencies [0c90ece]
+- Updated dependencies [195ad76]
+- Updated dependencies [c2bbd97]
+- Updated dependencies [3ec8186]
+- Updated dependencies [698cbc2]
+- Updated dependencies [b1863a5]
+- Updated dependencies [b1863a5]
+- Updated dependencies [270650f]
+- Updated dependencies [956e7f9]
+- Updated dependencies [3aef718]
+- Updated dependencies [ffb003c]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [e5e8b10]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [bb1ce2e]
+- Updated dependencies [b4be309]
+- Updated dependencies [6fa1827]
+- Updated dependencies [05154a1]
+- Updated dependencies [7a55913]
+- Updated dependencies [0f12193]
+- Updated dependencies [7a55913]
+- Updated dependencies [f5ab1c7]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [3abd233]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [a946efd]
+- Updated dependencies [ea24593]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [fccec22]
+- Updated dependencies [2af1988]
+- Updated dependencies [b3a2318]
+- Updated dependencies [0af50a3]
+- Updated dependencies [fce14ab]
+- Updated dependencies [2e836de]
+- Updated dependencies [7309c81]
+- Updated dependencies [cbc08eb]
+- Updated dependencies [0c4f5b2]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [302e972]
+- Updated dependencies [4580597]
+- Updated dependencies [eb9230c]
+- Updated dependencies [60110bb]
+- Updated dependencies [29e5a0e]
+- Updated dependencies [bec0f9a]
+- Updated dependencies [6fd0786]
+- Updated dependencies [7df7c64]
+- Updated dependencies [fae74b5]
+- Updated dependencies [545d931]
+- Updated dependencies [a225ef5]
+- Updated dependencies [7bf5349]
+- Updated dependencies [366105c]
+- Updated dependencies [c9d254a]
+- Updated dependencies [42e3b01]
+- Updated dependencies [c8124e5]
+- Updated dependencies [9e8f04d]
+- Updated dependencies [39eb01b]
+- Updated dependencies [c3bcb42]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [f4d7f1d]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [4dc14cc]
+- Updated dependencies [0373d52]
+- Updated dependencies [4f30943]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [bb192c4]
+- Updated dependencies [98e7cc7]
+- Updated dependencies [4cf7c61]
+- Updated dependencies [9881074]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [347f460]
+- Updated dependencies [8a341a4]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [c39d713]
+- Updated dependencies [dc530b4]
+- Updated dependencies [f0d6594]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [6f98c2d]
+- Updated dependencies [385c4b0]
+- Updated dependencies [38182ff]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [af5b96b]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [d4720ca]
+- Updated dependencies [43ff598]
+- Updated dependencies [e5a4d26]
+- Updated dependencies [839982e]
+- Updated dependencies [623e555]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [10575f3]
+- Updated dependencies [9a4932a]
+- Updated dependencies [71af9f5]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [74aa3f0]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [7d80695]
+- Updated dependencies [ade7be4]
+- Updated dependencies [507b92a]
+- Updated dependencies [ac1cc8c]
+- Updated dependencies [99b4392]
+- Updated dependencies [99ffc04]
+- Updated dependencies [974c6d4]
+- Updated dependencies [7309c81]
+- Updated dependencies [a8dcc37]
+- Updated dependencies [495019b]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [ac6c0be]
+- Updated dependencies [90c2b15]
+- Updated dependencies [33a5ff4]
+- Updated dependencies [9e01213]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [55bbefc]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [3fe0ff1]
+- Updated dependencies [be7945a]
+- Updated dependencies [cc2de0e]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [9555b07]
+- Updated dependencies [8db4587]
+- Updated dependencies [7fec5d6]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [3ba8d77]
+- Updated dependencies [6c87cc9]
+- Updated dependencies [af2a095]
+- Updated dependencies [bf478e1]
+- Updated dependencies [dd5daac]
+- Updated dependencies [ec796d5]
+- Updated dependencies [77fadbf]
+- Updated dependencies [a3cb9c8]
+- Updated dependencies [e87fea1]
+- Updated dependencies [4be9d99]
+- Updated dependencies [c65e529]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [5b08389]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [0931185]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [5c13368]
+- Updated dependencies [1d5dc46]
+- Updated dependencies [667b83e]
+- Updated dependencies [7967133]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [1e38158]
+- Updated dependencies [65a3a84]
+- Updated dependencies [f1f40b4]
+- Updated dependencies [4580597]
+- Updated dependencies [de6daa5]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [c53aa53]
+- Updated dependencies [6f23667]
+- Updated dependencies [77a77fd]
+- Updated dependencies [d82f8c0]
+- Updated dependencies [efcd68c]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [2053714]
+- Updated dependencies [68dea0b]
+- Updated dependencies [64f8cbe]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [7309c81]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [43fc039]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [4965bfa]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/runtime@17.0.0-rc.1
+  - @objectstack/lint@17.0.0-rc.1
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/objectql@17.0.0-rc.1
+  - @objectstack/client@17.0.0-rc.1
+  - @objectstack/service-storage@17.0.0-rc.1
+  - @objectstack/platform-objects@17.0.0-rc.1
+  - @objectstack/driver-memory@17.0.0-rc.1
+  - @objectstack/driver-sql@17.0.0-rc.1
+  - @objectstack/metadata@17.0.0-rc.1
+  - @objectstack/plugin-sharing@17.0.0-rc.1
+  - @objectstack/plugin-security@17.0.0-rc.1
+  - @objectstack/rest@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/cloud-connection@17.0.0-rc.1
+  - @objectstack/plugin-auth@17.0.0-rc.1
+  - @objectstack/plugin-approvals@17.0.0-rc.1
+  - @objectstack/plugin-webhooks@17.0.0-rc.1
+  - @objectstack/service-messaging@17.0.0-rc.1
+  - @objectstack/service-automation@17.0.0-rc.1
+  - @objectstack/trigger-api@17.0.0-rc.1
+  - @objectstack/service-analytics@17.0.0-rc.1
+  - @objectstack/plugin-audit@17.0.0-rc.1
+  - @objectstack/formula@17.0.0-rc.1
+  - @objectstack/driver-mongodb@17.0.0-rc.1
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.1
+  - @objectstack/account@17.0.0-rc.1
+  - @objectstack/console@17.0.0-rc.1
+  - @objectstack/mcp@17.0.0-rc.1
+  - @objectstack/observability@17.0.0-rc.1
+  - @objectstack/plugin-email@17.0.0-rc.1
+  - @objectstack/plugin-hono-server@17.0.0-rc.1
+  - @objectstack/plugin-pinyin-search@17.0.0-rc.1
+  - @objectstack/plugin-reports@17.0.0-rc.1
+  - @objectstack/service-cache@17.0.0-rc.1
+  - @objectstack/service-datasource@17.0.0-rc.1
+  - @objectstack/service-job@17.0.0-rc.1
+  - @objectstack/service-package@17.0.0-rc.1
+  - @objectstack/service-queue@17.0.0-rc.1
+  - @objectstack/service-realtime@17.0.0-rc.1
+  - @objectstack/service-settings@17.0.0-rc.1
+  - @objectstack/service-sms@17.0.0-rc.1
+  - @objectstack/setup@17.0.0-rc.1
+  - @objectstack/trigger-record-change@17.0.0-rc.1
+  - @objectstack/trigger-schedule@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+  - @objectstack/verify@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Major Changes

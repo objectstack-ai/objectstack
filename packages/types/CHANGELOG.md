@@ -1,5 +1,440 @@
 # @objectstack/types
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- 2a37694: fix(plugin-dev,types): the production escape hatch stops being silent (#3900)
+
+  `DevPlugin.init()` refuses to run under `NODE_ENV=production` (ADR-0115 D6), and
+  `OS_ALLOW_DEV_PLUGIN` overrides that refusal. As shipped, the override returned
+  early with **no output at all**: the process ran the development assembly while
+  every log line and the ready banner read like an ordinary production start.
+
+  That reproduces, one level up, the defect the guard exists to close. The guard's
+  own precedent says so — `OS_ALLOW_DEGRADED_TENANCY` boots degraded _and brands
+  it everywhere an operator looks_, and `OS_ALLOW_DRIVER_CONNECT_FAILURE`'s
+  contract is "logged loudly at startup". An escape hatch that says nothing leaves
+  the operator's only evidence of a degraded state in an env var they may not have
+  set themselves.
+
+  **The override now brands itself, twice.** A warning at `init()` — emitted
+  before any assembly work, so it survives an assembly step that later throws —
+  and a repeat on the ready banner, which is the surface an operator actually
+  reads:
+
+  ```
+  ⚠ DEV ASSEMBLY UNDER NODE_ENV=production (OS_ALLOW_DEV_PLUGIN is set) — the boot
+    guard was explicitly overridden. This process is running the DEVELOPMENT
+    assembly, which is not hardened for production traffic (ADR-0115 D6).
+      • Auth secret is the default published inside @objectstack/plugin-dev. It is
+        public, so anyone can mint a session this stack accepts. Pass `authSecret`
+        explicitly.
+      • Data goes to the in-memory driver with persistence disabled — every record
+        is lost when this process exits.
+  ```
+
+  Only hazards that are live for _that_ configuration are named: the secret line
+  is suppressed when the operator passed their own `authSecret`, and the driver
+  line when the `driver` toggle is off. The dev-admin seed is deliberately absent
+  — `plugin-auth`'s `maybeSeedDevAdmin` is hard-gated to
+  `NODE_ENV === 'development'` and cannot fire on this path, so warning about it
+  would spend the attention the real hazards need.
+
+  **New export — `resolveAllowDevPlugin()` (`@objectstack/types`).** The flag moves
+  off a bare `process.env['OS_ALLOW_DEV_PLUGIN'] === '1'` and joins the
+  `OS_ALLOW_*` family's shared truthy vocabulary, next to
+  `resolveAllowDegradedTenancy` / `resolveAllowDriverConnectFailure`.
+
+  FROM → TO for operators: `OS_ALLOW_DEV_PLUGIN=1` keeps working unchanged.
+  `OS_ALLOW_DEV_PLUGIN=true` (and `on` / `yes`, case-insensitive, surrounding
+  whitespace ignored) **now takes effect** where the strict comparison previously
+  ignored it and failed the boot. That is a widening, in the direction an operator
+  setting the flag already intended; falsy and unrecognised values still refuse to
+  boot, and unset still means "fail fast". If you were relying on
+  `OS_ALLOW_DEV_PLUGIN=true` being inert as a way to keep the guard armed, unset
+  the variable instead.
+
+  No change to the refusal path, which this issue re-verified end to end:
+  `kernel.use()` only registers, `initPluginWithTimeout` does not catch,
+  `bootstrap()` rethrows, and `os serve`'s outer handler prints the message and
+  exits `1`. The `throw` is genuinely fatal here, so it needs none of the
+  `process.exit(1)` the tenancy guard required for sitting inside a broad `catch`.
+
+- d5749d7: refactor(types,rest,services,plugin-sharing): one shared writer for the response envelope, and `error.code` is enforced at compile time (#3973)
+
+  `BaseResponseSchema` declares one envelope for every REST body the platform
+  emits. It declared it once; the code that _wrote_ it was copied per route
+  module. After #3843 and #3983 converted the last drifting one, seven modules
+  each carried their own two-line `sendOk` / `sendError` pair — so the envelope's
+  shape lived in fourteen places rather than one.
+
+  `pnpm check:route-envelope` proved those seven copies agreed, which is why this
+  is a cleanup rather than a bug fix. But a guard proves agreement; it does not
+  create it. An eighth module starts by copying the pair again — not
+  hypothetically: `share-link-routes.ts` was found already drifting by the
+  repo-wide scan, and its drift had broken `client.shareLinks.create()` and
+  `.list()` through `unwrapResponse` (#3983).
+
+  ## What moved
+
+  `sendOk` / `sendError` now live once, in `@objectstack/types`
+  (`response-envelope.ts`), and all seven modules import them:
+
+  | Module                                |
+  | ------------------------------------- |
+  | `service-storage/storage-routes.ts`   |
+  | `service-settings/settings-routes.ts` |
+  | `service-datasource/admin-routes.ts`  |
+  | `rest/external-datasource-routes.ts`  |
+  | `rest/package-routes.ts`              |
+  | `service-i18n/i18n-service-plugin.ts` |
+  | `plugin-sharing/share-link-routes.ts` |
+
+  Placement was the open question in #3973, not design. `packages/spec` is
+  schemas-only (Prime Directive #2), and the callers span `rest`, four
+  `services/*` and one `plugins/*`, which rules out anything depending on them.
+  `@objectstack/types` depends on nothing but `@objectstack/spec`, so every caller
+  can reach it, and it is already where the repo puts a helper the HTTP boundaries
+  share — `looksLikeInternalErrorLeak` (#3867) sits one file over and made the
+  same argument first.
+
+  The builders take a structural `{ status(n), json(body) }`, so the package
+  imports no HTTP contract at all: `IHttpResponse` satisfies it, and so does the
+  `any`-typed `res` the older modules carry.
+
+  ## `error.code` is now checked by the compiler
+
+  All seven copies typed the parameter `code: string`. ADR-0112 (#3841) closed the
+  vocabulary — `ErrorCode` is `StandardErrorCode ∪ ERROR_CODE_LEDGER` — but an
+  invented code was still caught only at runtime, by a conformance suite parsing a
+  driven body, i.e. only on routes some test happened to drive.
+
+  The shared `sendError` types `code` as `ErrorCode`, so an unregistered code now
+  fails to compile, at every call site at once:
+
+  ```ts
+  sendError(res, 400, "NOT_A_REGISTERED_CODE", "invented");
+  // Argument of type '"NOT_A_REGISTERED_CODE"' is not assignable to parameter of type 'ErrorCode'.
+  ```
+
+  This cost no call-site churn: every code the seven modules emit was already
+  registered.
+
+  ## `extra` is closed at the same place
+
+  `sendError`'s last parameter is `Pick<ApiError, 'category' | 'httpStatus' |
+'details' | 'requestId'>` — exactly what `ApiErrorSchema` declares beside `code`
+  and `message`.
+
+  It was `Record<string, unknown>` while `settings-routes` still hung `namespace` /
+  `key` / `reason` / `fields` beside `code`. Those bodies passed every gate anyway:
+  `ApiErrorSchema` is a plain `z.object`, so unknown keys were STRIPPED rather than
+  rejected, and `envelopeViolations` inspects only the body's top level —
+  conformant _by stripping_ rather than by declaration. #4224 moved that module
+  onto `details`, which is what lets the parameter close here. Closing it at the
+  shared builder is the part that lasts: an undeclared sibling is now a compile
+  error in every module at once, rather than a key that quietly evaporates in
+  whichever module reintroduces it.
+
+  ## Nothing changes on the wire
+
+  The seven pairs were identical modulo the optional `status` and `extra`
+  parameters this one unions, and each module's driven conformance suite still
+  parses its real bodies against the real spec schemas. One internal call site was
+  rewritten: `package-routes` passed `details` positionally and now passes
+  `{ details }`, producing the same `error.details` it always did.
+
+  ## The guard got stronger
+
+  `scripts/check-route-envelope.mjs` counts response write sites per module. A
+  module that routes everything through the shared pair builds **none** itself, so
+  the seven now declare `0 / 0 / 0` where they used to declare `2 / 1 / 1`, and the
+  shared pair is pinned separately at `2 / 1 / 1` so the invariant stays total for
+  the surface rather than per-module. What the count asserts is no longer "your two
+  builders are the enveloped ones" but "you have no builders" — and a new route
+  that hand-rolls a body still moves it off zero and fails.
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- c20b875: **Correct the stale premise left behind by #4012: the degraded-boot stderr copy
+  survives the operator's LOG LEVEL, not `os serve`'s boot-quiet window.**
+
+  `emitDegradedBootBanner` writes the `OS_ALLOW_DRIVER_CONNECT_FAILURE` banner to
+  stderr in addition to `logger.warn`, and every comment and test name explaining
+  why cited the same reason: `os serve` swallowed all of stdout while the kernel
+  booted, and `Logger` routes `warn` to stdout. #4012 fixed that — the boot window
+  now buffers and replays `warn`-and-above — which retires the _stated_
+  justification for a duplicate that is nonetheless still load-bearing:
+
+  `Logger.write()` returns before touching a stream when the record is below
+  `config.level`, so at `--log-level error`, `fatal` or `silent` the banner's
+  `logger.warn` reaches **no** stream at all. A production host at `error` is
+  exactly the deployment this escape hatch exists for, and exactly where a
+  logger-only banner would vanish. Removing the stderr copy on the strength of
+  #4012 would therefore have been a regression — so this documents the reason that
+  is still true, in the places someone would read before deleting it:
+  `degraded-boot.ts`, the engine's emit site, and all three parity tests
+  (objectql, runtime, service-datasource), which are renamed off "which `os serve`
+  boot-quiet cannot swallow" to "which the operator log level cannot filter away".
+
+  The objectql parity test now proves the claim instead of asserting around it: it
+  drives a **real** `ObjectLogger` at `level: 'error'` and requires the banner on
+  stderr _and_ nothing on stdout. Set the level to `warn` and it fails — so the
+  test is pinned to the level filter rather than passing for any reason.
+
+  Also corrected in the same sweep, all comment-only, all previously overstating
+  what #4012 had not yet fixed:
+
+  - the automation wiring summary (`format.ts`, `serve.ts`, its test) claimed the
+    boot window swallowed the engine's binding warnings. Its real justification is
+    stronger and unchanged: a flow that silently fails to arm emits **no** log line
+    at any level, so binding state has to be read off the live engine — absence of
+    a warning was never evidence of a bound flow.
+  - the seed summary (`seed-summary.ts`, `format.ts`, its test) and `AppPlugin`'s
+    seed-outcome note attributed the silence to the boot window; the operative
+    gate is that `SeedLoader`'s result logs are `info`, under the default `warn`.
+
+  No behavior changes.
+
+- 9881074: fix(batch): the background walks seek instead of counting, so they stop skipping rows (#4363)
+
+  #4363 made a single paged read a partition of its result set. It could not make
+  a _walk_ one: seven background scans paged with a growing `offset` while writing
+  to the very rows they were reading, and an offset counts into a set those writes
+  are changing. Rows slide past the cursor and are never visited.
+
+  That is not a slow page in any of these — it is a wrong answer wearing the shape
+  of a clean run:
+
+  - **`rebuildApproverIndex`** built its desired state by walking
+    `sys_approval_request WHERE status = 'pending'` with no `orderBy` at all, then
+    **deleted** every index row that state did not explain. A skipped request
+    meant an approver silently dropped from someone's queue. (The loop beside it
+    ordered by `created_at` — not unique, so its pages were never a partition
+    either.)
+  - **`verifyFileReferences`** decides which files nothing references. A record it
+    never visits is reported as an unreferenced file.
+  - **`backfillFileReferences`** and the **pinyin companion backfill** rewrite
+    each row they read, so their own writes were shifting the set out from under
+    the cursor. Records were left unconverted and unsearchable by a run that
+    reported success.
+  - **`scanValueShapes`** exists to vouch that no stored value is off-shape, and
+    it opens a migration gate on that evidence.
+
+  All of them now go through `keysetWalk` (`@objectstack/types`): order by a
+  unique key, and seek past the last one instead of counting from the start. A
+  row's key does not move when the row is updated, and cannot be shifted when
+  another is deleted, so the walk is stable under exactly the mutation these
+  functions perform. It is also O(n) rather than O(n²/page) — measured on
+  Postgres over 2M rows, deep pages cost ~1.1 s by offset against ~0.09 s by seek.
+
+  One deliberate non-conversion: the REST **export** stream keeps its offset. It
+  honors a caller-chosen sort, and a keyset walk would have to re-order the export
+  by `id` to seek — changing what the user asked for to fix a cost. Its pages are
+  already a partition since #4363; only the depth cost remains.
+
+  `keysetWalk` merges the cursor with `$and` rather than spreading it into the
+  caller's filter, so a walk whose own `where` constrains the key column
+  (`{ id: { $in: [...] } }`) keeps that constraint instead of having it silently
+  overwritten. When a `max` cap is set it reads one row beyond the cap to tell
+  "the cap stopped us" from "the source ended exactly there" — without that, a
+  walk that read everything still reports `truncated`, and a caller acting on it
+  goes looking for rows that were never withheld.
+
+  The storage suites' fake engines now **throw** on an `offset` instead of serving
+  one, so the conversion is pinned rather than merely passing.
+
+- 39eb01b: fix(runtime,cli,types): `os migrate` and the dev runtime now share one `__search` companion schema view (#3955)
+
+  On a zh-locale deployment the dev runtime provisions the hidden `__search`
+  pinyin companion column (ADR-0098) on every eligible object, but the
+  `os migrate plan`/`apply` boot went through `createStandaloneStack`, which
+  never derived the locale-gated pinyin decision from the compiled artifact.
+  Its metadata therefore lacked every companion column, and `migrate plan`
+  reported each live `__search` column of a dev-created database as a
+  destructive orphan — with `--allow-destructive` as the printed remediation,
+  which would have dropped live feature columns.
+
+  - `@objectstack/types`: new `collectConfiguredLocales(i18n)` and
+    `stampSearchPinyinEnabled(i18n)` — the single resolve-and-stamp helper for
+    `OS_SEARCH_PINYIN_ENABLED`. An explicit env value still wins; only a
+    positive locale-derived decision is stamped.
+  - `@objectstack/runtime`: `createStandaloneStack` stamps the decision from
+    the artifact's `i18n` before any plugin constructs a `SchemaRegistry`, and
+    surfaces `i18n` on its result like `requires`/`objects`/`manifest`.
+  - `@objectstack/cli`: the `serve`/`dev` boot now stamps through the same
+    shared helper (behaviour unchanged), so create/serve and plan/apply cannot
+    compute different schema views of the same source tree.
+
+  A fresh CLI-created database is now also born with the same `__search`
+  columns the dev runtime would provision, instead of acquiring them on the
+  next dev boot.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [65a3a84]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes

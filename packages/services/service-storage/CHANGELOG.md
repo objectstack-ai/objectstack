@@ -1,5 +1,523 @@
 # @objectstack/service-storage
 
+## 17.0.0-rc.1
+
+### Minor Changes
+
+- b1863a5: feat(storage): released field files enter collection on deployments that verified their file migration — ADR-0104 D3 wave 2 PR-5b (#3459)
+
+  The gated, final step of the file-as-reference sequence. On a deployment whose
+  `adr-0104-file-references` flag is verified (`os migrate files-to-references
+--apply`, #3617), releasing a field file's ownership — clearing the field, or
+  deleting the owning record — now also tombstones the file
+  (`status='deleted'` + `deleted_at`), which starts the `sys_file` lifecycle's
+  declared 30-day grace window and, at its end, hands the row to the reap sweep.
+  Re-referencing the id inside the window revives it, exactly like re-attaching
+  an attachment.
+
+  **The two halves ship together, deliberately.** The same change extends the
+  reap guard's sweep-time re-verify beyond `sys_attachment` join rows to the
+  ownership columns: a tombstoned file whose `ref_*` columns name a current
+  owner (re-claimed in the window, or a release/claim race) is un-tombstoned and
+  vetoed. Tombstoning released files without that re-verify would have turned
+  every release into a _guaranteed_ byte delete — the guard's old check consults
+  a table that is always empty for field files. This pairing was the standing
+  hard constraint on #3459, locked by regression tests on both halves.
+
+  **Nothing changes for a deployment that has not migrated.** Release keeps
+  clearing the ownership columns only, and released files are retained forever.
+  Every way of not knowing — no flag row, an unreadable table, an engine that
+  cannot be asked — reads as "not verified": the gate fails closed, toward
+  retention. And the guard re-reads the flag _fresh_ at sweep time (not the
+  release path's memoized read), so a later failing migration run — a database
+  that has drifted — closes the gate for already-written tombstones too, without
+  a restart. Attachments-scope collection is unchanged and needs no flag.
+
+  The irreversible moment is therefore per deployment: day 30 after _that_
+  deployment verified its migration and released a file — never the upgrade
+  itself.
+
+- 270650f: feat(migrate): a datastore created from empty attests its data migrations at creation (#3438, ADR-0104 2026-07-30 addendum)
+
+  Deployment-level migration flags could only be recorded by running
+  `os migrate`. That left a hole at the other end of a deployment's life: a
+  database created on a version that already ships the migrations started **lax**
+  and stayed lax until someone thought to run a command that, for them, converts
+  nothing and finds nothing. Every new deployment re-entered the warn regime, so
+  the warn regime would never die out — and, since #3459, every new deployment
+  also kept every released file forever.
+
+  A store the platform **creates from empty** now records
+  `adr-0104-file-references` and `adr-0104-value-shapes` at that moment. Nothing
+  to run; enforcement and collection are live from the first boot.
+
+  **This is not version-gating in disguise.** The fact recorded — no legacy value
+  is stored here — is _observed_: the store had no history at all. The platform
+  attests only what it watched itself create, and the test is deliberately
+  strict: every table made by this boot and **none found already present**. One
+  pre-existing table anywhere, one datasource that was already there, one driver
+  that cannot account for its schema sync — any of those and the deployment
+  attests nothing and produces its evidence by scan, exactly as before. "Found
+  empty" and "created empty" are not the same claim, and only the second is an
+  observation.
+
+  **New surfaces.** `IDataDriver.getSchemaSyncStats?()` (optional, purely
+  observational: tables created vs found since connect — implemented by the SQL
+  and in-memory drivers), `engine.wasDatastoreCreatedFromEmpty()`,
+  `attestFreshDatastore()` in `@objectstack/platform-objects/system`, and
+  `VALUE_SHAPES_MIGRATION_ID` / `CREATION_ATTESTED_MIGRATION_IDS` in
+  `@objectstack/spec/system`. Attestation never overwrites an existing flag row
+  and never throws into a boot: a failure leaves the deployment lax, which a
+  migration run can still fix.
+
+  **Upgrading changes nothing for an existing database.** It is non-empty when
+  the platform reaches it, so it is never attested — run
+  `os migrate files-to-references --apply` as before. Importing legacy values
+  into an attested deployment is rejected loudly at the write path;
+  `OS_ALLOW_LAX_MEDIA_VALUES=1` re-opens leniency while you diagnose.
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 9881074: fix(batch): the background walks seek instead of counting, so they stop skipping rows (#4363)
+
+  #4363 made a single paged read a partition of its result set. It could not make
+  a _walk_ one: seven background scans paged with a growing `offset` while writing
+  to the very rows they were reading, and an offset counts into a set those writes
+  are changing. Rows slide past the cursor and are never visited.
+
+  That is not a slow page in any of these — it is a wrong answer wearing the shape
+  of a clean run:
+
+  - **`rebuildApproverIndex`** built its desired state by walking
+    `sys_approval_request WHERE status = 'pending'` with no `orderBy` at all, then
+    **deleted** every index row that state did not explain. A skipped request
+    meant an approver silently dropped from someone's queue. (The loop beside it
+    ordered by `created_at` — not unique, so its pages were never a partition
+    either.)
+  - **`verifyFileReferences`** decides which files nothing references. A record it
+    never visits is reported as an unreferenced file.
+  - **`backfillFileReferences`** and the **pinyin companion backfill** rewrite
+    each row they read, so their own writes were shifting the set out from under
+    the cursor. Records were left unconverted and unsearchable by a run that
+    reported success.
+  - **`scanValueShapes`** exists to vouch that no stored value is off-shape, and
+    it opens a migration gate on that evidence.
+
+  All of them now go through `keysetWalk` (`@objectstack/types`): order by a
+  unique key, and seek past the last one instead of counting from the start. A
+  row's key does not move when the row is updated, and cannot be shifted when
+  another is deleted, so the walk is stable under exactly the mutation these
+  functions perform. It is also O(n) rather than O(n²/page) — measured on
+  Postgres over 2M rows, deep pages cost ~1.1 s by offset against ~0.09 s by seek.
+
+  One deliberate non-conversion: the REST **export** stream keeps its offset. It
+  honors a caller-chosen sort, and a keyset walk would have to re-order the export
+  by `id` to seek — changing what the user asked for to fix a cost. Its pages are
+  already a partition since #4363; only the depth cost remains.
+
+  `keysetWalk` merges the cursor with `$and` rather than spreading it into the
+  caller's filter, so a walk whose own `where` constrains the key column
+  (`{ id: { $in: [...] } }`) keeps that constraint instead of having it silently
+  overwritten. When a `max` cap is set it reads one row beyond the cap to tell
+  "the cap stopped us" from "the source ended exactly there" — without that, a
+  walk that read everything still reports `truncated`, and a caller acting on it
+  goes looking for rows that were never withheld.
+
+  The storage suites' fake engines now **throw** on an `offset` instead of serving
+  one, so the conversion is pinned rather than merely passing.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- d5749d7: refactor(types,rest,services,plugin-sharing): one shared writer for the response envelope, and `error.code` is enforced at compile time (#3973)
+
+  `BaseResponseSchema` declares one envelope for every REST body the platform
+  emits. It declared it once; the code that _wrote_ it was copied per route
+  module. After #3843 and #3983 converted the last drifting one, seven modules
+  each carried their own two-line `sendOk` / `sendError` pair — so the envelope's
+  shape lived in fourteen places rather than one.
+
+  `pnpm check:route-envelope` proved those seven copies agreed, which is why this
+  is a cleanup rather than a bug fix. But a guard proves agreement; it does not
+  create it. An eighth module starts by copying the pair again — not
+  hypothetically: `share-link-routes.ts` was found already drifting by the
+  repo-wide scan, and its drift had broken `client.shareLinks.create()` and
+  `.list()` through `unwrapResponse` (#3983).
+
+  ## What moved
+
+  `sendOk` / `sendError` now live once, in `@objectstack/types`
+  (`response-envelope.ts`), and all seven modules import them:
+
+  | Module                                |
+  | ------------------------------------- |
+  | `service-storage/storage-routes.ts`   |
+  | `service-settings/settings-routes.ts` |
+  | `service-datasource/admin-routes.ts`  |
+  | `rest/external-datasource-routes.ts`  |
+  | `rest/package-routes.ts`              |
+  | `service-i18n/i18n-service-plugin.ts` |
+  | `plugin-sharing/share-link-routes.ts` |
+
+  Placement was the open question in #3973, not design. `packages/spec` is
+  schemas-only (Prime Directive #2), and the callers span `rest`, four
+  `services/*` and one `plugins/*`, which rules out anything depending on them.
+  `@objectstack/types` depends on nothing but `@objectstack/spec`, so every caller
+  can reach it, and it is already where the repo puts a helper the HTTP boundaries
+  share — `looksLikeInternalErrorLeak` (#3867) sits one file over and made the
+  same argument first.
+
+  The builders take a structural `{ status(n), json(body) }`, so the package
+  imports no HTTP contract at all: `IHttpResponse` satisfies it, and so does the
+  `any`-typed `res` the older modules carry.
+
+  ## `error.code` is now checked by the compiler
+
+  All seven copies typed the parameter `code: string`. ADR-0112 (#3841) closed the
+  vocabulary — `ErrorCode` is `StandardErrorCode ∪ ERROR_CODE_LEDGER` — but an
+  invented code was still caught only at runtime, by a conformance suite parsing a
+  driven body, i.e. only on routes some test happened to drive.
+
+  The shared `sendError` types `code` as `ErrorCode`, so an unregistered code now
+  fails to compile, at every call site at once:
+
+  ```ts
+  sendError(res, 400, "NOT_A_REGISTERED_CODE", "invented");
+  // Argument of type '"NOT_A_REGISTERED_CODE"' is not assignable to parameter of type 'ErrorCode'.
+  ```
+
+  This cost no call-site churn: every code the seven modules emit was already
+  registered.
+
+  ## `extra` is closed at the same place
+
+  `sendError`'s last parameter is `Pick<ApiError, 'category' | 'httpStatus' |
+'details' | 'requestId'>` — exactly what `ApiErrorSchema` declares beside `code`
+  and `message`.
+
+  It was `Record<string, unknown>` while `settings-routes` still hung `namespace` /
+  `key` / `reason` / `fields` beside `code`. Those bodies passed every gate anyway:
+  `ApiErrorSchema` is a plain `z.object`, so unknown keys were STRIPPED rather than
+  rejected, and `envelopeViolations` inspects only the body's top level —
+  conformant _by stripping_ rather than by declaration. #4224 moved that module
+  onto `details`, which is what lets the parameter close here. Closing it at the
+  shared builder is the part that lasts: an undeclared sibling is now a compile
+  error in every module at once, rather than a key that quietly evaporates in
+  whichever module reintroduces it.
+
+  ## Nothing changes on the wire
+
+  The seven pairs were identical modulo the optional `status` and `extra`
+  parameters this one unions, and each module's driven conformance suite still
+  parses its real bodies against the real spec schemas. One internal call site was
+  rewritten: `package-routes` passed `details` positionally and now passes
+  `{ details }`, producing the same `error.details` it always did.
+
+  ## The guard got stronger
+
+  `scripts/check-route-envelope.mjs` counts response write sites per module. A
+  module that routes everything through the shared pair builds **none** itself, so
+  the seven now declare `0 / 0 / 0` where they used to declare `2 / 1 / 1`, and the
+  shared pair is pinned separately at `2 / 1 / 1` so the invariant stays total for
+  the surface rather than per-module. What the count asserts is no longer "your two
+  builders are the enveloped ones" but "you have no builders" — and a new route
+  that hand-rolls a body still moves it off zero and fails.
+
+- efcd68c: **The storage adapter stops being rebuilt and re-pointed on every boot, and the
+  "files may be unreachable" warning stops firing at a healthy server (#4096).**
+
+  Every `os dev` / `os serve` boot printed:
+
+  ```
+  WARN StorageServicePlugin: storage adapter swapped (LocalStorageAdapter →
+  LocalStorageAdapter). Existing files were NOT migrated and may be unreachable
+  through the new adapter.
+  ```
+
+  The warning was telling the truth. `serve` constructed the plugin with
+  `{ driver: 'local', root }` — and `StorageServicePluginOptions` declares
+  neither key. Both were dropped silently, so the plugin applied its own
+  `./storage` default, `OS_STORAGE_ROOT` changed nothing, and uploads landed in a
+  directory nobody named. The `storage` settings namespace then corrected the root
+  on its first read (its manifest default is `./.objectstack/data/uploads`),
+  genuinely moving the backing store — every boot, forever.
+
+  Three fixes, because there were three defects:
+
+  - **`serve` now passes options the plugin reads** — `{ adapter: 'local',
+local: { rootDir } }`. `OS_STORAGE_ROOT` takes effect, and local uploads land
+    under `.objectstack/data/uploads` from the first byte instead of `./storage`.
+    Extracted as `resolveStorageCapabilityArg` so the option SHAPE is pinned by
+    tests: a mismatch like this type-checks fine and does nothing at runtime.
+  - **A swap is skipped when nothing changed.** The plugin records what the
+    running adapter points at and compares resolved configurations, instead of
+    rebuilding whenever the settings namespace held any value at all — which is
+    every boot once that namespace has persisted its own defaults.
+  - **The warning now means what it says.** It fires when the BACKING STORE moved
+    (kind change, different root, different bucket/region/endpoint), not merely
+    when the adapter object was replaced. A credential rotation swaps the adapter
+    so the new key takes effect and logs at info: same bucket, nothing stranded.
+    A swap from a caller that resolved no target still warns — ignorance must not
+    silence it.
+
+  Path spellings are normalised, so the platform writing the same default two ways
+  (`./.objectstack/data/uploads` in the settings manifest,
+  `.objectstack/data/uploads` in the CLI) is no longer read as a migration between
+  a directory and itself.
+
+  Verified on `examples/app-todo`: the boot-diagnostics block went from four
+  warnings to three, with the storage line gone and `./storage` no longer created.
+  19 unit cases cover the target resolver and the swap/warn split (including the
+  refusals), 4 plugin-level cases pin what a boot does and says, and 7 pin the CLI
+  option shape.
+
+  `config.storage` authored with the `driver`/`root` dialect is still forwarded
+  verbatim and still not read by the plugin — the same mismatch one layer up.
+  Correcting it means deciding whether the plugin accepts that dialect or the
+  config schema is wrong, so it is filed rather than papered over with a lenient
+  alias here (AGENTS.md Prime Directive #12).
+
+- 68dea0b: feat(platform-objects,service-storage,cli): `sys_migration` is platform infrastructure — registered by `PlatformObjectsPlugin`, not by the storage service (#4243)
+
+  The deployment-level data-migration flag ledger (`sys_migration`, #3617) was
+  registered by `@objectstack/service-storage` as its first consumer. That was
+  deliberate while the file migration was the only consumer, but the ledger now
+  gates storage-independent behaviour too — `os migrate value-shapes` (#4235)
+  and the fresh-datastore attestation (#4215) — and a non-file migration had to
+  boot the whole storage plugin just so the kernel carried the table. Any kernel
+  assembled without storage silently had no ledger at all, which read exactly
+  like "migration not run" (both answer false) while actually meaning "ledger
+  not installed".
+
+  The registration now lives in `PlatformObjectsPlugin`
+  (`@objectstack/platform-objects/plugin`) — the plugin `os serve` already
+  auto-injects into every served kernel — so the ledger exists with the
+  platform, independent of which optional services are composed. The
+  fresh-datastore attestation (#3438, ADR-0104) moves with it: it is ledger
+  bookkeeping, and its old home justified itself as "the service that registers
+  `sys_migration`". Definition ownership is unchanged (`sys_migration` stays in
+  `@objectstack/platform-objects` and in `PLATFORM_OBJECTS_BY_PACKAGE`); the
+  flag helpers and readers are untouched.
+
+  Consequences:
+
+  - `@objectstack/service-storage` no longer contributes `sys_migration` to the
+    manifest and no longer performs the fresh-datastore attestation. An embedder
+    composing `StorageServicePlugin` on a hand-built kernel that relied on it
+    for the ledger must compose `PlatformObjectsPlugin` (the plugin every
+    supported assembly path already includes).
+  - The CLI's `buildDataMigrationPlugins()` no longer boots storage for every
+    gated migration — it registers `PlatformObjectsPlugin` always, and settings
+    - storage only for `os migrate files-to-references` (`{ storage: true }`),
+      the one migration that actually reconciles against the storage adapter.
+
+- Updated dependencies [6a67d7a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [05154a1]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [8c711fb]
+- Updated dependencies [09e4547]
+- Updated dependencies [91f4c78]
+- Updated dependencies [820eff9]
+- Updated dependencies [8d895ff]
+- Updated dependencies [f6472d7]
+- Updated dependencies [78caf51]
+- Updated dependencies [62a789b]
+- Updated dependencies [789ad63]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [2e836de]
+- Updated dependencies [12a19a8]
+- Updated dependencies [41dcda3]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [86a71d1]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [4384921]
+- Updated dependencies [3c628ce]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [58a03d2]
+- Updated dependencies [dc530b4]
+- Updated dependencies [e59786e]
+- Updated dependencies [bcf1112]
+- Updated dependencies [9774b78]
+- Updated dependencies [b07d829]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [45dc446]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [f985b3f]
+- Updated dependencies [9a4932a]
+- Updated dependencies [f9fc874]
+- Updated dependencies [011b386]
+- Updated dependencies [9881074]
+- Updated dependencies [7777e8f]
+- Updated dependencies [507b92a]
+- Updated dependencies [7309c81]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [90c2b15]
+- Updated dependencies [39eb01b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [01e124d]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [a13827e]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [59b85c0]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [62f8017]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [ec796d5]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [239c3a3]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [667b83e]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [d5749d7]
+- Updated dependencies [ccd9397]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [6f23667]
+- Updated dependencies [5d21a48]
+- Updated dependencies [19365b7]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [68dea0b]
+- Updated dependencies [64f8cbe]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [eb95d97]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [1bd2795]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+  - @objectstack/spec@17.0.0-rc.1
+  - @objectstack/platform-objects@17.0.0-rc.1
+  - @objectstack/core@17.0.0-rc.1
+  - @objectstack/observability@17.0.0-rc.1
+  - @objectstack/types@17.0.0-rc.1
+
 ## 17.0.0-rc.0
 
 ### Minor Changes
