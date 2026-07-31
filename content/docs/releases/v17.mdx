@@ -1854,7 +1854,10 @@ rc.1, and administrators should know what changed:
 
 ### New in Console — bundled objectui advanced `4a4829d0ef39 → 7d9734d5e321`
 
-79 objectui commits across five pin moves, released as **objectui 17.1.0**.
+143 objectui commits across five pin moves, released as **objectui 17.1.0**.
+(The pin changesets enumerate 79 of them; one range under-enumerated its own
+window and is recorded by `console-bebaebd39ace-backfill` — the fixes it
+covers are folded into the list below rather than left to the changelog.)
 
 - **The lockstep half of ADR-0110 — release-critical.** The rc.0 pin predates
   the client fix, so the Console it built still posted `action.target` to
@@ -1882,13 +1885,29 @@ rc.1, and administrators should know what changed:
   downloads the searched rows, not the unsearched superset; and every column
   resolver reads one identity key, resolved at ingestion and reported out
   loud.
+- **Forms stop losing what you typed.** A tabbed or sectioned modal keeps
+  **every** tab's values and a split form keeps **both** panels' — previously
+  only the active pane survived the save; a `defaultValues` change no longer
+  discards the field being filled (and new defaults apply in the commit that
+  renders them); leaving a page with unsaved input in a modal or drawer form
+  is guarded; swapping `recordId` no longer leaves the previous record on
+  screen; and a wizard that ends on a field-less review step can finish.
 - **Edits are safer.** Form edit saves send `If-Match` and surface 409
   conflicts instead of silently overwriting; a wizard with `allowSkip` no
   longer submits past skipped fields; a select no longer wipes itself when
   its value outruns its options; numeric and boolean option values survive
   selection typed; multi-value lookup is selectable in inline edit and
   hydrates through a batched `$in` (showing loading rather than the empty
-  placeholder).
+  placeholder); tabbed and split forms honour the form view's own `columns`.
+- **Spec values render instead of failing three different ways.** Three tiers
+  of spec-declared values were silently wrong, validated into nothing, or
+  red-boxed the surface; they now render. The spec→FilterBuilder operator
+  table covers the whole view vocabulary, a spec `series[].type` draws (and a
+  spec-shape `series` plots at all), a chart says so when its rows carry no
+  category key instead of drawing an empty axis, a missing analytics
+  capability stops rendering as an empty KPI, a legacy string row action runs
+  instead of green-toasting a no-op, and a flow or action that failed under
+  HTTP 200 stops reporting success.
 - **Bulk actions become per-record.** An object-declared bulk action runs over
   the selection, `visible` is evaluated per selected record, params render
   through the shared form-field widgets (lookup errors get Retry, `sys_user`
