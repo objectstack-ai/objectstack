@@ -21,6 +21,9 @@ on:
       # The variant/doc gate reads hand-written pages, so editing one can break it
       # without touching packages/spec at all.
       - 'content/docs/**'
+      # Same for the strictness ledger — it is a doc, and editing it can break
+      # the gate that now holds it to the code.
+      - 'docs/audits/**'
 
 permissions:
   contents: read
@@ -61,3 +64,12 @@ jobs:
       # apps.mdx said the nav tree had "eight item types" while the schema had nine.
       - name: Check discriminated-union variants are documented
         run: pnpm --filter @objectstack/spec check:variant-docs
+
+      # #4001 follow-up. The strictness ledger is the campaign's map — which
+      # z.object sites are authorable, wire or open. Every step reads it to pick
+      # the next move, and nothing kept it honest: it went stale twice in one
+      # week (a classification verification disproved, and a "next step" that had
+      # shipped months earlier). A map that drifts is worse than no map, because
+      # it gets followed. This holds its arithmetic and its coverage to the code.
+      - name: Check the strictness ledger matches the code
+        run: pnpm --filter @objectstack/spec check:strictness-ledger

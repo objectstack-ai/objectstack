@@ -112,6 +112,18 @@ describe('sendError', () => {
         expect(BaseResponseSchema.safeParse(seen.body).success).toBe(true);
     });
 
+    it('rejects an UNDECLARED sibling of `code` at compile time (#4224)', () => {
+        // `settings-routes` used to hang `namespace` / `key` / `reason` / `fields`
+        // beside `code`. `ApiErrorSchema` declares none of them, and being a plain
+        // `z.object` it STRIPPED them rather than rejecting — conformant by
+        // stripping, not by declaration. #4224 moved those onto `details`; typing
+        // `extra` as ApiError's own optional fields is what stops them returning,
+        // in every module at once rather than in the one that was fixed.
+        const { res } = capture();
+        // @ts-expect-error 'namespace' is not a declared field of ApiError.
+        sendError(res, 403, 'SETTINGS_FORBIDDEN', 'denied', { namespace: 'branding' });
+    });
+
     it('rejects an unregistered code at COMPILE time, not just on parse', () => {
         // `code` is `ErrorCode` — `StandardErrorCode ∪ ERROR_CODE_LEDGER`. The
         // seven copies typed it `string`, so this was caught at runtime only,

@@ -18,12 +18,12 @@ Query records with filtering, sorting, selection, and pagination.
 | Parameter | Location | Description |
 |:----------|:---------|:------------|
 | `object` | path | Object name |
-| `select` | query | Comma-separated field names |
+| `select` | query | Comma-separated field names. Every name must exist — an unknown one is `400 INVALID_FIELD`, never dropped. |
 | `filter` | query | Filter expression (JSON). `filters` also accepted for backward compatibility. Malformed JSON is rejected with `400 INVALID_FILTER` — never ignored. |
-| `sort` | query | Sort expression (e.g. `name asc` or `-created_at`) |
+| `sort` | query | Sort expression (e.g. `name asc` or `-created_at`). Must name a real field — otherwise `400 INVALID_SORT`. |
 | `top` | query | Max records to return. No default — omitting it returns all matching records. |
 | `skip` | query | Offset |
-| `expand` | query | Comma-separated list of relations to eager-load |
+| `expand` | query | Comma-separated list of relations to eager-load. Must name a reference field (`lookup` / `master_detail` / `user` / `tree`) — otherwise `400 INVALID_FIELD`. |
 | `search` | query | Full-text search query |
 
 > **Note:** OData-style `$`-prefixed parameters (`$filter`, `$select`, `$orderby`, `$top`, `$skip`, `$expand`, `$count`, `$search`) are also accepted directly on this same endpoint as aliases — they're normalized internally to the parameter names above. There is no separate standalone OData endpoint.
@@ -78,6 +78,43 @@ successful query:
 
 The same rule applies to `orderby` on `GET /data/:object/export`.
 
+#### Nor is a sort, a projection, or an expansion
+
+`filter` is not the only parameter that names a field. `sort`, `select` and
+`expand` do too, and each one used to be dropped in silence when the name was
+wrong — three more responses that looked exactly like successful ones:
+
+| Request | Result |
+|:---|:---|
+| `?sort=-created_at` | sorts |
+| `?sort=no_such_field` | `400 INVALID_SORT` |
+| `?sort={oops` / `?sort=title:desc` | `400 INVALID_SORT` — the list route spells a direction with a space (`title desc`) or a leading `-` |
+| `?select=id,title` | projects those two columns |
+| `?select=no_such_field`, `?select=title,no_such_field` | `400 INVALID_FIELD` |
+| `?expand=owner_id` | expands the reference |
+| `?expand=no_such_rel` | `400 INVALID_FIELD` — no such field |
+| `?expand=title` | `400 INVALID_FIELD` — real field, but it holds no reference |
+
+Why each one matters, since none of them changes which rows match:
+
+- **`sort`** — `sort` + `top` is how you ask for "the latest N". A sort that is
+  dropped turns that into an **arbitrary** N, and nothing in the response says so.
+- **`select`** — an unknown column used to be dropped, and a projection left with
+  no known column fell back to *every* column: a parameter that exists to return
+  **less** failed by returning **more**.
+- **`expand`** — an unexpanded relation is indistinguishable from one whose
+  foreign keys are all null, so clients render raw ids where names belong.
+
+Sorts accept any of these spellings, all equivalent:
+`?sort=-created_at`, `?$orderby=-created_at`, and — on
+`POST /data/:object/query` — `{"orderBy": [{"field": "created_at", "order":
+"desc"}]}`, `{"orderBy": ["-created_at"]}` or `{"orderBy": {"created_at":
+"desc"}}`. A shape that is none of these (a number, an entry naming no field,
+a direction that is neither `asc` nor `desc`) is `400 INVALID_SORT`.
+
+`GET /data/:object/:id` applies the same `select` and `expand` rules, so the
+list and single-record routes cannot disagree about one field map.
+
 **Response**:
 ```json
 {
@@ -96,8 +133,8 @@ Get a single record by ID. Only `select` and `expand` query parameters are allow
 |:----------|:---------|:------------|
 | `object` | path | Object name |
 | `id` | path | Record ID |
-| `select` | query | Comma-separated field names to include |
-| `expand` | query | Comma-separated list of relations to eager-load |
+| `select` | query | Comma-separated field names to include. Unknown name → `400 INVALID_FIELD`. |
+| `expand` | query | Comma-separated list of relations to eager-load. Not a reference field → `400 INVALID_FIELD`. |
 
 **Response**: `{ object: "account", id: "1", record: { ... } }`
 

@@ -698,9 +698,9 @@ describe('HttpDispatcher extracted domains (PR-7: auth/ai)', () => {
         // #4053: in the declared envelope now, with `AiAgentsResponseSchema`'s
         // `{ agents }` RELOCATED under `data` rather than flattened to the bare
         // array. `unwrapResponse` returns `data`, so `client.ai.agents.list()`
-        // reads `.agents` off it and keeps working against cloud's still-
-        // unenveloped `service-ai` too — which is what lets the two surfaces
-        // convert independently instead of in lockstep.
+        // reads `.agents` off it — which is what let this surface convert on its
+        // own and cloud's `service-ai`, the route's other producer, follow
+        // independently instead of in lockstep. Both answer this now (cloud#929).
         expect(envelopeViolations(result.response?.body), JSON.stringify(result.response?.body)).toEqual([]);
         expect(result.response?.body?.data?.agents).toEqual([]);
         expect(result.response?.body?.agents).toBeUndefined();

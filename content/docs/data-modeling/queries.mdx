@@ -216,6 +216,14 @@ Sort results with `orderBy` (array of sort nodes):
 | `field` | `string` | Field name to sort by |
 | `order` | `'asc' \| 'desc'` | Sort direction |
 
+<Callout type="info">
+Over the REST/protocol ingress, `orderBy` also accepts `'-created_at'`,
+`['-created_at']` and `{created_at: 'desc'}`, all normalized to the node array
+above. A sort naming a field the object does not have — or an `order` that is
+neither `asc` nor `desc` — is `400 INVALID_SORT` there rather than a dropped
+sort. Internal callers reaching `engine.find()` directly are unaffected.
+</Callout>
+
 ---
 
 ## Pagination
@@ -288,13 +296,20 @@ and you get every column; if it doesn't, the error is rethrown. Either way there
 `owner.name` key.
 
 Use `expand` to pull in a relationship's fields instead.
+
+Both of these are `engine.find()` behaviours, reached by internal callers. Over
+the REST/protocol ingress a projection column that names no field at all is
+`400 INVALID_FIELD` — including the case where *no* requested column is known,
+which used to fall back to `SELECT *` and answer a one-column request with every
+column.
 </Callout>
 
 ---
 
 ## Expand (Related Records)
 
-Load related records through `lookup`, `master_detail`, and `user` fields with
+Load related records through the reference field types — `lookup`,
+`master_detail`, `user` and `tree` (`REFERENCE_VALUE_TYPES`) — with
 `expand`. Each key is a relationship field name; the value is a nested query that
 can select fields, filter, and expand further (max depth 3 — a fixed constant, not
 configurable).

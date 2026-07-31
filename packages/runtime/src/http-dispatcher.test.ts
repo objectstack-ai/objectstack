@@ -2785,7 +2785,8 @@ describe('HttpDispatcher', () => {
             // it just travels under `data` now. `AiAgentsResponseSchema`'s
             // `{ agents }` is RELOCATED, not flattened to the bare array, so
             // `client.ai.agents.list()` still reads `.agents` off what
-            // `unwrapResponse` returns.
+            // `unwrapResponse` returns. Cloud's `service-ai` — the route's other
+            // producer — answers the same shape (cloud#929).
             expect(agents.response?.body).toEqual({ success: true, data: { agents: [] }, meta: undefined });
             expect(agents.response?.body?.agents).toBeUndefined();
         });

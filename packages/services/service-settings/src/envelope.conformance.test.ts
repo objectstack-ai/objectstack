@@ -32,7 +32,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
+import { ApiErrorSchema, BaseResponseSchema, FieldErrorSchema, envelopeViolations } from '@objectstack/spec/api';
 import { SettingsNamespacePayloadSchema } from '@objectstack/spec/system';
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { SettingsService } from './settings-service';
@@ -288,8 +288,160 @@ describe('settings envelope (#3843) — error bodies', () => {
       // bare-string dialect the sibling modules carried cannot land quietly.
       expect(typeof body.error).not.toBe('string');
       expect(body.code).toBeUndefined();
+
+      // [#4224] No key inside `error` that `ApiErrorSchema` does not declare.
+      //
+      // This is the assertion neither gate above can make. `safeParse` STRIPS
+      // unknown keys (`ApiErrorSchema` is a plain `z.object`), so it passed
+      // `error.namespace` / `.key` / `.reason` / `.fields` for as long as this
+      // module emitted them; `envelopeViolations` deliberately inspects only the
+      // body's top level. Between them a body could carry four undeclared keys
+      // and read as fully conformant — conformant *by stripping*, which is not
+      // the same claim as conformant by declaration.
+      //
+      // Derived from `ApiErrorSchema.shape` rather than a hand-written list, so
+      // a field added to the contract is allowed here the moment it is declared,
+      // and one removed stops being allowed — the failure mode of a restated
+      // list is that it silently keeps blessing a retired key.
+      expect(
+        Object.keys(body.error).filter((k) => !(k in (ApiErrorSchema as any).shape)),
+        `error carries keys ApiErrorSchema does not declare: ${JSON.stringify(body.error)}`,
+      ).toEqual([]);
     });
   }
+});
+
+describe('settings envelope (#4224) — the four ad-hoc keys travel in the declared slot', () => {
+  /**
+   * Each of these branches used to spread its context as SIBLINGS of `code` and
+   * `message`. They now use `error.details`, the slot `ApiErrorSchema` declares
+   * for exactly this and the one `SETTINGS_ACTION_FAILED` was already using one
+   * branch over — so the module speaks one dialect rather than two.
+   *
+   * Both directions are asserted per case: the value is under `details`, AND the
+   * old top-level spelling is gone. Asserting only the first would pass a body
+   * that emitted both, which is how a "migration" quietly becomes a permanent
+   * dual-write.
+   */
+  const CASES: Array<{
+    name: string;
+    status: number;
+    code: string;
+    details: Record<string, unknown>;
+    gone: string[];
+    run: () => Promise<Captured>;
+  }> = [
+    {
+      name: 'SETTINGS_FORBIDDEN carries its namespace',
+      status: 403,
+      code: 'SETTINGS_FORBIDDEN',
+      details: { namespace: 'branding' },
+      gone: ['namespace'],
+      run: async () => {
+        const { http } = mount(anon);
+        return drive(http, 'GET /api/settings/:namespace', { params: { namespace: 'branding' } });
+      },
+    },
+    {
+      name: 'UNKNOWN_KEY carries its namespace and key',
+      status: 400,
+      code: 'UNKNOWN_KEY',
+      details: { namespace: 'branding', key: 'not_a_key' },
+      gone: ['namespace', 'key'],
+      run: async () => {
+        const { http } = mount();
+        return drive(http, 'PUT /api/settings/:namespace', {
+          params: { namespace: 'branding' },
+          body: { not_a_key: 1 },
+        });
+      },
+    },
+    {
+      name: 'SETTINGS_LOCKED carries its namespace, key and reason',
+      status: 409,
+      code: 'SETTINGS_LOCKED',
+      details: { namespace: 'branding', key: 'workspace_name', reason: 'locked-by-env' },
+      gone: ['namespace', 'key', 'reason'],
+      run: async () => {
+        // An `OS_BRANDING_WORKSPACE_NAME` in the environment locks the key, so a
+        // write to it is refused — the one branch that needs a locked namespace.
+        const { http } = mount(admin, { OS_BRANDING_WORKSPACE_NAME: 'Locked Co' });
+        return drive(http, 'PUT /api/settings/:namespace', {
+          params: { namespace: 'branding' },
+          body: { workspace_name: 'Acme' },
+        });
+      },
+    },
+  ];
+
+  for (const c of CASES) {
+    it(`${c.name} under error.details, not beside code/message`, async () => {
+      const { status, body } = await c.run();
+      expect(status).toBe(c.status);
+      expect(body.error.code).toBe(c.code);
+      expect(body.error.details).toMatchObject(c.details);
+      for (const k of c.gone) {
+        expect(body.error[k], `error.${k} is still a sibling of code/message`).toBeUndefined();
+      }
+    });
+  }
+});
+
+describe('settings envelope (#4224) — SETTINGS_VALIDATION speaks the field-level vocabulary', () => {
+  /**
+   * The decision #4224 asked for: `fields` was a `Record<key, message>` hung
+   * beside `code`, and `fields` is the name ADR-0114 (#3977) closed for
+   * `FieldError[]`. Keeping the map under that name would have left one spelling
+   * meaning two shapes — so it became the declared array, in the declared slot.
+   */
+  const lockedPattern = () => {
+    const { http, service } = mount();
+    service.registerManifest({
+      namespace: 'validated',
+      label: 'Validated',
+      writePermission: 'setup.write',
+      readPermission: 'setup.access',
+      specifiers: [
+        { key: 'model', type: 'text', label: 'Model', pattern: '^[a-z]+/[a-z]+$', description: 'Use provider/model.' },
+        { key: 'token', type: 'text', label: 'API token', required: true },
+      ],
+    } as any);
+    return http;
+  };
+
+  it('every entry parses as the declared FieldError', async () => {
+    const http = lockedPattern();
+    const { status, body } = await drive(http, 'PUT /api/settings/:namespace', {
+      params: { namespace: 'validated' },
+      body: { model: 'gpt-4o', token: '' },
+    });
+    expect(status).toBe(400);
+    expect(body.error.code).toBe('SETTINGS_VALIDATION');
+
+    const fields = body.error.details?.fields;
+    expect(Array.isArray(fields), `details.fields is not an array: ${JSON.stringify(body.error)}`).toBe(true);
+    expect(fields.length).toBeGreaterThan(0);
+    for (const f of fields) {
+      const parsed = FieldErrorSchema.safeParse(f);
+      expect(parsed.success, `not a FieldError: ${JSON.stringify(parsed.error ?? f)}`).toBe(true);
+    }
+    // The codes come from the closed ADR-0114 catalog, so a consumer can branch
+    // on the constraint instead of substring-matching the message.
+    expect(fields.map((f: any) => f.code).sort()).toEqual(['invalid_format', 'required']);
+  });
+
+  it('the pre-#4224 map is gone from both of its old spellings', async () => {
+    const http = lockedPattern();
+    const { body } = await drive(http, 'PUT /api/settings/:namespace', {
+      params: { namespace: 'validated' },
+      body: { token: '' },
+    });
+    // Not a sibling of code/message any more …
+    expect(body.error.fields).toBeUndefined();
+    expect(body.error.namespace).toBeUndefined();
+    // … and not the `key → message` object under its new home either.
+    expect(Array.isArray(body.error.details.fields)).toBe(true);
+  });
 });
 
 describe('settings envelope (#3843) — a reported action failure keeps its detail', () => {

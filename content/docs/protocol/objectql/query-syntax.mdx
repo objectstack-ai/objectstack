@@ -415,6 +415,14 @@ const opportunities = await engine.find('opportunity', {
 
 Sorting uses the **`orderBy`** array of `SortNode` objects.
 
+<Callout type="info">
+Over the REST/protocol ingress, `orderBy` also accepts `'-created_at'`,
+`['-created_at']` and `{created_at: 'desc'}` — all normalized to the
+`SortNode[]` above. A sort naming a field the object does not have is
+`400 INVALID_SORT` there, rather than being dropped. Internal callers reaching
+`engine.find()` directly are unaffected.
+</Callout>
+
 ### Single Field Sort
 
 ```typescript
@@ -449,13 +457,17 @@ const query: QueryAST = {
 `SqlDriver.find()` then retries **without the sort**, so the rows come back unordered
 rather than sorted — and no error surfaces. Denormalise the value onto the queried
 object (for example with a formula or rollup field) when you need to sort by it.
+
+This is the one sort that still degrades silently: the REST ingress judges a
+dotted path on its **head segment** (`account` here, a real field), so the
+`INVALID_SORT` gate passes it through to the driver backstop.
 </Callout>
 
 ---
 
 ## 4. Relationships (Expand)
 
-The `expand` property enables **recursive loading of related records** through `lookup`, `master_detail`, and `user` fields. Each key is a relationship field name; the value is a nested `QueryAST`.
+The `expand` property enables **recursive loading of related records** through the reference field types — `lookup`, `master_detail`, `user` and `tree` (`REFERENCE_VALUE_TYPES`). Each key is a relationship field name; the value is a nested `QueryAST`. Over the REST/protocol ingress, a key that is not one of those is `400 INVALID_FIELD` rather than a silently absent relation.
 
 ### Basic Expand
 

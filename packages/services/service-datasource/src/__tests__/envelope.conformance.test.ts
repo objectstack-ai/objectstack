@@ -173,6 +173,15 @@ describe('datasource-admin envelope (#3843) — error bodies', () => {
       run: () => drive(mount(undefined), '/api/v1/datasources'),
     },
     {
+      // The same 503, from the three routes served by the OTHER service (#4225).
+      // Which service is named is asserted in `admin-routes.test.ts`; what this
+      // row adds is that the branch emits the declared envelope, like its twin.
+      name: 'the external-datasource service is not wired',
+      status: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      run: () => drive(mount(undefined), '/api/v1/datasources/ext/remote-tables'),
+    },
+    {
       name: 'a lifecycle failure carries the service message',
       status: 400,
       code: 'DATASOURCE_ADMIN_ERROR',

@@ -57,9 +57,10 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // payload under `data`, the way `SettingsNamespacePayload` moved in #3843,
         // not a flatten to the bare array. That distinction is load-bearing here:
         // `unwrapResponse` returns `data`, so `client.ai.agents.list()` reads
-        // `.agents` off it and keeps working, and it keeps working against cloud's
-        // `service-ai` too while that surface still answers unenveloped. Flattening
-        // to `data: []` would have made `.agents` `undefined` — an empty catalog,
+        // `.agents` off it. It is also what let this side convert first and cloud's
+        // `service-ai` — the route's OTHER producer — follow independently rather
+        // than in lockstep; both answer this shape now (cloud#929). Flattening to
+        // `data: []` would have made `.agents` `undefined` — an empty catalog,
         // which `useAiSurfaceEnabled` turns into "hide the entire AI surface", and
         // which is indistinguishable from the legitimate seat-less/CE state.
         if (method === 'GET' && subPath === '/ai/agents') {

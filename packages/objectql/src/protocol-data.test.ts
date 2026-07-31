@@ -746,6 +746,11 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
                 const bare = spelling.replace(/^\$/, '').toLowerCase();
                 if (bare === 'top' || bare === 'skip') return 1;
                 if (bare === 'filter' || bare === 'filters') return { status: 'open' };
+                // [#4226] `expand` needs a RELATIONSHIP, not merely a real
+                // field: expanding `title` is now a legitimate 400 for the same
+                // reason `filter: 'title'` is one — the parameter is accepted,
+                // that value for it is not. `owner_id` is this object's lookup.
+                if (bare === 'expand' || bare === 'populate') return 'owner_id';
                 return 'title';
             };
             for (const spelling of suggested) {
@@ -825,6 +830,32 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
                 query: { filter: '', owner_id: 'usr_1' },
             });
             expect(engine.find.mock.calls[1][1].where).toEqual({ owner_id: 'usr_1' });
+        });
+
+        it('every OTHER vacuous filter shape means "absent" too — the two deliberate carve-outs nothing pinned', async () => {
+            // Both of these are decisions the code states in a comment and no
+            // test held. They sit one line away from a rejection, so a future
+            // tightening of the surrounding guard would silently turn "no
+            // filter" into a 400 for callers who send an empty one:
+            //
+            //   []     — #4121 rejects an array `isFilterAST` refuses, but
+            //            deliberately exempts the EMPTY array ("it means no
+            //            filter, and every path already treats it that way").
+            //   '   '  — #4181 rejects an unparseable filter STRING via
+            //            JSON.parse, but blanks it first with `.trim()`, so a
+            //            whitespace-only filter is absent rather than invalid.
+            //            Only `''` was covered; `'   '` never exercised trim().
+            const { protocol, engine } = makeProtocol();
+            for (const filter of [[], '   ']) {
+                await protocol.findData({
+                    object: 'showcase_task',
+                    query: { filter, owner_id: 'usr_1' },
+                });
+            }
+            for (const call of engine.find.mock.calls) {
+                expect(call[1].where).toEqual({ owner_id: 'usr_1' });
+            }
+            expect(engine.find).toHaveBeenCalledTimes(2);
         });
 
         it('count() sees the merged where — pagination totals cannot disagree with records (#4164)', async () => {

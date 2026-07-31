@@ -68,6 +68,22 @@ sendError(res, 400, 'NOT_A_REGISTERED_CODE', 'invented');
 This cost no call-site churn: every code the seven modules emit was already
 registered.
 
+## `extra` is closed at the same place
+
+`sendError`'s last parameter is `Pick<ApiError, 'category' | 'httpStatus' |
+'details' | 'requestId'>` — exactly what `ApiErrorSchema` declares beside `code`
+and `message`.
+
+It was `Record<string, unknown>` while `settings-routes` still hung `namespace` /
+`key` / `reason` / `fields` beside `code`. Those bodies passed every gate anyway:
+`ApiErrorSchema` is a plain `z.object`, so unknown keys were STRIPPED rather than
+rejected, and `envelopeViolations` inspects only the body's top level —
+conformant *by stripping* rather than by declaration. #4224 moved that module
+onto `details`, which is what lets the parameter close here. Closing it at the
+shared builder is the part that lasts: an undeclared sibling is now a compile
+error in every module at once, rather than a key that quietly evaporates in
+whichever module reintroduces it.
+
 ## Nothing changes on the wire
 
 The seven pairs were identical modulo the optional `status` and `extra`

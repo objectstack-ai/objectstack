@@ -50,7 +50,7 @@
  * `check-route-envelope.mjs`.
  */
 
-import type { ErrorCode } from '@objectstack/spec/api';
+import type { ApiError, ErrorCode } from '@objectstack/spec/api';
 
 /**
  * The only thing an envelope builder needs from a response object.
@@ -107,28 +107,32 @@ export function sendOk(res: EnvelopeResponse, data: unknown, status = 200): void
  * and if the condition is generic (not found / permission / validation), the
  * standard catalog is used instead of registering a synonym for it.
  *
- * ## `extra`
+ * ## `extra` is `ApiError`'s own optional fields, not a `Record`
  *
- * Merged into `error`, for the declared optional fields `ApiErrorSchema` carries
+ * Merged into `error`, and typed as exactly what `ApiErrorSchema` declares
  * beside `code` and `message` — `details`, `category`, `requestId`, `httpStatus`.
  * `details` is the slot for structured context: `package-routes` puts a partial
  * delete's per-item failures there, `settings-routes` the whole
  * `SettingsActionResult`.
  *
- * It is typed `Record<string, unknown>` rather than the declared fields because
- * `settings-routes` also passes `namespace` / `key` / `reason` / `fields` as
- * SIBLINGS of `code`, which `ApiErrorSchema` does not declare — `z.object`
- * strips them, so those bodies are conformant by stripping rather than by
- * declaration. Tightening this parameter is a wire change to that module's error
- * bodies, deliberately out of scope for a consolidation that changes no bytes;
- * it is tracked separately.
+ * This started as `Record<string, unknown>`, because `settings-routes` also hung
+ * `namespace` / `key` / `reason` / `fields` beside `code`, which the schema does
+ * not declare. Those bodies passed every gate anyway — `ApiErrorSchema` is a
+ * plain `z.object`, so unknown keys were STRIPPED rather than rejected, and
+ * `envelopeViolations` inspects only the body's top level — making them
+ * conformant *by stripping* rather than by declaration. #4224 moved that module's
+ * four branches onto `details`, which is what lets the parameter close here.
+ *
+ * Closing it at the shared builder is the part that lasts: an undeclared sibling
+ * is now a compile error in every module at once, rather than a key that quietly
+ * evaporates at the schema boundary in whichever module reintroduces it.
  */
 export function sendError(
   res: EnvelopeResponse,
   status: number,
   code: ErrorCode,
   message: string,
-  extra?: Record<string, unknown>,
+  extra?: Pick<ApiError, 'category' | 'httpStatus' | 'details' | 'requestId'>,
 ): void {
   res.status(status).json({ success: false, error: { code, message, ...extra } });
 }

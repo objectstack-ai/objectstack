@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import type { FieldError } from '@objectstack/spec/api';
 import type {
   SettingsManifest,
   ResolvedSettingValue,
@@ -639,7 +640,11 @@ export class SettingsService {
     }
 
     const patchKeys = new Set(Object.keys(patch));
-    const errors: Record<string, string> = {};
+    // One `FieldError` per offending key (ADR-0114). The constraint kind is
+    // known HERE and nowhere later — the route that serves this used to receive
+    // a `key → message` map and could only re-emit the prose — so the code is
+    // stamped at the point the check fails rather than inferred from the text.
+    const errors: FieldError[] = [];
 
     for (const spec of (reg.manifest.specifiers ?? []) as Array<Record<string, unknown>>) {
       const key = spec.key as string | undefined;
@@ -666,7 +671,12 @@ export class SettingsService {
         (typeof value === 'string' && value.trim() === '');
 
       if (spec.required === true && empty) {
-        errors[key] = `${label} is required for this configuration.`;
+        errors.push({
+          field: key,
+          code: 'required',
+          message: `${label} is required for this configuration.`,
+          label,
+        });
         continue;
       }
       if (!empty && typeof spec.pattern === 'string' && typeof value === 'string') {
@@ -678,12 +688,20 @@ export class SettingsService {
         }
         if (re && !re.test(value)) {
           const hint = typeof spec.description === 'string' ? ` ${spec.description}` : '';
-          errors[key] = `${label} does not match the expected format.${hint}`;
+          errors.push({
+            field: key,
+            code: 'invalid_format',
+            message: `${label} does not match the expected format.${hint}`,
+            label,
+            // The declared pattern, so a client can format its own message
+            // rather than parsing ours (`FieldError.constraint`, ADR-0114).
+            constraint: { pattern: spec.pattern },
+          });
         }
       }
     }
 
-    if (Object.keys(errors).length > 0) {
+    if (errors.length > 0) {
       throw new SettingsValidationError(namespace, errors);
     }
   }
