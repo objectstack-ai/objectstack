@@ -406,14 +406,21 @@ export interface QueryAliasConflict {
 }
 
 /**
- * The five alias pairs the RPC query surface accepts (#3795) — the ONE place
- * the alias → canonical mapping is declared. The schema transform below folds
- * parsed input by this table, and the protocol normalizer
+ * The six alias pairs the RPC query surface accepts (#3795, #4346) — the ONE
+ * place the alias → canonical mapping is declared. The schema transform below
+ * folds parsed input by this table, the protocol normalizer
  * (`metadata-protocol`) folds raw wire input by the same table, extended with
  * the wire-only spellings `filters` / `$filter` / `$expand` that no schema
- * declares. Before this table existed the precedence lived in prose only, so
- * every reader re-implemented it — the #3713 condition — and the two readers
- * disagreed on three of the five pairs, four of them backwards.
+ * declares, and the ObjectQL engine folds the slots its own option bags still
+ * admit (`where`, `limit`) on every entry point. Before this table existed the
+ * precedence lived in prose only, so every reader re-implemented it — the
+ * #3713 condition — and the two readers disagreed on three of the five pairs,
+ * four of them backwards.
+ *
+ * `limit`/`top` joined last (#4346): the #3795 sweep scoped it out as "the
+ * OData layer", leaving the protocol folding it BACKWARDS (`top` overwrote
+ * `limit`) while the engine folded it canonical-wins — `{top: 1, limit: 3}`
+ * answered 1 over HTTP and 3 in-process.
  */
 export const RPC_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = [
   { canonical: 'where', aliases: ['filter'] },
@@ -421,6 +428,7 @@ export const RPC_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = [
   { canonical: 'orderBy', aliases: ['sort'] },
   { canonical: 'offset', aliases: ['skip'] },
   { canonical: 'expand', aliases: ['populate'] },
+  { canonical: 'limit', aliases: ['top'] },
 ];
 
 /**
@@ -555,7 +563,7 @@ function foldRpcQueryOptions(input: object, ctx: z.core.$RefinementCtx): EngineQ
  *
  * **One slot, one value (#3795):** each legacy alias is folded into its
  * canonical key at parse — `filter`→`where`, `select`→`fields`,
- * `sort`→`orderBy`, `skip`→`offset`, `populate`→`expand`
+ * `sort`→`orderBy`, `skip`→`offset`, `populate`→`expand`, `top`→`limit`
  * ({@link RPC_QUERY_ALIAS_SLOTS}) — and the alias is dropped from the parsed
  * output, so consumers only ever read canonical QueryAST keys. Sending both
  * spellings with the SAME value is redundant and tolerated; sending DIFFERENT
@@ -704,6 +712,24 @@ export const DataEngineRequestSchema = lazySchema(() => z.discriminatedUnion('me
 // ==========================================================================
 
 // --- New: QueryAST-aligned types (preferred) ---
+/**
+ * Trailing options for the READ methods (`find` / `findOne` / `count` /
+ * `aggregate`) — the execution context, and nothing else.
+ *
+ * [#4251] The schema always existed; the exported type did not, so
+ * `IDataEngine`'s read methods could not declare the trailing argument their
+ * implementation has taken since the split was unified. Reads once took their
+ * context INSIDE the query while writes took it in trailing `options.context`,
+ * and passing the write shape to a read SILENTLY DROPPED it — an intended
+ * `isSystem` bypass just vanished. The engine accepts both channels now
+ * (`options.context` wins), but a caller typed to the contract could not reach
+ * the trailing one at all, so the callers that use it were reaching it through
+ * `any`. Same shape as {@link BaseEngineOptionsSchema} by construction: this is
+ * naming what is already there, not widening it. (The type itself is not new —
+ * it sat unused under the "legacy/deprecated" heading below, which is why the
+ * contract went looking for it and did not find it.)
+ */
+export type BaseEngineOptions = z.infer<typeof BaseEngineOptionsSchema>;
 export type EngineQueryOptions = z.infer<typeof EngineQueryOptionsSchema>;
 export type EngineUpdateOptions = z.infer<typeof EngineUpdateOptionsSchema>;
 export type DroppedFieldsEvent = z.infer<typeof DroppedFieldsEventSchema>;
@@ -715,7 +741,6 @@ export type EngineCountOptions = z.infer<typeof EngineCountOptionsSchema>;
 export type DataEngineFilter = z.infer<typeof DataEngineFilterSchema>;
 /** @deprecated Use standard `SortNode[]` from QueryAST instead. */
 export type DataEngineSort = z.infer<typeof DataEngineSortSchema>;
-export type BaseEngineOptions = z.infer<typeof BaseEngineOptionsSchema>;
 /** @deprecated Use `EngineQueryOptions` instead. */
 export type DataEngineQueryOptions = z.infer<typeof DataEngineQueryOptionsSchema>;
 export type DataEngineInsertOptions = z.infer<typeof DataEngineInsertOptionsSchema>;

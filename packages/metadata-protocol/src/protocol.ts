@@ -840,10 +840,10 @@ function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEve
  * which is a behavior change to call out in that changeset.
  */
 const QUERY_AST_KEYS: Readonly<Record<keyof QueryAST, true>> = {
-    object: true, fields: true, where: true, search: true, orderBy: true,
-    limit: true, offset: true, top: true, cursor: true, joins: true,
-    aggregations: true, groupBy: true, having: true, windowFunctions: true,
-    distinct: true, expand: true,
+    object: true, fields: true, where: true, search: true, searchFields: true,
+    orderBy: true, limit: true, offset: true, top: true, cursor: true,
+    joins: true, aggregations: true, groupBy: true, having: true,
+    windowFunctions: true, distinct: true, expand: true,
 };
 
 /**
@@ -882,7 +882,10 @@ const RESERVED_LIST_QUERY_PARAMS: ReadonlySet<string> = new Set([
     ...Object.keys(QUERY_AST_KEYS),
     // Transport-only extras the normalizer consumes but the AST does not name.
     'count',        // ?count / $count — response flag, not a projection
-    'searchFields', // ?searchFields / $searchFields — ADR-0061 override
+    // `searchFields` used to be listed here as such an extra. It is a named
+    // AST key since #3899 declared it (ADR-0061 P1), so it now arrives through
+    // the spread above and the type-level pin covers it — the hand-maintained
+    // copy would have been a second source that could silently fall out of step.
     // Server-derived, never caller input (stripped then re-set from `request`).
     'context',
 ]);
@@ -4112,15 +4115,16 @@ export class ObjectStackProtocolImplementation implements
             delete options[dollar];
         }
 
-        // [#3795] One slot, one value. Every alias spelling of the five
+        // [#3795] One slot, one value. Every alias spelling of the six
         // QueryAST slots resolves HERE, by the spec's own table, before the
         // per-slot wire coercion below ever runs — so that coercion reads
         // canonical keys only. An alias alone folds into its canonical key;
         // redundant identical spellings collapse; different values for one
         // slot are refused (the #4181 rule, generalized from the filter slot
-        // to all five — four of which used to resolve BACKWARDS here, each in
-        // its own way, disagreeing with the spec's documented precedence and
-        // with the runtime dispatcher's copy of the same fold).
+        // to all of them — four used to resolve BACKWARDS here, each in its
+        // own way, disagreeing with the spec's documented precedence and with
+        // the runtime dispatcher's copy of the same fold; `top`→`limit`
+        // joined the table last, via #4346).
         //
         // `arrivedAs` remembers which spelling carried each slot's value;
         // composed with `wireSpelling` it names the parameter the caller
@@ -4131,12 +4135,12 @@ export class ObjectStackProtocolImplementation implements
         });
         const slotParam = (canonical: string): string => spellingFor(arrivedAs[canonical] ?? canonical);
 
-        // Numeric fields — normalize top → limit ($top is the OData layer,
-        // outside the #3795 slot table), then coerce querystring strings.
-        if (options.top != null) {
-            options.limit = Number(options.top);
-            delete options.top;
-        }
+        // Numeric fields — coerce querystring strings. `top` already folded
+        // into `limit` above: the pair joined the #3795 slot table with #4346,
+        // replacing an open-coded rewrite here that resolved it BACKWARDS
+        // (`options.limit = Number(options.top)` — the alias overwrote the
+        // canonical key, so `{top: 1, limit: 3}` answered 1 over HTTP and 3
+        // through a direct engine call).
         if (options.limit != null) options.limit = Number(options.limit);
         if (options.offset != null) options.offset = Number(options.offset);
 

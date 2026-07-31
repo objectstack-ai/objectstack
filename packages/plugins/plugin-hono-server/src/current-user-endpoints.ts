@@ -45,7 +45,7 @@ import {
     type EnableLike,
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { Logger } from '@objectstack/spec/contracts';
+import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/contracts';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 
 /** API prefix these endpoints mount under unless the host overrides it. */
@@ -261,6 +261,71 @@ export function foldWildcardSuperUser(objects: Record<string, any>): void {
     }
 }
 
+/**
+ * The `objectql` slot BEYOND `IDataEngine` — the schema registry these
+ * endpoints read.
+ *
+ * [#4251] The slot's ledger entry is `IDataEngine` (ObjectQL registers the SAME
+ * instance under `data` and `objectql`), and that covers the reads below. It
+ * does NOT cover `registry` / `getSchema`, and the honest record of why lives
+ * on `getObjectQL` in `@objectstack/runtime`'s `DomainHandlerContext`: ObjectQL
+ * is genuinely wider than `IDataEngine`, nobody has written a contract for the
+ * wider part, and typing the whole thing `IDataEngine` would be "the more
+ * comfortable-looking lie". So the extra surface is declared here, named and
+ * narrow, instead of the lookup being erased to `any` — the wider contract, when
+ * someone writes it, absorbs this and the declaration is deleted.
+ *
+ * Every member is optional and every call site probes with `?.`: the slot is
+ * satisfied by engines with no registry at all (test fakes, remote engines), and
+ * these endpoints degrade rather than fail when it is absent.
+ */
+interface EngineRegistrySurface {
+    /**
+     * The engine's schema registry — the PUBLIC accessor. ObjectQL exposes it as
+     * `get registry()` over the private `_registry` field; `_registry` is what
+     * `/me/apps` used to reach through `as any`, two handlers away from the
+     * `/auth/me/permissions` reach for the public one, for the same object.
+     */
+    readonly registry?: {
+        getAllObjects?(): ApiExposureSchemaLike[];
+        getAllApps?(): unknown[];
+    };
+    getSchema?(objectName: string): unknown;
+}
+
+/**
+ * The `security.permissions` slot, as these two handlers use it.
+ *
+ * [#4251] plugin-security registers its `PermissionEvaluator` under this name;
+ * the slot has no `packages/spec` contract, so this declares the ONE method both
+ * handlers call rather than erasing the lookup. Structural on purpose —
+ * plugin-hono-server must not take a runtime dependency on plugin-security,
+ * which is OPTIONAL in the stacks these endpoints serve (the `!evaluator`
+ * branches below are exactly its absence).
+ *
+ * The parameter types are the loose shapes this caller passes, not the
+ * evaluator's own: it takes `metadataService: any` and resolves to parsed
+ * `PermissionSet`s, while the DB loader here yields the projected subset the
+ * merges below read. Declaring what is passed and read keeps the claim honest.
+ */
+interface PermissionEvaluatorSurface {
+    resolvePermissionSets(
+        identifiers: string[],
+        metadataService: unknown,
+        bootstrapPermissionSets?: unknown[],
+        dbLoader?: (unresolved: string[]) => Promise<unknown[]>,
+    ): Promise<ResolvedPermissionSetLike[]>;
+}
+
+/** The permission-set fields the two handlers merge out of a resolution. */
+interface ResolvedPermissionSetLike {
+    name?: string;
+    objects?: Record<string, unknown>;
+    fields?: Record<string, unknown>;
+    systemPermissions?: unknown;
+    tabPermissions?: unknown;
+}
+
 /** Minimal schema shape the managed-write clamp needs. */
 export interface ManagedSchemaLike {
     managedBy?: string;
@@ -426,9 +491,9 @@ export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
     // promotion seeded by `bootstrapPlatformAdmin`.
     const resolveCtx = async (c: any): Promise<any | undefined> => {
         try {
-            const authService: any = ctx.getService('auth');
+            const authService = ctx.getService<IAuthService>('auth');
             if (!authService) return undefined;
-            let api: any = authService.api;
+            let api = authService.api;
             if (!api && typeof authService.getApi === 'function') {
                 api = await authService.getApi();
             }
@@ -685,11 +750,12 @@ export function registerCurrentUserEndpoints(
             // logged as "/auth/me/permissions failed", which reads as a
             // fault on every console navigation instead of the deliberate
             // `!evaluator` branch right below.
-            const metadata: any = (() => {
-                try { return ctx.getService('metadata'); } catch { return null; }
+            const metadata = (() => {
+                try { return ctx.getService<IMetadataService>('metadata') ?? null; } catch { return null; }
             })();
-            const evaluator: any = (() => {
-                try { return ctx.getService('security.permissions'); } catch { return null; }
+            const evaluator = (() => {
+                try { return ctx.getService<PermissionEvaluatorSurface>('security.permissions') ?? null; }
+                catch { return null; }
             })();
             const bootstrap: any[] = (() => {
                 try { return ctx.getService<any[]>('security.bootstrapPermissionSets') ?? []; }
@@ -702,8 +768,9 @@ export function registerCurrentUserEndpoints(
             // DB loader: surfaces user-defined permission sets
             // (created via the admin UI as `sys_permission_set`
             // rows) that aren't in metadata or bootstrap.
-            const ql: any = (() => {
-                try { return ctx.getService('objectql'); } catch { return null; }
+            const ql = (() => {
+                try { return ctx.getService<IDataEngine & EngineRegistrySurface>('objectql') ?? null; }
+                catch { return null; }
             })();
             const dbLoader = ql
                 ? async (names: string[]) => {
@@ -763,7 +830,7 @@ export function registerCurrentUserEndpoints(
                 ...(execCtx.positions ?? []),
                 ...(execCtx.permissions ?? []),
             ];
-            let resolved: any[] = await evaluator
+            let resolved: ResolvedPermissionSetLike[] = await evaluator
                 .resolvePermissionSets(requested, metadata, bootstrap, dbLoader)
                 .catch(() => []);
             if (resolved.length === 0 && fallbackName) {
@@ -831,7 +898,7 @@ export function registerCurrentUserEndpoints(
             // here must never drop the whole response.
             try {
                 const allSchemas: ApiExposureSchemaLike[] = (() => {
-                    try { return (ql as any)?.registry?.getAllObjects?.() ?? []; }
+                    try { return ql?.registry?.getAllObjects?.() ?? []; }
                     catch { return []; }
                 })();
                 seedSuperUserRestrictedObjects(objects, allSchemas);
@@ -909,13 +976,17 @@ export function registerCurrentUserEndpoints(
         try {
             const byName = new Map<string, any>();
             try {
-                const registry: any = (ctx.getService('objectql') as any)?._registry;
+                // The PUBLIC accessor. This read used to reach ObjectQL's
+                // private `_registry` while `/auth/me/permissions` read the
+                // `registry` getter over the same field, on the same object,
+                // in the same file — visible only once both were typed.
+                const registry = ctx.getService<EngineRegistrySurface>('objectql')?.registry;
                 for (const app of registry?.getAllApps?.() ?? []) {
-                    if (app?.name) byName.set(String(app.name), app);
+                    if ((app as { name?: unknown })?.name) byName.set(String((app as { name: unknown }).name), app);
                 }
             } catch { /* registry unavailable — fall through to metadata */ }
             try {
-                const metadata: any = ctx.getService('metadata');
+                const metadata = ctx.getService<IMetadataService>('metadata');
                 for (const app of ((await metadata?.list?.('app')) ?? []) as any[]) {
                     if (app?.name && !byName.has(String(app.name))) byName.set(String(app.name), app);
                 }
@@ -929,10 +1000,10 @@ export function registerCurrentUserEndpoints(
             const tabs: Record<string, string> = { ...((execCtx as any).tabPermissions ?? {}) };
             let failOpen = true;
             try {
-                const evaluator: any = ctx.getService('security.permissions');
+                const evaluator = ctx.getService<PermissionEvaluatorSurface>('security.permissions');
                 failOpen = !evaluator;
                 if (evaluator) {
-                    const metadata: any = ctx.getService('metadata');
+                    const metadata = ctx.getService<IMetadataService>('metadata');
                     const bootstrap: any[] = (() => {
                         try { return ctx.getService<any[]>('security.bootstrapPermissionSets') ?? []; }
                         catch { return []; }
@@ -945,7 +1016,9 @@ export function registerCurrentUserEndpoints(
                         ...((execCtx as any).positions ?? []),
                         ...((execCtx as any).permissions ?? []),
                     ];
-                    const qlSvc: any = (() => { try { return ctx.getService('objectql'); } catch { return null; } })();
+                    const qlSvc = (() => {
+                        try { return ctx.getService<IDataEngine>('objectql') ?? null; } catch { return null; }
+                    })();
                     const dbLoader = qlSvc
                         ? async (names: string[]) => {
                             let rows: any;
@@ -968,7 +1041,7 @@ export function registerCurrentUserEndpoints(
                             }));
                         }
                         : undefined;
-                    let resolved: any[] = await evaluator
+                    let resolved: ResolvedPermissionSetLike[] = await evaluator
                         .resolvePermissionSets(requested, metadata, bootstrap, dbLoader)
                         .catch(() => []);
                     if (resolved.length === 0 && fallbackName) {

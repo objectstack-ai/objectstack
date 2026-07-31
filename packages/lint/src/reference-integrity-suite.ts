@@ -123,6 +123,17 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // action bodies, run by the same sandbox. Only the `ctx.api` write family
   // carries over — an action's `ctx.input` is its params bag, not a record
   // (see that module's ledger). Lazy on the same terms.
+  //
+  // The ONE member here that emits two rule ids. Besides resolving `ctx.api`
+  // writes against declared fields (`action-body-write-unknown-field`), it
+  // reports a `ctx.record` write that can reach nothing
+  // (`action-record-write-discarded`, #4345) — not a resolution question, so
+  // by the charter above it does not belong in the suite. It rides along
+  // anyway because it falls out of the SAME parse of the SAME source: a
+  // separate member would parse every action body twice to say two things
+  // about one walk, and hand-wiring it into the CLI instead is exactly the
+  // drift this suite exists to end (`validateReadonlyFlowWrites` is the
+  // standing proof — wired into `validate` and `compile`, never into `lint`).
   { name: 'validateActionBodyWrites', run: validateActionBodyWrites },
 ];
 

@@ -9,6 +9,9 @@ import {
   EngineDeleteOptions,
   EngineAggregateOptions,
   EngineCountOptions,
+  RPC_QUERY_ALIAS_SLOTS,
+  foldQueryAliasSlots,
+  type QueryAliasSlot,
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
@@ -89,6 +92,61 @@ const DISPATCHABLE_HOOK_EVENTS: ReadonlySet<string> = new Set([
   'beforeUpdate', 'afterUpdate',
   'beforeDelete', 'afterDelete',
 ]);
+
+/**
+ * [#4346] The alias slots the ENGINE option bags still admit, cut from the
+ * spec's own table (#3795) so the engine never re-declares a mapping.
+ *
+ * The deprecated `DataEngine{Query,Update,Delete,Count,Aggregate}Options`
+ * contracts declare `filter` on every read AND write method, but only `find`
+ * folded it — `findOne`/`count`/`update`/`delete`/`aggregate` passed the bag
+ * through with `where === undefined`, which every driver reads as "no
+ * predicate": a caller filtering with `{ filter }` silently matched EVERY row
+ * (an over-grant on the reads, an unbounded write on `update`/`delete`).
+ *
+ * `where` is the slot every method folds; `limit` additionally applies to the
+ * find-shaped bags, which declare `top` (OData) as its alias. The other four
+ * pairs in the table are RPC/wire spellings folded at parse by
+ * `RpcQueryOptionsSchema` / the protocol normalizer — their values need shape
+ * lowering (`sort` records, `populate` lists) that belongs to those layers, so
+ * the engine deliberately does not fold them.
+ */
+const ENGINE_WHERE_SLOTS: readonly QueryAliasSlot[] =
+  RPC_QUERY_ALIAS_SLOTS.filter((slot) => slot.canonical === 'where');
+const ENGINE_QUERY_SLOTS: readonly QueryAliasSlot[] =
+  RPC_QUERY_ALIAS_SLOTS.filter((slot) => slot.canonical === 'where' || slot.canonical === 'limit');
+
+/**
+ * Fold the deprecated alias spellings of an engine option bag into their
+ * canonical QueryAST keys, under the #3795/#4181 rule: an alias alone moves to
+ * the canonical key, redundant identical spellings collapse, DIFFERENT values
+ * for one slot are irreconcilable and throw (picking a winner IS the silent
+ * drop), and an explicit `null` alias is a withdrawal.
+ *
+ * Returns the SAME reference when no alias spelling is present (the common
+ * path allocates nothing — `withResolvedWhere` discipline); otherwise folds a
+ * shallow copy, because the bag belongs to the caller and may be reused (view
+ * metadata, flow node config).
+ */
+function foldEngineOptionAliases<T extends object | undefined>(
+  object: string,
+  operation: string,
+  bag: T,
+  slots: readonly QueryAliasSlot[],
+): T {
+  if (!bag) return bag;
+  if (!slots.some((slot) => slot.aliases.some((alias) => alias in bag))) return bag;
+  const folded: Record<string, unknown> = { ...bag };
+  foldQueryAliasSlots(folded, slots, (conflict) => {
+    throw new Error(
+      `Conflicting options on ${operation}('${object}'): ` +
+      `${conflict.spellings.map((s) => `'${s}'`).join(', ')} are spellings of the same ` +
+      `parameter (canonical '${conflict.canonical}') and were given different values. ` +
+      'Send exactly one.',
+    );
+  });
+  return folded as T;
+}
 
 interface FormulaPlanEntry { name: string; expression: Expression; }
 
@@ -2857,25 +2915,17 @@ export class ObjectQL implements IDataEngine {
 
   async find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
+    // Normalize the alias spellings (`filter`→`where`, `top`→`limit`) by the
+    // spec's slot table — the driver AST only understands the canonical keys,
+    // so an unfolded `{ filter }` would match ALL rows (silent over-grant —
+    // surfaced by ADR-0057's sharing/graph read path). Same fold, same
+    // conflict rule on every engine entry point (#4346).
+    query = foldEngineOptionAliases(object, 'find', query, ENGINE_QUERY_SLOTS);
     this.logger.debug('Find operation starting', { object, query });
     const driver = this.getDriver(object);
     const ast: QueryAST = { object, ...query };
     // Remove context from the AST — it's not a driver concern
     delete (ast as any).context;
-    // Normalize the `filter` alias → `where`. The DataEngine contract
-    // (`spec/data/data-engine.zod.ts`) exposes both, but the driver AST only
-    // understands `where`; an internal caller passing `{ filter }` would
-    // otherwise match ALL rows (silent over-grant — surfaced by ADR-0057's
-    // sharing/graph read path). `where` wins when both are present.
-    if ((ast as any).filter != null && ast.where == null) {
-      ast.where = (ast as any).filter;
-    }
-    delete (ast as any).filter;
-    // Normalize OData `top` alias → standard `limit`
-    if ((ast as any).top != null && ast.limit == null) {
-      ast.limit = (ast as any).top;
-    }
-    delete (ast as any).top;
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
     // names and inject their dependencies, so the driver returns the raw
@@ -3002,12 +3052,16 @@ export class ObjectQL implements IDataEngine {
 
   async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any> {
     objectName = this.resolveObjectName(objectName);
+    // Same alias fold as find() (#4346). Without it, `findOne({ filter })`
+    // matched the first row of the WHOLE table rather than the predicate.
+    // `top` folds into `limit` here too, but findOne is single-row by
+    // contract, so the literal `limit: 1` below wins over both spellings.
+    query = foldEngineOptionAliases(objectName, 'findOne', query, ENGINE_QUERY_SLOTS);
     this.logger.debug('FindOne operation', { objectName });
     const driver = this.getDriver(objectName);
     const ast: QueryAST = { object: objectName, ...query, limit: 1 };
-    // Remove context and top alias from the AST
+    // Remove context from the AST — it's not a driver concern
     delete (ast as any).context;
-    delete (ast as any).top;
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
@@ -3370,6 +3424,12 @@ export class ObjectQL implements IDataEngine {
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
      const driver = this.getDriver(object);
+
+     // Fold the `filter` alias into `where` FIRST (#4346): everything below —
+     // token resolution, the by-id fast path, the #2982 AST seeding — reads
+     // `options.where` only, so an unfolded `{ filter }` left the AST with no
+     // predicate at all and a `multi: true` update rewrote EVERY row.
+     options = foldEngineOptionAliases(object, 'update', options, ENGINE_WHERE_SLOTS);
 
      // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
      // The read path resolves them; without the same call here the SAME filter
@@ -3764,6 +3824,11 @@ export class ObjectQL implements IDataEngine {
     this.assertWriteAllowed(object, 'delete');
     const driver = this.getDriver(object);
 
+    // Fold the `filter` alias into `where` first — same reasoning as update()
+    // above (#4346): unfolded, a `multi: true` delete with `{ filter }` had no
+    // predicate on its AST and emptied the table.
+    options = foldEngineOptionAliases(object, 'delete', options, ENGINE_WHERE_SLOTS);
+
     // Expand `{filter-placeholder}` values before the id is extracted — same
     // reasoning as update() above (#3810).
     options = this.withResolvedWhere(options);
@@ -3892,6 +3957,9 @@ export class ObjectQL implements IDataEngine {
 
   async count(object: string, query?: EngineCountOptions, options?: EngineReadOptions): Promise<number> {
      object = this.resolveObjectName(object);
+     // Fold the `filter` alias into `where` (#4346) — the AST below reads
+     // `query.where` only, so an unfolded `{ filter }` counted the whole table.
+     query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
      const driver = this.getDriver(object);
 
      // The AST must ride on the opCtx so the security/sharing middlewares can
@@ -3969,6 +4037,9 @@ export class ObjectQL implements IDataEngine {
 
   async aggregate(object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {
       object = this.resolveObjectName(object);
+      // Fold the `filter` alias into `where` (#4346) — the AST below reads
+      // `query.where` only, so an unfolded `{ filter }` aggregated every row.
+      query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
       this.rejectCredentialAggregation(object, query);
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
@@ -4412,7 +4483,7 @@ export class ObjectQL implements IDataEngine {
    * Usage:
    *   const ctx = engine.createContext({ userId: '...', tenantId: '...' });
    *   const users = ctx.object('user');
-   *   await users.find({ filter: { status: 'active' } });
+   *   await users.find({ where: { status: 'active' } });
    */
   createContext(ctx: Partial<ExecutionContext>): ScopedContext {
     return new ScopedContext(

@@ -25,37 +25,61 @@
 // partition-tested against the shared ledger so a pattern added to the hook
 // side later cannot be silently assumed to apply here.
 //
-// `ctx.record` is likewise NOT a write surface and is deliberately unchecked.
-// The runner hands the body a plain snapshot (`record:
-// unwrapProxyToPlain(actionCtx?.record)`) and `boundActionHandler` returns
-// `result.value` without writing anything back — no `applyMutationsToInput`,
-// which is the hook path's alone. So `ctx.record.x = …` is discarded for
-// DECLARED and undeclared fields alike. That is a different defect from "the
-// unknown column silently vanishes", and flagging only its undeclared half
-// would imply the declared half persists — precisely the false completion this
-// rule family exists to stop manufacturing. Not this rule's business.
+// So the unknown-field check keeps exactly one shape: `api-crud-literal`
+// (`ctx.api.object('<literal>').insert|.create|.update|.updateById({…})`). That
+// is the one path through which an action body actually persists anything, it
+// addresses its target object explicitly (so the action's own `objectName`
+// binding is irrelevant to the check), and the hook rule's extractor already
+// recognizes it verbatim.
 //
-// What survives is `api-crud-literal`: `ctx.api.object('<literal>')
-// .insert|.create|.update|.updateById({…})`. That is the one path through
-// which an action body actually persists anything, it addresses its target
-// object explicitly (so the action's own `objectName` binding is irrelevant to
-// the check), and the hook rule's extractor already recognizes it verbatim.
+// ─── The second finding: a record write that reaches nothing (#4345) ────────
 //
-// Everything else keeps the hook rule's posture exactly: advisory `warning`,
-// silent bail on anything statically unknowable (dynamic object names,
-// non-literal payloads, cross-package targets), did-you-mean on a miss.
+// `ctx.record` is not a write surface either, but it fails DIFFERENTLY, so it
+// gets its own rule id rather than being folded in or dropped. The runner hands
+// the body a plain snapshot (`record: unwrapProxyToPlain(actionCtx?.record)`)
+// and `boundActionHandler` returns `result.value` without writing anything back
+// — no `applyMutationsToInput`, which is the hook path's alone. So
+// `ctx.record.x = …` is discarded for DECLARED and undeclared fields alike.
+// Reporting that through the unknown-field rule would be actively wrong:
+// flagging only the undeclared half implies the declared half persists —
+// precisely the false completion this rule family exists to stop manufacturing.
 //
-// Wired via REFERENCE_INTEGRITY_RULES, so `os validate`, `os lint` and
-// `os compile` report it at once. Lazy like its sibling: an action body that
-// never mentions `api` cannot match the one applicable pattern and never pays
-// the TypeScript load.
+// It is NOT enough to flag every `ctx.record.<field> = …`, because mutating the
+// snapshot to build a payload is a legitimate idiom:
+//
+//   ctx.record.stage = 'won';
+//   await ctx.api.object('crm_deal').update(ctx.record);   // the write is LIVE
+//
+// So the finding requires the write to be PROVABLY dead: reported only when
+// `ctx.record` never escapes as a value anywhere in the body (see
+// `ctxRecordEscapes`). Property reads (`ctx.record.id`) do not rescue a write
+// and do not suppress the finding; handing the object to anything — an
+// argument, an assignment RHS, a spread, a return — does. Aliasing
+// (`const r = ctx.record`) reads as an escape, which is the safe direction.
+//
+// ─── Shared posture ─────────────────────────────────────────────────────────
+//
+// Both findings keep the hook rule's posture: advisory `warning`, silent bail
+// on anything statically unknowable (dynamic object names, non-literal
+// payloads, cross-package targets), did-you-mean on a miss.
+//
+// ONE suite entry, TWO rule ids. Both findings fall out of one parse of one
+// source on one surface, so splitting them into two `REFERENCE_INTEGRITY_RULES`
+// members would parse every action body twice to say two things about the same
+// walk; hand-wiring the second into the CLI instead is the drift that suite
+// exists to end — `validateReadonlyFlowWrites` is the standing proof, wired
+// into `validate` and `compile` but never into `lint`.
+//
+// Lazy like its sibling: a body mentioning neither `api` nor `record` cannot
+// match either shape and never pays the TypeScript load.
 
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 import {
-  extractHookBodyWrites,
+  extractHookBodyWriteSet,
   indexObjectFields,
   IMPLICIT_FIELDS,
   HOOK_BODY_WRITE_PATTERNS,
+  type BodyWritePatternExclusion,
   type HookBodyWritePattern,
 } from './validate-hook-body-writes.js';
 
@@ -73,28 +97,26 @@ export interface ActionBodyWriteFinding {
   hint: string;
 }
 
-// Rule id (registry entry).
+// Rule ids (registry entries). Two, from one walk — see the header.
 export const ACTION_BODY_WRITE_UNKNOWN_FIELD = 'action-body-write-unknown-field';
+export const ACTION_RECORD_WRITE_DISCARDED = 'action-record-write-discarded';
 
 // ─── The applicable-pattern ledger ──────────────────────────────────────────
 //
 // Not a second pattern list: a declared PARTITION of the shared
-// `HOOK_BODY_WRITE_PATTERNS` into the shapes that mean the same thing in an
-// action body and the shapes that do not. Both halves are data, and
+// `HOOK_BODY_WRITE_PATTERNS` into the shapes each of this module's two checks
+// consumes, plus the shapes neither does. Every part is data, and
 // validate-action-body-writes.test.ts asserts they cover the shared ledger
-// exactly — so adding a fourth pattern on the hook side FAILS this rule's test
-// until someone decides which half it belongs in. Silence is not a decision.
+// exactly — so a pattern added on the hook side FAILS this rule's test until
+// someone decides which part it belongs in. Silence is not a decision.
+// (`record-property-assign` landing here is that ratchet's first live catch.)
 
-/** A shared-ledger pattern that does NOT apply to action bodies, and why. */
-export interface ActionBodyWriteExclusion {
-  /** The {@link HOOK_BODY_WRITE_PATTERNS} entry id being excluded. */
-  readonly id: string;
-  /** Why the shape does not mean the same thing in an action body. */
-  readonly reason: string;
-}
+/** @deprecated alias — the exclusion shape is shared with the hook rule. */
+export type ActionBodyWriteExclusion = BodyWritePatternExclusion;
 
 /**
- * Pattern ids carried over from {@link HOOK_BODY_WRITE_PATTERNS} verbatim.
+ * Ledger shapes the UNKNOWN-FIELD check consumes — resolved against the named
+ * object's declared fields.
  *
  * Include-list, not exclude-list, on purpose: an unclassified new pattern is
  * then inert here (a missed finding) rather than live against a context it was
@@ -103,8 +125,14 @@ export interface ActionBodyWriteExclusion {
  */
 export const ACTION_BODY_WRITE_PATTERN_IDS: readonly string[] = ['api-crud-literal'];
 
-/** Shared-ledger patterns deliberately left out, each with its reason. */
-export const ACTION_BODY_WRITE_EXCLUSIONS: readonly ActionBodyWriteExclusion[] = [
+/**
+ * Ledger shapes the DISCARDED-RECORD-WRITE check consumes — never resolved
+ * against anything, because no field name can make a discarded write land.
+ */
+export const ACTION_RECORD_WRITE_PATTERN_IDS: readonly string[] = ['record-property-assign'];
+
+/** Shared-ledger patterns neither check consumes, each with its reason. */
+export const ACTION_BODY_WRITE_EXCLUSIONS: readonly BodyWritePatternExclusion[] = [
   {
     id: 'input-property-assign',
     reason:
@@ -118,13 +146,18 @@ export const ACTION_BODY_WRITE_EXCLUSIONS: readonly ActionBodyWriteExclusion[] =
 ];
 
 /**
- * The subset of the shared ledger this rule actually sees — the published
- * answer to "which writes does the action lint check?".
+ * The subset of the shared ledger the unknown-field check sees — the published
+ * answer to "which writes does the action lint resolve against fields?".
  */
 export const ACTION_BODY_WRITE_PATTERNS: readonly HookBodyWritePattern[] =
   HOOK_BODY_WRITE_PATTERNS.filter((p) => ACTION_BODY_WRITE_PATTERN_IDS.includes(p.id));
 
+/** The subset the discarded-record-write check sees. */
+export const ACTION_RECORD_WRITE_PATTERNS: readonly HookBodyWritePattern[] =
+  HOOK_BODY_WRITE_PATTERNS.filter((p) => ACTION_RECORD_WRITE_PATTERN_IDS.includes(p.id));
+
 const APPLICABLE_IDS: ReadonlySet<string> = new Set(ACTION_BODY_WRITE_PATTERN_IDS);
+const RECORD_WRITE_IDS: ReadonlySet<string> = new Set(ACTION_RECORD_WRITE_PATTERN_IDS);
 
 type AnyRec = Record<string, unknown>;
 
@@ -224,22 +257,56 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
   const sites = collectActionBodies(stack);
   if (sites.length === 0) return findings;
 
-  // Built lazily: a stack whose action bodies never touch `ctx.api` never pays it.
+  // Built lazily: only the unknown-field check needs it, so a stack whose
+  // action bodies never reach `ctx.api` never pays it.
   let objectFields: Map<string, Set<string>> | null = null;
 
   for (const site of sites) {
-    // Cheap prefilter, narrower than the extractor's own: every applicable
-    // pattern is rooted at `ctx.api`, so a body without the `api` identifier
-    // cannot match and must not pay the ~9 MB TypeScript load. Pinned by the
-    // ledger test — an applicable pattern whose example fails this filter
-    // fails there, rather than going quietly unchecked here.
-    if (!/\bapi\b/.test(site.source)) continue;
+    // Cheap prefilter, narrower than the extractor's own: every consumed
+    // pattern is rooted at `ctx.api` or `ctx.record`, so a body carrying
+    // neither identifier cannot match and must not pay the ~9 MB TypeScript
+    // load. Pinned by the ledger test — a consumed pattern whose example fails
+    // this filter fails there, rather than going quietly unchecked here.
+    if (!/\bapi\b/.test(site.source) && !/\brecord\b/.test(site.source)) continue;
 
-    const writes = extractHookBodyWrites(site.source).filter((w) => APPLICABLE_IDS.has(w.patternId));
-    if (writes.length === 0) continue;
+    // ONE parse per body, both checks read from it.
+    const { writes: allWrites, ctxRecordEscapes } = extractHookBodyWriteSet(site.source);
+    const writes = allWrites.filter((w) => APPLICABLE_IDS.has(w.patternId));
+    const recordWrites = allWrites.filter((w) => RECORD_WRITE_IDS.has(w.patternId));
+    if (writes.length === 0 && recordWrites.length === 0) continue;
 
-    objectFields ??= indexObjectFields(stack);
     const where = `action "${site.name}" › body`;
+
+    // ── Discarded record writes (#4345) ──────────────────────────────────
+    // Reported only when the write is PROVABLY dead: `ctx.record` never
+    // leaves the body as a value, so nothing can persist the mutation. When
+    // it does escape, the snapshot may be a payload under construction, and
+    // every one of its writes is skipped — a missed finding, never a false one.
+    if (recordWrites.length > 0 && !ctxRecordEscapes) {
+      const reportedFields = new Set<string>();
+      for (const w of recordWrites) {
+        if (reportedFields.has(w.field)) continue;
+        reportedFields.add(w.field);
+        findings.push({
+          severity: 'warning',
+          rule: ACTION_RECORD_WRITE_DISCARDED,
+          where,
+          path: site.path,
+          message:
+            `body assigns ctx.record.${w.field}, but an action's ctx.record is a plain snapshot the runtime ` +
+            `never writes back — the action returns success and the assignment is discarded, whether or not ` +
+            `'${w.field}' is a declared field (#4345).`,
+          hint:
+            `To persist it, write through the API: ctx.api.object('<object>').updateById(ctx.recordId, ` +
+            `{ ${w.field}: … }). Reported only because ctx.record is never passed anywhere in this body — ` +
+            `mutating the snapshot and then handing it to an API write is a live payload and is not flagged. ` +
+            `This warning never blocks a build.`,
+        });
+      }
+    }
+
+    if (writes.length === 0) continue;
+    objectFields ??= indexObjectFields(stack);
     const reported = new Set<string>();
 
     for (const w of writes) {
@@ -280,7 +347,7 @@ function fixHint(field: string, declared: string[]): string {
   return (
     (suggestion ? `${suggestion} ` : '') +
     `Fix the field name, or declare '${field}' on the object. Only the literal write patterns in ` +
-    `ACTION_BODY_WRITE_PATTERNS are checked — an action's ctx.input is its params bag and ctx.record is a ` +
-    `discarded snapshot, so neither is a record-write surface — and this warning never blocks a build.`
+    `ACTION_BODY_WRITE_PATTERNS are checked — an action's ctx.input is its params bag, so it is not a ` +
+    `record-write surface and is never resolved against fields — and this warning never blocks a build.`
   );
 }

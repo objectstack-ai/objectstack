@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { I18nServicePlugin } from './i18n-service-plugin';
+import { I18nServicePlugin } from './i18n-service-plugin.js';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 
 // ---------------------------------------------------------------------------

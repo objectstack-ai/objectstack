@@ -463,7 +463,7 @@ describe('DataEngineFindRequestSchema', () => {
     expect(request.query?.where).toBeDefined();
   });
 
-  it('folds legacy params into their canonical keys and drops the aliases (#3795)', () => {
+  it('folds legacy params into their canonical keys and drops the aliases (#3795, #4346)', () => {
     const request = DataEngineFindRequestSchema.parse({
       method: 'find',
       object: 'account',
@@ -473,6 +473,7 @@ describe('DataEngineFindRequestSchema', () => {
         sort: [{ field: 'name', order: 'asc' }],
         skip: 10,
         populate: ['owner'],
+        top: 5,
       },
     });
 
@@ -483,7 +484,8 @@ describe('DataEngineFindRequestSchema', () => {
     expect(request.query?.orderBy).toEqual([{ field: 'name', order: 'asc' }]);
     expect(request.query?.offset).toBe(10);
     expect(request.query?.expand).toEqual({ owner: { object: 'owner' } });
-    for (const alias of ['filter', 'select', 'sort', 'skip', 'populate']) {
+    expect(request.query?.limit).toBe(5);
+    for (const alias of ['filter', 'select', 'sort', 'skip', 'populate', 'top']) {
       expect(request.query && alias in request.query).toBe(false);
     }
   });
@@ -527,13 +529,14 @@ describe('DataEngineFindRequestSchema', () => {
     }
   });
 
-  it('refuses a conflicting value on every alias pair (#3795)', () => {
+  it('refuses a conflicting value on every alias pair (#3795, #4346)', () => {
     const cases: Array<Record<string, unknown>> = [
       { filter: { a: 1 }, where: { b: 2 } },
       { select: ['a'], fields: ['b'] },
       { sort: [{ field: 'a', order: 'asc' }], orderBy: [{ field: 'b', order: 'asc' }] },
       { skip: 1, offset: 2 },
       { populate: ['a'], expand: { b: { object: 'b' } } },
+      { top: 1, limit: 3 },
     ];
     for (const query of cases) {
       const result = DataEngineFindRequestSchema.safeParse({ method: 'find', object: 'account', query });

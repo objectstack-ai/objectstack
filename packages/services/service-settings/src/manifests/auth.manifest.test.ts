@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
-import { authSettingsManifest } from './auth.manifest';
+import { authSettingsManifest } from './auth.manifest.js';
 
 describe('authSettingsManifest', () => {
   it('parses against SettingsManifestSchema', () => {

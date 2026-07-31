@@ -18,19 +18,16 @@
       "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1330-1331 (applyFilters); every driver's find() applies it"
     },
     "search": {
-      "note": "Container. `query` + `fields` are the executed surface (ADR-0061); the six engine-affordance flags (fuzzy/operator/boost/minScore/language/highlight) resolve `experimental` from their `[EXPERIMENTAL — not enforced]` describe markers (#4286 step 1 — declared search-engine affordances no executor receives).",
-      "children": {
-        "query": {
-          "status": "live",
-          "verifiedAt": "2026-07-31",
-          "evidence": "packages/objectql/src/engine.ts:2860-2882 (ADR-0061: expanded into a server-resolved cross-field $or via expandSearchToFilter)"
-        },
-        "fields": {
-          "status": "live",
-          "verifiedAt": "2026-07-31",
-          "evidence": "packages/objectql/src/engine.ts:2867-2870 (scopes the ADR-0061 expansion to the named columns)"
-        }
-      }
+      "status": "live",
+      "verifiedAt": "2026-07-31",
+      "note": "Union since #3899's search-contract repair: the canonical bare query STRING (ADR-0061 D1 — what every surface sends and the dogfood HTTP proof pins) | the structured FullTextSearch form. A LEAF here, no longer a container: the walker does not descend into union members, so the object form's six engine-affordance flags (fuzzy/operator/boost/minScore/language/highlight) are audited where they are declared — FullTextSearchSchema's own `[EXPERIMENTAL — not enforced]` describe markers (#4286 step 1). The previously-listed children `query`/`fields` remain live at the same executor site.",
+      "evidence": "packages/objectql/src/engine.ts:2885-2911 (ADR-0061: string or object expanded into a server-resolved cross-field $or via expandSearchToFilter; object-form `fields` scopes the expansion); proof showcase-search.dogfood.test.ts"
+    },
+    "searchFields": {
+      "status": "live",
+      "verifiedAt": "2026-07-31",
+      "note": "Formally declared by #3899 (ADR-0061 P1, 'formalize $searchFields'): the per-query narrowing override the executor has served since the ADR landed — server-intersected with the object's allowed searchable set, can only narrow, never widen. The schema-side declaration caught up with the executor when #3899's entry validation started rejecting bodies the schema did not describe.",
+      "evidence": "packages/objectql/src/engine.ts:2893-2898 (requestedFields hand-off) → packages/objectql/src/search-filter.ts resolveSearchFields (intersection with the allowed set); proof showcase-search.dogfood.test.ts + search-conformance.ledger.ts row search-fields-override"
     },
     "orderBy": {
       "status": "live",

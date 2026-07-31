@@ -90,6 +90,52 @@ describe('Data Engine Contract', () => {
       expect(count).toBe(2);
     });
 
+    it('takes the execution context in a trailing options argument on every read', async () => {
+      // [#4251] The read methods' 3rd argument. It is what ObjectQL has taken
+      // since reads and writes were unified on "context goes in the trailing
+      // options" — passing it as the 3rd arg to `insert` was correct while the
+      // same object as the 3rd arg to `find` was SILENTLY DROPPED, and an
+      // intended `isSystem` bypass just vanished. The contract declared only
+      // `query.context`, so callers reaching the trailing channel had to erase
+      // the lookup to `any` to do it. Pinned here in the position that matters:
+      // at the CALL, which is where the old contract rejected it.
+      const seen: Array<{ method: string; isSystem?: boolean }> = [];
+      const engine: IDataEngine = {
+        find: async (_obj, _query, options) => {
+          seen.push({ method: 'find', isSystem: options?.context?.isSystem });
+          return [];
+        },
+        findOne: async (_obj, _query, options) => {
+          seen.push({ method: 'findOne', isSystem: options?.context?.isSystem });
+          return null;
+        },
+        insert: async (_obj, data) => data,
+        update: async (_obj, data) => data,
+        delete: async () => ({}),
+        count: async (_obj, _query, options) => {
+          seen.push({ method: 'count', isSystem: options?.context?.isSystem });
+          return 0;
+        },
+        aggregate: async (_obj, _query, options) => {
+          seen.push({ method: 'aggregate', isSystem: options?.context?.isSystem });
+          return [];
+        },
+      };
+
+      const sys = { context: { isSystem: true } };
+      await engine.find('sys_permission_set', { where: {} }, sys);
+      await engine.findOne('sys_user', { where: {} }, sys);
+      await engine.count('sys_account', { where: {} }, sys);
+      await engine.aggregate('sys_user', {} as any, sys);
+
+      expect(seen).toEqual([
+        { method: 'find', isSystem: true },
+        { method: 'findOne', isSystem: true },
+        { method: 'count', isSystem: true },
+        { method: 'aggregate', isSystem: true },
+      ]);
+    });
+
     it('should support optional vectorFind', async () => {
       const engine: IDataEngine = {
         find: async () => [],

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { DbQueueAdapter } from './db-queue-adapter';
+import { DbQueueAdapter } from './db-queue-adapter.js';
 
 /**
  * In-memory engine that mimics objectql's `where:`-based find and
