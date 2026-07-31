@@ -141,37 +141,33 @@ export interface MetadataPluginOptions {
     organizationId?: string;
     /**
      * Environment ID used by local artifact envelopes and metadata-scoped
-     * consumers, and REQUIRED by `artifactSource.mode: 'artifact-api'` — it
-     * addresses the control-plane endpoint. (The v5.0 rename retired the
-     * "project ID" wording this comment used to carry; see ADR-0006.)
+     * consumers. (The v5.0 rename retired the "project ID" wording this
+     * comment used to carry; see ADR-0006.)
      */
     environmentId?: string;
     /**
-     * When set, MetadataPlugin loads metadata from an artifact instead of scanning
-     * the filesystem. **Both modes are implemented** and are dispatched from all
-     * three bootstrap modes (`eager` / `lazy` / `artifact-only`) — see `start()`.
+     * When set, MetadataPlugin loads metadata from a compiled artifact instead
+     * of scanning the filesystem, honored by all three bootstrap modes
+     * (`eager` / `lazy` / `artifact-only`) — see `start()`.
      *
-     * - `local-file` — read `path` (a filesystem path, or an `http(s)://` URL
-     *   fetched verbatim). The dev/`os serve` path; also the one mode the
-     *   artifact-file HMR watcher ({@link artifactWatch}) applies to.
-     * - `artifact-api` — pull the published artifact from the cloud control
-     *   plane (`GET /api/v1/cloud/environments/:environmentId/artifact`, the
-     *   envelope declared by `EnvironmentArtifactSchema`). REQUIRES
-     *   {@link environmentId}; `start()` throws when it is missing rather than
-     *   fetching a URL it cannot address. `url` is the control-plane base URL
-     *   (the canonical path is appended) or an already-resolved artifact
-     *   endpoint — see `_loadFromArtifactApi`. `token` becomes a Bearer header,
-     *   `commitId` pins a published revision, and both modes honor
-     *   `fetchTimeoutMs` / `OS_ARTIFACT_FETCH_TIMEOUT_MS`.
+     * `path` is a filesystem path, or an `http(s)://` URL fetched verbatim —
+     * the control plane's public artifact route
+     * (`/pub/v1/environments/:id/artifact[?commit=…]`) serves exactly such
+     * URLs, so a sealed runtime can boot straight off a published revision.
+     * Remote reads honor `fetchTimeoutMs` / `OS_ARTIFACT_FETCH_TIMEOUT_MS`;
+     * the artifact-file HMR watcher ({@link artifactWatch}) applies to
+     * non-URL paths only.
      *
-     * Keep this describing what `start()` actually does: it used to call
-     * `artifact-api` "reserved for M3/M4" long after the loader and all three
-     * dispatch sites shipped, which read as "this mode is inert" to callers and
-     * propagated into the docs (#4246).
+     * `local-file` is the only mode. A second `artifact-api` mode (a
+     * Bearer-authenticated control-plane pull) existed here through v17 with
+     * zero consumers in any repo — the cloud runtime uses its own
+     * `ArtifactApiClient`, and package distribution into a running OSS
+     * instance goes through `@objectstack/cloud-connection` — and was removed
+     * when #4246 forced the declared-vs-enforced question. `start()` rejects
+     * an unknown mode loudly rather than silently scanning the filesystem
+     * instead.
      */
-    artifactSource?:
-        | { mode: 'local-file'; path: string; fetchTimeoutMs?: number }
-        | { mode: 'artifact-api'; url: string; token?: string; commitId?: string; fetchTimeoutMs?: number };
+    artifactSource?: { mode: 'local-file'; path: string; fetchTimeoutMs?: number };
     /**
      * Register the `sys_metadata` + `sys_metadata_history` storage objects
      * on this kernel. Default `true` for backward compatibility.
@@ -305,15 +301,33 @@ export class MetadataPlugin implements Plugin {
             artifactSource: src?.mode ?? 'none',
         });
 
+        // Reject a non-`local-file` source before choosing any load path. The
+        // union is single-member so TypeScript callers can't get here, but JS
+        // callers and config plumbed through `any` can — and the fall-through
+        // below would otherwise treat "unsupported source" as "no source"
+        // (eager would silently scan the filesystem instead of loading the
+        // artifact the caller named). The removed `artifact-api` mode gets a
+        // pointed migration message (#4246).
+        if (src && (src as { mode: string }).mode !== 'local-file') {
+            const bad = (src as { mode: string }).mode;
+            throw new Error(
+                `[MetadataPlugin] artifactSource.mode '${bad}' is not supported`
+                + (bad === 'artifact-api'
+                    ? " — the 'artifact-api' source was removed (#4246). Load the same artifact with"
+                      + " { mode: 'local-file', path: '<http(s) URL>' } (e.g. the control plane's"
+                      + " /pub/v1/environments/:id/artifact route), or install packages into a running"
+                      + ' runtime via @objectstack/cloud-connection.'
+                    : ". The only artifact source is { mode: 'local-file', path }."),
+            );
+        }
+
         if (mode === 'artifact-only') {
             // Sealed-runtime mode: ONLY load from a pre-compiled artifact. Never
             // touch the filesystem. Required for Edge / serverless / read-only
             // production deployments where the running process must not depend
             // on local source files.
-            if (src?.mode === 'local-file') {
+            if (src) {
                 await this._loadFromLocalFile(ctx, src.path, src.fetchTimeoutMs);
-            } else if (src?.mode === 'artifact-api') {
-                await this._loadFromArtifactApi(ctx, src);
             } else {
                 throw new Error('[MetadataPlugin] bootstrap=artifact-only requires options.artifactSource to be set');
             }
@@ -323,19 +337,15 @@ export class MetadataPlugin implements Plugin {
             // the DatabaseLoader read-through cache and any registered loaders.
             // An artifact source, if present, is still honored so projects can
             // pin a known set of metadata at boot without paying the FS scan.
-            if (src?.mode === 'local-file') {
+            if (src) {
                 await this._loadFromLocalFile(ctx, src.path, src.fetchTimeoutMs, { optional: true });
-            } else if (src?.mode === 'artifact-api') {
-                await this._loadFromArtifactApi(ctx, src);
             } else {
                 ctx.logger.info('[MetadataPlugin] lazy bootstrap — skipping filesystem priming; metadata loads on demand');
             }
         } else {
             // 'eager' (default): preserve historical behavior.
-            if (src?.mode === 'local-file') {
+            if (src) {
                 await this._loadFromLocalFile(ctx, src.path, src.fetchTimeoutMs, { optional: true });
-            } else if (src?.mode === 'artifact-api') {
-                await this._loadFromArtifactApi(ctx, src);
             } else {
                 await this._loadFromFileSystem(ctx);
             }
@@ -510,7 +520,7 @@ export class MetadataPlugin implements Plugin {
     /**
      * Fetch JSON content from a URL with configurable timeout.
      */
-    private async _fetchJson(url: string, fetchTimeoutMs?: number, token?: string): Promise<unknown> {
+    private async _fetchJson(url: string, fetchTimeoutMs?: number): Promise<unknown> {
         const envTimeout = Number(process.env.OS_ARTIFACT_FETCH_TIMEOUT_MS);
         const timeoutMs = fetchTimeoutMs
             ?? (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : undefined)
@@ -519,7 +529,6 @@ export class MetadataPlugin implements Plugin {
         const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
         try {
             const headers: Record<string, string> = { Accept: 'application/json, */*;q=0.5' };
-            if (token) headers.Authorization = `Bearer ${token}`;
             const res = await fetch(url, { redirect: 'follow', signal: controller.signal, headers });
             if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
             const content = await res.text();
@@ -738,58 +747,6 @@ export class MetadataPlugin implements Plugin {
         }
 
         await this._parseAndRegisterArtifact(ctx, raw, filePath);
-    }
-
-    /**
-     * Load metadata from the cloud control plane's artifact endpoint. Shipped
-     * and reachable from every bootstrap mode — see `MetadataPluginOptions.
-     * artifactSource` for the option contract and #4246 for why that doc
-     * comment used to claim otherwise.
-     *
-     * `src.url` accepts two forms, distinguished deterministically by whether
-     * the path already names an artifact endpoint:
-     *  - **control-plane base** (`https://cloud.example.com`) — the canonical
-     *    `/api/v1/cloud/environments/:environmentId/artifact` path is appended.
-     *  - **already-resolved endpoint** (any URL whose path ends in `/artifact`)
-     *    — used verbatim, so the `unlisted`-visibility public route
-     *    (`/pub/v1/environments/:id/artifact`) is reachable too.
-     */
-    private async _loadFromArtifactApi(
-        ctx: PluginContext,
-        src: { url: string; token?: string; commitId?: string; fetchTimeoutMs?: number },
-    ): Promise<void> {
-        const environmentId = this.options.environmentId;
-        if (!environmentId) {
-            throw new Error('[MetadataPlugin] artifact-api source requires options.environmentId to be set');
-        }
-
-        // Build the artifact URL:
-        //   ${url}/api/v1/cloud/environments/${environmentId}/artifact[?commit=${commitId}]
-        let artifactUrl = src.url.replace(/\/+$/, '');
-        // A URL that already names an artifact endpoint is used as-is; anything
-        // else is a control-plane base and gets the canonical path appended.
-        // This guard used to test for `/api/v{n}/cloud/projects/` — a segment the
-        // v5.0 `project → environment` rename deleted, leaving it unmatchable. So
-        // every already-resolved URL silently had the canonical path appended a
-        // SECOND time (`…/artifact/api/v1/cloud/environments/…/artifact`) and
-        // 404'd: half of this option's documented input shape was dead (#4246).
-        if (!/\/artifact(?:$|\?)/i.test(artifactUrl)) {
-            artifactUrl = `${artifactUrl}/api/v1/cloud/environments/${environmentId}/artifact`;
-        }
-        if (src.commitId) {
-            artifactUrl += `${artifactUrl.includes('?') ? '&' : '?'}commit=${encodeURIComponent(src.commitId)}`;
-        }
-
-        ctx.logger.info('[MetadataPlugin] Loading metadata from artifact API', { url: artifactUrl });
-
-        let raw: unknown;
-        try {
-            raw = await this._fetchJson(artifactUrl, src.fetchTimeoutMs, src.token);
-        } catch (e: any) {
-            throw new Error(`[MetadataPlugin] Cannot load artifact from API "${artifactUrl}": ${e.message}`);
-        }
-
-        await this._parseAndRegisterArtifact(ctx, raw, artifactUrl);
     }
 
     private async _loadFromFileSystem(ctx: PluginContext): Promise<void> {

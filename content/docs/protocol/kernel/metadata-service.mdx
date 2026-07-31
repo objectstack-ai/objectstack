@@ -187,7 +187,7 @@ Four orthogonal levers shape how `MetadataManager` and `MetadataPlugin` behave a
 | :--- | :--- | :--- |
 | `eager` (default) | Local dev, traditional servers | Scans filesystem (or hydrates from `artifactSource`) at boot. |
 | `lazy` | Cold-start sensitive runtimes, on-demand workloads | Skips the FS prime; reads flow through registered loaders (incl. DatabaseLoader cache). Honors `artifactSource` when set. |
-| `artifact-only` | Edge / serverless / read-only production | Refuses to touch the filesystem. Requires `artifactSource` (`mode: 'local-file'` or `'artifact-api'`). |
+| `artifact-only` | Edge / serverless / read-only production | Refuses to touch the filesystem. Requires `artifactSource` (`mode: 'local-file'`; `path` may be an `http(s)` URL). |
 
 ```typescript
 new MetadataPlugin({
@@ -196,34 +196,36 @@ new MetadataPlugin({
 });
 ```
 
-#### Artifact sources
+#### Artifact source
 
-Both `artifactSource` modes are implemented, and every bootstrap mode above
-dispatches to them:
-
-| Mode | Reads from | Notes |
-| :--- | :--- | :--- |
-| `local-file` | `path` — a filesystem path, or an `http(s)` URL fetched verbatim | The `os dev` / `os serve` path. Only this mode gets the artifact-file HMR watcher (`artifactWatch`). Outside `artifact-only`, an absent local file is "nothing compiled yet", not a fault. |
-| `artifact-api` | The control plane's `GET /api/v1/cloud/environments/:environmentId/artifact` | Requires `environmentId` on the plugin options; `start()` throws when it is missing. `token` is sent as `Authorization: Bearer`, `commitId` pins a published revision via `?commit=`. |
+`artifactSource: { mode: 'local-file', path, fetchTimeoutMs? }` is the single
+artifact source, honored by every bootstrap mode above. `path` is a filesystem
+path or an `http(s)` URL fetched verbatim — the control plane's public
+artifact route (`/pub/v1/environments/:id/artifact[?commit=<id>]`) serves
+exactly such URLs, so a sealed runtime can boot straight off a published
+revision:
 
 ```typescript
 new MetadataPlugin({
   config: { bootstrap: 'artifact-only' },
-  environmentId: 'env_42',
   artifactSource: {
-    mode: 'artifact-api',
-    url: 'https://cloud.example.com', // control-plane base — canonical path appended
-    token: process.env.OS_CLOUD_TOKEN,
-    commitId: 'cmt_1a2b',             // optional: pin a published revision
+    mode: 'local-file',
+    path: 'https://cloud.example.com/pub/v1/environments/env_42/artifact?commit=cmt_1a2b',
   },
 });
 ```
 
-`url` may instead be an already-resolved endpoint — any URL whose path ends in
-`/artifact` is used verbatim, which is how the `unlisted`-visibility public
-route (`/pub/v1/environments/:id/artifact`) is reached. Both modes honor
-`fetchTimeoutMs` (and `OS_ARTIFACT_FETCH_TIMEOUT_MS`, default 60 s) for remote
-reads.
+Only non-URL paths get the artifact-file HMR watcher (`artifactWatch`); remote
+reads honor `fetchTimeoutMs` (and `OS_ARTIFACT_FETCH_TIMEOUT_MS`, default
+60 s). Outside `artifact-only`, an absent local file is "nothing compiled
+yet", not a fault.
+
+A second `artifact-api` mode (a Bearer-authenticated control-plane pull) was
+removed while resolving #4246: it had no consumers — the cloud runtime uses
+its own `ArtifactApiClient`, and package distribution into a running OSS
+instance goes through `@objectstack/cloud-connection` (`os package install`).
+A still-configured `artifact-api` source fails loudly at `start()` rather
+than silently falling back to the filesystem scan.
 
 ### 2. Persistence Write Gates
 

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -839,22 +839,22 @@ describe('MetadataPlugin', () => {
       expect(manager.loadMany).not.toHaveBeenCalled();
     });
 
-    // #4246 — `artifact-api` IS implemented: `_loadFromArtifactApi` ships and all
-    // three bootstrap branches dispatch to it. The test that stood here —
-    // "artifact-only bootstrap rejects the not-yet-implemented artifact-api
-    // source" — passed for the wrong reason: the only throw on that path is the
-    // missing-`environmentId` guard, whose message happens to contain the string
-    // "artifact-api", so `rejects.toThrow(/artifact-api/)` matched while
-    // asserting nothing about implementation status. Supply `environmentId` and
-    // the plugin really does go to the network. The suite below pins what the
-    // loader actually does instead.
-    it('artifact-api requires environmentId — and fails for THAT reason, not as unimplemented', async () => {
+    // #4246 resolution — the `artifact-api` source is REMOVED, not reserved.
+    // The mode shipped through v17 with zero consumers in any repo (the cloud
+    // runtime uses its own ArtifactApiClient; package distribution into a
+    // running OSS instance goes through @objectstack/cloud-connection), so the
+    // enforce-or-remove call went to remove. What these tests pin is the
+    // failure MODE of the removal: a still-configured 'artifact-api' source —
+    // reachable only from JS callers or config plumbed through `any`, since
+    // the TS union is now single-member — must fail loudly at start(), never
+    // degrade into "no source".
+    it('artifact-only bootstrap rejects the removed artifact-api source with a migration message', async () => {
       const { MetadataPlugin } = await import('./plugin.js');
       const plugin = new MetadataPlugin({
         rootDir: '/tmp/test',
         watch: false,
         config: { bootstrap: 'artifact-only' },
-        artifactSource: { mode: 'artifact-api', url: 'https://example.com' },
+        artifactSource: { mode: 'artifact-api', url: 'https://example.com' } as any,
       });
 
       const manager = (plugin as any).manager;
@@ -866,169 +866,85 @@ describe('MetadataPlugin', () => {
       const ctx = createMockPluginContext();
       try {
         await plugin.init(ctx);
-        await expect(plugin.start(ctx)).rejects.toThrow(/requires options\.environmentId/);
-        // The guard is a pre-flight check, not a "mode unavailable" refusal —
-        // nothing was fetched, and nothing was scanned.
+        await expect(plugin.start(ctx)).rejects.toThrow(/'artifact-api' source was removed/);
+        // Rejected before any load path was chosen: no fetch, no FS scan.
         expect(fetchMock).not.toHaveBeenCalled();
         expect(manager.loadMany).not.toHaveBeenCalled();
       } finally {
         globalThis.fetch = realFetch;
       }
     });
-  });
 
-  // ---------- artifact-api source (#4246) ----------
-  //
-  // The loader was reachable and functional long before this suite existed; the
-  // type comment on `MetadataPluginOptions.artifactSource` just claimed the
-  // opposite ("reserved for M3/M4"), and `implementation-status.mdx` copied the
-  // claim. These tests are the enforcement side of the corrected declaration.
-  describe('artifact-api source', () => {
-    const PROBE_OBJECT = { name: 'artifact_probe', label: 'Artifact Probe', fields: {} };
-    const ARTIFACT_ENVELOPE = {
-      schemaVersion: '0.1',
-      environmentId: 'env_42',
-      commitId: 'cmt_1',
-      checksum: 'a'.repeat(64),
-      metadata: { objects: [PROBE_OBJECT] },
-    };
-
-    let fetchMock: ReturnType<typeof vi.fn>;
-    let realFetch: typeof globalThis.fetch;
-
-    beforeEach(() => {
-      realFetch = globalThis.fetch;
-      fetchMock = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-        text: async () => JSON.stringify(ARTIFACT_ENVELOPE),
-      });
-      globalThis.fetch = fetchMock as any;
-    });
-
-    afterEach(() => {
-      globalThis.fetch = realFetch;
-    });
-
-    async function startWith(
-      artifactSource: any,
-      config?: { bootstrap?: 'eager' | 'lazy' | 'artifact-only' },
-    ) {
+    // The dangerous degradation the guard exists to prevent: under `eager`,
+    // treating "unsupported source" as "no source" would fall through to the
+    // filesystem scan and boot with whatever happens to be on disk instead of
+    // the artifact the caller named.
+    it('eager bootstrap rejects the removed mode instead of silently falling back to the filesystem scan', async () => {
       const { MetadataPlugin } = await import('./plugin.js');
       const plugin = new MetadataPlugin({
         rootDir: '/tmp/test',
         watch: false,
-        environmentId: 'env_42',
-        ...(config ? { config } : {}),
-        artifactSource,
+        artifactSource: { mode: 'artifact-api', url: 'https://example.com' } as any,
       });
-      (plugin as any).manager.loadMany = vi.fn().mockResolvedValue([]);
+
+      const manager = (plugin as any).manager;
+      manager.loadMany = vi.fn().mockResolvedValue([]);
+
       const ctx = createMockPluginContext();
       await plugin.init(ctx);
-      await plugin.start(ctx);
-      return plugin;
-    }
-
-    /** The single fetch the loader issued: [url, init]. */
-    function fetchedCall() {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      return fetchMock.mock.calls[0] as [string, { headers: Record<string, string> }];
-    }
-
-    it('appends the canonical control-plane path to a base URL and registers the artifact', async () => {
-      const plugin = await startWith(
-        { mode: 'artifact-api', url: 'https://cloud.example.com/' },
-        { bootstrap: 'artifact-only' },
-      );
-
-      const [url] = fetchedCall();
-      expect(url).toBe('https://cloud.example.com/api/v1/cloud/environments/env_42/artifact');
-      // …and the payload really lands in the registry — the mode is not a stub.
-      expect((plugin as any).manager.register).toHaveBeenCalledWith(
-        'object',
-        'artifact_probe',
-        expect.objectContaining({ name: 'artifact_probe' }),
-        { notify: false },
-      );
+      await expect(plugin.start(ctx)).rejects.toThrow(/not supported/);
+      expect(manager.loadMany).not.toHaveBeenCalled();
     });
 
-    // Regression for the dead guard found while resolving #4246: it tested for a
-    // `/api/v{n}/cloud/projects/` segment that the v5.0 `project → environment`
-    // rename deleted, so it never matched and an already-resolved URL had the
-    // canonical path appended a SECOND time.
-    it('uses an already-resolved artifact URL verbatim instead of appending the path twice', async () => {
-      await startWith({
-        mode: 'artifact-api',
-        url: 'https://cloud.example.com/api/v1/cloud/environments/env_42/artifact',
+    // The migration target named by the rejection message, pinned so it stays
+    // real: `local-file` with an http(s) URL fetches verbatim and registers
+    // the envelope-wrapped artifact — the shape the control plane's public
+    // /pub/v1/environments/:id/artifact route serves.
+    it('local-file accepts an http(s) URL and registers the fetched artifact envelope', async () => {
+      const { MetadataPlugin } = await import('./plugin.js');
+      const url = 'https://cloud.example.com/pub/v1/environments/env_42/artifact?commit=cmt_1';
+      const envelope = {
+        schemaVersion: '0.1',
+        environmentId: 'env_42',
+        commitId: 'cmt_1',
+        checksum: 'a'.repeat(64),
+        metadata: { objects: [{ name: 'artifact_probe', label: 'Artifact Probe', fields: {} }] },
+      };
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => JSON.stringify(envelope),
       });
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = fetchMock as any;
 
-      const [url] = fetchedCall();
-      expect(url).toBe('https://cloud.example.com/api/v1/cloud/environments/env_42/artifact');
-      expect(url).not.toMatch(/artifact\/api/);
-    });
-
-    // Same rule keeps the `unlisted`-visibility public route addressable.
-    it('honors a non-canonical artifact endpoint (the /pub route)', async () => {
-      await startWith({
-        mode: 'artifact-api',
-        url: 'https://cloud.example.com/pub/v1/environments/env_42/artifact',
+      const plugin = new MetadataPlugin({
+        rootDir: '/tmp/test',
+        watch: false,
+        environmentId: 'env_42',
+        config: { bootstrap: 'artifact-only' },
+        artifactSource: { mode: 'local-file', path: url },
       });
+      const manager = (plugin as any).manager;
+      manager.loadMany = vi.fn().mockResolvedValue([]);
 
-      expect(fetchedCall()[0]).toBe('https://cloud.example.com/pub/v1/environments/env_42/artifact');
-    });
-
-    it('pins a published revision with ?commit= and sends the token as a Bearer header', async () => {
-      await startWith({
-        mode: 'artifact-api',
-        url: 'https://cloud.example.com',
-        commitId: 'cmt_9/1',
-        token: 'tok_secret',
-      });
-
-      const [url, init] = fetchedCall();
-      expect(url).toBe(
-        'https://cloud.example.com/api/v1/cloud/environments/env_42/artifact?commit=cmt_9%2F1',
-      );
-      expect(init.headers.Authorization).toBe('Bearer tok_secret');
-    });
-
-    // The three dispatch sites in `start()` — the reason the "reserved" comment
-    // was actively misleading rather than merely stale.
-    it.each(['eager', 'lazy', 'artifact-only'] as const)(
-      '%s bootstrap loads through the artifact API when the source is set',
-      async (bootstrap) => {
-        const plugin = await startWith(
-          { mode: 'artifact-api', url: 'https://cloud.example.com' },
-          { bootstrap },
-        );
-
-        expect(fetchedCall()[0]).toBe(
-          'https://cloud.example.com/api/v1/cloud/environments/env_42/artifact',
-        );
-        expect((plugin as any).manager.register).toHaveBeenCalledWith(
+      const ctx = createMockPluginContext();
+      try {
+        await plugin.init(ctx);
+        await plugin.start(ctx);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0][0]).toBe(url);
+        expect(manager.register).toHaveBeenCalledWith(
           'object',
           'artifact_probe',
           expect.objectContaining({ name: 'artifact_probe' }),
           { notify: false },
         );
-        // eager must not ALSO fall back to the filesystem scan
-        expect((plugin as any).manager.loadMany).not.toHaveBeenCalled();
-      },
-    );
-
-    it('fails loudly when the control plane rejects the request', async () => {
-      fetchMock.mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found', text: async () => '' });
-      const { MetadataPlugin } = await import('./plugin.js');
-      const plugin = new MetadataPlugin({
-        rootDir: '/tmp/test',
-        watch: false,
-        environmentId: 'env_42',
-        artifactSource: { mode: 'artifact-api', url: 'https://cloud.example.com' },
-      });
-      const ctx = createMockPluginContext();
-      await plugin.init(ctx);
-      await expect(plugin.start(ctx)).rejects.toThrow(/Cannot load artifact from API .*HTTP 404/);
+        expect(manager.loadMany).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = realFetch;
+      }
     });
   });
 });
