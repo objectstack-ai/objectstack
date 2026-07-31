@@ -16,29 +16,6 @@ import { Plugin, PluginContext } from '@objectstack/core';
  * const driverPlugin = new DriverPlugin(memoryDriver, 'memory');
  * kernel.use(driverPlugin);
  */
-/**
- * ⚠️ Both options are INERT. They configured start()'s datasource
- * registration, which probed `metadata.addDatasource` — a method no metadata
- * service implements — so the guarded block never ran on any boot and was
- * removed when typing the lookup surfaced it (#4251). The one live caller
- * that passes them (`serve.ts`, `datasourceName: 'telemetry'`) has never
- * gotten the registration it asks for. Kept only for source compatibility;
- * revive-or-remove is tracked in #4320.
- */
-export interface DriverPluginOptions {
-    /**
-     * If set, registers a named datasource so packages declaring
-     * `defaultDatasource: '<name>'` resolve to this driver.
-     */
-    datasourceName?: string;
-    /**
-     * If `true` (default), registers this driver as the `default` datasource
-     * when none exists. Set to `false` for proxy drivers (e.g. cloud proxy)
-     * that should never become the default.
-     */
-    registerAsDefault?: boolean;
-}
-
 export class DriverPlugin implements Plugin {
     name: string;
     type = 'driver';
@@ -46,12 +23,17 @@ export class DriverPlugin implements Plugin {
 
     private driver: any;
 
-    // Options are accepted (source compatibility for existing callers) but no
-    // longer stored — nothing reads them since the dead datasource block left
-    // start(); see the DriverPluginOptions doc.
-    constructor(driver: any, driverNameOrOptions?: string | DriverPluginOptions, _options?: DriverPluginOptions) {
+    // A `DriverPluginOptions` bag (`datasourceName` / `registerAsDefault`)
+    // used to be accepted here. Both options configured start()'s datasource
+    // registration, which probed `metadata.addDatasource` — a method no
+    // metadata service implements — so they were inert on every boot since
+    // inception; retired via #4320 (found by #4251). Routing to a named
+    // auxiliary driver needs only the DRIVER name: init() registers
+    // `driver.<name>`, ObjectQL's discovery loop adopts it, and the engine's
+    // lifecycle/datasource resolution keys off that name (see serve.ts's
+    // telemetry provision for the pattern).
+    constructor(driver: any, driverName?: string) {
         this.driver = driver;
-        const driverName = typeof driverNameOrOptions === 'string' ? driverNameOrOptions : undefined;
         this.name = `com.objectstack.driver.${driverName || driver.name || 'unknown'}`;
     }
 
@@ -68,10 +50,11 @@ export class DriverPlugin implements Plugin {
     // start() used to hold a named/default datasource registration block,
     // gated on `metadata.addDatasource` — a method no metadata service
     // implements, here or anywhere in the repo — so the guard's early return
-    // made every line behind it (and the options above) unreachable on every
-    // boot. Typing the lookup (#4251) surfaced that; the dead block is gone
-    // rather than typed against a phantom shape. Datasource declaration and
-    // visibility live in ADR-0062's DatasourceConnectionService +
+    // made every line behind it (and the options that configured it)
+    // unreachable on every boot. Typing the lookup (#4251) surfaced that; the
+    // dead block is gone rather than typed against a phantom shape, and the
+    // options followed it (#4320). Datasource declaration and visibility live
+    // in ADR-0062's DatasourceConnectionService +
     // `registerInMemory('datasource', …)` path — see DefaultDatasourcePlugin.
     start = async (ctx: PluginContext) => {
         ctx.logger.debug('Driver plugin started', { driverName: this.driver.name || 'unknown' });
