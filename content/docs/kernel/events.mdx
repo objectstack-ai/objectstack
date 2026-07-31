@@ -19,7 +19,7 @@ Triggered by the Kernel during bootstrap and shutdown:
 | Event | Description |
 | :--- | :--- |
 | `kernel:ready` | All plugins have successfully started. System is live. |
-| `kernel:bootstrapped` | Fired after every `kernel:ready` handler has settled, before `kernel:listening`. The "all bootstrap + seed data is ready" anchor — use it for reconcile/backfill work that consumes data a later-starting plugin produces during `kernel:ready`. |
+| `kernel:bootstrapped` | Fired after every `kernel:ready` handler has settled, before `kernel:listening`. The "all **synchronous** bootstrap has settled" anchor — use it for reconcile/backfill work that consumes data a later-starting plugin produces during `kernel:ready`. It does **not** guarantee app *seed* data has settled: an inline seed that overruns `OS_INLINE_SEED_BUDGET_MS` (default 8s) keeps seeding in the background and can outlast even `kernel:listening`. Subscribe to `app:seeded` for the true per-app seed-settle point. |
 | `kernel:listening` | Fired after every `kernel:ready` and `kernel:bootstrapped` handler has completed (e.g. the HTTP server is accepting connections). |
 | `kernel:shutdown` | Shutdown signal received. Plugins should clean up resources. |
 
@@ -74,7 +74,7 @@ Every data hook is a single-argument handler `(ctx: HookContext) => void | Promi
 | `ctx.input` | **Mutable** input. Shapes: find `{ ast, options }`, insert `{ data, options }`, update `{ id, data, options }`, delete `{ id, options }`. Modify this to change the operation. |
 | `ctx.result` | Operation result, available in `after*` events (mutable). |
 | `ctx.previous` | Record state before the operation (update/delete). |
-| `ctx.session` | Auth/tenancy info (`userId`, `organizationId`, `roles`, …). |
+| `ctx.session` | Auth/tenancy info (`userId`, `organizationId`, `positions`, `accessToken`, …). Absent entirely when the call carried no identity envelope. |
 | `ctx.api` | Scoped cross-object data access. |
 
 ### Registering Data Hooks

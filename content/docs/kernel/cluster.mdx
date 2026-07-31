@@ -417,8 +417,10 @@ Ask: **if I deploy 5 nodes, should there be 5 of these or 1?**
   - "Reacts to events with idempotent writes" → `idempotent-broadcast`
 
 Declaring `cluster` does not yet *do* anything (§5.1) — until Phase 4 lands
-you still have to hold the invariant yourself, e.g. by wrapping the work in
-`cluster.lock.withLock(key, fn)` the way `service-job`'s cron scheduler does.
+you still have to hold the invariant yourself, either by wrapping the work in
+`cluster.lock.withLock(key, fn)` or by acquiring and releasing by hand the way
+`service-job`'s cron scheduler does (`cluster.lock.acquire(key, { waitMs: 0 })`,
+bail out when it returns `null`, release in a `finally`).
 
 ### 7.3 "I want to read metadata in a long-lived cache"
 
@@ -631,7 +633,11 @@ of the declarative wiring below exists yet.
 - `service-job` declares `clusterScope: 'cluster' / 'leader-elected'`.
 - `service-cache` gains a cluster-backed cache derived from `KV + PubSub`.
 - `service-realtime` adds cross-node fan-out via PubSub.
-- Webhook dispatcher uses `partitioned` strategy from day one.
+- Webhook dispatcher declares the `partitioned` strategy. (The behaviour
+  already ships hand-rolled: webhook deliveries drain through
+  `service-messaging`'s `HttpDispatcher`, which walks `partitionCount`
+  partitions behind per-partition `cluster.lock` keys — only the declarative
+  annotation is missing.)
 
 ### Phase 5 — Postgres / NATS drivers (deferred, optional)
 

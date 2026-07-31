@@ -276,12 +276,13 @@ await kernel.use(new AppPlugin(stack));
 await kernel.bootstrap();
 ```
 
-The kernel validates each plugin at `use()`, then `bootstrap()` topologically
-sorts the registry — declared `dependencies` / `optionalDependencies` are
-hoisted ahead of their dependents, registration order breaking ties — and runs
-every plugin's `init` (Phase 1) followed by every plugin's `start` (Phase 2),
-exposing the resulting services through DI. It then fires `kernel:ready`,
-`kernel:bootstrapped`, and `kernel:listening` in that order.
+The kernel validates each plugin's structure and version compatibility at
+`use()`, then `bootstrap()` topologically sorts the registry — each plugin's
+declared `dependencies` are hoisted ahead of it, registration order breaking
+ties — and runs every plugin's `init` (kernel Phase 1) followed by every
+plugin's `start` (kernel Phase 2), exposing the resulting services through DI.
+It then fires `kernel:ready`, `kernel:bootstrapped`, and `kernel:listening` in
+that order.
 
 ### 2. Request Handling
 ```typescript
@@ -298,8 +299,9 @@ const context = await resolveExecutionContext({ getService, getQl, request });
 // → ExecutionContext { userId, tenantId, locale, timezone, positions,
 //                      permissions, isSystem, ... }
 
-// 2. Data — the context travels as `options.context`, which is what the engine
-//    enforces permissions and RLS against.
+// 2. Data — the context rides along as `context`, on the query itself or on
+//    the engine's trailing options argument (the engine merges both). It is
+//    what permissions and RLS are enforced against.
 const ql = ctx.getService<any>('objectql');
 const account = await ql.findOne('account', { where: { id: '123' }, context });
 ```
@@ -399,9 +401,12 @@ packages/plugins/plugin-slack-integration/
 
 ### Configuration Management
 ```typescript
-// Declare a Zod `configSchema` on the plugin object — the kernel's plugin
-// loader validates the plugin's config against it at `use()` time and refuses
-// to load the plugin when it fails.
+// A plugin object may carry a Zod `configSchema` describing its settings.
+// NOTE: the kernel RECORDS the schema but does not enforce it yet — `use()`
+// takes no config argument, so the loader has nothing to parse and logs
+// "config validation postponed" instead of running the schema. Treat
+// `configSchema` as a declaration of shape, and validate values you actually
+// depend on yourself.
 export const slackPlugin: Plugin = {
   name: 'slack-integration',
   version: '0.1.0',
@@ -477,7 +482,14 @@ const message = i18n.t('slack.button.send', context.locale);
 
 **Why:** Catch errors before customers see them.
 
-**Example:** A plugin declares `apiKey` in its `configSchema`. If it is missing, the plugin loader fails the load with the Zod issues spelled out per key — `Plugin slack-integration configuration validation failed:` followed by `  - apiKey: Required` — so boot stops instead of a request failing later.
+**Example:** Wiring, not config, is what the kernel currently enforces at boot. A plugin that declares a dependency the kernel never received fails `bootstrap()` outright — `[Kernel] Dependency 'com.objectstack.engine.objectql' not found for plugin 'com.objectstack.audit'` — and a dependency cycle throws `[Kernel] Circular dependency detected: <plugin>`. Boot stops there instead of a request failing later.
+
+<Callout type="warn">
+  Plugin `configSchema` is **not** part of this fail-fast path yet. The loader
+  stores the schema and postpones the check, so a missing or malformed value in
+  a plugin's config will not stop boot today. Validate config you depend on in
+  your own `init`.
+</Callout>
 
 ## Comparison: Kernel vs Alternatives
 

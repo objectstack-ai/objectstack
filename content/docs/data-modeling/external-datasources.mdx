@@ -122,9 +122,10 @@ from external configuration. Auto-connect is idempotent with it (whichever
 registers the datasource name first wins), so the two never conflict.
 </Callout>
 
-A connected external datasource is also visible in **Setup → Datasources** (stamped
-`origin: code`, read-only in the UI) and via `GET /api/v1/datasources` and
-`GET /api/v1/meta/datasource`, where an admin can run the "Sync objects" wizard.
+A connected external datasource is also visible in **Setup → Integrations →
+Datasources** (stamped `origin: code`, read-only in the UI) and via
+`GET /api/v1/datasources` and `GET /api/v1/meta/datasource`, where an admin can
+run the "Sync objects" wizard.
 
 ### When auto-connect fails
 
@@ -161,8 +162,8 @@ Every connect attempt's verdict is retained, so a datasource that is down no
 longer has to be diagnosed by restarting the server and re-reading boot logs
 ([#3827](https://github.com/objectstack-ai/objectstack/issues/3827)).
 
-**Setup → Datasources** and `GET /api/v1/datasources` report a `status` per
-datasource:
+**Setup → Integrations → Datasources** and `GET /api/v1/datasources` report a
+`status` per datasource:
 
 | `status` | Meaning |
 |:---|:---|
@@ -203,7 +204,7 @@ const policy: DatasourceConnectPolicy = {
       ? { allow: true }
       : {
           allow: false,
-          // operator-facing: logs + Setup → Datasources only
+          // operator-facing: logs + the Setup datasource list only
           reason: `egress allow-list miss for ${ds.name} (${tenant.id}, plan=${tenant.plan})`,
           // tenant-facing: appended to the query-time error
           publicReason: 'External datasources require the Scale plan.',

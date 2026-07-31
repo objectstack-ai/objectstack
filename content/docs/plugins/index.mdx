@@ -211,10 +211,22 @@ The `os serve` and `os dev` commands automatically detect and load plugins:
 | Condition | Auto-loaded Plugin |
 |:----------|:-------------------|
 | `objects` defined, no ObjectQL | `@objectstack/objectql` |
-| `objects` defined, no driver | `DefaultDatasourcePlugin` (runtime) — driver kind from `OS_DATABASE_DRIVER` / `OS_DATABASE_URL`, defaulting to SQLite in dev and to nothing in production |
+| `objects` defined, no driver | `DefaultDatasourcePlugin` (runtime) — driver kind from `OS_DATABASE_DRIVER` / `OS_DATABASE_URL`, defaulting to SQLite |
 | `objects`, `manifest`, `apps`, `flows`, or `apis` defined | `AppPlugin` (runtime) |
 | Server not disabled | `@objectstack/plugin-hono-server` |
 | Server enabled | `@objectstack/rest` (REST API) |
+
+<Callout type="info">
+**Which SQLite default you get depends on the boot path.** A bare `defineStack()`
+config — one whose `plugins` array instantiates nothing — boots through
+`createStandaloneStack`, which anchors a SQLite *file* under the project
+(`.objectstack/data/standalone.db`) in development **and** production. A host config
+that already instantiates plugins takes `serve`'s own fallback instead: with no
+`OS_DATABASE_URL` / `OS_DATABASE_DRIVER` set it declares SQLite `:memory:` in dev and
+registers **no** datasource in production, so a missing driver surfaces loudly
+downstream. `os dev` sidesteps both defaults by exporting
+`OS_DATABASE_URL=file:<project>/.objectstack/data/dev.db`.
+</Callout>
 
 This means a minimal config like this already works:
 

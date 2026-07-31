@@ -593,9 +593,15 @@ boot — not at install.
 <Callout type="warn">
 Earlier revisions of this page documented an `onInstall` / `onEnable` /
 `onDisable` / `onUninstall` / `onUpgrade` / `onBoot` hook family loaded from a
-manifest `lifecycle` file-map. **None of it existed** — ManifestSchema never
-declared the map and the kernel never called the hooks, so code written
-against them silently never ran. The family was retired from the protocol
+manifest `lifecycle` file-map. **That file-map never existed** — `ManifestSchema`
+has no `lifecycle` key and the kernel never invoked any of these hooks, so code
+written against them silently never ran. `PluginLifecycleSchema`
+(`packages/spec/src/kernel/plugin.zod.ts`) still *declares* `onInstall`,
+`onEnable`, `onDisable`, `onUninstall` and `onUpgrade` as optional functions, but
+nothing calls them; `onBoot` appears nowhere in the implementation at all. The
+single live exception is the **module-level** `onEnable` export of an app bundle
+described above, which `AppPlugin.start()` calls at boot — that is a stack-entry
+export, not a manifest hook. The family was retired from the protocol
 (#4212, ADR-0049 enforce-or-remove).
 </Callout>
 
@@ -632,8 +638,9 @@ implementation.
 `canAccessService` / `canTriggerHook` / `canReadFile` / `canWriteFile` /
 `canNetworkRequest` from the granted set, but only **service access** is wired into a
 live code path: `SecurePluginContext.getService()` and `.replaceService()` call
-`enforceServiceAccess`. `enforceNetworkAccess`, `enforceFileRead` and `enforceFileWrite`
-have no non-test call sites, and nothing patches global `fetch` — a plugin that calls
+`enforceServiceAccess`. `enforceNetworkRequest`, `enforceFileRead` and `enforceFileWrite`
+have no call sites outside the enforcer module itself, and nothing patches global
+`fetch` — a plugin that calls
 `fetch()` directly is **not** intercepted today. Treat `network` / `fs` declarations as
 consent metadata, not a runtime jail.
 </Callout>
