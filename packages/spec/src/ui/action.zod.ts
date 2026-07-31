@@ -470,6 +470,23 @@ const actionObject = () => z.object({
    *
    * Compiled-module bodies are not supported. Outbound IO (HTTP, etc.) goes
    * through Connector recipes (separate spec).
+   *
+   * **The body's write channel is `ctx.api` — `ctx.record` is READ-ONLY (#4345).**
+   * `ctx.record` is the record the dispatcher pre-fetched: a plain snapshot the
+   * runtime never writes back. `ctx.record.stage = 'won'` therefore mutates a
+   * copy that dies with the sandbox — for a DECLARED field exactly as much as
+   * for a misspelled one — while the action still returns success. To persist:
+   *
+   * ```js
+   * await ctx.api.object('crm_deal').update({ id: ctx.recordId, stage: 'won' });
+   * ```
+   *
+   * (with `capabilities: ['api.write']`). Do not reason by analogy from
+   * `ctx.input`, which IS written back on the hook path. Both ends now report
+   * the mistake instead of swallowing it: `validateActionRecordWrites`
+   * (`@objectstack/lint`, advisory) at authoring time for the literal patterns,
+   * and the sandbox itself at invocation time for every write, including the
+   * computed keys and aliases static analysis cannot see.
    */
   body: HookBodySchema.optional().describe('Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`.'),
 

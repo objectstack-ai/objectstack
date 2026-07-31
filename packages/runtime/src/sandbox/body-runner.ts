@@ -30,6 +30,13 @@
  *      Writes go through `Object.assign`, which means the host engine's
  *      flat-record Proxy (installed by `wrapDeclarativeHook`) sees them
  *      via its set trap.
+ *
+ * The ACTION path deliberately has no step 4: its output is the script's
+ * return value, and its write channel is `ctx.api.object(...)`. In particular
+ * `ctx.record` is a read-only pre-fetched snapshot — writes to it are
+ * discarded whether or not the field is declared (#4345). That stays true;
+ * what changed is that the discard is now REPORTED
+ * ({@link warnDiscardedRecordWrites}) instead of silent.
  */
 
 import type { Hook } from '@objectstack/spec/data';
@@ -131,6 +138,7 @@ export function actionBodyRunnerFactory(
           // configurable action default (5000ms) apply.
           timeoutMs: (body as any).timeoutMs ?? action.timeoutMs,
         });
+        warnDiscardedRecordWrites(result, action.name, action.object, opts);
         return result.value;
       } catch (err: any) {
         opts.logger?.error?.('[BodyRunner] sandboxed action threw', err, {
@@ -141,6 +149,41 @@ export function actionBodyRunnerFactory(
       }
     };
   };
+}
+
+/**
+ * Report `ctx.record` writes the action path discards (#4345).
+ *
+ * The hook path writes `ctx.input` back to the engine via
+ * {@link applyMutationsToInput}; the action path has no counterpart for
+ * `ctx.record`, by design — an action's output is its return value, and its
+ * write channel is `ctx.api`. What was wrong was not the design but the
+ * SILENCE: a body assigning to `ctx.record` got a successful action and an
+ * unchanged record, with no diagnostic anywhere, and the field being correctly
+ * declared changed nothing (the #4001 false-completion shape).
+ *
+ * Advisory, not fatal — the same reason the author-time lint warns rather than
+ * gates: a body may legitimately use the snapshot as local scratch
+ * (`ctx.record.total = a + b; return { total: ctx.record.total }`), which is
+ * indistinguishable here from an intended persist. The message states what is
+ * true of both — the writes did not leave the VM — and names the remedy.
+ * Ratcheting to a throw is a decision for field data, not a default.
+ */
+function warnDiscardedRecordWrites(
+  result: ScriptResult,
+  actionName: string,
+  object: string | undefined,
+  opts: FactoryOptions,
+): void {
+  const fields = result.droppedRecordWrites;
+  if (!fields || fields.length === 0) return;
+  opts.logger?.warn?.(
+    `[BodyRunner] action '${actionName}' wrote ${fields.length} field(s) to ctx.record, which is a read-only ` +
+      `pre-fetched snapshot — the writes never left the sandbox and the stored record is unchanged. ` +
+      `To persist, call ctx.api.object('${object ?? '<object>'}').update({ id: ctx.recordId, … }) ` +
+      `(needs the 'api.write' capability). See #4345.`,
+    { appId: opts.appId, action: actionName, object, fields },
+  );
 }
 
 function applyMutationsToInput(engineCtx: any, result: ScriptResult): void {
@@ -254,6 +297,9 @@ function buildActionSandboxContext(actionCtx: any, ql: any): ScriptContext {
     session: actionCtx?.session,
     object: typeof actionCtx?.object === 'string' ? actionCtx.object : undefined,
     recordId,
+    // A snapshot by construction, and read-only by contract (#4345): nothing
+    // downstream writes it back. `warnDiscardedRecordWrites` reports the writes
+    // a body makes to it rather than letting them vanish.
     record: unwrapProxyToPlain(actionCtx?.record),
     api: buildSandboxApi(actionCtx, ql, 'action body'),
     log: actionCtx?.logger,

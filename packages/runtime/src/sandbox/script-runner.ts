@@ -87,6 +87,20 @@ export interface ScriptContext {
    * Action only: the record loaded by the dispatcher before the action ran
    * (when the dispatcher pre-fetches it). May be undefined for actions
    * declared with `requiresRecord: false` or when no `recordId` was supplied.
+   *
+   * **READ-ONLY — it is a pre-fetched snapshot, not a write surface (#4345).**
+   * The action path hands the body a plain copy and returns only the script's
+   * value; there is no `ctx.record` write-back, so `ctx.record.stage = 'won'`
+   * mutates the copy inside the VM and is discarded when the VM is torn down —
+   * for a *declared* field exactly as much as for an unknown one. To persist,
+   * write through the repository: `ctx.api.object('<obj>').update({ id, … })`.
+   *
+   * Do not read this as `ctx.input`'s sibling: `ctx.input` IS written back on
+   * the hook path ({@link ScriptResult.mutatedInput}), and reasoning by analogy
+   * from that is what makes this trap cost a data loss rather than a typo. The
+   * asymmetry is now reported rather than assumed — writes are recorded and
+   * surfaced via {@link ScriptResult.droppedRecordWrites}, and caught earlier by
+   * `validateActionRecordWrites` in `@objectstack/lint`.
    */
   record?: unknown;
   /** Engine-side `result` (only set for after* hooks). */
@@ -123,6 +137,28 @@ export interface ScriptResult {
    * `undefined` if the dump failed or the script context did not expose `input`.
    */
   mutatedInput?: Record<string, unknown>;
+  /**
+   * Keys the script wrote on `ctx.record`, in first-write order (#4345).
+   *
+   * `ctx.record` is a read-only snapshot (see {@link ScriptContext.record}), so
+   * every one of these writes is DISCARDED. The engine records them rather than
+   * dropping them in silence: an author who believed the write persisted gets a
+   * host-side diagnostic naming the fields and the remedy, instead of a green
+   * action and an unchanged record — the #4001 "silent no-op manufactures false
+   * completion" shape.
+   *
+   * Recorded by a `set`/`deleteProperty`/`defineProperty` proxy installed over
+   * the snapshot inside the VM — behind an accessor, so a wholesale
+   * `ctx.record = {…}` is caught as well and does not swap the recorder out.
+   * Being a run-time trap rather than a parse, it sees what static analysis
+   * cannot: computed keys, `Object.assign`, and aliased references
+   * (`const r = ctx.record; r.x = 1`).
+   *
+   * `undefined` when the context carried no `record` (every hook, and actions
+   * with no pre-fetched record) or when the read-back failed; empty when a
+   * record was present and untouched.
+   */
+  droppedRecordWrites?: string[];
 }
 
 export interface ScriptRunOptions {

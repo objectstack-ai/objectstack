@@ -45,6 +45,26 @@
  * styles, seed replay safety, seed state machines, seed/security posture) stay
  * out — they answer a different question and have their own call sites.
  *
+ * ## One deliberate non-member: `validateActionRecordWrites`
+ *
+ * It resolves nothing against the stack. `ctx.record.<field> = …` in an action
+ * body is discarded because the action path has no record write-back at all, so
+ * the finding does not depend on whether the field is declared — checking that
+ * would in fact be WRONG, since warning only on the unknown half would imply
+ * the declared half persists (#4345). By the membership test above it is a
+ * shape rule and belongs at its own call sites.
+ *
+ * It is carried here anyway, as a deliberate widening rather than an oversight,
+ * because "its own call sites" is not a neutral alternative: it means three
+ * hand-wired commands, and the drift that produces is exactly what this module
+ * exists to end — `validateReadonlyFlowWrites`, the closest sibling by subject
+ * (a write that silently does not land), still demonstrates it, wired into
+ * `validate` and `compile` but not `lint`. The suite's real invariant is that a
+ * stack gets the SAME answer from every command; membership by question-shape
+ * is how that was described, not what it is for. A future rule may take the
+ * same exemption — but it must say so here, in these terms, rather than quietly
+ * reading the membership test loosely.
+ *
  * ## Known remaining asymmetry
  *
  * `os doctor` runs only `validateWidgetBindings` and is NOT converted here: it
@@ -66,6 +86,7 @@ import { validateAiSurfaceAffinity } from './validate-ai-surface-affinity.js';
 import { validateAiToolReferences } from './validate-ai-tool-references.js';
 import { validateAiAgentAuthoring } from './validate-ai-agent-authoring.js';
 import { validateHookBodyWrites } from './validate-hook-body-writes.js';
+import { validateActionRecordWrites } from './validate-action-record-writes.js';
 
 export type ReferenceIntegritySeverity = 'error' | 'warning';
 
@@ -118,6 +139,10 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // read-side membership (#4271). Lazy: only a hook that actually carries a
   // `language:'js'` body loads the TypeScript parser.
   { name: 'validateHookBodyWrites', run: validateHookBodyWrites },
+  // Writes an L2 ACTION body aims at `ctx.record` (#4345). Lazy on the same
+  // terms as the rule above. See "One deliberate non-member" in this module's
+  // header for why a rule that resolves no name is nevertheless carried here.
+  { name: 'validateActionRecordWrites', run: validateActionRecordWrites },
 ];
 
 /**

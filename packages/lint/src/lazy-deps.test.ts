@@ -76,6 +76,9 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       const jsHook = (source, language) => ({ objects: [{ name: 'a', fields: { amount: {} } }], hooks: [{ name: 'h', object: 'a', events: ['beforeInsert'], body: { language: language ?? 'js', source } }] });
       mod.validateHookBodyWrites(jsHook('input.x > 0', 'expression'));
       if (loaded('typescript')) fail('the hook-body write gate on an L1-only stack must not load typescript');
+      const recordAction = (source) => ({ objects: [{ name: 'a', fields: { stage: {} } }], actions: [{ name: 'act', objectName: 'a', type: 'script', body: { language: 'js', source } }] });
+      mod.validateActionRecordWrites(recordAction('return { ok: true };'));
+      if (loaded('typescript')) fail('the action-record write gate must not load typescript for a body that never mentions ctx.record');
       const syntax = mod.validateReactPages(${reactStack('function Page(){ return <div>oops; }')});
       if (!loaded('sucrase')) fail('sucrase was not loaded by a react-page syntax validation');
       if (loaded('typescript')) fail('the syntax gate must not load typescript');
@@ -83,6 +86,8 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       const hookWrites = mod.validateHookBodyWrites(jsHook('ctx.input.amout = 1;'));
       if (!loaded('typescript')) fail('typescript was not loaded by an L2 hook-body write validation');
       if (!hookWrites.some((f) => f.rule === 'hook-body-write-unknown-field')) fail('hook-body write gate produced no finding');
+      const recordWrites = mod.validateActionRecordWrites(recordAction("ctx.record.stage = 'won';"));
+      if (!recordWrites.some((f) => f.rule === 'action-body-record-write-discarded')) fail('action-record write gate produced no finding');
       const props = mod.validateReactPageProps(${reactStack('function Page(){ return <ObjectForm mode="edit" />; }')});
       if (!loaded('typescript')) fail('typescript was not loaded by a react-page props validation');
       if (!props.some((f) => f.rule === 'react-prop-missing-required')) fail('props gate produced no finding');
@@ -117,7 +122,8 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
 
   it('loads each dep lazily in-process and the gates still work', async () => {
     const req = createRequire(import.meta.url);
-    const { validateReactPages, validateReactPageProps, validateHookBodyWrites } = await import('./index.js');
+    const { validateReactPages, validateReactPageProps, validateHookBodyWrites, validateActionRecordWrites } =
+      await import('./index.js');
 
     // Stacks without a react-source page never touch either dep.
     expect(validateReactPages({ pages: [{ name: 'p', kind: 'object' }] })).toEqual([]);
@@ -129,6 +135,13 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
     expect(validateHookBodyWrites({ hooks: [hook(undefined)] })).toEqual([]);
     expect(validateHookBodyWrites({ hooks: [hook({ language: 'expression', source: 'input.x > 0' })] })).toEqual([]);
     expect(validateHookBodyWrites({ hooks: [hook({ language: 'js', source: 'return 1;' })] })).toEqual([]);
+    // Same contract one rule over: the action-record gate's prefilter needs
+    // BOTH `ctx` and `record` in the source, so a target-bound action, an L1
+    // body, and a JS body that never touches the snapshot all stay parser-free.
+    const action = (body: unknown) => ({ name: 'a', objectName: 'o', type: 'script', body });
+    expect(validateActionRecordWrites({ actions: [action(undefined)] })).toEqual([]);
+    expect(validateActionRecordWrites({ actions: [action({ language: 'expression', source: 'ctx.record.x' })] })).toEqual([]);
+    expect(validateActionRecordWrites({ actions: [action({ language: 'js', source: 'return ctx.recordId;' })] })).toEqual([]);
     for (const dep of LAZY_DEPS) {
       expect(depLoaded(req.cache, dep), `${dep} loaded before any react-source or L2-body validation`).toBe(false);
     }

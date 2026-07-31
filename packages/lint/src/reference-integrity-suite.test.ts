@@ -27,6 +27,7 @@ describe('reference-integrity suite — membership', () => {
       'validateAiToolReferences',
       'validateAiAgentAuthoring',
       'validateHookBodyWrites',
+      'validateActionRecordWrites',
     ]);
   });
 
@@ -59,7 +60,17 @@ describe('reference-integrity suite — every member actually runs', () => {
     ],
     actions: [
       // validateObjectReferences: a param pointing at an object nothing declares.
-      { name: 'assign', label: 'Assign', params: [{ name: 'owner', reference: 'user' }] },
+      // validateActionRecordWrites: the L2 body assigns to `ctx.record`, a
+      // read-only snapshot — discarded even though `name` IS declared on
+      // crm_lead (#4345). One fixture, two rules.
+      {
+        name: 'assign',
+        label: 'Assign',
+        objectName: 'crm_lead',
+        type: 'script',
+        params: [{ name: 'owner', reference: 'user' }],
+        body: { language: 'js', source: "ctx.record.name = 'assigned';" },
+      },
     ],
     views: [
       {
@@ -171,6 +182,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('ai-skill-tool-unresolved');
     expect(rules).toContain('agent-authoring-withdrawn');
     expect(rules).toContain('hook-body-write-unknown-field');
+    expect(rules).toContain('action-body-record-write-discarded');
   });
 
   it('carries a gating flow-template finding through the suite (#3810)', () => {
@@ -192,9 +204,9 @@ describe('reference-integrity suite — every member actually runs', () => {
       expect(typeof f.message).toBe('string');
       expect(typeof f.hint).toBe('string');
     }
-    // Object references run first, hook-body writes last.
+    // Object references run first, action-record writes last.
     expect(findings[0].rule).toBe('object-reference-unknown');
-    expect(findings[findings.length - 1].rule).toBe('hook-body-write-unknown-field');
+    expect(findings[findings.length - 1].rule).toBe('action-body-record-write-discarded');
   });
 
   it('returns nothing for an empty stack', () => {

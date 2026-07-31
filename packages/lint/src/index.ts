@@ -271,6 +271,19 @@ export type {
   ExtractedHookBodyWrite,
 } from './validate-hook-body-writes.js';
 
+export {
+  validateActionRecordWrites,
+  extractActionRecordWrites,
+  ACTION_RECORD_WRITE_PATTERNS,
+  ACTION_BODY_RECORD_WRITE_DISCARDED,
+} from './validate-action-record-writes.js';
+export type {
+  ActionRecordWriteFinding,
+  ActionRecordWriteSeverity,
+  ActionRecordWritePattern,
+  ExtractedActionRecordWrite,
+} from './validate-action-record-writes.js';
+
 // One entry point for the reference-resolution rules above (#3583 §5 D5).
 // Adding a rule to `REFERENCE_INTEGRITY_RULES` runs it on `validate`, `lint`
 // and `compile` at once — the CLI call sites do not change.

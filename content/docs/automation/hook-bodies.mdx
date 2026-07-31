@@ -94,8 +94,10 @@ The script sees only what the surrounding `ctx` object exposes:
 
 | Field | Description | Capability required |
 |---|---|---|
-| `ctx.input` | Mutable record being inserted/updated/etc. | none |
+| `ctx.input` | Hook: the mutable record being inserted/updated/etc. — assignments ARE written back to the engine. Action: the validated params bag. | none |
 | `ctx.previous` | Pre-update record (update events only). | none |
+| `ctx.recordId` | Action only: the record id from the invocation URL. | none |
+| `ctx.record` | Action only: the record the dispatcher pre-fetched. **Read-only** — a snapshot that is never written back, so assigning to it is discarded even for a declared field ([#4345](https://github.com/objectstack-ai/objectstack/issues/4345)). Persist via `ctx.api.object(...).update(...)`. | none |
 | `ctx.user` / `ctx.session` | Identity context. | none |
 | `ctx.api.object(name).find\|count\|aggregate` | Cross-object reads, scoped to current tenant. | `api.read` |
 | `ctx.api.object(name).insert\|update\|delete` | Cross-object writes. | `api.write` |
@@ -140,6 +142,18 @@ Because the write set carries no static checking:
 | Action | `(input: I, ctx: ActionContext) => Promise<O>` | `(input, ctx) => Promise<O>` |
 
 Hooks mutate `ctx.input`/`ctx.result`; actions return their output value explicitly.
+
+That asymmetry is load-bearing, and it is the one place authors reliably guess
+wrong. An action has **no** mutable context surface: `ctx.record` is a read-only
+pre-fetched snapshot, so `ctx.record.stage = 'won'` mutates a copy that dies
+with the sandbox while the action reports success — and a correctly spelled,
+fully declared field is dropped exactly like a misspelled one. An action
+persists through `ctx.api.object(name).update({ id: ctx.recordId, … })` and
+communicates through its return value. Both ends now say so rather than
+swallowing the mistake: `os validate` / `os lint` / `os compile` warn on a
+literal `ctx.record.<field> = …`, and the sandbox logs the discarded fields at
+invocation time, including the computed keys and aliased references a static
+check cannot see ([#4345](https://github.com/objectstack-ai/objectstack/issues/4345)).
 
 ### Engine
 

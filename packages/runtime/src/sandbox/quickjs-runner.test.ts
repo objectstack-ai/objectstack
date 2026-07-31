@@ -220,6 +220,145 @@ describe('QuickJSScriptRunner — L2 action script', () => {
   });
 });
 
+// `ctx.record` is a read-only pre-fetched snapshot: nothing writes it back, so
+// every write to it is discarded — for a DECLARED field exactly as much as for
+// an unknown one, which is what made #4345 a false-completion trap rather than
+// a typo. The engine cannot make the write land (that is the action's `ctx.api`
+// channel), but it can refuse to lose it in silence.
+describe('QuickJSScriptRunner — ctx.record writes are recorded, not silently dropped (#4345)', () => {
+  const record = { id: 'deal_1', stage: 'negotiation', amount: 100 };
+
+  it('reports no dropped writes when the context carries no record', async () => {
+    const r = await runner.runScript(
+      { language: 'js', source: 'return { ok: true };', capabilities: [] },
+      ctx(),
+      actionOpts,
+    );
+    // Distinct from `[]`: no snapshot existed, so no recorder was installed.
+    expect(r.droppedRecordWrites).toBeUndefined();
+  });
+
+  it('reports an empty write set when the record is only read', async () => {
+    const r = await runner.runScript(
+      { language: 'js', source: 'return { stage: ctx.record.stage };', capabilities: [] },
+      ctx({ record: { ...record } }),
+      actionOpts,
+    );
+    expect(r.value).toEqual({ stage: 'negotiation' });
+    expect(r.droppedRecordWrites).toEqual([]);
+  });
+
+  it('records a plain property write — and the host snapshot is untouched', async () => {
+    const host = { ...record };
+    const r = await runner.runScript(
+      { language: 'js', source: "ctx.record.stage = 'won'; return { ok: true };", capabilities: [] },
+      ctx({ record: host }),
+      actionOpts,
+    );
+    // The action still "succeeds" — that is the trap, and the report is the fix.
+    expect(r.value).toEqual({ ok: true });
+    expect(r.droppedRecordWrites).toEqual(['stage']);
+    expect(host.stage).toBe('negotiation');
+  });
+
+  it('forwards the write inside the VM so a body using the snapshot as scratch stays coherent', async () => {
+    const r = await runner.runScript(
+      {
+        language: 'js',
+        source: 'ctx.record.amount = ctx.record.amount * 2; return { amount: ctx.record.amount };',
+        capabilities: [],
+      },
+      ctx({ record: { ...record } }),
+      actionOpts,
+    );
+    expect(r.value).toEqual({ amount: 200 });
+    expect(r.droppedRecordWrites).toEqual(['amount']);
+  });
+
+  it('sees what static analysis cannot: computed keys, Object.assign, aliases, delete', async () => {
+    const r = await runner.runScript(
+      {
+        language: 'js',
+        source:
+          "var k = 'st' + 'age'; ctx.record[k] = 'won';" +
+          "Object.assign(ctx.record, { amount: 1 });" +
+          'var alias = ctx.record; alias.owner = "u1";' +
+          'delete ctx.record.id;' +
+          'return { ok: true };',
+        capabilities: [],
+      },
+      ctx({ record: { ...record } }),
+      actionOpts,
+    );
+    // First-write order, deduplicated.
+    expect(r.droppedRecordWrites).toEqual(['stage', 'amount', 'owner', 'id']);
+  });
+
+  it('catches a WHOLESALE replacement, and keeps recording afterwards', async () => {
+    // `ctx.record = {…}` would swap a bare proxy out and silence every later
+    // write — the one shape where the recorder could go quiet exactly when the
+    // author was most confident they had persisted. The accessor reports the
+    // replacement's own keys, which is what the author believed they wrote.
+    const r = await runner.runScript(
+      {
+        language: 'js',
+        source: "ctx.record = { stage: 'won', amount: 9 }; ctx.record.owner = 'u1'; return { ok: true };",
+        capabilities: [],
+      },
+      ctx({ record: { ...record } }),
+      actionOpts,
+    );
+    expect(r.value).toEqual({ ok: true });
+    expect(r.droppedRecordWrites).toEqual(['stage', 'amount', 'owner']);
+  });
+
+  it('reports a non-object replacement without inventing field names', async () => {
+    const r = await runner.runScript(
+      { language: 'js', source: 'ctx.record = null; return null;', capabilities: [] },
+      ctx({ record: { ...record } }),
+      actionOpts,
+    );
+    expect(r.droppedRecordWrites).toEqual(['(whole record replaced)']);
+  });
+
+  it('keeps the snapshot readable through the accessor', async () => {
+    const r = await runner.runScript(
+      {
+        language: 'js',
+        source: 'return { keys: Object.keys(ctx.record).sort(), stage: ctx.record.stage };',
+        capabilities: [],
+      },
+      ctx({ record: { ...record } }),
+      actionOpts,
+    );
+    expect(r.value).toEqual({ keys: ['amount', 'id', 'stage'], stage: 'negotiation' });
+    expect(r.droppedRecordWrites).toEqual([]);
+  });
+
+  it('reports each field once however often it is rewritten', async () => {
+    const r = await runner.runScript(
+      {
+        language: 'js',
+        source: "ctx.record.stage = 'a'; ctx.record.stage = 'b'; ctx.record.stage = 'c'; return null;",
+        capabilities: [],
+      },
+      ctx({ record: { ...record } }),
+      actionOpts,
+    );
+    expect(r.droppedRecordWrites).toEqual(['stage']);
+  });
+
+  it('leaves the hook path alone — a hook ctx carries no record, so nothing is recorded', async () => {
+    const r = await runner.runScript(
+      { language: 'js', source: 'ctx.input.total = 1; return null;', capabilities: [] },
+      ctx({ input: {} }),
+      hookOpts,
+    );
+    expect(r.droppedRecordWrites).toBeUndefined();
+    expect(r.mutatedInput).toEqual({ total: 1 });
+  });
+});
+
 describe('QuickJSScriptRunner — async host APIs', () => {
   it('awaits Promise return values from host APIs (asyncified)', async () => {
     const api = { object: () => ({ count: async () => 7 }) };
