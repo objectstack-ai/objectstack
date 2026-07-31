@@ -16,7 +16,7 @@ package catalog.
 
 The ObjectStack protocol defines **16 kernel services** registered via the `CoreServiceName` enum (the never-implemented `graphql` entry was removed in v17). Each service maps to a set of protocol methods governed by its per-domain contract (`DataProtocol`, `MetadataProtocol`, ...) — the transitional `ObjectStackProtocol` composition alias was dissolved in v17 (ADR-0076 D9); capability availability comes from the runtime discovery `services` registry.
 
-**Key architecture principle**: the kernel guarantees only **data** and **metadata**, and even those are filled by packages (`@objectstack/objectql`, `@objectstack/metadata`) rather than baked in — the kernel's own contribution is an in-memory fallback for each unfilled `core` slot. Everything else — including **auth** and **automation** — is delivered by plugins. `@objectstack/objectql` is an example kernel implementation to get the basic API running; production kernels will be rebuilt as separate plugins.
+**Key architecture principle**: the kernel guarantees only **data** and **metadata**, and even those are filled by packages (`@objectstack/objectql`, `@objectstack/metadata`) rather than baked in — the kernel's own contribution is an in-memory fallback for the `core` slots that have one (`metadata`, `cache`, `queue`, `job`, `i18n` — **not** `auth`). Everything else — including **auth** and **automation** — is delivered by plugins. `@objectstack/objectql` is an example kernel implementation to get the basic API running; production kernels will be rebuilt as separate plugins.
 
 <Callout type="info">
 **Legend**
@@ -24,9 +24,12 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 - ✅ Implemented — the 17 kernel-provided protocol methods (`DataProtocol` 9 + `MetadataProtocol` 8)
 - ⚠️ Framework — the slot is filled by the kernel's in-memory fallback: real reads and
   writes, no persistence (self-declares `degraded`, ADR-0076 D12)
-- ❌ Plugin Required — the remaining 36 protocol methods (`analytics` 2, `automation` 1,
-  `packages` 6, `views` 5, `permissions` 3, `workflow` 3, `realtime` 6, `notification` 7,
-  `i18n` 3), delivered by whatever fills the slot
+- ❌ Plugin Required — the remaining 36 methods declared across the other per-domain
+  contracts (`analytics` 2, `automation` 1, `packages` 6, `views` 5, `permissions` 3,
+  `workflow` 3, `realtime` 6, `notification` 7, `i18n` 3). *Declared* is not *routed*:
+  `packages` is answered kernel-side by the `/packages` dispatcher domain over the
+  ObjectQL registry, `i18n` has a kernel in-memory fallback, and `views` / `permissions` /
+  `workflow` have no implementation anywhere — the rest wait on whatever fills the slot
 </Callout>
 
 ---
@@ -69,7 +72,7 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 | 7 | **automation** | `optional` | 1 | ❌ Plugin Required | `@objectstack/service-automation` |
 | 8 | **realtime** | `optional` | 6 | ❌ Plugin Required (in-process only — no HTTP/WS route is mounted) | `@objectstack/service-realtime` |
 | 9 | **notification** | `optional` | 7 | ❌ Plugin Required | `@objectstack/service-messaging` |
-| 10 | **ai** | `optional` | — | ❌ Nothing ships in this repo | `service-ai` (Cloud/EE) |
+| 10 | **ai** | `optional` | — | ❌ Nothing ships in this repo | `@objectstack/service-ai` (Cloud/EE — not installable, so the table entry is `null`) |
 | 11 | **i18n** | `core` | 3 | ✅ Built-in (in-memory fallback) | `@objectstack/service-i18n` |
 | 12 | **file-storage** | `optional` | — | ❌ Plugin Required | `@objectstack/service-storage` |
 | 13 | **search** | `optional` | — | ❌ Nothing ships | — |
@@ -78,16 +81,30 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 | 16 | **job** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-job` |
 
 <Callout type="info">
-The Provider column is not prose — it is `CORE_SERVICE_PROVIDER` in
-`@objectstack/spec/system`, the single table discovery reads when it tells a
-caller what to install for an empty slot. `null` there (`ai`, `search`,
-`workflow`) means **nothing ships**, and discovery says so rather than naming a
-plausible package: `No implementation ships for the '<slot>' slot — register a
-service under it to enable`. `ui` is the one slot with a hand-written remedy,
-because the package named does not fill the slot: `Served by the protocol
-service — register MetadataPlugin (@objectstack/metadata-protocol) to enable`.
-`scripts/check-service-providers.mjs` fails CI if a name in that table is not a
-real workspace package.
+The Provider column mirrors `CORE_SERVICE_PROVIDER` in
+`@objectstack/spec/system` — the single table discovery reads when it tells a
+caller what to install for an empty slot, and the value it reports as
+`provider`. Two caveats. The table carries **no entry for
+`metadata` or `data`**: those are filled by the engine itself, never by an
+installable optional package, so they need no remedy (`NO_REMEDY_SLOTS` in the
+guard script). And `null` there does **not** always mean "nothing ships" — it
+means "no name belongs in an `Install X` sentence", which covers two cases:
+
+- **Nothing provides the slot at all** — `search`, `workflow` (and the retired
+  `graphql`). Discovery says exactly that rather than naming a plausible
+  package: `No implementation ships for the '<slot>' slot — register a service
+  under it to enable`.
+- **A provider exists but cannot be installed** — `ai`. `@objectstack/service-ai`
+  registers the slot in `objectstack-ai/cloud` and is `private: true`.
+
+Two slots therefore override the generic line with a hand-written
+`REMEDY_DETAIL` sentence: `ui`, because the package named does not fill the
+slot (`Served by the protocol service — register MetadataPlugin
+(@objectstack/metadata-protocol) to enable`), and `ai` (`Provided by
+@objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation
+ships in the open framework`). `scripts/check-service-providers.mjs` fails CI
+if a name in the table is not a real workspace package, or if a
+`CoreServiceName` slot other than `data`/`metadata` is missing from it.
 </Callout>
 
 <Callout type="warn">

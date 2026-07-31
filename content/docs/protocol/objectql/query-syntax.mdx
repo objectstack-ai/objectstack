@@ -989,7 +989,7 @@ Similarly, the following legacy field names should not be used in new code:
 |:-------|:----------|:------|
 | `filters` (array of tuples) | `where` (FilterCondition object) | Use `parseFilterAST()` to convert |
 | `sort` | `orderBy` | Array of `{ field, order }` objects |
-| `aggregate` | `aggregations` | Same `AggregationNode[]`; the SQL and MongoDB drivers read either key |
+| `aggregate` | `aggregations` | Same `AggregationNode[]`; the SQL and MongoDB drivers read either key, but `engine.aggregate()` forwards only `aggregations` |
 | `expand` (string array) | `expand` (Record) | Map of field name → nested QueryAST |
 | `skip` | `offset` | Number |
 | `select` | `fields` | Array of FieldNode (field-name strings) |

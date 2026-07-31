@@ -29,13 +29,18 @@ Removed from the spec:
 
 | Schema | Removed properties | Now required |
 |:---|:---|:---|
-| `DashboardWidget` | `object`, `categoryField`, `categoryGranularity`, `valueField`, `aggregate`, `aggregation`, `rowField`, `columnField`, `xAxisField`, `yAxisFields`, `measures` (and the `WidgetMeasure` type) | `dataset` + `values` |
+| `DashboardWidget` | `object`, `categoryField`, `categoryGranularity`, `valueField`, `aggregate`, `measures` (and the `WidgetMeasure` type) | `dataset` + `values` |
 | `Report` | top-level and joined-block `objectName`, `columns`, `groupingsDown`, `groupingsAcross`, `filter` | `dataset` + `values` (`rows` are the dimensions; scope filtering moves to `runtimeFilter`) |
 | `ListChart` | `xAxisField`, `yAxisFields`, `aggregation`, `groupByField` | `dataset` + `values` |
 
-`Report.columns` is repurposed rather than simply deleted: on both the report
-and a joined block the key now names the dataset **dimensions across** a
-`matrix` report, not raw report columns.
+> Note: `Report.columns` came back one release later (9.1.0) with a different
+> meaning — on both the report and a joined block it now names the dataset
+> **dimensions across** a `matrix` report, not raw report columns. A later
+> release also flipped `DashboardWidget` to reject *any* undeclared top-level
+> key instead of silently stripping it, so a leftover inline-analytics key is
+> now a hard parse error; the error map also names the pivot `rowField` /
+> `columnField` and list-chart `xAxisField` / `yAxisFields` / `aggregation`
+> spellings.
 
 **Migration:**
 
@@ -53,19 +58,14 @@ and a joined block the key now names the dataset **dimensions across** a
 
 ### 2. `ChartTypeSchema` trimmed to distinctly-renderable families
 
-Eight chart types are removed, so the taxonomy no longer advertises variants
-the renderer doesn't draw. Five of them (`bi-polar-bar`, `step-line`, `spline`,
-`pyramid`, `bubble`) only ever rendered as their base chart. The other three
-are dropped for a different reason: stacking is not a chart family but a
-property of the series — `ChartSeries.stack`, where series sharing a group id
-stack and otherwise group — so one `bar` / `area` family plus a series-level
-stack group expresses all three. Update any widget or series using a removed
-type:
+Eight chart types that only ever rendered as their base chart are removed, so
+the taxonomy no longer advertises variants the renderer doesn't draw. Update
+any widget or series using a removed type to its base:
 
 | Removed type | Use instead |
 |:---|:---|
-| `grouped-bar`, `stacked-bar`, `bi-polar-bar` | `bar` (to stack, give the series a shared `stack` group id) |
-| `stacked-area` | `area` (with a shared `series[].stack` group id) |
+| `grouped-bar`, `stacked-bar`, `bi-polar-bar` | `bar` |
+| `stacked-area` | `area` |
 | `step-line`, `spline` | `line` |
 | `pyramid` | `funnel` |
 | `bubble` | `scatter` |
@@ -76,10 +76,11 @@ single-value performance family (`metric` / `kpi` / `gauge` / `solid-gauge` /
 `bullet`). Removed variants can return behind an opt-in renderer once a real
 renderer and data model back them.
 
-> Note: a later release added one family the taxonomy had never named —
-> `combo`, for mixed bar/line/area series on shared dual axes, which the
-> renderer does draw distinctly (configured with `ChartSeries.type` +
-> `ChartSeries.yAxis`).
+> Note: stacking has since come back as a property of the *series* rather than
+> a chart family — the renderer now honors `ChartSeries.stack` (series sharing
+> a group id stack, otherwise they group), so a stacked bar or area today is
+> the `bar` / `area` family plus a shared `stack` group id on the series. The
+> taxonomy above is unchanged.
 
 ### 3. Settings env overrides: canonical `OS_<NAMESPACE>_<KEY>` only
 

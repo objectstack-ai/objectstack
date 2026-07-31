@@ -310,7 +310,7 @@ describe that separate runtime.
 |:---------|:-----------------:|:-------------:|:------:|
 | **Agent** | ✅ | ObjectOS runtime | ✅ Agent runtime |
 | **Model Registry** | ✅ | ObjectOS runtime | ✅ Model registry |
-| **RAG Pipeline** | ❌ | @objectstack/service-knowledge | ⚠️ Knowledge service + `knowledge-memory` / `knowledge-ragflow` / `embedder-openai` plugins |
+| **RAG Pipeline** | ⚠️ | @objectstack/service-knowledge | ⚠️ Knowledge service + `knowledge-memory` / `knowledge-ragflow` / `embedder-openai` plugins; spec defines the retrieval binding (`ai/knowledge-source.zod.ts`, `ai/knowledge-document.zod.ts`), not a pipeline DSL |
 | **NLQ** | ❌ | ObjectOS runtime | ⚠️ Data-query tools |
 | **Conversation** | ✅ | ObjectOS runtime | ✅ In-memory + ObjectQL conversation services |
 | **Agent Action** | ✅ | ObjectOS runtime | ⚠️ Action/data/knowledge tools (`tool.zod.ts` + `action_<name>` tools) |

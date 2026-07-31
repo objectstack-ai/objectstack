@@ -32,11 +32,15 @@ export const myPlugin: Plugin = {
 };
 ```
 
-Take configuration from the plugin's own options (as `CacheServicePlugin` and
-`createApiRegistryPlugin()` do) rather than from the `settings` service: that
-service is an async, namespaced resolver — `await settings.get(namespace, key)`
-returns a `{ value, source, locked, … }` envelope — not a synchronous config bag
-keyed by dotted paths.
+Take init-time configuration from the plugin's own options (as
+`CacheServicePlugin` and `createApiRegistryPlugin()` do) rather than from the
+`settings` service: that service is an async, namespaced resolver —
+`await settings.get(namespace, key)` returns a `{ value, source, locked, … }`
+envelope, not a synchronous config bag keyed by dotted paths — and it is only
+guaranteed to be registered during your `init` if you declare
+`requiresServices: ['settings']`. Settings-driven config usually belongs in
+`start` instead, the way `EmailServicePlugin` binds the `mail` namespace there
+and re-applies it on every change.
 
 ### Factory Registration (Lazy)
 
@@ -109,9 +113,11 @@ fallbacks above declare it); `status: 'stub'` means the answer is fabricated and
 must not be used for real work. `handlerReady: false` additionally means no HTTP
 handler serves it.
 
-Dev mode adds nothing here: `@objectstack/plugin-dev` registers no
-implementations of its own, so a slot no plugin fills is empty in dev exactly as
-in production (ADR-0115).
+Dev mode adds no fakes here: `@objectstack/plugin-dev` registers no
+implementations of its own — it composes the same real plugins (ObjectQL, the
+in-memory driver, auth, security, the HTTP server, REST) you would compose in
+production — so a slot no plugin fills is empty in dev exactly as in production
+(ADR-0115).
 
 ## Standard Services
 

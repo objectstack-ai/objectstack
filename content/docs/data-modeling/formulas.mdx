@@ -125,8 +125,10 @@ so the field silently never computes. To declare what the formula returns, set
 yourself — nothing back-fills it — but the agent-callable `validate_expression`
 tool reports the type it infers from the expression (`inferredType`) so an AI
 author can stamp the matching value. Consumers read the declared `returnType`
-instead of re-parsing the expression (record-title eligibility, for one: only a
-`returnType: 'text'` formula may be a `nameField`). The CEL source is the
+instead of re-parsing the expression (record-title eligibility, for one: a
+formula is title-eligible only when its `returnType` is `'text'`, which is what
+lets it be *derived* as the record title — an explicit `nameField` pointer is
+honored either way). The CEL source is the
 **`expression`** key — it is the only key the schema and runtime read for a
 formula's source; there is no separate `formula` source key.
 </Callout>

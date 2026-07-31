@@ -91,7 +91,7 @@ A `state_machine` rule shares the common validation-rule fields (`name`, `label`
 
 ### Transitions
 
-`transitions` is the whole legal graph. The keys are current state values; each value is the list of states the record may move *to*. An **explicit empty array** is an enforced dead-end — every move out of it is rejected. A state with **no key at all** is different: the checker has nothing to reason about there and lets the write through (see [Enforcement semantics](#enforcement-semantics)), so declare `[]` when you mean "terminal".
+`transitions` is the whole legal graph. The keys are current state values; each value is the list of states the record may move *to*. An **explicit empty array** is an enforced dead-end — every move to another state is rejected. A state with **no key at all** is different: the checker has nothing to reason about there and lets the write through (see [Enforcement semantics](#enforcement-semantics)), so declare `[]` when you mean "terminal".
 
 ```typescript
 transitions: {

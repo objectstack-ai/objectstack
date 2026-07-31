@@ -91,9 +91,8 @@ Install the plugin in your ObjectStack project:
 pnpm add @objectstack/plugin-auth
 ```
 
-Better-Auth is a direct runtime dependency of the plugin (`better-auth` in
-`packages/plugins/plugin-auth/package.json` — there is no `peerDependencies`
-block), so it is installed with the plugin; you do not add it yourself.
+Better-Auth is a direct runtime dependency of the plugin, not a peer dependency,
+so the command above installs it for you — you never add `better-auth` yourself.
 
 ---
 
