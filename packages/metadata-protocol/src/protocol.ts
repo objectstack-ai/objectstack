@@ -22,9 +22,12 @@ import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
+    RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
+    type QueryAliasConflict, type QueryAliasSlot,
     type DroppedFieldsEvent, type QueryAST,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
+import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed } from '@objectstack/spec/kernel';
@@ -882,6 +885,49 @@ const ODATA_SPELLING: Readonly<Record<string, string>> = {
 };
 
 /**
+ * [#3795] The spec's alias table ({@link RPC_QUERY_ALIAS_SLOTS}) extended with
+ * the wire-only spellings no schema declares: `filters` (documented plural
+ * alias of the `filter` transport param) and the OData `$filter` / `$expand`.
+ * Every spelling of one QueryAST slot resolves through ONE fold — the four
+ * slots that used to resolve backwards (canonical consulted last), each in its
+ * own open-coded way, are the reason the table lives in the spec and not here.
+ */
+const WIRE_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = (() => {
+    const extra: Record<string, readonly string[]> = {
+        where: ['filters', '$filter'],
+        expand: ['$expand'],
+    };
+    return RPC_QUERY_ALIAS_SLOTS.map((slot) => ({
+        canonical: slot.canonical,
+        aliases: [...slot.aliases, ...(extra[slot.canonical] ?? [])],
+    }));
+})();
+
+/**
+ * [#4181 → #3795] Spellings of ONE slot carrying DIFFERENT values. Two values
+ * for one slot cannot be reconciled — merging them would invent an intent the
+ * caller never expressed, and picking one is the silent drop itself — so an
+ * ambiguous request is refused. Redundant identical spellings pass. #4181
+ * established this on the filter slot; the fold now applies it to all five.
+ *
+ * `spellingFor` maps each folded name back to the wire spelling the caller
+ * actually wrote (`$orderby`, not `orderBy`) — the #4226 discipline.
+ */
+function conflictingQueryParamsError(
+    conflict: QueryAliasConflict,
+    spellingFor: (name: string) => string,
+): Error {
+    const names = conflict.spellings.map((s) => `'${spellingFor(s)}'`).join(', ');
+    const err: any = new Error(
+        `Conflicting query parameters: ${names} are spellings of the same parameter `
+        + `(canonical '${conflict.canonical}') and were given different values. Send exactly one.`,
+    );
+    err.status = 400;
+    err.code = 'INVALID_REQUEST';
+    return err;
+}
+
+/**
  * [#4181] A filter the normalizer cannot turn into a usable `FilterCondition`
  * by any route other than the array shapes {@link malformedFilterArrayError}
  * already diagnoses: unparseable JSON, or JSON that parses to something no
@@ -1591,6 +1637,47 @@ export class ObjectStackProtocolImplementation implements
      * {@link MetadataAuthoringGate}.
      */
     private authoringGates = new Map<string, MetadataAuthoringGate>();
+
+    /**
+     * Once-per-process dedupe for stored-row conversion notices
+     * (`conversionId|type|name`). `getMetaItems`/`getMetaItem` re-read
+     * sys_metadata on every call, so without this a single legacy row would
+     * warn on every list request instead of once.
+     */
+    private storedConversionWarned = new Set<string>();
+
+    /**
+     * Canonicalize a stored `sys_metadata` body on rehydration (#3903;
+     * ADR-0087 addendum "stored metadata replays the chain").
+     *
+     * Every seam that turns a row's `metadata` JSON into an in-memory item
+     * funnels through here, so a row written under a past protocol is read
+     * in today's canonical shape — parity with what the authored load path
+     * has always done, extended by the full-chain replay data at rest needs
+     * (a stored row has no author for a tombstone to teach).
+     *
+     * `flow` is deliberately skipped: flow-node conversions carry an
+     * open-namespace conflict guard that needs the automation engine's live
+     * executor registry (`reservedNodeTypes`), which this layer does not
+     * have. Flows canonicalize at `AutomationEngine.registerFlow` — the
+     * execution seam — with the same full-chain policy.
+     */
+    private convertStoredItem(type: string, data: unknown): unknown {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (singular === 'flow') return data;
+        return applyConversionsToStoredItem(singular, data, {
+            onNotice: (n) => {
+                const name = (data as { name?: unknown } | null | undefined)?.name;
+                const key = `${n.conversionId}|${singular}|${String(name ?? '')}`;
+                if (this.storedConversionWarned.has(key)) return;
+                this.storedConversionWarned.add(key);
+                console.warn(
+                    `[Protocol] stored ${singular}/${String(name ?? '<unnamed>')} carries a pre-protocol shape; ` +
+                    `${n.message} The row itself is unchanged — re-save it (Studio edit → save) to persist the canonical shape.`,
+                );
+            },
+        });
+    }
 
     constructor(
         engine: IDataEngine,
@@ -2346,14 +2433,19 @@ export class ObjectStackProtocolImplementation implements
             const records = Array.from(mergedMap.values());
             if (records && records.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
-                // Parse each overlay body once and surface its persisted
+                // Parse each overlay body once — replaying the stored-row
+                // conversion chain (#3903) so every consumer of this list sees
+                // the canonical protocol shape — and surface its persisted
                 // software-package binding so the sidebar package filter and
                 // provenance classification see overlay rows the way they see
                 // registry items.
                 const overlays = records.map((record) => {
-                    const data = typeof record.metadata === 'string'
-                        ? JSON.parse(record.metadata)
-                        : record.metadata;
+                    const data = this.convertStoredItem(
+                        String(record.type ?? request.type),
+                        typeof record.metadata === 'string'
+                            ? JSON.parse(record.metadata)
+                            : record.metadata,
+                    ) as any;
                     const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
                     if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                         (data as any)._packageId = recPkg;
@@ -2437,7 +2529,10 @@ export class ObjectStackProtocolImplementation implements
                     // previews only its own package's entry, so two packages'
                     // same-name drafts stay distinct. Draft rows win over active.
                     const drafts = draftRecords.map((record) => {
-                        const data = typeof record.metadata === 'string' ? JSON.parse(record.metadata) : record.metadata;
+                        const data = this.convertStoredItem(
+                            String(record.type ?? request.type),
+                            typeof record.metadata === 'string' ? JSON.parse(record.metadata) : record.metadata,
+                        ) as any;
                         const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
                         if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                             (data as any)._packageId = recPkg;
@@ -2606,9 +2701,12 @@ export class ObjectStackProtocolImplementation implements
                 };
                 const draftRec = (orgId ? await findDraft(orgId) : undefined) ?? await findDraft(null);
                 if (draftRec) {
-                    const draftItem = typeof draftRec.metadata === 'string'
-                        ? JSON.parse(draftRec.metadata)
-                        : draftRec.metadata;
+                    const draftItem = this.convertStoredItem(
+                        String(draftRec.type ?? request.type),
+                        typeof draftRec.metadata === 'string'
+                            ? JSON.parse(draftRec.metadata)
+                            : draftRec.metadata,
+                    ) as any;
                     if (draftItem && typeof draftItem === 'object') {
                         const recPkg = (draftRec as { package_id?: string | null }).package_id ?? undefined;
                         if (recPkg && (draftItem as any)._packageId === undefined) (draftItem as any)._packageId = recPkg;
@@ -2663,9 +2761,12 @@ export class ObjectStackProtocolImplementation implements
             const record = (orgId ? await findOverlay(orgId) : undefined)
                 ?? await findOverlay(null);
             if (record) {
-                item = typeof record.metadata === 'string'
-                    ? JSON.parse(record.metadata)
-                    : record.metadata;
+                item = this.convertStoredItem(
+                    String(record.type ?? request.type),
+                    typeof record.metadata === 'string'
+                        ? JSON.parse(record.metadata)
+                        : record.metadata,
+                );
                 // Surface the persisted software-package binding (parity with
                 // the list path in getMetaItems) so provenance/UI can read it.
                 const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
@@ -2941,14 +3042,20 @@ export class ObjectStackProtocolImplementation implements
             if (orgId) {
                 const rec = await findOverlay(orgId);
                 if (rec) {
-                    overlay = typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata;
+                    overlay = this.convertStoredItem(
+                        String(rec.type ?? request.type),
+                        typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata,
+                    );
                     overlayScope = 'org';
                 }
             }
             if (overlay === null) {
                 const rec = await findOverlay(null);
                 if (rec) {
-                    overlay = typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata;
+                    overlay = this.convertStoredItem(
+                        String(rec.type ?? request.type),
+                        typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata,
+                    );
                     overlayScope = 'env';
                 }
             }
@@ -3961,35 +4068,39 @@ export class ObjectStackProtocolImplementation implements
             delete options[dollar];
         }
 
-        // Numeric fields — normalize top → limit, skip → offset
+        // [#3795] One slot, one value. Every alias spelling of the five
+        // QueryAST slots resolves HERE, by the spec's own table, before the
+        // per-slot wire coercion below ever runs — so that coercion reads
+        // canonical keys only. An alias alone folds into its canonical key;
+        // redundant identical spellings collapse; different values for one
+        // slot are refused (the #4181 rule, generalized from the filter slot
+        // to all five — four of which used to resolve BACKWARDS here, each in
+        // its own way, disagreeing with the spec's documented precedence and
+        // with the runtime dispatcher's copy of the same fold).
+        //
+        // `arrivedAs` remembers which spelling carried each slot's value;
+        // composed with `wireSpelling` it names the parameter the caller
+        // actually wrote in every rejection below (#4226).
+        const spellingFor = (name: string): string => wireSpelling[name] ?? name;
+        const arrivedAs = foldQueryAliasSlots(options, WIRE_QUERY_ALIAS_SLOTS, (conflict) => {
+            throw conflictingQueryParamsError(conflict, spellingFor);
+        });
+        const slotParam = (canonical: string): string => spellingFor(arrivedAs[canonical] ?? canonical);
+
+        // Numeric fields — normalize top → limit ($top is the OData layer,
+        // outside the #3795 slot table), then coerce querystring strings.
         if (options.top != null) {
             options.limit = Number(options.top);
             delete options.top;
         }
-        if (options.skip != null) {
-            options.offset = Number(options.skip);
-        }
-        // Deleted unconditionally, unlike `top` (a declared QueryAST key the
-        // engine aliases itself): `skip` is wire-only, so a null/undefined one
-        // left behind would reach the #4134 field gate below and be reported as
-        // an unknown FIELD — a confusing rejection for a real parameter.
-        delete options.skip;
         if (options.limit != null) options.limit = Number(options.limit);
         if (options.offset != null) options.offset = Number(options.offset);
 
-        // Select → fields: comma-separated string → array
-        const projectionKey = options.select !== undefined ? (wireSpelling.select ?? 'select') : 'fields';
-        if (typeof options.select === 'string') {
-            options.fields = options.select.split(',').map((s: string) => s.trim()).filter(Boolean);
-        } else if (Array.isArray(options.select)) {
-            options.fields = options.select;
-        }
-        if (options.select !== undefined) delete options.select;
-
-        // fields: comma-separated string → array. Clients may pass `?fields=name`
-        // directly (not only via the `?select=` alias above) — a single-value
-        // querystring param arrives as a bare string, which drivers' `.map()`
+        // Projection: comma-separated string → array. A single-value
+        // querystring param arrives as a bare string — `?fields=name` or the
+        // folded `?select=` / `$select` spellings — which drivers' `.map()`
         // calls over `query.fields` would otherwise throw on.
+        const projectionKey = slotParam('fields');
         if (typeof options.fields === 'string') {
             options.fields = options.fields.split(',').map((s: string) => s.trim()).filter(Boolean);
         } else if (options.fields !== undefined && !Array.isArray(options.fields)) {
@@ -4000,7 +4111,7 @@ export class ObjectStackProtocolImplementation implements
         // returned MORE than was asked for.
         this.assertProjectionFieldsExist(request.object, options.fields, projectionKey);
 
-        // Sort/orderBy → orderBy: every wire spelling → SortNode[].
+        // Sort: every wire shape → SortNode[].
         //
         // [#4226] `normalizeSortNodes` folds the two shapes that used to fall
         // through this block untouched — `string[]` and `{field: direction}` —
@@ -4008,10 +4119,8 @@ export class ObjectStackProtocolImplementation implements
         // an array" simply skipped the branch, leaving a value on `orderBy`
         // that `SqlDriver`'s `Array.isArray` guard then declined to turn into
         // an ORDER BY clause: no sort, no error, no way to tell.
-        const usesOrderBy = options.orderBy !== undefined && options.orderBy !== null;
-        const sortValue = usesOrderBy ? options.orderBy : options.sort;
-        const sortKey = usesOrderBy ? (wireSpelling.orderBy ?? 'orderBy') : 'sort';
-        delete options.sort;
+        const sortValue = options.orderBy;
+        const sortKey = slotParam('orderBy');
         if (sortValue === undefined || sortValue === null) {
             // Nothing to sort by — and an explicit `orderBy: null` must not ride
             // to the engine as a value every driver quietly declines to read.
@@ -4028,41 +4137,15 @@ export class ObjectStackProtocolImplementation implements
             else delete options.orderBy;
         }
 
-        // Filter/filters/$filter → where: normalize all filter aliases.
-        //
-        // [#4181] These four names are FOUR SPELLINGS OF ONE SLOT (`filters` is
-        // documented as a deprecated alias of `filter`), so `??` picking the
-        // first non-null silently discarded the others: a body carrying both
-        // `where` and a different `filter` ran the `filter` and dropped the
-        // `where` with no signal. Two different values for one slot cannot be
-        // reconciled — merging them would invent an intent the caller never
-        // expressed, and picking one is the silent drop itself — so an
-        // ambiguous request is refused. Redundant identical spellings are
-        // harmless and pass.
-        const filterAliases = (['filter', 'filters', '$filter', 'where'] as const)
-            .filter((k) => options[k] !== undefined)
-            .map((k) => ({ key: k, value: options[k] }));
-        if (filterAliases.length > 1) {
-            const distinct = new Set(filterAliases.map((a) => JSON.stringify(a.value)));
-            if (distinct.size > 1) {
-                const err: any = new Error(
-                    `Conflicting filter parameters: ${filterAliases.map((a) => `'${a.key}'`).join(', ')} `
-                    + 'are aliases for the same filter and were given different values. Send exactly one.',
-                );
-                err.status = 400;
-                err.code = 'INVALID_REQUEST';
-                throw err;
-            }
-        }
+        // Filter: the folded slot value → a usable `FilterCondition` on
+        // `where`, or a rejection. The four spellings of this slot
+        // (`where`/`filter`/`filters`/`$filter`) already resolved through the
+        // #3795 fold above — #4181's one-slot-one-value rule, which this block
+        // pioneered before the fold generalized it.
+        const filterKey = slotParam('where');
 
-        const filterValue = options.filter ?? options.filters ?? options.$filter ?? options.where;
-        const filterKey = filterAliases[0]?.key ?? 'filter';
-        delete options.filter;
-        delete options.filters;
-        delete options.$filter;
-
-        if (filterValue !== undefined) {
-            let parsedFilter = filterValue;
+        if (options.where !== undefined) {
+            let parsedFilter = options.where;
             // A blank `?filter=` is ABSENT, not malformed — the same `length > 0`
             // guard the export route applies before parsing. Deleting `where`
             // here (rather than leaving `''` on it) is what lets every consumer
@@ -4127,31 +4210,24 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // Populate/expand/$expand → expand (Record<string, QueryAST>)
-        const populateValue = options.populate;
-        const expandValue = options.$expand ?? options.expand;
+        // Expand: the folded slot value → `Record<string, QueryAST>`. A comma
+        // list (string) and a name array both lower to `{name: {object: name}}`;
+        // the advanced `{rel: QueryAST}` map a caller may send directly on
+        // `POST /data/:object/query` passes through as-is. Lowering the ARRAY
+        // shape here (not just the string) also closes a pre-#3795 gap: a raw
+        // name array used to survive this block whole, so the #4226 gate read
+        // its INDICES as relation names and refused real requests with
+        // "Unknown field '0'".
+        const expandValue = options.expand;
         const expandNames: string[] = [];
-        if (typeof populateValue === 'string') {
-            expandNames.push(...populateValue.split(',').map((s: string) => s.trim()).filter(Boolean));
-        } else if (Array.isArray(populateValue)) {
-            expandNames.push(...populateValue);
+        if (typeof expandValue === 'string') {
+            expandNames.push(...expandValue.split(',').map((s: string) => s.trim()).filter(Boolean));
+        } else if (Array.isArray(expandValue)) {
+            expandNames.push(...expandValue);
         }
-        if (!expandNames.length && expandValue) {
-            if (typeof expandValue === 'string') {
-                expandNames.push(...expandValue.split(',').map((s: string) => s.trim()).filter(Boolean));
-            } else if (Array.isArray(expandValue)) {
-                expandNames.push(...expandValue);
-            }
-        }
-        delete options.populate;
-        delete options.$expand;
-        // Clean up non-object expand (e.g. string) BEFORE the Record conversion
-        // below, so that populate-derived names can create the expand Record even
-        // when a legacy string expand was also present.
-        if (typeof options.expand !== 'object' || options.expand === null) {
+        if (typeof options.expand !== 'object' || options.expand === null || Array.isArray(options.expand)) {
             delete options.expand;
         }
-        // Only set expand if not already an object (advanced usage)
         if (expandNames.length > 0 && !options.expand) {
             options.expand = {} as Record<string, any>;
             for (const rel of expandNames) {
@@ -7176,7 +7252,14 @@ export class ObjectStackProtocolImplementation implements
             const newName = renameName(row.name);
             let item: any;
             try {
-                item = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {});
+                // Canonicalize the source row before re-saving (#3903): the copy
+                // is a NEW write and must pass today's schema gate, so a legacy
+                // shape the chain owns is lifted rather than failing the copy —
+                // duplication never mints new rows in a pre-protocol dialect.
+                item = this.convertStoredItem(
+                    String(row.type),
+                    typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {}),
+                );
             } catch {
                 failed.push({ type: row.type, name: row.name, error: 'unparseable metadata' });
                 continue;
@@ -7963,10 +8046,29 @@ export class ObjectStackProtocolImplementation implements
      * Per ADR-0005, project-kernel mode ALSO hydrates from sys_metadata —
      * customization overlay rows must survive restart. Scope filter
      * (`environment_id = this.environmentId ?? null`) keeps tenants isolated.
+     *
+     * #3903 — two contract duties run per row, and their split is deliberate:
+     *
+     *  1. **Convert** ({@link convertStoredItem}): the full ADR-0087 chain
+     *     replays, so a row written under a past protocol registers in the
+     *     canonical shape. Chain-owned history therefore stops presenting as
+     *     "invalid metadata" at all.
+     *  2. **Diagnose, never drop**: what still fails the type's current spec
+     *     schema *after* conversion is a genuine contract violation — counted
+     *     in `invalid`, warned with a stable `[metadata_spec_invalid]` marker,
+     *     and STILL registered. Boot-time refusal would unhook the metadata
+     *     from every serving surface (an object row backs live tables; an
+     *     unregistered item cannot even be listed, opened, or fixed in
+     *     Studio), turning an upgrade into a data outage. The enforcing gates
+     *     live where an author is present to act: `saveMetaItem` rejects new
+     *     writes (422), and the read surfaces badge the row via
+     *     `_diagnostics`. This is that same read-side verdict, surfaced once
+     *     at boot where operators look.
      */
-    async loadMetaFromDb(): Promise<{ loaded: number; errors: number }> {
+    async loadMetaFromDb(): Promise<{ loaded: number; errors: number; invalid: number }> {
         let loaded = 0;
         let errors = 0;
+        let invalid = 0;
         try {
             // ADR-0005 (revised 2026-05): hydrate only env-wide rows
             // (organization_id IS NULL). Per-org overlays are loaded on
@@ -7979,11 +8081,26 @@ export class ObjectStackProtocolImplementation implements
             const records = await this.engine.find('sys_metadata', { where });
             for (const record of records) {
                 try {
-                    const data = typeof record.metadata === 'string'
-                        ? JSON.parse(record.metadata)
-                        : record.metadata;
+                    const data = this.convertStoredItem(
+                        String(record.type),
+                        typeof record.metadata === 'string'
+                            ? JSON.parse(record.metadata)
+                            : record.metadata,
+                    );
                     // Normalize DB type to singular (DB may store legacy plural forms)
                     const normalizedType = PLURAL_TO_SINGULAR[record.type] ?? record.type;
+                    const verdict = computeMetadataDiagnostics(normalizedType, data);
+                    if (verdict && !verdict.valid) {
+                        invalid++;
+                        const first = verdict.errors?.[0];
+                        console.warn(
+                            `[Protocol] [metadata_spec_invalid] stored ${normalizedType}/${record.name} fails the ` +
+                            `current spec schema even after conversion` +
+                            (first ? ` (${first.path || '<root>'}: ${first.message})` : '') +
+                            `. Registered anyway so it stays serveable and fixable — correct it in Studio ` +
+                            `(the read carries the full _diagnostics), or delete the sys_metadata row.`,
+                        );
+                    }
                     if (normalizedType === 'object') {
                         this.engine.registry.registerObject(data as any, record.packageId || 'sys_metadata');
                     } else {
@@ -8012,7 +8129,7 @@ export class ObjectStackProtocolImplementation implements
                 console.warn(`[Protocol] DB hydration skipped: ${e.message}`);
             }
         }
-        return { loaded, errors };
+        return { loaded, errors, invalid };
     }
 
     // ==========================================

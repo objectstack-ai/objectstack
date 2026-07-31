@@ -30,6 +30,7 @@ definition for a type.
 export interface IMetadataService {
   // Core CRUD (by type + name)
   register(type: string, name: string, data: unknown): Promise<void>;
+  registerInMemory?(type: string, name: string, data: unknown): void;
   get(type: string, name: string): Promise<unknown | undefined>;
   list(type: string): Promise<unknown[]>;
   unregister(type: string, name: string): Promise<void>;
@@ -165,6 +166,26 @@ await metadataService.unregister('object', 'project');
 <Callout type="tip">
 To inspect what would break before removing an item, call `getDependents('object', 'project')` — it returns the items that reference this one.
 </Callout>
+
+### registerInMemory
+
+Optional. Seeds an item into the in-memory registry **only** — never persisted
+to the DB store, never announced to `watch` subscribers. This is the boot-time
+path for source-control-owned artefacts that must be *listable* without
+creating DB drift — e.g. code-defined datasources (`origin: 'code'`), which is
+how the default datasource appears in Setup → Datasources:
+
+```typescript
+metadataService.registerInMemory?.('datasource', 'default', {
+  name: 'default',
+  label: 'Default',
+  driver: 'sqlite',
+  origin: 'code',
+});
+```
+
+Callers that mutate metadata mid-run want `register`, which persists and
+announces.
 
 ---
 

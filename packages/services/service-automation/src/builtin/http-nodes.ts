@@ -1,11 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { defineActionDescriptor, HttpConfigSchema } from '@objectstack/spec/automation';
+import type { HttpConfigParsed } from '@objectstack/spec/automation';
 import { randomUUID } from 'node:crypto';
 import type { AutomationEngine } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
 import { interpolate } from './template.js';
+import { parseNodeConfig } from './parse-config.js';
 
 /**
  * HTTP built-in node — canonical `http` (ADR-0018 M3).
@@ -93,16 +95,24 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
         }),
         async execute(node, variables, context) {
             const raw = (node.config ?? {}) as Record<string, unknown>;
-            const cfg = interpolate(raw, variables, context) as Record<string, unknown>;
+            // Parsed AFTER interpolation — unique among the contract-carrying
+            // builtins, because this executor reads the interpolated config
+            // wholesale, so that is the shape its contract describes: a `{token}`
+            // in a typed slot (`timeoutMs`, `durable`) resolves to the value's
+            // real type before the contract sees it (whole-token interpolation
+            // preserves types).
+            const parsed = parseNodeConfig<HttpConfigParsed>('http', node.id, HttpConfigSchema, interpolate(raw, variables, context));
+            if (!parsed.ok) return parsed.refusal;
+            const cfg = parsed.config;
 
-            const url = cfg.url as string | undefined;
+            const url = cfg.url;
             if (!url) return refuseNode('http: url is required');
 
             const durable = cfg.durable === true;
-            const headers = cfg.headers as Record<string, string> | undefined;
+            const headers = cfg.headers;
             const body = cfg.body;
-            const timeoutMs = typeof cfg.timeoutMs === 'number' ? cfg.timeoutMs : undefined;
-            const signingSecret = cfg.signingSecret as string | undefined;
+            const timeoutMs = cfg.timeoutMs;
+            const signingSecret = cfg.signingSecret;
 
             // ── Durable mode: enqueue onto the messaging HTTP outbox ──────────
             if (durable) {
@@ -115,7 +125,7 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                             dedupKey: randomUUID(),
                             label: `flow:${node.id}`,
                             url,
-                            method: (cfg.method as string) ?? 'POST',
+                            method: cfg.method ?? 'POST',
                             headers,
                             signingSecret,
                             timeoutMs,
@@ -133,7 +143,7 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             }
 
             // ── Request/response mode (default; preserves http_request) ───────
-            const method = (cfg.method as string) ?? 'GET';
+            const method = cfg.method ?? 'GET';
             const controller = new AbortController();
             const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
             try {

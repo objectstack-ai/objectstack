@@ -39,7 +39,7 @@ Every expression in metadata is persisted as the same envelope:
 type Expression = {
   dialect: 'cel' | 'cron' | 'template';
   source?: string;          // surface syntax
-  ast?: unknown;            // parsed AST (filled by `objectstack compile`)
+  ast?: unknown;            // parsed AST (filled by `os compile`)
   meta?: { rationale?: string; generatedBy?: string };
 };
 ```
@@ -66,11 +66,11 @@ to relearn the syntax across surfaces.
 most common mistake (and the root cause of issue #1491) is a condition like
 `{record.rating} >= 4`: in CEL, `{…}` is a **map literal**, so it is a parse
 error. Write bare CEL: `record.rating >= 4`. Braces belong only in `{{ … }}`
-text templates. As of 7.6 a malformed expression no longer silently does
-nothing — it fails `objectstack build` and throws at runtime.
+text templates. A malformed expression does not silently do nothing — it fails
+`os build` and throws at runtime.
 </Callout>
 
-**Template formatting (7.6).** A `template` hole is a field path with an optional
+**Template formatting.** A `template` hole is a field path with an optional
 whitelisted formatter — `{{ path | formatter[:arg] }}` — with defined value→string
 semantics (no arbitrary logic; put logic in a CEL field):
 
@@ -121,9 +121,14 @@ evaluates (`objectql` computes a formula virtual field from its `expression`
 only). Do **not** pass `type: 'currency' | 'number' | …` to `Field.formula` — it
 is rejected by the typed `FieldInput` and, untyped, would override `type:'formula'`
 so the field silently never computes. To declare what the formula returns, set
-**`returnType`** (`'number' | 'text' | 'boolean' | 'date'`); it is inferred and
-stamped automatically by the AI build path, and consumers (dashboard measures,
-formatting) read it instead of re-parsing the expression. The CEL source is the
+**`returnType`** (`'number' | 'text' | 'boolean' | 'date'`). You declare it
+yourself — nothing back-fills it — but the agent-callable `validate_expression`
+tool reports the type it infers from the expression (`inferredType`) so an AI
+author can stamp the matching value. Consumers read the declared `returnType`
+instead of re-parsing the expression (record-title eligibility, for one: a
+formula is title-eligible only when its `returnType` is `'text'`, which is what
+lets it be *derived* as the record title — an explicit `nameField` pointer is
+honored either way). The CEL source is the
 **`expression`** key — it is the only key the schema and runtime read for a
 formula's source; there is no separate `formula` source key.
 </Callout>
@@ -161,7 +166,7 @@ Cheat-sheet of what you'll write daily:
 
 Registered automatically into every `Environment` by `@objectstack/formula`.
 All functions are pure given a pinned `now`, which is what makes
-`objectstack build` artifacts byte-stable across runs.
+`os build` artifacts byte-stable across runs.
 
 | Function | Returns | Description |
 |:---|:---|:---|
@@ -197,7 +202,8 @@ Keep them pure, dependency-free, and AI-readable.
 | `record` | the row being evaluated | formulas, validation, sharing, visibility |
 | `previous` | row before update | hooks, validation on update |
 | `input` | hook payload | hooks |
-| `os.user` | install / request user | seed, predicates with identity |
+| `current_user` | the authenticated subject — the canonical binding (ADR-0068). `user`, `ctx.user` and `os.user` are aliases of the **same** object | predicates with identity |
+| `os.user` | alias of `current_user` | seed, predicates with identity |
 | `os.org` | active organization | seed, predicates |
 | `os.env` | install env (`prod`, `dev`, `test`) | seed, predicates |
 
@@ -205,12 +211,12 @@ Keep them pure, dependency-free, and AI-readable.
 
 ## Build-time validation
 
-`objectstack build` type-checks every expression against the object schema, so
+`os build` type-checks every expression against the object schema, so
 a mistake that would silently evaluate to `null` at runtime is caught before it
 ships. The same shared validator also runs when a flow is registered
 (`registerFlow`), so a flow authored dynamically gets the same verdict. Findings
 come at two severities: **errors** fail the build; **warnings** are advisory
-(surfaced, not fatal — `objectstack validate --strict` promotes them to errors).
+(surfaced, not fatal — `os validate --strict` promotes them to errors).
 
 | Check | Example | Severity |
 |:---|:---|:---|
@@ -330,9 +336,18 @@ invert the test (here `amount <= 0` rejects non-positive amounts).
   object: 'case',
   events: ['afterUpdate'],
   condition: P`previous.status != 'escalated' && record.status == 'escalated'`,
-  body: { language: 'js', source: 'await ctx.notifyOpsTeam(record)' },
+  body: {
+    language: 'js',
+    source: "ctx.log.warn('case escalated', { id: ctx.input.id });",
+    capabilities: ['log'],
+  },
 }
 ```
+
+The `condition` is the CEL part — it binds `record` / `previous` directly. The
+JS `body` is a different surface: it is wrapped as `new AsyncFunction('ctx', source)`,
+so inside it the record is `ctx.input` (there is no bare `record`), and every
+`ctx` API it touches must be covered by a declared capability.
 
 ---
 
@@ -375,23 +390,31 @@ Field.formula({
 Field.formula({
   label: 'Days to Close',
   returnType: 'number',
-  expression: 'daysBetween(record.close_date, today())',
+  expression: 'daysBetween(today(), record.close_date)',
 })
 
 // Contract end in 30 days
 Field.formula({
   label: 'Expiring Soon',
   returnType: 'boolean',
-  expression: 'record.status == "active" && daysBetween(record.end_date, today()) <= 30',
+  expression: 'record.status == "active" && daysBetween(today(), record.end_date) <= 30',
 })
 
 // Age in days
 Field.formula({
   label: 'Age (Days)',
   returnType: 'number',
-  expression: 'daysBetween(today(), record.created_date)',
+  expression: 'daysBetween(record.created_date, today())',
 })
 ```
+
+<Callout type="warn">
+**Argument order matters.** `daysBetween(a, b)` is `b − a`, so it counts
+*forward from `a` to `b`* and goes negative when `b` is earlier. "Days
+remaining" is `daysBetween(today(), record.due_date)`; "age so far" is
+`daysBetween(record.created_date, today())`. Swapping the two operands is the
+easiest way to ship a formula whose sign is inverted on every row.
+</Callout>
 
 <Callout type="info">
 **`dateField == today()` now matches (#3183).** A `date` field reads back as a
@@ -479,18 +502,20 @@ Field.formula({
 ❌ **DON'T:**
 - Create circular references
 - Use formulas for frequently changing data
-- Nest too many IF statements
+- Nest ternaries so deeply the expression stops being readable
 - Ignore null handling
 
 ---
 
 ## Determinism contract
 
-Two consecutive `objectstack build` runs with no source changes must produce
+Two consecutive `os build` runs with no source changes must produce
 **byte-identical** `dist/objectstack.json`. CEL plus pinned `now` is what
 makes this possible — there are zero compile-time-evaluated `Date.now()`
-calls in seed metadata. CI enforces this via SHA-1 comparison; if you add a
-new dialect or stdlib helper, ensure it preserves determinism.
+calls in seed metadata: a CEL seed value travels into the artifact as
+unevaluated source and only resolves at install. This is a design contract
+held by review, not a gate — no CI job currently diffs two builds — so if you
+add a new dialect or stdlib helper, ensure it preserves determinism.
 
 ---
 
@@ -524,7 +549,7 @@ Salesforce semantics rewrite their formulas in CEL.
 ```ts
 import { ExpressionEngine } from '@objectstack/formula';
 
-// Compile + cache
+// Compile — parse + type-check, returning the engine-native AST as `value`
 const compiled = ExpressionEngine.compile({ dialect: 'cel', source: 'record.x * 2' });
 
 // Evaluate
@@ -536,11 +561,11 @@ const result = ExpressionEngine.evaluate(
 ```
 
 The low-level engine never throws — `evaluate()` returns `{ ok: false, error }`.
-But **call sites must not silently swallow that** (ADR-0032): `objectstack build`
+But **call sites must not silently swallow that** (ADR-0032): `os build`
 **fails** on an invalid expression (with a located, schema-aware message), and at
 runtime the flow/rule engines **throw** a loud, attributed error instead of
 treating a bad expression as `false`/`null`. The same `validateExpression`
-validator backs `objectstack build` and metadata registration (and the
+validator backs `os build` and metadata registration (and the
 agent-callable `validate_expression` tool), so an expression is checked before it ships.
 
 ---

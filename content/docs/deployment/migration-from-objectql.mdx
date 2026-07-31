@@ -5,7 +5,7 @@ description: Step-by-step guide for migrating from @objectql/core to @objectstac
 
 # Migrating from `@objectql/core` to `@objectstack/objectql`
 
-Starting with `@objectstack/objectql` v3.1, all core functionality previously provided by `@objectql/core` is now available upstream. This guide walks you through migrating your project so that `@objectql/core` can be removed.
+The core functionality previously provided by `@objectql/core` — the introspection types, the utility functions, and the kernel factory — was upstreamed into `@objectstack/objectql` in **v3.0.4** and has shipped in every release since (the current release line is **v16.x**). This guide walks you through migrating your project so that `@objectql/core` can be removed.
 
 ## Why Migrate?
 
@@ -26,7 +26,7 @@ Starting with `@objectstack/objectql` v3.1, all core functionality previously pr
     "dependencies": {
 -     "@objectql/core": "^4.x",
 -     "@objectql/types": "^4.x",
-+     "@objectstack/objectql": "^3.1.0"
++     "@objectstack/objectql": "^16.1.0"
     }
   }
 ```

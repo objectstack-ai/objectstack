@@ -1,9 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { defineActionDescriptor, ScreenConfigSchema } from '@objectstack/spec/automation';
+import type { ScreenConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
+import { parseNodeConfig } from './parse-config.js';
 
 /**
  * Screen / Script built-in nodes — 'screen' and 'script' executors.
@@ -98,7 +100,12 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         },
       }),
       async execute(node, variables, context) {
-        const cfg = (node.config ?? {}) as Record<string, unknown>;
+        // Parsed BEFORE interpolation: the contract's typed slots are strings
+        // (or `unknown`, for the interpolatable `defaultValue`/`defaults`), so
+        // `{var}` templates pass the parse and resolve below as always.
+        const parsedCfg = parseNodeConfig<ScreenConfigParsed>('screen', node.id, ScreenConfigSchema, node.config);
+        if (!parsedCfg.ok) return parsedCfg.refusal;
+        const cfg = parsedCfg.config;
         // `{var}` tokens in screen config resolve against the live flow
         // variables here (the engine does NOT pre-interpolate node config) — so
         // a step's title/description/field-default/object-form-default can pull
@@ -143,7 +150,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           };
         }
 
-        const rawFields = Array.isArray(cfg.fields) ? (cfg.fields as Array<Record<string, unknown>>) : [];
+        const rawFields = cfg.fields ?? [];
         const hasFields = rawFields.length > 0;
         // Suspend to collect input when the screen declares fields, or opts in
         // explicitly. `waitForInput === false` forces a server pass-through.
@@ -152,13 +159,13 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           return { success: true };
         }
         const fields = rawFields.map((f) => ({
-          name: String(f.name ?? ''),
-          label: f.label != null ? String(f.label) : undefined,
-          type: f.type != null ? String(f.type) : undefined,
+          name: f.name,
+          label: f.label,
+          type: f.type,
           required: f.required === true,
-          options: Array.isArray(f.options) ? (f.options as Array<{ value: unknown; label: string }>) : undefined,
+          options: f.options as Array<{ value: unknown; label: string }> | undefined,
           defaultValue: f.defaultValue !== undefined ? interpolate(f.defaultValue, variables, context) : undefined,
-          placeholder: f.placeholder != null ? String(f.placeholder) : undefined,
+          placeholder: f.placeholder,
           // Forwarded RAW — deliberately not interpolated. `visibleWhen` is a
           // predicate the client re-evaluates on every keystroke against the
           // values collected SO FAR; the server has no view of those, so
@@ -172,7 +179,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           // validating the full list blocked Submit on a field the user was
           // never shown — the run then sat paused with no resume request ever
           // issued (#3528).
-          visibleWhen: f.visibleWhen != null ? String(f.visibleWhen) : undefined,
+          visibleWhen: f.visibleWhen,
         })).filter((f) => f.name.length > 0);
         return {
           success: true,

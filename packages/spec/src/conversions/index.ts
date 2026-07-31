@@ -27,3 +27,7 @@ export {
   collectConversionNotices,
   type ApplyConversionsOptions,
 } from './apply.js';
+export {
+  applyConversionsToStoredItem,
+  type StoredConversionOptions,
+} from './stored.js';

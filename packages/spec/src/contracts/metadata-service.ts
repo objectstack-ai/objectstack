@@ -167,6 +167,25 @@ export interface IMetadataService {
     register(type: string, name: string, data: unknown, options?: MetadataWriteOptions): Promise<void>;
 
     /**
+     * Register a metadata item in memory only — never persisted, never
+     * announced to `subscribe(type, …)` watchers.
+     *
+     * [#4251] Declared from the evidenced binding: `MetadataManager`
+     * implements it (`packages/metadata/src/metadata-manager.ts`) as the
+     * boot-time seeding primitive for source-control-owned artefacts that must
+     * be *listable* without leaking into the runtime DB store (`origin:'code'`
+     * datasources, ADR-0015 Addendum), and DefaultDatasourcePlugin calls it to
+     * surface the primary DB in Setup → Datasources (#3827). Optional: the
+     * in-memory registry is `MetadataManager`'s split, not something every
+     * occupant of the `metadata` slot must carry.
+     *
+     * @param type - Metadata type (e.g. 'datasource')
+     * @param name - Item name/identifier (snake_case)
+     * @param data - The metadata definition to register
+     */
+    registerInMemory?(type: string, name: string, data: unknown): void;
+
+    /**
      * Get a metadata item by type and name
      * @param type - Metadata type
      * @param name - Item name/identifier

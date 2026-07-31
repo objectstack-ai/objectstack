@@ -66,16 +66,82 @@ const SLOT_LOOKUPS = ['resolveService', 'getService', 'getRequestKernelService']
 // eslint-disable comments on purpose: exceptions belong in one reviewable
 // place, not sprinkled through the code. Deleting a name from this list is how
 // the exemption ends once that contract gets written.
-const UNCONTRACTED_SLOTS = ['protocol', 'mcp', 'kernel-resolver', 'scope-manager'].join('|');
+//
+// Entries are spliced into a regex, so escape metacharacters (`http\\.server`).
+// `http.server` is served by three providers (plugin-hono-server, runtime's
+// config.server path, qa's node-plugin) and no IHttpServer contract exists;
+// callers read only `getPort()`.
+const UNCONTRACTED_SLOTS = ['protocol', 'mcp', 'kernel-resolver', 'scope-manager', 'http\\.server'].join('|');
 
 const SLOT_LOOKUP_ANY_MESSAGE =
-  'Do not annotate a service-lookup result as `any` — the lookup already returns ' +
-  'the slot\'s contract (#4168/#4176/#4202), and this switches that checking off ' +
+  'Do not erase a service-lookup result to `any` (`: any`, `as any`, or a ' +
+  '`getService<any>(…)` type argument) — the lookup already returns the slot\'s ' +
+  'contract (#4168/#4176/#4202), and this switches that checking off ' +
   'for the call site while looking identical to code that has it. Every such ' +
   'annotation found so far was hiding a real gap, including a project-membership ' +
-  'gate that silently stopped gating. If the slot genuinely has no contract, add ' +
-  'its name to UNCONTRACTED_SLOTS in eslint.config.mjs with a note, so the ' +
-  'exemption is reviewed once and visible in one place — see issue #4127.';
+  'gate that silently stopped gating and two datasource-registration branches ' +
+  'probing a method no metadata service has (#4251). Pass the slot\'s contract ' +
+  'type instead (`getService<IDataEngine>(\'data\')`). If the slot genuinely has ' +
+  'no contract, add its name to UNCONTRACTED_SLOTS in eslint.config.mjs with a ' +
+  'note, so the exemption is reviewed once and visible in one place — see ' +
+  'issues #4127 and #4251.';
+
+// [#4251] The sweep ratchet. These files hold pre-existing lookup-erasure
+// sites — `getService<any>(…)`, `: any`, or `as any` — that predate the rule
+// reaching them: the rule's scope was packages/runtime only until #4251
+// widened it, and the type-argument selector did not exist. Enumerated by
+// running this config with this list emptied: 180 sites in 44 files (the
+// issue's 80 was the non-test `<any>` form alone; the annotation forms and
+// test files the old selectors would have caught under a wider scope roughly
+// double it). They are grandfathered BY FILE, here, for the same reason
+// UNCONTRACTED_SLOTS is central: `--no-inline-config` means the escape must
+// live in config, and a shrinking list in one place is the ratchet made
+// visible. Batches remove entries as they sweep (see #4214 for the batch
+// pattern and its yield — these sites are where the erased contracts live).
+// NEVER add an entry: a new file starts covered, and a new violation in a
+// listed file rides an existing entry only until its batch.
+const SLOT_LOOKUP_UNSWEPT = [
+  'packages/cli/src/commands/migrate/files-to-references.ts',
+  'packages/cli/src/commands/migrate/value-shapes.ts',
+  'packages/cli/src/commands/serve.ts',
+  'packages/client/src/client.hono.test.ts',
+  'packages/cloud-connection/src/cloud-connection-plugin.ts',
+  'packages/cloud-connection/src/marketplace-install-local-plugin.ts',
+  'packages/core/examples/kernel-features-example.ts',
+  'packages/metadata-protocol/src/plugin.ts',
+  'packages/metadata/src/plugin.ts',
+  'packages/objectql/src/plugin.integration.test.ts',
+  'packages/objectql/src/plugin.ts',
+  'packages/plugins/plugin-approvals/src/approvals-plugin.ts',
+  'packages/plugins/plugin-approvals/src/status-mirror-cascade.integration.test.ts',
+  'packages/plugins/plugin-audit/src/audit-plugin.ts',
+  'packages/plugins/plugin-auth/src/auth-plugin.ts',
+  'packages/plugins/plugin-email/src/email-plugin.ts',
+  'packages/plugins/plugin-hono-server/src/current-user-endpoints.ts',
+  'packages/plugins/plugin-pinyin-search/src/pinyin-search-plugin.ts',
+  'packages/plugins/plugin-reports/src/reports-plugin.ts',
+  'packages/plugins/plugin-security/src/security-plugin.ts',
+  'packages/plugins/plugin-sharing/src/sharing-plugin.ts',
+  'packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts',
+  'packages/qa/dogfood/test/showcase-agent-intersection.dogfood.test.ts',
+  'packages/qa/dogfood/test/showcase-bu-hierarchy-sharing.dogfood.test.ts',
+  'packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts',
+  'packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts',
+  'packages/rest/src/external-datasource-routes.ts',
+  'packages/rest/src/rest-api-plugin.ts',
+  'packages/services/service-datasource/src/admin-routes.ts',
+  'packages/services/service-job/src/job-service-plugin.ts',
+  'packages/services/service-messaging/src/messaging-service-plugin.test.ts',
+  'packages/services/service-messaging/src/messaging-service-plugin.ts',
+  'packages/services/service-queue/src/queue-service-plugin.ts',
+  'packages/services/service-realtime/src/realtime-service-plugin.ts',
+  'packages/services/service-settings/src/settings-service-plugin.ts',
+  'packages/services/service-sms/src/sms-plugin.ts',
+  'packages/services/service-storage/src/storage-service-plugin.ts',
+  'packages/triggers/trigger-record-change/src/formula-context.test.ts',
+  'packages/triggers/trigger-record-change/src/multilookup-context.test.ts',
+  'packages/triggers/trigger-record-change/src/record-change-integration.test.ts',
+];
 
 export default [
   {
@@ -200,6 +266,13 @@ export default [
   // having — a deliberate gap is a reviewed line in this file, a careless one
   // is a build failure, and the two stop looking identical in the code.
   //
+  // [#4251] Scope is all of packages/ — the rule shipped scoped to
+  // packages/runtime while the composition roots (rest, plugins/*, services/*)
+  // held 77 of the 80 known sites, an unlinted majority that looked covered.
+  // Per-package curation would recreate that gap one package at a time, so the
+  // scope is total and the not-yet-swept files are grandfathered individually
+  // in SLOT_LOOKUP_UNSWEPT above — a shrinking list, not a silent boundary.
+  //
   // KNOWN RESIDUAL: a wrapper whose own return type is annotated
   // (`const getEngine = async (): Promise<any> => …resolveService(…)`) erases
   // the slot type just as effectively, and this selector cannot see it — the
@@ -207,8 +280,8 @@ export default [
   // existed (share-links `getEngine`, fixed in batch 4). Catching that shape
   // needs type information, so it belongs to a typed-lint pass, not here.
   {
-    files: ['packages/runtime/**/*.{ts,mts,cts}'],
-    ignores: ['**/node_modules/**', '**/dist/**'],
+    files: ['packages/**/*.{ts,tsx,mts,cts}'],
+    ignores: ['**/node_modules/**', '**/dist/**', ...SLOT_LOOKUP_UNSWEPT],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
@@ -229,6 +302,17 @@ export default [
             'TSAsExpression[typeAnnotation.type="TSAnyKeyword"]' +
             `:has(CallExpression[callee.property.name=/^(${SLOT_LOOKUPS})$/]` +
             `:not(:has(Literal[value=/^(${UNCONTRACTED_SLOTS})$/])))`,
+          message: SLOT_LOOKUP_ANY_MESSAGE,
+        },
+        {
+          // `ctx.getService<any>('data')` — the type-argument form (#4251).
+          // No annotation, no `as`, and the contract is erased all the same;
+          // this is the shape 80 sites actually used while the two selectors
+          // above matched zero of them.
+          selector:
+            `CallExpression[callee.property.name=/^(${SLOT_LOOKUPS})$/]` +
+            '[typeArguments.params.0.type="TSAnyKeyword"]' +
+            `:not(:has(Literal[value=/^(${UNCONTRACTED_SLOTS})$/]))`,
           message: SLOT_LOOKUP_ANY_MESSAGE,
         },
       ],

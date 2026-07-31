@@ -1,12 +1,25 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
+import {
+    defineActionDescriptor,
+    GetRecordConfigSchema,
+    CreateRecordConfigSchema,
+    UpdateRecordConfigSchema,
+    DeleteRecordConfigSchema,
+} from '@objectstack/spec/automation';
+import type {
+    GetRecordConfigParsed,
+    CreateRecordConfigParsed,
+    UpdateRecordConfigParsed,
+    DeleteRecordConfigParsed,
+} from '@objectstack/spec/automation';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate, interpolateFilter, type VariableMap } from './template.js';
 import { refuseNode } from '../guard-refusal.js';
+import { parseNodeConfig } from './parse-config.js';
 import { resolveRunDataContext } from '../runtime-identity.js';
 
 /**
@@ -166,12 +179,17 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 },
             }),
             async execute(node, variables, context) {
-                const cfg = (node.config ?? {}) as Record<string, unknown>;
                 // `filters` → `filter` and `object` → `objectName` are handled at
                 // load by the ADR-0087 D2 conversion layer ('flow-node-crud-filter-alias',
-                // 'flow-node-crud-object-alias'), so the executor reads the canonical
-                // keys directly (PD #12 fallbacks retired).
-                const objectName = String(cfg.objectName ?? '');
+                // 'flow-node-crud-object-alias'), so the parse sees canonical keys
+                // (PD #12 fallbacks retired). Parsed BEFORE interpolation: every
+                // typed slot the contract declares beyond strings is read raw by
+                // this executor too (`limit` never honored a template), so a
+                // template in one was already dead config — now it is loud.
+                const parsed = parseNodeConfig<GetRecordConfigParsed>('get_record', node.id, GetRecordConfigSchema, node.config);
+                if (!parsed.ok) return parsed.refusal;
+                const cfg = parsed.config;
+                const objectName = cfg.objectName;
                 if (!objectName) return refuseNode('get_record: objectName required');
 
                 const filterResult = resolveNodeFilter(
@@ -180,9 +198,9 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 );
                 if ('error' in filterResult) return refuseNode(filterResult.error);
                 const filter = filterResult.filter;
-                const fields = cfg.fields as string[] | undefined;
-                const limit = typeof cfg.limit === 'number' ? cfg.limit : undefined;
-                const outputVariable = cfg.outputVariable as string | undefined;
+                const fields = cfg.fields;
+                const limit = cfg.limit;
+                const outputVariable = cfg.outputVariable;
 
                 const data = getData();
                 if (!data) {
@@ -228,12 +246,14 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 },
             }),
             async execute(node, variables, context) {
-                const cfg = (node.config ?? {}) as Record<string, unknown>;
-                const objectName = String(cfg.objectName ?? '');
+                const parsed = parseNodeConfig<CreateRecordConfigParsed>('create_record', node.id, CreateRecordConfigSchema, node.config);
+                if (!parsed.ok) return parsed.refusal;
+                const cfg = parsed.config;
+                const objectName = cfg.objectName;
                 if (!objectName) return refuseNode('create_record: objectName required');
 
                 const fields = interpolate(cfg.fields ?? {}, variables, context) as Record<string, unknown>;
-                const outputVariable = cfg.outputVariable as string | undefined;
+                const outputVariable = cfg.outputVariable;
 
                 const data = getData();
                 if (!data) {
@@ -309,8 +329,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 },
             }),
             async execute(node, variables, context) {
-                const cfg = (node.config ?? {}) as Record<string, unknown>;
-                const objectName = String(cfg.objectName ?? '');
+                const parsed = parseNodeConfig<UpdateRecordConfigParsed>('update_record', node.id, UpdateRecordConfigSchema, node.config);
+                if (!parsed.ok) return parsed.refusal;
+                const cfg = parsed.config;
+                const objectName = cfg.objectName;
                 if (!objectName) return refuseNode('update_record: objectName required');
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
@@ -382,8 +404,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 },
             }),
             async execute(node, variables, context) {
-                const cfg = (node.config ?? {}) as Record<string, unknown>;
-                const objectName = String(cfg.objectName ?? '');
+                const parsed = parseNodeConfig<DeleteRecordConfigParsed>('delete_record', node.id, DeleteRecordConfigSchema, node.config);
+                if (!parsed.ok) return parsed.refusal;
+                const cfg = parsed.config;
+                const objectName = cfg.objectName;
                 if (!objectName) return refuseNode('delete_record: objectName required');
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
