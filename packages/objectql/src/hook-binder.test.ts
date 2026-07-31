@@ -227,6 +227,35 @@ describe('bindHooksToEngine', () => {
     expect(calls).toEqual(['body-default-runner']);
   });
 
+  it('keeps the FIRST default body runner — the setter is first-wins (#4251)', async () => {
+    const engine = makeEngine();
+    const calls: string[] = [];
+    expect(engine.setDefaultBodyRunner(() => async () => { calls.push('first'); })).toBe(true);
+    // A second install (another AppPlugin sharing the kernel) is refused —
+    // the invariant used to be enforced by callers probing the private
+    // `_defaultBodyRunner` field; it is the engine's own now.
+    expect(engine.setDefaultBodyRunner(() => async () => { calls.push('second'); })).toBe(false);
+    const hook: Hook = {
+      name: 'body-first-wins', object: 'account', events: ['beforeInsert'], priority: 100,
+      body: { language: 'js', source: 'ctx.input.x = 1;' },
+    } as unknown as Hook;
+    engine.bindHooks([hook], { packageId: 'app:first-wins' });
+    await engine.triggerHooks('beforeInsert', makeCtx());
+    // Execution proves the first runner stayed installed.
+    expect(calls).toEqual(['first']);
+  });
+
+  it('keeps the FIRST default action runner and exposes both via public accessors (#4251)', () => {
+    const engine = makeEngine();
+    const first = () => undefined;
+    const second = () => undefined;
+    expect(engine.setDefaultActionRunner(first)).toBe(true);
+    expect(engine.setDefaultActionRunner(second)).toBe(false);
+    // The accessors are the public read the old private-field probes become.
+    expect(engine.getDefaultActionRunner()).toBe(first);
+    expect(engine.getDefaultBodyRunner()).toBeUndefined();
+  });
+
   it('explicit bodyRunner wins over the engine default', async () => {
     const engine = makeEngine();
     const calls: string[] = [];

@@ -690,8 +690,8 @@ export class ObjectQL implements IDataEngine {
     metrics?: any;
   }): void {
     const merged = { ...(opts ?? {}), logger: this.logger } as any;
-    if (!merged.bodyRunner && (this as any)._defaultBodyRunner) {
-      merged.bodyRunner = (this as any)._defaultBodyRunner;
+    if (!merged.bodyRunner && this._defaultBodyRunner) {
+      merged.bodyRunner = this._defaultBodyRunner;
     }
     if (merged.strict === undefined && (this as any)._strictHookBinding) {
       merged.strict = true;
@@ -705,14 +705,41 @@ export class ObjectQL implements IDataEngine {
     bindHooksToEngine(this, hooks, merged);
   }
 
+  /** Default hook body-runner — see {@link setDefaultBodyRunner}. */
+  private _defaultBodyRunner?: any;
+  /** Default action body-runner factory — see {@link setDefaultActionRunner}. */
+  private _defaultActionRunner?: (actionDef: any) => ((ctx: any) => Promise<unknown>) | undefined;
+
   /**
    * Install a default body-runner used when `bindHooks` is called without
    * an explicit one. The runtime layer sets this once on each per-project
    * engine so every binding path (template seed, metadata sync, AppPlugin)
    * can execute hook `body.source` consistently.
+   *
+   * FIRST-WINS (#4251): "set once per engine" is this method's own contract,
+   * so the method enforces it — a second call is ignored and returns `false`.
+   * Callers used to implement the guard themselves by probing the private
+   * `_defaultBodyRunner` field through `any` (multiple AppPlugin instances on
+   * one kernel must not clobber each other's runner), which meant the
+   * invariant lived in every caller and belonged to none. Nobody replaces a
+   * runner on a live engine: every setter call site either owns a fresh
+   * engine or wants exactly this keep-the-first behaviour.
+   *
+   * @returns `true` when this call installed the runner, `false` when one was
+   * already present (kept unchanged).
    */
-  setDefaultBodyRunner(runner: any): void {
-    (this as any)._defaultBodyRunner = runner;
+  setDefaultBodyRunner(runner: any): boolean {
+    if (this._defaultBodyRunner) {
+      this.logger.debug('Default body runner already installed — keeping the first');
+      return false;
+    }
+    this._defaultBodyRunner = runner;
+    return true;
+  }
+
+  /** The installed default body-runner, if any — the public read the first-wins guard implies. */
+  getDefaultBodyRunner(): any {
+    return this._defaultBodyRunner;
   }
 
   /**
@@ -724,9 +751,25 @@ export class ObjectQL implements IDataEngine {
    * `body` into an executable `registerAction` handler. The factory returns
    * `undefined` for actions it cannot run (no `body`, invalid shape), which
    * callers must treat as "skip", not an error.
+   *
+   * FIRST-WINS (#4251) — same contract and rationale as
+   * {@link setDefaultBodyRunner}.
+   *
+   * @returns `true` when this call installed the runner, `false` when one was
+   * already present (kept unchanged).
    */
-  setDefaultActionRunner(runner: (actionDef: any) => ((ctx: any) => Promise<unknown>) | undefined): void {
-    (this as any)._defaultActionRunner = runner;
+  setDefaultActionRunner(runner: (actionDef: any) => ((ctx: any) => Promise<unknown>) | undefined): boolean {
+    if (this._defaultActionRunner) {
+      this.logger.debug('Default action runner already installed — keeping the first');
+      return false;
+    }
+    this._defaultActionRunner = runner;
+    return true;
+  }
+
+  /** The installed default action-runner factory, if any. */
+  getDefaultActionRunner(): ((actionDef: any) => ((ctx: any) => Promise<unknown>) | undefined) | undefined {
+    return this._defaultActionRunner;
   }
 
   /**

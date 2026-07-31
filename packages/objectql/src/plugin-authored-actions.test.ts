@@ -30,8 +30,13 @@ function makeQlMock(overrides: AnyRecord = {}) {
       getArtifactItem: vi.fn(() => undefined),
     },
     // Default action runner as the runtime installs it: body → handler.
+    // The plugin reads it through `getDefaultActionRunner()` (#4251); the
+    // field stays so tests can swap or clear the runner directly.
     _defaultActionRunner: vi.fn((action: AnyRecord) =>
       action?.body ? async () => `ran:${action.name}` : undefined),
+    getDefaultActionRunner(): unknown {
+      return (this as AnyRecord)._defaultActionRunner;
+    },
     ...overrides,
   };
 }

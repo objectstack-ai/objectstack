@@ -259,7 +259,9 @@ function resolveHandler(
   if (body && typeof body === 'object') {
     let runner = opts.bodyRunner;
     if (typeof runner !== 'function') {
-      const fallback = (engine as any)?._defaultBodyRunner;
+      // [#4251] The public accessor — this read used to reach the private
+      // `_defaultBodyRunner` field through `as any`.
+      const fallback = engine?.getDefaultBodyRunner?.();
       if (typeof fallback === 'function') runner = fallback;
     }
     if (typeof runner !== 'function') {
