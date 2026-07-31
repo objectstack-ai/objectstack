@@ -61,16 +61,19 @@ describe('reference-integrity suite — every member actually runs', () => {
     actions: [
       // validateObjectReferences: a param pointing at an object nothing declares.
       { name: 'assign', label: 'Assign', params: [{ name: 'owner', reference: 'user' }] },
-      // validateActionBodyWrites: the L2 body persists a field crm_lead does
-      // not declare — the action returns success and the column never lands
-      // (#4271, the action half of the hook rule below).
+      // validateActionBodyWrites, both of its rule ids from one body:
+      //   - the L2 body persists a field crm_lead does not declare — the action
+      //     returns success and the column never lands (#4271);
+      //   - and it assigns ctx.record, a snapshot the runtime never writes
+      //     back, without ever passing it anywhere (#4345).
       {
         name: 'score_now',
         label: 'Score Now',
         objectName: 'crm_lead',
         body: {
           language: 'js',
-          source: "await ctx.api.object('crm_lead').update({ lead_score: 100 });",
+          source:
+            "ctx.record.name = 'scored'; await ctx.api.object('crm_lead').update({ lead_score: 100 });",
         },
       },
     ],
@@ -185,6 +188,9 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('agent-authoring-withdrawn');
     expect(rules).toContain('hook-body-write-unknown-field');
     expect(rules).toContain('action-body-write-unknown-field');
+    // The one member that emits a second rule id — see the suite's comment on
+    // why it rides along instead of becoming its own entry.
+    expect(rules).toContain('action-record-write-discarded');
   });
 
   it('carries a gating flow-template finding through the suite (#3810)', () => {

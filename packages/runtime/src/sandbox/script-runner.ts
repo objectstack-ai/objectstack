@@ -87,6 +87,16 @@ export interface ScriptContext {
    * Action only: the record loaded by the dispatcher before the action ran
    * (when the dispatcher pre-fetches it). May be undefined for actions
    * declared with `requiresRecord: false` or when no `recordId` was supplied.
+   *
+   * READ-ONLY in effect. `buildActionSandboxContext` passes a plain snapshot
+   * (`unwrapProxyToPlain`), and `boundActionHandler` returns `result.value`
+   * without writing anything back — the hook path's `applyMutationsToInput` has
+   * no action-side counterpart. So `ctx.record.x = …` inside a body mutates a
+   * copy that is then discarded, for DECLARED and undeclared fields alike; to
+   * persist, write through `ctx.api.object(...)`. `@objectstack/lint` warns on
+   * a provably dead assignment (`action-record-write-discarded`, #4345); the
+   * open question of whether the runtime should instead refuse or honour the
+   * write is tracked there.
    */
   record?: unknown;
   /** Engine-side `result` (only set for after* hooks). */

@@ -471,12 +471,17 @@ const actionObject = () => z.object({
    * Compiled-module bodies are not supported. Outbound IO (HTTP, etc.) goes
    * through Connector recipes (separate spec).
    *
-   * The writes an L2 body persists are checked at author time by
-   * `validateActionBodyWrites` in `@objectstack/lint` — a literal
-   * `ctx.api.object('y').update({ x })` naming a field object `y` never
-   * declares warns with a did-you-mean, because the call succeeds while the
-   * unknown column silently never lands (#4271). Advisory only, and blind to
-   * everything statically unknowable; see `ScriptBodySchema` for the scope.
+   * `ctx.api.object(...)` is the ONLY way a body persists anything. `ctx.input`
+   * is the action's params bag, and `ctx.record` is a snapshot the runtime
+   * never writes back — assigning to it is discarded, declared field or not.
+   *
+   * Both are checked at author time by `validateActionBodyWrites` in
+   * `@objectstack/lint`: a literal `ctx.api.object('y').update({ x })` naming a
+   * field object `y` never declares warns with a did-you-mean, because the call
+   * succeeds while the unknown column silently never lands (#4271); and a
+   * provably dead `ctx.record.<field> = …` warns as discarded (#4345).
+   * Advisory only, and blind to everything statically unknowable; see
+   * `ScriptBodySchema` for the scope.
    */
   body: HookBodySchema.optional().describe('Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`.'),
 
