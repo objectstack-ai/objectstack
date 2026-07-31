@@ -596,8 +596,23 @@ const step18: MigrationStep = {
     + '`SqlDriver.findWithWindowFunctions()`, a driver-level door whose flat input shape the '
     + 'spec vocabulary never matched (it declared `field`/`over`/`frame` members the door never '
     + 'read — that cluster goes too). Request shapes again: two semantic TODOs, no source '
-    + 'rewrite.',
-  conversionIds: ['stack-api-require-auth-removed'],
+    + 'rewrite.\n\n'
+    + 'The same kind of retirement covers `wait`\'s timeout pair (#4158). `waitEventConfig.onTimeout` '
+    + 'had ZERO readers — no path ever inspected it, so neither `fail` nor `continue` ever '
+    + 'happened, while its `.default(\'fail\')` stamped a decision nothing made onto every wait '
+    + 'node. `waitEventConfig.timeoutMs` said "maximum wait time before timeout" and its only '
+    + 'reader used it as the timer DURATION when `timerDuration` was absent: it did something, '
+    + 'just not what it said. Together they declared a timeout `wait` does not have — the run '
+    + 'resumes when its timer elapses or its signal arrives, never on a deadline. Rather than '
+    + 'retrofit an implementation to fit two keys that happened to be declared, the pair is '
+    + 'retired and real timeout semantics are left to be built to a requirement. `timeoutMs` '
+    + 'converts to `timerDuration` (stringified — the target is `z.string()` and '
+    + '`parseIsoDuration` reads a bare numeric string as milliseconds, so the wait is unchanged); '
+    + 'with `timerDuration` already set it is dropped, having been dead metadata. Like the other '
+    + 'keys retired for MISDESCRIBING themselves rather than for being renamed, both leave the '
+    + 'load path: absorbing them silently would let an author keep believing they configured a '
+    + 'timeout.',
+  conversionIds: ['stack-api-require-auth-removed', 'flow-node-wait-timeout-keys-removed'],
   semantic: [
     {
       id: 'query-field-node-object-form-retired',

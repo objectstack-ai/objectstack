@@ -460,16 +460,16 @@ const query: QueryAST = {
 ### Sorting on Related Fields
 
 <Callout type="warn">
-`orderBy` only reaches columns of the queried table. A dotted path
-(`account.company_name`) is handed to Knex verbatim and renders as
-`"account"."company_name"`, which the database rejects as an unknown column;
-`SqlDriver.find()` then retries **without the sort**, so the rows come back unordered
-rather than sorted — and no error surfaces. Denormalise the value onto the queried
-object (for example with a formula or rollup field) when you need to sort by it.
+`orderBy` only reaches columns of the queried table. Over the REST/protocol
+ingress a dotted path (`account.company_name`) is `400 INVALID_SORT` (#4256):
+no driver can order by it — `SqlDriver` would render it as
+`"account"."company_name"` against a table that was never joined, and until the
+path was refused, the unknown-column backstop retried **without the sort** and
+answered 200 with unordered rows. Denormalise the value onto the queried object
+(for example with a formula or rollup field) when you need to sort by it.
 
-This is the one sort that still degrades silently: the REST ingress judges a
-dotted path on its **head segment** (`account` here, a real field), so the
-`INVALID_SORT` gate passes it through to the driver backstop.
+Internal callers reaching `engine.find()` directly are unaffected: a dotted
+`orderBy` there still falls through to the driver backstop and orders nothing.
 </Callout>
 
 ---

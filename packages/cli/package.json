@@ -11,8 +11,7 @@
   "scripts": {
     "build": "if [ -n \"$OS_SKIP_DTS\" ]; then tsc -p tsconfig.build.json --noCheck --declaration false --declarationMap false; else tsc -p tsconfig.build.json; fi",
     "dev": "tsc -p tsconfig.build.json --watch",
-    "test": "vitest run",
-    "lint": "eslint src"
+    "test": "vitest run"
   },
   "keywords": [
     "objectstack",
@@ -124,7 +123,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22.0.0"

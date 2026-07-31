@@ -482,6 +482,30 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
       + 'one entry would misrepresent both what it covers and what that entry is proven by. The '
       + 'per-property bindings above carve out the parts that do have a single owner.',
   },
+  {
+    id: 'field-file-collection',
+    label: 'Field-file collection (ADR-0104 PR-5b)',
+    summary:
+      'a field file released by its ONE owning record is tombstoned, and the sweep reclaims the row AND '
+      + 'the storage bytes once the declared window passes — with both vetoes intact: a tombstone that '
+      + 'regained an owner is un-tombstoned rather than reaped, and a REGRESSED migration flag stops '
+      + 'collection immediately (the guard re-reads the flag at sweep time instead of trusting the '
+      + 'memoized read the release path uses). This is the only code on the platform that deletes a '
+      + "user's bytes, and its sibling lineage — attachments — has had an end-to-end proof since #2755 "
+      + 'while field files, which reach collection by a different route (exclusive ownership, released '
+      + 'by the write path, gated per deployment), had none.',
+    proofId: 'adr0104-field-file-collection',
+    proofRef: 'packages/qa/dogfood/test/field-file-collection.dogfood.test.ts#adr0104-field-file-collection',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'the collection contract it guards is the `lifecycle` ttl declared on the SYSTEM object `sys_file` '
+      + '(service-storage), not an authorable per-type property — and `object.lifecycle` is already bound '
+      + 'to `data-lifecycle`, which carries one `proof` ref. The rest of the route (exclusive ownership, '
+      + 'release-on-write, the per-deployment migration gate) is service code with no authorable surface '
+      + 'to govern, so there is no other entry to bind instead. It runs unconditionally in the dogfood '
+      + 'suite.',
+  },
 ];
 
 /** Bound ledger paths → the class that binds them. Key: `<type>/<path>`. */

@@ -90,8 +90,21 @@ export const CORE_SERVICE_PROVIDER: Readonly<Record<string, string | null>> = {
   // `/ui` is served by the `protocol` service, which MetadataPlugin registers;
   // the `ui` slot itself has no implementation anywhere (#4093 / #4146).
   'ui':           '@objectstack/metadata-protocol',
-  // Nothing ships for these. `search` and `workflow` have no consumer either
-  // (ADR-0115 Evidence 5); `graphql` and `ai` have surfaces but no provider.
+  // `null` means "no name belongs in an `Install X` sentence", which covers two
+  // different situations — see REMEDY_DETAIL, which is how the second one still
+  // gets an accurate message.
+  //
+  //   Nothing provides the slot at all: `search`, `workflow` (no consumer
+  //   either — ADR-0115 Evidence 5) and `graphql` (a surface with no provider).
+  //   Verified across BOTH repositories: nothing in `objectstack-ai/cloud`
+  //   registers them.
+  //
+  //   A provider exists but cannot be installed: `ai`. `@objectstack/service-ai`
+  //   registers this slot in `objectstack-ai/cloud` and is `private: true`, so
+  //   naming it would send a reader after a package they cannot obtain — the
+  //   exact failure this table was written to end. It carries a REMEDY_DETAIL
+  //   sentence instead; a bare `null` here would tell a Cloud/Enterprise
+  //   deployment that nothing ships, which is false.
   'ai':           null,
   'search':       null,
   'workflow':     null,
@@ -110,6 +123,12 @@ export const CORE_SERVICE_PROVIDER: Readonly<Record<string, string | null>> = {
  */
 const REMEDY_DETAIL: Readonly<Record<string, string>> = {
   'ui': 'Served by the protocol service — register MetadataPlugin (@objectstack/metadata-protocol) to enable',
+  // A provider EXISTS — `@objectstack/service-ai` registers this slot — but it
+  // lives in the `objectstack-ai/cloud` repository and is `private: true`, so
+  // there is nothing to install and no name that belongs in an "Install X"
+  // sentence. Without this entry the `null` above reads as "nothing ships",
+  // which is what a Cloud/Enterprise deployment is NOT looking at.
+  'ai': 'Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation ships in the open framework',
 };
 
 /**
