@@ -2653,6 +2653,38 @@ describe('HttpDispatcher', () => {
             expect(fromDispatcher.message).toBe(fromProtocol.message);
             expect(fromDispatcher.route).toBe(fromProtocol.route);
         });
+
+        // ── The class-wide gate (#3898): the fake INVENTORY, not spot checks ──
+        //
+        // Everything above pins one slot each. This iterates the actual list of
+        // in-memory fallbacks the kernel auto-registers — CORE_FALLBACK_FACTORIES
+        // is the complete fake inventory now that plugin-dev's stub table is
+        // retired (ADR-0115) and the third marker kind, `_fallback`, was
+        // eliminated rather than recognized (#4058 step 1) — and registers each
+        // product into its own slot: discovery must never call any of them
+        // `available`. Table-driven so the next fallback added to the table is
+        // gated the day it lands; this class of hole recurs with every new
+        // fallback. cache/queue/job had no per-slot pin before this — dropping
+        // their `svcAvailable(…, svc)` third argument, the exact #4130
+        // regression shape, was test-invisible.
+
+        it('reports every CORE_FALLBACK_FACTORIES product as degraded, never available (#3898)', async () => {
+            const { CORE_FALLBACK_FACTORIES } = await import('@objectstack/core');
+            expect(Object.keys(CORE_FALLBACK_FACTORIES).length).toBeGreaterThan(0);
+
+            for (const [slot, factory] of Object.entries(CORE_FALLBACK_FACTORIES)) {
+                const fallback = factory();
+                (kernel as any).getService = vi.fn().mockImplementation((n: string) => (n === slot ? fallback : null));
+                (kernel as any).services = new Map([[slot, fallback]]);
+
+                const info = await dispatcher.getDiscoveryInfo('/api/v1');
+                const reported = (info.services as Record<string, any>)[slot];
+                expect(reported, `services.${slot}`).toBeDefined();
+                expect(reported.enabled, `services.${slot}.enabled`).toBe(true);
+                expect(reported.status, `services.${slot}.status`).toBe('degraded');
+                expect(reported.message, `services.${slot}.message`).toBeTruthy();
+            }
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════
