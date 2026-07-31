@@ -312,6 +312,19 @@ jobs:
       # The whole driver-sql suite runs under the skewed process zone — not
       # just the live-server files — so a TZ-sensitive assumption anywhere in
       # the driver's tests fails here before it can ship.
+      #
+      # run-with-stall-guard: same wiring as Test Core (see the comment there;
+      # #4250). Both of this job's test legs have hit the same nondeterministic
+      # stall (#4331) — once frozen mid-file in core's kernel.test, once silent
+      # for 24 minutes AFTER every suite printed `Done` (a process that never
+      # exited) — and each burned the full 30-minute job timeout to end as an
+      # uninformative "The operation was canceled". The guard watches output
+      # silence, so both shapes become a labeled red naming the last line after
+      # 10 quiet minutes, and its process-group kill takes down whatever
+      # refused to exit. `--log` is the guard's own tee (mandatory); no
+      # completeness guard reads these files yet. The zone-assert `node -e`
+      # stays outside the wrapper: a one-shot print cannot stall, and the
+      # guard should time the suite only.
       - name: Run driver-sql suite against both live servers
         env:
           TZ: America/New_York
@@ -323,7 +336,8 @@ jobs:
           # everything still passes — the same vacuous-pass hole the live-server
           # suites close by asserting a non-UTC SERVER.
           node -e "const tz=Intl.DateTimeFormat().resolvedOptions().timeZone,off=new Date().getTimezoneOffset();if(!tz||tz==='UTC'||off===0){console.error('process zone is '+tz+' (offset '+off+') — this job must run skewed');process.exit(1)}console.log('process zone: '+tz+' (offset '+off+')')"
-          pnpm --filter @objectstack/driver-sql test
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/temporal-driver-sql.log" --stall-minutes 10 -- \
+            pnpm --filter @objectstack/driver-sql test
 
       # The non-SQL half of the same axis. `driver-sql` has run under a skewed
       # process zone since #3979, but the other backends the temporal
@@ -359,13 +373,17 @@ jobs:
           # everything still passes — the same vacuous-pass hole the live-server
           # suites close by asserting a non-UTC SERVER.
           node -e "const tz=Intl.DateTimeFormat().resolvedOptions().timeZone,off=new Date().getTimezoneOffset();if(!tz||tz==='UTC'||off===0){console.error('process zone is '+tz+' (offset '+off+') — this job must run skewed');process.exit(1)}console.log('process zone: '+tz+' (offset '+off+')')"
-          pnpm \
-            --filter @objectstack/core \
-            --filter @objectstack/formula \
-            --filter @objectstack/driver-memory \
-            --filter @objectstack/driver-mongodb \
-            --filter @objectstack/service-analytics \
-            test
+          # Stall guard: same wiring and rationale as the driver-sql step above
+          # (#4250/#4331) — the "silent after every suite printed Done"
+          # occurrence was on THIS leg.
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/temporal-non-sql.log" --stall-minutes 10 -- \
+            pnpm \
+              --filter @objectstack/core \
+              --filter @objectstack/formula \
+              --filter @objectstack/driver-memory \
+              --filter @objectstack/driver-mongodb \
+              --filter @objectstack/service-analytics \
+              test
 
   dogfood:
     # Sharded 2-way: the suite is ~60 independent test files, each booting its
