@@ -595,6 +595,41 @@ function valueShapeStrictEffective(deploymentVerified: boolean): boolean {
 }
 
 /**
+ * Has an environment switch already settled the reference / structured-JSON
+ * posture, so the boot advisory for the scan (#3438) would be untrue or
+ * useless?
+ *
+ * `OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1` means enforcement is already on for
+ * every class, so a line announcing "warn mode is in effect" would be false.
+ * `OS_ALLOW_LAX_VALUE_SHAPES=1` means the operator opted out deliberately —
+ * running the scan would not change what they get, so pointing at it is noise.
+ *
+ * Exported rather than re-read in the engine for the same reason the scanner
+ * imports `valueShapeViolation`: two readings of these variables drifting by
+ * one clause is how a deployment gets told to run a migration that would not
+ * change its posture, or gets told nothing while it still would.
+ *
+ * The predicate is exactly the pair {@link valueShapeStrictEffective} consults
+ * ahead of the deployment flag — the announcement stays silent in precisely
+ * the cases where the flag it reports on cannot decide the posture.
+ */
+export function valueShapePostureSetByEnv(): boolean {
+  return LAX_VALUE_SHAPES() || VALUE_SHAPE_STRICT();
+}
+
+/**
+ * The media counterpart, standing in the same relation to
+ * {@link mediaStrictEffective}. A sibling rather than a parameter for the
+ * reason the two `*StrictEffective` functions are siblings: each gate names
+ * the switches it answers to at its own call site, and the two sets differ by
+ * more than a name — `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` opens both, while
+ * each opt-out reaches only its own class.
+ */
+export function mediaPostureSetByEnv(): boolean {
+  return LAX_MEDIA_VALUES() || VALUE_SHAPE_STRICT();
+}
+
+/**
  * Is `value` a violation of `def`'s declared stored shape — the SAME question
  * `validateOne` asks, exported so the `os migrate value-shapes` scanner counts
  * exactly what strict mode would reject and nothing else.

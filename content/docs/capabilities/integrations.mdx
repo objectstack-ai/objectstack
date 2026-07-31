@@ -12,7 +12,7 @@ A business system earns its keep by fitting into the systems — and habits — 
 - **Generated REST APIs** — every object gets standard endpoints automatically, so your website, mini-program, or ERP reads and writes through the same permission gate as people.
 - **Webhooks out** — data changes notify external systems (*deal won → billing system opens an invoice*).
 - **Triggers in** — external systems start platform [flows](/docs/capabilities/automation).
-- **Connectors** — ready-made Slack and generic REST connectors drop into flows.
+- **Connectors** — ready-made Slack and generic REST connectors drop into flows; an HTTP API, OpenAPI document, or MCP server can be [declared as metadata](/docs/automation/connectors) and goes live at boot, no plugin code.
 - **Federated external databases** — point at an existing database and query it in place: no migration, visible in views, usable in flows.
 - **Marketplace templates** — install complete apps (HotCRM among them) with one click: objects, views, flows, dashboards, and seed data included, then customize in Studio.
 - **Deploy anywhere** — cloud or fully self-hosted; your data and your app definition stay yours.
@@ -27,4 +27,4 @@ Interface text — labels, options, messages — is translatable per language, a
 
 > **In HotCRM**: the interface ships in four languages (English, Chinese, Japanese, Spanish); the Slack connector and web-to-lead intake demonstrate both directions of integration.
 
-**For developers**: [API & SDK](/docs/api), [connectors and webhooks](/docs/automation), and [translations](/docs/ui/translations).
+**For developers**: [API & SDK](/docs/api), [connectors](/docs/automation/connectors), [webhooks](/docs/automation/webhooks), and [translations](/docs/ui/translations).

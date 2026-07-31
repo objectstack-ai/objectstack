@@ -791,10 +791,30 @@ ObjectStack sends CORS headers automatically:
 
 ```http
 Access-Control-Allow-Origin: https://app.acme.com
-Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS
-Access-Control-Allow-Headers: Authorization, Content-Type
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS
+Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Tenant-ID, X-Environment-Id, If-Match
+Access-Control-Expose-Headers: set-auth-token, x-objectstack-dropped-fields
 Access-Control-Max-Age: 86400
 ```
+
+Three of the allowed request headers are easy to overlook, and each one disables
+a feature if an intermediate proxy strips it:
+
+| Header | Why it is allowed |
+| --- | --- |
+| `X-Tenant-ID` / `X-Environment-Id` | Route the request to its environment on a multi-tenant host. |
+| `If-Match` | Carries the OCC token on record `PATCH`es. Without it, a cross-origin save fails in the browser with "Failed to fetch". |
+
+The two **exposed** response headers matter to browser clients specifically:
+`set-auth-token` delivers a rotated session token (without it a cross-origin
+session silently breaks even though every request succeeds), and
+`x-objectstack-dropped-fields` warns that a write dropped undeclared keys — the
+response body's `droppedFields` stays the primary channel for that.
+
+These are the defaults exported as `DEFAULT_CORS_ALLOW_HEADERS` and
+`DEFAULT_CORS_EXPOSE_HEADERS` from `@objectstack/plugin-hono-server`. Supplying
+`allowHeaders` **replaces** the default; supplying `exposeHeaders` **merges**
+with it.
 
 **Preflight request:**
 ```http

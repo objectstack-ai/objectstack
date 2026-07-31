@@ -11,6 +11,18 @@ This ledger makes that classification **explicit and regression-proof**: every p
 of a governed metadata type must declare a liveness status with evidence, or CI fails
 (the ratchet — you can't add new undeclared surface).
 
+The gate checks **both directions**, and it took a while to notice the second one was
+missing. Schema → ledger catches a property with no row (`UNCLASSIFIED`). Ledger →
+schema catches a **row that outlived its property** (`ORPHAN`): when a key is removed
+from a `.strict()` schema it leaves the walked shape, so the forward pass simply stops
+asking about it and a stale `dead`/`live` claim rots in place — which is exactly what
+the report `aria`/`performance` rows did for a full release, deleted by hand only
+because someone happened to read the file. Note the asymmetry that makes this
+error-prone: a `retiredKey()` tombstone **keeps** the key in the walked shape, so a
+tombstoned key's row must **stay**, while a strict-removed key's row must **go**. The
+route decides the disposition — see `scripts/liveness/orphans.mts` and
+`.claude/skills/spec-property-retirement/SKILL.md` §2.
+
 ## Source of truth = the metadata-type registry
 
 The gate reads `BUILTIN_METADATA_TYPE_SCHEMAS` (`packages/spec/src/kernel/metadata-type-schemas.ts`)
@@ -415,6 +427,9 @@ over-share.
 
 - `<type>.json` — the ledger for a governed metadata type.
 - `../scripts/liveness/check-liveness.mts` — the gate (tsx; imports the registry).
+- `../scripts/liveness/orphans.mts` — the reverse (ledger → schema) scan: rows whose
+  property is gone. Pure + unit-tested, because the tree was orphan-free when it
+  landed, so a green gate proves nothing about whether the scan can fire.
 - `../scripts/liveness/check-empty-state.mts` — the empty-state gate (above);
   `empty-state-registry.mts` is its source of truth.
 

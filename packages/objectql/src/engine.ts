@@ -12,7 +12,7 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, STRUCTURED_JSON_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
@@ -69,7 +69,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError } from './validation/record-validator.js';
+import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 
@@ -2149,17 +2149,28 @@ export class ObjectQL implements IDataEngine {
   }
 
   /**
-   * Does this object declare a reference or structured-JSON field? Same
-   * per-schema cache and same dormancy rule as {@link objectHasMediaField}: an
-   * object holding none of these types can hold no violation of them, so it
-   * must not pay a query to learn that.
+   * Does this object declare a reference or structured-JSON field that a write
+   * would actually check? Same per-schema cache and same dormancy rule as
+   * {@link objectHasMediaField}: an object holding none can hold no violation
+   * of them, so it must not pay a query to learn that.
+   *
+   * The membership test is `isScannableValueShapeField` — the validator's own
+   * — and not raw type membership, because the registry INJECTS covered-type
+   * fields into every object it registers: `organization_id` and `owner_id`
+   * (both `system`), plus `created_by` / `updated_by` (both in `SKIP_FIELDS`),
+   * are all `lookup`s. `validateRecord` skips every one of them before it ever
+   * reaches the value-shape check, so counting them made this answer `true` for
+   * literally every object — the dormancy rule above never fired, and this
+   * cache memoized a constant. Same predicate as the scanner for the same
+   * reason the scanner imports it: three readings of "a covered field" drifting
+   * by one clause is how a gate ends up governing fields nothing enforces.
    */
   private objectHasCoveredValueField(objectSchema: any): boolean {
     if (!objectSchema?.fields) return false;
     const cached = ObjectQL.coveredValueFieldPresence.get(objectSchema);
     if (cached !== undefined) return cached;
-    const present = Object.values(objectSchema.fields).some(
-      (def: any) => def && (REFERENCE_VALUE_TYPES.has(def.type) || STRUCTURED_JSON_TYPES.has(def.type)),
+    const present = Object.entries(objectSchema.fields).some(
+      ([name, def]: [string, any]) => isScannableValueShapeField(name, def),
     );
     ObjectQL.coveredValueFieldPresence.set(objectSchema, present);
     return present;
@@ -2282,6 +2293,15 @@ export class ObjectQL implements IDataEngine {
    * own metadata says the gate is about something it stores; the verified case
    * already logs from the flag read.
    *
+   * A gate whose posture an environment switch has already settled says
+   * nothing either, because the flag this line reports on is not what decides
+   * that deployment's posture: under `OS_DATA_VALUE_SHAPE_STRICT_ENABLED`
+   * enforcement is already on, so "checked but NOT enforced here" is simply
+   * false, and under either opt-out the operator chose leniency deliberately,
+   * so naming a migration that would not change what they get is noise. Each
+   * gate consults its own pair, since the opt-outs are per-class. Cheapest
+   * test first: a kernel with nothing to say never reaches the flag query.
+   *
    * Costs one flag read per applicable gate (both memoized, and both already
    * paid by the first write to such an object), and nothing at all for an app
    * that declares neither class of field.
@@ -2290,12 +2310,16 @@ export class ObjectQL implements IDataEngine {
     if (this.migrationGatesAnnounced) return;
     this.migrationGatesAnnounced = true;
     try {
+      const mediaByEnv = mediaPostureSetByEnv();
+      const coveredByEnv = valueShapePostureSetByEnv();
+      if (mediaByEnv && coveredByEnv) return;
+
       let media = false;
       let covered = false;
       for (const obj of this._registry.getAllObjects() as any[]) {
-        if (!media && this.objectHasMediaField(obj)) media = true;
-        if (!covered && this.objectHasCoveredValueField(obj)) covered = true;
-        if (media && covered) break;
+        if (!media && !mediaByEnv && this.objectHasMediaField(obj)) media = true;
+        if (!covered && !coveredByEnv && this.objectHasCoveredValueField(obj)) covered = true;
+        if ((media || mediaByEnv) && (covered || coveredByEnv)) break;
       }
 
       if (media && !(await this.isFileReferencesMigrationVerified())) {

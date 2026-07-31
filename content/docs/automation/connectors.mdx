@@ -1,0 +1,363 @@
+---
+title: Connectors
+description: Call external systems from flows — plugin-registered connectors, and declarative provider-bound instances (rest / openapi / mcp) authored as pure metadata with reference-based credentials.
+---
+
+# Connectors
+
+> **Status:** Shipped · **Audience:** App authors (human and AI), integration
+> engineers
+>
+> **TL;DR** — A connector packages an external system behind named **actions**
+> that flows dispatch with the `connector_action` node. You get one in two
+> ways: a **plugin** registers it from host code, or — since ADR-0097 — you
+> **declare** it as pure metadata: a `connectors:` entry naming a `provider`
+> (`rest`, `openapi`, or `mcp`) is materialized into a live connector at boot,
+> no plugin code required. Credentials are **references** (`credentialRef`),
+> never secrets inlined in metadata. This page is the authoring guide for that
+> declarative path — what to write, how auth works, and how it fails.
+
+A connector is a **transport mechanism**: it knows how to reach one external
+system and exposes that system as a set of dispatchable actions. The runtime
+keeps a **connector registry** — `GET /api/v1/automation/connectors` lists it,
+the Studio flow palette browses it, and a flow's
+[`connector_action` node](/docs/automation/flows#node-types) dispatches against
+it. Connectors are *not* messaging channels (ADR-0022): "send a Slack message"
+is a connector action; routing, templating, and user notification preferences
+live in the messaging layer.
+
+## The three shapes of a `connectors:` entry
+
+| Shape | Behavior comes from | When to use |
+|:---|:---|:---|
+| **Plugin-registered connector** | Host code: a plugin calls `engine.registerConnector(def, handlers)` (brand connectors like Slack, or the executors' hand-wired instance options) | The integration needs custom logic, or ships as an installable plugin |
+| **Provider-bound instance** (ADR-0097) | An installed **generic executor** (`rest` / `openapi` / `mcp`) materializes the entry at boot | The upstream is an HTTP API, an OpenAPI document, or an MCP server — declare it as metadata, write no code |
+| **Catalog descriptor** | Nothing — the entry is inert documentation | Cataloguing a planned or externally-managed integration ([below](#catalog-descriptors-entries-without-a-provider)) |
+
+The first shape is code and belongs to [plugin development](/docs/plugins).
+This guide is about the other two — the entries a tenant (or an AI author)
+writes into stack metadata.
+
+## Declaring a provider-bound instance
+
+A declarative entry becomes a live connector the moment it names a `provider`:
+
+{/* os:check */}
+```typescript
+import { defineConnector } from '@objectstack/spec/integration';
+
+export const BillingApiConnector = defineConnector({
+  name: 'billing_api',
+  label: 'Billing API',
+  type: 'api',
+  provider: 'rest',
+  providerConfig: {
+    baseUrl: 'https://billing.example.com',
+  },
+  auth: { type: 'bearer', credentialRef: 'BILLING_API_TOKEN' },
+});
+```
+
+Wire it into the stack alongside your other metadata:
+
+```ts
+// objectstack.config.ts
+export default defineStack({
+  // ...
+  connectors: [BillingApiConnector],
+});
+```
+
+At boot, the automation service resolves each provider-bound entry:
+
+1. **Look up the provider factory** registered under `entry.provider`. The
+   three generic executors — `@objectstack/connector-rest`,
+   `@objectstack/connector-openapi`, `@objectstack/connector-mcp` — each
+   contribute one; scaffolded projects (`npm create objectstack`) ship all
+   three in `plugins:` by default, paired with the `automation` capability
+   that performs the materialization.
+2. **The factory validates `providerConfig`** and the automation service
+   resolves `auth.credentialRef` to its secret.
+3. **The result is registered** on the connector registry — indistinguishable
+   from a hand-written connector. Its **actions are derived from the
+   upstream** (the OpenAPI document's operations, the MCP server's
+   `tools/list`, the REST executor's generic `request`), never authored.
+
+Three authoring rules are enforced when the stack is validated:
+
+- `providerConfig` and `auth` **require** `provider` — on an entry without one
+  they are meaningless materialization inputs and are rejected.
+- A provider-bound instance must **not** inline secrets via `authentication`
+  (the runtime auth shape) — see [Authentication](#authentication).
+- A provider-bound instance must **not** author `actions` or `triggers` — the
+  provider derives actions from the upstream at boot; authoring both the
+  instance and its actions would let them drift apart (ADR-0097 §5).
+
+## Provider config contracts
+
+<Callout type="warn">
+`providerConfig` is deliberately **not** validated by the stack schema — each
+provider factory validates its own config **at boot** (re-modelling an OpenAPI
+document or an MCP transport inside the stack schema is exactly what ADR-0023
+rejected). A wrong or missing key is therefore *not* flagged by `os validate`;
+it surfaces as a **hard boot error** naming the connector. Check the contracts
+below against what you wrote.
+</Callout>
+
+### `provider: 'rest'` — a generic HTTP client
+
+Config: **`baseUrl`** (required, e.g. `https://api.example.com`) and
+**`defaultHeaders`** (optional string→string map merged into every request;
+request-level headers win).
+
+Materializes a single **`request`** action accepting
+`{ method?, path?, headers?, query?, body? }` — the flow supplies the path and
+payload per call. Use it when the upstream is "just HTTP" and you don't have a
+spec document.
+
+### `provider: 'openapi'` — one action per operation
+
+Config: **`spec`** (required) and **`baseUrl`** (optional — overrides the
+document's `servers[0].url`). The `spec` takes any of three forms:
+
+- an **inline OpenAPI 3.x document object** — no I/O at boot, the most
+  deterministic form;
+- an **`http(s)` URL**, fetched at materialization;
+- a **package-relative file path** like `'./specs/billing-openapi.json'`,
+  resolved against the directory containing `objectstack.config.ts` and
+  **confined to it** — absolute and `..`-escaping paths are rejected.
+
+{/* os:check */}
+```typescript
+import { defineConnector } from '@objectstack/spec/integration';
+
+export const CrmApiConnector = defineConnector({
+  name: 'crm_api',
+  label: 'CRM API',
+  type: 'api',
+  provider: 'openapi',
+  providerConfig: {
+    spec: './specs/crm-openapi.json',
+  },
+  auth: { type: 'api-key', credentialRef: 'CRM_API_KEY', headerName: 'X-API-Key' },
+});
+```
+
+Each operation becomes an action keyed by its `operationId` (or a
+`method_path` slug when the document omits one) — so `getInvoice` in the
+document is `actionId: 'getInvoice'` in your flow.
+
+### `provider: 'mcp'` — one action per tool
+
+Config: **`transport`** (required) and **`include`** (optional tool-name
+allowlist — only the listed tools become actions):
+
+- `{ kind: 'http', url, headers? }` — a remote MCP server over streamable
+  HTTP. Resolved `auth` is folded into the request headers.
+- `{ kind: 'stdio', command, args?, env? }` — a **local child process**,
+  policy-gated (below). Credentials for a stdio server ride `transport.env`,
+  not `auth`.
+
+{/* os:check */}
+```typescript
+import { defineConnector } from '@objectstack/spec/integration';
+
+export const SearchToolsConnector = defineConnector({
+  name: 'search_tools',
+  label: 'Search Tools (MCP)',
+  type: 'api',
+  provider: 'mcp',
+  providerConfig: {
+    transport: { kind: 'http', url: 'https://mcp.example.com/mcp' },
+    include: ['web_search', 'fetch_page'],
+  },
+  auth: { type: 'bearer', credentialRef: 'SEARCH_MCP_TOKEN' },
+});
+```
+
+At materialization the provider connects, calls `tools/list`, and maps each
+tool to an action — the MCP server's tool names are your `actionId`s.
+
+<Callout type="warn">
+**Declarative stdio transports are denied by default.** Materializing one
+spawns a local process *from metadata* — which a runtime Studio publish can
+introduce — so anyone who can publish metadata could otherwise execute
+commands on the server. The host opts in per command:
+
+```ts
+new ConnectorMcpPlugin({ declarativeStdio: ['node'] })  // exact-match allowlist
+```
+
+The boot error you hit without the opt-in spells out this exact fix. The
+allowlist is a deliberately coarse boundary — allowlisting a launcher like
+`npx` effectively trusts anything it can run, so list the specific server
+binaries you trust. Hand-wired MCP connectors configured in host code are not
+subject to this policy (their command *is* host code), and `http` transports
+need no opt-in.
+</Callout>
+
+## Authentication
+
+Connector auth answers "how do we authenticate **to the external system**" —
+it is unrelated to how users authenticate to ObjectStack. There are two shapes,
+and which one you write depends on which of the two connector worlds you are
+in:
+
+### Declarative instances: references, never secrets
+
+Stack metadata is authored, versioned, and shipped — a raw token must never
+live in it (ADR-0097 §3). The `auth` field on a provider-bound instance
+therefore has **no field that can hold a secret**. Its secret-bearing variants
+carry a **`credentialRef`** instead, resolved at materialization:
+
+```ts
+auth: { type: 'none' }                                     // public upstream
+auth: { type: 'bearer', credentialRef: 'BILLING_API_TOKEN' }
+auth: { type: 'api-key', credentialRef: 'CRM_API_KEY',
+        headerName: 'X-API-Key' }                          // or paramName: 'api_key'
+auth: { type: 'basic', username: 'svc_objectstack',        // username is not a secret
+        credentialRef: 'ERP_SVC_PASSWORD' }                // the password is
+```
+
+Variant notes:
+
+- **`api-key`** — the key travels in a header (`headerName`, default
+  `X-API-Key`) or a query parameter (`paramName`); set one or the other.
+- **`basic`** — the `username` stays in metadata (it is not a secret); only
+  the password resolves through `credentialRef`.
+
+**What `credentialRef` resolves through.** In the open tier the ref is the
+name of an **environment variable** (`BILLING_API_TOKEN` above means
+`process.env.BILLING_API_TOKEN` on the server). A ref that resolves to nothing
+is a **hard boot error** — an app must not silently run with a dead connector.
+The enterprise tier swaps in a vault/KMS-backed resolver
+(`AutomationServicePluginOptions.credentialResolver`) without changing what
+you author: the entry still just names a ref.
+
+Inlining a secret is rejected when the stack is validated. Writing the runtime
+shape on a provider-bound instance —
+
+```ts
+// ✗ rejected at authoring/publish:
+//   "must not inline secrets via `authentication`; reference credentials
+//    with `auth: { type, credentialRef }` instead (ADR-0097 §3)."
+authentication: { type: 'bearer', token: 'sk_live_9f…' },
+
+// ✓ a reference, resolved at boot:
+auth: { type: 'bearer', credentialRef: 'BILLING_API_TOKEN' },
+```
+
+— fails validation, and `auth: { type: 'bearer', token: … }` is not even a
+legal shape (the declarative union has no `token` field to put a secret in).
+
+### Where is `oauth2`?
+
+Deliberately absent from declarative instances — **not** an oversight to work
+around. The runtime auth shape has five variants (`none`, `bearer`,
+`api-key`, `basic`, `oauth2`); the declarative shape stops at four. Static
+credentials resolved from env/config are the open tier; the OAuth2
+authorization-code/refresh **lifecycle** — token acquisition, rotation,
+per-tenant connections — is the enterprise tier (ADR-0015). If your upstream
+needs OAuth2, use an enterprise credential resolver or register the connector
+from a plugin that manages its own tokens; don't try to emulate it by stuffing
+a short-lived access token behind a `bearer` ref.
+
+### The runtime shape: `authentication`
+
+The `authentication` field is the **runtime** auth config — it carries the
+resolved secret *inline* (`{ type: 'bearer', token }`), because it is supplied
+by **host code** (a plugin calling `engine.registerConnector`, or the
+executors' hand-wired instance options reading `process.env`). That is a
+different trust anchor than metadata: code review guards what enters it, and
+it is never serialized into a versioned artifact. On declarative entries,
+leave `authentication` alone — provider-bound instances must use `auth`, and
+catalog descriptors documenting a planned integration must still never carry a
+live secret value.
+
+## Dispatching from a flow
+
+A materialized instance is dispatched exactly like any other connector — by
+`name` and action key:
+
+```ts
+{
+  id: 'ping',
+  type: 'connector_action',
+  label: 'GET /api/v1/health',
+  connectorConfig: {
+    connectorId: 'billing_api',   // the connector's `name`
+    actionId: 'request',          // rest: 'request' · openapi: operationId · mcp: tool name
+    input: { method: 'GET', path: '/api/v1/health' },
+  },
+},
+```
+
+See [Flows](/docs/automation/flows) for the node reference and how outputs
+flow into downstream nodes.
+
+## Failure modes at a glance
+
+Boot distinguishes **configuration faults** (your entry is wrong — fail loud,
+fix the metadata) from **operational faults** (the upstream is down — degrade,
+retry):
+
+| You wrote / it happened | What you get |
+|:---|:---|
+| `provider` names no installed factory | **Hard boot error** naming the entry, the provider, and the plugin that supplies it — add the executor to `plugins:` |
+| Invalid `providerConfig` (missing `baseUrl` / `spec` / `transport`, wrong shape) | **Hard boot error** from the provider factory |
+| `credentialRef` resolves to nothing | **Hard boot error** — set the env var (open tier) or fix the vault ref |
+| Instance `name` collides with a plugin-registered connector | **Hard boot error** — there is no silent precedence between the two worlds |
+| stdio transport without host opt-in | **Hard boot error** with the `declarativeStdio` fix inline — a security rejection is never retried |
+| MCP server unreachable / `tools/list` fails; remote spec URL unreachable or transiently failing (408/429/5xx) | **Not fatal**: the instance registers **degraded** (visible on `GET /api/v1/automation/connectors` with the reason), dispatches fail with that reason, and the platform retries on a 5s→5min backoff — recovery is automatic |
+| Wrong spec URL (other 4xx) or unparseable document | Configuration fault — **hard boot error** |
+| A bad entry arrives via **runtime reload** (Studio publish / dev reload) | Logged and **skipped**, never crashing the live server; a changed instance's old connector keeps serving until its replacement materializes |
+
+## Catalog descriptors: entries without a `provider`
+
+An entry with no `provider` never reaches the registry — it is an inert
+**descriptor** for discovery, documentation, or marketplace listing. It *may*
+author `actions` (as documentation of a planned surface, including I/O JSON
+Schemas). Because a declared-with-actions connector that nothing registers is
+usually a mistake, boot **warns** about it — mark a deliberate descriptor with
+`enabled: false` to state the intent and silence the audit:
+
+{/* os:check */}
+```typescript
+import { defineConnector } from '@objectstack/spec/integration';
+
+export const ErpCatalogConnector = defineConnector({
+  name: 'erp_catalog',
+  label: 'ERP Integration (planned)',
+  type: 'saas',
+  description: 'Planned ERP integration — catalogued, not yet dispatchable.',
+  actions: [
+    { key: 'get_invoice', label: 'Get Invoice' },
+  ],
+  enabled: false, // deliberate catalog-only descriptor: suppresses the boot audit warning
+});
+```
+
+A descriptor sharing a live connector's name stays legal — it is catalog
+metadata *about* that connector. (A provider-bound instance sharing one is the
+boot error from the table above.)
+
+## A complete, runnable example
+
+The showcase app exercises every shape on a real boot —
+[`examples/app-showcase/src/system/connectors/index.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/system/connectors/index.ts)
+declares a `rest` instance pointing at the server's own health endpoint, an
+`openapi` instance whose spec is a package-relative file, an `mcp` instance
+spawning the in-repo stdio fixture under a `declarativeStdio` allowlist, and a
+catalog descriptor — with flows dispatching the `rest` and `mcp` instances
+end-to-end. Start from it rather than assembling the shapes from scratch:
+
+```bash
+pnpm dev
+```
+
+Related pages: [Flows](/docs/automation/flows) ·
+[Webhook Delivery](/docs/automation/webhooks) (the outbound-notification
+counterpart) · [Connect an MCP Client](/docs/ai/connect-mcp) (the **opposite
+direction**: exposing *this* platform to an external MCP client) ·
+[Connector schema reference](/docs/references/integration/connector)
+(generated from the schema).

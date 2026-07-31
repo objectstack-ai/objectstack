@@ -35,6 +35,8 @@
  * value whichever one served the request.
  */
 
+import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
+
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -59,7 +61,12 @@ export async function handleShareLinksRequest(
     // [#4127 batch 3] `plugin-sharing` registers `ShareLinkService`, which
     // declares `implements IShareLinkService`; the four methods called below
     // were all already on that contract. Only the ledger entry was missing.
-    const svc = await deps.resolveService('shareLinks', context.environmentId);
+    // The registry key comes from the contract that DEFINES it (#3786). This was
+    // a second hand-written `'shareLinks'`, copied from a constant whose own
+    // doc-comment says "keep in sync with the SharingPlugin registration" — and a
+    // drifted copy here resolves nothing, so every share link 501s with "Sharing
+    // is not configured for this environment" on an environment where it is.
+    const svc = await deps.resolveService(SHARE_LINK_SERVICE, context.environmentId);
     if (!svc) {
         return { handled: true, response: deps.error('Sharing is not configured for this environment', 501) };
     }

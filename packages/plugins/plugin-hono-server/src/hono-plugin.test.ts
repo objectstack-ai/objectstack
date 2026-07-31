@@ -15,7 +15,13 @@ vi.mock('@hono/node-server/serve-static', () => ({
     serveStatic: vi.fn(() => (c: any, next: any) => next())
 }));
 
-vi.mock('./adapter', () => ({
+// PARTIAL mock: only `HonoHttpServer` is replaced. The CORS default constants
+// are deliberately kept REAL via `importOriginal` — they are the single source
+// this plugin and the `@objectstack/hono` adapter both read (#3786), and the
+// assertions below check exact header lists, so stubbing them would make this
+// file agree with itself instead of with the shipped defaults.
+vi.mock('./adapter', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('./adapter')>()),
     HonoHttpServer: vi.fn(function() {
         return {
             mount: vi.fn(),

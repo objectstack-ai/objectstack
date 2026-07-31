@@ -19,6 +19,11 @@
 // (object / record / array-of-object) may be drilled into via `"children"` so e.g.
 // `permission.objects.allowCreate` stays distinguishable from a blanket `objects`.
 //
+// BOTH DIRECTIONS. Schema → ledger catches an undeclared property (UNCLASSIFIED).
+// Ledger → schema catches the reverse: a row that outlived its property, which
+// went unchecked until #4080 mapped the asymmetry (a strict removal takes the key
+// out of the walked shape, so the forward pass just stops asking). See orphans.mts.
+//
 // Statuses: live | experimental | planned | dead.  Resolution per property:
 //   ledger entry → spec `.describe()` marker ([EXPERIMENTAL — not enforced]) → UNCLASSIFIED
 //
@@ -64,6 +69,7 @@ import {
   type VerificationReport,
 } from './verification.mts';
 import { checkEvidence } from './evidence.mts';
+import { ORPHAN_GUIDANCE, findOrphanEntries, type Orphan } from './orphans.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
@@ -202,6 +208,7 @@ const report: any = {
   proofErrors: [] as string[], // a `proof` ref that doesn't resolve (missing file / missing tag / malformed)
   proofMissing: [] as string[], // a bound high-risk `live` entry with no proof at all
   orphanProofs: [] as string[], // a dogfood `@proof:` tag not registered in proof-registry.mts
+  orphanEntries: [] as string[], // a ledger row whose property is gone from the schema (the reverse direction)
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
   evidenceLocal: 0, // repo-rooted evidence paths actually resolved against this checkout
   evidenceForeign: 0, // evidence paths attributed to objectui / cloud — not resolvable here
@@ -279,7 +286,24 @@ for (const type of GOVERNED) {
   const ledger = loadLedger(type);
   const props = ledger.props || {};
   const cat = { classified: 0, unclassified: 0, byStatus: {} as Record<string, number> };
-  for (const { key, node, description } of topProps(type)) {
+  const walked = topProps(type);
+
+  // ── reverse direction: a row whose property is gone (see orphans.mts) ──
+  // Runs off the SAME walk the forward pass classifies against, so the two
+  // directions can never disagree about what the schema contains.
+  const nodeOf = new Map(walked.map((p) => [p.key, p.node]));
+  const orphans: Orphan[] = findOrphanEntries({
+    type,
+    props,
+    shapeKeys: walked.map((p) => p.key),
+    childKeysOf: (key) => {
+      const cs = childShape(nodeOf.get(key));
+      return cs ? Object.keys(cs) : null;
+    },
+  });
+  for (const o of orphans) report.orphanEntries.push(o.key);
+
+  for (const { key, node, description } of walked) {
     if (FRAMEWORK_FIELDS.has(key)) { classify(type, key, 'live', null, cat); continue; }
     const led = props[key];
     if (led?.children) {
@@ -314,7 +338,11 @@ report.verification = buildVerificationReport(verificationEntries, { staleDays }
 
 const totalUnclassified = report.unclassified.length;
 const totalProofFailures = report.proofErrors.length + report.proofMissing.length;
-const failed = totalUnclassified > 0 || totalProofFailures > 0 || report.verification.errors.length > 0;
+const failed =
+  totalUnclassified > 0 ||
+  totalProofFailures > 0 ||
+  report.orphanEntries.length > 0 ||
+  report.verification.errors.length > 0;
 if (asJson) {
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 } else {
@@ -349,6 +377,12 @@ if (asJson) {
     console.log(`\n✗ ${totalUnclassified} UNCLASSIFIED — classify in packages/spec/liveness/<type>.json:`);
     report.unclassified.forEach((s: string) => console.log(`    ${s}`));
   }
+  if (report.orphanEntries.length) {
+    console.log(`\n✗ ${report.orphanEntries.length} ORPHAN ledger row(s) — the property is gone from the schema:`);
+    report.orphanEntries.forEach((s: string) => console.log(`    ${s}`));
+    console.log('');
+    ORPHAN_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
   // ── re-verification clock ──
   const v = report.verification!;
   if (v.errors.length) {
@@ -373,7 +407,10 @@ if (asJson) {
     console.log('  run with --stale-verification[=days] for the worklist.');
   }
   if (!failed) {
-    console.log('\n✓ all governed-type properties are classified; all bound high-risk proofs resolve.');
+    console.log(
+      '\n✓ all governed-type properties are classified, no ledger row outlives its property, ' +
+      'and all bound high-risk proofs resolve.',
+    );
   }
 }
 process.exit(failed ? 1 : 0);
