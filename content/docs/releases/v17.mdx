@@ -1316,8 +1316,10 @@ most of its rows in silence.
 
 ## New in Console (Studio) — bundled objectui 17.0
 
-The v17 Console window is `cf2d56e32a11 → 4a4829d0ef39` (`.objectui-sha`) — 128
-objectui commits on top of the pin 16.1.0 shipped.
+This section covers the window bundled at **`rc.0`**: `cf2d56e32a11 →
+4a4829d0ef39` (`.objectui-sha`) — 128 objectui commits on top of the pin
+16.1.0 shipped. The pin has since advanced — the rest of the line is under
+*New in Console* in the **Landed since 17.0.0-rc.0** section below.
 
 ### Files, actions and forms
 
@@ -1829,6 +1831,74 @@ rc.1, and administrators should know what changed:
   packages join the ADR-0087 load-time handshake; and `spec-changes.json`,
   the generated upgrade guide and the `spec_changes` MCP tool actually
   report the 16 → 17 chain (they still said 16.0.0).
+
+### New in Console — bundled objectui advanced `4a4829d0ef39 → 7d9734d5e321`
+
+79 objectui commits across five pin moves, released as **objectui 17.1.0**.
+
+- **The lockstep half of ADR-0110 — release-critical.** The rc.0 pin predates
+  the client fix, so the Console it built still posted `action.target` to
+  `/api/v1/actions/:object/:action`. Against a 17 server — which resolves the
+  declaration by `name` and refuses an unresolvable one — **every
+  target-bound script action would 404 from the shipped Console**. The
+  ADR-0066 D4 capability gate is now applied on every action surface, and a
+  modal action is client-side only (its server fall-through is dropped).
+- **Action feedback stops lying.** A failed server action no longer shows the
+  green success toast, `redirectUrl` finally fires, one source now owns the
+  `/actions` envelope rule, and the Console reads the single-wrapped
+  responses the server started sending (#3962). A server rejection that names
+  fields marks **those** fields in the form; error-code branches survive the
+  ADR-0112 rename; a 400 from the server no longer reads to the user as
+  "check your connection"; and settings validation errors render against the
+  fields that caused them.
+- **Filters, sorting and export agree with the server.** Every spec view
+  operator is bridged onto the filter AST (the client half of the operator
+  parity above); a view's own filter no longer vanishes when the user adds
+  one, nor arrives as a predicate on columns that do not exist, nor depends
+  on whether the query expands a lookup; a column-header sort orders the
+  whole list rather than the visible page, and a string `$orderby` reaches
+  the server as a sort instead of a list of character indices; sorting a
+  lookup column stops ordering by an invisible key; exporting a searched list
+  downloads the searched rows, not the unsearched superset; and every column
+  resolver reads one identity key, resolved at ingestion and reported out
+  loud.
+- **Edits are safer.** Form edit saves send `If-Match` and surface 409
+  conflicts instead of silently overwriting; a wizard with `allowSkip` no
+  longer submits past skipped fields; a select no longer wipes itself when
+  its value outruns its options; numeric and boolean option values survive
+  selection typed; multi-value lookup is selectable in inline edit and
+  hydrates through a batched `$in` (showing loading rather than the empty
+  placeholder).
+- **Bulk actions become per-record.** An object-declared bulk action runs over
+  the selection, `visible` is evaluated per selected record, params render
+  through the shared form-field widgets (lookup errors get Retry, `sys_user`
+  params get the PeoplePicker), and a bulk delete clears the row checkboxes.
+  The `bulkEnabled` derivation is dropped — the spec key is a tombstone.
+- **Approvals and notifications.** Decision outputs reach both decision
+  surfaces; a reassign hand-off reads legibly and `svc:*` audit actors render
+  as "System"; the Console mounts the notification surfaces, each spec
+  `displayType` gets its own presentation, and the spec `icon`, config,
+  position and action variant are read instead of forked or ignored;
+  Attachments become a peer tab with a live count badge, translated.
+- **Studio and the designers.** A page button created in Studio can be given
+  an action (the `InlineActionSchema` above is its contract); the script
+  node's form authors what the executor actually runs; a published
+  `configSchema` can no longer delete a node's sibling-block editors; and the
+  flow inspector preserves sibling blocks. `SplitForm` honours the new
+  `FormSection.pane`.
+- **Types stop forking the spec.** `Page`/`App`/`Dashboard` validate the
+  spec's own fields instead of passing them through; navigation metadata
+  stops losing spec fields the renderer already honours; the `*Validation`
+  five and five more spec-named symbols are derived rather than copied; and
+  the form-field boundary between spec and runtime is declared, with a
+  tripwire against re-importing the wrong one. The SDUI public contract is
+  curated and guarded against silent drift, with declared inputs for the
+  `page:*` / `element:*` / `record:*` block families.
+- **Resilience and chrome.** A transient `/me/permissions` or
+  `/me/localization` failure retries instead of stranding the app on its
+  loading state; a 403 is no longer blamed on the network; ⌘K search is no
+  longer capped at 8 objects; the chart view gets a label and an icon in the
+  view switcher; and the developer-voiced default form subtitle is dropped.
 
 ## Upgrade checklist
 
