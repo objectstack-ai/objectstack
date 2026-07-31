@@ -145,7 +145,10 @@ const HIGH_RISK = [
   'owd-private', 'owd-public-read', 'controlled-by-parent', 'anonymous-deny', 'default-profile',
   // #2567 — every anonymous-deny HTTP surface is high-risk: it guards the
   // same object data as REST `/data` through a sibling entry point.
-  'anonymous-deny-meta', 'anonymous-deny-hono-data',
+  // (the raw-hono `/data` row retired with its surface — #4073 deleted the
+  // entry point rather than gating it, so there is nothing left to mark
+  // high-risk there)
+  'anonymous-deny-meta',
   // #2948/#3003 — write-integrity face: without the strip, `readonly: true`
   // is false compliance (declared ≠ enforced) and approval/status columns are
   // one direct PATCH away from self-approval.
@@ -183,11 +186,14 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
   });
 
   it('(a) a row that DROPS its covers → UNCLASSIFIED surface failure', () => {
+    // Fixture moved off the raw-hono `/data` row when #4073 deleted that
+    // surface. `anonymous-deny-meta` covers a live one, so the ratchet still
+    // has a real classification to lose.
     const m = clone();
-    const row = m.find((r) => r.id === 'anonymous-deny-hono-data')!;
+    const row = m.find((r) => r.id === 'anonymous-deny-meta')!;
     row.covers = [];
     const problems = checkLedger(m, opts(() => discoverAnonymousDenySurfaces()));
-    expect(problems.some((p) => /UNCLASSIFIED surface/.test(p) && /data:hono-plugin\.ts/.test(p))).toBe(true);
+    expect(problems.some((p) => /UNCLASSIFIED surface/.test(p) && /meta:/.test(p))).toBe(true);
   });
 
   it('(b) a NEW ungated route appearing in source → UNCLASSIFIED surface failure', () => {
