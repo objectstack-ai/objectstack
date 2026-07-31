@@ -409,11 +409,17 @@ export class MetadataPlugin implements Plugin {
         try {
             // [#4251] Both names are the SAME instance; `http.server` is the
             // canonical one (the only name every provider registers), read
-            // first. `getRawApp?()` is on the contract now — the deliberate
-            // framework-handle escape, declared once there instead of per
-            // consumer. The alias fallback dies with the alias registrations.
-            const httpServer = ctx.getService<IHttpServer>('http.server')
-                ?? ctx.getService<IHttpServer>('http-server');
+            // first. Per-name try — `getService` THROWS for an empty slot, so
+            // a single try around `canonical ?? alias` never reaches the
+            // alias: exactly the shape this read had before (alias-first),
+            // whose fallback therefore never once fired. `getRawApp?()` is on
+            // the contract now — the deliberate framework-handle escape,
+            // declared once there instead of per consumer. The alias fallback
+            // dies with the alias registrations.
+            const readServer = (name: string): IHttpServer | undefined => {
+                try { return ctx.getService<IHttpServer>(name); } catch { return undefined; }
+            };
+            const httpServer = readServer('http.server') ?? readServer('http-server');
             if (httpServer && typeof httpServer.getRawApp === 'function') {
                 const { registerMetadataHmrRoutes } = await import('./routes/hmr-routes.js');
                 const hub = registerMetadataHmrRoutes(httpServer.getRawApp(), this.manager);

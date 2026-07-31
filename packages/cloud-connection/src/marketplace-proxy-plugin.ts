@@ -183,19 +183,21 @@ export class MarketplaceProxyPlugin implements Plugin {
                 manifest?.register?.(MARKETPLACE_BROWSE_UI_BUNDLE);
             } catch { /* no manifest service */ }
 
-            // [#4251] `http.server` is the canonical name (the only one every
-            // provider registers — runtime's `config.server` path registers no
-            // alias, which made this alias-only read an empty-slot miss there).
-            // The alias fallback dies with the alias registrations.
-            let httpServer: IHttpServer | undefined;
-            try {
-                httpServer = ctx.getService<IHttpServer>('http.server')
-                    ?? ctx.getService<IHttpServer>('http-server');
-            } catch {
+            // [#4251] Read canonical-first with a REAL per-name fallback:
+            // `getService` THROWS for an empty slot, so a single try around
+            // `canonical ?? alias` never reaches the alias — the shape the old
+            // alias-first read had too, meaning its fallback never once fired.
+            const readServer = (name: string): IHttpServer | undefined => {
+                try { return ctx.getService<IHttpServer>(name); } catch { return undefined; }
+            };
+            // `http.server` is canonical (the only name every provider
+            // registers); the alias fallback dies with the alias registrations.
+            const httpServer = readServer('http.server') ?? readServer('http-server');
+            if (!httpServer) {
                 ctx.logger?.warn?.('[MarketplaceProxyPlugin] http-server not available — marketplace routes not mounted');
                 return;
             }
-            if (!httpServer || typeof httpServer.getRawApp !== 'function') {
+            if (typeof httpServer.getRawApp !== 'function') {
                 ctx.logger?.warn?.('[MarketplaceProxyPlugin] http-server missing getRawApp() — marketplace routes not mounted');
                 return;
             }

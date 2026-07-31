@@ -183,17 +183,20 @@ export class RuntimeConfigPlugin implements Plugin {
 
     start = async (ctx: PluginContext): Promise<void> => {
         ctx.hook('kernel:ready', async () => {
-            // [#4251] Canonical name first — see marketplace-proxy-plugin for
-            // the alias-only-miss this fixes; the fallback dies with the alias.
-            let httpServer: IHttpServer | undefined;
-            try {
-                httpServer = ctx.getService<IHttpServer>('http.server')
-                    ?? ctx.getService<IHttpServer>('http-server');
-            } catch {
+            // [#4251] Read canonical-first with a REAL per-name fallback:
+            // `getService` THROWS for an empty slot, so a single try around
+            // `canonical ?? alias` never reaches the alias — the shape the old
+            // alias-first read had too, meaning its fallback never once fired.
+            const readServer = (name: string): IHttpServer | undefined => {
+                try { return ctx.getService<IHttpServer>(name); } catch { return undefined; }
+            };
+            // Canonical first — see marketplace-proxy-plugin.
+            const httpServer = readServer('http.server') ?? readServer('http-server');
+            if (!httpServer) {
                 ctx.logger?.warn?.('[RuntimeConfigPlugin] http-server not available — runtime/config not mounted');
                 return;
             }
-            if (!httpServer || typeof httpServer.getRawApp !== 'function') {
+            if (typeof httpServer.getRawApp !== 'function') {
                 ctx.logger?.warn?.('[RuntimeConfigPlugin] http-server missing getRawApp() — runtime/config not mounted');
                 return;
             }
