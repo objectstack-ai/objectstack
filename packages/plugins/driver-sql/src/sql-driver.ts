@@ -1333,10 +1333,21 @@ export class SqlDriver implements IDataDriver {
 
       // ORDER BY
       if (withOrderBy && query.orderBy && Array.isArray(query.orderBy)) {
+        const sorted: string[] = [];
+        let lastDirection: 'asc' | 'desc' = 'asc';
         for (const item of query.orderBy) {
           if (item.field) {
-            b.orderBy(this.remoteColumn(object, item.field, this.mapSortField(item.field)), item.order || 'asc');
+            lastDirection = item.order === 'desc' ? 'desc' : 'asc';
+            b.orderBy(this.remoteColumn(object, item.field, this.mapSortField(item.field)), lastDirection);
+            sorted.push(item.field);
           }
+        }
+        const tieBreaker = sorted.length > 0 ? this.paginationTieBreaker(object) : null;
+        if (tieBreaker && !sorted.includes(tieBreaker)) {
+          b.orderBy(
+            this.remoteColumn(object, tieBreaker, this.mapSortField(tieBreaker)),
+            lastDirection,
+          );
         }
       }
 
@@ -5438,6 +5449,38 @@ export class SqlDriver implements IDataDriver {
     if (field === 'createdAt') return 'created_at';
     if (field === 'updatedAt') return 'updated_at';
     return field;
+  }
+
+  /**
+   * The unique column appended to a non-empty ORDER BY so that paging is a
+   * partition of the result set rather than five independent queries that
+   * happen to share a WHERE clause (objectui#3106, contract on
+   * `IDataDriver.find`).
+   *
+   * `ORDER BY status LIMIT 50 OFFSET 50` names a key that does not identify a
+   * row, and SQL promises nothing about how equal keys are arranged — nor that
+   * two executions arrange them the same way. Page 2 can then repeat a row
+   * page 1 already showed and skip one nobody ever sees. Every page looks
+   * perfect on its own, which is why this is found by a user counting records
+   * and not by reading a response.
+   *
+   * Returns `null` — no tie-breaker, prior behavior exactly — unless this
+   * driver **created** the table and therefore knows it carries the `id`
+   * primary key (`initObjects` populates {@link managedObjectFields} for
+   * exactly those). Guessing on a federated table (ADR-0015) would be worse
+   * than doing nothing: an `id` column that isn't there raises an unknown-column
+   * error, and the #3821 recovery ladder answers that by retrying with **no
+   * ORDER BY at all** — trading a reshuffle among ties for the loss of the
+   * caller's whole sort.
+   *
+   * Returns the LOGICAL field name; the call site maps it to a physical column
+   * like any other sort key.
+   */
+  protected paginationTieBreaker(object: string): string | null {
+    const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
+    const managed =
+      this.managedObjectFields.has(tableName) || this.managedObjectFields.has(object);
+    return managed ? 'id' : null;
   }
 
   /**

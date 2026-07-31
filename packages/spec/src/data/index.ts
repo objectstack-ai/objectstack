@@ -7,6 +7,11 @@ export * from './filter.zod';
 // against, so they cannot drift apart again (#3774).
 export * from './filter-logic-conformance';
 export * from './temporal-conformance';
+// Canonical conformance cases for deterministic paged reads — the standard
+// every driver's `find()` is held to when `orderBy` and `limit`/`offset` arrive
+// together, so a sort key that does not identify a row cannot let pages overlap
+// or skip (#3106).
+export * from './pagination-conformance';
 export * from './date-macros.zod';
 export * from './calendar-day';
 // Session-scoped filter placeholders ({current_user_id} / {current_org_id}) —

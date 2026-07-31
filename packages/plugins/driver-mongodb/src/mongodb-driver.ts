@@ -238,15 +238,8 @@ export class MongoDBDriver implements IDataDriver {
     }
 
     // Sorting
-    if (query.orderBy && Array.isArray(query.orderBy)) {
-      const sort: Document = {};
-      for (const item of query.orderBy) {
-        if (item.field) {
-          sort[this.mapFieldName(item.field)] = item.order === 'desc' ? -1 : 1;
-        }
-      }
-      findOptions.sort = sort;
-    }
+    const sort = this.buildSortSpec(query.orderBy);
+    if (sort) findOptions.sort = sort;
 
     // Pagination
     if (query.offset !== undefined) findOptions.skip = query.offset;
@@ -284,15 +277,8 @@ export class MongoDBDriver implements IDataDriver {
       projection: { _id: 0 },
     };
 
-    if (query.orderBy && Array.isArray(query.orderBy)) {
-      const sort: Document = {};
-      for (const item of query.orderBy) {
-        if (item.field) {
-          sort[this.mapFieldName(item.field)] = item.order === 'desc' ? -1 : 1;
-        }
-      }
-      findOptions.sort = sort;
-    }
+    const sort = this.buildSortSpec(query.orderBy);
+    if (sort) findOptions.sort = sort;
 
     if (query.offset !== undefined) findOptions.skip = query.offset;
     if (query.limit !== undefined) findOptions.limit = query.limit;
@@ -609,6 +595,42 @@ export class MongoDBDriver implements IDataDriver {
     if (field === 'createdAt') return 'created_at';
     if (field === 'updatedAt') return 'updated_at';
     return field;
+  }
+
+  /**
+   * The `sort` spec for a `find`, with a unique tie-breaker appended so that
+   * paging is a partition of the result set rather than a series of unrelated
+   * queries (objectui#3106, contract on `IDataDriver.find`).
+   *
+   * MongoDB is explicit that this is not free: `sort` on a non-unique key
+   * combined with `skip`/`limit` "may return the same document more than once"
+   * because equal keys have no defined relative order and nothing holds that
+   * order steady between two executions. Page 2 repeats a row from page 1 and
+   * silently drops another — with every page full, every row real, and the two
+   * halves of the symptom too far apart for anyone to notice.
+   *
+   * `id` is always present (`create()` fills it when the caller omits one), so
+   * unlike the SQL driver there is no table this cannot apply to. It is
+   * appended in the LAST requested key's direction: determinism holds either
+   * way, but a same-direction suffix is the one a compound index can still walk
+   * in a single pass.
+   *
+   * Returns `undefined` when nothing was requested — an unordered read stays
+   * unordered (see the contract's explicit carve-out).
+   */
+  private buildSortSpec(orderBy: QueryAST['orderBy']): Document | undefined {
+    if (!orderBy || !Array.isArray(orderBy)) return undefined;
+    const sort: Document = {};
+    let lastDirection: 1 | -1 = 1;
+    for (const item of orderBy) {
+      if (item.field) {
+        lastDirection = item.order === 'desc' ? -1 : 1;
+        sort[this.mapFieldName(item.field)] = lastDirection;
+      }
+    }
+    if (Object.keys(sort).length === 0) return undefined;
+    if (sort.id === undefined) sort.id = lastDirection;
+    return sort;
   }
 
   // ── Temporal storage form (#4047) ─────────────────────────────────────────
