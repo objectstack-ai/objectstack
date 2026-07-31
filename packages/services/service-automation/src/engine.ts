@@ -2923,6 +2923,11 @@ export class AutomationEngine implements IAutomationService {
      * warned about (not rejected) so flows authored against a temporarily
      * absent plugin still register; the runtime surfaces a hard NO_EXECUTOR
      * error if such a node is actually executed.
+     *
+     * Covers nodes inside ADR-0031 regions (#4389). A node in a `loop` body is
+     * as executable as one beside it, so leaving regions out meant the warning
+     * that exists to predict NO_EXECUTOR went quiet on exactly the nodes whose
+     * failure is hardest to place at run time.
      */
     private validateNodeTypes(flowName: string, flow: FlowParsed): void {
         const known = new Set<string>([
@@ -2931,7 +2936,9 @@ export class AutomationEngine implements IAutomationService {
             ...this.actionDescriptors.keys(),
         ]);
         const unknown = [...new Set(
-            flow.nodes.map(n => n.type).filter(t => !known.has(t)),
+            collectFlowGraphs(flow)
+                .flatMap(g => g.nodes.map(n => n.type))
+                .filter(t => !known.has(t)),
         )];
         if (unknown.length > 0) {
             this.logger.warn(
@@ -2995,13 +3002,23 @@ export class AutomationEngine implements IAutomationService {
      */
     private validateNodeConfigKeys(flowName: string, flow: FlowParsed): void {
         const violations: string[] = [];
-        for (const node of flow.nodes) {
-            // `assignment` config keys are the author's variable names — see the
-            // exemption note above.
-            if (node.type === 'assignment') continue;
-            const schema = this.actionDescriptors.get(node.type)?.configSchema as ConfigSchemaNode | undefined;
-            if (!schema) continue;
-            this.collectUndeclaredConfigKeys(node, schema, node.config, 'config', violations);
+        // #4389 — every graph, not just the flow's own. `visibleIf` is the typo
+        // this check exists to catch, and moving the node into a `loop` body
+        // used to restore the silence #4277 closed. No double-reporting from the
+        // container side: all three container descriptors declare their region
+        // slot as a bare `nodes: { type: 'array' }` with no `items`, so the
+        // schema-lockstep walk stops there rather than descending twice.
+        for (const graph of collectFlowGraphs(flow)) {
+            const scoped: string[] = [];
+            for (const node of graph.nodes) {
+                // `assignment` config keys are the author's variable names — see the
+                // exemption note above.
+                if (node.type === 'assignment') continue;
+                const schema = this.actionDescriptors.get(node.type)?.configSchema as ConfigSchemaNode | undefined;
+                if (!schema) continue;
+                this.collectUndeclaredConfigKeys(node, schema, node.config, 'config', scoped);
+            }
+            for (const v of scoped) violations.push(graph.scope ? `${graph.scope} · ${v}` : v);
         }
         if (violations.length > 0) {
             throw new Error(
