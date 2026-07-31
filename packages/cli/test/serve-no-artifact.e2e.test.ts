@@ -24,12 +24,36 @@
  * Both live above the kernel — in what the command assembles and in what boot
  * treats as fatal — so only a test driving the real `os serve` process pins
  * them. These two boots are that pin: no `os compile` anywhere in this file.
+ *
+ * framework#3887 filed the same crash from the shape every REAL project has —
+ * `export default defineStack({…})` — five weeks before #4085 named it, and the
+ * fix landed without ever linking it. Its repro gets its own boot below, because
+ * the plain object literals above are not a substitute for it: `defineStack`
+ * PARSES and NORMALIZES, so what reaches boot from an authored project carries
+ * defaults no literal here writes — `datasource: 'default'` on every object and
+ * a fully defaulted descriptor on every field. The literals reach boot as typed;
+ * only this fixture reaches it as the spec produces it.
+ *
+ * That it must live under this package rather than the OS tmpdir is the same
+ * point in the file system: `@objectstack/spec` is external to the config
+ * bundler (`BUNDLE_REQUIRE_EXTERNALS`), so an authored config only resolves
+ * where a real `node_modules` does — which is exactly why no test had ever
+ * booted one, and why the gap outlived the fix.
+ *
+ * Scope, so nobody reads more into a green run than it earns: this pins the
+ * authored shape END TO END — config loaded, app registered, server ready with
+ * no `dist/` — not fault 1's mechanism. Registration order stopped being the
+ * load-bearing thing when ADR-0116 (#4131) made plugin ordering a declared,
+ * kernel-enforced contract; reverting the CLI-side append alone no longer
+ * reproduces the crash. Both guarantees are wanted, and they are pinned at
+ * different layers.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { runServe, randomPort } from './helpers/serve-process.js';
 
 /** An ordinary app: manifest + an object, exactly what `os init` scaffolds. */
@@ -80,9 +104,34 @@ export default {
 };
 `;
 
+/**
+ * framework#3887's repro, verbatim — an authored config, not a hand-rolled
+ * envelope. `defineStack` is the documented entry every scaffolded project
+ * uses, and running it is the whole point: it validates and fills in defaults,
+ * so this is the only fixture in the file whose objects reach boot carrying a
+ * `datasource`.
+ */
+const DEFINE_STACK_CONFIG = `
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  manifest: { id: 'com.test.cfgload', name: 'CfgLoad', type: 'app', version: '1.0.0' },
+  objects: [{ name: 'cfg_note', label: 'Note', fields: { title: { type: 'text' } } }],
+});
+`;
+
+/**
+ * That fixture has to RESOLVE `@objectstack/spec`, which an OS-tmpdir project
+ * cannot — so it lives under this package, which declares the dependency, and
+ * resolves through a real `node_modules` exactly as a user's project does.
+ * `tmp/` is gitignored repo-wide; `afterAll` removes the directory regardless.
+ */
+const CLI_PACKAGE_ROOT = resolve(fileURLToPath(import.meta.url), '../..');
+
 let appDir: string;
 let bareDir: string;
 let orphanDir: string;
+let defineStackDir: string;
 
 beforeAll(() => {
   appDir = mkdtempSync(join(tmpdir(), 'os-no-artifact-app-'));
@@ -93,10 +142,15 @@ beforeAll(() => {
 
   orphanDir = mkdtempSync(join(tmpdir(), 'os-no-artifact-orphan-'));
   writeFileSync(join(orphanDir, 'objectstack.config.ts'), UNREGISTERABLE_CONFIG, 'utf8');
+
+  const sandbox = join(CLI_PACKAGE_ROOT, 'tmp');
+  mkdirSync(sandbox, { recursive: true });
+  defineStackDir = mkdtempSync(join(sandbox, 'os-no-artifact-definestack-'));
+  writeFileSync(join(defineStackDir, 'objectstack.config.ts'), DEFINE_STACK_CONFIG, 'utf8');
 });
 
 afterAll(() => {
-  for (const dir of [appDir, bareDir, orphanDir]) {
+  for (const dir of [appDir, bareDir, orphanDir, defineStackDir]) {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -134,6 +188,47 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
       // A missing artifact is a normal state, so it must not be reported as a
       // failure — it reads as a build problem and sends readers hunting.
       expect(stdout + stderr).not.toContain('artifact read FAILED');
+    },
+    240_000,
+  );
+
+  it(
+    'serves a config authored through defineStack(), the shape every real project has (#3887)',
+    async () => {
+      const { stdout, stderr } = await runServe(defineStackDir, ['--port', randomPort()], {
+        waitFor: /Press Ctrl\+C to stop/,
+        timeoutMs: 240_000,
+      });
+      const seen = `\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`;
+      const out = stdout + stderr;
+
+      // Same premise as every boot in this file: nothing was ever compiled.
+      expect(existsSync(join(defineStackDir, 'dist/objectstack.json'))).toBe(false);
+
+      expect(stdout, `serve never reported ready${seen}`).toContain('Server is ready');
+      // The crash #3887 reported, and the truthful message the kernel replaced
+      // it with — neither may return through the authored path either.
+      expect(out).not.toMatch(/Service 'manifest' (is async|not found)/);
+      expect(out).not.toMatch(/Service 'objectql' (is async|not found)/);
+      expect(out).not.toContain('rollback complete');
+      expect(out).not.toContain('artifact read FAILED');
+
+      // The fixture `import`s the spec, so a config that failed to load at all
+      // fails HERE rather than degrading into a green run against nothing: the
+      // app is named in the started plugin set, which it can only reach by
+      // having been parsed, registered, and started.
+      expect(stdout, `app plugin missing from the boot banner${seen}`).toMatch(
+        /Plugins:[\s\S]*cfgload/,
+      );
+
+      // And the datasource half of it, which only this fixture can state:
+      // `defineStack` stamped `datasource: 'default'` onto `cfg_note`, so the
+      // app's start had to find a connected driver behind that name. The banner
+      // reports which one resolved, so assert it rather than leave the claim
+      // resting on "boot did not throw".
+      expect(stdout, `no driver resolved for the stamped datasource${seen}`).toMatch(
+        /Driver:\s+\S+/,
+      );
     },
     240_000,
   );
