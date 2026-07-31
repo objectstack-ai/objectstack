@@ -33,12 +33,15 @@ cannot express.
 
 Two structural reasons to prefer the flow when either could work:
 
-- **A flow's writes are validatable metadata; a hook body is opaque code.** An
+- **A flow's writes are structured metadata; a hook body is code.** An
   `update_record` node's `fields` is structural config that `os validate`
   checks — readonly targets, template dialects, declared expression slots. A
-  hook body's write set is **not** statically checked (see
-  [Hook & Action Bodies](/docs/automation/hook-bodies#not-statically-checked-the-write-set)):
-  a misspelled field name runs green and writes nothing.
+  hook body's write set is checked too, but only for the literal patterns a
+  parser can recognise and only as an advisory warning (see
+  [Hook & Action Bodies](/docs/automation/hook-bodies#write-set-checking)).
+  Note the one axis where this reverses: writing a field the target object never
+  declares warns in a hook body, and is reported nowhere in an `update_record`
+  node.
 - **A flow reviews as data.** The node graph diffs field-by-field and renders
   in the Console designer with per-node run history; a hook body reviews as
   code only.
@@ -84,9 +87,10 @@ a hook can be, so review it as such:
   belongs behind a `condition` (evaluated before the handler) rather than an
   early `return` inside the body.
 - **Reads and writes both widen.** A wildcard hook holding an L2 body with
-  `api.write` can write anywhere. Whether the fields it writes exist is
-  [not statically checked](/docs/automation/hook-bodies#not-statically-checked-the-write-set),
-  so a wildcard write set is the least verifiable shape in the system.
+  `api.write` can write anywhere. Its `ctx.input` writes are also the one shape
+  the [write-set lint](/docs/automation/hook-bodies#write-set-checking) has to
+  skip — with no single target object there is nothing to resolve field names
+  against — so a wildcard write set is the least verifiable shape in the system.
 
 Where a wildcard is the honest answer, say so in `description` — it is the one
 place a reviewer can find out why the broad target was chosen.
@@ -179,8 +183,9 @@ ctx = {
 - Use `ctx.api.object('x')` for cross-object access so writes stay in scope
 - Handle errors gracefully
 - Verify every field your hook writes exists on the target object(s) — the
-  write set of a hook body is **not statically validated**, unlike `condition`
-  (see [Hook & Action Bodies](/docs/automation/hook-bodies#not-statically-checked-the-write-set))
+  write-set lint catches the literal cases, but it is advisory, and computed
+  keys, spreads and aliased input are invisible to it (see
+  [Hook & Action Bodies](/docs/automation/hook-bodies#write-set-checking))
 
 ❌ **DON'T:**
 - Query in loops

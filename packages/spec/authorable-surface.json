@@ -3751,6 +3751,7 @@
     "data/Query:offset",
     "data/Query:orderBy",
     "data/Query:search",
+    "data/Query:searchFields",
     "data/Query:top",
     "data/Query:where",
     "data/Query:windowFunctions [RETIRED]",

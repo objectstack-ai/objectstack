@@ -343,10 +343,34 @@ const BaseQuerySchema = z.object({
   
   /** Where Clause (Filtering) */
   where: FilterConditionSchema.optional().describe('Filtering criteria (WHERE)'),
-  
-  /** Full-Text Search */
-  search: FullTextSearchSchema.optional().describe('Full-text search configuration ($search parameter)'),
-  
+
+  /**
+   * Full-Text Search.
+   *
+   * The bare string IS the canonical Tier-1 contract (ADR-0061 D1: "the
+   * client sends only the query text; the server resolves which fields to
+   * search from object metadata") — it is what every surface sends and what
+   * the dogfood HTTP proof (`showcase-search.dogfood.test.ts`) pins. The
+   * structured `FullTextSearchSchema` form remains for the declared Tier-2
+   * knobs. The union is schema-side drift REPAIR, not a new dialect: the
+   * schema declared only the object form while the executor and the ADR's own
+   * conformance ledger served the string — surfaced the moment #3899 started
+   * validating request bodies against this schema.
+   */
+  search: z.union([z.string(), FullTextSearchSchema]).optional()
+    .describe('Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration'),
+
+  /**
+   * Per-query narrowing of the searchable field set (ADR-0061 D1).
+   * Server-validated: intersected with the object's allowed searchable
+   * fields — it can only narrow, never widen. Formalized here per the ADR's
+   * P1 ("formalize `$searchFields`"); the enforcement site is
+   * `objectql/src/search-filter.ts` `resolveSearchFields`, proven at the
+   * HTTP level by `showcase-search.dogfood.test.ts`.
+   */
+  searchFields: z.array(z.string()).optional()
+    .describe('Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1)'),
+
   /** Order By Clause (Sorting) */
   orderBy: z.array(SortNodeSchema).optional().describe('Sorting instructions (ORDER BY)'),
   

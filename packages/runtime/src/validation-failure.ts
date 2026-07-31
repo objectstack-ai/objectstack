@@ -45,3 +45,35 @@ export function validationFailureDetails(err: any): ValidationFailureDetails | u
         fields: Array.isArray(err.fields) ? err.fields : [],
     };
 }
+
+/**
+ * [#3878/#3899] The CONSTRUCTOR for the shape {@link validationFailureDetails}
+ * recognises — kept in the same module so the two can never drift. Thrown from
+ * a domain handler, both dispatcher error exits map it to
+ * `400 VALIDATION_FAILED` + `details.fields[]` (#3918) with no new error
+ * channel and no runtime dependency on objectql's `ValidationError` class.
+ * First built inline by the analytics domain; hoisted here when notifications
+ * and automation grew the same entry gates rather than a third copy.
+ */
+export function validationFailure(message: string, fields: unknown[]): Error {
+    const err = new Error(message) as Error & { code: string; fields: unknown[] };
+    err.name = 'ValidationError';
+    err.code = 'VALIDATION_FAILED';
+    err.fields = fields;
+    return err;
+}
+
+/**
+ * Zod issues → the dispatcher's `fields[]` envelope entries
+ * (`{ field, code, message }`). `'(body)'` names a root-level failure — a body
+ * that is the wrong TYPE entirely has no path to point at.
+ */
+export function fieldsFromZodIssues(
+    issues: Array<{ path: Array<string | number | symbol>; code: string; message: string }>,
+): Array<{ field: string; code: string; message: string }> {
+    return issues.map((issue) => ({
+        field: issue.path.length > 0 ? issue.path.join('.') : '(body)',
+        code: issue.code,
+        message: issue.message,
+    }));
+}
