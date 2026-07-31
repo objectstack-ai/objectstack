@@ -60,12 +60,12 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
 
   it('stores every writer form as canonical UTC ISO text', async () => {
     await seedMixed();
-    const raw = await driver.find('task', {} as any);
+    const raw = await driver.find('task', { object: 'task' });
     for (const row of raw) {
       expect(typeof (row as any).created_at, `${(row as any).id} stored form`).toBe('string');
       expect((row as any).created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     }
-    const midnight = raw.find((r: any) => r.id === 'd_midnight') as any;
+    const midnight = raw.find((r: any) => r.id === 'd_midnight');
     expect(midnight.created_at).toBe('2026-07-28T00:00:00.000Z');
   });
 
@@ -92,10 +92,10 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
 
   it('keeps #3777/#4042 bound semantics on top of the converged storage', async () => {
     await seedMixed();
-    const gte = await driver.find('task', { where: { created_at: { $gte: '2026-07-28' } } } as any);
+    const gte = await driver.find('task', { object: 'task', where: { created_at: { $gte: '2026-07-28' } } });
     expect(ids(gte)).toEqual(['d_midnight', 'd_next_day', 's_evening', 's_morning']);
 
-    const lt = await driver.find('task', { where: { created_at: { $lt: '2026-07-28' } } } as any);
+    const lt = await driver.find('task', { object: 'task', where: { created_at: { $lt: '2026-07-28' } } });
     expect(ids(lt)).toEqual(['d_yesterday', 's_old']);
 
     const instant = await driver.find('task', {
@@ -144,7 +144,7 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
     // honest subject for an update-path assertion.
     await driver.create('task', { id: 'u1', due_at: '2026-04-19T10:00:00.000Z' });
     await driver.update('task', 'u1', { due_at: new Date('2026-07-28T09:15:00Z') });
-    const row: any = (await driver.find('task', { where: { id: 'u1' } } as any))[0];
+    const row: any = (await driver.find('task', { object: 'task', where: { id: 'u1' } }))[0];
     expect(row.due_at).toBe('2026-07-28T09:15:00.000Z');
 
     // …and the converged value is reachable by a date window, which is the
@@ -165,9 +165,9 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
     ] as const) {
       await driver.create('task', { id, created_on });
     }
-    const all = await driver.find('task', {} as any);
+    const all = await driver.find('task', { object: 'task' });
     for (const row of all) expect(typeof (row as any).created_on).toBe('string');
-    expect((all.find((r: any) => r.id === 'on_obj') as any).created_on).toBe('2026-07-28');
+    expect((all.find((r: any) => r.id === 'on_obj')).created_on).toBe('2026-07-28');
 
     const found = await driver.find('task', {
       where: { created_on: { $gte: '2026-04-29', $lte: '2026-07-28' } },
@@ -177,7 +177,7 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
 
   it('an undeclared object is left alone (no schema → no coercion)', async () => {
     await driver.create('freeform', { id: 'f1', when: new Date('2026-07-28T09:15:00Z') });
-    const row: any = (await driver.find('freeform', {} as any))[0];
+    const row: any = (await driver.find('freeform', { object: 'freeform' }))[0];
     expect(row.when).toBeInstanceOf(Date);
   });
 });

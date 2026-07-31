@@ -144,7 +144,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
     });
 
     it('should update many records', async () => {
-      const result = await driver.updateMany('orders', { where: { status: 'pending' } } as any, { status: 'processing' });
+      const result = await driver.updateMany('orders', { object: 'orders', where: { status: 'pending' } }, { status: 'processing' });
 
       expect(result).toBeGreaterThan(0);
 
@@ -153,7 +153,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
     });
 
     it('should delete many records', async () => {
-      const result = await driver.deleteMany('orders', { where: { status: 'cancelled' } } as any);
+      const result = await driver.deleteMany('orders', { object: 'orders', where: { status: 'cancelled' } });
 
       expect(result).toBe(1);
 
@@ -162,10 +162,10 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
     });
 
     it('should handle empty bulk update and delete', async () => {
-      const result = await driver.updateMany('orders', { where: { status: 'nonexistent' } } as any, { status: 'updated' });
+      const result = await driver.updateMany('orders', { object: 'orders', where: { status: 'nonexistent' } }, { status: 'updated' });
       expect(result).toBe(0);
 
-      const deleteResult = await driver.deleteMany('orders', { where: { id: 'nonexistent' } } as any);
+      const deleteResult = await driver.deleteMany('orders', { object: 'orders', where: { id: 'nonexistent' } });
       expect(deleteResult).toBe(0);
     });
   });

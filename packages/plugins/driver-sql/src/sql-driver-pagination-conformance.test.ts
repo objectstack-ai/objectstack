@@ -116,7 +116,7 @@ describe('SqlDriver — paged reads are a partition of the result set (objectui#
   }
 
   it('leaves an unordered read alone — no sort is imposed on a caller who asked for none', async () => {
-    const rows = await driver.find('ticket', {} as any, { bypassTenantAudit: true } as any);
+    const rows = await driver.find('ticket', { object: 'ticket' }, { bypassTenantAudit: true });
     expect(rows.map((r) => r.id)).toEqual(PAGINATION_ROWS.map((r) => r.id));
   });
 });

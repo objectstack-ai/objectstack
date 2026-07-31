@@ -44,7 +44,7 @@ describe('SqlDriver.getSchemaSyncStats', () => {
   it('counts every table it creates in an empty store', async () => {
     const driver = sqlite();
     try {
-      await driver.initObjects(OBJECTS as any);
+      await driver.initObjects(OBJECTS);
 
       expect(driver.getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
     } finally {
@@ -56,9 +56,9 @@ describe('SqlDriver.getSchemaSyncStats', () => {
   it('stays "created from empty" across repeated syncs of its own tables', async () => {
     const driver = sqlite();
     try {
-      await driver.initObjects(OBJECTS as any);
-      await driver.initObjects(OBJECTS as any);
-      await driver.syncSchema('alpha', OBJECTS[0] as any);
+      await driver.initObjects(OBJECTS);
+      await driver.initObjects(OBJECTS);
+      await driver.syncSchema('alpha', OBJECTS[0]);
 
       expect(driver.getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
     } finally {
@@ -84,7 +84,7 @@ describe('SqlDriver.getSchemaSyncStats', () => {
     // long after the run itself has passed.
     const first = new SqlDriver(opts);
     try {
-      await first.initObjects(OBJECTS as any);
+      await first.initObjects(OBJECTS);
       expect(first.getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
     } finally {
       await first.disconnect();
@@ -93,7 +93,7 @@ describe('SqlDriver.getSchemaSyncStats', () => {
     // A later boot against the same store — the tables precede it.
     const second = new SqlDriver(opts);
     try {
-      await second.initObjects(OBJECTS as any);
+      await second.initObjects(OBJECTS);
 
       expect(second.getSchemaSyncStats()).toEqual({ created: 0, existing: 2 });
     } finally {
@@ -104,8 +104,8 @@ describe('SqlDriver.getSchemaSyncStats', () => {
   it('a store that gains an object later is still not one we found', async () => {
     const driver = sqlite();
     try {
-      await driver.initObjects([OBJECTS[0]] as any);
-      await driver.syncSchema('gamma', { name: 'gamma', fields: { n: { type: 'string' } } } as any);
+      await driver.initObjects([OBJECTS[0]]);
+      await driver.syncSchema('gamma', { name: 'gamma', fields: { n: { type: 'string' } } });
 
       expect(driver.getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
     } finally {

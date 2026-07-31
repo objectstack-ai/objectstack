@@ -42,60 +42,60 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
 
   describe('array-format where', () => {
     it('equals + null → IS NULL (baseline that already worked)', async () => {
-      const rows = await driver.find('tasks', { where: [['assignee', '=', null]] } as any);
+      const rows = await driver.find('tasks', { object: 'tasks', where: [['assignee', '=', null]] });
       expect(ids(rows)).toEqual(['2', '4']);
     });
 
     it.each(['is_null', 'isnull', 'is_empty'])('%s → IS NULL', async (op) => {
-      const rows = await driver.find('tasks', { where: [['assignee', op, true]] } as any);
+      const rows = await driver.find('tasks', { object: 'tasks', where: [['assignee', op, true]] });
       expect(ids(rows)).toEqual(['2', '4']);
     });
 
     it.each(['is_not_null', 'isnotnull', 'is_not_empty'])('%s → IS NOT NULL', async (op) => {
-      const rows = await driver.find('tasks', { where: [['assignee', op, true]] } as any);
+      const rows = await driver.find('tasks', { object: 'tasks', where: [['assignee', op, true]] });
       expect(ids(rows)).toEqual(['1', '3']);
     });
 
     it('!= null → IS NOT NULL (not a `<> NULL` that matches nothing)', async () => {
-      const rows = await driver.find('tasks', { where: [['assignee', '!=', null]] } as any);
+      const rows = await driver.find('tasks', { object: 'tasks', where: [['assignee', '!=', null]] });
       expect(ids(rows)).toEqual(['1', '3']);
     });
 
     it('unknown operator throws instead of returning the whole table', async () => {
       await expect(
-        driver.find('tasks', { where: [['assignee', 'totally_bogus', null]] } as any),
+        driver.find('tasks', { object: 'tasks', where: [['assignee', 'totally_bogus', null]] }),
       ).rejects.toThrow(/Unsupported filter operator/);
     });
 
     it('count with is_null is scoped, not the whole table', async () => {
-      const count = await driver.count('tasks', { where: [['assignee', 'isnull', true]] } as any);
+      const count = await driver.count('tasks', { object: 'tasks', where: [['assignee', 'isnull', true]] });
       expect(count).toBe(2);
     });
   });
 
   describe('object-format where ($-operators)', () => {
     it('$null: true → IS NULL', async () => {
-      const rows = await driver.find('tasks', { where: { assignee: { $null: true } } } as any);
+      const rows = await driver.find('tasks', { object: 'tasks', where: { assignee: { $null: true } } });
       expect(ids(rows)).toEqual(['2', '4']);
     });
 
     it('$null: false → IS NOT NULL', async () => {
-      const rows = await driver.find('tasks', { where: { assignee: { $null: false } } } as any);
+      const rows = await driver.find('tasks', { object: 'tasks', where: { assignee: { $null: false } } });
       expect(ids(rows)).toEqual(['1', '3']);
     });
 
     it('$ne: null → IS NOT NULL', async () => {
-      const rows = await driver.find('tasks', { where: { assignee: { $ne: null } } } as any);
+      const rows = await driver.find('tasks', { object: 'tasks', where: { assignee: { $ne: null } } });
       expect(ids(rows)).toEqual(['1', '3']);
     });
 
     it('$startsWith → prefix LIKE', async () => {
-      const rows = await driver.find('tasks', { where: { assignee: { $startsWith: 'a' } } } as any);
+      const rows = await driver.find('tasks', { object: 'tasks', where: { assignee: { $startsWith: 'a' } } });
       expect(ids(rows)).toEqual(['1']);
     });
 
     it('$regex (better-auth contains) → substring LIKE, not exact match', async () => {
-      const rows = await driver.find('tasks', { where: { assignee: { $regex: 'aro' } } } as any);
+      const rows = await driver.find('tasks', { object: 'tasks', where: { assignee: { $regex: 'aro' } } });
       expect(ids(rows)).toEqual(['3']);
     });
 
@@ -112,7 +112,7 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
 
     it('unknown $-operator throws instead of a silent equality compare', async () => {
       await expect(
-        driver.find('tasks', { where: { assignee: { $bogus: 1 } } } as any),
+        driver.find('tasks', { object: 'tasks', where: { assignee: { $bogus: 1 } } }),
       ).rejects.toThrow(/Unsupported filter operator/);
     });
   });

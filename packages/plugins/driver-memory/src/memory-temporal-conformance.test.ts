@@ -103,14 +103,14 @@ describe('driver-memory — temporal conformance', () => {
 
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { where: c.filter } as any);
+      const rows = await driver.find('conformance', { object: 'conformance', where: c.filter });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
 
     if (c.tokenFilter) {
       it(`${c.name} — via relative tokens`, async () => {
-        const rows = await driver.find('conformance', { where: resolveTokens(c.tokenFilter) } as any);
+        const rows = await driver.find('conformance', { object: 'conformance', where: resolveTokens(c.tokenFilter) });
         const got = (rows as any[]).map((r) => r.id).sort();
         expect(got, c.note).toEqual([...c.expected].sort());
       });
@@ -141,7 +141,7 @@ describe('driver-memory — Field.time conformance', () => {
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { where: c.filter } as any);
+      const rows = await driver.find('time_conformance', { object: 'time_conformance', where: c.filter });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -164,7 +164,7 @@ describe('driver-memory — temporal conformance on rows that predate the schema
   });
 
   it('converged every pre-schema row to the storage canon (the premise, so the sweep cannot pass vacuously)', async () => {
-    const rows = await driver.find('conformance', {} as any);
+    const rows = await driver.find('conformance', { object: 'conformance' });
     expect(rows).toHaveLength(TEMPORAL_ROWS.length);
     for (const row of rows as any[]) {
       const expected = TEMPORAL_ROWS.find((r) => r.id === row.id)!;
@@ -179,7 +179,7 @@ describe('driver-memory — temporal conformance on rows that predate the schema
   // already swept above — a divergence here is a convergence bug by construction.
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { where: c.filter } as any);
+      const rows = await driver.find('conformance', { object: 'conformance', where: c.filter });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -199,7 +199,7 @@ describe('driver-memory — Field.time conformance on rows that predate the sche
   });
 
   it('converged every pre-schema wall clock to the storage canon (the premise)', async () => {
-    const rows = await driver.find('time_conformance', {} as any);
+    const rows = await driver.find('time_conformance', { object: 'time_conformance' });
     expect(rows).toHaveLength(TEMPORAL_TIME_ROWS.length);
     for (const row of rows as any[]) {
       const expected = TEMPORAL_TIME_ROWS.find((r) => r.id === row.id)!;
@@ -209,7 +209,7 @@ describe('driver-memory — Field.time conformance on rows that predate the sche
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { where: c.filter } as any);
+      const rows = await driver.find('time_conformance', { object: 'time_conformance', where: c.filter });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });

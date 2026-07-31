@@ -87,7 +87,7 @@ describe('SqliteWasmDriver (in-memory)', () => {
   });
 
   it('should count objects', async () => {
-    const count = await driver.count('users', { where: { age: 17 } } as any);
+    const count = await driver.count('users', { object: 'users', where: { age: 17 } });
     expect(count).toBe(2);
   });
 });

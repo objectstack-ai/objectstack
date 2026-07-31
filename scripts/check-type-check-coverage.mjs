@@ -25,6 +25,16 @@
 // not declare; 19 for an analytics `timezone` default. The tests were right
 // and the types were wrong. A tsc count is a place to look, never a verdict.
 //
+// The reverse also holds: a LOW count can be call sites opting out. Those same
+// three packages carried 111 `as any` casts on driver-call arguments. Removing
+// them left 66 fresh errors -- every one a real missing `object` the cast had
+// hidden, including an `orderBy: [['id','asc']]` tuple the driver reads as
+// `item.field` and therefore silently dropped, inside a helper whose whole job
+// was reading rows in order. 43 of the casts were needed by nothing at all;
+// exactly 2 were load-bearing (tests feeding a filter the AST gate refuses, on
+// purpose). Onboarding a package is supposed to make its `typecheck` mean
+// something, so the casts belong in the diff too.
+//
 //   node scripts/check-type-check-coverage.mjs
 //   node scripts/check-type-check-coverage.mjs --self-test
 //

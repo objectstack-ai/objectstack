@@ -43,8 +43,8 @@ describe('SqlDriver auto_number format tokens', () => {
     await driver.initObjects([
       { name: 'andon', fields: { andon_no: { type: 'autonumber', format: 'AD{YYYYMMDD}{0000}' } } },
     ]);
-    const r1 = await driver.create('andon', {}, { timezone: 'UTC' } as any);
-    const r2 = await driver.create('andon', {}, { timezone: 'UTC' } as any);
+    const r1 = await driver.create('andon', {}, { timezone: 'UTC' });
+    const r2 = await driver.create('andon', {}, { timezone: 'UTC' });
     expect(r1.andon_no).toBe(`AD${utcYmd()}0001`);
     expect(r2.andon_no).toBe(`AD${utcYmd()}0002`);
   });
@@ -57,7 +57,7 @@ describe('SqlDriver auto_number format tokens', () => {
     const k = (driver as any).knex;
     await k('andon').insert({ id: 'old', andon_no: 'AD202001010099' });
 
-    const r = await driver.create('andon', {}, { timezone: 'UTC' } as any);
+    const r = await driver.create('andon', {}, { timezone: 'UTC' });
     expect(r.andon_no).toBe(`AD${utcYmd()}0001`); // fresh scope, not 0100
   });
 
@@ -113,9 +113,9 @@ describe('SqlDriver auto_number format tokens', () => {
         },
       },
     ]);
-    const a = await driver.create('plan', { organization_id: 'orgA', line: 'PROD' }, { timezone: 'UTC' } as any);
-    const b = await driver.create('plan', { organization_id: 'orgB', line: 'PROD' }, { timezone: 'UTC' } as any);
-    const a2 = await driver.create('plan', { organization_id: 'orgA', line: 'PROD' }, { timezone: 'UTC' } as any);
+    const a = await driver.create('plan', { organization_id: 'orgA', line: 'PROD' }, { timezone: 'UTC' });
+    const b = await driver.create('plan', { organization_id: 'orgB', line: 'PROD' }, { timezone: 'UTC' });
+    const a2 = await driver.create('plan', { organization_id: 'orgA', line: 'PROD' }, { timezone: 'UTC' });
 
     expect(a.plan_no).toBe(`PROD${utcYmd()}001`);
     expect(a2.plan_no).toBe(`PROD${utcYmd()}002`);

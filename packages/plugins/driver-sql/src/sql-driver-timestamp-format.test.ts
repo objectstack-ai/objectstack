@@ -71,7 +71,7 @@ describe('SqlDriver canonical audit-timestamp format (SQLite)', () => {
   it('update({ preserveAudit }) KEEPS a caller-supplied updated_at instead of force-stamping now', async () => {
     await driver.create('thing', { id: 'h1', name: 'A' }, { bypassTenantAudit: true });
     const historical = '2021-03-01T09:00:00.000Z';
-    await driver.update('thing', 'h1', { name: 'B', updated_at: historical }, { bypassTenantAudit: true, preserveAudit: true } as any);
+    await driver.update('thing', 'h1', { name: 'B', updated_at: historical }, { bypassTenantAudit: true, preserveAudit: true });
     const row = await raw('thing').where('id', 'h1').first();
     expect(row.name).toBe('B');
     expect(row.updated_at).toBe(historical); // original timeline preserved, not "now"
@@ -80,7 +80,7 @@ describe('SqlDriver canonical audit-timestamp format (SQLite)', () => {
   it('update({ preserveAudit }) with NO supplied updated_at still stamps now (fills-only-empty)', async () => {
     await driver.create('thing', { id: 'h2', name: 'A' }, { bypassTenantAudit: true });
     await new Promise((r) => setTimeout(r, 5));
-    await driver.update('thing', 'h2', { name: 'B' }, { bypassTenantAudit: true, preserveAudit: true } as any);
+    await driver.update('thing', 'h2', { name: 'B' }, { bypassTenantAudit: true, preserveAudit: true });
     const row = await raw('thing').where('id', 'h2').first();
     expect(row.updated_at).toMatch(ISO_Z);
   });

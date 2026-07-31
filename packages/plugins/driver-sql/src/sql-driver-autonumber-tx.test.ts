@@ -73,12 +73,12 @@ describe('SqlDriver auto_number in-transaction (deadlock regression)', () => {
     // /batch endpoint wraps operations. Must commit, not hang.
     const trx = await driver!.beginTransaction();
     const r1 = await withTimeout(
-      driver!.create('contract', { organization_id: 'org_x', name: 'A' }, { transaction: trx } as any),
+      driver!.create('contract', { organization_id: 'org_x', name: 'A' }, { transaction: trx }),
       6000,
       'batch create #1 (autonumber)',
     );
     const r2 = await withTimeout(
-      driver!.create('contract', { organization_id: 'org_x', name: 'B' }, { transaction: trx } as any),
+      driver!.create('contract', { organization_id: 'org_x', name: 'B' }, { transaction: trx }),
       6000,
       'batch create #2 (autonumber)',
     );
@@ -106,7 +106,7 @@ describe('SqlDriver auto_number in-transaction (deadlock regression)', () => {
 
     const trx = await driver!.beginTransaction();
     const r1 = await withTimeout(
-      driver!.create('contract', { organization_id: 'org_cold', name: 'C' }, { transaction: trx } as any),
+      driver!.create('contract', { organization_id: 'org_cold', name: 'C' }, { transaction: trx }),
       6000,
       'cold-cache create inside tx',
     );

@@ -178,9 +178,9 @@ describe('SqliteWasmDriver auto_number sequence', () => {
     ]);
 
     // No organization_id on the row, but provided via DriverOptions.
-    const r1 = await driver.create('contract', {}, { tenantId: 'org_options' } as any);
-    const r2 = await driver.create('contract', {}, { tenantId: 'org_options' } as any);
-    const r3 = await driver.create('contract', {}, { tenantId: 'org_other' } as any);
+    const r1 = await driver.create('contract', {}, { tenantId: 'org_options' });
+    const r2 = await driver.create('contract', {}, { tenantId: 'org_options' });
+    const r3 = await driver.create('contract', {}, { tenantId: 'org_other' });
 
     expect(r1.contract_number).toBe('CTR-0001');
     expect(r2.contract_number).toBe('CTR-0002');

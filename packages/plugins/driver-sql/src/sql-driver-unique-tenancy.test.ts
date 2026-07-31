@@ -299,7 +299,7 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
     expect(Object.values(uniques)).toContainEqual(['organization_id', 'code']);
 
     // Existing data survived, and the cross-tenant insert now works.
-    expect(await driver.count('product', {} as any)).toBe(2);
+    expect(await driver.count('product', { object: 'product' })).toBe(2);
     const b = await driver.create('product', { organization_id: 'org_b', code: 'PROD-00001' });
     expect(b.code).toBe('PROD-00001');
   });
@@ -401,7 +401,7 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
     expect(Object.values(uniques)).not.toContainEqual(['code']);
 
     // Data preserved, and cross-tenant reuse still works post-rebuild.
-    expect(await driver.count('product', {} as any)).toBe(1);
+    expect(await driver.count('product', { object: 'product' })).toBe(1);
     const b = await driver.create('product', { organization_id: 'org_b', code: 'C1', note: 'n' });
     expect(b.code).toBe('C1');
   });

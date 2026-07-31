@@ -341,7 +341,7 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
       },
     ];
 
-    await driver.initObjects(objects as any);
+    await driver.initObjects(objects);
 
     // PRAGMA proves a non-PK unique index was actually created.
     const list: any = await knexInstance.raw('PRAGMA index_list(idx_unique_obj)');
@@ -368,7 +368,7 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
       },
     ];
 
-    await driver.initObjects(objects as any);
+    await driver.initObjects(objects);
 
     const list: any = await knexInstance.raw('PRAGMA index_list(idx_multi_obj)');
     const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
@@ -397,7 +397,7 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
       },
     ];
 
-    await driver.initObjects(objects as any);
+    await driver.initObjects(objects);
 
     // Two rows with no dedup_key (NULL) must both be insertable.
     await driver.create('idx_null_obj', {});
@@ -418,7 +418,7 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
       },
     ];
 
-    await driver.initObjects(objects as any);
+    await driver.initObjects(objects);
 
     const list: any = await knexInstance.raw('PRAGMA index_list(idx_plain_obj)');
     const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
@@ -435,9 +435,9 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
       },
     ];
 
-    await driver.initObjects(objects as any);
+    await driver.initObjects(objects);
     // Second run must not throw "index already exists".
-    await driver.initObjects(objects as any);
+    await driver.initObjects(objects);
 
     const list: any = await knexInstance.raw('PRAGMA index_list(idx_idem_obj)');
     const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
@@ -460,7 +460,7 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     ];
 
     // Must not throw even though `total` has no physical column.
-    await driver.initObjects(objects as any);
+    await driver.initObjects(objects);
 
     const list: any = await knexInstance.raw('PRAGMA index_list(idx_virtual_obj)');
     const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));

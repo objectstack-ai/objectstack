@@ -22,6 +22,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import type { FilterCondition } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 
 const TABLE = 'vocab_probe';
@@ -37,8 +38,11 @@ describe('InMemoryDriver filter vocabulary ↔ VALID_AST_OPERATORS', () => {
   });
 
   /** Operators are exercised through `find`, the path a real query takes. */
+  // Cast deliberately: several `where` shapes below are ones the AST gate
+  // refuses, fed in to prove the driver throws instead of silently dropping
+  // the condition. `unknown` is the honest parameter type.
   const find = (where: unknown) =>
-    driver.find(TABLE, { object: TABLE, fields: ['id'], where } as any);
+    driver.find(TABLE, { object: TABLE, fields: ['id'], where: where as FilterCondition });
 
   it('reads a non-empty operator set from the spec', () => {
     // Guards every assertion below from passing vacuously.

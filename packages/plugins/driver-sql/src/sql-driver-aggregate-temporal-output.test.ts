@@ -71,7 +71,10 @@ describe('temporal values leaving aggregate()/distinct() (#3797)', () => {
 
   /** What the same column looks like through the path that always formatted it. */
   const viaFind = async (field: string) => {
-    const rows = await driver.find(TABLE, { orderBy: [['id', 'asc']] } as any);
+    // `orderBy: [['id', 'asc']]` until #4311. The driver reads `item.field`,
+    // which a tuple does not have, so the sort was silently dropped — this
+    // helper had been reading whatever order the rows came back in.
+    const rows = await driver.find(TABLE, { object: TABLE, orderBy: [{ field: 'id', order: 'asc' }] });
     return rows.map((r: any) => r[field]);
   };
 
