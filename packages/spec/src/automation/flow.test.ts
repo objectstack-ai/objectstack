@@ -958,8 +958,6 @@ describe('BPMN — Wait Event Configuration', () => {
       waitEventConfig: {
         eventType: 'timer',
         timerDuration: 'PT1H',
-        timeoutMs: 7200000,
-        onTimeout: 'fail',
       },
     });
     expect(result.success).toBe(true);
@@ -977,15 +975,12 @@ describe('BPMN — Wait Event Configuration', () => {
       waitEventConfig: {
         eventType: 'webhook',
         signalName: 'payment_received',
-        timeoutMs: 86400000,
-        onTimeout: 'continue',
       },
     });
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.waitEventConfig?.eventType).toBe('webhook');
       expect(result.data.waitEventConfig?.signalName).toBe('payment_received');
-      expect(result.data.waitEventConfig?.onTimeout).toBe('continue');
     }
   });
 
@@ -1000,8 +995,28 @@ describe('BPMN — Wait Event Configuration', () => {
       },
     });
     expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.waitEventConfig?.onTimeout).toBe('fail'); // default
+  });
+
+  /**
+   * These three tests used to assert the OPPOSITE — that `timeoutMs` and
+   * `onTimeout` were accepted, and that `onTimeout` defaulted to `'fail'`. They
+   * were encoding a contract the runtime never honoured: nothing read `onTimeout`,
+   * and `timeoutMs` was consumed as the timer duration rather than as a timeout
+   * (#4158). Retiring the pair is what flipped them, which is the point — the
+   * schema now says what `wait` actually does.
+   */
+  it('rejects the retired timeout keys instead of stripping them (#4158)', () => {
+    for (const retired of [{ timeoutMs: 7_200_000 }, { onTimeout: 'fail' }]) {
+      const result = FlowNodeSchema.safeParse({
+        id: 'wait_timer',
+        type: 'wait',
+        label: 'Wait 1 Hour',
+        waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H', ...retired },
+      });
+      const key = Object.keys(retired)[0];
+      expect(result.success, `${key} must be rejected, not silently dropped`).toBe(false);
+      // The prescription names the issue and the replacement (or its absence).
+      expect(JSON.stringify(result.error?.issues), `${key} guidance`).toMatch(/4158/);
     }
   });
 

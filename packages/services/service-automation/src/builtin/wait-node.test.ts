@@ -279,7 +279,9 @@ describe('rearmSuspendedWaitTimers (cold-boot timer re-arm)', () => {
 
   it('resumes an overdue timer immediately (deadline elapsed while down)', async () => {
     const store = new InMemorySuspendedRunStore();
-    const config = { eventType: 'timer', timeoutMs: 1 };
+    // `timerDuration: '1'`, not the retired `timeoutMs: 1` (#4158) — a bare
+    // numeric string is milliseconds, so this is the same 1ms deadline.
+    const config = { eventType: 'timer', timerDuration: '1' };
 
     const a = bootEngine(store, ctxNoJob(), config); // degraded: no job service
     const paused = await a.engine.execute('wait_flow');
