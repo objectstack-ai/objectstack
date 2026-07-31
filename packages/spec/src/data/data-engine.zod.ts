@@ -424,6 +424,40 @@ export const RPC_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = [
 ];
 
 /**
+ * The `where` slot alone (#4346) — for engine option bags that carry a
+ * predicate and nothing else to fold: `findOne`, `count`, `update`, `delete`,
+ * `aggregate`.
+ *
+ * These take the same `filter`-carrying option shapes the deprecated
+ * `DataEngine{Query,Update,Delete,Count}OptionsSchema` declare, but only
+ * `find()` ever folded the alias — so `delete({filter, multi: true})` reached
+ * the driver with NO predicate and emptied the object. The fold is what makes
+ * the deprecated spelling mean what it says on every verb.
+ */
+export const ENGINE_FILTER_ALIAS_SLOTS: readonly QueryAliasSlot[] = RPC_QUERY_ALIAS_SLOTS.filter(
+  (slot) => slot.canonical === 'where',
+);
+
+/**
+ * The sixth pair (#4346): `top` is documented as "Alias for limit (OData
+ * compatibility)" on both `QuerySchema` and `EngineQueryOptionsSchema`, so
+ * `limit` is canonical — but the two normalizers folded it in OPPOSITE
+ * directions (the protocol overwrote `limit` with `top` unguarded; the engine
+ * kept `limit`), which is the #3795 divergence on the one pair that sweep's
+ * scope note excluded.
+ *
+ * Deliberately NOT in {@link RPC_QUERY_ALIAS_SLOTS}: those five are deprecated
+ * RPC keys that the parse transform drops from its output, while `top` is a
+ * DECLARED AST key. Removing it from the parsed type is a breaking change that
+ * deserves its own decision; giving it one precedence does not have to wait for
+ * that.
+ */
+export const ENGINE_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = [
+  ...ENGINE_FILTER_ALIAS_SLOTS,
+  { canonical: 'limit', aliases: ['top'] },
+];
+
+/**
  * Fold alias spellings into their canonical slot key, in place.
  *
  * Per slot: an alias alone moves to the canonical key; redundant IDENTICAL
@@ -478,11 +512,6 @@ export function foldQueryAliasSlots(
   return arrivedAs;
 }
 
-/** The `where` slot alone — for RPC options that accept only the `filter` alias. */
-const RPC_WHERE_SLOT: readonly QueryAliasSlot[] = RPC_QUERY_ALIAS_SLOTS.filter(
-  (slot) => slot.canonical === 'where',
-);
-
 function aliasConflictIssue(conflict: QueryAliasConflict): {
   code: 'custom';
   path: string[];
@@ -520,7 +549,7 @@ function foldRpcLegacyFilter<T extends { filter?: unknown }>(
   ctx: z.core.$RefinementCtx,
 ): Omit<T, 'filter'> {
   const bag: Record<string, unknown> = { ...input };
-  foldQueryAliasSlots(bag, RPC_WHERE_SLOT, (conflict) => ctx.addIssue(aliasConflictIssue(conflict)));
+  foldQueryAliasSlots(bag, ENGINE_FILTER_ALIAS_SLOTS, (conflict) => ctx.addIssue(aliasConflictIssue(conflict)));
   return bag as Omit<T, 'filter'>;
 }
 

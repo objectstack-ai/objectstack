@@ -18,7 +18,7 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
-import { parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots, type QueryAliasConflict, type QueryAliasSlot, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
+import { parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, ENGINE_QUERY_ALIAS_SLOTS, foldQueryAliasSlots, type QueryAliasConflict, type QueryAliasSlot, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
@@ -923,7 +923,14 @@ const WIRE_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = (() => {
         where: ['filters', '$filter'],
         expand: ['$expand'],
     };
-    return RPC_QUERY_ALIAS_SLOTS.map((slot) => ({
+    // [#4346] `limit`/`top` rides in from ENGINE_QUERY_ALIAS_SLOTS rather than
+    // being spelled again here: this layer folded it in the direction OPPOSITE
+    // to the engine (`options.limit = Number(options.top)`, no guard — the
+    // alias overwriting the canonical key), so `{top: 1, limit: 3}` answered 1
+    // over HTTP and 3 through a direct engine call.
+    return ENGINE_QUERY_ALIAS_SLOTS.concat(
+        RPC_QUERY_ALIAS_SLOTS.filter((slot) => !ENGINE_QUERY_ALIAS_SLOTS.some((e) => e.canonical === slot.canonical)),
+    ).map((slot) => ({
         canonical: slot.canonical,
         aliases: [...slot.aliases, ...(extra[slot.canonical] ?? [])],
     }));
@@ -3695,12 +3702,10 @@ export class ObjectStackProtocolImplementation implements
         });
         const slotParam = (canonical: string): string => spellingFor(arrivedAs[canonical] ?? canonical);
 
-        // Numeric fields — normalize top → limit ($top is the OData layer,
-        // outside the #3795 slot table), then coerce querystring strings.
-        if (options.top != null) {
-            options.limit = Number(options.top);
-            delete options.top;
-        }
+        // Numeric coercion — a querystring carries every number as a string.
+        // `top` → `limit` folded above with the rest (#4346); what is left here
+        // is the coercion the fold deliberately does not do (it moves values
+        // verbatim).
         if (options.limit != null) options.limit = Number(options.limit);
         if (options.offset != null) options.offset = Number(options.offset);
 

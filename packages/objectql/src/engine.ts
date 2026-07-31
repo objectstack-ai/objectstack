@@ -9,6 +9,11 @@ import {
   EngineDeleteOptions,
   EngineAggregateOptions,
   EngineCountOptions,
+  ENGINE_FILTER_ALIAS_SLOTS,
+  ENGINE_QUERY_ALIAS_SLOTS,
+  foldQueryAliasSlots,
+  type QueryAliasConflict,
+  type QueryAliasSlot,
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
@@ -319,6 +324,52 @@ interface SummaryDescriptor {
    * Undefined ⇒ aggregate every child of the parent.
    */
   filter?: Record<string, unknown>;
+}
+
+/**
+ * [#4346] Two spellings of one option slot, carrying different values. Same
+ * rule the protocol layer applies (#4181): merging them would invent an intent
+ * the caller never expressed, and picking a winner is the silent drop itself.
+ *
+ * Carries the wire shape (`status` / `code`) so a call arriving through REST
+ * surfaces as a 400 rather than a 500 — the engine is reached both ways.
+ */
+function aliasConflictError(conflict: QueryAliasConflict): Error {
+  const err: any = new Error(
+    `Conflicting query options: ${conflict.spellings.map((s) => `'${s}'`).join(', ')} are `
+    + `spellings of the same option (canonical '${conflict.canonical}') and were given `
+    + 'different values. Send exactly one.',
+  );
+  err.status = 400;
+  err.code = 'INVALID_REQUEST';
+  return err;
+}
+
+/**
+ * [#4346] Fold the deprecated option aliases onto their canonical QueryAST
+ * keys, by the spec's own table — returning a COPY, so a caller's bag is never
+ * mutated under it.
+ *
+ * Why every entry point needs this and not just `find()`: the driver AST
+ * understands `where` only, so an unfolded `filter` is not a narrower query,
+ * it is NO query. On a read that silently over-grants (the ADR-0057 finding
+ * that put the fold in `find()`); on `updateMany`/`deleteMany` it is an
+ * unbounded write over the whole object. The deprecated
+ * `DataEngine*OptionsSchema` shapes declare `filter` for exactly these verbs
+ * and `ScopedContext` forwards hook-authored bags verbatim, so "callers should
+ * not pass it" was never the contract.
+ */
+function foldOptionAliases<T extends object | undefined>(
+  options: T,
+  slots: readonly QueryAliasSlot[],
+): T {
+  if (!options || typeof options !== 'object') return options;
+  const bag = options as Record<string, unknown>;
+  // Fast path: nothing to fold, so nothing to copy either.
+  if (!slots.some((slot) => slot.aliases.some((alias) => bag[alias] !== undefined))) return options;
+  const copy = { ...bag };
+  foldQueryAliasSlots(copy, slots, (conflict) => { throw aliasConflictError(conflict); });
+  return copy as T;
 }
 
 export class ObjectQL implements IDataEngine {
@@ -2862,20 +2913,15 @@ export class ObjectQL implements IDataEngine {
     const ast: QueryAST = { object, ...query };
     // Remove context from the AST — it's not a driver concern
     delete (ast as any).context;
-    // Normalize the `filter` alias → `where`. The DataEngine contract
-    // (`spec/data/data-engine.zod.ts`) exposes both, but the driver AST only
-    // understands `where`; an internal caller passing `{ filter }` would
-    // otherwise match ALL rows (silent over-grant — surfaced by ADR-0057's
-    // sharing/graph read path). `where` wins when both are present.
-    if ((ast as any).filter != null && ast.where == null) {
-      ast.where = (ast as any).filter;
-    }
-    delete (ast as any).filter;
-    // Normalize OData `top` alias → standard `limit`
-    if ((ast as any).top != null && ast.limit == null) {
-      ast.limit = (ast as any).top;
-    }
-    delete (ast as any).top;
+    // [#4346] `filter` → `where` and `top` → `limit`, by the spec's table.
+    // This is where the fold used to be open-coded twice, in two directions:
+    // `where` won its pair (correct — the driver AST understands `where` only,
+    // so an unfolded `filter` matched ALL rows, the ADR-0057 over-grant), while
+    // the protocol layer let `top` overwrite `limit` (backwards — `top` is
+    // declared as the alias). One table now answers both, here and there.
+    foldQueryAliasSlots(ast as Record<string, unknown>, ENGINE_QUERY_ALIAS_SLOTS, (conflict) => {
+      throw aliasConflictError(conflict);
+    });
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
     // names and inject their dependencies, so the driver returns the raw
@@ -3004,7 +3050,11 @@ export class ObjectQL implements IDataEngine {
     objectName = this.resolveObjectName(objectName);
     this.logger.debug('FindOne operation', { objectName });
     const driver = this.getDriver(objectName);
-    const ast: QueryAST = { object: objectName, ...query, limit: 1 };
+    // [#4346] Fold BEFORE `limit: 1` is applied: `findOne` forces the page
+    // size, so a caller's `top` is discarded rather than folded — feeding it to
+    // the pagination slot would collide with the forced `1` and reject a
+    // request that has no ambiguity in it.
+    const ast: QueryAST = { object: objectName, ...foldOptionAliases(query, ENGINE_FILTER_ALIAS_SLOTS), limit: 1 };
     // Remove context and top alias from the AST
     delete (ast as any).context;
     delete (ast as any).top;
@@ -3370,6 +3420,12 @@ export class ObjectQL implements IDataEngine {
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
      const driver = this.getDriver(object);
+
+     // [#4346] `filter` → `where` FIRST: everything below reads `options.where`
+     // — the placeholder resolution, the by-id fast path, the seeded AST the
+     // middleware chain scopes — so an unfolded alias did not narrow the write,
+     // it left it unbounded, and `updateMany` rewrote every row in the object.
+     options = foldOptionAliases(options, ENGINE_FILTER_ALIAS_SLOTS);
 
      // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
      // The read path resolves them; without the same call here the SAME filter
@@ -3764,6 +3820,11 @@ export class ObjectQL implements IDataEngine {
     this.assertWriteAllowed(object, 'delete');
     const driver = this.getDriver(object);
 
+    // [#4346] Same fold, same ordering reason as update() — and the sharpest
+    // consequence of skipping it: `delete({filter, multi: true})` reached
+    // `deleteMany` with no predicate and emptied the object.
+    options = foldOptionAliases(options, ENGINE_FILTER_ALIAS_SLOTS);
+
     // Expand `{filter-placeholder}` values before the id is extracted — same
     // reasoning as update() above (#3810).
     options = this.withResolvedWhere(options);
@@ -3894,6 +3955,10 @@ export class ObjectQL implements IDataEngine {
      object = this.resolveObjectName(object);
      const driver = this.getDriver(object);
 
+     // [#4346] An unfolded `filter` counted the RAW table — the same wrong
+     // number the #2737 middleware fix was about, reached by a different route.
+     query = foldOptionAliases(query, ENGINE_FILTER_ALIAS_SLOTS);
+
      // The AST must ride on the opCtx so the security/sharing middlewares can
      // inject their read filters (RLS, OWD/sharing scope) into `ast.where` —
      // exactly like find(). Building it locally inside the executor (#2737)
@@ -3969,6 +4034,9 @@ export class ObjectQL implements IDataEngine {
 
   async aggregate(object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {
       object = this.resolveObjectName(object);
+      // [#4346] Folded before the credential gate reads it, so the gate judges
+      // the predicate that will actually run.
+      query = foldOptionAliases(query, ENGINE_FILTER_ALIAS_SLOTS);
       this.rejectCredentialAggregation(object, query);
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);

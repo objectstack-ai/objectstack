@@ -313,6 +313,8 @@
     "DriverType (const)",
     "DroppedFieldsEvent (type)",
     "DroppedFieldsEventSchema (const)",
+    "ENGINE_FILTER_ALIAS_SLOTS (const)",
+    "ENGINE_QUERY_ALIAS_SLOTS (const)",
     "ESignatureConfig (type)",
     "ESignatureConfigSchema (const)",
     "EffectiveApiMethods (interface)",

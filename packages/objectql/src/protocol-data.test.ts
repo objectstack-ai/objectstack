@@ -1278,6 +1278,27 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             ).rejects.toThrow(/'\$expand'/);
         });
 
+        it('folds `top` into `limit` in the SAME direction the engine does (#4346)', async () => {
+            // This layer used to do `options.limit = Number(options.top)` with
+            // no guard — the alias overwriting the canonical key — while
+            // `engine.find` kept `limit`. `{top: 1, limit: 3}` answered 1 here
+            // and 3 there: #3795's divergence on the sixth pair.
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({ object: 'showcase_task', query: { top: '7' } });
+            expect(engine.find.mock.calls[0][1].limit).toBe(7);
+            expect('top' in engine.find.mock.calls[0][1]).toBe(false);
+
+            await expect(
+                protocol.findData({ object: 'showcase_task', query: { top: 1, limit: 3 } }),
+            ).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+        });
+
+        it('$top keeps working through the OData rewrite into the same slot', async () => {
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({ object: 'showcase_task', query: { $top: '4' } });
+            expect(engine.find.mock.calls[0][1].limit).toBe(4);
+        });
+
         it('a canonical key alone is never touched by the fold', async () => {
             const { protocol, engine } = makeProtocol();
             await protocol.findData({
