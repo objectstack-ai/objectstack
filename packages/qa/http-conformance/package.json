@@ -6,7 +6,8 @@
   "description": "HTTP transport-port conformance gate (ADR-0076 D11/OQ#10, #2462) \u2014 a zero-dependency node:http reference implementation of IHttpServer plus a cross-adapter suite that boots the dispatcher bridge and REST generator on it AND on plugin-hono-server, pinning that the port stays free of framework-isms. Not published; validation instrument, not a product server.",
   "type": "module",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*"

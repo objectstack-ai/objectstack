@@ -20,8 +20,14 @@ pnpm install          # deps
 pnpm setup            # first-time: install + build spec
 pnpm build            # turbo build (excludes docs)
 pnpm test             # turbo test
+pnpm typecheck        # turbo typecheck — per-package `tsc --noEmit`; tsup/vitest never type-check (#4311)
 pnpm docs:dev         # docs site
 ```
+
+Type-check coverage is ratcheted (`pnpm check:type-check-coverage`, CI-gated): every
+workspace package declares a `typecheck` script or carries a measured DEBT/EXEMPT entry
+in `scripts/check-type-check-coverage.mjs`. New packages must arrive covered; a package
+that graduates deletes its ledger entry in the same PR.
 
 ### Running the dev server
 
@@ -408,7 +414,7 @@ composition with its real services, or do not claim an answer.
 
 ## Post-Task Checklist
 
-1. `pnpm test` — verify nothing broke.
+1. `pnpm test` — verify nothing broke. Touched a type-check-covered package? `pnpm typecheck` too.
 2. **Land it — don't leave passing work in the working tree.** Once tests pass,
    create a feature branch, commit, push, open a PR, and merge it after remote
    CI is fully green (see Multi-agent discipline: never straight to `main`,
