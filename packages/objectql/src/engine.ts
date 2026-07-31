@@ -2493,11 +2493,23 @@ export class ObjectQL implements IDataEngine {
     for (const [fieldName, nestedAST] of Object.entries(expand)) {
       const fieldDef = objectSchema.fields[fieldName];
 
-      // Skip if field not found or not a relationship type
+      // Skip if field not found or not a relationship type.
+      //
+      // `user` is a lookup specialized to sys_user and `tree` is a hierarchical
+      // self-reference — both carry the same `reference` + id storage, so both
+      // expand through this exact path (single or multiple).
+      //
+      // [#4226] The membership test is `REFERENCE_VALUE_TYPES` — the spec's own
+      // list of types whose value "points at another record … the related record
+      // object in expanded form" — rather than a hand-copied `!==` chain. The
+      // chain had drifted: it omitted `tree`, so a `$expand` of a hierarchy
+      // field returned the raw parent id and rendered as a bare placeholder,
+      // while `field-value.zod.ts` and objectui's `EXPANDABLE_FIELD_TYPES` both
+      // declared it expandable. Reading the shared set is what stops the
+      // protocol's expand gate (which validates against the same set) from ever
+      // admitting a field this loop then silently skips.
       if (!fieldDef || !fieldDef.reference) continue;
-      // `user` is a lookup specialized to sys_user — it carries the same `reference`
-      // and id storage, so it expands through this exact path (single or multiple).
-      if (fieldDef.type !== 'lookup' && fieldDef.type !== 'master_detail' && fieldDef.type !== 'user') continue;
+      if (!REFERENCE_VALUE_TYPES.has(fieldDef.type)) continue;
 
       const referenceObject = fieldDef.reference;
 

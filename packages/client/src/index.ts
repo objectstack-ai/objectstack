@@ -3798,6 +3798,16 @@ export class ObjectStackClient {
        * Agents the CALLER may chat with — the route filters by the caller's
        * permissions (ADR-0049), so an empty list is a legitimate answer for a
        * seat-less user rather than an error to retry.
+       *
+       * The `.agents` read below survived #4053 unchanged, and that is the
+       * conclusion rather than an oversight. `AiAgentsResponseSchema` moved
+       * under the envelope's `data` as a RELOCATION (#3843's precedent), so
+       * `unwrapResponse` hands back `{ agents }` from an enveloped producer and
+       * the same object from a pre-conversion one. Had the route flattened to
+       * `data: [...]` (#3983's precedent) this line would read `undefined` and
+       * answer `[]` — an empty catalog, which is what the console reads as "this
+       * caller has no AI", so the regression would have been invisible.
+       * `ai-agents-envelope.test.ts` pins both readings.
        */
       list: async (): Promise<AiAgentSummary[]> => {
         const route = this.getRoute('ai');

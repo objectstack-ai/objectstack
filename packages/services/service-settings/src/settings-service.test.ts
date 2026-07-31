@@ -311,7 +311,15 @@ describe('SettingsService — save-time validation (required/visible/pattern)', 
       }),
     ).rejects.toMatchObject({
       code: 'SETTINGS_VALIDATION',
-      fields: { cloudflare_api_key: expect.stringContaining('required') },
+      // `FieldError[]` since #4224 — the constraint is named by `code`, not
+      // only described in the prose of `message` (ADR-0114).
+      fields: [
+        {
+          field: 'cloudflare_api_key',
+          code: 'required',
+          message: expect.stringContaining('required'),
+        },
+      ],
     });
     // Nothing was persisted — the batch is atomic.
     expect((await svc.get('ai', 'provider')).source).toBe('default');
@@ -321,10 +329,10 @@ describe('SettingsService — save-time validation (required/visible/pattern)', 
     const svc = aiService();
     await expect(svc.setMany('ai', { provider: 'cloudflare' })).rejects.toMatchObject({
       code: 'SETTINGS_VALIDATION',
-      fields: {
-        cloudflare_account_id: expect.any(String),
-        cloudflare_api_key: expect.any(String),
-      },
+      fields: expect.arrayContaining([
+        expect.objectContaining({ field: 'cloudflare_account_id', code: 'required' }),
+        expect.objectContaining({ field: 'cloudflare_api_key', code: 'required' }),
+      ]),
     });
   });
 
@@ -357,7 +365,16 @@ describe('SettingsService — save-time validation (required/visible/pattern)', 
       svc.setMany('ai', { provider: 'gateway', gateway_model: 'gpt-4o' }),
     ).rejects.toMatchObject({
       code: 'SETTINGS_VALIDATION',
-      fields: { gateway_model: expect.stringContaining('format') },
+      // A pattern miss is `invalid_format`, and the pattern it missed travels
+      // as a discrete `constraint` rather than only inside the sentence.
+      fields: [
+        {
+          field: 'gateway_model',
+          code: 'invalid_format',
+          message: expect.stringContaining('format'),
+          constraint: { pattern: expect.any(String) },
+        },
+      ],
     });
     await expect(
       svc.setMany('ai', { provider: 'gateway', gateway_model: 'anthropic/claude-sonnet-4.6' }),

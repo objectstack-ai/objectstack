@@ -37,7 +37,10 @@ The runtime admin owns only the `origin: 'runtime'` lifecycle.
 
 Mounted under `/api/v1/datasources` by `registerDatasourceAdminRoutes` (lifecycle
 + introspection) and the federation routes by the external service. Every route
-degrades gracefully (`503` / "unavailable") when its service isn't wired.
+degrades gracefully (`503` / "unavailable") when its service isn't wired, and the
+message names **that** service — one registrar, but two services behind it: the
+three routes marked below dispatch to `external-datasource`, the rest to
+`datasource-admin` (#4225).
 
 **Lifecycle & connection**
 - `GET    /datasources` — list (code + runtime, with provenance/health)
@@ -47,9 +50,9 @@ degrades gracefully (`503` / "unavailable") when its service isn't wired.
 - `PATCH  /datasources/:name` — update a runtime datasource
 - `DELETE /datasources/:name` — remove a runtime datasource (blocked while objects are bound)
 - `POST   /datasources/test` — probe an unsaved draft (inline body)
-- `POST   /datasources/:name/test` — probe a **saved** datasource by name (backs the `test_connection` action)
+- `POST   /datasources/:name/test` — probe a **saved** datasource by name (backs the `test_connection` action) — *`external-datasource`*
 
-**Introspection / sync (read-only)**
+**Introspection / sync (read-only)** — all on `external-datasource`
 - `GET    /datasources/:name/remote-tables` — list remote tables
 - `POST   /datasources/:name/object-draft` — generate an object definition draft for one table (no persistence)
 - federation import/validate/refresh routes under `/datasources/:name/external/*` (ADR-0015)

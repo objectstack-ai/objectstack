@@ -1069,7 +1069,23 @@ export const AiAgentSummarySchema = lazySchema(() => z.object({
 }));
 
 /**
- * `GET /api/v1/ai/agents`.
+ * `GET /api/v1/ai/agents` — the **`data` payload**, not the whole body.
+ *
+ * The body is the platform envelope (`BaseResponseSchema`), and this schema is
+ * what travels under `data`: `{ success: true, data: { agents: [...] } }`. It
+ * was declared as the whole body until #4053 converted the route, and moving it
+ * under `data` was a RELOCATION — the payload is unchanged, exactly as
+ * `SettingsNamespacePayload` moved in #3843, not a flatten to the bare array the
+ * way #3983 reshaped `/share-links`.
+ *
+ * That distinction is load-bearing, which is why it is recorded on the
+ * declaration rather than only at the two producers. `unwrapResponse` returns
+ * `data`, so `client.ai.agents.list()` reads `.agents` off this object; flattening
+ * to `data: [...]` would make that read `undefined` → an empty catalog, which
+ * `useAiSurfaceEnabled` turns into "hide the entire AI surface" — the same thing a
+ * seat-less caller and a Community-Edition deployment correctly see, with no
+ * error, no 403 and no log to tell them apart. `ai-agents-envelope.test.ts` pins
+ * both halves.
  *
  * ACCESS-AWARE: the route returns only agents the CALLER may chat with
  * (ADR-0049), so an empty list is a legitimate answer for a seat-less user —
