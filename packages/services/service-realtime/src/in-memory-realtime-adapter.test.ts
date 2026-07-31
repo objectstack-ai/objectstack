@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { InMemoryRealtimeAdapter, DEFAULT_MAX_SUBSCRIPTIONS } from './in-memory-realtime-adapter';
+import { InMemoryRealtimeAdapter, DEFAULT_MAX_SUBSCRIPTIONS } from './in-memory-realtime-adapter.js';
 import type { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
 
 describe('InMemoryRealtimeAdapter', () => {

@@ -64,7 +64,7 @@ function fakeEmail() {
     };
 }
 
-function channel(getEmail: () => any, data: any, templates: any[] = []) {
+function channel(getEmail: () => any, data: any) {
     const store = new NotificationTemplateStore({ getData: () => data });
     return createEmailChannel({ getEmail, getData: () => data, store: store });
 }

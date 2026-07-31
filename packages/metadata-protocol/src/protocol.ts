@@ -18,7 +18,14 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
-import { parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots, type QueryAliasConflict, type QueryAliasSlot, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
+import {
+    parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES,
+    AggregationFunction, DateGranularity, resolveSearchFieldResolution,
+    SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
+    RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
+    type QueryAliasConflict, type QueryAliasSlot,
+    type DroppedFieldsEvent, type QueryAST,
+} from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
@@ -840,6 +847,17 @@ const QUERY_AST_KEYS: Readonly<Record<keyof QueryAST, true>> = {
 };
 
 /**
+ * [#4254] The two aggregation vocabularies, read off the SPEC's own enums so a
+ * function or granularity added there is admitted here without a second edit —
+ * the same both-directions pinning `QUERY_AST_KEYS` gets from `keyof QueryAST`.
+ * They exist because the in-memory aggregation path answers an unknown member
+ * with a silent placeholder (`null` result / raw-value buckets) rather than an
+ * error, so the ingress must be the layer that refuses one.
+ */
+const AGGREGATION_FUNCTIONS: ReadonlySet<string> = new Set(AggregationFunction.options);
+const DATE_GRANULARITIES: ReadonlySet<string> = new Set(DateGranularity.options);
+
+/**
  * [#4134] Every query-parameter name `findData` consumes itself, consulted
  * AFTER the alias normalization in `findData` has run — so the wire spellings
  * that get rewritten (`$top`→`top`→`limit`, `select`→`fields`, `sort`→
@@ -1010,6 +1028,39 @@ function invalidSortError(
     );
     err.status = 400;
     err.code = 'INVALID_SORT';
+    err.param = param;
+    Object.assign(err, opts?.extra ?? {});
+    return err;
+}
+
+/**
+ * [#4254] An aggregation-axis value (`groupBy` / `aggregations`) whose SHAPE
+ * the spec's `QueryAST` cannot read — a non-array, an entry that names no
+ * field, a function or granularity outside the spec enums, a missing alias.
+ *
+ * Carries `INVALID_QUERY` — the standard-catalog code (`errors.zod.ts`,
+ * "Malformed query syntax") that had sat in the catalog with no emitter since
+ * it was written, exactly as `INVALID_SORT` had before #4226. Shape mistakes
+ * get their own code because they are not about any FIELD: `INVALID_FIELD` on
+ * these axes is reserved for a well-formed entry naming a column the object
+ * does not have.
+ *
+ * The message spells out what the dropped/misread value used to do, because
+ * that is the part the caller cannot infer: every one of these shapes was
+ * silently ignored (rows returned ungrouped) or silently mis-answered
+ * (`null` aggregates, one raw-value bucket per row) with an ordinary 200.
+ */
+function invalidQueryError(
+    param: string,
+    detail: string,
+    opts?: { hint?: string, extra?: Record<string, unknown> },
+): Error {
+    const err: any = new Error(
+        `Query parameter '${param}' ${detail}.`
+        + (opts?.hint ?? ''),
+    );
+    err.status = 400;
+    err.code = 'INVALID_QUERY';
     err.param = param;
     Object.assign(err, opts?.extra ?? {});
     return err;
@@ -3339,7 +3390,7 @@ export class ObjectStackProtocolImplementation implements
      *   object-existence gate above already warns once when the registry itself
      *   is missing, so this stays quiet rather than warning twice per process.
      */
-    private resolveQueryFields(object: string): { known: ReadonlySet<string>, declared: readonly string[], fields: any } | null {
+    private resolveQueryFields(object: string): { known: ReadonlySet<string>, declared: readonly string[], fields: any, schema: any } | null {
         const schema: any = this.engine?.registry?.getObject?.(object);
         const declared = schema?.fields;
         if (!declared || typeof declared !== 'object') return null;
@@ -3354,7 +3405,7 @@ export class ObjectStackProtocolImplementation implements
         known.add('id');
         known.add('created_at');
         known.add('updated_at');
-        return { known, declared: fieldNames, fields: declared };
+        return { known, declared: fieldNames, fields: declared, schema };
     }
 
     /**
@@ -3608,6 +3659,391 @@ export class ObjectStackProtocolImplementation implements
         throw err;
     }
 
+    /**
+     * [#4254] SEARCH-FIELDS axis. A `searchFields` override naming something
+     * `search` cannot scan is refused (`400 INVALID_FIELD`).
+     *
+     * This axis is the `select` failure with the sign flipped OUTWARD. The
+     * engine's `resolveSearchFields` drops unknown names and, when that leaves
+     * the override empty, falls back to the FULL allowed set — the exact
+     * two-step #4226 closed on projections, except that where a widened
+     * projection returns extra columns, a widened search returns extra ROWS:
+     * `?search=alpha&searchFields=<typo>` matched rows the caller's narrowing
+     * excluded, in a response with nothing to distinguish it from a satisfied
+     * one. `searchFields` exists only to narrow (ADR-0061: the override is
+     * "intersected with the allowed set — it can narrow the scan, never widen
+     * it"), so failing open to a wider scan is the one direction it must never
+     * take. Its only in-framework caller today is `GET /data/:object/export` —
+     * the same route whose `search` support just shipped precisely so an
+     * export would stop downloading "the unsearched superset … in a file that
+     * looks authoritative".
+     *
+     * Two rejections, one code, different messages, because the fixes differ
+     * (the same split the expand axis draws): a name that is no field at all
+     * is a typo, while a REAL field outside the searchable set needs the
+     * OBJECT changed — added to a declared `searchableFields`, or declared
+     * searchable at all when the auto-default excludes its type. The allowed
+     * set itself comes from {@link resolveSearchFieldResolution} in
+     * `@objectstack/spec/data` — the same function the engine's search
+     * expansion consumes — so this gate cannot admit a field the engine would
+     * then decline to scan, nor refuse one it would.
+     *
+     * Names are judged EXACTLY (no dotted-head tolerance): the engine
+     * intersects the override with the allowed set by exact string, so
+     * `owner_id.name` — plausible from the select/sort axes — would be
+     * silently dropped there, and this gate letting it through would
+     * reintroduce the fallback it exists to close.
+     */
+    private assertSearchFieldsAreSearchable(object: string, requested: unknown, param: string): void {
+        // Shape first, BEFORE the field-map tiering below — same order as the
+        // projection gate (#4196): a registry-less host, which skips the name
+        // checks, still must not carry an unreadable override to an engine
+        // that would ignore it and scan the default set.
+        let names: readonly string[];
+        if (typeof requested === 'string') {
+            names = requested.split(',').map((s) => s.trim()).filter(Boolean);
+        } else if (Array.isArray(requested)) {
+            const badShape = requested.findIndex((f) => typeof f !== 'string');
+            if (badShape !== -1) {
+                const err: any = new Error(
+                    `'${param}' entry #${badShape + 1} on object '${object}' is not a field name. `
+                    + `'${param}' narrows which columns 'search' scans, as a comma-separated string `
+                    + 'or an array of field names.',
+                );
+                err.code = 'INVALID_FIELD';
+                err.status = 400;
+                err.object = object;
+                err.param = param;
+                throw err;
+            }
+            names = requested;
+        } else {
+            const err: any = new Error(
+                `'${param}' on object '${object}' must be a comma-separated string or an array of `
+                + `field names, received ${requested === null ? 'null' : typeof requested}. It narrows `
+                + "which columns 'search' scans; a value the server cannot read would have been "
+                + 'ignored, leaving the search over the DEFAULT columns instead.',
+            );
+            err.code = 'INVALID_FIELD';
+            err.status = 400;
+            err.object = object;
+            err.param = param;
+            throw err;
+        }
+        // An empty override is ABSENT — the engine falls through to the
+        // allowed set for it, which for a caller who named nothing is the
+        // answer they asked for, not a widened one.
+        if (names.length === 0) return;
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const { allowed, source } = resolveSearchFieldResolution({
+            fields: gate.fields,
+            searchableFields: gate.schema?.searchableFields,
+            // [ADR-0079] Same precedence the engine's search expansion applies:
+            // `nameField` is canonical, `displayNameField` the honored alias.
+            displayField: gate.schema?.nameField ?? gate.schema?.displayNameField,
+        });
+        const allowedSet = new Set(allowed);
+        // A name in the object's own `searchableFields` that names no field is
+        // a STALE DECLARATION — a bug on the OBJECT, not on the request. It
+        // matters because clients echo the declaration verbatim (objectui's
+        // list search sends `$searchFields: schema.searchableFields`), so
+        // calling it "unknown" would send the caller hunting a typo they
+        // never made. Same split the expand axis draws for a lookup whose
+        // `reference` was never authored.
+        const declaredSet = new Set<string>(Array.isArray(gate.schema?.searchableFields) ? gate.schema.searchableFields : []);
+        const unknown = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && !declaredSet.has(n));
+        const staleDeclared = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && declaredSet.has(n));
+        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n));
+        const [offenders, reason] =
+            unknown.length > 0 ? [unknown, 'unknown' as const]
+            : staleDeclared.length > 0 ? [staleDeclared, 'stale-declared' as const]
+            : [unsearchable, 'unsearchable' as const];
+        if (offenders.length === 0) return;
+        const first = offenders[0];
+        let detail: string;
+        if (reason === 'stale-declared') {
+            detail = `Field '${first}' on object '${object}' is declared in 'searchableFields' but `
+                + 'does not exist'
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + '. The declaration is stale — searching it can never match, and the engine '
+                + "silently skipped it. Fix the object's 'searchableFields' to name real fields.";
+        } else if (reason === 'unknown') {
+            // A dotted path is a special unknown: plausible vocabulary from the
+            // select/sort axes, but search scans this object's own columns.
+            const dottedHint = first.includes('.') && gate.known.has(first.split('.')[0])
+                ? " 'search' scans this object's own columns; a related record's column cannot be a search target."
+                : suggestFieldName(first, gate.declared);
+            detail = `Unknown field '${first}' on object '${object}'`
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + `. '${param}' narrows which columns 'search' scans, so a name the object does not `
+                + 'declare cannot narrow anything — and the engine used to drop it and scan the '
+                + 'default columns instead, answering a NARROWER search with a WIDER one.'
+                + dottedHint;
+        } else if (source === 'declared') {
+            detail = `Field '${first}' on object '${object}' is not searchable`
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + `. The object declares 'searchableFields' (${allowed.join(', ')}), which is the set `
+                + "'search' scans — a field outside it cannot be a search target until it is added there.";
+        } else {
+            const meta = gate.fields[first];
+            const why = !meta || SEARCH_AUTO_EXCLUDED_FIELDS.has(first)
+                ? 'a system/audit column, which the default never includes'
+                : meta.hidden
+                    ? 'hidden'
+                    : `type '${meta.type}'`;
+            detail = `Field '${first}' on object '${object}' is not searchable`
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + `. With no 'searchableFields' declared, 'search' scans the text-like columns `
+                + `(${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')}), and '${first}' is `
+                + why
+                + ". Declare 'searchableFields' on the object to choose the searchable set explicitly.";
+        }
+        const err: any = new Error(detail);
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = first;
+        err.fields = offenders;
+        err.object = object;
+        err.param = param;
+        throw err;
+    }
+
+    /**
+     * [#4254] GROUP-BY axis. A grouping target the object does not have is
+     * refused (`400 INVALID_FIELD`); a grouping target the spec cannot read is
+     * refused as a shape (`400 INVALID_QUERY`).
+     *
+     * The failure this closes is the quietest of the family: the in-memory
+     * aggregation path projects an unknown column as `null` for every row, so
+     * ALL rows land in one bucket — `groupBy=[<typo>]` answered
+     * `[{ <typo>: null, n: <true row count> }]`, a structurally perfect result
+     * identical to "this column really holds a single value". A chart draws
+     * one bar; nothing anywhere says the grouping never ran. And the answer
+     * depended on which backend a deployment happens to sit on: a driver with
+     * native aggregation hands `GROUP BY <typo>` to its database instead
+     * (whose refusal `SqlDriver` may or may not surface), while the in-memory
+     * fallback invents the one-bucket result — the "two routes, opposite
+     * answers" split #4226 closed, relocated one axis over. Refusing at the
+     * shared ingress is what makes the two paths agree.
+     *
+     * Names are judged EXACTLY, not by dotted head: the aggregation contract
+     * groups by THIS object's columns (`row[field]` verbatim on the in-memory
+     * path, a bare column reference in pushed-down SQL), so a dotted path can
+     * only ever produce the null bucket.
+     */
+    private assertGroupByFieldsExist(object: string, groupBy: unknown): void {
+        if (groupBy === undefined || groupBy === null) return;
+        if (!Array.isArray(groupBy)) {
+            throw invalidQueryError(
+                'groupBy',
+                `must be an array of grouping targets (a field name, or { field, dateGranularity } `
+                + `for date bucketing), received ${typeof groupBy}`,
+                {
+                    hint: ' A value the server cannot read used to be ignored — the rows came back '
+                        + 'UNGROUPED, looking exactly like a query that never asked for grouping. '
+                        + `Send e.g. { "groupBy": ["status"] } in the 'POST /data/:object/query' body.`,
+                    extra: { object },
+                },
+            );
+        }
+        if (groupBy.length === 0) return;
+        const fieldsToCheck: string[] = [];
+        for (let i = 0; i < groupBy.length; i++) {
+            const entry = groupBy[i];
+            if (typeof entry === 'string') {
+                fieldsToCheck.push(entry);
+                continue;
+            }
+            if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+                throw invalidQueryError(
+                    'groupBy',
+                    `entry #${i + 1} on object '${object}' is not a grouping target — expected a `
+                    + `field name or { field, dateGranularity }, received `
+                    + `${entry === null ? 'null' : Array.isArray(entry) ? 'an array' : typeof entry}`,
+                    { extra: { object } },
+                );
+            }
+            if (typeof entry.field !== 'string' || entry.field.length === 0) {
+                throw invalidQueryError(
+                    'groupBy',
+                    `entry #${i + 1} on object '${object}' names no field — the structured form is `
+                    + `{ field, dateGranularity?, alias? }`,
+                    { extra: { object } },
+                );
+            }
+            if (entry.dateGranularity !== undefined && !DATE_GRANULARITIES.has(entry.dateGranularity)) {
+                throw invalidQueryError(
+                    'groupBy',
+                    `entry #${i + 1} on object '${object}' buckets by '${String(entry.dateGranularity)}', `
+                    + `which is not a date granularity (${[...DATE_GRANULARITIES].join(' / ')})`,
+                    {
+                        hint: ' An unknown granularity used to fall through to one bucket per raw '
+                            + 'value — date bucketing that silently never bucketed.',
+                        extra: { object },
+                    },
+                );
+            }
+            fieldsToCheck.push(entry.field);
+        }
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const unknown = fieldsToCheck.filter((f) => !gate.known.has(f));
+        if (unknown.length === 0) return;
+        const first = unknown[0];
+        const dottedHint = first.includes('.') && gate.known.has(first.split('.')[0])
+            ? " Grouping runs over this object's own columns; a related record's column cannot be a "
+              + 'grouping target.'
+            : suggestFieldName(first, gate.declared);
+        const err: any = new Error(
+            `Unknown field '${first}' on object '${object}'`
+            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
+            + `. 'groupBy' buckets rows by a column's values, so an unknown column puts every row `
+            + 'in ONE bucket keyed null — a result indistinguishable from a column that really '
+            + 'holds a single value.'
+            + dottedHint,
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = first;
+        err.fields = unknown;
+        err.object = object;
+        err.param = 'groupBy';
+        throw err;
+    }
+
+    /**
+     * [#4254] AGGREGATIONS axis. An aggregation over a field the object does
+     * not have is refused (`400 INVALID_FIELD`); an entry the spec cannot read
+     * is refused as a shape (`400 INVALID_QUERY`).
+     *
+     * The stakes are the highest of the three #4254 axes because the wrong
+     * answer is a NUMBER: the in-memory path collects `undefined` for every
+     * row and `sum` folds those to 0, so `sum(<typo>)` answered `0` — the same
+     * `0` a genuinely empty quarter produces, in a report whose whole job is
+     * to be believed. (`avg`/`min`/`max` answer `null`, `count(<typo>)` counts
+     * nothing — every function has a plausible-looking value for a column that
+     * is not there.)
+     *
+     * The shape checks pin the rest of the spec's `AggregationNode` contract,
+     * because each violation also had a silent placeholder instead of an
+     * error: a function outside the spec enum computed `null`, a missing
+     * `alias` keyed the result column `"undefined"`, and a field-less
+     * aggregation is only meaningful as `count(*)` — for every other function
+     * it answered `null`/`0` while looking like a served query. `count` with
+     * no field (or the explicit `'*'` sentinel) is the one legitimate
+     * field-less form and passes.
+     */
+    private assertAggregationFieldsExist(object: string, aggregations: unknown): void {
+        if (aggregations === undefined || aggregations === null) return;
+        if (!Array.isArray(aggregations)) {
+            throw invalidQueryError(
+                'aggregations',
+                `must be an array of { function, field?, alias } entries, received `
+                + `${typeof aggregations}`,
+                {
+                    hint: ' A value the server cannot read used to be ignored — the rows came back '
+                        + 'raw and unaggregated. Send e.g. { "aggregations": [{ "function": "sum", '
+                        + `"field": "amount", "alias": "total" }] } in the 'POST /data/:object/query' body.`,
+                    extra: { object },
+                },
+            );
+        }
+        if (aggregations.length === 0) return;
+        const fieldsToCheck: string[] = [];
+        for (let i = 0; i < aggregations.length; i++) {
+            const entry = aggregations[i];
+            if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+                throw invalidQueryError(
+                    'aggregations',
+                    `entry #${i + 1} on object '${object}' is not an aggregation — expected `
+                    + `{ function, field?, alias }, received `
+                    + `${entry === null ? 'null' : Array.isArray(entry) ? 'an array' : typeof entry}`,
+                    { extra: { object } },
+                );
+            }
+            if (typeof entry.function !== 'string' || !AGGREGATION_FUNCTIONS.has(entry.function)) {
+                throw invalidQueryError(
+                    'aggregations',
+                    `entry #${i + 1} on object '${object}' uses `
+                    + (typeof entry.function === 'string'
+                        ? `'${entry.function}', which is not an aggregation function`
+                        : 'no aggregation function')
+                    + ` (${[...AGGREGATION_FUNCTIONS].join(' / ')})`,
+                    {
+                        hint: ' An unknown function used to compute null for every group while the '
+                            + 'response looked served.',
+                        extra: { object },
+                    },
+                );
+            }
+            if (typeof entry.alias !== 'string' || entry.alias.length === 0) {
+                throw invalidQueryError(
+                    'aggregations',
+                    `entry #${i + 1} on object '${object}' has no 'alias' — the alias names the `
+                    + `result column (without one it came back keyed "undefined")`,
+                    { extra: { object } },
+                );
+            }
+            if (entry.field === undefined || entry.field === null) {
+                if (entry.function !== 'count') {
+                    throw invalidQueryError(
+                        'aggregations',
+                        `entry '${entry.alias}' on object '${object}' applies '${entry.function}' to no `
+                        + `field. Only 'count' may omit the field (count(*), every row); '${entry.function}' `
+                        + 'needs a column to compute over — without one it answered null while looking served',
+                        { extra: { object } },
+                    );
+                }
+                continue;
+            }
+            if (typeof entry.field !== 'string') {
+                throw invalidQueryError(
+                    'aggregations',
+                    `entry '${entry.alias}' on object '${object}' has a non-string 'field' `
+                    + `(received ${typeof entry.field})`,
+                    { extra: { object } },
+                );
+            }
+            if (entry.field === '*') {
+                if (entry.function !== 'count') {
+                    throw invalidQueryError(
+                        'aggregations',
+                        `entry '${entry.alias}' on object '${object}' applies '${entry.function}' to '*'. `
+                        + `'*' is the count-all sentinel and only 'count' reads it`,
+                        { extra: { object } },
+                    );
+                }
+                continue;
+            }
+            fieldsToCheck.push(entry.field);
+        }
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const unknown = fieldsToCheck.filter((f) => !gate.known.has(f));
+        if (unknown.length === 0) return;
+        const first = unknown[0];
+        const dottedHint = first.includes('.') && gate.known.has(first.split('.')[0])
+            ? " Aggregation runs over this object's own columns; a related record's column cannot "
+              + 'be aggregated.'
+            : suggestFieldName(first, gate.declared);
+        const err: any = new Error(
+            `Unknown field '${first}' on object '${object}'`
+            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
+            + `. An aggregation computes over a column's values, so an unknown column could only `
+            + 'aggregate blanks — sum answered 0 and avg/min/max answered null, each '
+            + 'indistinguishable from the same result over real data.'
+            + dottedHint,
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = first;
+        err.fields = unknown;
+        err.object = object;
+        err.param = 'aggregations';
+        throw err;
+    }
+
     async findData(request: { object: string, query?: any, context?: any }) {
         // [#3770] Existence first: an unregistered object is a 404 before any
         // query parameter is even parsed, so an unknown name can never be
@@ -3850,6 +4286,25 @@ export class ObjectStackProtocolImplementation implements
             this.assertExpandTargetsExist(request.object, Object.keys(options.expand));
         }
 
+        // [#4254] The `searchFields` override is validated on the value the
+        // ENGINE will read — the standalone parameter when present, otherwise
+        // the object-form `search: { query, fields }` a `POST` body may carry
+        // (same precedence as the engine's own `searchFields ?? search.fields`,
+        // and the same shapes: the engine accepts the comma-string and array
+        // forms from either slot). Checked whether or not a `search` term rode
+        // along: the caller named fields either way, and a stale override is
+        // the same typo before the search that will eventually use it is added.
+        if (options.searchFields != null) {
+            this.assertSearchFieldsAreSearchable(
+                request.object, options.searchFields, wireSpelling.searchFields ?? 'searchFields',
+            );
+        } else if (options.search !== null && typeof options.search === 'object'
+            && (options.search as any)?.fields != null) {
+            this.assertSearchFieldsAreSearchable(
+                request.object, (options.search as any).fields, wireSpelling.search ?? 'search',
+            );
+        }
+
         // Boolean fields
         for (const key of ['distinct', 'count']) {
             if (options[key] === 'true') options[key] = true;
@@ -3933,6 +4388,15 @@ export class ObjectStackProtocolImplementation implements
                 ? implicitFilters
                 : { $and: [explicitWhere, implicitFilters] };
         }
+
+        // [#4254] The aggregation axes name fields too, and were the last
+        // read-path axes that answered a wrong name with a plausible result
+        // (one null-keyed bucket; sum = 0). Validated before the routing
+        // below so an unreadable SHAPE cannot slip past the `Array.isArray`
+        // routing guard and ride to `engine.find` as ignored AST junk —
+        // rows returned ungrouped, looking exactly like a served query.
+        this.assertGroupByFieldsExist(request.object, options.groupBy);
+        this.assertAggregationFieldsExist(request.object, options.aggregations);
 
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
         // engine.find() does not do in-memory aggregation fallback, so without

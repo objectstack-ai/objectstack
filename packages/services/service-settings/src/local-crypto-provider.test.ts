@@ -8,7 +8,7 @@ import { randomBytes } from 'node:crypto';
 import {
   LocalCryptoProvider,
   InMemoryCryptoProvider,
-} from './local-crypto-provider';
+} from './local-crypto-provider.js';
 
 const ctx = { namespace: 'mail', key: 'api_key' };
 

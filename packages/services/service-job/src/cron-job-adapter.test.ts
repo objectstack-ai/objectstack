@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { CronJobAdapter } from './cron-job-adapter';
+import { CronJobAdapter } from './cron-job-adapter.js';
 
 describe('CronJobAdapter', () => {
   let adapter: CronJobAdapter;

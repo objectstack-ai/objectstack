@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { MemoryQueueAdapter } from './memory-queue-adapter';
+import { MemoryQueueAdapter } from './memory-queue-adapter.js';
 import type { IQueueService, QueueMessage } from '@objectstack/spec/contracts';
 
 describe('MemoryQueueAdapter', () => {

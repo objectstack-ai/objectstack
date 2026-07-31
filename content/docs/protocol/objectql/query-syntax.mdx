@@ -616,6 +616,18 @@ FROM opportunity
 GROUP BY stage
 ```
 
+<Callout type="info">
+Over the REST/protocol ingress, both axes are validated before any driver
+runs: a `groupBy` entry or `aggregations[].field` naming a field the object
+does not have is `400 INVALID_FIELD` (the in-memory fallback used to collapse
+every row into one `null`-keyed bucket, and to answer `sum(<typo>)` with `0`),
+and a shape the spec cannot read — a non-array, an entry naming no field, an
+unknown function or `dateGranularity`, a missing `alias` — is
+`400 INVALID_QUERY`. `count` with no `field` (or `field: '*'`) is the one
+legitimate field-less form. Internal callers reaching `engine.aggregate()`
+directly are unaffected.
+</Callout>
+
 ### Aggregation Functions
 
 ```typescript
@@ -753,7 +765,11 @@ const query: QueryAST = {
 Field resolution is server-side and never client-trusted: `search.fields` is
 **intersected** with the object's declared `searchableFields` (or, absent those, an
 auto-default of the name field plus short-text/enum fields), so naming a field outside
-that set does not widen the search. Multiple whitespace-separated terms are AND-ed and
+that set can never widen the search — and over the REST/protocol ingress it is
+`400 INVALID_FIELD` outright (#4254), because the engine-side intersection alone used to
+drop the unknown name and fall back to scanning the full searchable set. Internal
+callers reaching `engine.find()` directly keep the tolerant intersection.
+Multiple whitespace-separated terms are AND-ed and
 fields are OR-ed. Case sensitivity is the **driver's**, not the expansion's: the
 expansion emits a plain `$contains`, which `SqlDriver` compiles to a parameterised
 `LIKE '%…%'` with no case folding — so the dialect's own `LIKE`/collation rules decide —
