@@ -25,7 +25,7 @@ Mechanics: `retiredKey()` tombstones on both declaration sites
 (`QuerySchema.cursor` and `EngineQueryOptionsSchema.cursor`, one shared
 prescription), so authoring the key fails `tsc` and a query still carrying it
 fails to parse with the fix. `QueryBuilder.cursor()` is deleted. Registered as
-the protocol-18 semantic migration `query-cursor-retired` (request surface —
+the protocol-17 semantic migration `query-cursor-retired` (request surface —
 nothing stored to rewrite). The caller-built `Record<string, unknown>` shape
 would not survive a real keyset design anyway: a first-class cursor, if ever
 built, will be a response-minted opaque token (the pattern the

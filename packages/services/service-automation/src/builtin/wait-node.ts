@@ -65,7 +65,7 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
 
       if (eventType === 'timer') {
         // One source for the wait length. `timeoutMs` used to double as this
-        // when `timerDuration` was absent — it was retired in protocol 18 (#4158)
+        // when `timerDuration` was absent — it was retired in protocol 17 (#4158)
         // precisely because that is not what it said it did, and the conversion
         // rewrites it to `timerDuration`, so there is one spelling left.
         const durationMs = parseIsoDuration(wec.timerDuration);

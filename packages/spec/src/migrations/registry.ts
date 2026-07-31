@@ -470,7 +470,65 @@ const step17: MigrationStep = {
     "at least 1 under `'retry'`, in both spellings (omitted, and an explicit 0). " +
     'This is the one v17 flow change the chain cannot apply for you: choosing the ' +
     'count is a judgment about re-running the WHOLE flow with its side effects, ' +
-    'so it is a semantic TODO rather than a rewrite.',
+    'so it is a semantic TODO rather than a rewrite.\n\n' +
+    'It also retires `api.requireAuth` (#3963): the deployment-wide opt-out that let a '
+    + 'stack serve its ENTIRE data plane anonymously with one boolean. Auth is a kernel '
+    + 'concern, not a deployment posture — anonymous access to object data is now denied '
+    + 'unconditionally on every HTTP surface. Every surface that legitimately serves a '
+    + 'session-less caller derives its own narrow authorization from a DECLARATION instead: '
+    + 'the control-plane allowlist, `publicFormGrant` (public form views), share-link tokens '
+    + "(read as SYSTEM), and `book.audience: 'public'` (ADR-0046 §6.7). The key is dropped "
+    + 'with a notice rather than mapped — there is no replacement value, only a different '
+    + 'way to publish (by declaration). A stack that mounts no auth at all now fails at boot '
+    + 'when it would serve a data API, instead of receiving an implicit fail-open.\n\n'
+    + 'The same major retires `BatchOptions.validateOnly` (#4052): a batch "dry-run" flag that '
+    + 'was declared but never implemented — every batch surface (`updateManyData` / '
+    + '`deleteManyData` / `batchData`) persisted regardless, so a caller sending it to PREVIEW a '
+    + 'mutation got it executed. That is the dangerous direction of declared ≠ enforced: a flag '
+    + 'lying about a data-safety guarantee. No dry-run exists today; the schema tombstones the '
+    + 'key with the prescription. It is HTTP-only (never stored in stack metadata), so the '
+    + 'change is one semantic TODO for API callers rather than a stack conversion.\n\n'
+    + 'It also narrows `QueryAST.fields` to field names (#4196): the `FieldNode` union carried a '
+    + 'second `{ field, fields, alias }` nested-select member that nothing produced and nothing '
+    + 'consumed — every reader on the path treats the list as `string[]`, so the object form was '
+    + 'dropped by the SQL and memory drivers, projected as a column named "[object Object]" by '
+    + 'MongoDB, and refused by the REST ingress as an unknown field of that name. `expand` is the '
+    + 'one spelling for nested selection (ADR-0049 enforce-or-remove; Prime Directive #12: one '
+    + 'capability, one contract). Like the two above it is a request shape, never stored, so the '
+    + 'chain has no source to rewrite.\n\n'
+    + 'The #4286 sweep applies the same method to the rest of the request surface: `query.joins` '
+    + 'and `query.windowFunctions` are tombstoned — no engine or driver ever read either on the '
+    + 'query path, so every join and OVER clause a caller declared was silently dropped. Joins '
+    + 'were the second, broken spelling of related-record retrieval (`expand` is the live one; '
+    + 'the whole JoinNode cluster goes with the key), and window functions only ever ran behind '
+    + '`SqlDriver.findWithWindowFunctions()`, a driver-level door whose flat input shape the '
+    + 'spec vocabulary never matched (it declared `field`/`over`/`frame` members the door never '
+    + 'read — that cluster goes too). Request shapes again: two semantic TODOs, no source '
+    + 'rewrite.\n\n'
+    + 'The #4286 close-out settles the remaining three. `having` is ENFORCED, not removed — '
+    + 'the engine applies it after aggregation on both paths, so the clause every SQL-literate '
+    + 'author expects now works (no migration; queries that carried it were silently returning '
+    + 'every group and now filter as written). `cursor` and `distinct` are tombstoned WITH '
+    + 'their shipped SDK producers (`QueryBuilder.cursor()` / `.distinct()` are deleted): no '
+    + 'driver ever implemented keyset pagination or SELECT DISTINCT, `cursor` re-served page 1 '
+    + "forever, and `distinct`'s only observable effect was mis-wired — it suppressed the REST "
+    + 'list count, which is now truthful again. Both are request shapes; two more semantic '
+    + 'TODOs, no source rewrite.\n\n'
+    + 'The same kind of retirement covers `wait`\'s timeout pair (#4158). `waitEventConfig.onTimeout` '
+    + 'had ZERO readers — no path ever inspected it, so neither `fail` nor `continue` ever '
+    + 'happened, while its `.default(\'fail\')` stamped a decision nothing made onto every wait '
+    + 'node. `waitEventConfig.timeoutMs` said "maximum wait time before timeout" and its only '
+    + 'reader used it as the timer DURATION when `timerDuration` was absent: it did something, '
+    + 'just not what it said. Together they declared a timeout `wait` does not have — the run '
+    + 'resumes when its timer elapses or its signal arrives, never on a deadline. Rather than '
+    + 'retrofit an implementation to fit two keys that happened to be declared, the pair is '
+    + 'retired and real timeout semantics are left to be built to a requirement. `timeoutMs` '
+    + 'converts to `timerDuration` (stringified — the target is `z.string()` and '
+    + '`parseIsoDuration` reads a bare numeric string as milliseconds, so the wait is unchanged); '
+    + 'with `timerDuration` already set it is dropped, having been dead metadata. Like the other '
+    + 'keys retired for MISDESCRIBING themselves rather than for being renamed, both leave the '
+    + 'load path: absorbing them silently would let an author keep believing they configured a '
+    + 'timeout.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -493,6 +551,8 @@ const step17: MigrationStep = {
     'dashboard-inert-keys-removed',
     'agent-knowledge-removed',
     'skill-trigger-phrases-removed',
+    'stack-api-require-auth-removed',
+    'flow-node-wait-timeout-keys-removed',
   ],
   semantic: [
     {
@@ -557,73 +617,6 @@ const step17: MigrationStep = {
         'No /analytics/query or /analytics/sql call sends `format`; exports go through the ' +
         'export surface.',
     },
-  ],
-};
-
-/** All migration steps, keyed by the major they migrate into. */
-const step18: MigrationStep = {
-  toMajor: 18,
-  rationale:
-    'Protocol 18 retires `api.requireAuth` (#3963): the deployment-wide opt-out that let a '
-    + 'stack serve its ENTIRE data plane anonymously with one boolean. Auth is a kernel '
-    + 'concern, not a deployment posture — anonymous access to object data is now denied '
-    + 'unconditionally on every HTTP surface. Every surface that legitimately serves a '
-    + 'session-less caller derives its own narrow authorization from a DECLARATION instead: '
-    + 'the control-plane allowlist, `publicFormGrant` (public form views), share-link tokens '
-    + "(read as SYSTEM), and `book.audience: 'public'` (ADR-0046 §6.7). The key is dropped "
-    + 'with a notice rather than mapped — there is no replacement value, only a different '
-    + 'way to publish (by declaration). A stack that mounts no auth at all now fails at boot '
-    + 'when it would serve a data API, instead of receiving an implicit fail-open.\n\n'
-    + 'The same major retires `BatchOptions.validateOnly` (#4052): a batch "dry-run" flag that '
-    + 'was declared but never implemented — every batch surface (`updateManyData` / '
-    + '`deleteManyData` / `batchData`) persisted regardless, so a caller sending it to PREVIEW a '
-    + 'mutation got it executed. That is the dangerous direction of declared ≠ enforced: a flag '
-    + 'lying about a data-safety guarantee. No dry-run exists today; the schema tombstones the '
-    + 'key with the prescription. It is HTTP-only (never stored in stack metadata), so the '
-    + 'change is one semantic TODO for API callers rather than a stack conversion.\n\n'
-    + 'It also narrows `QueryAST.fields` to field names (#4196): the `FieldNode` union carried a '
-    + 'second `{ field, fields, alias }` nested-select member that nothing produced and nothing '
-    + 'consumed — every reader on the path treats the list as `string[]`, so the object form was '
-    + 'dropped by the SQL and memory drivers, projected as a column named "[object Object]" by '
-    + 'MongoDB, and refused by the REST ingress as an unknown field of that name. `expand` is the '
-    + 'one spelling for nested selection (ADR-0049 enforce-or-remove; Prime Directive #12: one '
-    + 'capability, one contract). Like the two above it is a request shape, never stored, so the '
-    + 'chain has no source to rewrite.\n\n'
-    + 'The #4286 sweep applies the same method to the rest of the request surface: `query.joins` '
-    + 'and `query.windowFunctions` are tombstoned — no engine or driver ever read either on the '
-    + 'query path, so every join and OVER clause a caller declared was silently dropped. Joins '
-    + 'were the second, broken spelling of related-record retrieval (`expand` is the live one; '
-    + 'the whole JoinNode cluster goes with the key), and window functions only ever ran behind '
-    + '`SqlDriver.findWithWindowFunctions()`, a driver-level door whose flat input shape the '
-    + 'spec vocabulary never matched (it declared `field`/`over`/`frame` members the door never '
-    + 'read — that cluster goes too). Request shapes again: two semantic TODOs, no source '
-    + 'rewrite.\n\n'
-    + 'The #4286 close-out settles the remaining three. `having` is ENFORCED, not removed — '
-    + 'the engine applies it after aggregation on both paths, so the clause every SQL-literate '
-    + 'author expects now works (no migration; queries that carried it were silently returning '
-    + 'every group and now filter as written). `cursor` and `distinct` are tombstoned WITH '
-    + 'their shipped SDK producers (`QueryBuilder.cursor()` / `.distinct()` are deleted): no '
-    + 'driver ever implemented keyset pagination or SELECT DISTINCT, `cursor` re-served page 1 '
-    + "forever, and `distinct`'s only observable effect was mis-wired — it suppressed the REST "
-    + 'list count, which is now truthful again. Both are request shapes; two more semantic '
-    + 'TODOs, no source rewrite.\n\n'
-    + 'The same kind of retirement covers `wait`\'s timeout pair (#4158). `waitEventConfig.onTimeout` '
-    + 'had ZERO readers — no path ever inspected it, so neither `fail` nor `continue` ever '
-    + 'happened, while its `.default(\'fail\')` stamped a decision nothing made onto every wait '
-    + 'node. `waitEventConfig.timeoutMs` said "maximum wait time before timeout" and its only '
-    + 'reader used it as the timer DURATION when `timerDuration` was absent: it did something, '
-    + 'just not what it said. Together they declared a timeout `wait` does not have — the run '
-    + 'resumes when its timer elapses or its signal arrives, never on a deadline. Rather than '
-    + 'retrofit an implementation to fit two keys that happened to be declared, the pair is '
-    + 'retired and real timeout semantics are left to be built to a requirement. `timeoutMs` '
-    + 'converts to `timerDuration` (stringified — the target is `z.string()` and '
-    + '`parseIsoDuration` reads a bare numeric string as milliseconds, so the wait is unchanged); '
-    + 'with `timerDuration` already set it is dropped, having been dead metadata. Like the other '
-    + 'keys retired for MISDESCRIBING themselves rather than for being renamed, both leave the '
-    + 'load path: absorbing them silently would let an author keep believing they configured a '
-    + 'timeout.',
-  conversionIds: ['stack-api-require-auth-removed', 'flow-node-wait-timeout-keys-removed'],
-  semantic: [
     {
       id: 'query-field-node-object-form-retired',
       surface: 'data.query.fields',
@@ -748,6 +741,7 @@ const step18: MigrationStep = {
   ],
 };
 
+/** All migration steps, keyed by the major they migrate into. */
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   11: step11,
   12: step12,
@@ -756,7 +750,6 @@ export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   15: step15,
   16: step16,
   17: step17,
-  18: step18,
 };
 
 /** The majors that have a step, ascending. */

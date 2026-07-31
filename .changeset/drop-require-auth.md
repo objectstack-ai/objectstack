@@ -32,7 +32,7 @@ switch:
   `RestApiConfigSchema` and the stack `api` block, so authoring it now fails with
   a fix-it message rather than being silently stripped (the ADR-0104 / #3733
   quiet-failure this whole line of work has been closing). `os migrate meta`
-  drops it via the protocol-18 conversion `stack-api-require-auth-removed`.
+  drops it via the protocol-17 conversion `stack-api-require-auth-removed`.
 - `shouldDenyAnonymous` (@objectstack/core) no longer takes a `requireAuth`
   input; it denies any anonymous, non-system caller outside the control-plane
   allowlist.

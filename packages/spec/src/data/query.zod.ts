@@ -174,7 +174,7 @@ export type FieldNode = string;
  */
 const FIELD_NODE_OBJECT_FORM_REMOVED =
   'A `fields[]` entry is a field name (string). The nested-select object form '
-  + '`{ field, fields, alias }` was removed in @objectstack/spec 18 (#4196, ADR-0049) — nothing '
+  + '`{ field, fields, alias }` was removed in @objectstack/spec 17 (#4196, ADR-0049) — nothing '
   + 'ever produced it and nothing ever read `.fields`/`.alias`: every consumer on this path '
   + 'treats the list as `string[]`, so the object form was dropped by the SQL and memory drivers, '
   + 'projected as a column literally named "[object Object]" by MongoDB, and refused as an unknown '
@@ -209,11 +209,11 @@ export const FieldNodeSchema = z.string({
  * {@link FIELD_NODE_OBJECT_FORM_REMOVED}, the rejection is where an author
  * meets a retirement, so each message carries the FROM → TO mapping. `QueryAST`
  * is a request shape, never stored in stack metadata, so there is no
- * `os migrate meta` step — callers rewrite their own queries (the protocol-18
+ * `os migrate meta` step — callers rewrite their own queries (the protocol-17
  * semantic migrations `query-joins-retired` / `query-window-functions-retired`).
  */
 const QUERY_JOINS_REMOVED =
-  '`query.joins` was removed in @objectstack/spec 18 (#4286, ADR-0049) — no engine or driver '
+  '`query.joins` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no engine or driver '
   + 'ever read it: a query carrying `joins` behaved exactly as if the key were absent, while '
   + 'its name squatted on the reserved REST parameter set. Delete the key. Related records are '
   + "read through `expand` — `expand: { owner: { object: 'user', fields: ['name'] } }` — which "
@@ -226,7 +226,7 @@ const QUERY_JOINS_REMOVED =
  * same prescription — one string, two rejection sites.
  */
 export const QUERY_CURSOR_REMOVED =
-  '`query.cursor` was removed in @objectstack/spec 18 (#4286, ADR-0049) — no driver ever '
+  '`query.cursor` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no driver ever '
   + 'implemented keyset pagination, so the cursor was accepted and ignored and every page came '
   + 'back identical (a caller looping "until hasMore is false" never terminates). Delete the '
   + 'key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary '
@@ -237,7 +237,7 @@ export const QUERY_CURSOR_REMOVED =
 
 /** See {@link QUERY_CURSOR_REMOVED} for why this one is exported. */
 export const QUERY_DISTINCT_REMOVED =
-  '`query.distinct` was removed in @objectstack/spec 18 (#4286, ADR-0049 / ADR-0078) — no '
+  '`query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no '
   + "driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: "
   + 'the REST list path treated a distinct query as not countable and silently degraded '
   + '`total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete '
@@ -247,7 +247,7 @@ export const QUERY_DISTINCT_REMOVED =
   + 'count, the `count_distinct` aggregation.';
 
 const QUERY_WINDOW_FUNCTIONS_REMOVED =
-  '`query.windowFunctions` was removed in @objectstack/spec 18 (#4286, ADR-0049) — `find()` '
+  '`query.windowFunctions` was removed in @objectstack/spec 17 (#4286, ADR-0049) — `find()` '
   + 'never applied it: no engine or driver read the key on the query path, so every OVER '
   + 'clause it declared was silently dropped. Delete the key. Window functions are a '
   + 'SQL-driver capability behind `SqlDriver.findWithWindowFunctions(object, query)` '
