@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
-import { storageSettingsManifest, storageTestActionHandler } from './storage.manifest';
+import { storageSettingsManifest, storageTestActionHandler } from './storage.manifest.js';
 
 describe('storageSettingsManifest', () => {
   it('parses against SettingsManifestSchema', () => {

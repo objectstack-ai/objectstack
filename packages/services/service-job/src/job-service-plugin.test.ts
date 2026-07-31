@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { JobServicePlugin } from './job-service-plugin';
+import { JobServicePlugin } from './job-service-plugin.js';
 
 function makeFakeEngine() {
   const tables = new Map<string, any[]>();

@@ -432,6 +432,21 @@ dotted `fields` path (`'customer.name'`) for a single related column:
 
 ## Full-Text Search
 
+`search` takes the query text; the server resolves which fields to search from object
+metadata (ADR-0061). Pass `searchFields` to narrow that set — it is intersected with what
+the object allows, so it can only narrow, never widen.
+
+```typescript
+{
+  object: 'article',
+  search: 'kubernetes deployment',
+  searchFields: ['title', 'body', 'tags']   // optional
+}
+```
+
+The structured form is equivalent and carries the experimental knobs below — `query` and
+`fields` mean exactly what `search` and `searchFields` do:
+
 ```typescript
 {
   object: 'article',
@@ -444,8 +459,8 @@ dotted `fields` path (`'customer.name'`) for a single related column:
 
 | Property | Type | Description |
 |:---|:---|:---|
-| `query` | `string` | Search text |
-| `fields` | `string[]` | Fields to search (optional — defaults to all searchable) |
+| `query` | `string` | Search text (the bare `search: '…'` string form) |
+| `fields` | `string[]` | Fields to search (optional — defaults to all searchable; the top-level spelling is `searchFields`) |
 | `fuzzy` | `boolean` | `[EXPERIMENTAL — not enforced]` Fuzzy matching for typo tolerance |
 | `operator` | `'and' \| 'or'` | `[EXPERIMENTAL — not enforced]` How to combine search terms |
 | `boost` | `Record<string, number>` | `[EXPERIMENTAL — not enforced]` Field relevance weights |

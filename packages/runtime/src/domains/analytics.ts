@@ -15,22 +15,14 @@
 import { CoreServiceName } from '@objectstack/spec/system';
 import { AnalyticsQueryRequestSchema } from '@objectstack/spec/api';
 import { isServiceServeable } from '../service-serveable.js';
+import { validationFailure, fieldsFromZodIssues } from '../validation-failure.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
-/**
- * [#3878] The duck-typed validation-failure shape both dispatcher error exits
- * already map to 400 `VALIDATION_FAILED` + `details.fields[]` (see
- * `validation-failure.ts`, #3918) — thrown here so entry validation needs no
- * new error channel and no dependency on objectql's `ValidationError` class.
- */
-function validationFailure(message: string, fields: unknown[]): Error {
-    const err = new Error(message) as Error & { code: string; fields: unknown[] };
-    err.name = 'ValidationError';
-    err.code = 'VALIDATION_FAILED';
-    err.fields = fields;
-    return err;
-}
+// [#3878] `validationFailure` — the duck-typed shape both dispatcher error
+// exits map to 400 `VALIDATION_FAILED` + `details.fields[]` (#3918) — began
+// life inline here; it lives in `../validation-failure.js` now, next to the
+// recogniser, shared with the notifications/automation entry gates (#3899).
 
 /**
  * [#3878] Reject a malformed `AnalyticsQuery` body AT THE ENTRY with a 400
@@ -61,11 +53,7 @@ function assertAnalyticsQueryBody(body: unknown): void {
     }
     const parsed = AnalyticsQueryRequestSchema.safeParse(body);
     if (!parsed.success) {
-        const fields = parsed.error.issues.map((issue) => ({
-            field: issue.path.length > 0 ? issue.path.join('.') : '(body)',
-            code: issue.code,
-            message: issue.message,
-        }));
+        const fields = fieldsFromZodIssues(parsed.error.issues);
         throw validationFailure(
             `Invalid AnalyticsQuery body: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`,
             fields,

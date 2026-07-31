@@ -840,10 +840,10 @@ function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEve
  * which is a behavior change to call out in that changeset.
  */
 const QUERY_AST_KEYS: Readonly<Record<keyof QueryAST, true>> = {
-    object: true, fields: true, where: true, search: true, orderBy: true,
-    limit: true, offset: true, top: true, cursor: true, joins: true,
-    aggregations: true, groupBy: true, having: true, windowFunctions: true,
-    distinct: true, expand: true,
+    object: true, fields: true, where: true, search: true, searchFields: true,
+    orderBy: true, limit: true, offset: true, top: true, cursor: true,
+    joins: true, aggregations: true, groupBy: true, having: true,
+    windowFunctions: true, distinct: true, expand: true,
 };
 
 /**
@@ -882,7 +882,10 @@ const RESERVED_LIST_QUERY_PARAMS: ReadonlySet<string> = new Set([
     ...Object.keys(QUERY_AST_KEYS),
     // Transport-only extras the normalizer consumes but the AST does not name.
     'count',        // ?count / $count — response flag, not a projection
-    'searchFields', // ?searchFields / $searchFields — ADR-0061 override
+    // `searchFields` used to be listed here as such an extra. It is a named
+    // AST key since #3899 declared it (ADR-0061 P1), so it now arrives through
+    // the spread above and the type-level pin covers it — the hand-maintained
+    // copy would have been a second source that could silently fall out of step.
     // Server-derived, never caller input (stripped then re-set from `request`).
     'context',
 ]);

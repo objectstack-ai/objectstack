@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { MemoryCacheAdapter } from './memory-cache-adapter';
+import { MemoryCacheAdapter } from './memory-cache-adapter.js';
 import type { ICacheService } from '@objectstack/spec/contracts';
 
 describe('MemoryCacheAdapter', () => {

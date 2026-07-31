@@ -21,8 +21,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { I18nServicePlugin } from './i18n-service-plugin';
-import { I18N_ROUTE_LEDGER } from './i18n-route-ledger';
+import { I18nServicePlugin } from './i18n-service-plugin.js';
+import { I18N_ROUTE_LEDGER } from './i18n-route-ledger.js';
 
 /** Minimal IHttpServer mock that records registrations. */
 function createMockServer() {

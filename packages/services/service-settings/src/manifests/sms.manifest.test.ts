@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
-import { smsSettingsManifest, smsTestActionHandler } from './sms.manifest';
+import { smsSettingsManifest, smsTestActionHandler } from './sms.manifest.js';
 
 describe('sms settings manifest', () => {
   it('parses against SettingsManifestSchema', () => {

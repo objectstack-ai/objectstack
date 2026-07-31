@@ -1,13 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it } from 'vitest';
-import { SettingsService } from './settings-service';
-import { SettingsLockedError, UnknownKeyError, UnknownNamespaceError, envKeyOf } from './settings-service.types';
-import { NoopCryptoAdapter } from './crypto-adapter';
-import { mailSettingsManifest, mailTestActionHandler } from './manifests/mail.manifest';
-import { aiSettingsManifest } from './manifests/ai.manifest';
-import { brandingSettingsManifest } from './manifests/branding.manifest';
-import { featureFlagsSettingsManifest } from './manifests/feature-flags.manifest';
+import { SettingsService } from './settings-service.js';
+import { SettingsLockedError, UnknownKeyError, UnknownNamespaceError, envKeyOf } from './settings-service.types.js';
+import { NoopCryptoAdapter } from './crypto-adapter.js';
+import { mailSettingsManifest, mailTestActionHandler } from './manifests/mail.manifest.js';
+import { aiSettingsManifest } from './manifests/ai.manifest.js';
+import { brandingSettingsManifest } from './manifests/branding.manifest.js';
+import { featureFlagsSettingsManifest } from './manifests/feature-flags.manifest.js';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
 
 describe('reference manifests are spec-valid', () => {

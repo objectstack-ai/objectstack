@@ -35,9 +35,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiErrorSchema, BaseResponseSchema, FieldErrorSchema, envelopeViolations } from '@objectstack/spec/api';
 import { SettingsNamespacePayloadSchema } from '@objectstack/spec/system';
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
-import { SettingsService } from './settings-service';
-import { registerSettingsRoutes } from './settings-routes';
-import { brandingSettingsManifest } from './manifests/branding.manifest';
+import { SettingsService } from './settings-service.js';
+import { registerSettingsRoutes } from './settings-routes.js';
+import { brandingSettingsManifest } from './manifests/branding.manifest.js';
 
 class MockHttp implements IHttpServer {
   routes = new Map<string, RouteHandler>();
