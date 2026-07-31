@@ -201,4 +201,87 @@ describe('actionBodyRunnerFactory', () => {
     const out = await fn!({ params: {} });
     expect(out).toEqual({ count: 3 });
   });
+
+  // The hook path writes `ctx.input` back; the action path has no `ctx.record`
+  // counterpart, so a body that assigns to `ctx.record` gets a green action and
+  // an unchanged record. That stays true — an action's write channel is
+  // `ctx.api` — but it is no longer silent (#4345).
+  describe('discarded ctx.record writes are reported (#4345)', () => {
+    const warnsFor = async (source: string, record?: Record<string, unknown>) => {
+      const warns: Array<{ msg: string; meta: any }> = [];
+      const factory = actionBodyRunnerFactory(runner, {
+        ql: {},
+        appId: 'crm',
+        logger: { warn: (msg: string, meta: any) => warns.push({ msg, meta }) },
+      });
+      const fn = factory({
+        name: 'close_deal',
+        object: 'crm_deal',
+        body: { language: 'js', source, capabilities: [] },
+      });
+      const value = await fn!({ record, recordId: record?.id });
+      return { warns, value };
+    };
+
+    it('warns naming the discarded fields and the ctx.api remedy', async () => {
+      const { warns, value } = await warnsFor("ctx.record.stage = 'won'; return { ok: true };", {
+        id: 'deal_1',
+        stage: 'negotiation',
+      });
+      // The action still reports success — the warning is the only signal the
+      // author's intended write did not happen.
+      expect(value).toEqual({ ok: true });
+      expect(warns).toHaveLength(1);
+      expect(warns[0].msg).toContain('read-only');
+      expect(warns[0].msg).toContain("ctx.api.object('crm_deal').update(");
+      expect(warns[0].meta.fields).toEqual(['stage']);
+      expect(warns[0].meta.action).toBe('close_deal');
+    });
+
+    it('warns for a DECLARED field exactly as for an unknown one — the whole point of #4345', async () => {
+      // The runner never consults the object's fields: `stage` (declared on the
+      // object in the issue's repro) and `stgae` (a typo) are dropped alike, so
+      // both must warn. A rule that fired only on the unknown one would imply
+      // the declared one landed.
+      const declared = await warnsFor("ctx.record.stage = 'won'; return null;", { id: 'd', stage: 'x' });
+      const typo = await warnsFor("ctx.record.stgae = 'won'; return null;", { id: 'd', stage: 'x' });
+      expect(declared.warns).toHaveLength(1);
+      expect(typo.warns).toHaveLength(1);
+    });
+
+    it('stays quiet when the body only reads the record', async () => {
+      const { warns, value } = await warnsFor('return { stage: ctx.record.stage };', {
+        id: 'deal_1',
+        stage: 'negotiation',
+      });
+      expect(value).toEqual({ stage: 'negotiation' });
+      expect(warns).toEqual([]);
+    });
+
+    it('stays quiet for an action with no pre-fetched record', async () => {
+      const { warns } = await warnsFor('return { ok: true };');
+      expect(warns).toEqual([]);
+    });
+
+    it('stays quiet when the body persists correctly through ctx.api', async () => {
+      const updates: unknown[] = [];
+      const factory = actionBodyRunnerFactory(runner, {
+        ql: { object: () => ({ update: async (d: unknown) => { updates.push(d); return d; } }) },
+        appId: 'crm',
+        logger: { warn: () => { throw new Error('the documented remedy must not warn'); } },
+      });
+      const fn = factory({
+        name: 'close_deal',
+        object: 'crm_deal',
+        body: {
+          language: 'js',
+          source:
+            "await ctx.api.object('crm_deal').update({ id: ctx.recordId, stage: 'won' }); return { ok: true };",
+          capabilities: ['api.write'],
+        },
+      });
+      expect(await fn!({ record: { id: 'deal_1' }, recordId: 'deal_1' })).toEqual({ ok: true });
+      expect(updates).toEqual([{ id: 'deal_1', stage: 'won' }]);
+    });
+  });
 });

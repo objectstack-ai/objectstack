@@ -97,13 +97,36 @@ describe('FLOW_WRITE_NODE_TYPES — the covered-node ledger', () => {
     expect(classified).toEqual(withWriteMap);
   });
 
+  // Every write-map node type is covered as of #4371, so the deferred list is
+  // empty and the two tests below are vacuous TODAY. Both are kept live because
+  // they are what makes a FUTURE deferral honest: the partition test above
+  // forces a new node type into one list or the other, and these decide what
+  // the uncovered list is allowed to mean.
+  it('every covered type actually reports — the ledger describes behaviour, not intent', () => {
+    for (const type of FLOW_WRITE_NODE_TYPES) {
+      const findings = validateFlowNodeWrites({
+        objects: [dealObject],
+        flows: [
+          {
+            name: 'f',
+            nodes: [{ id: 'n', type, config: { objectName: 'deal', fields: { stagee: 'won' } } }],
+          },
+        ],
+      });
+      expect(findings.map((f) => f.rule), `covered type '${type}' reports nothing`).toEqual([
+        FLOW_NODE_WRITE_UNKNOWN_FIELD,
+      ]);
+      expect(findings[0].severity).toBe('error');
+    }
+  });
+
   it('gives every deferral a non-empty reason', () => {
     for (const deferral of FLOW_WRITE_NODE_TYPES_DEFERRED) {
       expect(deferral.reason.length, `deferral '${deferral.type}' carries no reason`).toBeGreaterThan(0);
     }
   });
 
-  it('leaves every deferred type unchecked — the ledger describes behaviour, not intent', () => {
+  it('leaves every deferred type unchecked', () => {
     for (const deferral of FLOW_WRITE_NODE_TYPES_DEFERRED) {
       const findings = validateFlowNodeWrites({
         objects: [dealObject],
@@ -116,6 +139,26 @@ describe('FLOW_WRITE_NODE_TYPES — the covered-node ledger', () => {
       });
       expect(findings, `deferred type '${deferral.type}' is being checked`).toEqual([]);
     }
+  });
+
+  // A node type NOT in the ledger at all must stay silent — the guard that the
+  // covered set is an allowlist rather than "anything with a fields key".
+  it('ignores a fields-bearing node type outside the ledger', () => {
+    const findings = validateFlowNodeWrites({
+      objects: [dealObject],
+      flows: [
+        {
+          name: 'f',
+          nodes: [
+            // `screen` carries `defaults`/`fields`, but an object-form screen
+            // forwards them to the client renderer — an unknown key there is an
+            // ignored prefill, not a write that reaches storage.
+            { id: 'n', type: 'screen', config: { objectName: 'deal', fields: { stagee: 'won' } } },
+          ],
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
   });
 });
 
@@ -266,6 +309,80 @@ describe('validateFlowNodeWrites', () => {
     expect(validateFlowNodeWrites({ objects: [dealObject], flows: [byIndex] })[0].where).toBe(
       'flow "#0" › node "#0"',
     );
+  });
+
+  // ── create_record — the same map on the INSERT surface (#4371) ───────
+  it('errors when a create_record node writes a field the object never declares', () => {
+    const flow = {
+      name: 'seed_deal',
+      nodes: [
+        { id: 'start', type: 'start', config: {} },
+        {
+          id: 'seed',
+          type: 'create_record',
+          label: 'Seed deal',
+          config: { objectName: 'deal', fields: { name: 'ACME', stagee: 'won' }, outputVariable: 'created' },
+        },
+      ],
+    };
+    const findings = validateFlowNodeWrites({ objects: [dealObject], flows: [flow] });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('flows[0].nodes[1].config.fields.stagee');
+    expect(findings[0].where).toBe('flow "seed_deal" › node "Seed deal"');
+    // The INSERT consequence is strictly worse than the UPDATE one and the
+    // message says so: the row never exists, so `{created.id}` downstream is
+    // reading from a record that was never written.
+    expect(findings[0].message).toContain('the record is never created at all');
+  });
+
+  it('names only the UPDATE consequence for an update_record node', () => {
+    const findings = validateFlowNodeWrites({
+      objects: [dealObject],
+      flows: [flowWith({ stagee: 'won' })],
+    });
+    expect(findings[0].message).not.toContain('never created at all');
+  });
+
+  it('takes every skip on create_record too', () => {
+    const createFlow = (config: Record<string, unknown>) => ({
+      name: 'f',
+      nodes: [{ id: 'c', type: 'create_record', config }],
+    });
+    // templated object, non-literal fields, unknown object, fieldless object
+    expect(
+      validateFlowNodeWrites({
+        objects: [dealObject],
+        flows: [createFlow({ objectName: '{target}', fields: { stagee: 1 } })],
+      }),
+    ).toEqual([]);
+    expect(
+      validateFlowNodeWrites({ objects: [dealObject], flows: [createFlow({ objectName: 'deal', fields: '{all}' })] }),
+    ).toEqual([]);
+    expect(
+      validateFlowNodeWrites({ objects: [], flows: [createFlow({ objectName: 'deal', fields: { stagee: 1 } })] }),
+    ).toEqual([]);
+    expect(
+      validateFlowNodeWrites({
+        objects: [{ name: 'deal', external: true }],
+        flows: [createFlow({ objectName: 'deal', fields: { stagee: 1 } })],
+      }),
+    ).toEqual([]);
+  });
+
+  it('does NOT flag a readonly field on create_record — INSERT is engine-exempt from that strip', () => {
+    // The readonly rule skips create_record entirely (a create may legitimately
+    // seed readonly columns). This rule asks a different question, so a DECLARED
+    // readonly field is clean here for its own reason: it resolves to a column.
+    const withReadonly = {
+      name: 'deal',
+      fields: { stage: { type: 'text' }, approval_status: { type: 'text', readonly: true } },
+    };
+    const findings = validateFlowNodeWrites({
+      objects: [withReadonly],
+      flows: [{ name: 'f', nodes: [{ id: 'c', type: 'create_record', config: { objectName: 'deal', fields: { approval_status: 'approved' } } }] }],
+    });
+    expect(findings).toEqual([]);
   });
 
   // ── the family boundary ──────────────────────────────────────────────

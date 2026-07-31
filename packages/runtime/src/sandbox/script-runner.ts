@@ -94,9 +94,14 @@ export interface ScriptContext {
    * no action-side counterpart. So `ctx.record.x = …` inside a body mutates a
    * copy that is then discarded, for DECLARED and undeclared fields alike; to
    * persist, write through `ctx.api.object(...)`. `@objectstack/lint` warns on
-   * a provably dead assignment (`action-record-write-discarded`, #4345); the
-   * open question of whether the runtime should instead refuse or honour the
-   * write is tracked there.
+   * a provably dead assignment (`action-record-write-discarded`, #4345).
+   *
+   * The runtime reports the same thing at INVOCATION time — see
+   * {@link ScriptResult.droppedRecordWrites}. That covers what a parse cannot:
+   * computed keys, aliases, and bodies authored through Studio or the API,
+   * which no lint ever inspects. It only reports; whether the runtime should
+   * instead refuse or honour the write remains open, and logging a discard
+   * prejudges neither answer.
    */
   record?: unknown;
   /** Engine-side `result` (only set for after* hooks). */
@@ -133,6 +138,36 @@ export interface ScriptResult {
    * `undefined` if the dump failed or the script context did not expose `input`.
    */
   mutatedInput?: Record<string, unknown>;
+  /**
+   * Keys the script wrote on `ctx.record`, in first-write order (#4345).
+   *
+   * `ctx.record` is a read-only snapshot (see {@link ScriptContext.record}), so
+   * every one of these writes is DISCARDED. The engine records them rather than
+   * dropping them in silence: an author who believed the write persisted gets a
+   * host-side diagnostic naming the fields and the remedy, instead of a green
+   * action and an unchanged record — the #4001 "silent no-op manufactures false
+   * completion" shape.
+   *
+   * Recorded by a `set`/`deleteProperty`/`defineProperty` proxy installed over
+   * the snapshot inside the VM — behind an accessor, so a wholesale
+   * `ctx.record = {…}` is caught as well and does not swap the recorder out.
+   * Being a run-time trap rather than a parse, it sees what static analysis
+   * cannot: computed keys, `Object.assign`, aliased references
+   * (`const r = ctx.record; r.x = 1`), and bodies authored through Studio or
+   * the API, which no lint ever inspects.
+   *
+   * ONLY dead writes are reported. A snapshot that leaves the body as a value
+   * — `update(ctx.record)`, a spread, a return, a `JSON.stringify` — may well
+   * have carried the write somewhere, so the recorder goes quiet (an `ownKeys`
+   * after a write marks the escape). A plain property read does not rescue it.
+   * Same direction as the author-time rule: a wrong "discarded" asserts
+   * something false about the stored record, which is worse than a miss.
+   *
+   * `undefined` when the context carried no `record` (every hook, and actions
+   * with no pre-fetched record) or when the read-back failed; empty when a
+   * record was present and untouched.
+   */
+  droppedRecordWrites?: string[];
 }
 
 export interface ScriptRunOptions {

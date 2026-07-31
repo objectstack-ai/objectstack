@@ -99,6 +99,40 @@ export const MarkDoneAction = defineAction({
 
 Body-carrying actions are **registered automatically** at boot.
 
+<Callout type="warn">
+  **`ctx.record` is read-only — persist through `ctx.api`.**
+
+  `ctx.record` is the record the dispatcher pre-fetched before the action ran: a
+  snapshot the runtime never writes back. Assigning to it changes a copy that
+  dies with the sandbox, and the action still returns success:
+
+  ```js
+  ctx.record.done = true;      // ❌ discarded — even though `done` is a declared field
+  return { ok: true };         //    the action reports success, the record is unchanged
+
+  await ctx.api.object('showcase_task').update({ id: ctx.recordId, done: true });  // ✅ persists
+  ```
+
+  This holds for **declared** fields too — it is not a spelling problem, so no
+  did-you-mean will appear. Do not reason from `ctx.input`, which *is* written
+  back in a [hook body](/docs/automation/hook-bodies); an action's output is its
+  return value and its write channel is `ctx.api` (declare
+  `capabilities: ['api.write']`).
+
+  You will be told rather than left guessing. `os validate` / `os lint` /
+  `os compile` raise `action-record-write-discarded`, and the sandbox logs the
+  discarded fields at invocation time — the latter also catching computed keys,
+  aliases and bodies authored in Studio, which no lint ever inspects.
+
+  Both report only writes that reach **nothing**. Building a payload on the
+  snapshot and then persisting it is a normal, live pattern and stays quiet:
+
+  ```js
+  ctx.record.done = true;
+  await ctx.api.object('showcase_task').update(ctx.record);   // ✅ lands — not reported
+  ```
+</Callout>
+
 ### Path B: a registered handler (full TypeScript)
 
 For logic that belongs in real source files, point `target` at a handler name
