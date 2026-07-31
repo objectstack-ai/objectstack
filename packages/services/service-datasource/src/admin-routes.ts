@@ -2,6 +2,8 @@
 
 import type { PluginContext } from '@objectstack/core';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+// The declared envelope is written in ONE place for the whole platform (#3973).
+import { sendOk, sendError } from '@objectstack/types';
 import { DRIVER_CATALOG } from './driver-catalog.js';
 
 /**
@@ -43,9 +45,41 @@ type ServiceName = 'datasource-admin' | 'external-datasource';
  * `secret` field; the route splits `secret` out so it never reaches the draft
  * the service persists.
  *
- * Every body — both halves — is built by `sendOk` / `sendError` below, in the
- * envelope `BaseResponseSchema` declares. See those two for what this module
- * emitted before #3843 and why it was the worse of the two drifting dialects.
+ * Every body — both halves — is built by the shared `sendOk` / `sendError`, in
+ * the envelope `BaseResponseSchema` declares (#3843, consolidated in #3973).
+ *
+ * ## What this module emitted before #3843
+ *
+ * `{ error: '<string>' }` — the shape #3675 had already declared wrong for
+ * `service-storage`, with `message` a SIBLING of `error` rather than a field
+ * of it:
+ *
+ *     res.status(400).json({ error: 'datasource_admin_error', message });
+ *
+ * so a caller reading `body.error.message` got `undefined` here and the real
+ * message from the dispatcher — the identical asymmetry #3675 opened on, one
+ * layer over. `ObjectStackClient` sniffs several shapes to paper over the
+ * difference; that shim is the consumer-side symptom Prime Directive #12 says
+ * to cure at the producer.
+ *
+ * The codes follow ADR-0112, which #3841 settled while #3843 was in review:
+ * `error.code` is SCREAMING_SNAKE and `ApiErrorSchema.code` is the closed
+ * `ErrorCode` union — which is now also `sendError`'s parameter type, so an
+ * unregistered code fails to COMPILE rather than failing a schema parse at
+ * runtime (#3973). The old lowercase trio was re-spelled accordingly, and the
+ * generic conditions went to the STANDARD catalog rather than becoming
+ * registered synonyms of it:
+ *
+ *   datasource_admin_unavailable → SERVICE_UNAVAILABLE   (standard)
+ *   not_found                    → RESOURCE_NOT_FOUND    (standard)
+ *   datasource_admin_error       → DATASOURCE_ADMIN_ERROR (registered — a
+ *                                  lifecycle/validation refusal specific to
+ *                                  this service, so not a standard synonym)
+ *
+ * Which service is unavailable is carried by `message`; the ledger explicitly
+ * asks generic conditions to reuse the catalog instead of registering a
+ * per-service 503. That puts the whole burden of naming the service on one
+ * string — see `resolve` below for how it is kept honest (#4225).
  */
 export function registerDatasourceAdminRoutes(
   server: IHttpServer,
@@ -53,55 +87,6 @@ export function registerDatasourceAdminRoutes(
   basePath = '/api/v1',
 ): void {
   const root = `${basePath}/datasources`;
-
-  /**
-   * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
-   * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
-   * `{ success: false, error: { code, message } }`.
-   *
-   * Before #3843 this module emitted `{ error: '<string>' }` — the shape #3675
-   * had already declared wrong for `service-storage`, with `message` a SIBLING
-   * of `error` rather than a field of it:
-   *
-   *     res.status(400).json({ error: 'datasource_admin_error', message });
-   *
-   * so a caller reading `body.error.message` got `undefined` here and the real
-   * message from the dispatcher — the identical asymmetry #3675 opened on, one
-   * layer over. `ObjectStackClient` sniffs several shapes to paper over the
-   * difference; that shim is the consumer-side symptom Prime Directive #12 says
-   * to cure at the producer.
-   *
-   * The codes follow ADR-0112, which #3841 settled while this was in review:
-   * `error.code` is SCREAMING_SNAKE and `ApiErrorSchema.code` is now the closed
-   * `ErrorCode` union, so an unregistered code fails schema parse. The old
-   * lowercase trio was re-spelled accordingly, and the generic conditions went to
-   * the STANDARD catalog rather than becoming registered synonyms of it:
-   *
-   *   datasource_admin_unavailable → SERVICE_UNAVAILABLE   (standard)
-   *   not_found                    → RESOURCE_NOT_FOUND    (standard)
-   *   datasource_admin_error       → DATASOURCE_ADMIN_ERROR (registered — a
-   *                                  lifecycle/validation refusal specific to
-   *                                  this service, so not a standard synonym)
-   *
-   * Which service is unavailable is carried by `message`; the ledger explicitly
-   * asks generic conditions to reuse the catalog instead of registering a
-   * per-service 503. That puts the whole burden of naming the service on one
-   * string — see `resolve` below for how it is kept honest.
-   */
-  const sendError = (res: any, status: number, code: string, message: string) =>
-    res.status(status).json({ success: false, error: { code, message } });
-
-  /**
-   * Emit a success body in the DECLARED envelope — `{ success: true, data }`.
-   *
-   * The payload keys are unchanged, just one level deeper: `{ datasources }`
-   * becomes `{ success: true, data: { datasources } }`. `ObjectStackClient`
-   * reads these through `unwrapResponse`, which returns `body.data` when the
-   * flag is present, so the SDK's published return types describe the same
-   * object they always did.
-   */
-  const sendOk = (res: any, data: unknown, status = 200) =>
-    res.status(status).json({ success: true, data });
 
   /**
    * Resolve the service a route dispatches to — or answer

@@ -37,5 +37,9 @@
     "approval",
     "workflow",
     "process"
+  ],
+  "files": [
+    "dist",
+    "README.md"
   ]
 }

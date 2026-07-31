@@ -33,5 +33,9 @@
     "rag",
     "memory",
     "in-memory"
+  ],
+  "files": [
+    "dist",
+    "README.md"
   ]
 }
