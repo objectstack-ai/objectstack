@@ -1499,7 +1499,22 @@ platform capabilities an administrator gains, then the Console delta.
   read with no `orderBy` — the shape every list view without a configured sort
   sends — is now ordered by the unique key on SQL and MongoDB, and any
   non-empty `orderBy` gains a unique tie-breaker, so page 2 can no longer
-  repeat a row while another row is never served.
+  repeat a row while another row is never served. **The background walks seek
+  instead of counting** for the same reason: seven scans paged with a growing
+  `offset` while writing to the rows they were reading, so rows slid past the
+  cursor unvisited — which meant `rebuildApproverIndex` **deleted** index rows
+  for requests it skipped (an approver silently dropped from someone's queue),
+  `verifyFileReferences` reported referenced files as unreferenced, the file
+  and pinyin backfills left rows unconverted under a run that reported
+  success, and `scanValueShapes` — which opens the value-shape migration gate
+  on its evidence — could vouch for rows it never read.
+- **`SqlDriver.findOne(object, id)` is removed.** An undeclared bare-id branch
+  that was on no contract, that nothing outside the driver's own tests used,
+  and that the other two drivers answered differently. Pass a query. In the
+  same pass `bypassTenantAudit` becomes a **declared** `DriverOptions` member
+  (it was live but read through a cast, so no caller was type-checked), with
+  its limit stated: it silences a diagnostic and must not change which rows a
+  write touches.
 - **Query options fold once, everywhere (#3795, #4346, #4371).** The five RPC
   aliases (`filter`→`where`, `select`→`fields`, `sort`→`orderBy`,
   `skip`→`offset`, `populate`→`expand`) resolve through one spec-owned fold
@@ -1812,7 +1827,12 @@ rc.1, and administrators should know what changed:
   hook and action bodies get the same write-set analysis as advisories, plus
   a runtime report for dead `ctx.record` writes (#4345); and a field carrying
   both per-tenant `unique: true` and a global unique index is flagged before
-  the second tenant finds out.
+  the second tenant finds out. All three commands now answer identically by
+  construction — `os lint` and `os compile` were letting through react pages
+  and readonly flow writes that `os validate` rejected, including the field
+  resolution that **gates** (an unresolvable `<ListView filters>` predicate
+  yields a silently empty list, indistinguishable from no data). Expect CI
+  running `os lint` to newly fail on metadata that was already broken.
 - **Service slots are typed contracts (#4251, #4127).** `IObjectQLEngine`
   lands (the seven consumer-local stand-in surfaces die), `getService`
   resolves through a slot→contract ledger, and a shrinking baseline bans
