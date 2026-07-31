@@ -5,9 +5,14 @@ import { DriverDefinitionSchema } from '../datasource.zod';
 
 /**
  * MongoDB Standard Driver Protocol
- * 
- * Defines the strict schema for MongoDB connection and capabilities.
- * This is used by the Platform to validate `datasource.config` when `driver: 'mongo'`.
+ *
+ * Describes the MongoDB connection settings and capabilities.
+ *
+ * CONTRACT ONLY — nothing parses `datasource.config` against this. This block
+ * used to claim it was "used by the Platform to validate `datasource.config`
+ * when `driver: 'mongo'`", which was never true: the config slot is a `z.record`
+ * and this schema has no consumer (#4410). It is the shape to author against,
+ * not a gate that runs. Say "validates" here again only once #4410 lands.
  */
 
 // ==========================================================================
@@ -64,7 +69,10 @@ export const MongoDriverSpec = DriverDefinitionSchema.parse({
   label: 'MongoDB',
   description: 'Official MongoDB Driver for ObjectStack. Supports rich queries, aggregation, and atomic updates.',
   icon: 'database',
-  configSchema: {}, // Will be populated with JSON Schema version of MongoConfigSchema at runtime
+  // Empty, and nothing fills it. This comment used to promise the field would be
+  // "populated with a JSON Schema version of MongoConfigSchema at runtime" — no
+  // such code exists here or in any consumer (#4410).
+  configSchema: {},
   capabilities: {
     transactions: true,
     // Query

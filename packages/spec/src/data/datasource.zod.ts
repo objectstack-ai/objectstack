@@ -20,8 +20,9 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
  *
  * TWO ESCAPE HATCHES STAY OPEN, and must:
  *   - `config` is per-driver by construction (a sqlite `filename` and a
- *     postgres `host`/`port` share no shape), so it stays `z.record`. The
- *     driver's own `configSchema` is what validates it.
+ *     postgres `host`/`port` share no shape), so it stays `z.record`.
+ *     NOTHING VALIDATES INSIDE IT TODAY — see {@link belongsInConfig}, which
+ *     used to claim otherwise. Tracked as #4410.
  *   - `readReplicas` carries the same per-driver config objects.
  *
  * That openness is exactly why the TOP level had to close. Before this, a
@@ -63,10 +64,31 @@ const SSL_KEYS = ['enabled', 'rejectUnauthorized', 'ca', 'cert', 'key'] as const
 /** Keys the datasource `retryPolicy` block declares (drift-guarded by datasource.test.ts). */
 const DATASOURCE_RETRY_POLICY_KEYS = ['maxRetries', 'baseDelayMs', 'maxDelayMs', 'backoffMultiplier'] as const;
 
-/** A connection detail written one level too high — it belongs inside `config`. */
+/**
+ * A connection detail written one level too high — it belongs inside `config`.
+ *
+ * This prescription stops at *where to put it* and deliberately does NOT promise
+ * that the move gets validated. It used to: the sentence read "the driver's own
+ * configSchema validates it there", and that was false twice over —
+ * {@link DriverDefinitionSchema}'s `configSchema` is a `z.record` that both
+ * bundled driver specs set to `{}`, and nothing in this repo reads it (#4410).
+ *
+ * Which made this the worst line in the module: it took an author who had made a
+ * recoverable mistake at a place that now catches it, and pointed them — with the
+ * platform's authority — at a slot where the same mistake is silent again.
+ * `config: { hostname: … }` is stripped in silence and the datasource connects on
+ * localhost, which is #4001's original bug verbatim, one level down. A wrong
+ * instruction is worse than none, and worst of all for an AI author, whose only
+ * check on "did that work?" is whether the parse complained.
+ *
+ * Naming the per-driver schema is the honest form: it is the shape to write
+ * against, and a reader can check themselves against it even while nothing
+ * enforces it. Restore a validation claim here only when #4410 makes one true.
+ */
 const belongsInConfig = (key: string) =>
   `\`${key}\` is a driver connection detail — it belongs inside \`config\`, not at the top `
-  + `level. Move it to \`config: { ${key}: … }\`; the driver's own configSchema validates it there.`;
+  + `level. Move it to \`config: { ${key}: … }\`, matching your driver's config shape `
+  + `(\`PostgresConfigSchema\` / \`MongoConfigSchema\` / \`MemoryConfigSchema\` in \`data/driver/\`).`;
 
 const driverDefinitionUnknownKeyError = strictUnknownKeyError({
   surface: 'this driver definition',

@@ -101,6 +101,18 @@ dropped at parse, and nothing failed.
    now aliases to `expanded`. Note where this one was found: not in a tenant
    project, but in first-party platform metadata that had been shipping for
    releases.
+7. **This campaign's own fix signposted the way into the failure mode it
+   exists to kill.** The strict rejection on a misplaced `host` prescribed:
+   "Move it to `config: { host: … }`; the driver's own configSchema validates
+   it there." False twice over — `DriverDefinitionSchema.configSchema` is a
+   `z.record` that both bundled driver specs set to `{}`, and nothing in the
+   repo reads it. So an author who made a *recoverable* mistake at a place that
+   now catches it was directed, with the platform's authority, at a slot where
+   the same mistake is silent again: `config: { hostname: … }` is stripped and
+   the datasource connects on localhost — #4001's original bug verbatim, one
+   level down. Corrected to name the per-driver shape instead of promising a
+   gate; enforcement is #4410. **A wrong instruction is worse than none**, and
+   worst for an AI author, whose only signal is whether the parse complained.
 
 This is the empirical argument for the ratchet: the inference "no metadata in
 the repo carries unknown keys" was **false three times over**, and only the
@@ -146,7 +158,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `notification.zod.ts` / `offline.zod.ts` / `report.zod.ts` | 3 ea | authorable (p) | |
 | `sharing.zod.ts` | 2 | authorable (p) | public-sharing config |
 
-### `data/` — 149 sites
+### `data/` — 158 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
@@ -157,7 +169,8 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `field.zod.ts` | 11 | authorable | partially strict |
 | `filter.zod.ts` / `query.zod.ts` | 11+5 | open | query dialect — user data flows through; validated semantically elsewhere. `query.zod.ts` dropped one site in #4196: `FieldNodeSchema`'s nested-select object form was declared-but-inert and narrowed to `z.string()`, so the union's second member is gone. Four more left in #4286 with the `joins`/`windowFunctions` removals: `JoinNodeBaseSchema`, `WindowFunctionNodeSchema`, and `WindowSpecSchema`'s two blocks (outer + `frame`) were deleted with their clusters. Class unchanged |
 | `driver-nosql.zod.ts` / `driver.zod.ts` / `driver-sql.zod.ts` | 10+9+2 | wire | driver capability contracts |
-| `datasource.zod.ts` | 9 | authorable | **strict as of #4001 data step** — all 9: `DatasourceSchema` (+ `pool` / `healthCheck` / `ssl` / `retryPolicy`), `ExternalDatasourceSettingsSchema` (+ `validation`), `DatasourceCapabilities`, `DriverDefinitionSchema`. `config` + `readReplicas` stay `z.record` by construction (per-driver shapes; the driver's own `configSchema` validates them) — which is precisely why the top level had to close: a connection key written one level too high was stripped, and the datasource then connected on driver defaults instead of failing |
+| `datasource.zod.ts` | 9 | authorable | **strict as of #4001 data step** — all 9: `DatasourceSchema` (+ `pool` / `healthCheck` / `ssl` / `retryPolicy`), `ExternalDatasourceSettingsSchema` (+ `validation`), `DatasourceCapabilities`, `DriverDefinitionSchema`. `config` + `readReplicas` stay `z.record` by construction (per-driver shapes — see the `driver/` row below). This row used to add "the driver's own `configSchema` validates them"; **it does not, and never did** — corrected, and the gap is #4410. Which is precisely why the top level had to close: a connection key written one level too high was stripped, and the datasource then connected on driver defaults instead of failing |
+| `driver/memory.zod.ts` / `driver/mongo.zod.ts` / `driver/postgres.zod.ts` | 6+1+2 | authorable | The per-driver shapes for the `config` slot — what an author actually writes under `datasource.config` (`host`, `port`, `filename`, pool sizes). **Undeclared here until the coverage walk went recursive** (see below): a subdirectory was invisible to the gate, so these nine sites sat outside the map while the map reported full coverage. Authorable by the rule, but they are **contract-only exports today** — nothing parses `datasource.config` against them and both `*DriverSpec.configSchema` literals are `{}` (#4410). Strictness here would therefore enforce nothing; this row is blocked on #4410 giving it a parse site, not on a verification pass |
 | `analytics.zod.ts` | 8 | mixed (p) | |
 | `document.zod.ts` | 8 | wire (p) | |
 | `hook.zod.ts` / `hook-body.zod.ts` | 6+2 | mixed | **strict as of #4001 data step** for the AUTHORING shapes: `HookSchema` (+ `retryPolicy`) and both body branches (`ExpressionBodySchema` / `ScriptBodySchema`). `HookContextSchema` and its `session` / `provenance` / `user` blocks are the RUNTIME shape the engine hands a handler — they stay tolerant, and must: strictness there would make an engine-internal enrichment (as `provenance` was in #3712) a breaking change for anyone parsing a context they were given. The file's old blanket `authorable (p)` was too wide — verification split it |
@@ -219,6 +232,32 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 1. Let the warning layer run in the wild for a release, then schedule the v18
    strict close-out on what it actually reports — which is the whole point of
    having built it. Nothing more to do here until there is field data.
+
+   **This wait has a decision point, deliberately.** "Wait for field data" with
+   no way to tell when it has arrived is how a ratchet stops without anyone
+   choosing to stop it — and this file would go on describing an in-flight
+   campaign either way. So the wait is discharged by an answerable question, not
+   by a date: *has `lintUnknownAuthoringKeys` reported an unknown key on any
+   surface outside this repo yet?* Three outcomes, each with a next action:
+   - **Findings exist** → they are the close-out worklist. Tighten the shapes
+     they name first; that is the evidence the whole layer was built to produce.
+   - **Zero findings, and the layer is reaching real authors** → the tail is
+     cheaper than feared and the remaining directories can be batched by class
+     rather than one shape at a time.
+   - **Zero findings because nothing is reporting back** → then the layer is not
+     instrumented, and *that* is the next task, not more strictness. This is the
+     outcome to actually check for: it is indistinguishable from success at a
+     glance, which is this campaign's own subject matter.
+
+   Whoever reads this next: answer the question and record the answer here, even
+   if the answer is "still nothing". A wait that is never re-examined is
+   indistinguishable from an abandoned one.
+
+2. `studio/` is the largest untouched authorable block — 27 sites, **0 strict**,
+   and all three files still carry a provisional `(p)` from the original triage.
+   Not blocked on field data (Studio-written JSON is our own producer, so the
+   downstream risk is the lowest on the board); it is simply unstarted. If the
+   step-1 question comes back "nothing is reporting", start here instead.
 
 Done in step 2: `security/rls.zod.ts` + `security/sharing.zod.ts` strict;
 `PositionSchema` strict with the protection envelope declared (closing the
@@ -303,9 +342,11 @@ checkable, so this map cannot go stale in silence again:
   matches means schemas were added or removed under a `Class` verdict nobody
   re-examined. Touching a file forces you back through this ledger.
 - **Coverage.** Every `*.zod.ts` in a triaged directory that HAS sites must have
-  a row. A new one is undeclared surface. Zero-site files (pure enum/token
-  modules like `data/date-macros.zod.ts`) are skipped — there is nothing to
-  classify — and become reportable the day they grow their first `z.object(`.
+  a row. A new one is undeclared surface. The walk is **recursive**; nested files
+  are declared by their path relative to the section directory
+  (`driver/postgres.zod.ts`). Zero-site files (pure enum/token modules like
+  `data/date-macros.zod.ts`) are skipped — there is nothing to classify — and
+  become reportable the day they grow their first `z.object(`.
 - **Section totals**, and that any row claiming "strict as of" names a file that
   really contains `.strict()`.
 
@@ -336,5 +377,23 @@ precisely the intended behaviour: the file arrived, so someone had to classify
 it. It is now a row. Every existing count survived that merge unchanged, so the
 failure was exactly as narrow as it should have been.
 
+**And then the gate turned out to have the ledger's own disease.** Its coverage
+walk listed each triaged directory exactly one level deep, so `data/driver/` —
+three per-driver connection-config files, nine sites — was invisible to the check
+whose entire promise is "no undeclared surface". The gate printed *"no undeclared
+schema files"* while nine authorable sites sat outside the map. Fixed by making
+the walk recursive; the three files are now a row.
+
+Read that next to this file's own opening argument — *a map that drifts is worse
+than no map, because it is followed*. The same asymmetry applies one level up,
+and harder: **a gate that under-reports is worse than no gate, because it
+converts "I should classify this" into "it is already classified."** No gate
+leaves a reader suspicious; a green gate retires their suspicion. That is the
+identical shape to the silent strip this whole campaign is about — a success
+signal covering an omission — reproduced in the instrument built to detect it.
+So when a check claims coverage, prove it sees something it is supposed to see
+before trusting the green: this one was verified by watching it go red on
+`data/driver/` and green again only once the rows existed.
+
 Long tail stays gated on a verification pass per shape — never a one-shot
-"make all ~453 sites strict" (ADR-0054 ratchet; #4001's own recommendation).
+"make all ~500 sites strict" (ADR-0054 ratchet; #4001's own recommendation).

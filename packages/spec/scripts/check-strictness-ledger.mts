@@ -23,10 +23,14 @@
 //      touching a file forces you back through the ledger.
 //   2. Coverage. Every `*.zod.ts` under a triaged directory that HAS `z.object(` sites
 //      must appear in that directory's table. A new one is undeclared surface —
-//      exactly what the ledger exists to prevent. Files with zero sites (pure enum /
-//      token modules like `data/date-macros.zod.ts`) are skipped: the ledger classifies
-//      sites, and they have none to classify. This is not a hole — the day such a file
-//      grows its first `z.object(` it becomes undeclared and this gate says so.
+//      exactly what the ledger exists to prevent. The walk is RECURSIVE; nested files
+//      are declared by their path relative to the section directory
+//      (`driver/postgres.zod.ts`). It was not recursive at first, and `data/driver/`
+//      sat undeclared behind that — see the ledger's note on it. Files with zero sites
+//      (pure enum / token modules like `data/date-macros.zod.ts`) are skipped: the
+//      ledger classifies sites, and they have none to classify. This is not a hole —
+//      the day such a file grows its first `z.object(` it becomes undeclared and this
+//      gate says so.
 //   3. Section totals. `### \`ui/\` — 192 sites` must equal the sum of its rows.
 //      Cheap, and it catches a row edited without updating the header.
 //   4. Strictness claims. A row whose note says "strict as of" must name a file that
@@ -47,6 +51,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import url from 'node:url';
+
+import { countSites, listSchemaFiles } from './lib/strictness-ledger';
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const SPEC = path.resolve(HERE, '..');
@@ -77,11 +83,6 @@ function parseCounts(cell: string, fileCount: number): number[] | null {
   const nums = parts.map(Number);
   if (nums.length === 1 && fileCount > 1) return null;
   return nums.length === fileCount ? nums : null;
-}
-
-/** `z.object(` occurrences — the ledger's own stated counting method. */
-function countSites(file: string): number {
-  return (fs.readFileSync(file, 'utf-8').match(/z\.object\(/g) ?? []).length;
 }
 
 const md = fs.readFileSync(LEDGER, 'utf-8').split('\n');
@@ -169,7 +170,10 @@ for (const row of rows) {
 for (const [d, declared] of declaredByDir) {
   const dirPath = path.join(SRC, d);
   if (!fs.existsSync(dirPath)) continue;
-  const onDisk = fs.readdirSync(dirPath).filter((f) => f.endsWith('.zod.ts'));
+  // Recursive — see lib/strictness-ledger.ts for why that is load-bearing.
+  // Nested files are declared by their path relative to the section directory
+  // (`driver/postgres.zod.ts`), which the row parser already accepts.
+  const onDisk = listSchemaFiles(dirPath);
   // Zero-site files carry nothing to classify (see the header note). They become
   // reportable the moment they grow a `z.object(`.
   const missing = onDisk.filter((f) => !declared.has(f) && countSites(path.join(dirPath, f)) > 0);
