@@ -12,7 +12,12 @@ import {
     makeExecutionContextResolver,
     registerCurrentUserEndpoints,
 } from './current-user-endpoints';
-import { HonoHttpServer, HonoCorsOptions } from './adapter';
+import {
+    HonoHttpServer,
+    HonoCorsOptions,
+    DEFAULT_CORS_ALLOW_HEADERS,
+    DEFAULT_CORS_EXPOSE_HEADERS,
+} from './adapter';
 import { cors } from 'hono/cors';
 import { serveStatic } from '@hono/node-server/serve-static';
 import * as fs from 'fs';
@@ -420,24 +425,13 @@ export class HonoServerPlugin implements Plugin {
                 }
 
                 const rawApp = this.server.getRawApp();
-                // Always include `set-auth-token` in exposed headers so that
-                // the better-auth `bearer()` plugin can deliver rotated
-                // session tokens to cross-origin clients (see plugin-auth).
-                // User-supplied exposeHeaders are merged with this default.
-                // `If-Match` carries the OCC token on record PATCHes (objectui's
-                // record-level inline edit, REST `update` with `ifMatch`) — without
-                // it in the preflight allow-list, every cross-origin save fails in
-                // the browser with "Failed to fetch" (objectui#2572 dogfood find;
-                // same split-origin class as the #2548 Bearer fixes).
-                const defaultAllowHeaders = ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Tenant-ID', 'X-Environment-Id', 'If-Match'];
-                // `x-objectstack-dropped-fields` (#3455): expose the single-write
-                // drop header (#3431) to cross-origin JS. Kept in lockstep with the
-                // `@objectstack/hono` adapter's default. The body `droppedFields`
-                // channel remains the primary, cross-origin-safe surface.
-                const defaultExposeHeaders = ['set-auth-token', 'x-objectstack-dropped-fields'];
-                const allowHeaders = corsOpts.allowHeaders ?? defaultAllowHeaders;
+                // Both defaults come from `adapter.ts` (#3786). They used to be
+                // spelled out here AND in the `@objectstack/hono` adapter, each
+                // under a "keep in sync" comment; the per-entry rationale now
+                // lives on the constants themselves.
+                const allowHeaders = corsOpts.allowHeaders ?? [...DEFAULT_CORS_ALLOW_HEADERS];
                 const exposeHeaders = Array.from(new Set([
-                    ...defaultExposeHeaders,
+                    ...DEFAULT_CORS_EXPOSE_HEADERS,
                     ...(corsOpts.exposeHeaders ?? []),
                 ]));
 

@@ -85,14 +85,6 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
     check: 'check:exported-any',
     why: 'audits the built .d.ts for exported types/schemas that resolve to `any` — no artifact (needs a fresh `pnpm build`)',
   },
-  // Same cross-PR race as `check:variant-docs` above, now for the second time:
-  // landed in #4232 with no entry here, so `main` again carries an unclassified
-  // script and this reconciliation fails on `main` itself. The ledger it audits
-  // is hand-written prose — there is no generator to name.
-  {
-    check: 'check:strictness-ledger',
-    why: 'audits the hand-written #4001 strictness ledger against the z.object sites in src — no artifact',
-  },
 ];
 
 /**
