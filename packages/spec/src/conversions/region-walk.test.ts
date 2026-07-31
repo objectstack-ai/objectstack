@@ -14,16 +14,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  LOOP_NODE_TYPE,
-  PARALLEL_NODE_TYPE,
-  TRY_CATCH_NODE_TYPE,
-  LoopConfigSchema,
-  ParallelConfigSchema,
-  TryCatchConfigSchema,
-} from '../automation/control-flow.zod.js';
+import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
 import { applyConversions, applyConversionsToFlow, collectConversionNotices } from './apply.js';
-import { FLOW_REGION_SLOTS } from './walk.js';
 
 /** A protocol-11 callout alias — renamed to `http` by the table. */
 const webhookNode = (id: string) => ({ id, type: 'webhook', label: id, config: { url: 'https://x' } });
@@ -224,29 +216,24 @@ describe('#4347 — the region walk stays copy-on-write and shape-gated', () => 
 });
 
 /**
- * The slot table in `walk.ts` is declared locally so the conversion walker stays
- * free of schema imports. This is what keeps that copy honest: a fourth ADR-0031
- * container, or a renamed region key, fails here instead of silently going
- * unwalked — which is exactly the shape of the #4347 defect.
+ * The conversion walk no longer states WHERE regions live — it reads the shared
+ * declaration (#4401), which `region-slots.test.ts` reconciles against the
+ * construct schemas. What is worth pinning here is that this walk actually
+ * covers every declared container, so a fourth construct added to the shared
+ * table cannot land while the conversion pass keeps skipping it.
  */
-describe('#4347 — FLOW_REGION_SLOTS reconciles with the ADR-0031 constructs', () => {
-  it('covers every canonical container type id', () => {
-    expect([...FLOW_REGION_SLOTS.keys()].sort())
-      .toEqual([LOOP_NODE_TYPE, PARALLEL_NODE_TYPE, TRY_CATCH_NODE_TYPE].sort());
-  });
-
-  it('names region keys the container config schemas actually declare', () => {
-    const declared = (schema: { shape: Record<string, unknown> }) => Object.keys(schema.shape);
-    const slotKeys = (type: string) => FLOW_REGION_SLOTS.get(type)!.map(s => s.key);
-
-    expect(declared(LoopConfigSchema as never)).toEqual(expect.arrayContaining(slotKeys(LOOP_NODE_TYPE)));
-    expect(declared(ParallelConfigSchema as never)).toEqual(expect.arrayContaining(slotKeys(PARALLEL_NODE_TYPE)));
-    expect(declared(TryCatchConfigSchema as never)).toEqual(expect.arrayContaining(slotKeys(TRY_CATCH_NODE_TYPE)));
-  });
-
-  it('marks exactly the array-valued slot as `many`', () => {
-    const many = [...FLOW_REGION_SLOTS].flatMap(([type, slots]) =>
-      slots.filter(s => s.many).map(s => `${type}.${s.key}`));
-    expect(many).toEqual(['parallel.branches']);
+describe('#4401 — the conversion walk descends into every declared container', () => {
+  it('reaches a region node under each container type in the shared table', () => {
+    for (const nodeType of FLOW_REGION_SLOTS_BY_TYPE.keys()) {
+      for (const { key, arity } of FLOW_REGION_SLOTS_BY_TYPE.get(nodeType)!) {
+        const value = arity === 'many' ? [region(webhookNode('inner'))] : region(webhookNode('inner'));
+        const { stack } = collectConversionNotices({
+          flows: [{ name: 'f', nodes: [{ id: 'c', type: nodeType, label: 'C', config: { [key]: value } }] }],
+        });
+        const slot = ((stack.flows as any[])[0].nodes[0].config)[key];
+        const converted = (arity === 'many' ? slot[0] : slot).nodes[0];
+        expect(converted, `${nodeType}.${key}`).toEqual(httpNode('inner'));
+      }
+    }
   });
 });

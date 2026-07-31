@@ -6,7 +6,7 @@ import {
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage } from '@objectstack/spec/system';
-import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { readServiceSelfInfo, DispatcherErrorCode } from '@objectstack/spec/api';
 import { apiErrorResponse } from './error-envelope.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -396,10 +396,12 @@ export class HttpDispatcher {
         }
         let unhealthy: string[] = [];
         try {
-            // [#4251] `checkDriversHealth` is ObjectQL's, not `IDataEngine`'s —
-            // declared narrow rather than erased; the probe below is what runs
+            // [#4251] `checkDriversHealth` is ObjectQL's (IObjectQLEngine), not
+            // `IDataEngine`'s — and this lookup resolves the `data` slot, whose
+            // ledger entry deliberately stays the narrow view. Partial<Pick<…>>
+            // names the one wider member probed; the probe below is what runs
             // when the slot holds an engine without a driver-health surface.
-            let engine: (IDataEngine & { checkDriversHealth?(): Promise<unknown> }) | undefined;
+            let engine: (IDataEngine & Partial<Pick<IObjectQLEngine, 'checkDriversHealth'>>) | undefined;
             try {
                 engine = (this.kernel as any)?.getService?.('data');
             } catch {
@@ -1415,7 +1417,7 @@ export class HttpDispatcher {
      * Get the ObjectQL service which provides access to SchemaRegistry.
      * Tries multiple access patterns since kernel structure varies.
      */
-    private async getObjectQLService(scopeId?: string): Promise<any> {
+    private async getObjectQLService(scopeId?: string): Promise<IObjectQLEngine | null> {
         // 1. Try via resolveService (handles scoped, async factories, sync, context, and map)
         try {
             const svc = await this.resolveService('objectql', scopeId);

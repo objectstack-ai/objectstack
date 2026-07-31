@@ -48,6 +48,8 @@
  * read named keys (`config.fields`, `config.objectName`) can use either.
  */
 
+import { FLOW_REGION_SLOTS_BY_TYPE, FLOW_REGION_CONFIG_KEYS } from '@objectstack/spec/automation';
+
 export type AnyRec = Record<string, unknown>;
 
 function isRec(v: unknown): v is AnyRec {
@@ -59,24 +61,28 @@ function strName(v: unknown): string | undefined {
 }
 
 /**
- * Config keys that hold a nested region, by owning node type. Declared as data
- * so a new construct is one entry here rather than a fifth silent blind spot,
- * and pinned against the spec's own region-bearing schemas by
- * `flow-walk.test.ts`.
+ * Config keys that hold a nested region, by owning node type.
+ *
+ * Projected from `@objectstack/spec/automation` rather than declared here
+ * (#4401). This used to be a local copy with its own reconciliation test — as
+ * did the ADR-0087 conversion walk's copy and the spec-side control-flow walk's.
+ * Three tables, three tests each pinning its own copy, and nothing that would
+ * fail if they drifted from ONE ANOTHER: every copy was individually protected
+ * and the set was not. A fourth construct is now a single entry in
+ * `spec/src/automation/region-slots.ts`.
+ *
+ * The **walk** below stays here. It takes raw authored records (not
+ * `FlowNodeParsed`), and it yields per-node diagnostic paths and label trails —
+ * formatting that is lint's business, not the protocol's (Prime Directive #2).
+ * Only the table is shared; the three traversals stay separate because they walk
+ * different units for different consumers.
  */
-export const REGION_SLOTS: ReadonlyMap<string, readonly string[]> = new Map([
-  ['try_catch', ['try', 'catch']],
-  ['loop', ['body']],
-  // `parallel` is the odd one: `config.branches[]` is an ARRAY of regions, not
-  // a region. Handled separately in the walk; named here so the key set stays
-  // one list.
-  ['parallel', ['branches']],
-]);
+export const REGION_SLOTS: ReadonlyMap<string, readonly string[]> = new Map(
+  [...FLOW_REGION_SLOTS_BY_TYPE].map(([type, slots]) => [type, slots.map(s => s.key)]),
+);
 
 /** Every config key that may hold region nodes, across all node types. */
-export const REGION_CONFIG_KEYS: ReadonlySet<string> = new Set(
-  [...REGION_SLOTS.values()].flat(),
-);
+export const REGION_CONFIG_KEYS: ReadonlySet<string> = FLOW_REGION_CONFIG_KEYS;
 
 /**
  * Depth cap. Regions are a tree in parsed metadata, so this is not a cycle

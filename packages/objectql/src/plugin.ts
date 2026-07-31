@@ -8,6 +8,7 @@ import { StorageNameMapping } from '@objectstack/spec/system';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 import { runActionGovernanceInventory } from './action-governance.js';
+import type { IMetadataService } from '@objectstack/spec/contracts';
 
 export type { Plugin, PluginContext };
 
@@ -311,7 +312,7 @@ export class ObjectQLPlugin implements Plugin {
 
     // Sync from external metadata service (e.g. MetadataPlugin) if available
     try {
-        const metadataService = ctx.getService('metadata') as any;
+        const metadataService = ctx.getService<IMetadataService>('metadata');
         if (metadataService && typeof metadataService.loadMany === 'function' && this.ql) {
             await this.loadMetadataFromService(metadataService, ctx);
         }
@@ -1095,7 +1096,7 @@ export class ObjectQLPlugin implements Plugin {
    */
   private async bridgeObjectsToMetadataService(ctx: PluginContext): Promise<void> {
     try {
-      const metadataService = ctx.getService<any>('metadata');
+      const metadataService = ctx.getService<IMetadataService>('metadata');
       if (!metadataService || typeof metadataService.register !== 'function') {
         ctx.logger.debug('Metadata service unavailable for bridging, skipping');
         return;
@@ -1181,9 +1182,9 @@ export class ObjectQLPlugin implements Plugin {
     if (!packageId || !this.ql?.registry) return;
 
     try {
-      let metadataService: any;
+      let metadataService: IMetadataService | undefined;
       try {
-        metadataService = ctx.getService<any>('metadata');
+        metadataService = ctx.getService<IMetadataService>('metadata');
       } catch {
         return; // no metadata service on this kernel — nothing to bridge into
       }
@@ -1383,7 +1384,7 @@ export class ObjectQLPlugin implements Plugin {
 
     let serviceHooks: any[] | null = null;
     try {
-      const metadataService = ctx.getService('metadata') as any;
+      const metadataService = ctx.getService<IMetadataService>('metadata');
       if (metadataService && typeof metadataService.loadMany === 'function') {
         serviceHooks = (await metadataService.loadMany('hook')) ?? [];
       }
@@ -1577,9 +1578,10 @@ export class ObjectQLPlugin implements Plugin {
     if (!ql || typeof ql.listRegisteredActions !== 'function') return;
     let loadStandaloneActions: (() => Promise<any[]>) | undefined;
     try {
-      const meta: any = ctx.getService('metadata');
-      if (meta && typeof meta.loadMany === 'function') {
-        loadStandaloneActions = () => meta.loadMany('action');
+      const meta = ctx.getService<IMetadataService>('metadata');
+      const loadMany = meta?.loadMany;
+      if (meta && typeof loadMany === 'function') {
+        loadStandaloneActions = () => loadMany.call(meta, 'action');
       }
     } catch { /* no metadata service — registry objects still audit */ }
     this.lastGovernanceFingerprint = await runActionGovernanceInventory({
@@ -1638,7 +1640,7 @@ export class ObjectQLPlugin implements Plugin {
 
     let serviceActions: any[] | null = null;
     try {
-      const metadataService = ctx.getService('metadata') as any;
+      const metadataService = ctx.getService<IMetadataService>('metadata');
       if (metadataService && typeof metadataService.loadMany === 'function') {
         serviceActions = (await metadataService.loadMany('action')) ?? [];
       }

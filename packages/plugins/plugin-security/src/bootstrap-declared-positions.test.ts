@@ -20,7 +20,7 @@ function makeQl(declared: any[] = []) {
   const rows: any[] = [];
   return {
     rows,
-    _registry: { listItems: (type: string) => (type === 'position' ? declared.map((c) => ({ content: c })) : []) },
+    registry: { listItems: (type: string) => (type === 'position' ? declared.map((c) => ({ content: c })) : []) },
     async find(object: string, q: any) {
       if (object !== 'sys_position') return [];
       const where = q?.where ?? {};

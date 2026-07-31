@@ -17,25 +17,8 @@ import {
   intersectFieldMasks,
 } from './explain-engine.js';
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
-import type { IDataEngine, II18nService, IMetadataService } from '@objectstack/spec/contracts';
+import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 
-/**
- * The `objectql` slot as this plugin's start-up path checks it: the data
- * contract plus the middleware seam it installs.
- *
- * [#4251] `registerMiddleware` is ObjectQL's own, not `IDataEngine`'s, and the
- * probe right below is what the plugin does when it is absent. Declared narrow
- * and named rather than erased — see the standing record on `getObjectQL` in
- * `@objectstack/runtime` for why ObjectQL's wider contract stays unwritten.
- */
-type SecurityEngineSurface = IDataEngine & {
-  registerMiddleware?(
-    fn: (opCtx: any, next: () => Promise<void>) => Promise<void>,
-    options?: { object?: string },
-  ): void;
-  /** Schema lookup the engine-owned write guard reads `managedBy` off of. */
-  getSchema?(objectName: string): any;
-};
 import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
 import { bootstrapDeclaredPermissions, upsertPackagePermissionSet, readDeclared } from './bootstrap-declared-permissions.js';
 import { applyManagedWriteDenies } from './managed-object-write-denies.js';
@@ -76,7 +59,7 @@ import { matchesFilterCondition } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
 import { assertReadableQueryFields } from './predicate-guard.js';
 import { PermissionDeniedError } from './errors.js';
-import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
+import { assertEngineOwnedWriteAllowed, type EngineOwnedSchemaLike } from './system-write-guard.js';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
 import {
   backfillOrgAdminGrants,
@@ -490,11 +473,11 @@ export class SecurityPlugin implements Plugin {
     ctx.logger.info('Starting Security Plugin...');
 
     // Get required services
-    let ql: SecurityEngineSurface | undefined;
+    let ql: IObjectQLEngine | undefined;
     let metadata: IMetadataService | undefined;
 
     try {
-      ql = ctx.getService<SecurityEngineSurface>('objectql');
+      ql = ctx.getService<IObjectQLEngine>('objectql');
       metadata = ctx.getService<IMetadataService>('metadata');
     } catch (e) {
       ctx.logger.warn('ObjectQL or metadata service not available, security middleware not registered');
@@ -894,7 +877,11 @@ export class SecurityPlugin implements Plugin {
       // construction. Runs BEFORE the empty-principal fall-open so engine-owned
       // tables fail CLOSED for principal-less-but-user-context callers.
       assertEngineOwnedWriteAllowed(
-        typeof ql?.getSchema === 'function' ? ql.getSchema(opCtx.object) : undefined,
+        // The contract's getSchema returns `unknown` (schema shape is
+        // engine-local); narrow to the slice the guard reads.
+        typeof ql?.getSchema === 'function'
+          ? ql.getSchema(opCtx.object) as EngineOwnedSchemaLike | undefined
+          : undefined,
         opCtx.operation,
         opCtx.context,
       );

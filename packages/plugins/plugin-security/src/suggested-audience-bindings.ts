@@ -148,7 +148,7 @@ export function collectDeclaredSuggestions(ql: any, metadata?: any): DeclaredSug
 
   // Source 2 — installed package manifests (live at install time).
   try {
-    const packages: any[] = ql?._registry?.getAllPackages?.() ?? [];
+    const packages: any[] = ql?.registry?.getAllPackages?.() ?? [];
     for (const pkg of packages) {
       if (pkg?.enabled === false) continue;
       const manifest = pkg?.manifest;

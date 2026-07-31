@@ -36,6 +36,14 @@
  */
 
 import type { MetadataQuery, MetadataQueryResult, MetadataValidationResult, MetadataBulkResult, MetadataDependency } from '../kernel/metadata-plugin.zod';
+// The PERSISTENCE-side watch event (`add`/`added`/`changed`/`deleted`/…, path +
+// file stats) — what `MetadataManager.subscribe` actually relays. NOT the
+// near-namesake in `../kernel/metadata-loader.zod`: spec carries TWO types
+// named `MetadataWatchEvent` with different shapes (reported on #4251; merging
+// them is its own change), and `MetadataManager implements IMetadataService`
+// rejected the first draft of this import — which is exactly the check doing
+// its job.
+import type { MetadataWatchEvent } from '../system/metadata-persistence.zod';
 import type { Action } from '../ui/action.zod';
 import type { MetadataOverlay } from '../kernel/metadata-customization.zod';
 import type { PackagePublishResult, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataDiffResult } from '../system/metadata-persistence.zod';
@@ -408,6 +416,39 @@ export interface IMetadataService {
      * @returns A handle to unsubscribe
      */
     watch?(type: string, callback: MetadataWatchCallback): MetadataWatchHandle;
+
+    /**
+     * Subscribe to LOADER-level change events of a type, unsubscribing by
+     * calling the returned function.
+     *
+     * NOT {@link watch} with a different return shape: the two carry different
+     * events. `watch` reports registration-level transitions
+     * (`registered`/`updated`/`unregistered`); `subscribe` relays the loader
+     * pipeline's {@link MetadataWatchEvent} (`add`/`changed`/`deleted`, with
+     * path and file stats) — the granularity ObjectQLPlugin's metadata bridge
+     * re-syncs runtime-authored hooks/actions from. (The first draft of this
+     * member reused `watch`'s callback type; `MetadataManager implements
+     * IMetadataService` rejected it — the check working exactly as intended.)
+     *
+     * [#4251 B3] Declared from the implementation and its one cross-package
+     * caller, probed with `typeof … === 'function'`. Optional like `watch`:
+     * the in-memory fallback need not provide it, and the probe is the
+     * degraded path.
+     */
+    subscribe?(type: string, callback: (event: MetadataWatchEvent) => void | Promise<void>): () => void;
+
+    /**
+     * Load EVERY item of a type across all loaders — the bulk read the
+     * ObjectQLPlugin bridge boots from (hooks, actions), where {@link list}
+     * serves the registry index.
+     *
+     * [#4251 B3] Same evidence as {@link subscribe}: implemented by
+     * `MetadataManager.loadMany` since the bridge existed, reached through the
+     * slot only via `any`. `options` is the manager's load-options bag,
+     * engine-local in shape — declared `Record<string, unknown>` here; the one
+     * caller passes nothing.
+     */
+    loadMany?<T = unknown>(type: string, options?: Record<string, unknown>): Promise<T[]>;
 
     // ==========================================
     // Import / Export

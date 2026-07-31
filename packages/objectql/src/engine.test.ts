@@ -484,6 +484,39 @@ describe('ObjectQL Engine', () => {
         });
     });
 
+    /**
+     * ADR-0014 D2 / #4366 — the service-principal label. A non-user write (a
+     * `runAs:'system'` flow, a service token) carries `ExecutionContext.actor`;
+     * the audit writer's `userId ?? session.actor` fallback is dead unless the
+     * engine propagates it onto the hook session.
+     */
+    describe('service-principal actor propagated to the hook session (#4366)', () => {
+        beforeEach(async () => {
+            engine.registerDriver(mockDriver, true);
+            await engine.init();
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', fields: {} } as any);
+        });
+
+        it('surfaces context.actor as session.actor for a system write', async () => {
+            let session: any;
+            engine.registerHook('afterInsert', async (ctx: any) => { session = ctx.session; }, { object: 'task' });
+
+            await engine.insert('task', { title: 'x' }, { context: { isSystem: true, actor: 'svc:flow:mirror_status' } as any });
+
+            expect(session).toMatchObject({ isSystem: true, actor: 'svc:flow:mirror_status' });
+        });
+
+        it('omits session.actor when the context carries none (no anonymous label invented)', async () => {
+            let session: any;
+            engine.registerHook('afterInsert', async (ctx: any) => { session = ctx.session; }, { object: 'task' });
+
+            await engine.insert('task', { title: 'y' }, { context: { userId: 'u1' } as any });
+
+            expect(session.userId).toBe('u1');
+            expect(session.actor).toBeUndefined();
+        });
+    });
+
     describe('organizationId exposed to hooks as the blessed org name (#3280)', () => {
         beforeEach(async () => {
             engine.registerDriver(mockDriver, true);

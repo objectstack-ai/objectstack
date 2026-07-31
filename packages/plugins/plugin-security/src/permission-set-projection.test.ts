@@ -232,7 +232,7 @@ describe('projectPermissionMutation (the awaited projector)', () => {
     const declaredBody = envBody({ systemPermissions: ['declared.only'] });
     const declared = { organization_admin: declaredBody };
     // engine SchemaRegistry — the artifact source the projection never writes
-    (ql as any)._registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
     const protocol = makeProtocol(ql, declared);
     const metadata = makeMetadataFacade();
     const deps = { ql, metadata };
@@ -313,7 +313,7 @@ describe('package-owned set customization lifecycle (env overlay)', () => {
   it('a Studio env-scope save on a PACKAGE name customizes the record and keeps provenance', async () => {
     const ql = makeQl();
     const declaredBody = envBody({ systemPermissions: ['pkg.baseline'] });
-    (ql as any)._registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
     const protocol = makeProtocol(ql, { organization_admin: declaredBody });
     registerPermissionSetProjection(protocol, { ql });
     ql.permRows.push({ id: 'ps_pkg', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]' });
@@ -330,7 +330,7 @@ describe('package-owned set customization lifecycle (env overlay)', () => {
   it('deleting the overlay RESETS the package record to its declared baseline', async () => {
     const ql = makeQl();
     const declaredBody = envBody({ systemPermissions: ['pkg.baseline'] });
-    (ql as any)._registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
     const protocol = makeProtocol(ql, { organization_admin: declaredBody });
     registerPermissionSetProjection(protocol, { ql });
     ql.permRows.push({ id: 'ps_pkg', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]' });
@@ -481,7 +481,7 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
   it('UPDATE of a PACKAGE-OWNED set becomes an env overlay; the record keeps its provenance', async () => {
     const ql = makeQl();
     const declaredBody = envBody({ name: 'crm_rep', systemPermissions: ['pkg.baseline'] });
-    (ql as any)._registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
     const protocol = makeProtocol(ql, { crm_rep: declaredBody });
     registerPermissionSetProjection(protocol, { ql });
     ql.permRows.push({
@@ -507,7 +507,7 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
   it('DELETE of a customized PACKAGE set removes the overlay and resets to the declared baseline', async () => {
     const ql = makeQl();
     const declaredBody = envBody({ name: 'crm_rep', systemPermissions: ['pkg.baseline'] });
-    (ql as any)._registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
     const protocol = makeProtocol(ql, { crm_rep: declaredBody });
     registerPermissionSetProjection(protocol, { ql });
     ql.permRows.push({ id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]' });

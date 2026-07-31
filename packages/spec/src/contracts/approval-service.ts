@@ -311,6 +311,21 @@ export interface ApprovalActionRow {
   created_at?: string;
   /** Display name of the actor (`sys_user.name`), when resolvable. */
   actor_name?: string;
+  /**
+   * Structured hand-off parties on a `reassign` action (#4365): the user whose
+   * pending-approver slot was moved, and the user who received it. Previously
+   * the pair existed only inside a default free-text `comment`
+   * (`"<from_id> → <to_id>"`), which clients could neither parse nor render
+   * readably. `comment` is now pure user input; consumers render the hand-off
+   * from these fields (via the resolved `*_name` companions below).
+   */
+  reassign_from?: string;
+  /** See {@link ApprovalActionRow.reassign_from}. */
+  reassign_to?: string;
+  /** Display name of `reassign_from` (`sys_user.name`), when resolvable. */
+  reassign_from_name?: string;
+  /** Display name of `reassign_to` (`sys_user.name`), when resolvable. */
+  reassign_to_name?: string;
 }
 
 /** Input for a decision on an approval request. */

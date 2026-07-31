@@ -9,9 +9,9 @@ function makeQl(declared: any[] = []) {
   const rows: any[] = [];
   return {
     rows,
-    // readDeclared() reads engine._registry.listItems(type); stub it so
+    // readDeclared() reads engine.registry.listItems(type); stub it so
     // capabilities are surfaced without a metadata service.
-    _registry: {
+    registry: {
       listItems(type: string) {
         return type === 'capability' ? declared.map((c) => ({ content: c })) : [];
       },
@@ -58,7 +58,7 @@ describe('bootstrapDeclaredCapabilities (ADR-0066 D1 package declaration)', () =
     const ql = makeQl([{ name: 'billing.refund', label: 'Refund', scope: 'platform', _packageId: 'com.acme.billing' }]);
     await bootstrapDeclaredCapabilities(ql, null);
     // Ship a new label on the next boot.
-    (ql as any)._registry.listItems = (t: string) =>
+    (ql as any).registry.listItems = (t: string) =>
       t === 'capability' ? [{ content: { name: 'billing.refund', label: 'Issue Refund', _packageId: 'com.acme.billing' } }] : [];
     const out2 = await bootstrapDeclaredCapabilities(ql, null);
     expect(out2.seeded).toBe(0);

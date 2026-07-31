@@ -28,6 +28,7 @@ import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from 
 import {
   IDataDriver,
   IDataEngine,
+  type IObjectQLEngine,
   Logger,
   createLogger,
   withTransientRetry,
@@ -554,7 +555,12 @@ interface SummaryDescriptor {
   filter?: Record<string, unknown>;
 }
 
-export class ObjectQL implements IDataEngine {
+// `implements IObjectQLEngine` is the verification step of #4251 B3: every
+// member the `objectql` slot's contract declares is checked against this class
+// on every build, so the seven consumer-local surface declarations the contract
+// replaced can never silently drift from the engine again. IObjectQLEngine
+// extends IDataEngine, so the old claim rides along.
+export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
    * runs, the active transaction handle lives here so that EVERY data
@@ -1076,6 +1082,13 @@ export class ObjectQL implements IDataEngine {
       // Propagate system-elevated flag so hooks can distinguish engine
       // self-writes (e.g. approval status mirror) from genuine user writes.
       ...((execCtx as any).isSystem ? { isSystem: true } : {}),
+      // Propagate the service-principal label (`ExecutionContext.actor`,
+      // e.g. `svc:flow:<name>`) so a non-user write stays attributable in the
+      // audit log — the writer's `userId ?? session.actor` fallback is dead
+      // without this hop (ADR-0014 D2, #4366).
+      ...(typeof (execCtx as any).actor === 'string' && (execCtx as any).actor
+        ? { actor: (execCtx as any).actor }
+        : {}),
       // Propagate the automation-suppression flag so the record-change trigger
       // can skip flow dispatch for seed/bulk writes (ADR: seed loads end-state
       // data, not user events). `skipAutomations` implies `skipTriggers` —

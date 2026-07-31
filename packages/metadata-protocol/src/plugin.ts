@@ -23,6 +23,7 @@
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import {
     SysMetadataObject,
     SysMetadataHistoryObject,
@@ -51,7 +52,7 @@ export function createMetadataProtocolPlugin(options: MetadataProtocolPluginOpti
         dependencies: ['com.objectstack.engine.objectql'],
 
         init: async (ctx: PluginContext) => {
-            const ql: any = ctx.getService('objectql');
+            const ql = ctx.getService<IObjectQLEngine>('objectql');
 
             // Assembly-conflict guard: the engine plugin's built-in assembly
             // (registerProtocol !== false) already registered `protocol`.

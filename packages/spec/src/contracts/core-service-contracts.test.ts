@@ -16,6 +16,7 @@ import type { INotificationService } from './notification-service';
 import type { II18nService } from './i18n-service';
 import type { IDataEngine } from './data-engine';
 import type { IHttpServer } from './http-server';
+import type { IObjectQLEngine } from './objectql-engine';
 import type { ISecurityService } from './security-service';
 import type { IShareLinkService } from './share-link-service';
 
@@ -92,10 +93,17 @@ describe('slot → contract ledger beyond the enum (#4127 batch 3)', () => {
         expect(true).toBe(true);
     });
 
-    it('resolves objectql to the same contract as data, because it is the same instance', () => {
-        // `packages/objectql`'s plugin registers `this.ql` under both names two
-        // lines apart. Anything else here would claim they are two services.
-        type _Alias = Expect<Equals<ServiceSlotContract<'objectql'>, ServiceSlotContract<'data'>>>;
+    it('resolves objectql to the FULL engine contract, a strict widening of data (#4251 B3)', () => {
+        // Same instance, two views: `data` is the engine as IDataEngine (the
+        // data plane), `objectql` is the whole engine. The subtype relation is
+        // the claim that they cannot drift apart — every IObjectQLEngine IS an
+        // IDataEngine, so code holding the objectql view can always be handed
+        // where the data view is expected, never the reverse.
+        type Extends<A, B> = A extends B ? true : false;
+        type _Widens = Expect<Extends<ServiceSlotContract<'objectql'>, ServiceSlotContract<'data'>>>;
+        type _IsFull = Expect<Equals<ServiceSlotContract<'objectql'>, IObjectQLEngine>>;
+        // Deliberately NOT equal any more — `data` stays the narrow view.
+        type _NotSame = Expect<Equals<Equals<ServiceSlotContract<'objectql'>, ServiceSlotContract<'data'>>, false>>;
         expect(true).toBe(true);
     });
 

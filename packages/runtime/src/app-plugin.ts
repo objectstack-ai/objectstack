@@ -7,7 +7,7 @@ import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
-import type { IDataEngine, IJobService, IMetadataService, II18nService } from '@objectstack/spec/contracts';
+import type { IJobService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
@@ -32,49 +32,6 @@ const SEED_WRITE_OPTIONS = { context: { isSystem: true, skipTriggers: true, seed
  * hooks that drive the org-scoped `sys_app` catalog. Standalone (single-tenant)
  * usages may omit this — no catalog hooks are emitted in that case.
  */
-/**
- * The `objectql` slot BEYOND `IDataEngine` — the seams AppPlugin installs on the
- * engine.
- *
- * [#4251] The slot's ledger entry is `IDataEngine`, and it covers the `insert`
- * calls in this file and nothing else here. Everything below is ObjectQL's own
- * surface, for which no contract has been written — the standing record of why
- * is on `getObjectQL` in {@link DomainHandlerContext}. Declared narrow and named
- * so the extension is legible rather than erased to `any`; whoever writes
- * ObjectQL's contract absorbs this and deletes it.
- *
- * The members are declared REQUIRED even though a kernel may hold an engine
- * that implements none of them: every call site already probes with
- * `typeof … === 'function'` and degrades there, and that runtime guard is the
- * real defence. Marking them optional here would only turn each guarded
- * invocation into a `possibly undefined` error and push the code back toward
- * the `any` this rule exists to remove.
- */
-interface AppEngineSurface {
-    bindHooks(hooks: unknown[], options: Record<string, unknown>): void;
-    registerAction(objectKey: string, name: string, handler: unknown, packageId: string): void;
-    registerDriver(driver: unknown): void;
-    setDatasourceMapping(rules: unknown): void;
-    /**
-     * FIRST-WINS setters (#4251): the engine keeps the first runner and
-     * returns whether this call installed it. The idempotence guard used to
-     * live HERE, as a probe of the engine's private `_defaultBodyRunner` /
-     * `_defaultActionRunner` fields through this surface — an invariant owned
-     * by every caller and enforced by none. It is the engine's now.
-     * `boolean | void` because pre-first-wins engines (and bare `vi.fn()`
-     * doubles) return undefined — treated as installed.
-     */
-    setDefaultBodyRunner(runner: unknown): boolean | void;
-    setDefaultActionRunner(
-        runner: (actionDef: any) => ((ctx: any) => Promise<unknown>) | undefined,
-    ): boolean | void;
-    setHookMetricsRecorder(recorder: unknown): void;
-    getHookMetricsRecorder(): any;
-    readonly registry?: { setInitialDisabledPackageIds?: (ids: Iterable<string>) => void };
-}
-
-/** The engine as AppPlugin uses it: the data contract plus those seams. */
-type AppEngine = IDataEngine & AppEngineSurface;
 
 export interface AppPluginProjectContext {
     environmentId: string;
@@ -315,9 +272,9 @@ export class AppPlugin implements Plugin {
             ctx.logger.info('[AppPlugin] OS_DISABLE_AUTHORED_HOOKS=1 — runtime-authored hook bodies will not execute');
             return;
         }
-        let ql: AppEngine | undefined;
+        let ql: IObjectQLEngine | undefined;
         try {
-            ql = ctx.getService<AppEngine>('objectql');
+            ql = ctx.getService<IObjectQLEngine>('objectql');
         } catch {
             return; // no engine on this kernel — nothing to wire
         }
@@ -357,9 +314,9 @@ export class AppPlugin implements Plugin {
             ctx.logger.info('[AppPlugin] OS_DISABLE_AUTHORED_ACTIONS=1 — runtime-authored action bodies will not execute');
             return;
         }
-        let ql: AppEngine | undefined;
+        let ql: IObjectQLEngine | undefined;
         try {
-            ql = ctx.getService<AppEngine>('objectql');
+            ql = ctx.getService<IObjectQLEngine>('objectql');
         } catch {
             return; // no engine on this kernel — nothing to wire
         }
@@ -389,9 +346,9 @@ export class AppPlugin implements Plugin {
      * idempotent across the multiple AppPlugins a multi-app env installs.
      */
     private installHookMetricsTiming(ctx: PluginContext): void {
-        let ql: AppEngine | undefined;
+        let ql: IObjectQLEngine | undefined;
         try {
-            ql = ctx.getService<AppEngine>('objectql');
+            ql = ctx.getService<IObjectQLEngine>('objectql');
         } catch {
             return; // no engine on this kernel — nothing to wire
         }
@@ -430,9 +387,9 @@ export class AppPlugin implements Plugin {
         // Retrieve ObjectQL engine from services
         // ctx.getService throws when a service is not registered, so we
         // must use try/catch instead of a null-check.
-        let ql: AppEngine | undefined;
+        let ql: IObjectQLEngine | undefined;
         try {
-            ql = ctx.getService<AppEngine>('objectql');
+            ql = ctx.getService<IObjectQLEngine>('objectql');
         } catch {
             // Service not registered — handled below
         }

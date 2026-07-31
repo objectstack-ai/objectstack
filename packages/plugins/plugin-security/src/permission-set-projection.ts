@@ -164,7 +164,7 @@ const isProjectionEcho = (v: any): boolean =>
  */
 function readDeclaredBody(ql: any, name: string): any {
   try {
-    const items = ql?._registry?.listItems?.('permission') ?? [];
+    const items = ql?.registry?.listItems?.('permission') ?? [];
     for (const i of items) {
       const body = i?.content ?? i;
       // Skip projection echoes too: deleteMetaItem's registry heal
@@ -182,7 +182,7 @@ function readDeclaredBody(ql: any, name: string): any {
 
 /** Whether the engine exposes a SchemaRegistry we can read declared bodies from. */
 function hasSchemaRegistry(ql: any): boolean {
-  return typeof ql?._registry?.listItems === 'function';
+  return typeof ql?.registry?.listItems === 'function';
 }
 
 /**
@@ -327,7 +327,7 @@ async function retirePermissionSetRecord(
     // Drop any engine-registry ghost of the retired definition (a runtime
     // shadow, or a projection echo re-registered by the delete-time registry
     // heal) so metadata lists don't keep showing a deleted set.
-    try { ql?._registry?.unregisterItem?.('permission', name); } catch { /* best-effort */ }
+    try { ql?.registry?.unregisterItem?.('permission', name); } catch { /* best-effort */ }
   } catch (e) {
     logger?.warn?.('[security] failed to retire sys_permission_set record after metadata delete', {
       name, error: (e as Error)?.message,

@@ -1830,6 +1830,10 @@ export class AutomationEngine implements IAutomationService {
         const runContext: AutomationContext = {
             ...(context ?? {}),
             runAs: flow.runAs ?? 'user',
+            // `flowName` shares the same lifetime and construction point: it feeds
+            // audit attribution (`svc:flow:<name>` on ExecutionContext.actor) for
+            // runs that resolve no user (#4366).
+            flowName: flow.name,
             ...(runId ? { flowRunId: runId } : {}),
         };
 

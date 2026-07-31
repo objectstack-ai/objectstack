@@ -17,7 +17,7 @@
 
 import { validateActionParams, type ResolvedActionParam } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { checkApiExposure } from './api-exposure.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
@@ -82,7 +82,7 @@ function warnActionParamsOnce(key: string, message: string): void {
 export interface ActionExecutionDeps {
     resolveService<K extends keyof ServiceSlotContracts>(name: K, environmentId?: string): Promise<ServiceSlotContract<K> | undefined>;
     resolveService(name: string, environmentId?: string): any;
-    getObjectQL(environmentId?: string): Promise<any>;
+    getObjectQL(environmentId?: string): Promise<IObjectQLEngine | null>;
 }
 
 /**

@@ -2,6 +2,7 @@
 
 
 export * from './flow.zod';
+export * from './region-slots';
 export * from './control-flow.zod';
 export * from './io-node-config.zod';
 export * from './builtin-node-config.zod';

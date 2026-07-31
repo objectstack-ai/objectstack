@@ -60,7 +60,7 @@ interface SeedOptions {
  */
 export function readDeclared(engine: any, type: string): any[] {
   try {
-    const reg = engine?._registry;
+    const reg = engine?.registry;
     if (reg?.listItems) {
       return (reg.listItems(type) ?? []).map((i: any) => i?.content ?? i).filter(Boolean);
     }
