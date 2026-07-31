@@ -29,12 +29,12 @@ import { SystemFile, SystemUploadSession } from './objects/index.js';
 // storage domain, not the audit/compliance ledger. Definition stays in
 // platform-objects; storage now contributes (registers) it instead of audit.
 import { SysAttachment } from '@objectstack/platform-objects/audit';
-// Deployment-level data-migration flags (#3617). The table is platform-generic
-// (defined in platform-objects, contract in spec/system), registered here by
-// its first consuming domain: the ADR-0104 file-as-reference row gates this
-// service's released-file collection (#3459 PR-5b) and the strict media
-// value-shape default (#3438).
-import { SysMigration, isDataMigrationVerified, attestFreshDatastore } from '@objectstack/platform-objects/system';
+// Deployment-level data-migration flag READER (#3617). The `sys_migration`
+// ledger itself is platform infrastructure — registered by
+// `PlatformObjectsPlugin` (#4243), not by this service — this service only
+// consumes the ADR-0104 file-as-reference flag, which gates its released-file
+// collection (#3459 PR-5b).
+import { isDataMigrationVerified } from '@objectstack/platform-objects/system';
 import { FILE_REFERENCES_MIGRATION_ID } from '@objectstack/spec/system';
 import { SwappableStorageService } from './swappable-storage-service.js';
 import {
@@ -240,7 +240,7 @@ export class StorageServicePlugin implements Plugin {
         version: '1.0.0',
         type: 'plugin',
         scope: 'system',
-        objects: [SystemFile, SystemUploadSession, SysAttachment, SysMigration],
+        objects: [SystemFile, SystemUploadSession, SysAttachment],
       });
     } catch {
       // manifest service may not be available in all environments
@@ -334,36 +334,10 @@ export class StorageServicePlugin implements Plugin {
           // hooks above, and nothing sweeps without the LifecycleService.
         }
 
-        // ── Fresh-datastore attestation (#3438, ADR-0104 2026-07-30) ───
-        // A store this process just created from empty can hold no legacy
-        // value, so the data migrations that exist to find and convert them
-        // are settled here before they are ever run — recorded now, while
-        // that emptiness is still an observed fact rather than something a
-        // later scan would have to infer. Without it every new deployment
-        // would start lax and stay lax until someone ran a command that, for
-        // them, does nothing: the warn regime would never die out.
-        //
-        // This service owns the call because it registers `sys_migration`
-        // (above) and is the platform's only holder of the flag's other
-        // consumers. A store that was found rather than created attests
-        // nothing and keeps producing evidence by scan.
-        if (typeof (engine as any).wasDatastoreCreatedFromEmpty === 'function') {
-          try {
-            if ((engine as any).wasDatastoreCreatedFromEmpty()) {
-              await attestFreshDatastore(engine as any, { logger: ctx.logger });
-              // The engine memoizes the flag read on first use; this write
-              // may already have raced it on a fast boot.
-              (engine as any).invalidateDataMigrationFlags?.();
-            }
-          } catch (err) {
-            // Bookkeeping must never break a new deployment's boot. Not
-            // attesting only leaves it lax — recoverable by running the
-            // migration, which for an empty store is a no-op that passes.
-            ctx.logger.warn(
-              `StorageServicePlugin: fresh-datastore attestation skipped (${(err as Error)?.message ?? err})`,
-            );
-          }
-        }
+        // Fresh-datastore attestation (#3438, ADR-0104) moved to
+        // `PlatformObjectsPlugin` with the `sys_migration` registration it
+        // belongs to (#4243) — the ledger and its bookkeeping are platform
+        // infrastructure, present with or without this service.
       }
 
       // ── HTTP routes (existing behaviour) ───────────────────────────
