@@ -52,11 +52,17 @@ export function collectConditionFields(condition: unknown, out: Set<string> = ne
 
 /**
  * Collect every field referenced by the query's row-shaping clauses:
- * where / orderBy / groupBy / having / aggregations (field + FILTER) /
- * window functions (field + partitionBy + over.orderBy). `fields`
- * (projection) is intentionally NOT collected — selecting a hidden field is
- * harmless because FieldMasker strips it from the result; only predicates
- * leak.
+ * where / orderBy / groupBy / having / aggregations (field + FILTER).
+ * `fields` (projection) is intentionally NOT collected — selecting a hidden
+ * field is harmless because FieldMasker strips it from the result; only
+ * predicates leak.
+ *
+ * `windowFunctions` was walked here too until the key was removed from
+ * `QueryAST` (#4286) — the tombstone refuses it wherever the schema parses,
+ * and no executor ever ran a window function off the query path, so there is
+ * no clause left to leak through. `having` and `aggregations[].filter` stay
+ * walked while they stay declared (#4286 leaves `having`'s enforce-or-remove
+ * call open): this guard being ready is what makes enforcing them later safe.
  */
 export function collectQueryFields(ast: Record<string, unknown>): Set<string> {
   const out = new Set<string>();
@@ -87,24 +93,6 @@ export function collectQueryFields(ast: Record<string, unknown>): Set<string> {
       const field = (a as { field?: unknown })?.field;
       if (typeof field === 'string' && field !== '*') out.add(field.split('.')[0]);
       collectConditionFields((a as { filter?: unknown })?.filter, out);
-    }
-  }
-
-  const windowFunctions = ast.windowFunctions;
-  if (Array.isArray(windowFunctions)) {
-    for (const w of windowFunctions) {
-      const field = (w as { field?: unknown })?.field;
-      if (typeof field === 'string') out.add(field.split('.')[0]);
-      const over = (w as { over?: { partitionBy?: unknown; orderBy?: unknown } })?.over;
-      if (Array.isArray(over?.partitionBy)) {
-        for (const p of over.partitionBy) if (typeof p === 'string') out.add(p.split('.')[0]);
-      }
-      if (Array.isArray(over?.orderBy)) {
-        for (const s of over.orderBy) {
-          const f = (s as { field?: unknown })?.field;
-          if (typeof f === 'string') out.add(f.split('.')[0]);
-        }
-      }
     }
   }
 

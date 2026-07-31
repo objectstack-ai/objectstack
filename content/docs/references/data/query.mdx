@@ -16,8 +16,8 @@ Represents "Order By".
 ## TypeScript Usage
 
 ```typescript
-import { AggregationFunction, AggregationNode, DateGranularity, FieldNode, FullTextSearch, GroupByNode, JoinNode, JoinStrategy, JoinType, Query, SortNode, WindowFunction, WindowFunctionNode, WindowSpec } from '@objectstack/spec/data';
-import type { AggregationFunction, AggregationNode, DateGranularity, FieldNode, FullTextSearch, GroupByNode, JoinNode, JoinStrategy, JoinType, Query, SortNode, WindowFunction, WindowFunctionNode, WindowSpec } from '@objectstack/spec/data';
+import { AggregationFunction, AggregationNode, DateGranularity, FieldNode, FullTextSearch, GroupByNode, Query, SortNode } from '@objectstack/spec/data';
+import type { AggregationFunction, AggregationNode, DateGranularity, FieldNode, FullTextSearch, GroupByNode, Query, SortNode } from '@objectstack/spec/data';
 
 // Validate data
 const result = AggregationFunction.parse(data);
@@ -51,7 +51,7 @@ const result = AggregationFunction.parse(data);
 | **field** | `string` | optional | Field to aggregate (optional for COUNT(*)) |
 | **alias** | `string` | ✅ | Result column alias |
 | **distinct** | `boolean` | optional | Apply DISTINCT before aggregation |
-| **filter** | `any` | optional | Filter/Condition to apply to the aggregation (FILTER WHERE clause) |
+| **filter** | `any` | optional | [EXPERIMENTAL — not enforced] Per-aggregation filter (SQL FILTER (WHERE …)). Neither the SQL builders nor the in-memory fallback applies it (#4286); filter the whole query with `where` instead. |
 
 
 ---
@@ -80,12 +80,12 @@ const result = AggregationFunction.parse(data);
 | :--- | :--- | :--- | :--- |
 | **query** | `string` | ✅ | Search query text |
 | **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
-| **fuzzy** | `boolean` | ✅ | Enable fuzzy matching (tolerates typos) |
-| **operator** | `Enum<'and' \| 'or'>` | ✅ | Logical operator between terms |
-| **boost** | `Record<string, number>` | optional | Field-specific relevance boosting (field name -> boost factor) |
-| **minScore** | `number` | optional | Minimum relevance score threshold |
-| **language** | `string` | optional | Language for text analysis (e.g., "en", "zh", "es") |
-| **highlight** | `boolean` | ✅ | Enable search result highlighting |
+| **fuzzy** | `boolean` | ✅ | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag (#4286). |
+| **operator** | `Enum<'and' \| 'or'>` | ✅ | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag (#4286). |
+| **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results (#4286). |
+| **minScore** | `number` | optional | [EXPERIMENTAL — not enforced] Minimum relevance score threshold. No executor scores results (#4286). |
+| **language** | `string` | optional | [EXPERIMENTAL — not enforced] Language for text analysis (e.g., "en", "zh", "es"). No executor selects an analyzer (#4286). |
+| **highlight** | `boolean` | ✅ | [EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights (#4286). |
 
 
 ---
@@ -117,46 +117,6 @@ Type: `string`
 
 ---
 
-## JoinNode
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `Enum<'inner' \| 'left' \| 'right' \| 'full'>` | ✅ | Join type |
-| **strategy** | `Enum<'auto' \| 'database' \| 'hash' \| 'loop'>` | optional | Execution strategy hint |
-| **object** | `string` | ✅ | Object/table to join |
-| **alias** | `string` | optional | Table alias |
-| **on** | `any` | ✅ | Join condition |
-| **subquery** | `{ object: string; fields?: string[]; where?: any; search?: object; … }` | optional | Subquery instead of object |
-
-
----
-
-## JoinStrategy
-
-### Allowed Values
-
-* `auto`
-* `database`
-* `hash`
-* `loop`
-
-
----
-
-## JoinType
-
-### Allowed Values
-
-* `inner`
-* `left`
-* `right`
-* `full`
-
-
----
-
 ## Query
 
 ### Properties
@@ -172,11 +132,11 @@ Type: `string`
 | **offset** | `number` | optional | Records to skip (OFFSET) |
 | **top** | `number` | optional | Alias for limit (OData compatibility) |
 | **cursor** | `Record<string, any>` | optional | Cursor for keyset pagination |
-| **joins** | `{ type: Enum<'inner' \| 'left' \| 'right' \| 'full'>; strategy?: Enum<'auto' \| 'database' \| 'hash' \| 'loop'>; object: string; alias?: string; … }[]` | optional | Explicit Table Joins |
+| **joins** | `any` | optional | [REMOVED] `query.joins` was removed in @objectstack/spec 18 (#4286, ADR-0049) — no engine or driver ever read it: a query carrying `joins` behaved exactly as if the key were absent, while its name squatted on the reserved REST parameter set. Delete the key. Related records are read through `expand` — `expand: { owner: { object: 'user', fields: ['name'] } }` — which the engine resolves via batch $in queries, and a single related column is a dotted `fields` path (`fields: ['owner.name']`). |
 | **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]` | optional | Aggregation functions |
 | **groupBy** | `string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string }[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
 | **having** | `any` | optional | HAVING clause for aggregation filtering |
-| **windowFunctions** | `{ function: Enum<'row_number' \| 'rank' \| 'dense_rank' \| 'percent_rank' \| 'lag' \| 'lead' \| 'first_value' \| 'last_value' \| 'sum' \| 'avg' \| 'count' \| 'min' \| 'max'>; field?: string; alias: string; over: object }[]` | optional | Window functions with OVER clause |
+| **windowFunctions** | `any` | optional | [REMOVED] `query.windowFunctions` was removed in @objectstack/spec 18 (#4286, ADR-0049) — `find()` never applied it: no engine or driver read the key on the query path, so every OVER clause it declared was silently dropped. Delete the key. Window functions are a SQL-driver capability behind `SqlDriver.findWithWindowFunctions(object, query)` (embedder-level; not on the `IDataDriver` contract or the REST surface); request-level analytics are `aggregations` + `groupBy`. |
 | **distinct** | `boolean` | optional | SELECT DISTINCT flag |
 | **expand** | `Record<string, [Query](#query)>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
 
@@ -191,54 +151,6 @@ Type: `string`
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ |  |
 | **order** | `Enum<'asc' \| 'desc'>` | ✅ |  |
-
-
----
-
-## WindowFunction
-
-### Allowed Values
-
-* `row_number`
-* `rank`
-* `dense_rank`
-* `percent_rank`
-* `lag`
-* `lead`
-* `first_value`
-* `last_value`
-* `sum`
-* `avg`
-* `count`
-* `min`
-* `max`
-
-
----
-
-## WindowFunctionNode
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **function** | `Enum<'row_number' \| 'rank' \| 'dense_rank' \| 'percent_rank' \| 'lag' \| 'lead' \| 'first_value' \| 'last_value' \| 'sum' \| 'avg' \| 'count' \| 'min' \| 'max'>` | ✅ | Window function name |
-| **field** | `string` | optional | Field to operate on (for aggregate window functions) |
-| **alias** | `string` | ✅ | Result column alias |
-| **over** | `{ partitionBy?: string[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; frame?: object }` | ✅ | Window specification (OVER clause) |
-
-
----
-
-## WindowSpec
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **partitionBy** | `string[]` | optional | PARTITION BY fields |
-| **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | ORDER BY specification |
-| **frame** | `{ type?: Enum<'rows' \| 'range'>; start?: string; end?: string }` | optional | Window frame specification |
 
 
 ---
