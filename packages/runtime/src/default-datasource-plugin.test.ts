@@ -7,6 +7,7 @@
 // the real kernel (init-all → start-all) with the real driver factory.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 import { Runtime } from './runtime.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 import { AppPlugin } from './app-plugin.js';
@@ -64,10 +65,10 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
     });
     try {
       await kernel.bootstrap();
-      const engine = kernel.getService<any>('data');
+      const engine = kernel.getService<IDataEngine>('data');
       // The driver keeps its NATURAL name (no 'default' stamping) — routing to
       // `default` goes through the engine's default-driver fallback.
-      expect(engine.getDriverByName('default')).toBeUndefined();
+      expect(engine.getDriverByName?.('default')).toBeUndefined();
       await engine.insert('note', { title: 'through-the-default' });
       const rows = await engine.find('note');
       expect(rows.map((r: any) => r.title)).toContain('through-the-default');
@@ -93,7 +94,7 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
     const kernel = await assemble({ withAdminPlugin: false });
     try {
       await kernel.bootstrap();
-      const engine = kernel.getService<any>('data');
+      const engine = kernel.getService<IDataEngine>('data');
       await engine.insert('sys_metadata', undefined as never).catch(() => { /* shape probe only */ });
       // The default driver exists and the engine can answer a trivial query path.
       expect(typeof engine.find).toBe('function');
@@ -133,8 +134,8 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
     });
     try {
       await expect(kernel.bootstrap()).resolves.not.toThrow();
-      const engine = kernel.getService<any>('data');
-      expect(engine.getDefaultDriverName()).toBeDefined();
+      const engine = kernel.getService<IDataEngine>('data');
+      expect(engine.getDefaultDriverName?.()).toBeDefined();
     } finally {
       try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
     }
@@ -158,11 +159,11 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
     });
     try {
       await kernel.bootstrap();
-      const engine = kernel.getService<any>('data');
-      const defaultName = engine.getDefaultDriverName();
+      const engine = kernel.getService<IDataEngine>('data');
+      const defaultName = engine.getDefaultDriverName?.();
       expect(defaultName).toBeDefined();
       // Identity, not equivalence: the engine's default driver IS the host's instance.
-      expect(engine.getDriverByName(defaultName)).toBe(hostBuilt);
+      expect(engine.getDriverByName?.(defaultName!)).toBe(hostBuilt);
       await engine.insert('note', { title: 'through-the-adopted-default' });
       const rows = await engine.find('note');
       expect(rows.map((r: any) => r.title)).toContain('through-the-adopted-default');
@@ -197,8 +198,10 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
   it('kernel teardown disconnects an OWNED (factory-built) default through the one service (#3993)', async () => {
     const kernel = await assemble({});
     await kernel.bootstrap();
-    const engine = kernel.getService<any>('data');
-    const drv = engine.getDriverByName(engine.getDefaultDriverName());
+    const engine = kernel.getService<IDataEngine>('data');
+    // The real engine carries the driver registry; `!` asserts exactly that,
+    // and a missing surface fails the test rather than sliding past it.
+    const drv = engine.getDriverByName!(engine.getDefaultDriverName!()!)!;
     let disconnects = 0;
     const orig = drv.disconnect?.bind(drv);
     drv.disconnect = async () => { disconnects += 1; return orig?.(); };

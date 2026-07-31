@@ -119,18 +119,34 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             );
         });
 
-        it('should prefer populate names over expand string when both provided', async () => {
-            await protocol.findData({
-                object: 'task',
-                query: { populate: ['assignee'], expand: 'project' },
-            });
+        it('refuses conflicting populate/expand values — spellings of ONE slot (#3795)', async () => {
+            // The deprecated `populate` used to WIN this mix (canonical
+            // `expand` was only consulted when populate produced nothing) —
+            // the documented precedence, backwards. Two different values for
+            // one slot cannot be reconciled, so the mix is refused outright,
+            // the same #4181 rule the filter slot already had.
+            await expect(
+                protocol.findData({
+                    object: 'task',
+                    query: { populate: ['assignee'], expand: 'project' },
+                }),
+            ).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+            expect(mockEngine.find).not.toHaveBeenCalled();
+        });
 
-            // populate names take precedence; the non-object expand string is
-            // cleaned up first, then populate-derived names create the Record.
-            const callArgs = mockEngine.find.mock.calls[0][1];
-            expect(callArgs.populate).toBeUndefined();
-            expect(callArgs.$expand).toBeUndefined();
-            expect(callArgs.expand).toEqual({ assignee: { object: 'assignee' } });
+        it('should lower a direct expand ARRAY to the Record, not ride it raw (#3795)', async () => {
+            // A `{expand: ['a']}` body used to survive the block whole: the
+            // array is `typeof 'object'`, so the Record conversion was
+            // skipped and the #4226 gate read its INDICES ('0') as relation
+            // names — a 400 for a shape `populate` handled fine.
+            await protocol.findData({ object: 'task', query: { expand: ['assignee', 'project'] } });
+
+            expect(mockEngine.find).toHaveBeenCalledWith(
+                'task',
+                expect.objectContaining({
+                    expand: { assignee: { object: 'assignee' }, project: { object: 'project' } },
+                }),
+            );
         });
 
         it('should pass expand Record object through as-is', async () => {
@@ -1155,6 +1171,148 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             for (const call of engine.find.mock.calls) {
                 expect(call[1].where).toEqual({ status: 'done' });
             }
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // #3795 — one slot, one value, for ALL five alias pairs
+    //
+    // The spec documented `where` > `filter`, `fields` > `select`,
+    // `orderBy` > `sort`, `offset` > `skip`, `expand` > `populate` — in prose
+    // only. This normalizer implemented four of the five BACKWARDS (canonical
+    // consulted last), and the runtime dispatcher carried a second fold with
+    // the opposite precedence on three of them, so one request resolved
+    // differently per path. The fold now lives once, in the spec's own table
+    // (`RPC_QUERY_ALIAS_SLOTS`), under #4181's rule: alias alone folds,
+    // identical duplicates collapse, different values are refused.
+    // ═══════════════════════════════════════════════════════════════
+
+    describe('alias precedence resolves by the spec table, all five slots (#3795)', () => {
+        function makeProtocol() {
+            const engine: any = {
+                find: vi.fn().mockResolvedValue([]),
+                findOne: vi.fn().mockResolvedValue(null),
+                count: vi.fn().mockResolvedValue(0),
+                registry: {
+                    getObject: vi.fn((name: string) => ({
+                        name,
+                        fields: {
+                            title: { type: 'text' },
+                            status: { type: 'text' },
+                            assignee: { type: 'lookup', reference: 'user' },
+                            project: { type: 'lookup', reference: 'project' },
+                        },
+                    })),
+                },
+            };
+            return { protocol: new ObjectStackProtocolImplementation(engine), engine };
+        }
+
+        // Each case: [alias spelling, canonical key, alias value,
+        // conflicting canonical value, expected canonical output of the
+        // alias-alone fold].
+        const SLOTS = [
+            ['select', 'fields', ['title'], ['status'], ['title']],
+            ['skip', 'offset', 5, 0, 5],
+            ['sort', 'orderBy', 'title', [{ field: 'status', order: 'asc' }], [{ field: 'title', order: 'asc' }]],
+            ['populate', 'expand', ['assignee'], { project: { object: 'project' } }, { assignee: { object: 'assignee' } }],
+            ['filter', 'where', { status: 'done' }, { status: 'open' }, { status: 'done' }],
+        ] as const;
+
+        it.each(SLOTS)(
+            '%s alone folds into %s — and the alias key is gone',
+            async (alias, canonical, aliasValue, _conflict, folded) => {
+                const { protocol, engine } = makeProtocol();
+                await protocol.findData({ object: 'showcase_task', query: { [alias]: aliasValue } });
+                const opts = engine.find.mock.calls[0][1];
+                expect(opts[canonical]).toEqual(folded);
+                expect(alias in opts).toBe(false);
+            },
+        );
+
+        it.each(SLOTS)(
+            '%s + %s with different values is refused, before the engine',
+            async (alias, canonical, aliasValue, conflictValue) => {
+                const { protocol, engine } = makeProtocol();
+                await expect(
+                    protocol.findData({
+                        object: 'showcase_task',
+                        query: { [alias]: aliasValue, [canonical]: conflictValue },
+                    }),
+                ).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+                expect(engine.find).not.toHaveBeenCalled();
+            },
+        );
+
+        it.each(SLOTS)(
+            '%s + %s with the SAME value passes — redundancy is not ambiguity',
+            async (alias, canonical, aliasValue, _conflict, folded) => {
+                const { protocol, engine } = makeProtocol();
+                await protocol.findData({
+                    object: 'showcase_task',
+                    query: { [alias]: aliasValue, [canonical]: aliasValue },
+                });
+                const opts = engine.find.mock.calls[0][1];
+                expect(opts[canonical]).toEqual(folded);
+                expect(alias in opts).toBe(false);
+            },
+        );
+
+        it('the rejection names the spellings the caller wrote and the canonical key', async () => {
+            const { protocol } = makeProtocol();
+            await expect(
+                protocol.findData({
+                    object: 'showcase_task',
+                    query: { select: ['title'], fields: ['status'] },
+                }),
+            ).rejects.toThrow(/'fields'.*'select'.*canonical 'fields'.*Send exactly one/s);
+        });
+
+        it("the rejection quotes the OData spelling when that is what arrived (#4226)", async () => {
+            const { protocol } = makeProtocol();
+            await expect(
+                protocol.findData({
+                    object: 'showcase_task',
+                    query: { $expand: 'assignee', expand: { project: { object: 'project' } } },
+                }),
+            ).rejects.toThrow(/'\$expand'/);
+        });
+
+        it('a canonical key alone is never touched by the fold', async () => {
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({
+                object: 'showcase_task',
+                query: {
+                    where: { status: 'done' },
+                    fields: ['title'],
+                    orderBy: [{ field: 'title', order: 'desc' }],
+                    offset: 3,
+                    expand: { assignee: { object: 'user' } },
+                },
+            });
+            const opts = engine.find.mock.calls[0][1];
+            expect(opts.where).toEqual({ status: 'done' });
+            expect(opts.fields).toEqual(['title']);
+            expect(opts.orderBy).toEqual([{ field: 'title', order: 'desc' }]);
+            expect(opts.offset).toBe(3);
+            expect(opts.expand).toEqual({ assignee: { object: 'user' } });
+        });
+
+        it('an explicit null spelling is a withdrawal, never a conflict', async () => {
+            // A null alias is dropped without folding (the `??` / `!= null`
+            // guards the fold replaced treated it as absent), and a null
+            // canonical does not shadow a real alias value (#4226 pinned this
+            // for `{orderBy: null, sort}`), so "this key intentionally
+            // carries nothing" never manufactures a 400.
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({ object: 'showcase_task', query: { filter: null } });
+            expect(engine.find.mock.calls[0][1].where).toBeUndefined();
+
+            await protocol.findData({
+                object: 'showcase_task',
+                query: { offset: null, skip: 7 },
+            });
+            expect(engine.find.mock.calls[1][1].offset).toBe(7);
         });
     });
 });

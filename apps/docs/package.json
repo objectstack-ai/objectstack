@@ -10,7 +10,8 @@
     "site:start": "next start",
     "site:lint": "next lint",
     "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",
-    "postinstall": "fumadocs-mdx"
+    "postinstall": "fumadocs-mdx",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "fumadocs-core": "16.12.1",

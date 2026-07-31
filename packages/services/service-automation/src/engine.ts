@@ -35,6 +35,36 @@ interface ConfigSchemaNode {
     items?: ConfigSchemaNode;
     additionalProperties?: unknown;
 }
+
+/**
+ * Known-confusable flow-node config keys → precise authoring guidance,
+ * appended to the undeclared-key rejection (#4277). The `UNKNOWN_KEY_GUIDANCE`
+ * pattern from `object.zod.ts`, scoped per node type so a key name that is
+ * wrong on one node but real on another never misfires.
+ *
+ * Entries are seeded only from documented incidents — a tombstone with no
+ * history is noise. The generic rejection already carries the path, the
+ * did-you-mean and the declared set; an entry here adds the *mechanism* the
+ * author was reaching for.
+ */
+const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
+    create_record: {
+        fieldValues:
+            'The write map is `fields` — `fieldValues` was an AI-authoring dialect that never had a ' +
+            'runtime reader; the fix is the authoring source + this rejection, not a runtime alias ' +
+            '(#2419, rejected by design).',
+    },
+    update_record: {
+        fieldValues:
+            'The write map is `fields` — `fieldValues` was an AI-authoring dialect that never had a ' +
+            'runtime reader (#2419, rejected by design).',
+    },
+    screen: {
+        visibleIf:
+            'The visibility predicate is `visibleWhen` (bare CEL, re-evaluated client-side as the ' +
+            'user types — #3528, the incident this whole check descends from).',
+    },
+};
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
 import { isGuardRefusal } from './guard-refusal.js';
 
@@ -1446,10 +1476,12 @@ export class AutomationEngine implements IAutomationService {
         // executeNode() already throws NO_EXECUTOR at run time for unknown types.
         this.validateNodeTypes(name, parsed);
 
-        // #4045 — warn on config keys the node's descriptor does not declare
-        // (a `visibleIf` typo is silently accepted today). Warn-only: see
-        // validateNodeConfigKeys for why hard-failing would gamble on the nine
-        // builtins whose read-vs-declared drift has not been audited.
+        // #4277 — REJECT config keys the node's descriptor does not declare
+        // (the tightened #4059 warning; a `visibleIf` typo used to register in
+        // silence). Hard-fail with per-key prescriptions: see
+        // validateNodeConfigKeys for why the #4045 reconciliation made this
+        // safe, and for the deliberate exemptions (`assignment`, schemaless
+        // types, keyValue maps).
         this.validateNodeConfigKeys(name, parsed);
 
         // ADR-0032 §Decision 1a — parse-validate every predicate at registration,
@@ -2697,48 +2729,81 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * Warn about node `config` keys the node type's descriptor does not declare
-     * (#4045 — the warn half of the unknown-key ladder).
+     * REJECT node `config` keys the node type's descriptor does not declare
+     * (#4277 — the error half of the #4045 unknown-key ladder; #4059 shipped
+     * the warn half).
      *
-     * `FlowNodeSchema.config` is `z.record(z.unknown())`, so a misspelled or
-     * invented config key is accepted in total silence today: `visibleIf` instead
-     * of `visibleWhen` registers cleanly and then does nothing, which is exactly
-     * the failure shape that made #3528 take three passes to diagnose. The key is
-     * never read, so there is no runtime error to trace back — the only symptom
-     * is a feature that quietly does not happen.
+     * `FlowNodeSchema.config` is `z.record(z.unknown())`, so before #4059 a
+     * misspelled or invented config key was accepted in total silence:
+     * `visibleIf` instead of `visibleWhen` registered cleanly and then did
+     * nothing, which is exactly the failure shape that made #3528 take three
+     * passes to diagnose. The key is never read, so there is no runtime error
+     * to trace back — the only symptom is a feature that quietly does not
+     * happen.
      *
-     * **Warn, never reject.** An undeclared key falls into three populations and
-     * this seam cannot yet tell them apart: an author typo (which we want to
-     * reject), a key the executor genuinely reads that its hand-written
-     * `configSchema` never declared (`notify.source` was exactly this until
-     * #4045 — rejecting those breaks working apps), and dead config nobody reads
-     * (harmless). Only 4 of the 13 schema-carrying builtins have been audited for
-     * the second population, so hard-failing here would gamble on the 9 that have
-     * not. The warning is what measures that distribution; tightening to an error
-     * is a later, per-key decision once the data exists, and belongs with a
-     * tombstone that carries the prescription (the `UNKNOWN_KEY_GUIDANCE` pattern
-     * in `object.zod.ts`).
+     * **Why an error is safe now.** An undeclared key falls into three
+     * populations, and when #4059 landed this seam could not tell them apart:
+     * an author typo (reject), a key the executor genuinely reads that its
+     * hand-written `configSchema` never declared (`notify.source` was exactly
+     * this — rejecting those breaks working apps), and dead config nobody
+     * reads. The #4045 reconciliation closed the second population — every
+     * read-but-undeclared key across the schema-carrying builtins was either
+     * declared on its descriptor or graduated into the ADR-0087 conversion
+     * layer, with ledger tests ratcheting both directions — and the #4059
+     * warning measured what remains in live metadata. What survives to this
+     * check today is typos and dead config, and both are metadata bugs the
+     * platform's contract-first rule says to reject at the producer, loudly
+     * (Prime Directive #12; ADR-0032 no-silent-failure).
      *
-     * Soft-fail matches {@link validateNodeTypes} directly above — same function,
-     * same `logger.warn` channel, same reasoning about not breaking flows over a
-     * diagnostic. Nothing about the published `configSchema` changes, so no
-     * consumer (designer form generation included) sees a different shape.
+     * The rejection carries its prescription (the `UNKNOWN_KEY_GUIDANCE`
+     * pattern from `object.zod.ts`): every violation names its exact path, the
+     * declared key set, a did-you-mean when edit distance allows, and — for
+     * keys with documented history — a per-key tombstone from
+     * {@link FLOW_NODE_UNKNOWN_KEY_GUIDANCE}.
+     *
+     * Deliberate exemptions, unchanged from the warn era:
+     *  - **`assignment` is exempt wholesale**: with no `assignments` wrapper
+     *    its top-level config keys ARE the author's variable names
+     *    (logic-nodes.ts normalizes three shapes), so no fixed key set can
+     *    describe it — pinned as un-reconcilable by the form↔Zod ledger.
+     *  - Schemaless types (`decision`, `script`, `wait`, `subflow`,
+     *    `connector_action`) publish no `configSchema` ⇒ nothing is declared,
+     *    so nothing can be undeclared. `wait` / `connector_action` keep their
+     *    contracts on FlowNode SIBLING blocks (`waitEventConfig` /
+     *    `connectorConfig`), which this walk never touches.
+     *  - keyValue maps (`additionalProperties: true`, no fixed `properties`)
+     *    stop the walk: their keys are author data, not config keys.
+     *
+     * Hard-fail matches {@link validateFlowExpressions} below — a flow whose
+     * metadata is wrong never registers, and every `registerFlow` call site
+     * already try/catches per flow, so a bad flow is skipped loudly at boot
+     * rather than crashing the kernel.
      */
     private validateNodeConfigKeys(flowName: string, flow: FlowParsed): void {
+        const violations: string[] = [];
         for (const node of flow.nodes) {
+            // `assignment` config keys are the author's variable names — see the
+            // exemption note above.
+            if (node.type === 'assignment') continue;
             const schema = this.actionDescriptors.get(node.type)?.configSchema as ConfigSchemaNode | undefined;
-            // No descriptor, or a deliberately schemaless type (`decision`,
-            // `script`, `wait`, `subflow`, `connector_action` publish none —
-            // see config-schemas.test) ⇒ nothing is declared, so nothing can
-            // be undeclared.
             if (!schema) continue;
-            this.warnUndeclaredConfigKeys(flowName, node, schema, node.config, 'config');
+            this.collectUndeclaredConfigKeys(node, schema, node.config, 'config', violations);
+        }
+        if (violations.length > 0) {
+            throw new Error(
+                `Flow '${flowName}' rejected: ${violations.length} undeclared config key(s) (#4277).\n` +
+                violations.map((v) => `  - ${v}`).join('\n') +
+                `\nAn undeclared key is never read, so it can only be a typo or dead config — fix the ` +
+                `flow's metadata (rename or remove the key). If an executor genuinely reads this key, ` +
+                `declare it on the node type's descriptor configSchema instead; read-but-undeclared ` +
+                `keys are exactly the drift the #4045 reconciliation closed.`,
+            );
         }
     }
 
     /**
-     * Walk `value` against `schema` in lockstep, warning on keys the schema does
-     * not declare.
+     * Walk `value` against `schema` in lockstep, collecting keys the schema does
+     * not declare into `violations`.
      *
      * Descends **only where the schema declares structure** — an object with fixed
      * `properties`, or an array whose `items` do. It deliberately stops at a
@@ -2752,17 +2817,17 @@ export class AutomationEngine implements IAutomationService {
      * comparison would miss `visibleIf` — the exact mistake this check exists to
      * catch — while still reporting the rarer top-level ones. A test pins it.
      */
-    private warnUndeclaredConfigKeys(
-        flowName: string,
+    private collectUndeclaredConfigKeys(
         node: FlowNodeParsed,
         schema: ConfigSchemaNode,
         value: unknown,
         path: string,
+        violations: string[],
     ): void {
         if (schema.type === 'array' && schema.items) {
             if (!Array.isArray(value)) return;
             value.forEach((element, index) => {
-                this.warnUndeclaredConfigKeys(flowName, node, schema.items!, element, `${path}[${index}]`);
+                this.collectUndeclaredConfigKeys(node, schema.items!, element, `${path}[${index}]`, violations);
             });
             return;
         }
@@ -2775,7 +2840,7 @@ export class AutomationEngine implements IAutomationService {
         for (const key of Object.keys(value as Record<string, unknown>)) {
             const child = schema.properties[key];
             if (child) {
-                this.warnUndeclaredConfigKeys(flowName, node, child, (value as Record<string, unknown>)[key], `${path}.${key}`);
+                this.collectUndeclaredConfigKeys(node, child, (value as Record<string, unknown>)[key], `${path}.${key}`, violations);
                 continue;
             }
             // The declared set is printed ALWAYS, not only as a fallback when the
@@ -2789,11 +2854,13 @@ export class AutomationEngine implements IAutomationService {
             // listing them is both cheap and complete, and the suggestion becomes
             // a bonus for the cases it does catch.
             const suggestion = nearestName(key, declared);
-            this.logger.warn(
-                `[flow '${flowName}'] node '${node.id}' (${node.type}): unknown config key \`${key}\` at ${path}.${key}` +
+            const guidance = FLOW_NODE_UNKNOWN_KEY_GUIDANCE[node.type]?.[key];
+            violations.push(
+                `node '${node.id}' (${node.type}): unknown config key \`${key}\` at ${path}.${key}` +
                 (suggestion ? ` — did you mean \`${suggestion}\`?` : '') +
                 ` It is not declared by this node type's configSchema, so nothing reads it.` +
-                ` Declared here: ${declared.join(', ')}.`,
+                ` Declared here: ${declared.join(', ')}.` +
+                (guidance ? ` ${guidance}` : ''),
             );
         }
     }

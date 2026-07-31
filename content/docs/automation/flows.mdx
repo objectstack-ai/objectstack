@@ -138,7 +138,7 @@ Each node performs a specific action in the flow.
 | `id` | `string` | ✅ | Unique node identifier |
 | `type` | `string` | ✅ | Node type — a built-in id from the table above **or** a plugin-registered one. Per ADR-0018 the spec does not gate this with a closed enum; it is checked against the live action registry at `registerFlow()` |
 | `label` | `string` | ✅ | Display label |
-| `config` | `object` | optional | Type-specific configuration (an open record — the registered executor's `configSchema` owns its shape) |
+| `config` | `object` | optional | Type-specific configuration — the registered executor's `configSchema` owns its shape. Keys that schema does not declare are rejected at `registerFlow()`, and the built-in executors `parse()` the value against their Zod contract before running (#4277) |
 | `connectorConfig` | `object` | optional | `{ connectorId, actionId, input }` for a `connector_action` node |
 | `position` | `{ x, y }` | optional | Visual position on canvas |
 | `timeoutMs` | `number` | optional | Per-node execution timeout |
@@ -148,8 +148,14 @@ Each node performs a specific action in the flow.
 
 <Callout type="info">
 The flow, node, edge, and variable **shells are `.strict()`** — a key they do not
-declare is a parse error naming the likely intended key, not a silent strip. (A
-node's `config` stays open, so plugin node types keep their own vocabulary.)
+declare is a parse error naming the likely intended key, not a silent strip. A
+node's `config` is open at the flow-parse level (plugin node types keep their own
+vocabulary), but it is not unchecked: `registerFlow()` rejects config keys the
+node type's published `configSchema` does not declare — naming the path, the
+declared key set, and a did-you-mean — and the contract-carrying builtins
+additionally `parse()` their config at execute time, refusing the node on a type
+or missing-`required` violation (#4277). A node type that publishes no
+`configSchema` declares nothing, so nothing can be undeclared.
 </Callout>
 
 ### Node Examples

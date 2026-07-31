@@ -43,15 +43,21 @@ field-item keys `options`/`defaultValue`/`placeholder`, `map.indexVariable`,
 
 ADR-0087 D2 conversion layer like `notify.source` before it.
 
-## What these schemas are (and are not) wired to
+## What these schemas are wired to (#4277)
 
-Contract exports only — no engine path `parse()`s a node config with them
+Live execute-time contracts: each executor `parse()`s its config against
 
-today, so registering a flow behaves exactly as before. Wiring the executors
+its schema before running (`service-automation`'s `parse-config.ts`), so
 
-to parse is deliberately deferred until the #4059 undeclared-key warning has
+type and `required` violations refuse the node as a guard. All of these
 
-measured a release's worth of real metadata (#4045 step 3b).
+parse the RAW stored config — their typed slots are strings (or `unknown`
+
+where values interpolate), so `\{token\}` templates pass and resolve at the
+
+executor's existing interpolation points. Unknown keys are rejected earlier,
+
+at `registerFlow()` (the tightened #4059 check); the parse here strips them.
 
 Deliberately absent:
 

@@ -65,6 +65,7 @@ import { validateFlowTemplatePaths } from './validate-flow-template-paths.js';
 import { validateAiSurfaceAffinity } from './validate-ai-surface-affinity.js';
 import { validateAiToolReferences } from './validate-ai-tool-references.js';
 import { validateAiAgentAuthoring } from './validate-ai-agent-authoring.js';
+import { validateHookBodyWrites } from './validate-hook-body-writes.js';
 
 export type ReferenceIntegritySeverity = 'error' | 'warning';
 
@@ -111,6 +112,12 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateAiSurfaceAffinity', run: validateAiSurfaceAffinity },
   { name: 'validateAiToolReferences', run: validateAiToolReferences },
   { name: 'validateAiAgentAuthoring', run: validateAiAgentAuthoring },
+  // Field names WRITTEN by an L2 hook body (`ctx.input.x = …`,
+  // `ctx.api.object('y').update({ x })`), resolved against the target object's
+  // declared fields — the write-side counterpart of validateFlowTemplatePaths'
+  // read-side membership (#4271). Lazy: only a hook that actually carries a
+  // `language:'js'` body loads the TypeScript parser.
+  { name: 'validateHookBodyWrites', run: validateHookBodyWrites },
 ];
 
 /**

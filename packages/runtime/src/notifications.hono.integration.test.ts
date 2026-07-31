@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 import { ObjectKernel, Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { ObjectQLPlugin } from '@objectstack/objectql';
@@ -164,7 +165,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
 
     // The receipts were actually persisted as `read` (not merely a view-layer
     // computation) — the server-side state the console poll re-reads.
-    const data = kernel.getService<any>('data');
+    const data = kernel.getService<IDataEngine>('data');
     const receipts = await data.find('sys_notification_receipt', {
       where: { user_id: TEST_USER, channel: 'inbox' },
     });

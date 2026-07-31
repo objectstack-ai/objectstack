@@ -36,9 +36,22 @@
  *
  * ## What these schemas are (and are not) wired to
  *
- * Contract exports only — like `builtin-node-config.zod.ts`, no engine path
- * `parse()`s a node config with them today, so registering a flow behaves
- * exactly as before.
+ * Contract exports only — no engine path `parse()`s a node config with them,
+ * so registering a flow behaves exactly as before. This is where they differ
+ * from their `builtin-node-config.zod.ts` siblings, which #4277 wired into
+ * execute-time parsing (`service-automation`'s `parse-config.ts`) and into the
+ * `registerFlow()` unknown-key rejection.
+ *
+ * That difference is deliberate, and it is the same reason these three publish
+ * no descriptor `configSchema`: **their key set is not the whole contract.**
+ * `script`'s legal keys depend on `actionType` (a built-in side effect reads
+ * `template`/`recipients`/`variables`; the function path reads
+ * `function`/`inputs`/`outputVariable`), and `decision` may carry no
+ * `conditions` at all when it branches purely on edge predicates. A flat parse
+ * would either reject those shapes or wave everything through — neither is the
+ * contract. Wiring them in needs a discriminated form first; until then the
+ * enforcement they DO get is the objectui reconciliation test, which is what
+ * #4278 was actually about (a form authoring keys nothing reads).
  *
  * Undeclared aliases are NOT part of these contracts: `subflow`'s historical
  * `flow` spelling graduated into the ADR-0087 D2 conversion

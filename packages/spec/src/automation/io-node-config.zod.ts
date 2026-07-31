@@ -15,15 +15,20 @@
  * and a Zod copied from the form would make that reconciliation a tautology —
  * it would pass by construction and prove nothing (#4045).
  *
- * ## What these schemas are (and are not) wired to
+ * ## What these schemas are wired to (#4277)
  *
  * Like `LoopConfigSchema` / `ParallelConfigSchema` / `TryCatchConfigSchema`,
- * these are **contract exports**: no engine path `parse()`s a node config with
- * them today, so registering a flow behaves exactly as before. Wiring the
- * executors to parse — which would finally give node configs the type /
- * `required` / unknown-key enforcement the descriptor `configSchema` never
- * provided — is deliberately deferred until the #4059 undeclared-key warning
- * has measured a release's worth of real metadata (#4045 step 3b).
+ * these are **live execute-time contracts**: each executor `parse()`s its
+ * config against its schema before running (`service-automation`'s
+ * `parse-config.ts`), so type and `required` violations refuse the node as a
+ * guard (not routable via `fault` edges). `notify` parses the RAW stored
+ * config — its slots are string-typed, so `{token}` templates pass and the
+ * post-interpolation guards still own "resolved to nothing". `http` parses
+ * the INTERPOLATED config, because that is the shape its executor reads —
+ * a `{token}` in a typed slot (`timeoutMs`, `durable`) resolves to its real
+ * type first. Unknown keys are the registration layer's job: `registerFlow()`
+ * rejects keys the descriptor `configSchema` does not declare (the tightened
+ * #4059 check), while the parse here strips them.
  *
  * `connector_action` has no schema here on purpose: its config contract is
  * empty. The executor reads only the declared `FlowNodeSchema.connectorConfig`

@@ -106,49 +106,17 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
     } else {
         // GET /data/:object (List)
         if (m === 'GET') {
-            // ── Normalize HTTP transport params → Spec canonical (QueryAST) ──
-            // HTTP GET query params use transport-level names (filter, sort, top,
-            // skip, select, expand) which are normalized here to canonical
-            // QueryAST field names (where, orderBy, limit, offset, fields,
-            // expand) before forwarding to the data service layer.
-            // The protocol.ts findData() method performs a deeper normalization
-            // pass, but pre-normalizing here ensures the data service always receives
-            // Spec-canonical keys.
-            const normalized: Record<string, unknown> = { ...query };
-
-            // filter/filters → where
-            // Note: `filter` is the canonical HTTP *transport* parameter name
-            // (see HttpFindQueryParamsSchema). It is normalized here to the
-            // canonical *QueryAST* field name `where` before data dispatch.
-            // `filters` (plural) is a deprecated alias for `filter`.
-            if (normalized.filter != null || normalized.filters != null) {
-                normalized.where = normalized.where ?? normalized.filter ?? normalized.filters;
-                delete normalized.filter;
-                delete normalized.filters;
-            }
-            // select → fields
-            if (normalized.select != null && normalized.fields == null) {
-                normalized.fields = normalized.select;
-                delete normalized.select;
-            }
-            // sort → orderBy
-            if (normalized.sort != null && normalized.orderBy == null) {
-                normalized.orderBy = normalized.sort;
-                delete normalized.sort;
-            }
-            // top → limit
-            if (normalized.top != null && normalized.limit == null) {
-                normalized.limit = normalized.top;
-                delete normalized.top;
-            }
-            // skip → offset
-            if (normalized.skip != null && normalized.offset == null) {
-                normalized.offset = normalized.skip;
-                delete normalized.skip;
-            }
-
+            // HTTP transport params (filter/select/sort/top/skip, see
+            // HttpFindQueryParamsSchema) ride through VERBATIM. Folding them
+            // into QueryAST names is owned by the protocol's `findData`
+            // normalizer alone (#3795): this route used to carry its own copy
+            // of that fold, with the OPPOSITE precedence on three of the five
+            // alias pairs — two readers of one prose contract, the exact
+            // condition #3713 described. One fold, one answer; a second copy
+            // here could only agree by inspection.
+            //
             // Spec: returns FindDataResponse = { object, records, total?, hasMore? }
-            const result = await actionExec.callData(deps, 'query', { object: objectName, query: normalized }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, 'query', { object: objectName, query: { ...query } }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 

@@ -13,7 +13,8 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.tsx --config ../../tsup.config.ts"
+    "build": "tsup src/index.tsx --config ../../tsup.config.ts",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "react": ">=18.0.0"

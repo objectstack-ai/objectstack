@@ -384,9 +384,124 @@ export const DataEngineContractSchema = lazySchema(() => z.object({
  */
 
 /**
+ * One RPC query-options slot: the canonical QueryAST key plus the deprecated
+ * alias spellings that fold into it.
+ */
+export interface QueryAliasSlot {
+  /** Canonical QueryAST key the slot's value lands on. */
+  canonical: string;
+  /** Accepted alias spellings, in report order. */
+  aliases: readonly string[];
+}
+
+/**
+ * A slot whose spellings arrived with different values — irreconcilable,
+ * reported instead of silently resolved (see {@link foldQueryAliasSlots}).
+ */
+export interface QueryAliasConflict {
+  /** Canonical key of the slot the spellings collided on. */
+  canonical: string;
+  /** Every spelling present on the input, canonical first when present. */
+  spellings: string[];
+}
+
+/**
+ * The five alias pairs the RPC query surface accepts (#3795) — the ONE place
+ * the alias → canonical mapping is declared. The schema transform below folds
+ * parsed input by this table, and the protocol normalizer
+ * (`metadata-protocol`) folds raw wire input by the same table, extended with
+ * the wire-only spellings `filters` / `$filter` / `$expand` that no schema
+ * declares. Before this table existed the precedence lived in prose only, so
+ * every reader re-implemented it — the #3713 condition — and the two readers
+ * disagreed on three of the five pairs, four of them backwards.
+ */
+export const RPC_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = [
+  { canonical: 'where', aliases: ['filter'] },
+  { canonical: 'fields', aliases: ['select'] },
+  { canonical: 'orderBy', aliases: ['sort'] },
+  { canonical: 'offset', aliases: ['skip'] },
+  { canonical: 'expand', aliases: ['populate'] },
+];
+
+/**
+ * Fold alias spellings into their canonical slot key, in place.
+ *
+ * Per slot: an alias alone moves to the canonical key; redundant IDENTICAL
+ * spellings (by JSON value) collapse into the canonical key; different values
+ * for one slot are irreconcilable — merging would invent an intent the caller
+ * never expressed, and picking a winner IS the silent drop (#4181) — so the
+ * slot is reported via `onConflict` and left unfolded. Alias keys are always
+ * deleted on a successful fold, so downstream readers see canonical keys only.
+ *
+ * An explicit `null` spelling is a WITHDRAWAL, not a value: a null alias is
+ * deleted without folding (the `??` / `!= null` guards this fold replaced
+ * treated it as absent), and a null canonical stays put for the slot's own
+ * value handling to answer — the filter slot rejects it (#4181), the sort
+ * slot ignores it (#4226) — so folding never manufactures a conflict out of
+ * "this key intentionally carries nothing".
+ *
+ * Values are moved verbatim — a folded value may still carry the alias's
+ * legacy SHAPE (e.g. `sort`'s `{field: 'asc'}` record form), which the caller
+ * lowers after folding.
+ *
+ * Returns the spelling each folded slot's value arrived under
+ * (canonical key → spelling), so a later rejection can quote the parameter
+ * the caller actually wrote (#4226).
+ */
+export function foldQueryAliasSlots(
+  options: Record<string, unknown>,
+  slots: readonly QueryAliasSlot[],
+  onConflict: (conflict: QueryAliasConflict) => void,
+): Record<string, string> {
+  const arrivedAs: Record<string, string> = {};
+  for (const slot of slots) {
+    const spellings = [slot.canonical, ...slot.aliases];
+    const present = spellings.filter((s) => options[s] != null);
+    if (present.length > 1) {
+      const distinct = new Set(present.map((s) => JSON.stringify(options[s])));
+      if (distinct.size > 1) {
+        // Left as-is: the caller either throws (wire) or fails the parse
+        // (schema transform), so the unfolded state is never observed.
+        onConflict({ canonical: slot.canonical, spellings: present });
+        continue;
+      }
+    }
+    if (present.length > 0) {
+      const value = options[present[0]];
+      options[slot.canonical] = value;
+      arrivedAs[slot.canonical] = present[0];
+    }
+    for (const spelling of spellings) {
+      if (spelling !== slot.canonical) delete options[spelling];
+    }
+  }
+  return arrivedAs;
+}
+
+/** The `where` slot alone — for RPC options that accept only the `filter` alias. */
+const RPC_WHERE_SLOT: readonly QueryAliasSlot[] = RPC_QUERY_ALIAS_SLOTS.filter(
+  (slot) => slot.canonical === 'where',
+);
+
+function aliasConflictIssue(conflict: QueryAliasConflict): {
+  code: 'custom';
+  path: string[];
+  message: string;
+} {
+  return {
+    code: 'custom',
+    path: [conflict.canonical],
+    message:
+      `Conflicting query parameters: ${conflict.spellings.map((s) => `'${s}'`).join(', ')} ` +
+      `are spellings of the same parameter (canonical '${conflict.canonical}') and were ` +
+      'given different values. Send exactly one.',
+  };
+}
+
+/**
  * RPC backward-compatibility mixin — shared `@deprecated filter` field.
- * When both `filter` and `where` are present, the protocol/engine ignores
- * `filter` in favor of `where`; only one should be provided.
+ * The parse transform folds `filter` into `where` and drops it; both spellings
+ * with different values fail the parse (see `RpcQueryOptionsSchema`).
  */
 const RpcLegacyFilterMixin = {
   /** @deprecated Use `where` */
@@ -394,13 +509,60 @@ const RpcLegacyFilterMixin = {
 };
 
 /**
+ * Parse-time fold for options that accept only the `filter` alias
+ * ({@link RpcLegacyFilterMixin}): `filter` lands on `where` and is dropped
+ * from the parsed output, so `filter` is absent from the inferred type and a
+ * TS consumer reading it fails to compile instead of silently reading
+ * `undefined` (the #3742 / #3764 shape, one layer down).
+ */
+function foldRpcLegacyFilter<T extends { filter?: unknown }>(
+  input: T,
+  ctx: z.core.$RefinementCtx,
+): Omit<T, 'filter'> {
+  const bag: Record<string, unknown> = { ...input };
+  foldQueryAliasSlots(bag, RPC_WHERE_SLOT, (conflict) => ctx.addIssue(aliasConflictIssue(conflict)));
+  return bag as Omit<T, 'filter'>;
+}
+
+/**
+ * Parse-time fold for the full RPC query options: each legacy alias lands on
+ * its canonical key (with the alias's legacy value shape lowered to the
+ * canonical one) and is dropped from the parsed output.
+ */
+function foldRpcQueryOptions(input: object, ctx: z.core.$RefinementCtx): EngineQueryOptions {
+  const bag = { ...(input as Record<string, unknown>) };
+  foldQueryAliasSlots(bag, RPC_QUERY_ALIAS_SLOTS, (conflict) => ctx.addIssue(aliasConflictIssue(conflict)));
+  // A folded `sort` may carry the record spellings `DataEngineSortSchema`
+  // allows; canonical `orderBy` declares `SortNode[]` only, so lower them.
+  if (bag.orderBy !== undefined && bag.orderBy !== null && !Array.isArray(bag.orderBy)) {
+    bag.orderBy = Object.entries(bag.orderBy as Record<string, 'asc' | 'desc' | 1 | -1>).map(
+      ([field, order]) => ({ field, order: order === 'asc' || order === 1 ? 'asc' : 'desc' }),
+    );
+  }
+  // A folded `populate` is a relation-name list; canonical `expand` is a
+  // `{name: QueryAST}` record.
+  if (Array.isArray(bag.expand)) {
+    bag.expand = Object.fromEntries(
+      (bag.expand as string[]).map((rel) => [rel, { object: rel }]),
+    );
+  }
+  return bag as EngineQueryOptions;
+}
+
+/**
  * RPC query options that accept BOTH new (where/fields/orderBy) and
  * legacy (filter/select/sort/skip/populate) parameter names.
- * 
- * **Precedence:** When both legacy and new keys are present for the same
- * concern, the protocol normalizer uses the new key (`where` > `filter`,
- * `fields` > `select`, `orderBy` > `sort`, `offset` > `skip`,
- * `expand` > `populate`). Callers should not mix vocabularies.
+ *
+ * **One slot, one value (#3795):** each legacy alias is folded into its
+ * canonical key at parse — `filter`→`where`, `select`→`fields`,
+ * `sort`→`orderBy`, `skip`→`offset`, `populate`→`expand`
+ * ({@link RPC_QUERY_ALIAS_SLOTS}) — and the alias is dropped from the parsed
+ * output, so consumers only ever read canonical QueryAST keys. Sending both
+ * spellings with the SAME value is redundant and tolerated; sending DIFFERENT
+ * values for one slot is irreconcilable — picking either would silently drop
+ * the other (#4181) — and fails the parse. The protocol normalizer applies
+ * the same table to raw wire input, so mixed vocabularies resolve identically
+ * on every path.
  */
 const RpcQueryOptionsSchema = EngineQueryOptionsSchema.extend({
   ...RpcLegacyFilterMixin,
@@ -412,7 +574,7 @@ const RpcQueryOptionsSchema = EngineQueryOptionsSchema.extend({
   skip: z.number().int().min(0).optional(),
   /** @deprecated Use `expand` */
   populate: z.array(z.string()).optional(),
-});
+}).transform((options, ctx) => foldRpcQueryOptions(options, ctx));
 
 export const DataEngineFindRequestSchema = lazySchema(() => z.object({
   method: z.literal('find'),
@@ -438,26 +600,30 @@ export const DataEngineUpdateRequestSchema = lazySchema(() => z.object({
   object: z.string(),
   data: z.record(z.string(), z.unknown()),
   id: z.union([z.string(), z.number()]).optional().describe('ID for single update, or use where in options'),
-  options: EngineUpdateOptionsSchema.extend(RpcLegacyFilterMixin).optional()
+  options: EngineUpdateOptionsSchema.extend(RpcLegacyFilterMixin)
+    .transform((options, ctx) => foldRpcLegacyFilter(options, ctx)).optional()
 }));
 
 export const DataEngineDeleteRequestSchema = lazySchema(() => z.object({
   method: z.literal('delete'),
   object: z.string(),
   id: z.union([z.string(), z.number()]).optional().describe('ID for single delete, or use where in options'),
-  options: EngineDeleteOptionsSchema.extend(RpcLegacyFilterMixin).optional()
+  options: EngineDeleteOptionsSchema.extend(RpcLegacyFilterMixin)
+    .transform((options, ctx) => foldRpcLegacyFilter(options, ctx)).optional()
 }));
 
 export const DataEngineCountRequestSchema = lazySchema(() => z.object({
   method: z.literal('count'),
   object: z.string(),
-  query: EngineCountOptionsSchema.extend(RpcLegacyFilterMixin).optional()
+  query: EngineCountOptionsSchema.extend(RpcLegacyFilterMixin)
+    .transform((options, ctx) => foldRpcLegacyFilter(options, ctx)).optional()
 }));
 
 export const DataEngineAggregateRequestSchema = lazySchema(() => z.object({
   method: z.literal('aggregate'),
   object: z.string(),
   query: EngineAggregateOptionsSchema.extend(RpcLegacyFilterMixin)
+    .transform((options, ctx) => foldRpcLegacyFilter(options, ctx))
 }));
 
 /**

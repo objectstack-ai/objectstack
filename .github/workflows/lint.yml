@@ -236,6 +236,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Coverage meta-gate (#4311): 66 of 77 workspace packages build with tsup
+      # (esbuild transpile, no type check) and `vitest run` does not type-check
+      # either, so a package without a `typecheck` script has NO tsc reading its
+      # src/ or its tests at all — 380 real errors had accumulated that way,
+      # invisible to every green build. This gate makes the hole itself the
+      # failure: every package either declares `typecheck` (run by the turbo
+      # step below) or carries a measured DEBT/EXEMPT entry in the script's
+      # ledger, reconciled in both directions so the ledger can only shrink.
+      # Reads package.json files only; no build, sub-second.
+      - name: Check every package is type-check covered or ledgered
+        run: pnpm check:type-check-coverage
+
       - name: Type check (@objectstack/spec)
         run: pnpm --filter @objectstack/spec exec tsc --noEmit
 
@@ -350,6 +362,19 @@ jobs:
       # packages/qa/ (#3037).
       - name: Build workspace packages
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
+
+      # The per-package `typecheck` scripts the coverage gate above requires
+      # (#4311). tsc resolves workspace imports through each dependency's built
+      # dist/*.d.ts, so the task carries `dependsOn: ^build` in turbo.json —
+      # which also builds the handful of nested packages (packages/plugins/*,
+      # packages/services/*, …) the build step's direct-children glob misses
+      # when no example depends on them. Three filters because the bare
+      # `./packages/*` glob only matches direct children (see the build step's
+      # comment): the nested group dirs and apps/ (docs) need their own globs.
+      # Examples and the downstream contract keep their dedicated steps below —
+      # they are distinct gates, not bulk coverage.
+      - name: Type check workspace packages
+        run: pnpm exec turbo run typecheck --filter='./packages/*' --filter='./packages/*/*' --filter='./apps/*'
 
       - name: Type check example apps
         run: pnpm --filter './examples/*' run typecheck

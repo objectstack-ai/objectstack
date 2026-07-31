@@ -1384,7 +1384,10 @@ export const InquiryPurgeFlow = defineFlow({
       id: 'report',
       type: 'notify',
       label: 'Report cleanup',
-      config: { topic: 'inquiry_purge', message: 'Closed inquiries purged.' },
+      // `recipients` + `title` are the notify contract's required pair — this
+      // node used to omit both, so every purge run FAILED here at execute time
+      // (found when the executors started parsing their config, #4277).
+      config: { topic: 'inquiry_purge', recipients: ['admin@objectos.ai'], title: 'Closed inquiries purged', message: 'Closed inquiries purged.' },
     },
     { id: 'end', type: 'end', label: 'End' },
   ],
@@ -1538,6 +1541,10 @@ export const TaskDueReminderFlow = defineFlow({
       label: 'Remind Owner',
       config: {
         topic: 'task.due_soon',
+        // The contract's required audience — this node used to omit it, so
+        // every sweep run FAILED here ("at least one recipient is required")
+        // and the #1874 demo never delivered (surfaced by #4277's parse).
+        recipients: ['{record.assignee}'],
         channels: ['inbox'],
         severity: 'warning',
         title: 'Task due soon: {record.title}',

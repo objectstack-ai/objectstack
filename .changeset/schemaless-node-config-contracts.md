@@ -14,8 +14,12 @@ options (`sms` / `notification`) that fail every run, a no-op default (`code`),
 and could not author the `function` / `inputs` / `outputVariable` path that
 works.
 
-New in `@objectstack/spec/automation` (contract exports only — no engine path
-parses node config with them):
+New in `@objectstack/spec/automation` — contract exports only. Unlike their
+`builtin-node-config.zod.ts` siblings, which #4277 wired into execute-time
+parsing, no engine path `parse()`s node config with these: `script`'s legal key
+set depends on `actionType` and `decision` may branch purely on edge
+predicates, so a flat parse would either reject valid shapes or check nothing.
+Their enforcement is the objectui reconciliation test.
 
 - `ScriptConfigSchema` / `SubflowConfigSchema` / `DecisionConfigSchema` (+
   `DecisionConditionSchema`) — written from the executors in

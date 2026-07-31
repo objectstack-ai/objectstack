@@ -12,6 +12,7 @@
     "spec:rebuild": "turbo run build --filter=...@objectstack/spec",
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
+    "typecheck": "turbo run typecheck",
     "clean": "turbo run clean && rm -rf dist",
     "setup": "pnpm install && pnpm --filter @objectstack/spec build",
     "version": "changeset version && node scripts/sync-protocol-version.mjs && node scripts/sync-template-versions.mjs",
@@ -41,7 +42,8 @@
     "check:console-sha": "node scripts/check-console-sha.mjs",
     "check:release-notes": "node scripts/check-release-notes.mjs",
     "check:node-version": "node scripts/check-node-version.mjs",
-    "check:published-files": "node scripts/check-published-files.mjs --self-test && node scripts/check-published-files.mjs"
+    "check:published-files": "node scripts/check-published-files.mjs --self-test && node scripts/check-published-files.mjs",
+    "check:type-check-coverage": "node scripts/check-type-check-coverage.mjs --self-test && node scripts/check-type-check-coverage.mjs"
   },
   "keywords": [
     "objectstack",

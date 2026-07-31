@@ -26,6 +26,7 @@ describe('reference-integrity suite — membership', () => {
       'validateAiSurfaceAffinity',
       'validateAiToolReferences',
       'validateAiAgentAuthoring',
+      'validateHookBodyWrites',
     ]);
   });
 
@@ -123,6 +124,16 @@ describe('reference-integrity suite — every member actually runs', () => {
     // validateAiToolReferences: a tool name nothing declares, registers, or
     // materialises (the HotCRM fictional-tool class).
     skills: [{ name: 'metadata_authoring', surface: 'build', tools: ['forecast_revenue'] }],
+    hooks: [
+      // validateHookBodyWrites: the L2 body writes a field crm_lead does not
+      // declare — runs clean in the sandbox, never lands in the record (#4271).
+      {
+        name: 'score_lead',
+        object: 'crm_lead',
+        events: ['beforeInsert'],
+        body: { language: 'js', source: "ctx.input.lead_score = 100;" },
+      },
+    ],
     flows: [
       {
         name: 'lead_followup',
@@ -159,6 +170,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('ai-skill-surface-mismatch');
     expect(rules).toContain('ai-skill-tool-unresolved');
     expect(rules).toContain('agent-authoring-withdrawn');
+    expect(rules).toContain('hook-body-write-unknown-field');
   });
 
   it('carries a gating flow-template finding through the suite (#3810)', () => {
@@ -180,9 +192,9 @@ describe('reference-integrity suite — every member actually runs', () => {
       expect(typeof f.message).toBe('string');
       expect(typeof f.hint).toBe('string');
     }
-    // Object references run first, agent-authoring last.
+    // Object references run first, hook-body writes last.
     expect(findings[0].rule).toBe('object-reference-unknown');
-    expect(findings[findings.length - 1].rule).toBe('agent-authoring-withdrawn');
+    expect(findings[findings.length - 1].rule).toBe('hook-body-write-unknown-field');
   });
 
   it('returns nothing for an empty stack', () => {

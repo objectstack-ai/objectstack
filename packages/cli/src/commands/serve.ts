@@ -1003,9 +1003,15 @@ export default class Serve extends Command {
                    });
                    if (telemetry.engine !== 'memory') {
                      // The engine keys datasources by driver name — the
-                     // lifecycle router looks this exact name up.
+                     // lifecycle router looks this exact name up. The driver
+                     // name is the WHOLE wiring: DriverPlugin.init registers
+                     // `driver.telemetry`, ObjectQL's discovery loop adopts
+                     // it, and lifecycle-classed objects route to it. (An
+                     // options bag once also asked for `datasourceName:
+                     // 'telemetry'` metadata registration — inert since
+                     // inception, retired in #4320.)
                      Object.defineProperty(telemetry.driver, 'name', { value: 'telemetry' });
-                     await kernel.use(new DriverPlugin(telemetry.driver, { datasourceName: 'telemetry', registerAsDefault: false }));
+                     await kernel.use(new DriverPlugin(telemetry.driver));
                      trackPlugin('TelemetryDatasource');
                      console.log(chalk.dim(`  telemetry datasource: ${telemetryPath} (lifecycle-classed system data; OS_TELEMETRY_DB=0 to disable)`));
                    }

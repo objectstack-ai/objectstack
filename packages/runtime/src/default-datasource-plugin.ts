@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import {
   DatasourceConnectionService,
   createDefaultDatasourceDriverFactory,
@@ -160,7 +161,7 @@ export class DefaultDatasourcePlugin implements Plugin {
     // call registerDriver again — the engine's skip-if-present guard makes
     // that a no-op for the same driver name.
     try {
-      const engine = ctx.getService<any>('data');
+      const engine = ctx.getService<IDataEngine>('data');
       const driverName = engine?.getDefaultDriverName?.();
       const driver = driverName ? engine?.getDriverByName?.(driverName) : undefined;
       if (driver) {
@@ -216,17 +217,20 @@ export class DefaultDatasourcePlugin implements Plugin {
   };
 
   /**
-   * Two registries, two consumers:
-   *  - `registerInMemory('datasource', …)` feeds the datasource-admin list
-   *    (`metadata.list('datasource')`), so Setup → Datasources shows the
-   *    primary DB — and, via the retained connect verdict, its REAL status
-   *    (#3827). Stamped `origin:'code'` → read-only in the admin UI.
-   *  - `addDatasource(…)` keeps parity with what DriverPlugin.start() used to
-   *    register for legacy `getDatasources()` consumers.
+   * `registerInMemory('datasource', …)` feeds the datasource-admin list
+   * (`metadata.list('datasource')`), so Setup → Datasources shows the
+   * primary DB — and, via the retained connect verdict, its REAL status
+   * (#3827). Stamped `origin:'code'` → read-only in the admin UI.
+   *
+   * A second branch used to probe `metadata.addDatasource(…)` "for legacy
+   * `getDatasources()` consumers" — typing this lookup (#4251) showed no
+   * metadata service implements either method, in this repo or its history's
+   * reach, so the probe never fired and the branch advertised parity it never
+   * delivered. registerInMemory IS the datasource-visibility path.
    */
   private async registerVisibility(ctx: PluginContext): Promise<void> {
     try {
-      const metadata = ctx.getService<any>('metadata');
+      const metadata = ctx.getService<IMetadataService>('metadata');
       if (typeof metadata?.registerInMemory === 'function') {
         metadata.registerInMemory('datasource', 'default', {
           name: 'default',
@@ -234,13 +238,6 @@ export class DefaultDatasourcePlugin implements Plugin {
           driver: this.def.driver,
           origin: 'code',
         });
-      }
-      if (typeof metadata?.addDatasource === 'function') {
-        const existing = typeof metadata.getDatasources === 'function' ? metadata.getDatasources() : [];
-        const hasDefault = Array.isArray(existing) && existing.some((ds: any) => ds?.name === 'default');
-        if (!hasDefault) {
-          await metadata.addDatasource({ name: 'default', driver: this.def.driver });
-        }
       }
     } catch (e) {
       ctx.logger.debug('[DefaultDatasourcePlugin] metadata service unavailable — default not listed', { error: e });
