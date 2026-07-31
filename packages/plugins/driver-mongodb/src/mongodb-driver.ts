@@ -238,7 +238,7 @@ export class MongoDBDriver implements IDataDriver {
     }
 
     // Sorting
-    const sort = this.buildSortSpec(query.orderBy);
+    const sort = this.buildSortSpec(query);
     if (sort) findOptions.sort = sort;
 
     // Pagination
@@ -277,7 +277,7 @@ export class MongoDBDriver implements IDataDriver {
       projection: { _id: 0 },
     };
 
-    const sort = this.buildSortSpec(query.orderBy);
+    const sort = this.buildSortSpec(query);
     if (sort) findOptions.sort = sort;
 
     if (query.offset !== undefined) findOptions.skip = query.offset;
@@ -609,27 +609,46 @@ export class MongoDBDriver implements IDataDriver {
    * silently drops another — with every page full, every row real, and the two
    * halves of the symptom too far apart for anyone to notice.
    *
-   * `id` is always present (`create()` fills it when the caller omits one), so
-   * unlike the SQL driver there is no table this cannot apply to. It is
-   * appended in the LAST requested key's direction: determinism holds either
-   * way, but a same-direction suffix is the one a compound index can still walk
-   * in a single pass.
+   * A paged read with **no** `sort` is the same defect at full strength
+   * (objectstack#4363), which is why this reads the whole query rather than
+   * just its `orderBy`. Unsorted documents come back in natural order, and
+   * natural order describes where a document currently sits in its extent — it
+   * moves when the document does, so page 2 of a walk can be cut from a layout
+   * page 1 no longer describes. The empty sort key is simply the case where
+   * every document ties with every other, so the same `id` suffix that was
+   * separating one `status` group ends up carrying the entire order.
    *
-   * Returns `undefined` when nothing was requested — an unordered read stays
-   * unordered (see the contract's explicit carve-out).
+   * `id` is always present (`create()` fills it when the caller omits one), so
+   * unlike the SQL driver there is no collection this cannot apply to, and
+   * `syncCollectionSchema` gives every collection it provisions a unique
+   * `idx_id_unique` — so a sort that ends in `id` is index-served rather than
+   * a blocking in-memory sort against the 100 MB cap. It is appended in the
+   * LAST requested key's direction (`1` when there is none): determinism holds
+   * either way, but a same-direction suffix is the one a compound index can
+   * still walk in a single pass.
+   *
+   * Returns `undefined` for a read that is neither sorted nor paged — nothing
+   * is being sliced there, so a caller who asked for no order keeps none (the
+   * contract's explicit carve-out).
    */
-  private buildSortSpec(orderBy: QueryAST['orderBy']): Document | undefined {
-    if (!orderBy || !Array.isArray(orderBy)) return undefined;
+  private buildSortSpec(query: QueryAST): Document | undefined {
     const sort: Document = {};
     let lastDirection: 1 | -1 = 1;
-    for (const item of orderBy) {
-      if (item.field) {
-        lastDirection = item.order === 'desc' ? -1 : 1;
-        sort[this.mapFieldName(item.field)] = lastDirection;
+    if (Array.isArray(query.orderBy)) {
+      for (const item of query.orderBy) {
+        if (item.field) {
+          lastDirection = item.order === 'desc' ? -1 : 1;
+          sort[this.mapFieldName(item.field)] = lastDirection;
+        }
       }
     }
-    if (Object.keys(sort).length === 0) return undefined;
-    if (sort.id === undefined) sort.id = lastDirection;
+
+    const requested = Object.keys(sort).length > 0;
+    const paged = query.limit !== undefined || query.offset !== undefined;
+    if (!requested && !paged) return undefined;
+
+    const idKey = this.mapFieldName('id');
+    if (sort[idKey] === undefined) sort[idKey] = lastDirection;
     return sort;
   }
 

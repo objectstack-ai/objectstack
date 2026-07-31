@@ -2,14 +2,14 @@
 
 /**
  * Canonical conformance cases for **deterministic paged reads** — the single
- * standard every driver's `find()` is held to when `orderBy` and `limit`/
- * `offset` arrive together.
+ * standard every driver's `find()` is held to whenever `limit`/`offset` slice
+ * the result set, with or without an `orderBy`.
  *
  * # The property
  *
- * Reading a collection page by page under one `orderBy` must visit every
- * matching row **exactly once**. Nothing here is about *which* order the rows
- * come back in — that is the caller's `orderBy`. It is about the order being
+ * Reading a collection page by page must visit every matching row **exactly
+ * once**. Nothing here is about *which* order the rows come back in — where the
+ * caller asked for one, that is their `orderBy`. It is about the order being
  * the *same* order on page 2 as it was on page 1.
  *
  * # Why it is not free
@@ -23,32 +23,44 @@
  * page is individually correct; the sequence of pages is not a partition of the
  * collection.
  *
+ * Dropping the `ORDER BY` does not escape that — it is the same defect at full
+ * strength, because now *every* row ties with every other. SQL leaves the row
+ * order of an unordered read to the plan (insertion order in practice on a
+ * small table, and not once it goes parallel, switches to an index scan, or is
+ * `VACUUM`ed), and MongoDB's natural order moves whenever a document does. This
+ * matters more than the sorted case rather than less: a list view with no `sort`
+ * configured, which nobody has clicked a column header on, is the single most
+ * common paged read there is.
+ *
  * What that costs the user is worth being precise about, because the failure is
  * invisible from any single response: every page is full, every row is real,
  * every row belongs. A record simply never appears, and a different one appears
  * twice — several screens apart, where nobody is comparing.
  *
- * The fix is one clause: append a column that *is* unique to the ORDER BY, so
- * ties can no longer reorder. Drivers do this themselves (they are the ones who
- * know their key column and whether the table has one), which is exactly why
- * the standard has to live somewhere they can all be checked against.
+ * The fix is one clause: order by a column that *is* unique — appended to the
+ * caller's sort keys, or standing alone when they gave none. Drivers do this
+ * themselves (they are the ones who know their key column and whether the table
+ * has one), which is exactly why the standard has to live somewhere they can
+ * all be checked against.
  *
  * # What belongs here
  *
  * Only the shape of the read: rows whose sort keys repeat heavily, and the
  * `orderBy` + page size to walk them with. Storage form, id generation and the
- * identity of the tie-breaking column are per-driver by design and asserted in
- * each driver's own suite.
+ * identity of the ordering column are per-driver by design and asserted in each
+ * driver's own suite — as is *how* a driver keeps the promise. A backend whose
+ * own read order is already steady between reads (`driver-memory`) satisfies
+ * these cases without emitting a sort at all; the cases test the property, not
+ * the clause.
  *
  * # Scope
  *
  * The guarantee is on `find()` (and whatever a driver builds on it, e.g. a
- * `findStream` that delegates). It says nothing about a query with NO `orderBy`
- * at all — paging an unordered read is non-deterministic on every backend by
- * definition, and forcing an order onto callers who asked for none is a much
- * larger change to plan selection than this one. That gap is tracked separately
- * (objectstack#4363); an unordered paged read is not covered by these cases and
- * a driver is not failing them by reshuffling one.
+ * `findStream` that delegates), and only where the read is **paged**. It says
+ * nothing about an unpaged read with no `orderBy`: nothing is being sliced, so
+ * no caller can be shown a partial view of the set, and imposing an order there
+ * would change plan selection across the majority of reads to buy nothing.
+ * Drivers are expected to leave that shape exactly as it was (objectstack#4363).
  *
  * @see IDataDriver.find in `contracts/data-driver.ts` for the normative wording
  */
@@ -118,6 +130,40 @@ export const PAGINATION_CASES: readonly PaginationConformanceCase[] = [
         orderBy: [{ field: 'status', order: 'asc' }, { field: 'rank', order: 'desc' }],
         pageSize: 5,
     },
+];
+
+/**
+ * One paged read with **no `orderBy` at all** to walk end to end.
+ *
+ * Deliberately a separate type from {@link PaginationConformanceCase} rather
+ * than the same one with an empty `orderBy`: the shape under test is a query
+ * that carries no sort *key* — `{ limit, offset }` and nothing else — and
+ * `orderBy: []` is a different value a driver may well treat differently.
+ * Keeping them apart means a suite cannot accidentally cover this case by
+ * spreading an empty array into the sorted one.
+ */
+export interface UnorderedPaginationConformanceCase {
+    /** Case label, used as the test name. */
+    name: string;
+    /** Page size to walk the twelve rows with. */
+    pageSize: number;
+}
+
+/**
+ * The unordered cases. Same twelve rows, same walk, no `orderBy` — the shape a
+ * list view issues when its metadata configures no `sort` and the user has not
+ * clicked a column header, which is the majority of list reads.
+ *
+ * Two of the page sizes do not divide 12, so the walk ends on a short page and
+ * its last `offset` lands past the final full page — the boundary an
+ * off-by-one reads wrong. The third is 1, which puts a boundary between every
+ * adjacent pair of rows, so nowhere is left for an unstable arrangement to hide
+ * inside a page.
+ */
+export const PAGINATION_UNORDERED_CASES: readonly UnorderedPaginationConformanceCase[] = [
+    { name: 'page size 5 over 12 rows', pageSize: 5 },
+    { name: 'page size 7 leaves a short last page', pageSize: 7 },
+    { name: 'page size 1 walks every boundary', pageSize: 1 },
 ];
 
 /** Every id in {@link PAGINATION_ROWS}, for the "visited exactly once" check. */

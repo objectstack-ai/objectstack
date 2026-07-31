@@ -239,6 +239,21 @@ reaching `engine.find()` directly are unaffected.
 }
 ```
 
+<Callout type="info">
+**Walking the pages visits every row exactly once**, whatever you sort by — or
+whether you sort at all. The SQL and MongoDB drivers get there by ordering on a
+unique column of their own, on top of whatever `orderBy` you gave, because a
+sort key like `status` does not identify a row and no backend promises equal
+keys keep the same arrangement between two queries. Without that, page 2 repeats
+a row page 1 already showed and skips one nobody ever sees — every page full,
+every row real, the two halves of the symptom several screens apart
+(objectui#3106, #4363).
+
+The guarantee attaches to `limit`/`offset`, so it costs nothing on the reads
+that do not paginate: a query with neither is returned in whatever order the
+backend chooses, exactly as before.
+</Callout>
+
 ### Keyset Pagination — a `where` predicate on the sort key
 
 `query.cursor` was **removed in `@objectstack/spec` 18** (#4286): nothing on the server

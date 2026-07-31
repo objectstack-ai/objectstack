@@ -859,6 +859,15 @@ const page2 = await engine.find('customer', {
 
 **Drawback:** Slow for large offsets (database still scans all skipped rows).
 
+**Determinism:** the walk above visits every `customer` exactly once even though
+it names no `orderBy`. A driver orders any paged read by a unique column of its
+own — appended to your sort keys, or standing alone when you gave none — because
+an unordered `LIMIT`/`OFFSET` slices an arrangement nothing holds steady: SQL
+leaves row order to the plan, and MongoDB's natural order moves when a document
+does. Page 2 would otherwise repeat a row from page 1 and drop another, with
+every page full and every row real (objectui#3106, #4363). A query with no
+`limit`/`offset` is untouched — nothing is being sliced, so no order is imposed.
+
 ### Keyset Pagination
 
 <Callout type="warn">

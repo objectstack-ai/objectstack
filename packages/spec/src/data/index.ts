@@ -8,9 +8,9 @@ export * from './filter.zod';
 export * from './filter-logic-conformance';
 export * from './temporal-conformance';
 // Canonical conformance cases for deterministic paged reads — the standard
-// every driver's `find()` is held to when `orderBy` and `limit`/`offset` arrive
-// together, so a sort key that does not identify a row cannot let pages overlap
-// or skip (#3106).
+// every driver's `find()` is held to whenever `limit`/`offset` slice the result
+// set, so neither a sort key that fails to identify a row (#3106) nor the
+// absence of one altogether (#4363) can let pages overlap or skip.
 export * from './pagination-conformance';
 export * from './date-macros.zod';
 export * from './calendar-day';

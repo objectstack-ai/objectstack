@@ -800,6 +800,13 @@ export class SqlDriver implements IDataDriver {
   /** De-dup set for boot-time drift warnings (keyed by {@link driftKey}). */
   protected driftWarned = new Set<string>();
 
+  /**
+   * Objects already reported as unable to keep the deterministic-paging
+   * contract (objectstack#4363) — see {@link orderKeysFor}. One line per
+   * object, not per query.
+   */
+  protected nondeterministicPagingWarned = new Set<string>();
+
   /** Deferred-DDL mode (#3917) — see {@link setDeferredDdl}. */
   protected deferredDdl = false;
 
@@ -1319,6 +1326,46 @@ export class SqlDriver implements IDataDriver {
   // ===================================
 
   async find(object: string, query: QueryAST, options?: DriverOptions): Promise<any[]> {
+    return this.findRows(object, query, options);
+  }
+
+  /**
+   * The body of {@link find}, shared with {@link findOne}.
+   *
+   * `singleRowLookup` marks the caller as `findOne` rather than a page, and the
+   * only thing it changes is that no ordering is imposed on an unsorted read
+   * (objectstack#4363). `findOne` reaches here as `limit: 1`, which is
+   * indistinguishable from "page one of a walk with page size 1" — and the two
+   * want opposite things:
+   *
+   * - The paged read needs a total order, or its pages are not a partition.
+   * - `findOne` needs the plan its predicate earned. `ORDER BY id LIMIT 1` is
+   *   the shape that makes a planner abandon the predicate's own index and walk
+   *   the primary key applying a filter instead, because at `LIMIT 1` that
+   *   looks like it will stop early. Measured on Postgres 16 over 2M rows,
+   *   `WHERE owner_id = ? LIMIT 1` went 0.08 ms → 7.8 ms (~100×) and swapped
+   *   `ticket_owner_idx` for `ticket_pkey`; at `LIMIT 5` and up the planner
+   *   keeps the right index and pays only a top-N sort (~2 ms). Nothing is
+   *   bought for that: `findOne` promises *a* matching record, never a position
+   *   in a sequence, so there is no partition to preserve.
+   *
+   * That also puts this driver back in step with `MongoDBDriver.findOne`, which
+   * issues `collection.findOne` and has never sorted. The obligation the
+   * contract states is on `find`, and this keeps it there.
+   */
+  private async findRows(
+    object: string,
+    query: QueryAST,
+    options?: DriverOptions,
+    singleRowLookup = false,
+  ): Promise<any[]> {
+    // The whole ORDER BY, decided once: the caller's keys plus whatever this
+    // driver has to add to make a paged read deterministic. Derived out here
+    // rather than inside `buildBase` so the recovery ladder below can ask
+    // whether the statement HAS a sort to drop, instead of asking whether the
+    // caller supplied one — since #4363 those are different questions.
+    const orderKeys = this.orderKeysFor(object, query, { singleRowLookup });
+
     // Build everything EXCEPT the SELECT list, so the unknown-column retry
     // below can rebuild without re-deriving where/order/pagination.
     const buildBase = (opts?: { withOrderBy?: boolean }) => {
@@ -1332,22 +1379,9 @@ export class SqlDriver implements IDataDriver {
       }
 
       // ORDER BY
-      if (withOrderBy && query.orderBy && Array.isArray(query.orderBy)) {
-        const sorted: string[] = [];
-        let lastDirection: 'asc' | 'desc' = 'asc';
-        for (const item of query.orderBy) {
-          if (item.field) {
-            lastDirection = item.order === 'desc' ? 'desc' : 'asc';
-            b.orderBy(this.remoteColumn(object, item.field, this.mapSortField(item.field)), lastDirection);
-            sorted.push(item.field);
-          }
-        }
-        const tieBreaker = sorted.length > 0 ? this.paginationTieBreaker(object) : null;
-        if (tieBreaker && !sorted.includes(tieBreaker)) {
-          b.orderBy(
-            this.remoteColumn(object, tieBreaker, this.mapSortField(tieBreaker)),
-            lastDirection,
-          );
+      if (withOrderBy) {
+        for (const key of orderKeys) {
+          b.orderBy(this.remoteColumn(object, key.field, this.mapSortField(key.field)), key.direction);
         }
       }
 
@@ -1398,7 +1432,7 @@ export class SqlDriver implements IDataDriver {
         // to lose), then the sort, then give up.
         const retries: Array<() => any> = [];
         if (query.fields) retries.push(() => buildBase().select('*'));
-        if (query.orderBy && Array.isArray(query.orderBy) && query.orderBy.length > 0) {
+        if (orderKeys.length > 0) {
           retries.push(() => buildBase({ withOrderBy: false }).select('*'));
         }
         results = [];
@@ -1442,7 +1476,7 @@ export class SqlDriver implements IDataDriver {
     }
 
     if (query && typeof query === 'object') {
-      const results = await this.find(object, { ...query, limit: 1 }, options);
+      const results = await this.findRows(object, { ...query, limit: 1 }, options, true);
       return results[0] || null;
     }
 
@@ -5452,7 +5486,7 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * The unique column appended to a non-empty ORDER BY so that paging is a
+   * The unique column this driver orders a paged read by, so that paging is a
    * partition of the result set rather than five independent queries that
    * happen to share a WHERE clause (objectui#3106, contract on
    * `IDataDriver.find`).
@@ -5464,7 +5498,14 @@ export class SqlDriver implements IDataDriver {
    * perfect on its own, which is why this is found by a user counting records
    * and not by reading a response.
    *
-   * Returns `null` — no tie-breaker, prior behavior exactly — unless this
+   * "Tie-breaker" stays the right word when the caller sent **no** `orderBy` at
+   * all (objectstack#4363): on an empty sort key every row ties with every
+   * other, so the same column that was breaking ties within a `status` group
+   * ends up carrying the entire order. That is why one method answers both call
+   * sites — the question is the same one, and a driver that could answer it for
+   * a sorted page but not an unsorted one would be fixing the rarer half.
+   *
+   * Returns `null` — no ordering column, prior behavior exactly — unless this
    * driver **created** the table and therefore knows it carries the `id`
    * primary key (`initObjects` populates {@link managedObjectFields} for
    * exactly those). Guessing on a federated table (ADR-0015) would be worse
@@ -5481,6 +5522,87 @@ export class SqlDriver implements IDataDriver {
     const managed =
       this.managedObjectFields.has(tableName) || this.managedObjectFields.has(object);
     return managed ? 'id' : null;
+  }
+
+  /**
+   * The complete ORDER BY for a `find()`: the caller's sort keys, followed by
+   * {@link paginationTieBreaker} when the read needs one to be deterministic.
+   * Logical field names — the call site maps each to a physical column.
+   *
+   * Three shapes, and the third is objectstack#4363:
+   *
+   * | `orderBy` | paged | result |
+   * |---|---|---|
+   * | non-empty | either | caller's keys + `id` |
+   * | empty | `limit`/`offset` present | `id` alone |
+   * | empty | neither present | **nothing** — the statement gets no ORDER BY |
+   *
+   * The last row is the deliberate carve-out, and it is why this asks about
+   * pagination at all rather than sorting every read. An unpaged read hands
+   * back the whole matching set: the caller sees every row whatever order they
+   * arrive in, so there is no partial view to be wrong about, and an imposed
+   * ORDER BY would only change plan selection for the majority of reads in the
+   * system. The moment `limit`/`offset` appear the caller is being shown a
+   * *slice*, and which rows fall in it stops being a matter of presentation.
+   *
+   * `limit` alone counts as paged, without waiting for an `offset`. Page one of
+   * a walk is routinely `limit=50` with no offset at all, and a page one that
+   * disagrees with the ordering pages two onward use is exactly the defect —
+   * ordering only the later pages would leave the bug fully intact while
+   * looking like a fix. `singleRowLookup` is how {@link findOne}'s own
+   * `limit: 1` stays out of that reading; see {@link findRows}.
+   *
+   * The tie-breaker goes on in the LAST requested key's direction (`asc` when
+   * there is none): determinism holds either way, but a same-direction suffix
+   * is the one a compound index can still walk in a single pass.
+   *
+   * When the read is paged, unsorted, and {@link paginationTieBreaker} has no
+   * column to offer, this warns once for that object. The behavior is unchanged
+   * — the statement goes out exactly as it did before — but the contract states
+   * determinism as a MUST, and a MUST that quietly does not hold is the same
+   * invisible failure the rule exists to remove.
+   */
+  protected orderKeysFor(
+    object: string,
+    query: QueryAST,
+    opts?: { singleRowLookup?: boolean },
+  ): Array<{ field: string; direction: 'asc' | 'desc' }> {
+    const keys: Array<{ field: string; direction: 'asc' | 'desc' }> = [];
+    if (Array.isArray(query.orderBy)) {
+      for (const item of query.orderBy) {
+        if (item.field) {
+          keys.push({ field: item.field, direction: item.order === 'desc' ? 'desc' : 'asc' });
+        }
+      }
+    }
+
+    const paged =
+      !opts?.singleRowLookup && (query.limit !== undefined || query.offset !== undefined);
+    if (keys.length === 0 && !paged) return keys;
+
+    const tieBreaker = this.paginationTieBreaker(object);
+    if (tieBreaker && !keys.some((k) => k.field === tieBreaker)) {
+      keys.push({ field: tieBreaker, direction: keys[keys.length - 1]?.direction ?? 'asc' });
+    } else if (!tieBreaker && keys.length === 0) {
+      // Paged, unsorted, and no column this driver can trust to order by: the
+      // read goes out exactly as before, and its pages are not a partition.
+      // Say so once per object rather than leave it to be discovered by a user
+      // counting records — a guarantee the contract states as MUST, quietly
+      // unavailable, is the same invisible failure it was written against.
+      // (Sorted reads on such a table keep the caller's own ORDER BY, so only
+      // the ties within it reshuffle; this case has nothing at all.)
+      if (!this.nondeterministicPagingWarned.has(object)) {
+        this.nondeterministicPagingWarned.add(object);
+        this.logger.warn(
+          `Paged read of '${object}' is NOT deterministic: this driver did not create the table, `
+            + 'so it cannot name a unique column to order by, and the query asked for no sort of '
+            + 'its own. Walking the pages may serve one row twice and never serve another '
+            + '(objectstack#4363). Give the query an `orderBy` on a unique column, or declare the '
+            + 'object so this driver manages its table.',
+        );
+      }
+    }
+    return keys;
   }
 
   /**
