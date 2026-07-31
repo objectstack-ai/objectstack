@@ -62,8 +62,6 @@ import type {
 import type {
   FieldNode,
   FieldNodeSchema,
-  JoinNodeInput,
-  JoinNodeSchema,
   QueryInput,
   QuerySchema,
 } from './data/query.zod';
@@ -83,19 +81,9 @@ export const queryNotAString: QueryInput = 'not a query at all';
 // @ts-expect-error — `object` is required; nothing else can stand in for it
 export const queryNeedsObject: QueryInput = { fields: ['name'] };
 
-/** A join carries its ON condition and may join a derived subquery. */
-export const joinInput: JoinNodeInput = {
-  type: 'inner',
-  object: 'contact',
-  on: { account_id: 'id' },
-  subquery: { object: 'account' },
-};
-
-// @ts-expect-error — a join node is not a number
-export const joinNotANumber: JoinNodeInput = 42;
-
-// @ts-expect-error — `type` must be one of the four declared join kinds
-export const joinBadType: JoinNodeInput = { type: 'sideways', object: 'c', on: {} };
+// `JoinNodeSchema` probes removed with the join cluster (#4286): `query.joins`
+// is tombstoned and the schema — the package's other recursive knot through
+// `QuerySchema` — is gone, so there is no input half left to pin.
 
 /**
  * A select entry is a field name, optionally dotted through a relationship.
@@ -216,9 +204,6 @@ export const formFieldNeedsField: FormFieldInput = { type: 'text' };
 
 // @ts-expect-error — QuerySchema's input is checked, not `unknown`
 export const wiredQuery: z.input<typeof QuerySchema> = 42;
-
-// @ts-expect-error — JoinNodeSchema's input is checked
-export const wiredJoin: z.input<typeof JoinNodeSchema> = 42;
 
 // @ts-expect-error — FieldNodeSchema's input is checked
 export const wiredFieldNode: z.input<typeof FieldNodeSchema> = 42;

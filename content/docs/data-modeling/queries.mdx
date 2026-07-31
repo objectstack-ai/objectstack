@@ -1,6 +1,6 @@
 ---
 title: Query Syntax Cheat Sheet
-description: One-page reference for ObjectStack QuerySchema — filters, sorts, pagination, aggregations, and joins
+description: One-page reference for ObjectStack QuerySchema — filters, sorts, pagination, aggregations, and expand
 ---
 
 # Query Syntax Cheat Sheet
@@ -387,47 +387,27 @@ on it either. Post-filter grouped results on the client until this is wired up.
 
 ---
 
-## Joins
+## Joins — removed
 
 <Callout type="warn">
-`joins` is defined in `QuerySchema` (`JoinNodeSchema`) and the SQL driver advertises
-`supports.joins: true`, but no driver's `find()` actually executes a join today — the SQL,
-in-memory, and MongoDB drivers all ignore the `joins` array (there is no `.join()`/`.leftJoin()`
-call in the SQL driver's query builder). Use `expand` for relationship traversal instead.
+`query.joins` was **removed in `@objectstack/spec` 18** (#4286, ADR-0049
+enforce-or-remove): no driver's `find()` ever executed a join — the SQL, in-memory, and
+MongoDB drivers all ignored the array, so it only ever declared a capability that did
+not run. The key is tombstoned: authoring it is a `tsc` error, and a query carrying it
+(even `joins: []`) fails to parse with the upgrade prescription. The
+`JoinNode`/`JoinType`/`JoinStrategy` exports left with it.
 </Callout>
 
-### Join Types
-
-| Type | Description |
-|:---|:---|
-| `inner` | Records with matches in both objects |
-| `left` | All records from left + matching from right |
-| `right` | All records from right + matching from left |
-| `full` | All records from both objects |
-
-### Join Strategies
-
-| Strategy | Description |
-|:---|:---|
-| `auto` | Let the engine choose the best strategy |
-| `database` | Push join to the database level |
-| `hash` | In-memory hash join |
-| `loop` | Nested loop join |
-
-### Join Example
+Use `expand` for relationship traversal — the live spelling for related records — or a
+dotted `fields` path (`'customer.name'`) for a single related column:
 
 ```typescript
 {
   object: 'order',
-  fields: ['id', 'total', 'customer.name', 'customer.email'],
-  joins: [
-    {
-      type: 'inner',
-      object: 'customer',
-      on: ['order.customer_id', '=', 'customer.id'],
-      strategy: 'auto'
-    }
-  ]
+  fields: ['id', 'total'],
+  expand: {
+    customer_id: { object: 'customer', fields: ['name', 'email'] }
+  }
 }
 ```
 
@@ -440,13 +420,7 @@ call in the SQL driver's query builder). Use `expand` for relationship traversal
   object: 'article',
   search: {
     query: 'kubernetes deployment',
-    fields: ['title', 'body', 'tags'],
-    fuzzy: true,
-    operator: 'and',
-    boost: { title: 2.0, body: 1.0 },
-    minScore: 0.5,
-    language: 'english',
-    highlight: true
+    fields: ['title', 'body', 'tags']
   }
 }
 ```
@@ -455,19 +429,20 @@ call in the SQL driver's query builder). Use `expand` for relationship traversal
 |:---|:---|:---|
 | `query` | `string` | Search text |
 | `fields` | `string[]` | Fields to search (optional — defaults to all searchable) |
-| `fuzzy` | `boolean` | Enable fuzzy matching for typo tolerance |
-| `operator` | `'and' \| 'or'` | How to combine search terms |
-| `boost` | `Record<string, number>` | Field relevance weights |
-| `minScore` | `number` | Minimum relevance score (0–1) |
-| `language` | `string` | Language for stemming/stopwords |
-| `highlight` | `boolean` | Return highlighted matches |
+| `fuzzy` | `boolean` | `[EXPERIMENTAL — not enforced]` Fuzzy matching for typo tolerance |
+| `operator` | `'and' \| 'or'` | `[EXPERIMENTAL — not enforced]` How to combine search terms |
+| `boost` | `Record<string, number>` | `[EXPERIMENTAL — not enforced]` Field relevance weights |
+| `minScore` | `number` | `[EXPERIMENTAL — not enforced]` Minimum relevance score (0–1) |
+| `language` | `string` | `[EXPERIMENTAL — not enforced]` Language for stemming/stopwords |
+| `highlight` | `boolean` | `[EXPERIMENTAL — not enforced]` Return highlighted matches |
 
 <Callout type="warn">
 Only `query` and `fields` are implemented. The engine expands `search` into a driver-agnostic
 `$and`-of-`$or`-of-`$contains` filter (ADR-0061) — `fuzzy`, `operator`, `boost`, `minScore`,
 `language`, and `highlight` are accepted by `QuerySchema` but read nowhere in
-`expandSearchToFilter()` / `normalizeSearch()`, so they have no effect. Multiple search terms
-are always AND-ed regardless of `operator`.
+`expandSearchToFilter()` / `normalizeSearch()`, so they have no effect; since #4286 their
+`.describe()` markers say so. Multiple search terms are always AND-ed regardless of
+`operator`.
 </Callout>
 
 ### Pinyin recall (Chinese deployments)
@@ -496,45 +471,35 @@ by `@objectstack/plugin-pinyin-search`) recomputes the column on demand.
 
 ---
 
-## Window Functions
+## Window Functions — removed from the request surface
 
 <Callout type="warn">
-`windowFunctions` is only reachable by calling the SQL driver's `findWithWindowFunctions()`
-method directly. `ObjectQL.find()` / `.aggregate()` and the `POST /api/v1/data/:object/query`
-route never call it, so sending `windowFunctions` through the standard client/REST query path
-has no effect.
+`query.windowFunctions` was **removed in `@objectstack/spec` 18** (#4286):
+`ObjectQL.find()` / `.aggregate()` and the `POST /api/v1/data/:object/query` route never
+routed it anywhere, so sending it had no effect. The key is tombstoned — a query carrying
+it fails to parse with the upgrade prescription — and the
+`WindowFunction`/`WindowSpec`/`WindowFunctionNode` exports left with it.
 </Callout>
 
-| Function | Description |
-|:---|:---|
-| `row_number` | Sequential row number within partition |
-| `rank` | Rank with gaps for ties |
-| `dense_rank` | Rank without gaps for ties |
-| `percent_rank` | Relative rank as percentage |
-| `lag` | Access previous row value |
-| `lead` | Access next row value |
-| `first_value` | First value in window |
-| `last_value` | Last value in window |
-| `sum` / `avg` / `count` / `min` / `max` | Running aggregations |
-
-### Window Function Example
+Window functions remain a **SQL-driver door**: `findWithWindowFunctions()`, callable
+directly on a SQL driver instance (it is not on the `IDataDriver` contract). Its input
+is the driver's own flat shape:
 
 ```typescript
-{
-  object: 'employee',
-  fields: ['name', 'department', 'salary'],
+const ranked = await sqlDriver.findWithWindowFunctions('employee', {
   windowFunctions: [
     {
       function: 'rank',
       alias: 'salary_rank',
-      over: {
-        partitionBy: ['department'],
-        orderBy: [{ field: 'salary', order: 'desc' }]
-      }
+      partitionBy: ['department'],
+      orderBy: [{ field: 'salary', order: 'desc' }]
     }
   ]
-}
+});
 ```
+
+For request-level analytics, use `aggregations` + `groupBy`, or model rankings in
+report/dashboard metadata.
 
 ---
 

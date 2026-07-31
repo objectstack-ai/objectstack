@@ -776,6 +776,16 @@ function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEve
  * decides what is a query parameter and what is a field filter — silently
  * drifting from the AST would resurrect exactly the #4134 failure for whatever
  * key was added.
+ *
+ * The #4286 tombstones (`joins`, `windowFunctions`) still count: `retiredKey()`
+ * keeps a retired key in `keyof QueryAST`, so both stay listed — and therefore
+ * deliberately stay RESERVED at this boundary while the tombstone lives. That
+ * is the right compat posture: a caller still sending one belongs with the
+ * prescription, not with a silent `where.joins` filter. When a tombstone ages
+ * out (~two majors) and the key leaves the spec, the excess-property error
+ * here is the reminder that deleting its line UN-reserves the name — an object
+ * field genuinely called `joins` would start resolving as an implicit filter,
+ * which is a behavior change to call out in that changeset.
  */
 const QUERY_AST_KEYS: Readonly<Record<keyof QueryAST, true>> = {
     object: true, fields: true, where: true, search: true, orderBy: true,
