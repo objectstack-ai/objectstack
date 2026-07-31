@@ -49,13 +49,13 @@ describe('Field.time canonical presentation (time-of-day, SQLite)', () => {
     // default (or any full timestamp that leaked into the column), bypassing the
     // driver write path.
     await raw('shift').insert({ id: 'legacy', label: 'L', starts_at: '2026-01-15 14:30:00' });
-    const row: any = await driver.findOne('shift', 'legacy', { bypassTenantAudit: true });
+    const row: any = await driver.findOne('shift', { object: 'shift', where: { id: 'legacy' } }, { bypassTenantAudit: true });
     expect(row.starts_at).toBe('14:30:00');
   });
 
   it('repairs a full-ISO value (with Z) in a time column to its time-of-day', async () => {
     await raw('shift').insert({ id: 'iso', label: 'I', starts_at: '2026-01-15T14:30:00.500Z' });
-    const row: any = await driver.findOne('shift', 'iso', { bypassTenantAudit: true });
+    const row: any = await driver.findOne('shift', { object: 'shift', where: { id: 'iso' } }, { bypassTenantAudit: true });
     expect(row.starts_at).toBe('14:30:00.500');
   });
 
@@ -71,7 +71,7 @@ describe('Field.time canonical presentation (time-of-day, SQLite)', () => {
       ['d', '09:05:30.250', '09:05:30.250'],
     ] as const) {
       await driver.create('shift', { id, label: id, starts_at: written }, { bypassTenantAudit: true });
-      const row: any = await driver.findOne('shift', id, { bypassTenantAudit: true });
+      const row: any = await driver.findOne('shift', { object: 'shift', where: { id } }, { bypassTenantAudit: true });
       expect(row.starts_at).toBe(presented);
     }
   });
@@ -79,7 +79,7 @@ describe('Field.time canonical presentation (time-of-day, SQLite)', () => {
   it('a NOW()-default time column reads back a time-of-day, not a full timestamp', async () => {
     // `auto_at` omitted → the DDL default fires.
     await driver.create('shift', { id: 'd', label: 'D' }, { bypassTenantAudit: true });
-    const row: any = await driver.findOne('shift', 'd', { bypassTenantAudit: true });
+    const row: any = await driver.findOne('shift', { object: 'shift', where: { id: 'd' } }, { bypassTenantAudit: true });
     expect(row.auto_at).toMatch(TIME_OF_DAY);
     expect(row.auto_at).not.toContain('-'); // not a `YYYY-MM-DD …` timestamp
   });
@@ -87,7 +87,7 @@ describe('Field.time canonical presentation (time-of-day, SQLite)', () => {
   it('find() (list path) normalizes time identically to findOne()', async () => {
     await raw('shift').insert({ id: 'l1', label: 'L1', starts_at: '2026-02-02 08:15:00' });
     await driver.create('shift', { id: 'l2', label: 'L2', starts_at: '08:15:00' }, { bypassTenantAudit: true });
-    const rows = await driver.find('shift', { orderBy: [{ field: 'id', order: 'asc' }] });
+    const rows = await driver.find('shift', { object: 'shift', orderBy: [{ field: 'id', order: 'asc' }] });
     const byId = Object.fromEntries(rows.map((r: any) => [r.id, r]));
     expect(byId.l1.starts_at).toBe('08:15:00'); // legacy full-timestamp repaired
     expect(byId.l2.starts_at).toBe('08:15:00'); // canonical write round-trips
@@ -95,7 +95,7 @@ describe('Field.time canonical presentation (time-of-day, SQLite)', () => {
 
   it('leaves null untouched', async () => {
     await driver.create('shift', { id: 'n', label: 'N', starts_at: null }, { bypassTenantAudit: true });
-    const row: any = await driver.findOne('shift', 'n', { bypassTenantAudit: true });
+    const row: any = await driver.findOne('shift', { object: 'shift', where: { id: 'n' } }, { bypassTenantAudit: true });
     expect(row.starts_at).toBeNull();
   });
 });

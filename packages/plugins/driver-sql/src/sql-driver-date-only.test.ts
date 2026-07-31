@@ -49,7 +49,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
       { id: 'd1', name: 'A', close_date: new Date('2026-07-15T17:24:56.533Z') },
       { bypassTenantAudit: true },
     );
-    const row = await driver.findOne('deal', 'd1', { bypassTenantAudit: true });
+    const row = await driver.findOne('deal', { object: 'deal', where: { id: 'd1' } }, { bypassTenantAudit: true });
     expect(row.close_date).toBe('2026-07-15');
   });
 
@@ -59,7 +59,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
       { id: 'd2', name: 'B', close_date: '2026-07-15T17:24:56.533Z' },
       { bypassTenantAudit: true },
     );
-    const row = await driver.findOne('deal', 'd2', { bypassTenantAudit: true });
+    const row = await driver.findOne('deal', { object: 'deal', where: { id: 'd2' } }, { bypassTenantAudit: true });
     expect(row.close_date).toBe('2026-07-15');
   });
 
@@ -69,7 +69,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
       { id: 'd3', name: 'C', close_date: '2026-07-15' },
       { bypassTenantAudit: true },
     );
-    const row = await driver.findOne('deal', 'd3', { bypassTenantAudit: true });
+    const row = await driver.findOne('deal', { object: 'deal', where: { id: 'd3' } }, { bypassTenantAudit: true });
     expect(row.close_date).toBe('2026-07-15');
   });
 
@@ -79,7 +79,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
       { id: 'd4', name: 'D', signed_at: new Date('2026-03-20T12:34:56.000Z') },
       { bypassTenantAudit: true },
     );
-    const row = await driver.findOne('deal', 'd4', { bypassTenantAudit: true });
+    const row = await driver.findOne('deal', { object: 'deal', where: { id: 'd4' } }, { bypassTenantAudit: true });
     // datetime must retain its wall-clock time — never sliced to YYYY-MM-DD.
     expect(new Date(row.signed_at).toISOString()).toBe('2026-03-20T12:34:56.000Z');
   });
@@ -92,7 +92,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
       { id: 'd5', name: 'E', close_date: new Date('2026-07-15T17:24:56.533Z') },
       { bypassTenantAudit: true },
     );
-    const rows = await driver.find('deal', { where: { close_date: '2026-07-15' } });
+    const rows = await driver.find('deal', { object: 'deal', where: { close_date: '2026-07-15' } });
     expect(rows.map((r: any) => r.id)).toEqual(['d5']);
   });
 
@@ -100,7 +100,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
     await driver.create('deal', { id: 'd6', name: 'F', close_date: new Date('2026-07-15T08:00:00Z') }, { bypassTenantAudit: true });
     await driver.create('deal', { id: 'd7', name: 'G', close_date: '2026-07-16' }, { bypassTenantAudit: true });
     await driver.create('deal', { id: 'd8', name: 'H', close_date: '2026-07-17' }, { bypassTenantAudit: true });
-    const rows = await driver.find('deal', { where: { close_date: { $in: ['2026-07-15', '2026-07-17'] } } });
+    const rows = await driver.find('deal', { object: 'deal', where: { close_date: { $in: ['2026-07-15', '2026-07-17'] } } });
     expect(rows.map((r: any) => r.id).sort()).toEqual(['d6', 'd8']);
   });
 
@@ -108,7 +108,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
     await driver.create('deal', { id: 'r1', close_date: '2025-01-15' }, { bypassTenantAudit: true });
     await driver.create('deal', { id: 'r2', close_date: '2026-03-20' }, { bypassTenantAudit: true });
     await driver.create('deal', { id: 'r3', close_date: '2026-05-25' }, { bypassTenantAudit: true });
-    const rows = await driver.find('deal', { where: { close_date: { $gte: '2026-01-01', $lt: '2026-05-01' } } });
+    const rows = await driver.find('deal', { object: 'deal', where: { close_date: { $gte: '2026-01-01', $lt: '2026-05-01' } } });
     expect(rows.map((r: any) => r.id)).toEqual(['r2']);
   });
 
@@ -119,7 +119,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
     await (driver as any).knex('deal').insert({ id: 'legacy', name: 'L', close_date: '2026-08-15T17:24:56.533Z' });
 
     // Read-side repair: the returned value is date-only with no migration.
-    const row = await driver.findOne('deal', 'legacy', { bypassTenantAudit: true });
+    const row = await driver.findOne('deal', { object: 'deal', where: { id: 'legacy' } }, { bypassTenantAudit: true });
     expect(row.close_date).toBe('2026-08-15');
 
     // …but the value still stored in SQL keeps its time, so a SQL equality
@@ -127,13 +127,13 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
     // ADR-0053 calls out: read-repair fixes display/read, and an optional
     // one-time migration (or any write through the normalized path) rewrites
     // legacy rows at rest.
-    const beforeRewrite = await driver.find('deal', { where: { close_date: '2026-08-15' } });
+    const beforeRewrite = await driver.find('deal', { object: 'deal', where: { close_date: '2026-08-15' } });
     expect(beforeRewrite.map((r: any) => r.id)).toEqual([]);
 
     // Rewriting through the normalized write path (formatInput) collapses the
     // stored value to date-only, after which the equality filter matches.
     await driver.update('deal', 'legacy', { close_date: '2026-08-15' }, { bypassTenantAudit: true });
-    const afterRewrite = await driver.find('deal', { where: { close_date: '2026-08-15' } });
+    const afterRewrite = await driver.find('deal', { object: 'deal', where: { close_date: '2026-08-15' } });
     expect(afterRewrite.map((r: any) => r.id)).toEqual(['legacy']);
   });
 });

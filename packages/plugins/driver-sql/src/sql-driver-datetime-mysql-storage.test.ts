@@ -130,7 +130,7 @@ describe.skipIf(!URL)('Field.datetime on MySQL (#3942)', () => {
   it('anchors a bare calendar-day comparand to UTC midnight, like the other dialects', async () => {
     await driver.create(TABLE, { id: 'b1', label: 'x', at: BOUNDARY }, { bypassTenantAudit: true });
     const day = async (from: string, to: string) =>
-      (await driver.find(TABLE, { where: { at: { $gte: from, $lt: to } } })).map((r: any) => r.id);
+      (await driver.find(TABLE, { object: TABLE, where: { at: { $gte: from, $lt: to } } })).map((r: any) => r.id);
 
     // 20:00Z belongs to 2026-03-20 in UTC; on a `+08:00` server read as local
     // midnight it would fall on the 21st — the divergence #3912 measured on PG.
@@ -140,7 +140,7 @@ describe.skipIf(!URL)('Field.datetime on MySQL (#3942)', () => {
 
   it('round-trips the instant through a read', async () => {
     await driver.create(TABLE, { id: 'r', label: 'r', at: MIDDAY }, { bypassTenantAudit: true });
-    const row: any = await driver.findOne(TABLE, 'r', { bypassTenantAudit: true });
+    const row: any = await driver.findOne(TABLE, { object: TABLE, where: { id: 'r' } }, { bypassTenantAudit: true });
     expect(new Date(row.at).toISOString()).toBe(MIDDAY);
   });
 });
@@ -219,7 +219,7 @@ describe.skipIf(!URL)('MySQL TIMESTAMP → DATETIME(3) migration (#3942)', () =>
       { name: LEGACY, fields: { label: { type: 'string' }, at: { type: 'datetime' } } },
     ]);
     await driver.create(LEGACY, { id: 'fresh', label: 'f' }, { bypassTenantAudit: true });
-    const row: any = await driver.findOne(LEGACY, 'fresh', { bypassTenantAudit: true });
+    const row: any = await driver.findOne(LEGACY, { object: LEGACY, where: { id: 'fresh' } }, { bypassTenantAudit: true });
     expect(row.created_at ?? null, 'created_at must still default').not.toBeNull();
   });
 });
@@ -319,7 +319,7 @@ async function columnTypes(driver: SqlDriver, table: string): Promise<Record<str
  * is itself a 32-bit epoch function and returns 0 there.
  */
 async function readInstant(driver: SqlDriver, id: string, table = TABLE): Promise<string> {
-  const row: any = await driver.findOne(table, id, { bypassTenantAudit: true });
+  const row: any = await driver.findOne(table, { object: table, where: { id } }, { bypassTenantAudit: true });
   return new Date(row.at).toISOString();
 }
 

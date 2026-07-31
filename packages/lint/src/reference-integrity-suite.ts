@@ -69,6 +69,7 @@ import { validateHookBodyWrites } from './validate-hook-body-writes.js';
 import { validateActionBodyWrites } from './validate-action-body-writes.js';
 import { validateFlowNodeWrites } from './validate-flow-node-writes.js';
 import { validateReadonlyFlowWrites } from './validate-readonly-flow-writes.js';
+import { validateReactPageProps } from './validate-react-page-props.js';
 
 export type ReferenceIntegritySeverity = 'error' | 'warning';
 
@@ -126,7 +127,8 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // carries over — an action's `ctx.input` is its params bag, not a record
   // (see that module's ledger). Lazy on the same terms.
   //
-  // The ONE member here that emits two rule ids. Besides resolving `ctx.api`
+  // The first member here to emit more than one rule id (`validateReactPageProps`
+  // below is the other, and carries the most). Besides resolving `ctx.api`
   // writes against declared fields (`action-body-write-unknown-field`), it
   // reports a `ctx.record` write that can reach nothing
   // (`action-record-write-discarded`, #4345) — not a resolution question, so
@@ -154,6 +156,29 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // build the other command would have stopped. Joining the suite is the whole
   // fix; the two hand-wired call sites are deleted with it (#4345 follow-up).
   { name: 'validateReadonlyFlowWrites', run: validateReadonlyFlowWrites },
+  // The `kind:'react'` page surface. Every prop a react block binds BY FIELD
+  // NAME is resolved against the object it names (#4340) — `<ListView columns>`,
+  // `<ObjectForm fields>`, the `record:*` family through the SAME
+  // `COMPONENT_FIELD_SPECS` table `validatePageFieldBindings` walks one surface
+  // over, plus `<ObjectChart>`'s aggregate/axes (#3701/#3729) and
+  // `searchableFields` (#4329). Squarely the charter's question, on the surface
+  // where it had no answer at all.
+  //
+  // It was hand-wired into `os validate` ALONE, so `os lint` and `os compile`
+  // accepted a react page whose every field binding was stale — including the
+  // gating ones (a missing required binding, a filter position naming no field:
+  // the predicate can never match and the list comes back empty). That is
+  // `validateReadonlyFlowWrites`' divergence again, one surface over, and it is
+  // the reason this entry exists rather than a fourth hand-wiring.
+  //
+  // Like `validateActionBodyWrites` above, it emits ids that are not resolution
+  // questions — `react-prop-missing-required` and `react-prop-typo` are shape,
+  // and by the charter belong outside. They ride along for the same reason: they
+  // fall out of the SAME TypeScript parse of the SAME page source, and splitting
+  // them into a second member would parse every react page twice to say two
+  // things about one walk. Lazy on the same terms as the hook/action body rules
+  // — only a page that is actually `kind:'react'` loads the compiler.
+  { name: 'validateReactPageProps', run: validateReactPageProps },
 ];
 
 /**

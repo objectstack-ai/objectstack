@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
+import { keysetWalk } from '@objectstack/types';
 
 /**
  * File-reference reconciliation (ADR-0104 D3 wave 2) — the executable form of
@@ -144,71 +145,65 @@ export async function verifyFileReferences(
 
   for (const object of scannedObjects) {
     const fileFields = fileFieldsOf(engine, object);
-    let offset = 0;
-    for (;;) {
-      let page: Array<Record<string, unknown>>;
-      try {
-        page = await engine.find(object, {
-          fields: ['id', ...fileFields],
-          limit: SCAN_PAGE_SIZE,
-          offset,
-          context: { ...SYSTEM_CTX },
-        });
-      } catch {
-        break; // unreadable object — skip rather than abort the whole scan
-      }
-      if (!page || page.length === 0) break;
-      for (const record of page) {
-        const recordId = record?.id;
-        if (recordId == null) continue;
-        scannedRecords++;
-        for (const field of fileFields) {
-          for (const fileId of new Set(idTokensIn(record[field]))) {
-            const list = held.get(fileId) ?? [];
-            list.push({ object, recordId: String(recordId), field });
-            held.set(fileId, list);
+    // Seek by `id` rather than counting from the start (#4363). This scan
+    // decides which files are still referenced, and a row it never visits is
+    // reported as an unreferenced file — the wrong answer with the shape of a
+    // clean run. An offset walk cannot promise it visits every row.
+    const walk = keysetWalk<Record<string, unknown>>(
+      (q) => engine.find(object, { ...q, fields: ['id', ...fileFields], context: { ...SYSTEM_CTX } }),
+      { pageSize: SCAN_PAGE_SIZE, max: maxPerObject },
+    );
+    try {
+      for await (const page of walk.pages()) {
+        for (const record of page) {
+          const recordId = record?.id;
+          if (recordId == null) continue;
+          scannedRecords++;
+          for (const field of fileFields) {
+            for (const fileId of new Set(idTokensIn(record[field]))) {
+              const list = held.get(fileId) ?? [];
+              list.push({ object, recordId: String(recordId), field });
+              held.set(fileId, list);
+            }
           }
         }
       }
-      offset += page.length;
-      if (page.length < SCAN_PAGE_SIZE) break;
-      if (offset >= maxPerObject) {
-        truncated = true;
-        break;
-      }
+    } catch {
+      // Unreadable object — skip rather than abort the whole scan. An object
+      // with no `id` column (a federated table, ADR-0015) lands here too, and
+      // skipping it is the honest outcome: it cannot be walked exhaustively,
+      // so it must not contribute a "nothing holds this file" conclusion.
+      continue;
     }
+    if (walk.truncated) truncated = true;
   }
 
   // ── 2. Recorded ownership ─────────────────────────────────────────
   /** fileId → the slot recorded as its owner. */
   const owned = new Map<string, { object: string; recordId: string; field: string }>();
-  let ownerOffset = 0;
-  for (;;) {
-    let page: Array<Record<string, unknown>>;
-    try {
-      page = await engine.find('sys_file', {
-        where: { ref_object: { $ne: null } },
-        fields: ['id', 'ref_object', 'ref_id', 'ref_field', 'status'],
-        limit: SCAN_PAGE_SIZE,
-        offset: ownerOffset,
-        context: { ...SYSTEM_CTX },
-      });
-    } catch {
-      break;
+  const owners = keysetWalk<Record<string, unknown>>(
+    (q) => engine.find('sys_file', {
+      ...q,
+      fields: ['id', 'ref_object', 'ref_id', 'ref_field', 'status'],
+      context: { ...SYSTEM_CTX },
+    }),
+    { where: { ref_object: { $ne: null } }, pageSize: SCAN_PAGE_SIZE },
+  );
+  try {
+    for await (const page of owners.pages()) {
+      for (const row of page) {
+        // A driver without `$ne` support may hand back unowned rows too — filter
+        // here rather than trusting the predicate round-tripped.
+        if (row?.id == null || !row.ref_object || row.ref_id == null) continue;
+        owned.set(String(row.id), {
+          object: String(row.ref_object),
+          recordId: String(row.ref_id),
+          field: String(row.ref_field ?? ''),
+        });
+      }
     }
-    if (!page || page.length === 0) break;
-    for (const row of page) {
-      // A driver without `$ne` support may hand back unowned rows too — filter
-      // here rather than trusting the predicate round-tripped.
-      if (row?.id == null || !row.ref_object || row.ref_id == null) continue;
-      owned.set(String(row.id), {
-        object: String(row.ref_object),
-        recordId: String(row.ref_id),
-        field: String(row.ref_field ?? ''),
-      });
-    }
-    ownerOffset += page.length;
-    if (page.length < SCAN_PAGE_SIZE) break;
+  } catch {
+    // Same posture as the record scan: an unreadable ledger is not evidence.
   }
 
   // ── 3. Diff ───────────────────────────────────────────────────────
@@ -277,35 +272,31 @@ export async function verifyFileReferences(
 
   // ── 4. Advisory: committed files nothing points at ────────────────
   if (options.includeUnreferenced) {
-    let offset = 0;
-    for (;;) {
-      let page: Array<Record<string, unknown>>;
-      try {
-        page = await engine.find('sys_file', {
-          where: { status: 'committed' },
-          fields: ['id', 'ref_object', 'scope'],
-          limit: SCAN_PAGE_SIZE,
-          offset,
-          context: { ...SYSTEM_CTX },
-        });
-      } catch {
-        break;
+    const files = keysetWalk<Record<string, unknown>>(
+      (q) => engine.find('sys_file', {
+        ...q,
+        fields: ['id', 'ref_object', 'scope'],
+        context: { ...SYSTEM_CTX },
+      }),
+      { where: { status: 'committed' }, pageSize: SCAN_PAGE_SIZE },
+    );
+    try {
+      for await (const page of files.pages()) {
+        for (const row of page) {
+          const id = row?.id == null ? null : String(row.id);
+          // attachments-scope files are governed by sys_attachment, not by the
+          // ownership columns — not this scan's business.
+          if (!id || row.ref_object || row.scope === 'attachments') continue;
+          if (held.has(id)) continue;
+          issues.push({
+            kind: 'unreferenced_file',
+            fileId: id,
+            detail: 'committed but neither owned nor held by any field — storage cost, not data risk',
+          });
+        }
       }
-      if (!page || page.length === 0) break;
-      for (const row of page) {
-        const id = row?.id == null ? null : String(row.id);
-        // attachments-scope files are governed by sys_attachment, not by the
-        // ownership columns — not this scan's business.
-        if (!id || row.ref_object || row.scope === 'attachments') continue;
-        if (held.has(id)) continue;
-        issues.push({
-          kind: 'unreferenced_file',
-          fileId: id,
-          detail: 'committed but neither owned nor held by any field — storage cost, not data risk',
-        });
-      }
-      offset += page.length;
-      if (page.length < SCAN_PAGE_SIZE) break;
+    } catch {
+      // Same posture as the record scan above.
     }
   }
 

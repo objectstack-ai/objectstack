@@ -81,6 +81,7 @@ describe('Field.time canonical writes (#3994)', () => {
     }
 
     const hits = await driver.find('shift', {
+      object: 'shift',
       where: { starts_at: { $gte: '09:00:00', $lte: '18:00:00' } },
       orderBy: [{ field: 'id', order: 'asc' }],
     });
@@ -95,11 +96,11 @@ describe('Field.time canonical writes (#3994)', () => {
     await driver.create('shift', { id: 'a', label: 'a', starts_at: '14:30' }, { bypassTenantAudit: true });
     await driver.create('shift', { id: 'b', label: 'b', starts_at: '14:30:00' }, { bypassTenantAudit: true });
 
-    const hits = await driver.find('shift', { where: { starts_at: '14:30:00' } });
+    const hits = await driver.find('shift', { object: 'shift', where: { starts_at: '14:30:00' } });
     expect(hits.map((r: any) => r.id).sort()).toEqual(['a', 'b']);
     // And the comparand is canonicalised too — the minutes-only spelling
     // matches the same two rows.
-    const hits2 = await driver.find('shift', { where: { starts_at: '14:30' } });
+    const hits2 = await driver.find('shift', { object: 'shift', where: { starts_at: '14:30' } });
     expect(hits2.map((r: any) => r.id).sort()).toEqual(['a', 'b']);
   });
 
@@ -109,7 +110,7 @@ describe('Field.time canonical writes (#3994)', () => {
     for (const [id, v] of WRITE_SHAPES) {
       await driver.create('shift', { id, label: id, starts_at: v }, { bypassTenantAudit: true });
     }
-    const rows = await driver.find('shift', { orderBy: [{ field: 'starts_at', order: 'asc' }] });
+    const rows = await driver.find('shift', { object: 'shift', orderBy: [{ field: 'starts_at', order: 'asc' }] });
     // 08:00 first; the `.500` rows after their `14:30:00` flat siblings
     // (`.` sorts below every digit, so lexicographic == chronological).
     expect((rows[0] as any).id).toBe('s_early');
@@ -161,6 +162,7 @@ describe('Field.time legacy storage: backfill and read-side repair (#3994)', () 
     await seedLegacy(driver);
 
     const hits = await driver.find('shift', {
+      object: 'shift',
       where: { starts_at: { $gte: '09:00:00', $lte: '18:00:00' } },
       orderBy: [{ field: 'id', order: 'asc' }],
     });
@@ -188,6 +190,7 @@ describe('Field.time legacy storage: backfill and read-side repair (#3994)', () 
 
     // Converged storage means the plain indexable comparison now works.
     const hits = await driver.find('shift', {
+      object: 'shift',
       where: { starts_at: { $gte: '09:00:00', $lte: '18:00:00' } },
       orderBy: [{ field: 'id', order: 'asc' }],
     });

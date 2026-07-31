@@ -76,6 +76,26 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
    * usual. A normal update leaves this unset, so `updated_at` always advances.
    */
   preserveAudit: z.boolean().optional().describe('Historical import: keep a supplied updated_at instead of force-stamping now (from ExecutionContext.preserveAudit)'),
+
+  /**
+   * Silence the tenant-audit warning a driver emits when it writes to a
+   * tenant-scoped object without a `tenantId` — the write is deliberately
+   * global, not an isolation bug.
+   *
+   * This key was live long before it was declared (#4311): `SqlDriver` reads it
+   * (`bypassTenantAudit === true` → skip the warning) and its own warning text
+   * tells callers to set it, the ObjectQL engine sets it for system-context
+   * calls, and `service-settings` / `service-datasource` pass it on every
+   * global-scope write. Only the schema never heard of it, so every driver read
+   * went through an `as any` and every caller through an untyped options object.
+   * Nothing type-checked either side, so the gap stayed invisible.
+   *
+   * A driver MAY warn on a tenant-scoped write that carries neither `tenantId`
+   * nor this flag; it MUST NOT change what the write does. Suppressing an audit
+   * warning is not a permission — it does not widen, narrow, or re-target the
+   * rows a write touches.
+   */
+  bypassTenantAudit: z.boolean().optional().describe('Suppress the driver tenant-audit warning for a deliberately global write on a tenant-scoped object (diagnostics only — never changes what the write touches)'),
 }));
 
 /**

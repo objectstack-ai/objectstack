@@ -27,11 +27,22 @@ function fakeEngine(tables: Record<string, Array<Record<string, unknown>>>) {
   const engine: BackfillEngine & { tables: typeof tables; calls: typeof calls } = {
     getObject: (name) => REGISTRY[name],
     getConfigs: () => REGISTRY,
+    // Executes the KEYSET walk the backfill emits since #4363: `orderBy` on
+    // the key plus a `$gt` seek. `offset` THROWS rather than being served —
+    // this walk rewrites the rows it is reading, and an offset counts into a
+    // set its own writes are changing, so rows slide past the cursor and never
+    // get converted. A fake that honored an offset would let that back in with
+    // every assertion still green.
     async find(object, options: any) {
-      const rows = tables[object] ?? [];
-      const start = typeof options?.offset === 'number' ? options.offset : 0;
-      const end = typeof options?.limit === 'number' ? start + options.limit : undefined;
-      return rows.slice(start, end);
+      if (options?.offset !== undefined) {
+        throw new Error('offset paging skips rows a mutating walk must visit — expected a keyset seek (#4363)');
+      }
+      const key = options?.orderBy?.[0]?.field;
+      const seek = (options?.where as any)?.[key]?.$gt ?? (options?.where as any)?.$and?.[1]?.[key]?.$gt;
+      let rows = tables[object] ?? [];
+      if (seek !== undefined) rows = rows.filter((r) => String(r[key]) > String(seek));
+      const ordered = key ? [...rows].sort((a, b) => String(a[key]).localeCompare(String(b[key]))) : rows;
+      return typeof options?.limit === 'number' ? ordered.slice(0, options.limit) : ordered;
     },
     async insert(object, data: any) {
       calls.push({ op: 'insert', object, arg: data });

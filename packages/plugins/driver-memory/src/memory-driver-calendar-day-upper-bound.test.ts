@@ -58,13 +58,13 @@ describe('InMemoryDriver — bare-day $lte covers the whole day (#4042)', () => 
   });
 
   it('$gte / $gt / $lt keep their midnight anchoring', async () => {
-    const gte = await driver.find('task', { where: { created_at: { $gte: '2026-07-28' } } } as any);
+    const gte = await driver.find('task', { object: 'task', where: { created_at: { $gte: '2026-07-28' } } });
     expect(ids(gte)).toEqual(['t_evening', 't_midnight', 't_morning']);
 
-    const gt = await driver.find('task', { where: { created_at: { $gt: '2026-07-28' } } } as any);
+    const gt = await driver.find('task', { object: 'task', where: { created_at: { $gt: '2026-07-28' } } });
     expect(ids(gt)).toEqual(['t_evening', 't_midnight', 't_morning']); // string '…T00:00' > '2026-07-28'
 
-    const lt = await driver.find('task', { where: { created_at: { $lt: '2026-07-28' } } } as any);
+    const lt = await driver.find('task', { object: 'task', where: { created_at: { $lt: '2026-07-28' } } });
     expect(ids(lt)).toEqual(['t_old', 't_yesterday']);
   });
 

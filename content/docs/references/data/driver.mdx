@@ -98,6 +98,7 @@ const result = DriverCapabilities.parse(data);
 | **tenantIds** | `string[]` | optional | Union tenant access set (group posture): native read scoping widens to organization_id IN (...); inserts still stamp from tenantId |
 | **timezone** | `string` | optional | Business reference timezone (IANA) for date-dependent generation, e.g. autonumber date tokens |
 | **preserveAudit** | `boolean` | optional | Historical import: keep a supplied updated_at instead of force-stamping now (from ExecutionContext.preserveAudit) |
+| **bypassTenantAudit** | `boolean` | optional | Suppress the driver tenant-audit warning for a deliberately global write on a tenant-scoped object (diagnostics only — never changes what the write touches) |
 
 
 ---

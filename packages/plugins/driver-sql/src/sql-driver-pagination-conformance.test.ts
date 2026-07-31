@@ -38,6 +38,7 @@ import {
   PAGINATION_ROWS,
   PAGINATION_UNORDERED_CASES,
 } from '@objectstack/spec/data';
+import type { QueryAST } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 
 /**
@@ -99,8 +100,8 @@ describe('SqlDriver — paged reads are a partition of the result set (objectui#
       for (let offset = 0; offset < PAGINATION_ROWS.length; offset += testCase.pageSize) {
         const page = await driver.find(
           'ticket',
-          { orderBy: [...testCase.orderBy], limit: testCase.pageSize, offset } as any,
-          { bypassTenantAudit: true } as any,
+          { object: 'ticket', orderBy: [...testCase.orderBy], limit: testCase.pageSize, offset },
+          { bypassTenantAudit: true },
         );
         seen.push(...page.map((r) => String(r.id)));
       }
@@ -115,8 +116,8 @@ describe('SqlDriver — paged reads are a partition of the result set (objectui#
       for (let offset = 0; offset < PAGINATION_ROWS.length; offset += testCase.pageSize) {
         const page = await driver.find(
           'ticket',
-          { orderBy: [...testCase.orderBy], limit: testCase.pageSize, offset } as any,
-          { bypassTenantAudit: true } as any,
+          { object: 'ticket', orderBy: [...testCase.orderBy], limit: testCase.pageSize, offset },
+          { bypassTenantAudit: true },
         );
         paged.push(...page);
       }
@@ -126,8 +127,8 @@ describe('SqlDriver — paged reads are a partition of the result set (objectui#
       // user-facing half of the guarantee.
       const whole = await driver.find(
         'ticket',
-        { orderBy: [...testCase.orderBy] } as any,
-        { bypassTenantAudit: true } as any,
+        { object: 'ticket', orderBy: [...testCase.orderBy] },
+        { bypassTenantAudit: true },
       );
       expect(paged.map((r) => r.id)).toEqual(whole.map((r) => r.id));
     });
@@ -139,8 +140,8 @@ describe('SqlDriver — paged reads are a partition of the result set (objectui#
       for (let offset = 0; offset < PAGINATION_ROWS.length; offset += testCase.pageSize) {
         const page = await driver.find(
           'ticket',
-          { limit: testCase.pageSize, offset } as any,
-          { bypassTenantAudit: true } as any,
+          { object: 'ticket', limit: testCase.pageSize, offset },
+          { bypassTenantAudit: true },
         );
         seen.push(...page.map((r) => String(r.id)));
       }
@@ -155,8 +156,8 @@ describe('SqlDriver — paged reads are a partition of the result set (objectui#
       for (let offset = 0; offset < PAGINATION_ROWS.length; offset += testCase.pageSize) {
         const page = await driver.find(
           'ticket',
-          { limit: testCase.pageSize, offset } as any,
-          { bypassTenantAudit: true } as any,
+          { object: 'ticket', limit: testCase.pageSize, offset },
+          { bypassTenantAudit: true },
         );
         paged.push(...page.map((r) => String(r.id)));
       }
@@ -174,7 +175,7 @@ describe('SqlDriver — paged reads are a partition of the result set (objectui#
     // ORDER BY would only change plan selection. The order below is SQLite's
     // own answer, not one this driver asked for — which the shuffled fixture
     // ids make visible.
-    const rows = await driver.find('ticket', {} as any, { bypassTenantAudit: true } as any);
+    const rows = await driver.find('ticket', { object: 'ticket' }, { bypassTenantAudit: true });
     expect(rows.map((r) => r.id)).toEqual(PAGINATION_ROWS.map((r) => r.id));
   });
 });
@@ -198,8 +199,8 @@ describe('SqlDriver — the ORDER BY that reaches the database', () => {
     await driver.disconnect();
   });
 
-  const sqlOfFind = (query: Record<string, unknown>) =>
-    driver.sqlOf(() => driver.find('ticket', query as any, { bypassTenantAudit: true } as any));
+  const sqlOfFind = (query: Omit<QueryAST, 'object'>) =>
+    driver.sqlOf(() => driver.find('ticket', { object: 'ticket', ...query }, { bypassTenantAudit: true }));
 
   it('appends `id` after a non-unique sort key', async () => {
     const sql = await sqlOfFind({ orderBy: [{ field: 'status', order: 'asc' }] });
@@ -250,9 +251,9 @@ describe('SqlDriver — the ORDER BY that reaches the database', () => {
     // unordered and 7.8 ms with `ORDER BY id`. `MongoDBDriver.findOne` has
     // never sorted either — this keeps the two drivers saying the same thing.
     const sql = await driver.sqlOf(() =>
-      driver.findOne('ticket', { where: { status: 'open' } } as any, {
+      driver.findOne('ticket', { object: 'ticket', where: { status: 'open' } }, {
         bypassTenantAudit: true,
-      } as any),
+      }),
     );
     expect(sql).not.toMatch(/order by/i);
     expect(sql).toMatch(/limit/i);
@@ -260,9 +261,9 @@ describe('SqlDriver — the ORDER BY that reaches the database', () => {
 
   it('still honors an orderBy the caller gave findOne, tie-breaker and all', async () => {
     const sql = await driver.sqlOf(() =>
-      driver.findOne('ticket', { orderBy: [{ field: 'status', order: 'desc' }] } as any, {
+      driver.findOne('ticket', { object: 'ticket', orderBy: [{ field: 'status', order: 'desc' }] }, {
         bypassTenantAudit: true,
-      } as any),
+      }),
     );
     expect(sql).toMatch(/order by .*`status` desc, .*`id` desc/i);
   });
@@ -275,7 +276,7 @@ describe('SqlDriver — the ORDER BY that reaches the database', () => {
     // more on the unsorted paged read: there is no requested sort to fall back
     // to, so a wrong guess turns a reshuffle into a failed read.
     expect(driver['paginationTieBreaker']('some_remote_table')).toBeNull();
-    expect(driver['orderKeysFor']('some_remote_table', { limit: 5, offset: 5 } as any)).toEqual([]);
+    expect(driver['orderKeysFor']('some_remote_table', { object: 'some_remote_table', limit: 5, offset: 5 })).toEqual([]);
   });
 
   it('says so, once, when it cannot keep the guarantee on a table it did not create', () => {
@@ -285,8 +286,8 @@ describe('SqlDriver — the ORDER BY that reaches the database', () => {
     // rule exists at all.
     const warn = vi.spyOn(driver['logger'], 'warn').mockImplementation(() => {});
     try {
-      driver['orderKeysFor']('some_remote_table', { limit: 5, offset: 5 } as any);
-      driver['orderKeysFor']('some_remote_table', { limit: 5, offset: 10 } as any);
+      driver['orderKeysFor']('some_remote_table', { object: 'some_remote_table', limit: 5, offset: 5 });
+      driver['orderKeysFor']('some_remote_table', { object: 'some_remote_table', limit: 5, offset: 10 });
       expect(warn, 'once per object, not per query').toHaveBeenCalledTimes(1);
       const message = warn.mock.calls[0]![0];
       expect(message, 'names the object').toContain('some_remote_table');
@@ -294,12 +295,12 @@ describe('SqlDriver — the ORDER BY that reaches the database', () => {
       expect(message, 'names a remedy').toMatch(/orderBy/);
 
       // A managed table keeps the guarantee, so it must stay quiet.
-      driver['orderKeysFor']('ticket', { limit: 5, offset: 5 } as any);
+      driver['orderKeysFor']('ticket', { object: 'ticket', limit: 5, offset: 5 });
       // So must an unpaged read, and a sorted one: neither is the silent case.
-      driver['orderKeysFor']('some_remote_table', {} as any);
+      driver['orderKeysFor']('some_remote_table', { object: 'some_remote_table' });
       driver['orderKeysFor'](
         'some_remote_table',
-        { orderBy: [{ field: 'status', order: 'asc' }], limit: 5 } as any,
+        { object: 'some_remote_table', orderBy: [{ field: 'status', order: 'asc' }], limit: 5 },
       );
       expect(warn).toHaveBeenCalledTimes(1);
     } finally {

@@ -41,8 +41,8 @@ describe('SqlDriver multi-write transaction (deadlock regression)', () => {
   it('commits TWO writes in one transaction without hanging', async () => {
     const k = await setup();
     const trx = await driver!.beginTransaction();
-    await withTimeout(driver!.create('t', { id: '1', name: 'A' }, { transaction: trx } as any), 6000, 'create #1');
-    await withTimeout(driver!.create('t', { id: '2', name: 'B' }, { transaction: trx } as any), 6000, 'create #2');
+    await withTimeout(driver!.create('t', { id: '1', name: 'A' }, { transaction: trx }), 6000, 'create #1');
+    await withTimeout(driver!.create('t', { id: '2', name: 'B' }, { transaction: trx }), 6000, 'create #2');
     await withTimeout(driver!.commit(trx), 6000, 'commit');
     const rows = await k('t').select();
     expect(rows.map((r: any) => r.id).sort()).toEqual(['1', '2']);
@@ -51,8 +51,8 @@ describe('SqlDriver multi-write transaction (deadlock regression)', () => {
   it('rolls back all writes when the transaction is aborted', async () => {
     const k = await setup();
     const trx = await driver!.beginTransaction();
-    await driver!.create('t', { id: '1', name: 'A' }, { transaction: trx } as any);
-    await driver!.create('t', { id: '2', name: 'B' }, { transaction: trx } as any);
+    await driver!.create('t', { id: '1', name: 'A' }, { transaction: trx });
+    await driver!.create('t', { id: '2', name: 'B' }, { transaction: trx });
     await driver!.rollback(trx);
     const rows = await k('t').select();
     expect(rows.length).toBe(0);

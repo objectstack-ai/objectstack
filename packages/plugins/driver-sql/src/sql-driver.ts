@@ -1466,21 +1466,26 @@ export class SqlDriver implements IDataDriver {
     return results;
   }
 
+  /**
+   * `IDataDriver.findOne` — find a single record BY QUERY.
+   *
+   * This also accepted a bare id (`findOne('task', 't1')`) through an
+   * undeclared `typeof query === 'string' | 'number'` branch until #4311. No
+   * caller outside this package's own tests used it, it was on no contract, and
+   * the other two drivers answer that same call differently: `MemoryDriver`
+   * spreads the argument (`{ ...query }` over a string yields `{0:'t',1:'1'}`)
+   * and `MongoDriver` reads `query.where` (undefined → an unfiltered findOne,
+   * i.e. an arbitrary row). One spelling meaning three things across three
+   * drivers is the second de-facto contract Prime Directive #12 exists to
+   * prevent — and the branch also bypassed the shared `findRows()` path
+   * (field selection, temporal coercion, unknown-column recovery, and the
+   * `singleRowLookup` ORDER BY decision).
+   * Spell an id lookup as what it is: `{ object, where: { id } }`.
+   */
   async findOne(object: string, query: QueryAST, options?: DriverOptions): Promise<any> {
-    // When called with a string/number id fall back gracefully
-    if (typeof query === 'string' || typeof query === 'number') {
-      const builder = this.getBuilder(object, options).where('id', query);
-      this.applyTenantScope(builder, object, options);
-      const res = await builder.first();
-      return this.formatOutput(object, res) || null;
-    }
-
-    if (query && typeof query === 'object') {
-      const results = await this.findRows(object, { ...query, limit: 1 }, options, true);
-      return results[0] || null;
-    }
-
-    return null;
+    if (!query || typeof query !== 'object') return null;
+    const results = await this.findRows(object, { ...query, limit: 1 }, options, true);
+    return results[0] || null;
   }
 
   /**
@@ -1818,7 +1823,7 @@ export class SqlDriver implements IDataDriver {
     const cfgs = this.autoNumberFields[object] || this.autoNumberFields[tableName];
     if (!cfgs || cfgs.length === 0) return;
     const parentTrx = options?.transaction as Knex.Transaction | undefined;
-    const timezone = (options as any)?.timezone as string | undefined;
+    const timezone = options?.timezone;
     const now = new Date();
     for (const cfg of cfgs) {
       if (row[cfg.name] !== undefined && row[cfg.name] !== null && row[cfg.name] !== '') continue;
@@ -1837,7 +1842,7 @@ export class SqlDriver implements IDataDriver {
       // Resolve tenant for this row: explicit field on the record wins,
       // then driver options, else null → global sequence.
       const rowTenant = cfg.tenantField ? row[cfg.tenantField] : undefined;
-      const optTenant = (options as any)?.tenantId;
+      const optTenant = options?.tenantId;
       const tenantId = rowTenant != null && rowTenant !== ''
         ? String(rowTenant)
         : optTenant != null && optTenant !== ''
@@ -1896,7 +1901,7 @@ export class SqlDriver implements IDataDriver {
    * A normal update leaves the flag unset, so `updated_at` always advances.
    */
   protected keepSuppliedUpdatedAt(formatted: Record<string, any>, options?: DriverOptions): boolean {
-    return (options as any)?.preserveAudit === true && formatted.updated_at != null;
+    return options?.preserveAudit === true && formatted.updated_at != null;
   }
 
   async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<any> {
@@ -2844,7 +2849,13 @@ export class SqlDriver implements IDataDriver {
     if (timeCols.length) this.timeFields[key] = new Set(timeCols);
   }
 
-  async initObjects(objects: Array<{ name: string; fields?: Record<string, any> }>): Promise<void> {
+  // `tenancy` is part of what this method READS — each object flows into
+  // `computeAndRecordTenantField`, which consumes `obj.tenancy` to pick the
+  // tenant column and to set or clear the sticky explicit-opt-out. It went
+  // undeclared here until #4311 (`registerExternalObject` and
+  // `computeAndRecordTenantField` both had it), so a caller spelling the key
+  // correctly was rejected by the type while the driver read it regardless.
+  async initObjects(objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>): Promise<void> {
     // DDL gate (ADR-0015 §5.1): createTable/alterTable below mutate schema.
     // Also covers `syncSchema`, which delegates here.
     this.assertSchemaMutable('initObjects');
@@ -4365,7 +4376,7 @@ export class SqlDriver implements IDataDriver {
     object: string,
     options?: DriverOptions,
   ): Knex.QueryBuilder {
-    const tenantId = (options as any)?.tenantId;
+    const tenantId = options?.tenantId;
     if (tenantId === undefined || tenantId === null || tenantId === '') return builder;
     const field = this.resolveTenantField(object);
     if (!field) return builder;
@@ -4377,7 +4388,7 @@ export class SqlDriver implements IDataDriver {
     // empty set falls through to the equality path: fail toward isolation,
     // never toward exposure. Insert-side injection (injectTenantOnInsert)
     // deliberately keeps `tenantId` — the active org is the write target (D5).
-    const rawIds = (options as any)?.tenantIds;
+    const rawIds = options?.tenantIds;
     const tenantIds = Array.isArray(rawIds)
       ? rawIds.filter((v: unknown) => typeof v === 'string' && v !== '')
       : [];
@@ -4414,7 +4425,7 @@ export class SqlDriver implements IDataDriver {
     row: Record<string, any>,
     options?: DriverOptions,
   ): void {
-    const tenantId = (options as any)?.tenantId;
+    const tenantId = options?.tenantId;
     if (tenantId === undefined || tenantId === null || tenantId === '') return;
     const field = this.resolveTenantField(object);
     if (!field) return;
@@ -4439,7 +4450,7 @@ export class SqlDriver implements IDataDriver {
     options?: DriverOptions,
   ): void {
     if (process.env.OS_TENANT_AUDIT === '0') return;
-    if ((options as any)?.bypassTenantAudit === true) return;
+    if (options?.bypassTenantAudit === true) return;
     // Only meaningful in multi-tenant deployments. Single-tenant stacks have no
     // tenant isolation, yet the kernel now ALWAYS provisions an `organization_id`
     // column (its existence is decoupled from the tenant flag). Column presence
@@ -4447,7 +4458,7 @@ export class SqlDriver implements IDataDriver {
     // system/sudo write (e.g. the notification/http delivery dispatchers' claim
     // updates) would spam a meaningless warning on single-tenant boots.
     if (!this.isMultiTenantMode()) return;
-    const tenantId = (options as any)?.tenantId;
+    const tenantId = options?.tenantId;
     if (tenantId !== undefined && tenantId !== null && tenantId !== '') return;
     const field = this.resolveTenantField(object);
     if (!field) return;

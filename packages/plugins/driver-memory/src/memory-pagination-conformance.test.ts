@@ -77,7 +77,7 @@ describe('InMemoryDriver — paged reads are a partition of the result set (obje
         paged.push(...page);
       }
 
-      const whole = await driver.find('ticket', { orderBy: [...testCase.orderBy] } as any);
+      const whole = await driver.find('ticket', { object: 'ticket', orderBy: [...testCase.orderBy] });
       expect(paged.map((r) => r.id)).toEqual(whole.map((r: any) => r.id));
     });
   }

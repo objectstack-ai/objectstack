@@ -139,33 +139,33 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
       expect(result).toBeDefined();
       expect(result.length).toBe(3);
 
-      const count = await driver.count('orders', {});
+      const count = await driver.count('orders', { object: 'orders' });
       expect(count).toBe(8);
     });
 
     it('should update many records', async () => {
-      const result = await driver.updateMany('orders', { where: { status: 'pending' } } as any, { status: 'processing' });
+      const result = await driver.updateMany('orders', { object: 'orders', where: { status: 'pending' } }, { status: 'processing' });
 
       expect(result).toBeGreaterThan(0);
 
-      const results = await driver.find('orders', { where: { status: 'processing' } });
+      const results = await driver.find('orders', { object: 'orders', where: { status: 'processing' } });
       expect(results.length).toBe(1);
     });
 
     it('should delete many records', async () => {
-      const result = await driver.deleteMany('orders', { where: { status: 'cancelled' } } as any);
+      const result = await driver.deleteMany('orders', { object: 'orders', where: { status: 'cancelled' } });
 
       expect(result).toBe(1);
 
-      const remaining = await driver.count('orders', {});
+      const remaining = await driver.count('orders', { object: 'orders' });
       expect(remaining).toBe(4);
     });
 
     it('should handle empty bulk update and delete', async () => {
-      const result = await driver.updateMany('orders', { where: { status: 'nonexistent' } } as any, { status: 'updated' });
+      const result = await driver.updateMany('orders', { object: 'orders', where: { status: 'nonexistent' } }, { status: 'updated' });
       expect(result).toBe(0);
 
-      const deleteResult = await driver.deleteMany('orders', { where: { id: 'nonexistent' } } as any);
+      const deleteResult = await driver.deleteMany('orders', { object: 'orders', where: { id: 'nonexistent' } });
       expect(deleteResult).toBe(0);
     });
   });
@@ -190,7 +190,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
 
         await driver.commitTransaction(trx);
 
-        const result = await driver.findOne('orders', 'trx1' as any);
+        const result = await driver.findOne('orders', { object: 'orders', where: { id: 'trx1' } });
         expect(result).toBeDefined();
         expect(result.customer).toBe('TxUser');
       } catch (e) {
@@ -218,7 +218,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
 
         await driver.rollbackTransaction(trx);
 
-        const result = await driver.findOne('orders', 'trx2' as any);
+        const result = await driver.findOne('orders', { object: 'orders', where: { id: 'trx2' } });
         expect(result).toBeNull();
       } catch (e) {
         await driver.rollbackTransaction(trx);
@@ -249,13 +249,13 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
 
         await driver.commitTransaction(trx);
 
-        const created = await driver.findOne('orders', 'trx3' as any);
+        const created = await driver.findOne('orders', { object: 'orders', where: { id: 'trx3' } });
         expect(created).toBeDefined();
 
-        const updated = await driver.findOne('orders', '1' as any);
+        const updated = await driver.findOne('orders', { object: 'orders', where: { id: '1' } });
         expect(updated.status).toBe('shipped');
 
-        const deleted = await driver.findOne('orders', '5' as any);
+        const deleted = await driver.findOne('orders', { object: 'orders', where: { id: '5' } });
         expect(deleted).toBeNull();
       } catch (e) {
         await driver.rollbackTransaction(trx);
@@ -266,12 +266,12 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
 
   describe('Edge Cases and Error Handling', () => {
     it('should handle empty filters gracefully', async () => {
-      const results = await driver.find('orders', { where: {} });
+      const results = await driver.find('orders', { object: 'orders', where: {} });
       expect(results.length).toBe(5);
     });
 
     it('should handle undefined query parameters', async () => {
-      const results = await driver.find('orders', {});
+      const results = await driver.find('orders', { object: 'orders' });
       expect(results.length).toBe(5);
     });
 
@@ -284,7 +284,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
 
       await driver.create('nullable_test', { id: '1', name: null, value: null });
 
-      const result = await driver.findOne('nullable_test', '1' as any);
+      const result = await driver.findOne('nullable_test', { object: 'nullable_test', where: { id: '1' } });
       expect(result).toBeDefined();
       expect(result.name).toBeNull();
       expect(result.value).toBeNull();
@@ -292,6 +292,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
 
     it('should handle pagination with offset and limit', async () => {
       const page1 = await driver.find('orders', {
+        object: 'orders',
         orderBy: [{ field: 'id', order: 'asc' }],
         offset: 0,
         limit: 2,
@@ -300,6 +301,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
       expect(page1[0].id).toBe('1');
 
       const page2 = await driver.find('orders', {
+        object: 'orders',
         orderBy: [{ field: 'id', order: 'asc' }],
         offset: 2,
         limit: 2,
@@ -309,12 +311,13 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
     });
 
     it('should handle offset beyond total records', async () => {
-      const results = await driver.find('orders', { offset: 100, limit: 10 });
+      const results = await driver.find('orders', { object: 'orders', offset: 100, limit: 10 });
       expect(results.length).toBe(0);
     });
 
     it('should handle complex nested filters', async () => {
       const results = await driver.find('orders', {
+        object: 'orders',
         where: {
           $or: [
             { $and: [{ status: 'completed' }, { amount: { $gt: 100 } }] },
@@ -335,6 +338,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
 
     it('should handle contains filter', async () => {
       const results = await driver.find('orders', {
+        object: 'orders',
         where: { product: { $contains: 'top' } },
       });
 
@@ -344,6 +348,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
 
     it('should handle in filter', async () => {
       const results = await driver.find('orders', {
+        object: 'orders',
         where: { status: { $in: ['completed', 'pending'] } },
       });
 
@@ -352,6 +357,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
 
     it('should handle nin (not in) filter', async () => {
       const results = await driver.find('orders', {
+        object: 'orders',
         where: { status: { $nin: ['cancelled'] } },
       });
 
@@ -359,14 +365,14 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
     });
 
     it('should handle findOne with query parameter', async () => {
-      const result = await driver.findOne('orders', { where: { customer: 'Charlie' } });
+      const result = await driver.findOne('orders', { object: 'orders', where: { customer: 'Charlie' } });
 
       expect(result).toBeDefined();
       expect(result.customer).toBe('Charlie');
     });
 
     it('should return null for non-existent record', async () => {
-      const result = await driver.findOne('orders', 'nonexistent' as any);
+      const result = await driver.findOne('orders', { object: 'orders', where: { id: 'nonexistent' } });
       expect(result).toBeNull();
     });
 

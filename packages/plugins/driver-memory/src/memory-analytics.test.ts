@@ -3,7 +3,21 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
-import type { Cube } from '@objectstack/spec/data';
+import { AnalyticsQuerySchema, defineCube } from '@objectstack/spec/data';
+import type { AnalyticsQuery, AnalyticsQueryInput, Cube } from '@objectstack/spec/data';
+
+/**
+ * Author-tier literal → the parsed `AnalyticsQuery` the service contract takes.
+ *
+ * `timezone` is `.default('UTC')` on the schema, so it is optional to write and
+ * required on the parsed type — the two tiers are genuinely different types. A
+ * real query reaches `query()` through the schema (the REST layer parses the
+ * request body), so these tests take the same route rather than hand-writing
+ * the filled-in default: the parse IS the proof that the default lands. Until
+ * #4311 no tsc read this file, so 19 author-tier literals sat unnoticed in a
+ * parameter that had required `timezone` all along.
+ */
+const asQuery = (input: AnalyticsQueryInput): AnalyticsQuery => AnalyticsQuerySchema.parse(input);
 
 describe('MemoryAnalyticsService', () => {
   let driver: InMemoryDriver;
@@ -160,10 +174,10 @@ describe('MemoryAnalyticsService', () => {
 
   describe('query', () => {
     it('should execute a simple count query', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'orders',
         measures: ['orders.count']
-      });
+      }));
 
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0]['orders.count']).toBe(5);
@@ -173,11 +187,11 @@ describe('MemoryAnalyticsService', () => {
     });
 
     it('should group by a dimension', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'orders',
         measures: ['orders.count'],
         dimensions: ['orders.status']
-      });
+      }));
 
       expect(result.rows).toHaveLength(3); // completed, pending, cancelled
       
@@ -187,11 +201,11 @@ describe('MemoryAnalyticsService', () => {
     });
 
     it('should calculate sum aggregation', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'orders',
         measures: ['orders.totalAmount'],
         dimensions: ['orders.customer']
-      });
+      }));
 
       const aliceRow = result.rows.find(r => r['orders.customer'] === 'Alice');
       expect(aliceRow).toBeDefined();
@@ -199,11 +213,11 @@ describe('MemoryAnalyticsService', () => {
     });
 
     it('should calculate average aggregation', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'products',
         measures: ['products.avgPrice'],
         dimensions: ['products.category']
-      });
+      }));
 
       const electronicsRow = result.rows.find(r => r['products.category'] === 'electronics');
       expect(electronicsRow).toBeDefined();
@@ -211,10 +225,10 @@ describe('MemoryAnalyticsService', () => {
     });
 
     it('should support multiple measures', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'orders',
         measures: ['orders.count', 'orders.totalAmount', 'orders.avgAmount']
-      });
+      }));
 
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0]['orders.count']).toBe(5);
@@ -223,11 +237,11 @@ describe('MemoryAnalyticsService', () => {
     });
 
     it('should apply filters via canonical `where`', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'orders',
         measures: ['orders.count', 'orders.totalAmount'],
         where: { 'orders.status': 'completed' },
-      });
+      }));
 
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0]['orders.count']).toBe(3);
@@ -235,11 +249,11 @@ describe('MemoryAnalyticsService', () => {
     });
 
     it('should accept FilterCondition (short-form equality)', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'orders',
         measures: ['orders.count', 'orders.totalAmount'],
         where: { status: 'completed' },
-      });
+      }));
 
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0]['orders.count']).toBe(3);
@@ -247,32 +261,32 @@ describe('MemoryAnalyticsService', () => {
     });
 
     it('should accept FilterCondition with $in operator', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'orders',
         measures: ['orders.count'],
         where: { status: { $in: ['completed', 'pending'] } },
-      });
+      }));
 
       expect(result.rows[0]['orders.count']).toBe(4); // 3 completed + 1 pending
     });
 
     it('should accept FilterCondition with $gte operator', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'orders',
         measures: ['orders.count'],
         where: { amount: { $gte: 200 } },
-      });
+      }));
 
       expect(result.rows[0]['orders.count']).toBe(2); // 200, 300
     });
 
     it('should support sorting', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'orders',
         measures: ['orders.totalAmount'],
         dimensions: ['orders.customer'],
         order: { 'orders.totalAmount': 'desc' }
-      });
+      }));
 
       expect(result.rows[0]['orders.customer']).toBe('Charlie'); // 300
       expect(result.rows[1]['orders.customer']).toBe('Alice');   // 250
@@ -280,14 +294,14 @@ describe('MemoryAnalyticsService', () => {
     });
 
     it('should support limit and offset', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'orders',
         measures: ['orders.count'],
         dimensions: ['orders.customer'],
         order: { 'orders.customer': 'asc' },
         limit: 2,
         offset: 1
-      });
+      }));
 
       expect(result.rows).toHaveLength(2);
       expect(result.rows[0]['orders.customer']).toBe('Bob');
@@ -299,7 +313,10 @@ describe('MemoryAnalyticsService', () => {
       // 'amount' of type 'sum'). Clients that build measure names from
       // (field, function) pairs send 'amount_sum' — the resolver should
       // accept that alias and produce the same aggregate value.
-      const aliasCube: Cube = {
+      // `defineCube` rather than a bare `: Cube` literal: `public` is
+      // `.default(false)`, so it is required on the parsed `Cube` type and
+      // absent here — the factory is the spec's own answer to that split.
+      const aliasCube = defineCube({
         name: 'opps',
         title: 'Opps',
         sql: 'orders',
@@ -309,14 +326,14 @@ describe('MemoryAnalyticsService', () => {
         dimensions: {
           status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
         },
-      };
+      });
       const aliasService = new MemoryAnalyticsService({ driver, cubes: [aliasCube] });
 
-      const aliased = await aliasService.query({
+      const aliased = await aliasService.query(asQuery({
         cube: 'opps',
         measures: ['amount_sum'],
         dimensions: ['status'],
-      });
+      }));
 
       const completed = aliased.rows.find(r => r.status === 'completed');
       expect(completed).toBeDefined();
@@ -325,18 +342,18 @@ describe('MemoryAnalyticsService', () => {
 
     it('should throw error for unknown cube', async () => {
       await expect(async () => {
-        await service.query({
+        await service.query(asQuery({
           cube: 'unknown',
           measures: ['unknown.count']
-        });
+        }));
       }).rejects.toThrow('Cube not found: unknown');
     });
 
     it('should include SQL in result for debugging', async () => {
-      const result = await service.query({
+      const result = await service.query(asQuery({
         cube: 'orders',
         measures: ['orders.count']
-      });
+      }));
 
       expect(result.sql).toBeDefined();
       expect(result.sql).toContain('orders');
@@ -345,10 +362,10 @@ describe('MemoryAnalyticsService', () => {
 
   describe('generateSql', () => {
     it('should generate SQL for a simple query', async () => {
-      const result = await service.generateSql({
+      const result = await service.generateSql(asQuery({
         cube: 'orders',
         measures: ['orders.count']
-      });
+      }));
 
       expect(result.sql).toContain('SELECT');
       expect(result.sql).toContain('COUNT(*)');
@@ -356,45 +373,45 @@ describe('MemoryAnalyticsService', () => {
     });
 
     it('should generate SQL with GROUP BY', async () => {
-      const result = await service.generateSql({
+      const result = await service.generateSql(asQuery({
         cube: 'orders',
         measures: ['orders.count'],
         dimensions: ['orders.status']
-      });
+      }));
 
       expect(result.sql).toContain('GROUP BY status');
     });
 
     it('should generate SQL with WHERE clause', async () => {
-      const result = await service.generateSql({
+      const result = await service.generateSql(asQuery({
         cube: 'orders',
         measures: ['orders.count'],
         where: { 'orders.status': 'completed' },
-      });
+      }));
 
       expect(result.sql).toContain('WHERE');
       expect(result.sql).toContain('status');
     });
 
     it('should generate SQL with ORDER BY', async () => {
-      const result = await service.generateSql({
+      const result = await service.generateSql(asQuery({
         cube: 'orders',
         measures: ['orders.count'],
         dimensions: ['orders.status'],
         order: { 'orders.status': 'asc' }
-      });
+      }));
 
       expect(result.sql).toContain('ORDER BY');
       expect(result.sql).toContain('ASC');
     });
 
     it('should generate SQL with LIMIT and OFFSET', async () => {
-      const result = await service.generateSql({
+      const result = await service.generateSql(asQuery({
         cube: 'orders',
         measures: ['orders.count'],
         limit: 10,
         offset: 5
-      });
+      }));
 
       expect(result.sql).toContain('LIMIT 10');
       expect(result.sql).toContain('OFFSET 5');

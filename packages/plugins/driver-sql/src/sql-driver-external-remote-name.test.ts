@@ -49,12 +49,12 @@ async function seedRemote(path: string) {
   (fixture as any).name = 'fixture';
   await fixture.connect?.();
   // Physical table name deliberately differs from the object name used later.
-  await (fixture as any).initObjects([{ name: 'remote_customers', fields: FIELDS }]);
-  await (fixture as any).create('remote_customers', {
+  await (fixture).initObjects([{ name: 'remote_customers', fields: FIELDS }]);
+  await (fixture).create('remote_customers', {
     id: 'c1', name: 'Acme', flag: true, meta: { tier: 'gold' },
     when: '2026-01-01', amount: 100, seen_at: new Date('2026-01-02T10:00:00.000Z'),
   });
-  await (fixture as any).create('remote_customers', {
+  await (fixture).create('remote_customers', {
     id: 'c2', name: 'Globex', flag: false, meta: { tier: 'silver' },
     when: '2026-02-15', amount: 250, seen_at: new Date('2026-02-16T08:00:00.000Z'),
   });
@@ -86,7 +86,7 @@ describe('SqlDriver external read path — remoteName resolution (ADR-0015)', ()
       ).not.toThrow();
 
       // The bug: this used to throw `no such table: ext_customer`.
-      const rows = await ext.find('ext_customer', {} as any);
+      const rows = await ext.find('ext_customer', { object: 'ext_customer' });
       expect(rows).toHaveLength(2);
 
       const acme = rows.find((r: any) => r.name === 'Acme');
@@ -98,24 +98,24 @@ describe('SqlDriver external read path — remoteName resolution (ADR-0015)', ()
       expect(typeof acme.amount).toBe('number');       // numeric scalar
 
       // count + findOne route to the remote table too.
-      expect(await ext.count('ext_customer', {} as any)).toBe(2);
-      const one = await ext.findOne('ext_customer', { where: { name: 'Globex' } } as any);
+      expect(await ext.count('ext_customer', { object: 'ext_customer' })).toBe(2);
+      const one = await ext.findOne('ext_customer', { object: 'ext_customer', where: { name: 'Globex' } });
       expect(one?.name).toBe('Globex');
 
       // Filtered reads hit the remote table.
-      const filtered = await ext.find('ext_customer', { where: { name: 'Acme' } } as any);
+      const filtered = await ext.find('ext_customer', { object: 'ext_customer', where: { name: 'Acme' } });
       expect(filtered).toHaveLength(1);
       expect(filtered[0].name).toBe('Acme');
 
       // Date filter — guards the coercion re-keying (§3): coercion maps are keyed
       // by the OBJECT name even though the builder now targets the remote table.
-      const byDate = await ext.find('ext_customer', { where: { when: '2026-02-15' } } as any);
+      const byDate = await ext.find('ext_customer', { object: 'ext_customer', where: { when: '2026-02-15' } });
       expect(byDate).toHaveLength(1);
       expect(byDate[0].name).toBe('Globex');
 
       // Datetime filter — the SQLite epoch-affinity case the §3 trap would break
       // if coercion were keyed by the physical (remote) name instead of object.
-      const byDatetime = await ext.find('ext_customer', { where: { seen_at: '2026-01-02T10:00:00.000Z' } } as any);
+      const byDatetime = await ext.find('ext_customer', { object: 'ext_customer', where: { seen_at: '2026-01-02T10:00:00.000Z' } });
       expect(byDatetime.map((r: any) => r.name)).toContain('Acme');
 
       // No object-named table was ever created in the remote db (no DDL leaked).
@@ -132,7 +132,7 @@ describe('SqlDriver external read path — remoteName resolution (ADR-0015)', ()
     await ext.connect?.();
     try {
       await expect(
-        ext.initObjects([{ name: 'ext_customer', fields: FIELDS as any }]),
+        ext.initObjects([{ name: 'ext_customer', fields: FIELDS }]),
       ).rejects.toBeInstanceOf(ExternalSchemaModeViolationError);
     } finally {
       await ext.disconnect?.();
@@ -144,7 +144,7 @@ describe('SqlDriver external read path — remoteName resolution (ADR-0015)', ()
     await ext.connect?.();
     try {
       ext.registerExternalObject!({ name: 'remote_customers', external: {}, fields: FIELDS as any });
-      const rows = await ext.find('remote_customers', {} as any);
+      const rows = await ext.find('remote_customers', { object: 'remote_customers' });
       expect(rows.length).toBe(2);
     } finally {
       await ext.disconnect?.();
@@ -156,7 +156,7 @@ describe('SqlDriver external read path — remoteName resolution (ADR-0015)', ()
     await ext.connect?.();
     try {
       ext.registerExternalObject!({ name: 'ext_cust2', external: { remoteName: 'remote_customers', remoteSchema: 'mart' }, fields: FIELDS as any });
-      const rows = await ext.find('ext_cust2', {} as any);
+      const rows = await ext.find('ext_cust2', { object: 'ext_cust2' });
       expect(rows.length).toBe(2);
     } finally {
       await ext.disconnect?.();

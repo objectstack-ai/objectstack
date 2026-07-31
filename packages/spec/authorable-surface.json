@@ -3393,6 +3393,7 @@
     "data/DriverDefinition:icon",
     "data/DriverDefinition:id",
     "data/DriverDefinition:label",
+    "data/DriverOptions:bypassTenantAudit",
     "data/DriverOptions:preserveAudit",
     "data/DriverOptions:skipCache",
     "data/DriverOptions:tenantId",

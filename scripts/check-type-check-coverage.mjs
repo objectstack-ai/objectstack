@@ -9,10 +9,31 @@
 // typecheck job covered exactly four targets (spec, examples,
 // downstream-contract, docs code blocks) -- so for most packages NOTHING read
 // src/ or the tests with a type checker at all. #4311 measured the hole:
-// 380 code-tier errors across 18 packages, 241 of them in driver-sql tests
-// passing authored-shape literals into the freshly narrowed QueryAST. A green
+// 380 code-tier errors across 18 packages, 241 of them in driver-sql. A green
 // test suite no tsc has ever read is not evidence of a contract; this gate
 // makes the coverage hole itself the failure, so it can only shrink.
+//
+// What the first burn-down found is worth knowing before reading a number
+// below as "N test literals to fix". The three drivers (driver-sql 241,
+// driver-sqlite-wasm 27, driver-memory 23) were filed as one playbook --
+// author-tier literals in a parsed-tier parameter -- and 165 of their 292
+// were something else entirely: 118 for a `bypassTenantAudit` driver option
+// that SqlDriver read (through an `as any`), the engine set, and two services
+// passed, while `DriverOptionsSchema` had never declared it; 41 for a bare-id
+// `findOne(object, id)` branch on no contract, which the other two drivers
+// answered differently; 4 for a `tenancy` key `initObjects` consumed but did
+// not declare; 19 for an analytics `timezone` default. The tests were right
+// and the types were wrong. A tsc count is a place to look, never a verdict.
+//
+// The reverse also holds: a LOW count can be call sites opting out. Those same
+// three packages carried 111 `as any` casts on driver-call arguments. Removing
+// them left 66 fresh errors -- every one a real missing `object` the cast had
+// hidden, including an `orderBy: [['id','asc']]` tuple the driver reads as
+// `item.field` and therefore silently dropped, inside a helper whose whole job
+// was reading rows in order. 43 of the casts were needed by nothing at all;
+// exactly 2 were load-bearing (tests feeding a filter the AST gate refuses, on
+// purpose). Onboarding a package is supposed to make its `typecheck` mean
+// something, so the casts belong in the diff too.
 //
 //   node scripts/check-type-check-coverage.mjs
 //   node scripts/check-type-check-coverage.mjs --self-test
@@ -87,7 +108,8 @@ const TEST_FILE = /\.(test|spec)\.tsx?$/;
 // implicit-any params, TS6133 unused) -- so each note says what the pile is
 // made of. Nobody should mistake a config-tier pile for real breakage, or --
 // worse -- the reverse: `core` at 91 raw has 3 real errors, while
-// `driver-sql`'s 241 are ALL real.
+// `driver-sql`'s 241 were ALL real (and, as the header notes, mostly real
+// about the types rather than about the tests).
 //
 // The tiers are not independent, which is why these numbers get re-measured
 // rather than decremented. Under `moduleResolution: NodeNext` a relative
@@ -110,18 +132,6 @@ const DEBT = {
   '@objectstack/dogfood': {
     errors: 12,
     note: 'code-tier 8 (TS2322/TS2554) + 3 config-tier + 1 noise.',
-  },
-  '@objectstack/driver-memory': {
-    errors: 23,
-    note: 'all code-tier: TS2345/TS2741/TS2339, the QueryAST authored-vs-parsed playbook.',
-  },
-  '@objectstack/driver-sql': {
-    errors: 241,
-    note: 'ALL code-tier (TS2345 x123, TS2353 x118): tests pass authored-shape literals into the parsed QueryAST type across 8+ test files; #4196/#4286 narrowed QueryAST and no tsc ever read these tests. 63% of the whole audit; single playbook, fix as one batch.',
-  },
-  '@objectstack/driver-sqlite-wasm': {
-    errors: 27,
-    note: 'all code-tier (TS2345/TS2353), same QueryAST playbook as driver-sql.',
   },
   '@objectstack/hono': {
     errors: 3,

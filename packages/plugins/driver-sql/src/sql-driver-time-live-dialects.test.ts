@@ -88,7 +88,7 @@ function suite(dialect: 'pg' | 'mysql', url: string | undefined) {
         await driver.create(TABLE, { id, label: id, starts_at: v }, { bypassTenantAudit: true });
       }
       for (const [id, , presented] of WRITES) {
-        const row: any = await driver.findOne(TABLE, id, { bypassTenantAudit: true });
+        const row: any = await driver.findOne(TABLE, { object: TABLE, where: { id } }, { bypassTenantAudit: true });
         expect(row.starts_at, id).toBe(presented);
       }
     });
@@ -101,14 +101,14 @@ function suite(dialect: 'pg' | 'mysql', url: string | undefined) {
         { id: 'd', label: 'd', starts_at: new Date(Date.UTC(2026, 0, 15, 14, 30, 0, 500)) },
         { bypassTenantAudit: true },
       );
-      const row: any = await driver.findOne(TABLE, 'd', { bypassTenantAudit: true });
+      const row: any = await driver.findOne(TABLE, { object: TABLE, where: { id: 'd' } }, { bypassTenantAudit: true });
       expect(row.starts_at).toBe('14:30:00.500');
     });
 
     it('keeps milliseconds — no zero-precision rounding to the next second', async () => {
       // MySQL's bare TIME would ROUND '14:30:00.500' up to 14:30:01.
       await driver.create(TABLE, { id: 'ms', label: 'ms', starts_at: '14:30:00.500' }, { bypassTenantAudit: true });
-      const row: any = await driver.findOne(TABLE, 'ms', { bypassTenantAudit: true });
+      const row: any = await driver.findOne(TABLE, { object: TABLE, where: { id: 'ms' } }, { bypassTenantAudit: true });
       expect(row.starts_at).toBe('14:30:00.500');
     });
 
@@ -119,6 +119,7 @@ function suite(dialect: 'pg' | 'mysql', url: string | undefined) {
       await driver.create(TABLE, { id: 'early', label: 'e', starts_at: '08:00:00' }, { bypassTenantAudit: true });
 
       const hits = await driver.find(TABLE, {
+        object: TABLE,
         where: { starts_at: { $gte: '09:00:00', $lte: '18:00:00' } },
         orderBy: [{ field: 'id', order: 'asc' }],
       });
@@ -127,7 +128,7 @@ function suite(dialect: 'pg' | 'mysql', url: string | undefined) {
 
     it("a NOW()-default time column records the UTC time-of-day, not the server's or session's", async () => {
       await driver.create(TABLE, { id: 'now', label: 'n' }, { bypassTenantAudit: true });
-      const row: any = await driver.findOne(TABLE, 'now', { bypassTenantAudit: true });
+      const row: any = await driver.findOne(TABLE, { object: TABLE, where: { id: 'now' } }, { bypassTenantAudit: true });
       // A leak of the +08:00 server zone is ~480 minutes; of the -04:00/-05:00
       // process zone, ~240-300. Genuine clock skew is seconds.
       expect(minutesOffUtc(String(row.auto_at))).toBeLessThan(5);
@@ -188,11 +189,11 @@ describe.skipIf(!MY_URL)('MySQL TIME → TIME(3) widening (#3994)', () => {
     const colType = String((list[0] as any).COLUMN_TYPE ?? (list[0] as any).column_type).toLowerCase();
     expect(colType).toBe('time(3)');
 
-    const old: any = await driver.findOne(LEGACY, 'old', { bypassTenantAudit: true });
+    const old: any = await driver.findOne(LEGACY, { object: LEGACY, where: { id: 'old' } }, { bypassTenantAudit: true });
     expect(old.starts_at).toBe('14:30:00'); // the wall clock must not move
 
     await driver.create(LEGACY, { id: 'ms', label: 'm', starts_at: '14:30:00.500' }, { bypassTenantAudit: true });
-    const ms: any = await driver.findOne(LEGACY, 'ms', { bypassTenantAudit: true });
+    const ms: any = await driver.findOne(LEGACY, { object: LEGACY, where: { id: 'ms' } }, { bypassTenantAudit: true });
     expect(ms.starts_at).toBe('14:30:00.500'); // pre-widen this ROUNDED to 14:30:01
   });
 

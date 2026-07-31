@@ -56,10 +56,22 @@ function makeEngine(schemas: any[]) {
     async trigger(event: string, ctx: any) {
       for (const { handler } of hooks[event] ?? []) await handler(ctx);
     },
+    // Executes the KEYSET walk the backfill emits since #4363: `orderBy` on
+    // the key plus a `$gt` seek. `offset` throws rather than being served —
+    // this walk updates the rows it is reading, so an offset counts into a set
+    // its own writes are changing and rows slide past the cursor unconverted.
     async find(o: string, opts?: any) {
-      const rows = tables[o] ?? [];
-      const offset = opts?.offset ?? 0;
-      return rows.slice(offset, offset + (opts?.limit ?? rows.length));
+      if (opts?.offset !== undefined) {
+        throw new Error('offset paging skips rows a mutating walk must visit — expected a keyset seek (#4363)');
+      }
+      const key = opts?.orderBy?.[0]?.field;
+      const seek = opts?.where?.[key]?.$gt ?? opts?.where?.$and?.[1]?.[key]?.$gt;
+      let rows: any[] = tables[o] ?? [];
+      if (seek !== undefined) rows = rows.filter((r: any) => String(r[key]) > String(seek));
+      const ordered = key
+        ? [...rows].sort((a: any, b: any) => String(a[key]).localeCompare(String(b[key])))
+        : rows;
+      return ordered.slice(0, opts?.limit ?? ordered.length);
     },
     async insert(o: string, data: Row) {
       const ctx = { object: o, event: 'beforeInsert', input: { data } };

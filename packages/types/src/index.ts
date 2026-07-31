@@ -3,6 +3,9 @@
 export * from './degraded-boot.js';
 export * from './env.js';
 export * from './error-leak.js';
+// Seek-based pagination for batch walks — the offset alternative that neither
+// skips rows when the walk mutates as it goes, nor costs O(n²/p) (#4363).
+export * from './keyset-walk.js';
 export * from './module-not-found.js';
 export * from './response-envelope.js';
 

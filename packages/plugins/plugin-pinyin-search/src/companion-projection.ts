@@ -21,6 +21,7 @@ import {
   resolveSearchCompanionSources,
   containsCJK,
 } from '@objectstack/objectql';
+import { keysetWalk } from '@objectstack/types';
 import { computeSearchCompanionValue } from './pinyin.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -145,21 +146,21 @@ export async function backfillSearchCompanion(
     if (sources.length === 0) continue;
     result.objects++;
 
-    let offset = 0;
-    for (;;) {
-      let rows: any[] = [];
-      try {
-        rows = await engine.find(schema.name, {
-          fields: ['id', ...sources, SEARCH_COMPANION_FIELD],
-          limit: batchSize,
-          offset,
-          context: SYSTEM_CTX,
-        });
-      } catch (err: any) {
-        logger?.warn?.('[pinyin-search] backfill scan failed', { object: schema.name, error: err?.message });
-        break;
-      }
-      if (!rows?.length) break;
+    // Seek by `id` (#4363). This walk UPDATES the rows it reads, and an offset
+    // counts into a set those writes are changing, so rows slide past the
+    // cursor and never get their companion blob — a backfill that reports a
+    // clean pass while leaving records unsearchable.
+    const walk = keysetWalk<any>(
+      (q) => engine.find(schema.name, {
+        ...q,
+        fields: ['id', ...sources, SEARCH_COMPANION_FIELD],
+        context: SYSTEM_CTX,
+      }),
+      { pageSize: batchSize },
+    );
+
+    try {
+      for await (const rows of walk.pages()) {
       result.scanned += rows.length;
 
       for (const row of rows) {
@@ -187,9 +188,10 @@ export async function backfillSearchCompanion(
           });
         }
       }
-
-      if (rows.length < batchSize) break;
-      offset += batchSize;
+      }
+    } catch (err: any) {
+      logger?.warn?.('[pinyin-search] backfill scan failed', { object: schema.name, error: err?.message });
+      continue;
     }
   }
 

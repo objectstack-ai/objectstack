@@ -22,6 +22,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
+import type { FilterCondition } from '@objectstack/spec/data';
 
 describe('SqlDriver rejects an uncompilable filter instead of dropping it', () => {
   let driver: SqlDriver;
@@ -48,8 +49,12 @@ describe('SqlDriver rejects an uncompilable filter instead of dropping it', () =
     await driver.create('deal', { id: '2', stage: 'lost', amount: 20 });
   });
 
+  // The cast is the point of the file: every `where` below is a shape
+  // `isFilterAST()` REFUSED, fed in deliberately to prove the driver throws
+  // rather than dropping it. `unknown` is the honest parameter type; the cast
+  // is what lets an off-spec value reach a parameter that forbids it.
   const find = (where: unknown) =>
-    driver.find('deal', { object: 'deal', fields: ['id'], where } as any);
+    driver.find('deal', { object: 'deal', fields: ['id'], where: where as FilterCondition });
 
   it('throws on a bare triple whose operator the AST gate refused', async () => {
     // The exact shape a stored single-condition `before` view produced.

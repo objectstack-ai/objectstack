@@ -186,3 +186,16 @@ export function defineCube(config: z.input<typeof CubeSchema>): Cube {
   return CubeSchema.parse(config);
 }
 export type AnalyticsQuery = z.infer<typeof AnalyticsQuerySchema>;
+
+/**
+ * Author-tier `AnalyticsQuery` — what a caller writes, before `.parse()` fills
+ * the defaults in. `timezone` is `.default('UTC')`, so it is optional here and
+ * REQUIRED on {@link AnalyticsQuery}: the two tiers are genuinely different
+ * types, and only the parse turns one into the other.
+ *
+ * Every executor (`IAnalyticsService.query`, the analytics strategies) takes
+ * the PARSED type, because a request body reaches them through the schema. Use
+ * this one for the literal handed to `AnalyticsQuerySchema.parse()` — the
+ * mirror of `QueryInput` / `QueryAST` in `data/query.zod.ts`.
+ */
+export type AnalyticsQueryInput = z.input<typeof AnalyticsQuerySchema>;

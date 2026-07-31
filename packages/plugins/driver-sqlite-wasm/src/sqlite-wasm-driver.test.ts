@@ -40,6 +40,7 @@ describe('SqliteWasmDriver (in-memory)', () => {
 
   it('should find objects with filters', async () => {
     const results = await driver.find('users', {
+      object: 'users',
       fields: ['name', 'age'],
       where: { age: { $gt: 18 } },
       orderBy: [{ field: 'name', order: 'asc' }],
@@ -51,6 +52,7 @@ describe('SqliteWasmDriver (in-memory)', () => {
 
   it('should apply simple AND/OR logic', async () => {
     const results = await driver.find('users', {
+      object: 'users',
       where: { $or: [{ age: 17 }, { age: { $gt: 29 } }] },
     });
     const names = results.map((r: any) => r.name).sort();
@@ -58,34 +60,34 @@ describe('SqliteWasmDriver (in-memory)', () => {
   });
 
   it('should find one object by id', async () => {
-    const [alice] = await driver.find('users', { where: { name: 'Alice' } });
+    const [alice] = await driver.find('users', { object: 'users', where: { name: 'Alice' } });
     expect(alice).toBeDefined();
-    const fetched = await driver.findOne('users', alice.id as any);
+    const fetched = await driver.findOne('users', { object: 'users', where: { id: alice.id } });
     expect(fetched.name).toBe('Alice');
   });
 
   it('should create an object', async () => {
     await driver.create('users', { name: 'Eve', age: 22 });
-    const [eve] = await driver.find('users', { where: { name: 'Eve' } });
+    const [eve] = await driver.find('users', { object: 'users', where: { name: 'Eve' } });
     expect(eve.age).toBe(22);
   });
 
   it('should update an object', async () => {
-    const [bob] = await driver.find('users', { where: { name: 'Bob' } });
+    const [bob] = await driver.find('users', { object: 'users', where: { name: 'Bob' } });
     await driver.update('users', bob.id, { age: 18 });
-    const updated = await driver.findOne('users', bob.id as any);
+    const updated = await driver.findOne('users', { object: 'users', where: { id: bob.id } });
     expect(updated.age).toBe(18);
   });
 
   it('should delete an object', async () => {
-    const [charlie] = await driver.find('users', { where: { name: 'Charlie' } });
+    const [charlie] = await driver.find('users', { object: 'users', where: { name: 'Charlie' } });
     await driver.delete('users', charlie.id);
-    const deleted = await driver.findOne('users', charlie.id as any);
+    const deleted = await driver.findOne('users', { object: 'users', where: { id: charlie.id } });
     expect(deleted).toBeNull();
   });
 
   it('should count objects', async () => {
-    const count = await driver.count('users', { where: { age: 17 } } as any);
+    const count = await driver.count('users', { object: 'users', where: { age: 17 } });
     expect(count).toBe(2);
   });
 });
@@ -114,7 +116,7 @@ describe('SqliteWasmDriver (file persistence)', () => {
     await d1.disconnect();
 
     const d2 = new SqliteWasmDriver({ filename: dbPath, persist: 'on-disconnect' });
-    const rows = await d2.find('items', {});
+    const rows = await d2.find('items', { object: 'items' });
     expect(rows.length).toBe(1);
     expect(rows[0].label).toBe('first');
     await d2.disconnect();
@@ -132,7 +134,7 @@ describe('SqliteWasmDriver (file persistence)', () => {
     await d1.flush();
 
     const d2 = new SqliteWasmDriver({ filename: dbPath, persist: 'on-write' });
-    const rows = await d2.find('items', {});
+    const rows = await d2.find('items', { object: 'items' });
     expect(rows.length).toBe(1);
     await d1.disconnect();
     await d2.disconnect();

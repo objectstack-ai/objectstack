@@ -9,6 +9,7 @@ import {
   type ApprovalNodeConfig,
 } from '@objectstack/spec/automation';
 import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
+import { keysetWalk } from '@objectstack/types';
 import {
   ADMIN_FULL_ACCESS,
   ORGANIZATION_ADMIN_GRANTS,
@@ -3112,37 +3113,41 @@ export class ApprovalService implements IApprovalService {
    * the number of *pending* requests, not the request history.
    */
   async rebuildApproverIndex(): Promise<{ requests: number; inserted: number; deleted: number }> {
-    // Desired state: every pending request's CSV entries.
+    // Both walks seek by `id` rather than counting from the start (#4363).
+    // The desired-state walk fed the deletion pass below, so a row it skipped
+    // was not a slow page — it was an approver silently dropped from someone's
+    // queue. An offset walk over `status = 'pending'` has no such guarantee:
+    // it slices an arrangement nothing holds steady, and this method is itself
+    // a writer against the same tables.
     const desired = new Map<string, { approvers: Set<string>; org: string | null }>();
     const PAGE = 500;
-    for (let offset = 0; ; offset += PAGE) {
-      const batch = await this.engine.find('sys_approval_request', {
-        where: { status: 'pending' },
+    const requests = keysetWalk<Record<string, any>>(
+      (q) => this.engine.find('sys_approval_request', {
+        ...q,
         fields: ['id', 'pending_approvers', 'organization_id'],
-        limit: PAGE, offset, context: SYSTEM_CTX,
-      });
-      const rows: any[] = Array.isArray(batch) ? batch : [];
+        context: SYSTEM_CTX,
+      }),
+      { where: { status: 'pending' }, pageSize: PAGE },
+    );
+    for await (const rows of requests.pages()) {
       for (const r of rows) {
         desired.set(String(r.id), {
           approvers: new Set(csvSplit(r.pending_approvers)),
           org: r.organization_id ?? null,
         });
       }
-      if (rows.length < PAGE) break;
     }
 
-    // Current state: read the whole index first (bounded by the live work
-    // queue), THEN mutate — deleting while paginating would shift the cursor.
+    // Current state: read the whole index first, THEN mutate. The seek makes
+    // that separation a belt rather than the only brace — `created_at` is not
+    // unique, so the previous ORDER BY could not make these pages a partition
+    // even before the deletes below shifted the rows underneath them.
     const indexRows: any[] = [];
-    for (let offset = 0; ; offset += PAGE) {
-      const batch = await this.engine.find('sys_approval_approver', {
-        orderBy: [{ field: 'created_at', order: 'asc' }],
-        limit: PAGE, offset, context: SYSTEM_CTX,
-      });
-      const rows: any[] = Array.isArray(batch) ? batch : [];
-      indexRows.push(...rows);
-      if (rows.length < PAGE) break;
-    }
+    const index = keysetWalk<Record<string, any>>(
+      (q) => this.engine.find('sys_approval_approver', { ...q, context: SYSTEM_CTX }),
+      { pageSize: PAGE },
+    );
+    for await (const rows of index.pages()) indexRows.push(...rows);
     let inserted = 0; let deleted = 0;
     const seen = new Map<string, Set<string>>();
     for (const row of indexRows) {

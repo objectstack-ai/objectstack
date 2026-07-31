@@ -93,6 +93,6 @@ describe('SqlDriver find() recovers from unknown columns (objectstack#3821)', ()
   });
 
   it('propagates errors that are not about an unknown column', async () => {
-    await expect(driver.find('no_such_table', {} as any)).rejects.toThrow();
+    await expect(driver.find('no_such_table', { object: 'no_such_table' })).rejects.toThrow();
   });
 });

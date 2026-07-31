@@ -330,6 +330,7 @@ another package defines.
 | Dashboard action/route references (ADR-0049) | ✓ | ✓ |
 | Object & action name references (#3583) | ✓ | ✓ |
 | Page-component field bindings (#3583) | ✓ | ✓ |
+| React page block field bindings — §10 (#4340) | ✓ | ✓ |
 | Chart bindings outside dashboards (#3583) | ✓ | ✓ |
 | Navigation vs. granted access (ADR-0090 D6) | ✓ | ✓ |
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ |
@@ -346,9 +347,20 @@ will not fail `os build` on schema/predicate/binding grounds — a test in the C
 asserts that every gate `os build` runs is also run by `os validate`, so the two
 cannot drift apart again (#3782). Both entry points
 also check SDUI styling (ADR-0065), and `os validate` additionally runs a set of
-view- and page-shape checks — list-view navigation modes (ADR-0053), view
-container shape, and JSX/React page sources (ADR-0080/0081) — that catch UI
-metadata which would otherwise be silently dropped.
+view- and page-SHAPE checks — list-view navigation modes (ADR-0053), view
+container shape, and whether a JSX/React page source parses at all
+(ADR-0080/0081) — that catch UI metadata which would otherwise be silently
+dropped.
+
+The field bindings INSIDE a react page source are a different matter: they are
+reference-integrity, so they run wherever the suite runs. `os lint` gets them
+too — it shares the same `REFERENCE_INTEGRITY_RULES` list, which is why the
+table's reference rows are the ones a cheap pre-flight can rely on. That was not
+always true: the react-page prop gate was hand-wired into `os validate` alone
+until #4340's follow-up, so `os lint` and `os build` accepted a page whose every
+field binding was stale — the same divergence #4394 closed for readonly flow
+writes. A CLI test now asserts no command reaches for a suite member directly
+(#4384).
 
 A clean run walks each gate and reports timing:
 
@@ -367,7 +379,6 @@ A clean run walks each gate and reports timing:
   → Checking SDUI styling (ADR-0065)...
   → Checking JSX-source pages (ADR-0080)...
   → Checking React-source pages (ADR-0081)...
-  → Checking React-source page props (ADR-0081)...
   → Checking source-page styling (ADR-0065)...
   → Checking capability references (ADR-0066)...
   → Checking flow trigger wiring...

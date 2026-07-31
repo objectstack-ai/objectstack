@@ -104,7 +104,7 @@ describe.skipIf(!URL)('Field.datetime on Postgres is timezone-independent (#3912
     await driver.create(TABLE, { id: 'b1', label: 'x', at: new Date(BOUNDARY) }, { bypassTenantAudit: true });
 
     const day = async (from: string, to: string) =>
-      (await driver.find(TABLE, { where: { at: { $gte: from, $lt: to } } })).map((r: any) => r.id);
+      (await driver.find(TABLE, { object: TABLE, where: { at: { $gte: from, $lt: to } } })).map((r: any) => r.id);
 
     // 20:00Z belongs to 2026-03-20 in UTC. Read against the server's local
     // midnight (Asia/Shanghai) it would fall on the 21st instead — which is
@@ -115,7 +115,7 @@ describe.skipIf(!URL)('Field.datetime on Postgres is timezone-independent (#3912
 
   it('presents the stored instant as canonical UTC on read', async () => {
     await driver.create(TABLE, { id: 'r', label: 'r', at: '2026-03-20 12:00:00' }, { bypassTenantAudit: true });
-    const row: any = await driver.findOne(TABLE, 'r', { bypassTenantAudit: true });
+    const row: any = await driver.findOne(TABLE, { object: TABLE, where: { id: 'r' } }, { bypassTenantAudit: true });
     expect(new Date(row.at).toISOString()).toBe(MIDDAY);
   });
 });
