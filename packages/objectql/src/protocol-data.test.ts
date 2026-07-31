@@ -1175,7 +1175,7 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
     });
 
     // ═══════════════════════════════════════════════════════════════
-    // #3795 — one slot, one value, for ALL five alias pairs
+    // #3795 — one slot, one value, for ALL the alias pairs
     //
     // The spec documented `where` > `filter`, `fields` > `select`,
     // `orderBy` > `sort`, `offset` > `skip`, `expand` > `populate` — in prose
@@ -1184,10 +1184,12 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
     // the opposite precedence on three of them, so one request resolved
     // differently per path. The fold now lives once, in the spec's own table
     // (`RPC_QUERY_ALIAS_SLOTS`), under #4181's rule: alias alone folds,
-    // identical duplicates collapse, different values are refused.
+    // identical duplicates collapse, different values are refused. `limit` >
+    // `top` — the pair #3795 scoped out as "the OData layer" — joined the
+    // table with #4346.
     // ═══════════════════════════════════════════════════════════════
 
-    describe('alias precedence resolves by the spec table, all five slots (#3795)', () => {
+    describe('alias precedence resolves by the spec table, all six slots (#3795, #4346)', () => {
         function makeProtocol() {
             const engine: any = {
                 find: vi.fn().mockResolvedValue([]),
@@ -1217,6 +1219,12 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             ['sort', 'orderBy', 'title', [{ field: 'status', order: 'asc' }], [{ field: 'title', order: 'asc' }]],
             ['populate', 'expand', ['assignee'], { project: { object: 'project' } }, { assignee: { object: 'assignee' } }],
             ['filter', 'where', { status: 'done' }, { status: 'open' }, { status: 'done' }],
+            // [#4346] The sixth pair — the one the #3795 scope note excluded.
+            // This normalizer used to fold it BACKWARDS (`options.limit =
+            // Number(options.top)` — alias overwrote canonical) while the
+            // engine folded it canonical-wins, so `{top: 1, limit: 3}`
+            // answered 1 over HTTP and 3 through a direct engine call.
+            ['top', 'limit', 5, 3, 5],
         ] as const;
 
         it.each(SLOTS)(
