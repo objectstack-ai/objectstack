@@ -159,7 +159,12 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
 
       for (const fieldName of Object.keys(fields as AnyRec)) {
         const meta = fieldMap.get(fieldName);
-        if (!meta) continue; // unknown field — a form/field-layout lint concern, not this rule's
+        // Unknown field — `validate-flow-node-writes.ts` owns that question
+        // (`flow-node-write-unknown-field`, also gating). This rule is about a
+        // field the object DOES declare and the engine then strips; a name that
+        // resolves to no column is a different failure with a different fix, so
+        // the two never double-report the same key.
+        if (!meta) continue;
 
         if (meta.readonly) {
           findings.push({

@@ -39,9 +39,10 @@ Two structural reasons to prefer the flow when either could work:
   hook body's write set is checked too, but only for the literal patterns a
   parser can recognise and only as an advisory warning (see
   [Hook & Action Bodies](/docs/automation/hook-bodies#write-set-checking)).
-  Note the one axis where this reverses: writing a field the target object never
-  declares warns in a hook body, and is reported nowhere in an `update_record`
-  node.
+  Field existence is checked on both surfaces, at different strengths: a hook
+  body gets a warning, an `update_record` node a **gating error**
+  (`flow-node-write-unknown-field`) — its `fields` is a literal map next to a
+  literal `objectName`, so nothing could have mis-read it.
 - **A flow reviews as data.** The node graph diffs field-by-field and renders
   in the Console designer with per-node run history; a hook body reviews as
   code only.

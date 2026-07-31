@@ -296,6 +296,23 @@ export type {
   ActionBodyWriteExclusion,
 } from './validate-action-body-writes.js';
 
+// The same write-set question on the third surface — a flow `update_record`
+// node's structural `config.fields`. Shares the hook rule's field index and
+// implicit-field set so all three agree on what is writable without being
+// authored; gates (`error`) rather than advising, because a literal key against
+// a literal object name is a certainty the parsed-JS rules cannot claim.
+export {
+  validateFlowNodeWrites,
+  FLOW_NODE_WRITE_UNKNOWN_FIELD,
+  FLOW_WRITE_NODE_TYPES,
+  FLOW_WRITE_NODE_TYPES_DEFERRED,
+} from './validate-flow-node-writes.js';
+export type {
+  FlowNodeWriteFinding,
+  FlowNodeWriteSeverity,
+  FlowWriteNodeDeferral,
+} from './validate-flow-node-writes.js';
+
 // One entry point for the reference-resolution rules above (#3583 §5 D5).
 // Adding a rule to `REFERENCE_INTEGRITY_RULES` runs it on `validate`, `lint`
 // and `compile` at once — the CLI call sites do not change.
