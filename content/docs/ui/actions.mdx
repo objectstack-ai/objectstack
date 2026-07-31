@@ -119,10 +119,18 @@ Body-carrying actions are **registered automatically** at boot.
   return value and its write channel is `ctx.api` (declare
   `capabilities: ['api.write']`).
 
-  You will be told rather than left guessing: `os validate` / `os lint` /
-  `os compile` warn on a literal `ctx.record.<field> = …`, and the sandbox logs
-  the discarded fields at invocation time — including the computed keys and
-  aliased references static checks cannot see.
+  You will be told rather than left guessing. `os validate` / `os lint` /
+  `os compile` raise `action-record-write-discarded`, and the sandbox logs the
+  discarded fields at invocation time — the latter also catching computed keys,
+  aliases and bodies authored in Studio, which no lint ever inspects.
+
+  Both report only writes that reach **nothing**. Building a payload on the
+  snapshot and then persisting it is a normal, live pattern and stays quiet:
+
+  ```js
+  ctx.record.done = true;
+  await ctx.api.object('showcase_task').update(ctx.record);   // ✅ lands — not reported
+  ```
 </Callout>
 
 ### Path B: a registered handler (full TypeScript)
