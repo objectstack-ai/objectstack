@@ -25,6 +25,7 @@ jobs:
     outputs:
       docs: ${{ steps.changes.outputs.docs }}
       core: ${{ steps.changes.outputs.core }}
+      console: ${{ steps.changes.outputs.console }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -45,6 +46,19 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'tsconfig.json'
+              - '.github/workflows/ci.yml'
+            # Build inputs of the vendored Console SPA — see the Console Pin Gate
+            # job at the bottom of this file. `.objectui-sha` is a ROOT DOTFILE, so
+            # it matches neither filter above: a pin-only diff skipped `core` and
+            # `docs` alike, which is how #4288 moved the pin 76 commits with six of
+            # fourteen checks skipped and nothing anywhere building the new SHA.
+            # The last two entries are the "a change to the guard runs the guard"
+            # rule the repo applies to every other filtered gate; they are close to
+            # free here because an unmoved pin hits the dist cache.
+            console:
+              - '.objectui-sha'
+              - 'scripts/build-console.sh'
+              - 'scripts/check-console-sha.mjs'
               - '.github/workflows/ci.yml'
 
   test:
@@ -696,3 +710,170 @@ jobs:
 
       - name: Build Docs
         run: pnpm --filter @objectstack/docs build
+
+  # ── The pinned objectui SHA actually builds (#4290) ───────────────────────
+  #
+  # `.objectui-sha` is the single source of truth for the vendored Console SPA:
+  # release.yml reads it, clones objectstack-ai/objectui at that commit, builds
+  # @object-ui/console, and copies the dist into packages/console/. Editing that
+  # one line replaces the entire frontend the platform ships.
+  #
+  # Nothing on the PR side ever built it. The pin appeared in exactly two
+  # workflows, neither of them a gate: release.yml (post-merge, on the main push)
+  # and showcase-smoke.yml (manual + nightly, whose own header says "it never
+  # gates PRs"). Combined with the filter hole noted above, #4288 merged a
+  # 76-commit pin bump green with six of fourteen checks skipped. A SHA that
+  # cannot build — a typo, a commit that was force-pushed away, a genuinely
+  # broken objectui, a dead bundle canary — reached main unchallenged and would
+  # have surfaced at PUBLISH time. The only thing standing between the two was
+  # the author remembering to run scripts/build-console.sh locally: discipline,
+  # not a gate.
+  #
+  # `pnpm objectui:refresh` does include the build, so the normal path was
+  # already covered in practice; the hole is a hand-edited pin, or that single
+  # line cherry-picked out of another branch.
+  #
+  # Cost is real but narrowly aimed. A moved pin is the only trigger that pays
+  # the full clone + vite build, and #4288's 76 commits of staleness are the
+  # measure of how rare that is. The other triggers (this file, the drift guard)
+  # leave the pin untouched, so they hit the dist cache and cost about a minute.
+  #
+  # Scope, stated plainly: this proves the PINNED SHA builds. It does NOT cover a
+  # packages/client change breaking the injected-client bundle — that input lives
+  # under `packages/**`, and watching it here would rebuild the console on a large
+  # fraction of every PR. release.yml stays the only check for that direction.
+  #
+  # The NAME is the required-check contract — the same trap the dogfood shards
+  # note above: renaming it silently drops the gate wherever branch protection
+  # lists it, with every PR still green.
+  console-pin:
+    name: Console Pin Gate
+    needs: filter
+    if: needs.filter.outputs.console == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Verify pnpm version
+        run: pnpm --version
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # Restore-only, and with no save step at all: this job runs a handful of
+      # times a month, so its own namespace would almost always be cold. The
+      # build-core fallbacks below are the ones that actually hit — that job
+      # builds a superset of the client closure needed here and is seeded from
+      # main (same reasoning as the Temporal Conformance job's fallback).
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # build-console.sh bundles THIS tree's @objectstack/client into the console
+      # (via OBJECTSTACK_CLIENT_DIST) and falls back to building it in place when
+      # the dist is missing — but that fallback is a bare `pnpm build` inside
+      # packages/client, which tsup cannot finish unless @objectstack/core and
+      # @objectstack/spec are built already. Build the closure through turbo
+      # instead: cacheable, and near-free off the restore above. Both of the
+      # script's existing callers (release.yml, showcase-smoke.yml) pre-build for
+      # the same reason.
+      - name: Build @objectstack/client and its dependencies
+        run: pnpm exec turbo run build --filter=@objectstack/client... --concurrency=4
+
+      # Same key as release.yml's "Cache vendored Console dist" step. Actions
+      # caches are repo-scoped, so a PR reads whatever main already built for this
+      # pin — that is what makes the non-pin triggers cheap. Only a pin the repo
+      # has never built misses, and a miss is exactly when this gate has work to do.
+      #
+      # Split restore/save where release.yml uses the combined action, because the
+      # combined form's post-step saves even when the job FAILED. build-console.sh
+      # writes the SHA stamp before it asserts the bundle canary, so a canary
+      # failure leaves a stamped-but-broken dist on disk — cache that and the next
+      # run restores it, skips the build, and sails through the stamp check. Saving
+      # only once every assertion below is green is what lets a restored dist carry
+      # the same guarantees as a freshly built one.
+      - name: Restore vendored Console dist (keyed on the objectui pin)
+        id: console-dist
+        uses: actions/cache/restore@v6
+        with:
+          path: packages/console/dist
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+
+      # The gate. Shallow-clones objectui at the pinned SHA, builds
+      # @object-ui/console against this tree's client, copies the dist into
+      # packages/console/, and asserts the bundle canary — every failure mode a
+      # bad pin can carry, surfaced on the PR instead of at publish time.
+      - name: Build the Console SPA at the pinned objectui SHA
+        if: steps.console-dist.outputs.cache-hit != 'true'
+        run: bash scripts/build-console.sh
+
+      # check:console-sha exits 0 — deliberately — when there is no dist at all
+      # (published installs and package-only CI legitimately have none), and warns
+      # without failing when a dist carries no stamp. Both are right for that
+      # script and both are VACUOUS here, where producing a dist is the entire
+      # point: an empty or partial cache restore would otherwise reach the drift
+      # check with nothing to check and report success. Prove one is really in
+      # place before letting that check speak for the job.
+      - name: Assert a real Console dist is in place
+        env:
+          CACHE_HIT: ${{ steps.console-dist.outputs.cache-hit }}
+        run: |
+          dist=packages/console/dist
+          if [ "$CACHE_HIT" = "true" ]; then origin="the dist cache restore"; else origin="scripts/build-console.sh"; fi
+          fail=0
+          [ -s "$dist/index.html" ] || { echo "::error::$dist/index.html is missing or empty"; fail=1; }
+          [ -n "$(ls -A "$dist/assets" 2>/dev/null || true)" ] || { echo "::error::$dist/assets is missing or empty"; fail=1; }
+          [ -s "$dist/.objectui-sha" ] || { echo "::error::$dist/.objectui-sha stamp is missing — check:console-sha would pass vacuously"; fail=1; }
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::No usable Console dist after $origin."
+            exit 1
+          fi
+          echo "✓ Console dist present ($(du -sk "$dist" | awk '{print $1}') KB, via $origin) from objectui@$(cut -c1-12 "$dist/.objectui-sha")"
+
+      - name: Verify the Console dist stamp matches the pin
+        run: pnpm check:console-sha
+
+      # Reached only with every assertion above green (see the split-restore note).
+      # This deviates from the workflow's restore-only-on-PRs policy on purpose:
+      # that policy targets the ~5 turbo entries every push writes, whereas this
+      # key moves only when the pin does. A pin-bump PR writes one entry, and the
+      # rest of that PR's pushes reuse it instead of rebuilding the console again.
+      - name: Save vendored Console dist
+        if: steps.console-dist.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: packages/console/dist
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
