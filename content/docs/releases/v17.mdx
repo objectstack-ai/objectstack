@@ -412,8 +412,12 @@ schema to the two highest-risk authorable surfaces, per the triage in
 - **Datasources** — `DatasourceSchema` with its `pool` / `healthCheck` / `ssl` /
   `retryPolicy` blocks, the ADR-0015 `external` federation settings and their
   `validation` policy, `DatasourceCapabilities`, and `DriverDefinitionSchema`.
-  `config` and `readReplicas` stay **open** records: their shape is per-driver
-  and the driver's own `configSchema` validates them. That openness is why the
+  `config` and `readReplicas` stay **open** records: their shape is per-driver.
+  Nothing validates *inside* them — an earlier version of this note said the
+  driver's own `configSchema` did, which was wrong; the per-driver schemas exist
+  (`PostgresConfigSchema` and siblings) but nothing parses `config` against
+  them, tracked as #4410. So a misspelling one level *down* is still silent
+  today. That openness is why the
   top level had to close — a connection key written one level too high (`host`
   next to `driver` instead of inside `config`) was stripped, and the datasource
   then connected on driver defaults rather than failing. Those keys now
