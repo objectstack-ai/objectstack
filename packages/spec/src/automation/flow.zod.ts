@@ -428,10 +428,30 @@ export const FlowSchema = lazySchema(() => z.object({
         'record-change flow fired by a write that carried no user.',
     ),
 
-  /** Error Handling Strategy */
+  /**
+   * Error Handling Strategy.
+   *
+   * **These defaults are the only defaults** (#4247). The engine reads the
+   * parsed block field-by-field with no fallback of its own — `retryExecution`
+   * used to carry `errorHandling.maxRetries ?? 3` beside a schema that said
+   * `.default(0)`, so "how many times does an under-specified flow retry?" had
+   * two answers and the winner depended on whether that flow had been through
+   * `FlowSchema` (0) or hand-built and fed to the engine directly (3). One
+   * contract, one number: whatever this block parses to is what runs.
+   *
+   * The retry knobs are read **only** under `strategy: 'retry'`; `'fail'` and
+   * `'continue'` ignore them (a fully spelled-out block under `'fail'` is
+   * common and stays legal).
+   */
   errorHandling: z.object({
     strategy: z.enum(['fail', 'retry', 'continue']).default('fail').describe('How to handle node execution errors'),
-    maxRetries: z.number().int().min(0).max(10).default(0).describe('Number of retry attempts (only for retry strategy)'),
+    // Default 0 = "no retries", which is the right reading for the two
+    // strategies that never retry. Under `strategy: 'retry'` it would instead
+    // mean "retry, zero times" — refused below rather than defaulted to some
+    // count, because a retry re-runs the WHOLE flow (CRUD side effects and
+    // all) and nobody should have that number picked for them.
+    maxRetries: z.number().int().min(0).max(10).default(0)
+      .describe("Number of retry attempts. Read only under strategy: 'retry', which requires >= 1"),
     retryDelayMs: z.number().int().min(0).default(1000).describe('Delay between retries in milliseconds'),
     backoffMultiplier: z.number().min(1).default(1).describe('Multiplier for exponential backoff between retries'),
     maxRetryDelayMs: z.number().int().min(0).default(30000).describe('Maximum delay between retries in milliseconds'),
@@ -446,6 +466,25 @@ export const FlowSchema = lazySchema(() => z.object({
       'configured here silently did not exist. Delete the key and draw a fault edge from ' +
       'the failing node to the handler node instead.',
     ),
+  }).superRefine((eh, ctx) => {
+    // `strategy: 'retry'` with 0 attempts is `strategy: 'fail'` wearing a
+    // different label — the flow runs once and stops. That is a declared
+    // capability the runtime does not deliver (AGENTS.md Prime Directive #10
+    // corollary), and omitting `maxRetries` produced exactly it. Refuse the
+    // combination in both spellings — written 0 and defaulted 0 — so the
+    // attempt count is stated wherever retrying is asked for.
+    if (eh.strategy === 'retry' && eh.maxRetries < 1) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['maxRetries'],
+        message:
+          "`errorHandling.strategy: 'retry'` requires `maxRetries` >= 1 — retrying zero " +
+          "times is exactly `strategy: 'fail'`, so a flow that omits the count (it " +
+          'defaults to 0) or writes 0 never retries. State the attempts explicitly ' +
+          "(e.g. `maxRetries: 3`), or use `strategy: 'fail'` if no retry is wanted. " +
+          'Note a retry re-runs the WHOLE flow, so side-effecting nodes run again.',
+      });
+    }
   }).optional().describe('Flow-level error handling configuration'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package

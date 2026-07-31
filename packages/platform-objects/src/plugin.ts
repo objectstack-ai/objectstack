@@ -2,26 +2,37 @@
 
 import { SetupAppTranslations } from './apps/translations/index.js';
 import { MetadataFormsTranslations } from './metadata-translations/index.js';
+import { SysMigration } from './system/sys-migration.object.js';
+import { attestFreshDatastore } from './system/migration-flag.js';
 
 /**
  * `PlatformObjectsPlugin`
  *
- * Owns the runtime contribution of platform-default translation bundles
- * into the kernel's i18n service. Replaces the historical detour of
- * piggy-backing on `plugin-auth` to load these bundles — translations
- * belong with the package that defines them.
+ * Owns the runtime contribution of platform infrastructure that must exist
+ * on every assembled kernel, independent of which optional services are
+ * composed:
  *
- * Loaded on `kernel:ready` so the i18n service plugin (which may register
- * later than ordinary services) is guaranteed to be present.
+ *  - **`sys_migration`** — the deployment-level data-migration flag ledger
+ *    (#3617). Registered here rather than by a consuming service because
+ *    its consumers span domains (#4243): the storage service's released-
+ *    file collection, the engine's strict value-shape gates (#3438/#4235)
+ *    and the migration CLI all read the same ledger, and none of them
+ *    should have to drag an unrelated service into the boot to find it.
+ *  - **Fresh-datastore attestation** (#3438, ADR-0104 2026-07-30) —
+ *    travels with the ledger registration: a store this boot created from
+ *    empty is attested at `kernel:ready`, whichever services are composed.
+ *  - **Translation bundles** — `SetupAppTranslations` (the static Setup
+ *    App + sys_* dashboards) and `MetadataFormsTranslations`
+ *    (`metadataForms.*` for object/field/agent/flow/view configuration
+ *    forms). Replaces the historical detour of piggy-backing on
+ *    `plugin-auth` — translations belong with the package that defines
+ *    them. Loaded on `kernel:ready` so the i18n service plugin (which may
+ *    register later than ordinary services) is guaranteed to be present.
  *
- * Bundles contributed:
- *  - `SetupAppTranslations`        — the static Setup App + sys_* dashboards.
- *  - `MetadataFormsTranslations`   — `metadataForms.*` for object/field/
- *                                    agent/flow/view configuration forms.
- *
- * Gracefully degrades when no i18n service is registered (e.g. lean
- * test / MSW kernels): the UI then falls back to the inline literals
- * carried on each App / Dashboard / `*.form.ts` schema.
+ * Gracefully degrades on lean kernels: without a manifest service the
+ * ledger is simply absent — every flag reader answers "not verified", the
+ * safe posture — and without an i18n service the UI falls back to the
+ * inline literals carried on each App / Dashboard / `*.form.ts` schema.
  *
  * Structurally typed against `@objectstack/core`'s `Plugin` contract so
  * this package does not need to depend on the kernel at compile time.
@@ -31,13 +42,69 @@ export class PlatformObjectsPlugin {
   readonly type = 'standard';
   readonly version = '1.0.0';
   readonly dependencies: string[] = [];
+  /**
+   * The manifest service consumed in `init()` is registered by ObjectQL's
+   * init. Optional, not required: hoisted after it when both are composed,
+   * still bootable without it (translations-only kernels).
+   */
+  readonly optionalDependencies: string[] = ['com.objectstack.engine.objectql'];
 
-  async init(_ctx: any): Promise<void> {
-    // No-op: this plugin only contributes translations on `kernel:ready`.
-    // The init hook exists to satisfy the kernel's Plugin contract.
+  async init(ctx: any): Promise<void> {
+    // Register the platform-infrastructure objects via the manifest service.
+    try {
+      ctx?.getService?.('manifest')?.register?.({
+        id: this.name,
+        name: 'Platform Objects',
+        version: this.version,
+        type: 'plugin',
+        scope: 'system',
+        objects: [SysMigration],
+      });
+    } catch {
+      // No manifest service (lean / i18n-only kernels) — the ledger stays
+      // unregistered and every flag reader answers "not verified".
+    }
   }
 
   async start(ctx: any): Promise<void> {
+    // ── Fresh-datastore attestation (#3438, ADR-0104 2026-07-30) ────────
+    // A store this process just created from empty can hold no legacy
+    // value, so the data migrations that exist to find and convert them
+    // are settled here before they are ever run — recorded now, while that
+    // emptiness is still an observed fact rather than something a later
+    // scan would have to infer. Without it every new deployment would
+    // start lax and stay lax until someone ran a command that, for them,
+    // does nothing: the warn regime would never die out.
+    //
+    // This plugin owns the call because it registers `sys_migration`
+    // (above; #4243 — moved here with the registration from
+    // service-storage). A store that was found rather than created attests
+    // nothing and keeps producing evidence by scan.
+    ctx?.hook?.('kernel:ready', async () => {
+      let engine: any;
+      try {
+        engine = ctx.getService?.('objectql');
+      } catch {
+        return;
+      }
+      if (!engine || typeof engine.wasDatastoreCreatedFromEmpty !== 'function') return;
+      try {
+        if (engine.wasDatastoreCreatedFromEmpty()) {
+          await attestFreshDatastore(engine, { logger: ctx.logger });
+          // The engine memoizes the flag read on first use; this write
+          // may already have raced it on a fast boot.
+          engine.invalidateDataMigrationFlags?.();
+        }
+      } catch (err: any) {
+        // Bookkeeping must never break a new deployment's boot. Not
+        // attesting only leaves it lax — recoverable by running the
+        // migration, which for an empty store is a no-op that passes.
+        ctx?.logger?.warn?.(
+          `[platform-objects] fresh-datastore attestation skipped (${err?.message ?? err})`,
+        );
+      }
+    });
+
     ctx?.hook?.('kernel:ready', async () => {
       let i18n: any;
       try {

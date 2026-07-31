@@ -162,7 +162,7 @@ export default class MigrateFilesToReferences extends Command {
     try {
       stack = await bootSchemaStack({
         databaseUrl: flags['database-url'],
-        extraPlugins: await buildDataMigrationPlugins(),
+        extraPlugins: await buildDataMigrationPlugins({ storage: true }),
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }

@@ -24,9 +24,13 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Writes flow through `recordDataMigrationRun` (system context, from the
  * migration commands) — the API surface is read-only diagnostics.
  *
- * Registered by the first consuming service (`@objectstack/service-storage`);
- * the row contract lives in `@objectstack/spec/system` (`DataMigrationFlagSchema`)
- * so any package can read flags without depending on this one.
+ * Registered by `PlatformObjectsPlugin` (`./plugin.ts`) — the ledger is
+ * platform infrastructure, present on every kernel that composes the platform
+ * objects, not owned by any one consuming service (#4243; it was originally
+ * registered by its first consumer, `@objectstack/service-storage`, until the
+ * storage-independent consumers of #4215/#4235 arrived). The row contract
+ * lives in `@objectstack/spec/system` (`DataMigrationFlagSchema`) so any
+ * package can read flags without depending on this one.
  *
  * @namespace sys
  */
