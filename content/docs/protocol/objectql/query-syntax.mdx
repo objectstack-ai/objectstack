@@ -70,11 +70,9 @@ interface QueryAST {
   offset?: number;                         // Skip records (OFFSET)
   top?: number;                            // Alias for limit (OData compat)
   cursor?: Record<string, unknown>;        // Keyset pagination cursor
-  joins?: JoinNode[];                      // Explicit JOINs
   aggregations?: AggregationNode[];        // Aggregation functions
   groupBy?: GroupByNode[];                 // GROUP BY targets (string | object)
   having?: FilterCondition;                // HAVING clause
-  windowFunctions?: WindowFunctionNode[];  // Window functions (OVER)
   distinct?: boolean;                      // SELECT DISTINCT
   expand?: Record<string, QueryAST>;       // Recursive relation loading
 }
@@ -92,14 +90,22 @@ on the `find()` path:
 
 | Member | Status |
 |:-------|:-------|
-| `joins` | No driver reads it — there is no `query.joins` / `ast.joins` consumer anywhere in `packages/` |
 | `having` | Never read: `engine.aggregate()` forwards only `object`/`where`/`groupBy`/`aggregations`, and the in-memory fallback has no HAVING stage |
 | `cursor` | Accepted by `EngineQueryOptions`, but no driver implements keyset pagination |
 | `distinct` | Not applied by `find()`; the SQL and in-memory drivers expose a separate `distinct(object, field, filters?)` method instead |
-| `windowFunctions` | Not applied by `find()`; `SqlDriver.findWithWindowFunctions()` is a separate method that is not on the `IDataDriver` contract |
-| `search.fuzzy` / `boost` / `operator` / `minScore` / `language` / `highlight` | Parsed by the schema but ignored: only `query` and `fields` drive the expansion |
+| `aggregations[].filter` | `[EXPERIMENTAL — not enforced]` — a SQL `FILTER (WHERE …)` affordance neither the SQL builders nor the in-memory fallback applies |
+| `search.fuzzy` / `boost` / `operator` / `minScore` / `language` / `highlight` | `[EXPERIMENTAL — not enforced]` — only `query` and `fields` drive the expansion |
 
 `top` is the exception that *is* honored — the engine normalises it to `limit`.
+
+Two members left this table by being **removed** (#4286, ADR-0049 enforce-or-remove):
+`joins` and `windowFunctions` are tombstoned in `@objectstack/spec` 18 — a query
+carrying either fails to parse with the upgrade prescription, and authoring one is a
+`tsc` error. Related records are read through `expand`; window functions remain a
+SQL-driver door (`SqlDriver.findWithWindowFunctions()`). The inert members that
+*remain* declared (`having`, `cursor`, `distinct`, and the experimental flags above)
+are tracked in the liveness ledger (`packages/spec/liveness/query.json`) pending
+their #4286 dispositions.
 </Callout>
 
 ### Key Types
@@ -118,7 +124,7 @@ interface AggregationNode {
   field?: string;        // optional for COUNT(*)
   alias: string;         // result column alias
   distinct?: boolean;    // DISTINCT before aggregation — in-memory path only
-  filter?: FilterCondition; // FILTER WHERE clause — protocol only, never applied
+  filter?: FilterCondition; // [EXPERIMENTAL — not enforced] FILTER WHERE clause — never applied
 }
 
 // FieldNode — one entry of the select list. A field name, optionally dotted to
@@ -742,40 +748,34 @@ expansion emits a plain `$contains`, which `SqlDriver` compiles to a parameteris
 `LIKE '%…%'` with no case folding — so the dialect's own `LIKE`/collation rules decide —
 while the in-memory driver matches with a case-insensitive regex. Only `select` /
 `status` option *labels* are matched case-insensitively by the expansion itself.
-`fuzzy`, `boost`, `operator`, `minScore`, `language`, and `highlight` are accepted by
-the schema but ignored by the expansion.
+`fuzzy`, `boost`, `operator`, `minScore`, `language`, and `highlight` carry
+`[EXPERIMENTAL — not enforced]` markers (#4286): the schema accepts them, the
+expansion ignores them.
 
-### Joins (protocol only)
+### Joins — removed (#4286)
 
-`QuerySchema` defines a `joins` array, but **no driver reads it** — there is no
-`query.joins` consumer anywhere in `packages/`, so a query carrying `joins` silently
-runs as a single-table query. Use `expand` (§4) for relationship loading, or two
-queries joined in application code.
+`query.joins` was **removed in `@objectstack/spec` 18** (#4286, ADR-0049
+enforce-or-remove): no driver ever read it, so a query carrying `joins` silently ran
+as a single-table query. The key is tombstoned — authoring it is a `tsc` error, and a
+query that still carries it (even as an empty array) fails to parse with the upgrade
+prescription. The `JoinNode` / `JoinType` / `JoinStrategy` exports left with it.
 
-For reference, the protocol shape is:
+Use `expand` (§4) for relationship loading — the live spelling for related records —
+a dotted `fields` path (`'owner.name'`) for a single related column, or two queries
+joined in application code.
 
-```typescript
-const query: QueryAST = {
-  object: 'order',
-  fields: ['id', 'amount'],
-  joins: [
-    {
-      type: 'inner',
-      object: 'customer',
-      alias: 'c',
-      on: { 'order.customer_id': { $eq: { $field: 'c.id' } } },
-    },
-  ],
-};
-```
+### Window Functions — removed from the request surface (#4286)
 
-**Join types:** `inner`, `left`, `right`, `full`
+`query.windowFunctions` was **removed in `@objectstack/spec` 18** (#4286): `find()`
+never applied it, so every OVER clause it declared was silently dropped. The key is
+tombstoned, and the `WindowFunction` / `WindowSpec` / `WindowFunctionNode` exports
+left with it — they declared `field` / `over` / `frame` members that no executor ever
+read.
 
-### Window Functions
-
-`windowFunctions` on a `QueryAST` is ignored by `find()`. The SQL drivers implement
-window functions through a separate `findWithWindowFunctions()` method, which is not on
-the `IDataDriver` contract and is not surfaced by `IDataEngine`:
+Window functions remain a **SQL-driver door**: `findWithWindowFunctions()`, which is
+not on the `IDataDriver` contract and is not surfaced by `IDataEngine`. Its input is
+the driver's own flat shape — function name, alias, and optional flat
+`partitionBy` / `orderBy`:
 
 ```typescript
 const ranked = await driver.findWithWindowFunctions('order', {
@@ -783,10 +783,8 @@ const ranked = await driver.findWithWindowFunctions('order', {
     {
       function: 'row_number',
       alias: 'rank',
-      over: {
-        partitionBy: ['customer_id'],
-        orderBy: [{ field: 'amount', order: 'desc' }],
-      },
+      partitionBy: ['customer_id'],
+      orderBy: [{ field: 'amount', order: 'desc' }],
     },
   ],
 });
@@ -796,7 +794,9 @@ const ranked = await driver.findWithWindowFunctions('order', {
 ```
 
 That method always selects `*` plus the window columns — it does not honor a `fields`
-projection.
+projection, and niladic rendering means argument-taking functions (`LAG(field)`)
+emit without their argument. For request-level analytics use `aggregations` +
+`groupBy` (§5).
 
 ---
 

@@ -19,16 +19,33 @@
 import type { SharingExecutionContext } from './sharing-service.js';
 
 /**
- * Lifecycle state of an approval request.
+ * Lifecycle states of an approval request, in the order the
+ * `sys_approval_request.status` select presents them.
+ *
+ * A VALUE, not only a type, so `plugin-approvals` can spread it into that select
+ * rather than re-typing the list (#3786). It used to be a bare union under a
+ * "keep in sync with the `sys_approval_request` status select" comment, with the
+ * plugin holding the second copy. The two agreed — but nothing made them, and
+ * both directions of drift fail quietly: a status the column accepts and the
+ * contract omits is invisible to every consumer typed against the contract,
+ * while one the contract declares and the column rejects surfaces only at write
+ * time, on whichever tenant first reaches that transition.
  *
  * `returned` (ADR-0044): the approver sent the request back for revision —
  * terminal for THIS request/round; the flow walks the `revise` edge to a wait
  * point, and a later resubmit opens a fresh `pending` request (next round).
  * Distinct from `recalled` (submitter-initiated withdrawal).
- *
- * Dual-source: keep in sync with the `sys_approval_request` status select.
  */
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'recalled' | 'returned';
+export const APPROVAL_STATUSES = [
+  'pending',
+  'approved',
+  'rejected',
+  'recalled',
+  'returned',
+] as const;
+
+/** Lifecycle state of an approval request — derived from {@link APPROVAL_STATUSES}. */
+export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
 
 /** Live request row. */
 export interface ApprovalRequestRow {
@@ -211,27 +228,49 @@ export interface ApprovalRequestRow {
   };
 }
 
-/** Kinds of entries on a request's audit trail. */
-export type ApprovalActionKind =
-  | 'submit'
-  | 'approve'
-  | 'reject'
-  | 'recall'
-  | 'escalate'
-  /** A pending approver handed their slot to someone else. */
-  | 'reassign'
-  /** The submitter nudged the pending approvers. */
-  | 'remind'
-  /** An approver asked the submitter for more information (request stays pending). */
-  | 'request_info'
-  /** A free-form reply on the thread (submitter or approver). */
-  | 'comment'
-  /** ADR-0044: an approver sent the request back for revision (request finalizes `returned`). */
-  | 'revise'
-  /** ADR-0044: the submitter resubmitted after rework (the next round's request opens with its own `submit`). */
-  | 'resubmit'
-  /** #1322 M1: an out-of-office approver's slot was auto-rerouted to their delegate at resolution time. */
-  | 'ooo_substitute';
+/**
+ * Kinds of entries on a request's audit trail, in the order the
+ * `sys_approval_action.action` select presents them.
+ *
+ * A VALUE for the same reason as {@link APPROVAL_STATUSES}: `plugin-approvals`
+ * spreads it into that select instead of holding a twelfth-entry copy of it
+ * (#3786). Twelve hand-matched strings across a package boundary is the widest
+ * of the sweep's remaining copies, and an audit vocabulary is the worst place
+ * for a silent gap — a kind the column accepts but the contract omits produces
+ * rows no typed consumer can narrow, and the audit trail is exactly what gets
+ * read back when someone asks what happened.
+ *
+ * Only some entries need explaining; the first five are self-describing:
+ *   reassign       a pending approver handed their slot to someone else
+ *   remind         the submitter nudged the pending approvers
+ *   request_info   an approver asked for more information (request stays pending)
+ *   comment        a free-form reply on the thread (submitter or approver)
+ *   revise         ADR-0044: sent back for revision (request finalizes `returned`)
+ *   resubmit       ADR-0044: resubmitted after rework (the next round opens with
+ *                  its own `submit`)
+ *   ooo_substitute #1322 M1: an out-of-office approver's slot was auto-rerouted
+ *                  to their delegate at resolution time
+ *
+ * `reassign` / `remind` / `request_info` / `comment` / `ooo_substitute` are
+ * thread interactions and never move the flow; `revise` / `resubmit` do.
+ */
+export const APPROVAL_ACTION_KINDS = [
+  'submit',
+  'approve',
+  'reject',
+  'recall',
+  'escalate',
+  'reassign',
+  'remind',
+  'request_info',
+  'comment',
+  'revise',
+  'resubmit',
+  'ooo_substitute',
+] as const;
+
+/** Kinds of entries on a request's audit trail — derived from {@link APPROVAL_ACTION_KINDS}. */
+export type ApprovalActionKind = (typeof APPROVAL_ACTION_KINDS)[number];
 
 /**
  * A file attached to a decision action (#3266) — the READ shape of one
