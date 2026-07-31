@@ -193,6 +193,18 @@
         "to": "skill key 'triggerPhrases' removed (#3896 close-out — activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
         "conversionId": "skill-trigger-phrases-removed",
         "toMajor": 17
+      },
+      {
+        "surface": "stack.api.requireAuth",
+        "to": "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (#3963)",
+        "conversionId": "stack-api-require-auth-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "flow.node.waitEventConfig",
+        "to": "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) and 'onTimeout' (removed — zero readers, so no timeout ever fired) (#4158)",
+        "conversionId": "flow-node-wait-timeout-keys-removed",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -293,6 +305,48 @@
         "migrationId": "analytics-query-request-format-retired",
         "toMajor": 17,
         "rationale": "The `format` key was declared but never implemented (declared ≠ enforced): every response is the JSON envelope regardless of the requested value, so there is no behaviour to preserve and nothing stored to rewrite."
+      },
+      {
+        "surface": "data.query.fields",
+        "replacement": "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted path for a single related column (`fields: ['owner.name']`)",
+        "migrationId": "query-field-node-object-form-retired",
+        "toMajor": 17,
+        "rationale": "The `FieldNode` union declared a nested-select object form `{ field, fields, alias }` that was inert end to end: no producer emitted it, and no consumer read `.fields` or `.alias` — objectql's formula projection and known-field filters, driver-sql's `select()` and driver-memory's projection all treat the list as `string[]`, driver-mongodb keyed its projection with the entry itself, and the REST ingress stringified it. Nested selection is `expand`, which the engine resolves via batch `$in` queries. This is a REQUEST surface — `QueryAST` is never stored in stack metadata (no view, dataset or report authors one), so there is no source for the chain to rewrite: the schema narrows to `z.string()` and callers move their own select lists. ADR-0049 / ADR-0078, #4196."
+      },
+      {
+        "surface": "api.batchOptions.validateOnly",
+        "replacement": "(removed — no dry-run today; open an issue to design a no-commit batch preview)",
+        "migrationId": "batch-options-validate-only-retired",
+        "toMajor": 17,
+        "rationale": "The `validateOnly` key promised a dry-run (\"validate records without persisting\") but no batch surface ever read it — updateManyData / deleteManyData / batchData persist regardless. There is no behaviour to preserve and nothing stored to rewrite (it only ever appeared in an HTTP request body). Callers must stop sending it."
+      },
+      {
+        "surface": "data.query.joins",
+        "replacement": "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted `fields` path for a single related column (`fields: ['owner.name']`)",
+        "migrationId": "query-joins-retired",
+        "toMajor": 17,
+        "rationale": "The `joins` array was declared-but-inert: no engine or driver read `query.joins` anywhere on the query path, so a query carrying it behaved exactly as if the key were absent — while the name squatted on the reserved REST parameter set. Related-record retrieval already has a live spelling (`expand`, resolved by the engine via batch `$in` queries), so the removal deletes the second, broken spelling rather than the capability, and the orphaned `JoinNode`/`JoinType`/`JoinStrategy` cluster goes with the key. A REQUEST surface — `QueryAST` is never stored in stack metadata — so there is no source for the chain to rewrite; callers move their own queries. ADR-0049 / ADR-0078, #4286."
+      },
+      {
+        "surface": "data.query.windowFunctions",
+        "replacement": "`aggregations` + `groupBy` for request-level analytics; `SqlDriver.findWithWindowFunctions(object, query)` for embedders on a SQL datasource",
+        "migrationId": "query-window-functions-retired",
+        "toMajor": 17,
+        "rationale": "The `windowFunctions` array was declared-but-inert on the query path: `find()` never applied a window function, so every OVER clause a caller declared was silently dropped. The capability only ever ran behind `SqlDriver.findWithWindowFunctions()`, a driver-level door that is not on the `IDataDriver` contract and whose flat input shape (`{ function, alias, partitionBy?, orderBy? }`) the spec vocabulary never matched — `WindowFunctionNodeSchema` declared `field`/`over`/`frame` members the door never read, so that cluster is removed with the key rather than left as a false affordance. A REQUEST surface, never stored; no source to rewrite. ADR-0049 / ADR-0078, #4286."
+      },
+      {
+        "surface": "data.query.cursor",
+        "replacement": "a `where` predicate on the sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` (the documented manual-keyset pattern)",
+        "migrationId": "query-cursor-retired",
+        "toMajor": 17,
+        "rationale": "The `cursor` key promised keyset pagination and no driver implemented it: the cursor was accepted and ignored, so every page came back identical — a caller looping \"until hasMore is false\" never terminates. Worse than inert, it had a shipped public producer (`QueryBuilder.cursor()`, removed with the key). The caller-built `Record<string, unknown>` shape also leaks sort/storage detail and squats on the reserved REST parameter set; a first-class cursor, if ever designed, will be a response-minted opaque token — a different API, so keeping this one preserved a wrong design rather than a roadmap. A REQUEST surface, never stored; nothing to rewrite. ADR-0049 / ADR-0078, #4286."
+      },
+      {
+        "surface": "data.query.distinct",
+        "replacement": "`groupBy` for unique combinations; the `count_distinct` aggregation for deduplicated counts; the SQL/memory drivers' `distinct(object, field)` door for one column's values",
+        "migrationId": "query-distinct-retired",
+        "toMajor": 17,
+        "rationale": "The `distinct` flag promised SELECT DISTINCT and no driver ever rendered it — but it was MIS-WIRED rather than merely dead (the harsher ADR-0078 class): the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate, so the caller got duplicate rows AND worse pagination metadata, and a side effect that \"confirmed\" the flag was doing something. It had a shipped public producer (`QueryBuilder.distinct()`, removed with the key). The count suppression is deleted in the same change — `total` is truthful for those queries again. A REQUEST surface, never stored; nothing to rewrite. ADR-0049 / ADR-0078, #4286."
       }
     ],
     "removed": []
@@ -615,6 +669,18 @@
           "to": "skill key 'triggerPhrases' removed (#3896 close-out — activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
           "conversionId": "skill-trigger-phrases-removed",
           "toMajor": 17
+        },
+        {
+          "surface": "stack.api.requireAuth",
+          "to": "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (#3963)",
+          "conversionId": "stack-api-require-auth-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "flow.node.waitEventConfig",
+          "to": "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) and 'onTimeout' (removed — zero readers, so no timeout ever fired) (#4158)",
+          "conversionId": "flow-node-wait-timeout-keys-removed",
+          "toMajor": 17
         }
       ],
       "migrated": [
@@ -645,6 +711,48 @@
           "migrationId": "analytics-query-request-format-retired",
           "toMajor": 17,
           "rationale": "The `format` key was declared but never implemented (declared ≠ enforced): every response is the JSON envelope regardless of the requested value, so there is no behaviour to preserve and nothing stored to rewrite."
+        },
+        {
+          "surface": "data.query.fields",
+          "replacement": "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted path for a single related column (`fields: ['owner.name']`)",
+          "migrationId": "query-field-node-object-form-retired",
+          "toMajor": 17,
+          "rationale": "The `FieldNode` union declared a nested-select object form `{ field, fields, alias }` that was inert end to end: no producer emitted it, and no consumer read `.fields` or `.alias` — objectql's formula projection and known-field filters, driver-sql's `select()` and driver-memory's projection all treat the list as `string[]`, driver-mongodb keyed its projection with the entry itself, and the REST ingress stringified it. Nested selection is `expand`, which the engine resolves via batch `$in` queries. This is a REQUEST surface — `QueryAST` is never stored in stack metadata (no view, dataset or report authors one), so there is no source for the chain to rewrite: the schema narrows to `z.string()` and callers move their own select lists. ADR-0049 / ADR-0078, #4196."
+        },
+        {
+          "surface": "api.batchOptions.validateOnly",
+          "replacement": "(removed — no dry-run today; open an issue to design a no-commit batch preview)",
+          "migrationId": "batch-options-validate-only-retired",
+          "toMajor": 17,
+          "rationale": "The `validateOnly` key promised a dry-run (\"validate records without persisting\") but no batch surface ever read it — updateManyData / deleteManyData / batchData persist regardless. There is no behaviour to preserve and nothing stored to rewrite (it only ever appeared in an HTTP request body). Callers must stop sending it."
+        },
+        {
+          "surface": "data.query.joins",
+          "replacement": "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted `fields` path for a single related column (`fields: ['owner.name']`)",
+          "migrationId": "query-joins-retired",
+          "toMajor": 17,
+          "rationale": "The `joins` array was declared-but-inert: no engine or driver read `query.joins` anywhere on the query path, so a query carrying it behaved exactly as if the key were absent — while the name squatted on the reserved REST parameter set. Related-record retrieval already has a live spelling (`expand`, resolved by the engine via batch `$in` queries), so the removal deletes the second, broken spelling rather than the capability, and the orphaned `JoinNode`/`JoinType`/`JoinStrategy` cluster goes with the key. A REQUEST surface — `QueryAST` is never stored in stack metadata — so there is no source for the chain to rewrite; callers move their own queries. ADR-0049 / ADR-0078, #4286."
+        },
+        {
+          "surface": "data.query.windowFunctions",
+          "replacement": "`aggregations` + `groupBy` for request-level analytics; `SqlDriver.findWithWindowFunctions(object, query)` for embedders on a SQL datasource",
+          "migrationId": "query-window-functions-retired",
+          "toMajor": 17,
+          "rationale": "The `windowFunctions` array was declared-but-inert on the query path: `find()` never applied a window function, so every OVER clause a caller declared was silently dropped. The capability only ever ran behind `SqlDriver.findWithWindowFunctions()`, a driver-level door that is not on the `IDataDriver` contract and whose flat input shape (`{ function, alias, partitionBy?, orderBy? }`) the spec vocabulary never matched — `WindowFunctionNodeSchema` declared `field`/`over`/`frame` members the door never read, so that cluster is removed with the key rather than left as a false affordance. A REQUEST surface, never stored; no source to rewrite. ADR-0049 / ADR-0078, #4286."
+        },
+        {
+          "surface": "data.query.cursor",
+          "replacement": "a `where` predicate on the sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` (the documented manual-keyset pattern)",
+          "migrationId": "query-cursor-retired",
+          "toMajor": 17,
+          "rationale": "The `cursor` key promised keyset pagination and no driver implemented it: the cursor was accepted and ignored, so every page came back identical — a caller looping \"until hasMore is false\" never terminates. Worse than inert, it had a shipped public producer (`QueryBuilder.cursor()`, removed with the key). The caller-built `Record<string, unknown>` shape also leaks sort/storage detail and squats on the reserved REST parameter set; a first-class cursor, if ever designed, will be a response-minted opaque token — a different API, so keeping this one preserved a wrong design rather than a roadmap. A REQUEST surface, never stored; nothing to rewrite. ADR-0049 / ADR-0078, #4286."
+        },
+        {
+          "surface": "data.query.distinct",
+          "replacement": "`groupBy` for unique combinations; the `count_distinct` aggregation for deduplicated counts; the SQL/memory drivers' `distinct(object, field)` door for one column's values",
+          "migrationId": "query-distinct-retired",
+          "toMajor": 17,
+          "rationale": "The `distinct` flag promised SELECT DISTINCT and no driver ever rendered it — but it was MIS-WIRED rather than merely dead (the harsher ADR-0078 class): the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate, so the caller got duplicate rows AND worse pagination metadata, and a side effect that \"confirmed\" the flag was doing something. It had a shipped public producer (`QueryBuilder.distinct()`, removed with the key). The count suppression is deleted in the same change — `total` is truthful for those queries again. A REQUEST surface, never stored; nothing to rewrite. ADR-0049 / ADR-0078, #4286."
         }
       ],
       "removed": []

@@ -29,7 +29,7 @@ The one-line fix: **delete the key**; deduplicate with `groupBy` /
 Mechanics: `retiredKey()` tombstones on both declaration sites
 (`QuerySchema.distinct` and `EngineQueryOptionsSchema.distinct`, one shared
 prescription); `QueryBuilder.distinct()` is deleted; registered as the
-protocol-18 semantic migration `query-distinct-retired`. **Observable REST
+protocol-17 semantic migration `query-distinct-retired`. **Observable REST
 change (`@objectstack/metadata-protocol`):** the count-suppression branch is
 deleted — a list request that used to carry `distinct` now gets a real
 `total`/`hasMore` again (that restoration is the point, not a side effect).

@@ -50,7 +50,7 @@ depth 3).
 There is no `os migrate meta` step, and deliberately so: `QueryAST` is a request
 shape, never stored in stack metadata, so the chain has no source to rewrite. It
 is registered as an ADR-0087 D3 **semantic** migration
-(`query-field-node-object-form-retired`) on the protocol-18 step instead — the
+(`query-field-node-object-form-retired`) on the protocol-17 step instead — the
 `EnhancedApiError.fieldErrors` / `BatchOptions.validateOnly` precedent. Callers
 move their own select lists, and both channels tell them how:
 

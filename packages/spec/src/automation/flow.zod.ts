@@ -234,14 +234,14 @@ export const FlowNodeSchema = lazySchema(() => z.object({
      * happened to be declared.
      */
     timeoutMs: retiredKey(
-      '`waitEventConfig.timeoutMs` was removed in @objectstack/spec 18 (#4158). It documented a '
+      '`waitEventConfig.timeoutMs` was removed in @objectstack/spec 17 (#4158). It documented a '
       + 'timeout guard that never existed: nothing ever failed or resumed a wait on a deadline. Its '
       + 'only reader treated it as the timer DURATION when `timerDuration` was absent, so use '
       + '`timerDuration` — it accepts a bare number as milliseconds, making `timeoutMs: 60000` and '
       + "`timerDuration: 60000` the same wait. Stored flows are converted automatically.",
     ),
     onTimeout: retiredKey(
-      '`waitEventConfig.onTimeout` was removed in @objectstack/spec 18 (#4158). It had no readers at '
+      '`waitEventConfig.onTimeout` was removed in @objectstack/spec 17 (#4158). It had no readers at '
       + 'all — no code path ever inspected it, so neither `fail` nor `continue` ever happened. Delete '
       + 'the key. There is no replacement: `wait` has no timeout, and a wait node resumes only when '
       + 'its timer elapses or its signal arrives.',
