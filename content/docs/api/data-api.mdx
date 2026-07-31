@@ -20,7 +20,7 @@ Query records with filtering, sorting, selection, and pagination.
 | `object` | path | Object name |
 | `select` | query | Comma-separated field names. Every name must exist — an unknown one is `400 INVALID_FIELD`, never dropped. |
 | `filter` | query | Filter expression (JSON). `filters` also accepted for backward compatibility. Malformed JSON is rejected with `400 INVALID_FILTER` — never ignored. |
-| `sort` | query | Sort expression (e.g. `name asc` or `-created_at`). Must name a real field — otherwise `400 INVALID_SORT`. |
+| `sort` | query | Sort expression (e.g. `name asc` or `-created_at`). Must name a real field on the object itself — an unknown name or a dotted path (`account.company_name`) is `400 INVALID_SORT`. |
 | `top` | query | Max records to return. No default — omitting it returns all matching records. |
 | `skip` | query | Offset |
 | `expand` | query | Comma-separated list of relations to eager-load. Must name a reference field (`lookup` / `master_detail` / `user` / `tree`) — otherwise `400 INVALID_FIELD`. |
@@ -88,6 +88,7 @@ wrong — three more responses that looked exactly like successful ones:
 |:---|:---|
 | `?sort=-created_at` | sorts |
 | `?sort=no_such_field` | `400 INVALID_SORT` |
+| `?sort=account.company_name` | `400 INVALID_SORT` — sort reaches only the object's own columns; denormalise the related value (formula/rollup field) to sort by it |
 | `?sort={oops` / `?sort=title:desc` | `400 INVALID_SORT` — the list route spells a direction with a space (`title desc`) or a leading `-` |
 | `?select=id,title` | projects those two columns |
 | `?select=no_such_field`, `?select=title,no_such_field` | `400 INVALID_FIELD` |

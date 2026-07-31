@@ -109,33 +109,6 @@ describe('HonoServerPlugin', () => {
         await expect(plugin.start(context as PluginContext)).resolves.not.toThrow();
     });
 
-    it('standalone discovery advertises transactionalBatch=false — the /batch route is not mounted here (#3298)', async () => {
-        // This standalone surface registers CRUD + auth only; the cross-object
-        // /batch endpoint ships with @objectstack/rest. declared === enforced:
-        // discovery must report the capability as disabled so a client never
-        // drops its non-atomic fallback against this backend.
-        const plugin = new HonoServerPlugin({ registerStandardEndpoints: true });
-        await plugin.init(context as PluginContext);
-
-        // Capture the routes the producer registers on the raw app.
-        const routes: Record<string, any> = {};
-        const rawApp = {
-            get: vi.fn((path: string, h: any) => { routes[`GET ${path}`] = h; }),
-            post: vi.fn((path: string, h: any) => { routes[`POST ${path}`] = h; }),
-            use: vi.fn(),
-        };
-        (plugin as any).server.getRawApp = () => rawApp;
-        (plugin as any).registerDiscoveryAndCrudEndpoints(context);
-
-        const handler = routes['GET /api/v1/discovery'];
-        expect(handler).toBeDefined();
-        const c = { json: vi.fn((x: any) => x) };
-        const res = handler(c);
-        expect(res.data.capabilities.transactionalBatch).toEqual({ enabled: false });
-        // Sanity: the standalone surface really has no /batch route (so `false`
-        // is honest, not merely conservative).
-        expect(routes['POST /api/v1/batch']).toBeUndefined();
-    });
 
     it('should configure static files and SPA fallback when enabled', async () => {
         const plugin = new HonoServerPlugin({

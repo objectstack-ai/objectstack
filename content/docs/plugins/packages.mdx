@@ -347,7 +347,7 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 **Development Assembly Plugin** — one plugin that wires the real platform stack for zero-config local development.
 
-- **Features**: Auto-assembles ObjectQL + in-memory driver + auth + security + Hono server + REST + dispatcher + app metadata, plus optional real services when installed (storage, realtime, i18n); registers no stubs — a slot no plugin fills stays empty, as in production (ADR-0115); refuses to boot with `NODE_ENV=production` (`OS_ALLOW_DEV_PLUGIN` escape hatch)
+- **Features**: Auto-assembles ObjectQL + in-memory driver + auth + security + Hono server + REST + dispatcher + app metadata, plus optional real services when installed (storage, realtime, i18n); registers no stubs — a slot no plugin fills stays empty, as in production (ADR-0115); refuses to boot with `NODE_ENV=production` (`OS_ALLOW_DEV_PLUGIN` escape hatch, which brands the override in the boot log and on the ready banner instead of overriding silently)
 - **When to use**: Zero-config local development and playgrounds
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/plugins/plugin-dev/README.md)
 

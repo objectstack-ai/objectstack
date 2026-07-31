@@ -24,7 +24,7 @@ describe('GET /ready over a real HTTP server (integration)', () => {
   beforeAll(async () => {
     kernel = new LiteKernel();
     // port 0 → OS-assigned free port; resolved via getPort() after listening.
-    kernel.use(new HonoServerPlugin({ port: 0, registerStandardEndpoints: true }));
+    kernel.use(new HonoServerPlugin({ port: 0 }));
     kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false }));
 
     await kernel.bootstrap();

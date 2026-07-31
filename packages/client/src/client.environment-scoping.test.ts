@@ -44,7 +44,6 @@ describe('Project-scoped REST routing (live Hono)', () => {
             port: 0,
             // IMPORTANT: skip hardcoded hono CRUD routes so createRestApiPlugin
             // owns /data and /meta registration end-to-end.
-            registerStandardEndpoints: false,
         });
         kernel.use(honoPlugin);
 

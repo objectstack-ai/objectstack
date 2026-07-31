@@ -69,13 +69,12 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // [#3842] Was a hand-rolled envelope with the status in `code`. It has
         // no header or shape of its own, so it is simply the shared exit now.
         // 501, not 404: `/ai/*` IS mounted, so the request reached a handler
-        // with nothing behind it — see ./unavailable.ts. The message stays
-        // local rather than using the shared sentence: the real provider
-        // (`@objectstack/service-ai`) ships outside this workspace as a
-        // Cloud/EE package, so CORE_SERVICE_PROVIDER — verified against
-        // workspace packages by check:service-providers — records `null` for
-        // this slot and would describe it as "nothing ships", which is wrong.
-        return capabilityUnavailable(deps, 'ai', 'AI service is not configured');
+        // with nothing behind it — see ./unavailable.ts. This used to pass a
+        // local message because the shared sentence said "nothing ships",
+        // which is false for a Cloud/Enterprise deployment. The shared table
+        // says the accurate thing now (REMEDY_DETAIL), so the override is gone
+        // and this answer matches what discovery reports for the slot.
+        return capabilityUnavailable(deps, 'ai');
     }
 
     // The AI service exposes route definitions via buildAIRoutes.

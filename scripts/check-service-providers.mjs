@@ -22,8 +22,14 @@
 //   2. A slot in `CoreServiceName` with no entry at all — which would fall
 //      back to `undefined` and print a remedy naming nothing.
 //
-// `null` is a legitimate entry: it means nothing ships for that slot yet, and
-// the message says so instead of naming a plausible package.
+// `null` is a legitimate entry, and it means "no name belongs in an `Install X`
+// sentence" — which covers TWO situations. Nothing provides the slot at all
+// (`search`, `workflow`, `graphql`), or a provider exists but cannot be
+// installed: `@objectstack/service-ai` registers `ai` in objectstack-ai/cloud
+// and is `private: true`. This script can only see workspace packages, so it
+// cannot tell those apart — `REMEDY_DETAIL` in the same file is where the
+// second kind gets an accurate sentence, and the reason a bare `null` must not
+// be read here (or reported) as "nothing exists".
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -86,7 +92,9 @@ for (const [slot, pkg] of table) {
     problems.push(
       `  ${slot} → ${pkg}\n`
       + '    Not a workspace package. Point it at the package that actually registers\n'
-      + `    the '${slot}' slot, or use \`null\` if nothing ships for it yet.`,
+      + `    the '${slot}' slot, or use \`null\` if no installable package provides it\n`
+      + '    (adding a REMEDY_DETAIL sentence if something ships that simply cannot\n'
+      + '    be installed, e.g. a private package in another repository).',
     );
   }
 }
@@ -115,7 +123,12 @@ if (problems.length > 0) {
 }
 
 const named = [...table.values()].filter(Boolean).length;
+// Deliberately NOT "nothing ships yet" — `null` means "no name belongs in an
+// `Install X` sentence", which also covers a provider that exists but cannot be
+// installed (`ai`, whose `@objectstack/service-ai` is private to the cloud
+// repo). Saying "nothing ships" here would repeat, in this script's own output,
+// the conflation the table was corrected to stop making.
 console.log(
-  `✓ check:service-providers — ${table.size} slot(s): ${named} name a real workspace `
-  + `package, ${table.size - named} correctly report that nothing ships yet.`,
+  `✓ check:service-providers — ${table.size} slot(s): ${named} name an installable workspace `
+  + `package, ${table.size - named} name none (see REMEDY_DETAIL for those that still ship something).`,
 );

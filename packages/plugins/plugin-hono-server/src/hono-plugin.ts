@@ -1,17 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import {
-    Plugin, PluginContext, IDataEngine,
-    shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
-} from '@objectstack/core';
-import {
-    RestServerConfig,
-    type ApiRoutes,
-} from '@objectstack/spec/api';
-import {
-    makeExecutionContextResolver,
-    registerCurrentUserEndpoints,
-} from './current-user-endpoints';
+import { Plugin, PluginContext } from '@objectstack/core';
+import { RestServerConfig } from '@objectstack/spec/api';
+import { registerCurrentUserEndpoints } from './current-user-endpoints';
 import {
     HonoHttpServer,
     HonoCorsOptions,
@@ -52,39 +43,6 @@ export interface HonoPluginOptions {
      * Controls automatic endpoint generation and API behavior
      */
     restConfig?: RestServerConfig;
-    /**
-     * Whether to register the standalone CRUD + discovery convenience surface:
-     * raw `POST/GET /api/v1/data/:object` (create + read only) and
-     * `GET /api/v1/discovery` / `/.well-known/objectstack`.
-     *
-     * @deprecated On its way out (#4073) — opt in only during the deprecation
-     * window; the surface (and this flag) will be deleted after a release of
-     * observation, leaving this plugin a pure transport adapter (ADR-0076 D11).
-     *
-     * Every path it mounts is DUPLICATE supply, and lesser supply at that:
-     * C+R only, a subset of the gates, and a discovery payload that predates
-     * `DiscoverySchema`. `@objectstack/rest` serves full `/data` CRUD behind
-     * the whole gate stack, REST/the dispatcher own discovery (this surface
-     * cedes it to them when either is present, #4018), and a composed host
-     * answers byte-identically with this flag on or off (#4260). It exists
-     * only for a bare host that mounts neither — and the tax has been real:
-     * every platform invariant needed re-implementing here after the fact
-     * (#2567, #3298, #4018).
-     *
-     * The default is now `false`. A bare host that relied on it should mount
-     * `createRestApiPlugin` (`@objectstack/rest`) — it needs the same
-     * `objectql` this surface already required, and returns full CRUD plus
-     * the gates — or pass `true` explicitly until the deletion lands. A boot
-     * with no data/discovery provider at all logs a pointer instead of
-     * silently 404ing.
-     *
-     * It does NOT gate the current-user endpoints (`/auth/me/permissions`,
-     * `/auth/me/localization`, `/me/apps`) — this plugin is their only provider
-     * anywhere, so they register unconditionally (#4073).
-     *
-     * @default false
-     */
-    registerStandardEndpoints?: boolean;
     /**
      * Whether to load endpoints from API Registry
      * @default true
@@ -208,42 +166,17 @@ export function buildTimingDetail(timing: PerfTiming): string {
 }
 
 /**
- * The two plugins that own a REAL, computed `/discovery` (ADR-0076 D11 / OQ#9).
- * `@objectstack/rest` serves `metadata-protocol`'s registry-driven `getDiscovery()`;
- * the runtime dispatcher serves `HttpDispatcher.getDiscoveryInfo()`. When either is
- * on the kernel, this convenience surface cedes the route to it rather than
- * publishing a third payload.
+ * The two plugins that own the data + discovery APIs (ADR-0076 D11 / OQ#9).
+ * `@objectstack/rest` serves `metadata-protocol`'s registry-driven
+ * `getDiscovery()` and full `/data` CRUD; the runtime dispatcher serves
+ * `HttpDispatcher.getDiscoveryInfo()` and the service routes.
+ *
+ * This plugin serves neither (#4073) — it is a transport adapter. These names
+ * exist only so a boot that mounts NO owner can say so out loud instead of
+ * leaving callers to diagnose a bare 404.
  */
 const REST_API_PLUGIN = 'com.objectstack.rest.api';
 const RUNTIME_DISPATCHER_PLUGIN = 'com.objectstack.runtime.dispatcher';
-
-/**
- * Base-path segment for every route family this surface can advertise, keyed by
- * its `ApiRoutes` field (`spec/api/discovery.zod.ts`). Typed against the spec so a
- * renamed or dropped key breaks the build here instead of drifting silently.
- *
- * This is a path map, not a capability list — nothing here is advertised unless a
- * matching route is actually registered (see `advertisableRoutes`).
- *
- * `realtime` is deliberately absent (ADR-0076 D12, #2462): service-realtime is an
- * in-process pub/sub bus with no HTTP surface anywhere, so it could never be
- * mounted under `/api/v1/realtime` and listing it would only invite a stale entry.
- */
-const DISCOVERY_ROUTE_SEGMENTS: Partial<Record<keyof ApiRoutes, string>> = {
-    data:          'data',
-    metadata:      'meta',
-    auth:          'auth',
-    packages:      'packages',
-    analytics:     'analytics',
-    workflow:      'workflow',
-    approvals:     'approvals',
-    automation:    'automation',
-    ai:            'ai',
-    notifications: 'notifications',
-    i18n:          'i18n',
-    storage:       'storage',
-    ui:            'ui',
-};
 
 /**
  * Hono Server Plugin
@@ -283,9 +216,6 @@ export class HonoServerPlugin implements Plugin {
     constructor(options: HonoPluginOptions = {}) {
         this.options = {
             port: 3000,
-            // OFF by default (#4073): the convenience surface is deprecated
-            // duplicate supply. See the option's JSDoc for the migration path.
-            registerStandardEndpoints: false,
             useApiRegistry: true,
             spaFallback: false,
             ...options
@@ -627,36 +557,32 @@ export class HonoServerPlugin implements Plugin {
             registerCurrentUserEndpoints({ rawApp: this.server.getRawApp(), ctx });
         });
 
-        if (this.options.registerStandardEndpoints) {
-            ctx.hook('kernel:ready', async () => {
-                this.registerDiscoveryAndCrudEndpoints(ctx);
-            });
-        } else {
-            // The default is OFF (#4073). For a composed host that is a no-op —
-            // REST/the dispatcher answer these routes byte-identically either
-            // way (#4260). The one composition it changes is a BARE host that
-            // mounts none of the three: it used to inherit the convenience
-            // surface implicitly and now gets 404s. Say so once at boot, with
-            // the remedy — the same honesty rule as #4018's discovery cede:
-            // absence must be loud, not something to diagnose from a silent
-            // 404. Checked on kernel:ready so every `kernel.use()` has landed,
-            // and quiet whenever a real API owner is mounted so transport-only
-            // compositions are not nagged.
-            ctx.hook('kernel:ready', async () => {
-                const kernel = ctx.getKernel() as { hasPlugin?(name: string): boolean } | undefined;
-                const hasPlugin = (name: string) =>
-                    typeof kernel?.hasPlugin === 'function' && kernel.hasPlugin(name);
-                if (!hasPlugin(REST_API_PLUGIN) && !hasPlugin(RUNTIME_DISPATCHER_PLUGIN)) {
-                    ctx.logger.warn(
-                        'No data/discovery API is mounted on this server: `registerStandardEndpoints` '
-                        + 'defaults to false (#4073; the convenience surface is deprecated). Mount '
-                        + '`createRestApiPlugin` from @objectstack/rest (full CRUD + gates) or the '
-                        + 'runtime dispatcher — or pass `registerStandardEndpoints: true` to keep the '
-                        + 'legacy surface during the deprecation window.',
-                    );
-                }
-            });
-        }
+        // This plugin is a TRANSPORT ADAPTER: it owns the socket, the middleware
+        // and the three current-user endpoints above, and nothing else. The data
+        // and discovery APIs belong to `@objectstack/rest` and the runtime
+        // dispatcher — one owner per route (ADR-0076 D11). The convenience
+        // surface that used to duplicate them here is gone (#4073).
+        //
+        // A host that mounts neither owner therefore has NO data or discovery
+        // API. That is a real composition (a bare transport host), and its
+        // failure mode without this warning is a bare 404 with nothing pointing
+        // at the cause. Absence must be loud — the same honesty rule #4018
+        // applied to the discovery cede. Checked on `kernel:ready` so every
+        // `kernel.use()` has landed, and silent whenever an owner IS mounted so
+        // transport-only compositions are not nagged.
+        ctx.hook('kernel:ready', async () => {
+            const kernel = ctx.getKernel() as { hasPlugin?(name: string): boolean } | undefined;
+            const hasPlugin = (name: string) =>
+                typeof kernel?.hasPlugin === 'function' && kernel.hasPlugin(name);
+            if (!hasPlugin(REST_API_PLUGIN) && !hasPlugin(RUNTIME_DISPATCHER_PLUGIN)) {
+                ctx.logger.warn(
+                    'No data or discovery API is mounted on this server. HonoServerPlugin is a '
+                    + 'transport adapter and serves neither (#4073). Mount `createRestApiPlugin` '
+                    + 'from @objectstack/rest for full CRUD behind the gate stack, or '
+                    + '`createDispatcherPlugin` from @objectstack/runtime.',
+                );
+            }
+        });
 
         // Open the listening socket on kernel:listening — this fires
         // STRICTLY AFTER every kernel:ready handler completes, so all
@@ -688,219 +614,6 @@ export class HonoServerPlugin implements Plugin {
                 url: `http://localhost:${actualPort}`
             });
         });
-    }
-
-    /**
-     * Discovery for this standalone convenience surface. Two rules, both ADR-0076:
-     *
-     * **1. Single owner (D11 / OQ#9).** `@objectstack/rest` and the runtime
-     * dispatcher each serve a real, computed discovery; whichever is on the kernel
-     * owns `${prefix}/discovery` and we do not register it. Hono is
-     * first-registration-wins and both of those register during plugin `start()` —
-     * i.e. before this `kernel:ready` hook — so they already shadowed this handler
-     * in every composed deployment; ceding cannot change which payload a client
-     * sees, it just stops us shipping a third one that nobody serves. (The
-     * dispatcher cedes to REST on the same `hasPlugin` predicate, without probing
-     * REST's `enableDiscovery`; matching it keeps the three surfaces consistent.)
-     *
-     * `/.well-known/objectstack` is ceded to the dispatcher ONLY — REST never
-     * registers it, so in a REST-without-dispatcher composition this redirect is
-     * the only thing pointing a `.well-known`-first client at `/discovery`.
-     *
-     * **2. Computed, never hardcoded (D12, #4018).** When we do own `/discovery`,
-     * `routes` is derived from the routes actually registered on this Hono app.
-     * The table used to be a hardcoded list of every ObjectStack domain —
-     * `/analytics`, `/workflow`, `/ai`, … — advertised whether or not anything
-     * mounted them, which is exactly the "advertise a route that 404s" class D12
-     * exists to kill: a standalone host with no service plugins advertised the
-     * whole platform while serving `/data` CRUD and two `/auth/me/*` helpers.
-     * Both real discovery surfaces compute per service
-     * (`hasXxx ? route : undefined`); this one computes per registration, which on
-     * a bare host is the stricter and more honest question — service-registered
-     * does not imply route-mounted here, because nothing bridges services to HTTP
-     * on this surface (that bridging IS the dispatcher).
-     */
-    private registerDiscoveryEndpoints(ctx: PluginContext, rawApp: any, prefix: string) {
-        const kernel = ctx.getKernel() as { hasPlugin?(name: string): boolean } | undefined;
-        const hasPlugin = (name: string) =>
-            typeof kernel?.hasPlugin === 'function' && kernel.hasPlugin(name);
-
-        if (hasPlugin(RUNTIME_DISPATCHER_PLUGIN)) {
-            ctx.logger.info(
-                `/.well-known/objectstack ceded to ${RUNTIME_DISPATCHER_PLUGIN} (single owner)`,
-            );
-        } else {
-            rawApp.get('/.well-known/objectstack', (c: any) => c.redirect(`${prefix}/discovery`));
-        }
-
-        const discoveryOwner =
-            hasPlugin(REST_API_PLUGIN) ? REST_API_PLUGIN
-            : hasPlugin(RUNTIME_DISPATCHER_PLUGIN) ? RUNTIME_DISPATCHER_PLUGIN
-            : undefined;
-        if (discoveryOwner) {
-            ctx.logger.info(`${prefix}/discovery ceded to ${discoveryOwner} (single owner)`);
-            return;
-        }
-
-        // Built per request, not here: sibling plugins keep registering routes
-        // through the rest of `kernel:ready`, and the socket only opens on
-        // `kernel:listening` — so by the time a request can arrive the route table
-        // is final, while a table snapshotted now would miss every later mount.
-        rawApp.get(`${prefix}/discovery`, (c: any) => c.json({ data: this.buildDiscovery(prefix) }));
-
-        ctx.logger.info('Registered discovery endpoints', { prefix });
-    }
-
-    /** The discovery payload served when this surface owns `/discovery`. */
-    private buildDiscovery(prefix: string) {
-        return {
-            version: 'v1',
-            apiName: 'ObjectStack API',
-            routes: this.advertisableRoutes(prefix),
-            capabilities: {
-                // This standalone Hono surface registers CRUD + auth only (see
-                // `registerDiscoveryAndCrudEndpoints`) — it does NOT mount the
-                // cross-object `/batch` route,
-                // which ships with `@objectstack/rest`. `declared === enforced`
-                // (#3298): report `transactionalBatch: false` so a client never
-                // drops its non-atomic fallback against a backend that lacks the
-                // endpoint. When `@objectstack/rest` is mounted it serves its own
-                // discovery, which reports the real value from the runtime engine.
-                transactionalBatch: { enabled: false },
-            },
-        };
-    }
-
-    /**
-     * `ApiRoutes` computed from the live Hono route table: a family is advertised
-     * iff some route is registered AT its base path or UNDER it.
-     *
-     * `app.routes` is every registration on this app — adapter routes, `getRawApp()`
-     * routes (how plugin-auth mounts `${basePath}/*`), mounted sub-apps and `use()`
-     * middleware alike — so this sees what a request will actually hit, not what a
-     * parallel bookkeeping list believes. Requiring the base or a `/`-separated
-     * child means a wildcard ABOVE the base (global `/*` middleware, `/api/v1/*`)
-     * never counts as a mount, while `/api/v1/auth/*` and `/api/v1/data/:object`
-     * both do — and `/api/v1/me/apps` does not pass for `metadata` (`/api/v1/meta`).
-     */
-    private advertisableRoutes(prefix: string): Partial<Record<keyof ApiRoutes, string>> {
-        const app = this.server.getRawApp() as { routes?: Array<{ path?: string }> };
-        const registered = Array.isArray(app?.routes) ? app.routes : [];
-        const routes: Partial<Record<keyof ApiRoutes, string>> = {};
-        for (const [key, segment] of Object.entries(DISCOVERY_ROUTE_SEGMENTS)) {
-            const base = `${prefix}/${segment}`;
-            const mounted = registered.some(
-                (r) => typeof r?.path === 'string' && (r.path === base || r.path.startsWith(`${base}/`)),
-            );
-            if (mounted) routes[key as keyof ApiRoutes] = base;
-        }
-        return routes;
-    }
-
-    /**
-     * Register discovery and basic CRUD endpoints.
-     * Called when `registerStandardEndpoints` is true, before the server starts listening.
-     */
-    private registerDiscoveryAndCrudEndpoints(ctx: PluginContext) {
-        const rawApp = this.server.getRawApp();
-        const prefix = '/api/v1';
-
-        this.registerDiscoveryEndpoints(ctx, rawApp, prefix);
-
-        // ── Anonymous-deny gate (ADR-0056 D2, #2567) ──────────────────────────
-        // These raw `/data/:object` routes delegate straight to ObjectQL. They
-        // are only *shadowed* by the REST plugin's gated `/data` routes when
-        // that plugin registers the same paths FIRST — so before this gate the
-        // platform's anonymous posture depended on plugin registration order: a
-        // load-order change silently reopened anonymous data access with no test
-        // failing. Gating here makes the deny decision a property of THIS entry
-        // point too, so security no longer depends on who registered first.
-        //
-        // [#3963] Anonymous access to object data is denied unconditionally —
-        // the `requireAuth` opt-out is retired, so there is no posture to read
-        // or warn about here. An authenticated / system caller always passes.
-        // Returns a 401 Response when the caller is anonymous, else null
-        // (caller proceeds). Delegates the decision to the
-        // shared `shouldDenyAnonymous` (#2567) so every HTTP seam stays in
-        // lockstep. `isSystem` is never set on inbound HTTP (internal-only), so
-        // it cannot be forged to bypass this.
-        const denyAnonymous = (c: any, execCtx: any): Response | null =>
-            shouldDenyAnonymous({ userId: execCtx?.userId, isSystem: execCtx?.isSystem })
-                ? c.json(ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS)
-                : null;
-
-        // Basic CRUD data endpoints — delegate to ObjectQL service directly
-        const getObjectQL = () => ctx.getService<IDataEngine>('objectql');
-
-        // Session → ExecutionContext. Shared with the always-registered
-        // current-user endpoints, which resolve the same principal.
-        const resolveCtx = makeExecutionContextResolver(ctx);
-
-        // Create
-        rawApp.post(`${prefix}/data/:object`, async (c: any) => {
-            const ql = getObjectQL();
-            if (!ql) return c.json({ error: 'Data service not available' }, 503);
-            const object = c.req.param('object');
-            const data = await c.req.json().catch(() => ({}));
-            const execCtx = await resolveCtx(c);
-            const denied = denyAnonymous(c, execCtx);
-            if (denied) return denied;
-            try {
-                const res = await ql.insert(object, data, { context: execCtx } as any);
-                const record = { ...data, ...res };
-                return c.json({ object, id: record.id, record });
-            } catch (err: any) {
-                if (err?.code === 'PERMISSION_DENIED' || err?.name === 'PermissionDeniedError') {
-                    return c.json({ error: err.message ?? 'Forbidden' }, 403);
-                }
-                throw err;
-            }
-        });
-
-        // Get by ID
-        rawApp.get(`${prefix}/data/:object/:id`, async (c: any) => {
-            const ql = getObjectQL();
-            if (!ql) return c.json({ error: 'Data service not available' }, 503);
-            const object = c.req.param('object');
-            const id = c.req.param('id');
-            const execCtx = await resolveCtx(c);
-            const denied = denyAnonymous(c, execCtx);
-            if (denied) return denied;
-            try {
-                let all = await ql.find(object, { context: execCtx } as any);
-                if (!all) all = [];
-                const match = all.find((i: any) => i.id === id);
-                return match ? c.json({ object, id, record: match }) : c.json({ error: 'Not found' }, 404);
-            } catch (err: any) {
-                if (err?.code === 'PERMISSION_DENIED' || err?.name === 'PermissionDeniedError') {
-                    return c.json({ error: err.message ?? 'Forbidden' }, 403);
-                }
-                throw err;
-            }
-        });
-
-        // Find / List
-        rawApp.get(`${prefix}/data/:object`, async (c: any) => {
-            const ql = getObjectQL();
-            if (!ql) return c.json({ error: 'Data service not available' }, 503);
-            const object = c.req.param('object');
-            const execCtx = await resolveCtx(c);
-            const denied = denyAnonymous(c, execCtx);
-            if (denied) return denied;
-            try {
-                let all = await ql.find(object, { context: execCtx } as any);
-                if (!Array.isArray(all) && all && (all as any).value) all = (all as any).value;
-                if (!all) all = [];
-                return c.json({ object, records: all, total: all.length });
-            } catch (err: any) {
-                if (err?.code === 'PERMISSION_DENIED' || err?.name === 'PermissionDeniedError') {
-                    return c.json({ error: err.message ?? 'Forbidden' }, 403);
-                }
-                throw err;
-            }
-        });
-
-        ctx.logger.debug('Registered standard CRUD data endpoints', { prefix });
     }
 
     /**

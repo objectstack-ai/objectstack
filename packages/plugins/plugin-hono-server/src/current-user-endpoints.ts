@@ -13,9 +13,10 @@
  * `/auth/me/localization` for regional defaults, and `core`'s auth gate
  * allow-lists `/me/apps` + `/me/localization` as endpoints a gated user MUST
  * still reach to bootstrap the remediation UI. #4079 lifted them out from under
- * `registerStandardEndpoints` (which covers only DUPLICATE supply — raw `/data`
- * CRUD and a discovery the dispatcher/REST own) so the flag could not take the
- * console down with it.
+ * `registerStandardEndpoints`, which also gated a DUPLICATE `/data` CRUD +
+ * discovery surface, so that flag could not take the console down with it. That
+ * surface and the flag have since been deleted (#4073); these three are all the
+ * plugin serves beyond the socket.
  *
  * That split fixed the flag but left the supply still welded to
  * {@link HonoServerPlugin}: a host that stands up a bare {@link HonoHttpServer}
@@ -405,13 +406,14 @@ export function annotateEffectiveApiOperations(
 }
 
 /**
- * Build the session → `ExecutionContext` resolver the current-user endpoints —
- * and the plugin's standalone `/data` CRUD surface — both need.
+ * Build the session → `ExecutionContext` resolver the current-user endpoints
+ * need.
  *
- * Extracted from `registerDiscoveryAndCrudEndpoints` when the current-user
- * endpoints stopped being gated on `registerStandardEndpoints` (#4073): they
- * resolve the same principal the `/data` routes do, and one resolver is the
- * only way the two groups can agree on who the caller is.
+ * Extracted from `registerDiscoveryAndCrudEndpoints` when these endpoints
+ * stopped being gated on `registerStandardEndpoints` (#4073), so the two groups
+ * would agree on who the caller is. That surface has since been deleted and
+ * these endpoints are the only remaining caller — kept as a named export
+ * because the serverless host path (cloud#924) composes it directly.
  */
 export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
     const getObjectQL = () => ctx.getService<IDataEngine>('objectql');
@@ -600,21 +602,19 @@ export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
  * Register the current-user endpoints — `/auth/me/permissions`,
  * `/auth/me/localization` and `/me/apps` — on `rawApp`.
  *
- * When {@link HonoServerPlugin} drives this, it is UNCONDITIONAL, unlike the
- * plugin's CRUD + discovery block (#4073). Those two groups used to ride on one
- * `registerStandardEndpoints` flag, which conflated two opposite things. The flag
- * covers DUPLICATE supply — raw `/data` CRUD that `@objectstack/rest` also serves
- * (and, being registered first, really serves), plus a discovery that the
- * dispatcher/REST own (#4018). These three are the opposite: nothing else in the
- * platform mounts them. `packages/rest` and `packages/runtime` register no
- * `/me/*` route at all, the console reads `/auth/me/permissions` for its whole
- * permission layer and `/auth/me/localization` for regional defaults, and
+ * When {@link HonoServerPlugin} drives this, it is UNCONDITIONAL — and these are
+ * now the only routes it mounts beyond the socket itself.
+ *
+ * They used to ride on the `registerStandardEndpoints` flag alongside a raw
+ * `/data` CRUD + discovery surface, one flag over two opposite things (#4073).
+ * That surface was DUPLICATE supply and has been deleted; these three are the
+ * opposite and could not be. Nothing else in the platform mounts them:
+ * `packages/rest` and `packages/runtime` register no `/me/*` route at all, the
+ * console reads `/auth/me/permissions` for its whole permission layer and
+ * `/auth/me/localization` for regional defaults, and
  * `core/security/auth-gate.ts` allow-lists `/me/apps` + `/me/localization` as
- * endpoints a gated user MUST still reach to bootstrap the remediation UI.
- * `os serve` gets them only because `registerStandardEndpoints` defaults to true
- * (`cli/src/commands/serve.ts` passes just `{ port }`), so turning that flag off
- * — or retiring the convenience surface it names — would have taken the console
- * down with it.
+ * endpoints a gated user MUST still reach to bootstrap the remediation UI. The
+ * split (#4144) had to land before the deletion for exactly that reason.
  *
  * IDEMPOTENT: returns `false` and registers nothing when all three paths are
  * already served. That is what lets a host call this eagerly on its own raw app

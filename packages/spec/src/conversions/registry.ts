@@ -1197,12 +1197,16 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
             // Loose `signal` alongside an explicit eventType: both lift.
             { id: 'n3', type: 'wait', config: { eventType: 'signal', signal: 'order_paid' } },
             // Partially shadowed: `timerDuration` is already declared, so the
-            // loose `duration` stays put untouched; only `timeoutMs` lifts.
+            // loose `duration` stays put untouched; only `eventType` lifts.
+            // (Deliberately not `timeoutMs` — protocol 18 retires that key
+            // (#4158), and the fixture harness replays the WHOLE table, so an
+            // `after` naming it would describe an end state that no longer
+            // exists.)
             {
               id: 'n4',
               type: 'wait',
-              waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
-              config: { duration: 'PT9M', timeoutMs: 60000 },
+              waitEventConfig: { timerDuration: 'PT5M' },
+              config: { duration: 'PT9M', eventType: 'signal' },
             },
           ],
         },
@@ -1219,7 +1223,7 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
             {
               id: 'n4',
               type: 'wait',
-              waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M', timeoutMs: 60000 },
+              waitEventConfig: { timerDuration: 'PT5M', eventType: 'signal' },
               config: { duration: 'PT9M' },
             },
           ],
@@ -1227,7 +1231,7 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
       ],
     },
     // n2: `duration` → `timerDuration`. n3: `eventType` + `signal` → `signalName`.
-    // n4: only `timeoutMs` (its `duration` is shadowed by a declared
+    // n4: only `eventType` (its `duration` is shadowed by a declared
     // `timerDuration` → no notice, and the key is left in place).
     expectedNotices: 4,
   },
@@ -2066,6 +2070,112 @@ const stackApiRequireAuthRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * `waitEventConfig.timeoutMs` / `.onTimeout` removed — `wait` never had a timeout
+ * (protocol 18, #4158).
+ *
+ * Both keys described a timeout and neither delivered one. `onTimeout` had **zero**
+ * readers: no path ever inspected it, so neither `'fail'` nor `'continue'` ever
+ * happened, and its `.default('fail')` stamped a decision nothing made onto every
+ * wait node. `timeoutMs` said "maximum wait time" while its only reader used it as
+ * the timer *duration* when `timerDuration` was absent — it did something, just not
+ * what it claimed.
+ *
+ * **Retired from the load path**, like every other key retired for lying rather than
+ * for being renamed (`api.requireAuth`, the tool/app/flow inert keys, RLS `priority`).
+ * The distinction the registry draws: a key that was merely *renamed* keeps a load
+ * window, because punishing an author for a spelling nobody warned them about is
+ * pointless. A key that **misdescribed itself** does not — silently absorbing it
+ * would let the author keep believing they configured a timeout. The chain converts
+ * it mechanically; the schema tombstone tells them what actually happened.
+ *
+ * `timeoutMs` moves to `timerDuration` rather than being dropped, because that IS
+ * what it did. It is stringified on the way: `timerDuration` is `z.string()` while
+ * `timeoutMs` was `z.number()`, and `parseIsoDuration` reads a bare numeric string as
+ * milliseconds — so `timeoutMs: 60000` and `timerDuration: '60000'` are the same
+ * wait. Moving the number unstringified would produce a block that no longer parses.
+ * With `timerDuration` already set it is dropped instead: the executor's `??` never
+ * looked past the duration, so it was already dead metadata.
+ */
+function removeWaitTimeoutKeys(stack: Dict, emit: Emit): Dict {
+  // Deliberately not filtered to `node.type === 'wait'`: the tombstones live on the
+  // block, so a non-wait node carrying one would fail to parse and never be cleaned.
+  return mapFlowNodes(stack, (node, path) => {
+    const wec = node.waitEventConfig;
+    if (!isDict(wec)) return node;
+    const next: Dict = { ...wec };
+    let changed = false;
+
+    if (next.timeoutMs != null) {
+      if (next.timerDuration == null) {
+        next.timerDuration = String(next.timeoutMs);
+        emit({ from: 'waitEventConfig.timeoutMs', to: 'waitEventConfig.timerDuration', path: `${path}.waitEventConfig.timerDuration` });
+      } else {
+        emit({ from: 'waitEventConfig.timeoutMs', to: '(removed — `timerDuration` already set, so it was never read)', path: `${path}.waitEventConfig` });
+      }
+      delete next.timeoutMs;
+      changed = true;
+    }
+    if (next.onTimeout != null) {
+      emit({ from: 'waitEventConfig.onTimeout', to: '(removed — no reader ever existed)', path: `${path}.waitEventConfig` });
+      delete next.onTimeout;
+      changed = true;
+    }
+    return changed ? { ...node, waitEventConfig: next } : node;
+  });
+}
+
+const flowNodeWaitTimeoutKeysRemoved: MetadataConversion = {
+  id: 'flow-node-wait-timeout-keys-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'flow.node.waitEventConfig',
+  summary:
+    "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) " +
+    "and 'onTimeout' (removed — zero readers, so no timeout ever fired) (#4158)",
+  apply(stack, emit) {
+    return removeWaitTimeoutKeys(stack, emit);
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'settlement',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            // The shape that actually did something: `timeoutMs` standing in for a
+            // duration. It must survive as a working wait, hence the move.
+            { id: 'n2', type: 'wait', waitEventConfig: { eventType: 'timer', timeoutMs: 60000, onTimeout: 'continue' } },
+            // `timerDuration` already set → `timeoutMs` was dead; dropped, not moved.
+            {
+              id: 'n3',
+              type: 'wait',
+              waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M', timeoutMs: 999 },
+            },
+            // Nothing retired here — left byte-identical.
+            { id: 'n4', type: 'wait', waitEventConfig: { eventType: 'signal', signalName: 'paid' } },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'settlement',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'wait', waitEventConfig: { eventType: 'timer', timerDuration: '60000' } },
+            { id: 'n3', type: 'wait', waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' } },
+            { id: 'n4', type: 'wait', waitEventConfig: { eventType: 'signal', signalName: 'paid' } },
+          ],
+        },
+      ],
+    },
+    // n2: `timeoutMs` moved + `onTimeout` dropped. n3: `timeoutMs` dropped (shadowed).
+    expectedNotices: 3,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -2095,6 +2205,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
   ],
   18: [
     stackApiRequireAuthRemoved,
+    flowNodeWaitTimeoutKeysRemoved,
   ],
 };
 

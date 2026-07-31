@@ -59,7 +59,6 @@ describe('data.batchTransaction (live Hono, #1604)', () => {
                 port: 0,
                 // Skip hardcoded hono CRUD routes so createRestApiPlugin owns
                 // route registration (including the root /batch route).
-                registerStandardEndpoints: false,
             }),
         );
 

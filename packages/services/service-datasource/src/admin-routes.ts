@@ -170,12 +170,19 @@ export function registerDatasourceAdminRoutes(
     return { draft, secret: normalised };
   };
 
-  // List all datasources with provenance + health.
+  // List all datasources with provenance + health. The catch was missing
+  // until #4264 — the one route in this module without one, so a backing-store
+  // failure surfaced as the adapter's non-envelope 500 instead of the 400 its
+  // eight siblings answer.
   server.get(root, async (_req: any, res: any) => {
     const svc = resolve(res, 'datasource-admin', 'listDatasources');
     if (!svc) return;
-    const datasources = await svc.listDatasources();
-    sendOk(res, { datasources });
+    try {
+      const datasources = await svc.listDatasources();
+      sendOk(res, { datasources });
+    } catch (err) {
+      badRequest(res, 'datasource-admin', err);
+    }
   });
 
   // Catalog of connection drivers + their JSON-Schema config (drives the

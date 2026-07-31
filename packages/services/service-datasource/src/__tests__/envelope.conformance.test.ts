@@ -188,6 +188,15 @@ describe('datasource-admin envelope (#3843) — error bodies', () => {
       run: () => drive(mount({ createDatasource: async () => { throw new Error('duplicate name'); } }), '/api/v1/datasources', { method: 'POST', body: JSON.stringify({ name: 'pg' }) }),
     },
     {
+      // #4264: the one route in the module that still had no `catch`, so this
+      // throw surfaced as the adapter's non-envelope
+      // `500 { error: 'No response from handler' }` instead of the 400 below.
+      name: 'a datasource listing failure',
+      status: 400,
+      code: 'DATASOURCE_ADMIN_ERROR',
+      run: () => drive(mount({ listDatasources: async () => { throw new Error('backing store offline'); } }), '/api/v1/datasources'),
+    },
+    {
       // On an external-datasource route, so the refusal carries THAT service's
       // registered code (#4249) — even though this one is raised by the route
       // itself before the service is called.
