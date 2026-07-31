@@ -3,6 +3,7 @@
 import { SetupAppTranslations } from './apps/translations/index.js';
 import { MetadataFormsTranslations } from './metadata-translations/index.js';
 import { SysMigration } from './system/sys-migration.object.js';
+import { SysSecret } from './system/sys-secret.object.js';
 import { attestFreshDatastore } from './system/migration-flag.js';
 
 /**
@@ -18,6 +19,17 @@ import { attestFreshDatastore } from './system/migration-flag.js';
  *    file collection, the engine's strict value-shape gates (#3438/#4235)
  *    and the migration CLI all read the same ledger, and none of them
  *    should have to drag an unrelated service into the boot to find it.
+ *  - **`sys_secret`** — the environment's encrypted-secret store
+ *    (ADR-0066 D2/④). Same shape as the ledger, sharper stakes (#4270):
+ *    its producers span domains — the settings service's encrypted
+ *    specifiers, the engine's own `secret`-field encryption
+ *    (`encryptSecretFields`/`resolveSecret`, a generic write path any
+ *    business object with a `Field.secret()` hits), and the datasource
+ *    credential binder — and the engine is fail-CLOSED about it: writing
+ *    a secret field with no reachable `sys_secret` store throws. While
+ *    service-settings registered it, a kernel composed without settings
+ *    hard-failed every secret-field write with an error that blamed
+ *    platform-objects. Registered here, that error message is true.
  *  - **Fresh-datastore attestation** (#3438, ADR-0104 2026-07-30) —
  *    travels with the ledger registration: a store this boot created from
  *    empty is attested at `kernel:ready`, whichever services are composed.
@@ -31,8 +43,9 @@ import { attestFreshDatastore } from './system/migration-flag.js';
  *
  * Gracefully degrades on lean kernels: without a manifest service the
  * ledger is simply absent — every flag reader answers "not verified", the
- * safe posture — and without an i18n service the UI falls back to the
- * inline literals carried on each App / Dashboard / `*.form.ts` schema.
+ * safe posture — secret-field writes fail closed (throw, never cleartext),
+ * and without an i18n service the UI falls back to the inline literals
+ * carried on each App / Dashboard / `*.form.ts` schema.
  *
  * Structurally typed against `@objectstack/core`'s `Plugin` contract so
  * this package does not need to depend on the kernel at compile time.
@@ -58,11 +71,12 @@ export class PlatformObjectsPlugin {
         version: this.version,
         type: 'plugin',
         scope: 'system',
-        objects: [SysMigration],
+        objects: [SysMigration, SysSecret],
       });
     } catch {
       // No manifest service (lean / i18n-only kernels) — the ledger stays
-      // unregistered and every flag reader answers "not verified".
+      // unregistered (every flag reader answers "not verified") and the
+      // secret store stays unregistered (secret-field writes fail closed).
     }
   }
 

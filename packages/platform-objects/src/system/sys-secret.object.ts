@@ -25,7 +25,13 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *     reads of e.g. feature flags.
  *
  * managedBy: 'engine-owned' — never edited from a generic Object grid. All
- * writes flow through `SettingsService` and an `ICryptoProvider`.
+ * writes flow through an `ICryptoProvider` on one of three privileged
+ * producer paths (#4270): `SettingsService` (encrypted settings specifiers),
+ * the engine's own `secret`-field encryption (`encryptSecretFields` — the
+ * generic write path of any object carrying a `Field.secret()`), and the
+ * datasource credential binder. Because the producers span domains and the
+ * engine fails CLOSED without this store, it is registered by
+ * `PlatformObjectsPlugin` (platform infrastructure), not by service-settings.
  *
  * @namespace sys
  */

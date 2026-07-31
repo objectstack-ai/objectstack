@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { PlatformObjectsPlugin } from './plugin.js';
-import { SysMigration } from './system/index.js';
+import { SysMigration, SysSecret } from './system/index.js';
 
 /**
  * Hand-rolled fake PluginContext (mirrors the service-plugin tests) — this
@@ -33,8 +33,8 @@ function makeCtx() {
   return ctx;
 }
 
-describe('PlatformObjectsPlugin: sys_migration ledger registration (#4243)', () => {
-  it('registers SysMigration through the manifest service', async () => {
+describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4243, #4270)', () => {
+  it('registers SysMigration and SysSecret through the manifest service', async () => {
     const ctx = makeCtx();
     const manifests: any[] = [];
     ctx.registerService('manifest', { register: (m: any) => manifests.push(m) });
@@ -44,8 +44,27 @@ describe('PlatformObjectsPlugin: sys_migration ledger registration (#4243)', () 
     expect(manifests).toHaveLength(1);
     expect(manifests[0].id).toBe('com.objectstack.platform-objects');
     expect(manifests[0].scope).toBe('system');
-    expect(manifests[0].objects).toEqual([SysMigration]);
-    expect(manifests[0].objects[0].name).toBe('sys_migration');
+    expect(manifests[0].objects).toEqual([SysMigration, SysSecret]);
+    expect(manifests[0].objects.map((o: any) => o.name)).toEqual(['sys_migration', 'sys_secret']);
+  });
+
+  /**
+   * #4270 pin: the engine's secret-field write path is fail-CLOSED — with no
+   * `sys_secret` store it throws, and its error message tells the operator to
+   * "Ensure the platform-objects (sys_secret) are registered". This plugin is
+   * what makes that sentence true; dropping SysSecret from the registration
+   * would fail any kernel composed without service-settings (and even with
+   * it — settings no longer registers the object either).
+   */
+  it('sys_secret is registered HERE, so the engine fail-closed error names the right package', async () => {
+    const ctx = makeCtx();
+    const manifests: any[] = [];
+    ctx.registerService('manifest', { register: (m: any) => manifests.push(m) });
+
+    await new PlatformObjectsPlugin().init(ctx);
+
+    const names = manifests.flatMap((m: any) => m.objects.map((o: any) => o.name));
+    expect(names).toContain('sys_secret');
   });
 
   it('degrades silently without a manifest service (lean/i18n-only kernels)', async () => {

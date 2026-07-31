@@ -1494,7 +1494,10 @@ export default class Serve extends Command {
       // infrastructure every served kernel needs: the `sys_migration`
       // data-migration flag ledger + fresh-datastore attestation (#4243 —
       // without it the engine's deployment gates read "no ledger" and fall
-      // back to the lax legacy posture), and the platform-default
+      // back to the lax legacy posture), the `sys_secret` cipher store
+      // (#4270 — the engine's secret-field write path and the datasource
+      // credential binder fail CLOSED without it; the crypto wiring below
+      // assumes the table exists), and the platform-default
       // translation bundles (Setup App + metadata-type configuration
       // forms). Without the latter, Setup nav labels and metadata-admin
       // form labels fall back to English literals even when
