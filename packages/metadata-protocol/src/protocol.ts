@@ -3289,12 +3289,43 @@ export class ObjectStackProtocolImplementation implements
      * The engine's tolerance is untouched: it guards INTERNAL callers (hooks,
      * flows, expand sub-reads, registry-less hosts) that never pass through
      * this ingress, exactly like the object-existence gate above.
+     *
+     * [#4196] It also owns the projection's SHAPE, which is a different
+     * question from its names and is answered first — see below.
      */
     private assertProjectionFieldsExist(object: string, fields: unknown, param: string): void {
         if (!Array.isArray(fields) || fields.length === 0) return;
+        // [#4196] A non-string entry is the retired nested-select object form
+        // (`{ field, fields, alias }`). It is checked BEFORE the field map,
+        // because it is wrong about the shape rather than about this object —
+        // and a registry-less host, which returns no gate below, would
+        // otherwise let it through to a driver that cannot read it. Until now
+        // it reached `.map(String)` and was refused as the unknown field
+        // `"[object Object]"`: a 400 naming something the caller never wrote.
+        const badShape = fields.findIndex((f) => typeof f !== 'string');
+        if (badShape !== -1) {
+            const entry = fields[badShape];
+            // Only the shape that used to be legal earns the retirement clause.
+            const retiredForm = typeof entry === 'object' && entry !== null && !Array.isArray(entry);
+            const err: any = new Error(
+                `'${param}' entry #${badShape + 1} on object '${object}' is not a field name.`
+                + (retiredForm
+                    ? ' The nested-select object form `{ field, fields, alias }` was removed in '
+                      + '@objectstack/spec 18 (#4196) — no engine or driver ever read it.'
+                    : '')
+                + " Select related records with `expand` (`expand=owner` / `{ expand: { owner: "
+                + "{ object: 'user', fields: ['name'] } } }`), or name one related column with a "
+                + 'dotted path (`select=owner.name`).',
+            );
+            err.code = 'INVALID_FIELD';
+            err.status = 400;
+            err.object = object;
+            err.param = param;
+            throw err;
+        }
         const gate = this.resolveQueryFields(object);
         if (!gate) return;
-        const unknown = fields.map(String).filter((f) => !gate.known.has(f.split('.')[0]));
+        const unknown = (fields as string[]).filter((f) => !gate.known.has(f.split('.')[0]));
         if (unknown.length === 0) return;
         const first = unknown[0];
         const err: any = new Error(

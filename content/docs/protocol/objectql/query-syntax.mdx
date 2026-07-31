@@ -62,7 +62,7 @@ import type { QueryAST } from '@objectstack/spec/data';
 // QueryAST — full structure
 interface QueryAST {
   object: string;                          // Target object (required)
-  fields?: FieldNode[];                    // Projection (SELECT)
+  fields?: FieldNode[];                    // Projection (SELECT) — field names
   where?: FilterCondition;                 // Filtering (WHERE) — MongoDB-style $op
   search?: FullTextSearch;                 // Full-text search ($search)
   orderBy?: SortNode[];                    // Ordering (ORDER BY)
@@ -97,7 +97,6 @@ on the `find()` path:
 | `cursor` | Accepted by `EngineQueryOptions`, but no driver implements keyset pagination |
 | `distinct` | Not applied by `find()`; the SQL and in-memory drivers expose a separate `distinct(object, field, filters?)` method instead |
 | `windowFunctions` | Not applied by `find()`; `SqlDriver.findWithWindowFunctions()` is a separate method that is not on the `IDataDriver` contract |
-| Object `FieldNode`s (`{ field, fields }`) | The engine drops non-string entries from `fields` — use `expand` to project related records |
 | `search.fuzzy` / `boost` / `operator` / `minScore` / `language` / `highlight` | Parsed by the schema but ignored: only `query` and `fields` drive the expansion |
 
 `top` is the exception that *is* honored — the engine normalises it to `limit`.
@@ -122,12 +121,16 @@ interface AggregationNode {
   filter?: FilterCondition; // FILTER WHERE clause — protocol only, never applied
 }
 
-// FieldNode — field selection
-type FieldNode = string | {
-  field: string;
-  fields?: FieldNode[];  // nested select — protocol only, dropped by the engine
-  alias?: string;
-};
+// FieldNode — one entry of the select list. A field name, optionally dotted to
+// reach through a relationship ('owner.name'). Related *records* come from
+// `expand`, not from inside this list.
+//
+// The `{ field, fields, alias }` nested-select member this union used to carry
+// was REMOVED in protocol 18 (#4196): nothing produced it and nothing read
+// `.fields`/`.alias`, so it was dropped by the SQL and memory drivers,
+// projected as a column named "[object Object]" by MongoDB, and refused as an
+// unknown field by the REST ingress. `expand` is the one spelling.
+type FieldNode = string;
 
 // GroupByNode — GROUP BY target
 type GroupByNode = string | {
@@ -980,7 +983,7 @@ Similarly, the following legacy field names should not be used in new code:
 | `aggregate` (object map) | `aggregations` (array) | Array of `AggregationNode` objects |
 | `expand` (string array) | `expand` (Record) | Map of field name → nested QueryAST |
 | `skip` | `offset` | Number |
-| `select` | `fields` | Array of FieldNode |
+| `select` | `fields` | Array of FieldNode (field-name strings) |
 | `populate` | `expand` | Map of field name → nested QueryAST |
 </Callout>
 

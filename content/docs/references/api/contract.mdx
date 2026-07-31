@@ -147,7 +147,7 @@ const result = ApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name (e.g. account) |
-| **fields** | `string \| { field: string; fields?: object[]; alias?: string }[]` | optional | Fields to retrieve |
+| **fields** | `string[]` | optional | Fields to retrieve — field names, optionally dotted to reach through a relationship (`owner.name`). Related *records* are selected with `expand`, not from inside this list. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
 | **search** | `{ query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional | Full-text search configuration ($search parameter) |
 | **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
@@ -161,7 +161,7 @@ const result = ApiError.parse(data);
 | **having** | `any` | optional | HAVING clause for aggregation filtering |
 | **windowFunctions** | `{ function: Enum<'row_number' \| 'rank' \| 'dense_rank' \| 'percent_rank' \| 'lag' \| 'lead' \| 'first_value' \| 'last_value' \| 'sum' \| 'avg' \| 'count' \| 'min' \| 'max'>; field?: string; alias: string; over: object }[]` | optional | Window functions with OVER clause |
 | **distinct** | `boolean` | optional | SELECT DISTINCT flag |
-| **expand** | `Record<string, { object: string; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; where?: any; search?: object; … }>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
+| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: object; … }>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
 
 
 ---

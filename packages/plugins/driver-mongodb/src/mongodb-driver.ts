@@ -223,14 +223,11 @@ export class MongoDBDriver implements IDataDriver {
     if (query.fields && query.fields.length > 0) {
       const projection: Document = {};
       for (const field of query.fields) {
-        // A `FieldNode` is either a plain field name or a relationship field
-        // carrying a nested select. The nested select is resolved by the engine
-        // (expand → batch `$in` queries), never by the driver, so all the
-        // projection needs from the object form is the relationship field's own
-        // name. Indexing with the object itself keyed the projection on
-        // `"[object Object]"` — invisible until #4171 gave `QueryAST['fields']`
-        // a real type.
-        projection[typeof field === 'string' ? field : field.field] = 1;
+        // A `FieldNode` is a field name. Nested selection is `expand`, resolved
+        // by the engine (batch `$in` queries), never by the driver — the
+        // `{ field, fields, alias }` form this loop used to unwrap was removed
+        // in #4196 once #4171's typing showed it had never had a producer.
+        projection[field] = 1;
       }
       // Always include `id`, never include `_id`
       projection.id = 1;

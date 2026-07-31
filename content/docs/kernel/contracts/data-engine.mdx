@@ -85,7 +85,7 @@ Defined by `EngineQueryOptionsSchema` in `@objectstack/spec`:
 ```typescript
 interface EngineQueryOptions {
   where?: FilterCondition;                   // WHERE clause — MongoDB-style $op
-  fields?: FieldNode[];                      // SELECT fields
+  fields?: FieldNode[];                      // SELECT — field names ('name', 'owner.name')
   orderBy?: SortNode[];                      // ORDER BY
   limit?: number;                            // LIMIT
   offset?: number;                           // OFFSET
@@ -387,7 +387,7 @@ The following legacy parameter names are accepted by the RPC layer for backward 
 | Legacy (Deprecated) | Canonical | Notes |
 |:---------------------|:----------|:------|
 | `filter` | `where` | FilterCondition object |
-| `select` | `fields` | Array of FieldNode |
+| `select` | `fields` | Array of FieldNode (field-name strings) |
 | `sort` | `orderBy` | Array of `{ field, order }` |
 | `skip` | `offset` | Number |
 | `populate` | `expand` | Record of field → QueryAST |

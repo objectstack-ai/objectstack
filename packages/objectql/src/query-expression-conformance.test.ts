@@ -388,6 +388,46 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
             .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'no_such_field' });
     });
 
+    // [#4196] The retired nested-select object form. Before it was removed from
+    // `FieldNode`, an entry like this reached `.map(String)` here and came back
+    // as the unknown field `"[object Object]"` — a 400 naming something the
+    // caller never wrote, about a shape the spec still said was legal.
+    it('the removed nested-select object form is refused BY NAME, not as the field "[object Object]"', async () => {
+        await expect(protocol.findData({
+            object: 'showcase_task',
+            query: { fields: [{ field: 'parent_id', fields: ['title'] }] },
+        })).rejects.toMatchObject({
+            status: 400,
+            code: 'INVALID_FIELD',
+            object: 'showcase_task',
+            param: 'fields',
+        });
+        await expect(protocol.findData({
+            object: 'showcase_task',
+            query: { fields: [{ field: 'parent_id' }] },
+        })).rejects.toThrow(/nested-select object form.*removed.*expand/s);
+    });
+
+    it('wrapping a REAL field in the object form is refused too — the shape is wrong, not the name', async () => {
+        // The gate is about the shape, so `title` being a perfectly good column
+        // buys the entry nothing. This is also why the shape is judged before
+        // the field map: a host whose registry cannot answer "is this a field"
+        // still must not hand `{ field: 'title' }` to a driver.
+        await expect(protocol.findData({
+            object: 'showcase_task',
+            query: { fields: [{ field: 'title' }] },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', param: 'fields' });
+    });
+
+    it('a dotted path is still accepted — the replacement the rejection prescribes', async () => {
+        // The string form covers the readable half of what the object form
+        // claimed: the head segment is validated here, the tail resolved
+        // downstream. The rejection above points at this and at `expand`.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { select: 'parent_id.title' },
+        })).resolves.toBeDefined();
+    });
+
     it('the system columns the registry injected still project', async () => {
         // `applySystemFields` adds these at registration — a gate reading only
         // the AUTHORED field map would reject every one of them.
