@@ -914,6 +914,23 @@ export type FormField = Omit<z.infer<typeof FormFieldBaseSchema>, 'visibleOn'> &
 };
 
 /**
+ * The authoring shape of a form field — the INPUT half of
+ * {@link FormFieldSchema} (#4195).
+ *
+ * Differs from {@link FormField} in both directions, which is exactly why it
+ * has to be declared: `span` is `.default('auto')` so it is optional here and
+ * required there, and the deprecated `visibleOn` is accepted here and stripped
+ * by the ADR-0089 D2 transform before it reaches the output.
+ *
+ * Without this, `z.input<typeof FormFieldSchema>` was `unknown` — so a form
+ * section's `fields` were unchecked at every authoring site.
+ */
+export type FormFieldInput = z.input<typeof FormFieldBaseSchema> & {
+  /** Sub-fields for composite/repeater/record types. Recursive. */
+  fields?: FormFieldInput[];
+};
+
+/**
  * Form Field Configuration Schema
  * Detailed configuration for individual form fields.
  *
@@ -930,7 +947,7 @@ export type FormField = Omit<z.infer<typeof FormFieldBaseSchema>, 'visibleOn'> &
  * @example Custom widget override
  * { field: 'filter', widget: 'filter-builder' }
  */
-export const FormFieldSchema: z.ZodType<FormField> = lazySchema(() =>
+export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(() =>
   FormFieldBaseSchema.extend({
     fields: z.array(z.lazy(() => FormFieldSchema)).optional()
       .describe('Sub-fields for composite/repeater/record types'),

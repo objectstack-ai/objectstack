@@ -34,7 +34,7 @@ import { SysAttachment } from '@objectstack/platform-objects/audit';
 // its first consuming domain: the ADR-0104 file-as-reference row gates this
 // service's released-file collection (#3459 PR-5b) and the strict media
 // value-shape default (#3438).
-import { SysMigration, isDataMigrationVerified } from '@objectstack/platform-objects/system';
+import { SysMigration, isDataMigrationVerified, attestFreshDatastore } from '@objectstack/platform-objects/system';
 import { FILE_REFERENCES_MIGRATION_ID } from '@objectstack/spec/system';
 import { SwappableStorageService } from './swappable-storage-service.js';
 import {
@@ -332,6 +332,37 @@ export class StorageServicePlugin implements Plugin {
           // lifecycle service absent (bare kernel) — the sys_file lifecycle
           // declaration stays safe: rows only gain reap triggers via the
           // hooks above, and nothing sweeps without the LifecycleService.
+        }
+
+        // ── Fresh-datastore attestation (#3438, ADR-0104 2026-07-30) ───
+        // A store this process just created from empty can hold no legacy
+        // value, so the data migrations that exist to find and convert them
+        // are settled here before they are ever run — recorded now, while
+        // that emptiness is still an observed fact rather than something a
+        // later scan would have to infer. Without it every new deployment
+        // would start lax and stay lax until someone ran a command that, for
+        // them, does nothing: the warn regime would never die out.
+        //
+        // This service owns the call because it registers `sys_migration`
+        // (above) and is the platform's only holder of the flag's other
+        // consumers. A store that was found rather than created attests
+        // nothing and keeps producing evidence by scan.
+        if (typeof (engine as any).wasDatastoreCreatedFromEmpty === 'function') {
+          try {
+            if ((engine as any).wasDatastoreCreatedFromEmpty()) {
+              await attestFreshDatastore(engine as any, { logger: ctx.logger });
+              // The engine memoizes the flag read on first use; this write
+              // may already have raced it on a fast boot.
+              (engine as any).invalidateDataMigrationFlags?.();
+            }
+          } catch (err) {
+            // Bookkeeping must never break a new deployment's boot. Not
+            // attesting only leaves it lax — recoverable by running the
+            // migration, which for an empty store is a no-op that passes.
+            ctx.logger.warn(
+              `StorageServicePlugin: fresh-datastore attestation skipped (${(err as Error)?.message ?? err})`,
+            );
+          }
         }
       }
 

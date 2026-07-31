@@ -401,6 +401,10 @@ const step17: MigrationStep = {
     'win; a lift that cannot complete the required connectorId+actionId pair leaves ' +
     'the node untouched rather than turning a step-time refusal into a load ' +
     'failure), and the descriptor stops publishing the mis-rooted schema.\n\n' +
+    'The reconciliation that found those also found `map`, whose executor read a ' +
+    'bare `cfg.flowName ?? cfg.flow` for an undeclared `flow` spelling no schema ' +
+    'ever described (#4045). A pure rename, graduated the same way, so the ' +
+    'executor reads only the canonical `flowName`.\n\n' +
     'And it removes the RLS-policy key `priority` (#3896 security audit): promised ' +
     '"conflict resolution" that cannot exist, because applicable policies OR-combine ' +
     '(most permissive wins) — there is never a conflict to order, and nothing ever ' +
@@ -462,6 +466,7 @@ const step17: MigrationStep = {
     'flow-node-notify-config-aliases',
     'flow-node-wait-event-config-lift',
     'flow-node-connector-config-lift',
+    'flow-node-map-flow-alias',
     'flow-node-script-config-aliases',
     'permission-rls-priority-removed',
     'tool-inert-authoring-keys-removed',

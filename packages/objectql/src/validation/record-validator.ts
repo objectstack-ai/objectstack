@@ -352,6 +352,7 @@ function validateOne(
   skipRequired = false,
   mediaStrict = false,
   ctx?: ValidationMessageContext,
+  valueStrict = false,
 ): FieldValidationError | null {
   const fail = (
     code: FieldErrorCode,
@@ -499,16 +500,23 @@ function validateOne(
   //    ADR-0104 R7 external URLs are the deliberate exception the migration
   //    reports and never converts, so a deployment still holding them fails
   //    its self-check and stays lenient here.
-  //  - **References and structured JSON** stay warn-first: the file migration
-  //    says nothing about whether a `lookup` or `location` value is well
-  //    formed, so gating them on ITS flag would be borrowing evidence for a
-  //    fact it does not cover. They flip when something can vouch for them.
+  //  - **References and structured JSON** enforce on their OWN evidence: the
+  //    `os migrate value-shapes` scan, which walks every stored value of these
+  //    classes against this same schema and records
+  //    `adr-0104-value-shapes` only at zero violations. They are NOT gated on
+  //    the file migration's flag — that one asserts file values were migrated
+  //    and reconciled, and says nothing about whether a `lookup` id or a
+  //    `location` payload is well formed. Borrowing it would be an authority
+  //    answering a question nobody asked it.
+  //
+  // Two flags rather than one, because they attest two different facts; a
+  // deployment can legitimately have passed either without the other.
   if (REFERENCE_VALUE_TYPES.has(t) || FILE_REFERENCE_TYPES.has(t) || STRUCTURED_JSON_TYPES.has(t)) {
     const parsed = shapeSchemaFor(def).safeParse(value);
     if (!parsed.success) {
       const detail = parsed.error.issues[0]?.message ?? 'invalid value shape';
       const isMedia = FILE_REFERENCE_TYPES.has(t);
-      if (isMedia ? mediaStrictEffective(mediaStrict) : VALUE_SHAPE_STRICT()) {
+      if (isMedia ? mediaStrictEffective(mediaStrict) : valueShapeStrictEffective(valueStrict)) {
         return fail('invalid_type', { type: t, detail }, 'invalid_value_shape');
       }
       // The warn-first path is a DEVELOPER log line, not an end-user message —
@@ -517,11 +525,9 @@ function validateOne(
       const message = `${name} has an invalid ${t} value: ${detail}`;
       warnOnce(
         `${t}:${name}`,
-        `[value-shape] ${message} — accepted for now (ADR-0104 warn-first; ` +
-          (isMedia
-            ? 'run `os migrate files-to-references --apply` to migrate this deployment and enforce'
-            : 'set OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1 to enforce') +
-          ')',
+        `[value-shape] ${message} — accepted for now (ADR-0104 warn-first; run \`os migrate ` +
+          (isMedia ? 'files-to-references' : 'value-shapes') +
+          ' --apply` to migrate this deployment and enforce)',
       );
     }
     return null;
@@ -532,7 +538,12 @@ function validateOne(
   return null;
 }
 
-/** Strict value-shape enforcement opt-in (ADR-0104 warn-first rollout). */
+/**
+ * All-class strict opt-in (ADR-0104). Turns on EVERY value class at once,
+ * including ones whose per-deployment migration has not run here — so it is
+ * the "I already know my data" lever, not the blessed route. The blessed route
+ * is running the migration that produces the evidence.
+ */
 function VALUE_SHAPE_STRICT(): boolean {
   return typeof process !== 'undefined' && process.env?.OS_DATA_VALUE_SHAPE_STRICT_ENABLED === '1';
 }
@@ -547,6 +558,16 @@ function LAX_MEDIA_VALUES(): boolean {
 }
 
 /**
+ * The same escape hatch for the reference / structured-JSON classes, whose
+ * evidence is the `adr-0104-value-shapes` scan rather than the file migration.
+ * Deliberately a SECOND variable: the two gates open on different evidence, so
+ * an operator backing out of one has said nothing about the other.
+ */
+function LAX_VALUE_SHAPES(): boolean {
+  return typeof process !== 'undefined' && process.env?.OS_ALLOW_LAX_VALUE_SHAPES === '1';
+}
+
+/**
  * Does a media value-shape violation reject, for this deployment?
  *
  * Three inputs, and the precedence is chosen so a CONTRADICTORY configuration
@@ -558,6 +579,57 @@ function mediaStrictEffective(deploymentVerified: boolean): boolean {
   if (LAX_MEDIA_VALUES()) return false;
   if (VALUE_SHAPE_STRICT()) return true;
   return deploymentVerified;
+}
+
+/**
+ * The reference / structured-JSON counterpart — identical precedence, its own
+ * pair of inputs. A sibling function rather than one parameterised helper so
+ * each gate names the evidence it opens on at its own call site; collapsing
+ * them would save three lines and lose the distinction the ADR spent an
+ * addendum drawing.
+ */
+function valueShapeStrictEffective(deploymentVerified: boolean): boolean {
+  if (LAX_VALUE_SHAPES()) return false;
+  if (VALUE_SHAPE_STRICT()) return true;
+  return deploymentVerified;
+}
+
+/**
+ * Is `value` a violation of `def`'s declared stored shape — the SAME question
+ * `validateOne` asks, exported so the `os migrate value-shapes` scanner counts
+ * exactly what strict mode would reject and nothing else.
+ *
+ * The scanner must not re-derive this. Two implementations of "malformed"
+ * drifting by one clause is how a deployment passes a scan and then has writes
+ * rejected anyway — the migration would be attesting a fact the validator does
+ * not recognise, which is precisely the borrowed-evidence failure the ADR's
+ * addendum forbids one layer up.
+ *
+ * Returns the first parse issue's message, or `null` when the value conforms.
+ * A value that is missing (per `isMissing`) is never a violation: absence is
+ * the `required` check's business, not the shape contract's.
+ */
+export function valueShapeViolation(def: FieldDef, value: unknown): string | null {
+  if (isMissing(value)) return null;
+  const t = def.type;
+  if (!REFERENCE_VALUE_TYPES.has(t) && !FILE_REFERENCE_TYPES.has(t) && !STRUCTURED_JSON_TYPES.has(t)) {
+    return null;
+  }
+  const parsed = shapeSchemaFor(def).safeParse(value);
+  if (parsed.success) return null;
+  return parsed.error.issues[0]?.message ?? 'invalid value shape';
+}
+
+/**
+ * Is this field one the value-shape scan covers, and one a client may write?
+ * `system` / `readonly` / lifecycle columns are skipped for the same reason
+ * `validateRecord` skips them — the engine owns them, so they are never
+ * validated on a write and must never be counted as blocking a gate that
+ * governs writes.
+ */
+export function isScannableValueShapeField(name: string, def: FieldDef | undefined): boolean {
+  if (!def || SKIP_FIELDS.has(name) || def.system || def.readonly) return false;
+  return REFERENCE_VALUE_TYPES.has(def.type) || STRUCTURED_JSON_TYPES.has(def.type);
 }
 
 const warnedShapes = new Set<string>();
@@ -599,6 +671,21 @@ export interface ValidateRecordOptions {
   mediaValueShapeStrict?: boolean;
 
   /**
+   * Has THIS DEPLOYMENT completed and self-check-verified the ADR-0104
+   * non-media value-shape scan (`os migrate value-shapes`, #3438)? When true, a
+   * malformed reference (`lookup` / `master_detail` / `user` / `tree`) or
+   * structured-JSON (`location` / `address` / `composite` / `repeater` /
+   * `record` / `vector`) value rejects instead of warning.
+   *
+   * Separate from {@link mediaValueShapeStrict} because the two facts are
+   * attested by two different migrations and either can hold without the other.
+   * Same default and same reason: a caller that cannot say stays lenient, so
+   * nothing starts rejecting writes merely because the evidence was
+   * unavailable.
+   */
+  valueShapeStrict?: boolean;
+
+  /**
    * Locale + translation hooks for the human half of each error (#3957). Omit
    * and messages render in `en` against the declared labels — the pre-#3957
    * behavior for any caller that has no principal to read a locale from.
@@ -624,6 +711,7 @@ export function validateRecord(
   const errors: FieldValidationError[] = [];
   const fields = objectSchema.fields;
   const mediaStrict = options.mediaValueShapeStrict === true;
+  const valueStrict = options.valueShapeStrict === true;
   const messages = options.messages;
 
   if (mode === 'insert') {
@@ -632,7 +720,7 @@ export function validateRecord(
     for (const [name, def] of Object.entries(fields)) {
       if (SKIP_FIELDS.has(name)) continue;
       if (def.system || def.readonly) continue;
-      const err = validateOne(name, def, data[name], false, mediaStrict, messages);
+      const err = validateOne(name, def, data[name], false, mediaStrict, messages, valueStrict);
       if (err) errors.push(err);
     }
   } else {
@@ -661,7 +749,7 @@ export function validateRecord(
       // skipRequired: PATCH-omitted fields must not 400. (No def clone — the
       // registry's own field object flows through so the ADR-0104 value-shape
       // schema cache, keyed on def identity, hits.)
-      const err = validateOne(name, def, value, true, mediaStrict, messages);
+      const err = validateOne(name, def, value, true, mediaStrict, messages, valueStrict);
       if (err) errors.push(err);
     }
   }

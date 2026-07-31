@@ -32,10 +32,38 @@ import { evaluateAnalyticsQueryOverRows, matchesWhere } from '../preview-evaluat
 const resolveTokens = <T,>(filter: T): T =>
   resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
 
+/**
+ * The storage-form axis on a type-blind surface (#4191).
+ *
+ * There is no storage to inject into here, but the same cross-type pairing
+ * arrives all the same, and not synthetically: `Field.datetime`'s storage form
+ * is a BSON `Date` on `driver-mongodb` (D-E2), so rows fetched from a
+ * mongo-backed dataset reach this evaluator as `Date` objects while the
+ * comparands stay wire text. The shared `writerForm` tag names exactly that
+ * population.
+ *
+ * Measured before the fix: 10 of the 16 shared cases diverged — and in BOTH
+ * directions, which is what makes this surface's variant nastier than the
+ * drivers'. `String(new Date())` is `'Mon Jul 27 2026 …'`, which sorts after
+ * every `'2026-…'` comparand, so a window dropped rows that belong in it and
+ * admitted rows that do not. A drafted chart therefore showed numbers that
+ * changed at publish — precisely the continuity this evaluator exists to
+ * provide.
+ */
+const nativeRows = TEMPORAL_ROWS.map((r) => ({
+  ...r,
+  at: r.writerForm === 'native' ? new Date(r.at) : r.at,
+}));
+
 describe('preview-evaluator — temporal conformance', () => {
   for (const c of TEMPORAL_CASES) {
     it(c.name, () => {
       const got = TEMPORAL_ROWS.filter((r) => matchesWhere(r as any, c.filter as any)).map((r) => r.id);
+      expect(got, c.note).toEqual(c.expected);
+    });
+
+    it(`${c.name} — on a native-writer (BSON Date) row population`, () => {
+      const got = nativeRows.filter((r) => matchesWhere(r as any, c.filter as any)).map((r) => r.id);
       expect(got, c.note).toEqual(c.expected);
     });
 

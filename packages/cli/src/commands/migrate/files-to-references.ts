@@ -17,7 +17,7 @@ import {
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
-import { resolveStorageCapabilityArg } from '../serve.js';
+import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -28,36 +28,6 @@ async function confirm(question: string): Promise<boolean> {
   } finally {
     rl.close();
   }
-}
-
-/**
- * The settings + storage service plugins, so the booted kernel carries
- * `sys_file`/`sys_migration` and the deployment's REAL storage adapter.
- * Settings first: the storage plugin re-resolves its adapter from persisted
- * settings when a settings service is present, which is how an S3-configured
- * deployment's backfill uploads land in S3 rather than on this machine.
- * Storage config goes through the SAME resolver `os serve` uses
- * (`resolveStorageCapabilityArg`), so the CLI materialises bytes exactly where
- * the server would. It did not, and that mattered here more than anywhere: this
- * command reconciles what records claim against what storage actually holds, so
- * a root that disagrees with the server's reconciles against the wrong tree.
- * It built `{ driver: 'local', root }` — keys `StorageServicePluginOptions` does
- * not declare — so the adapter silently used the plugin's own `./storage`
- * default while the server (since framework#4096) writes under
- * `.objectstack/data/uploads`.
- */
-async function buildDataMigrationPlugins(): Promise<unknown[]> {
-  const plugins: unknown[] = [];
-  try {
-    const { SettingsServicePlugin } = await import('@objectstack/service-settings');
-    plugins.push(new SettingsServicePlugin({ registerRoutes: false }));
-  } catch {
-    // optional — without it, constructor/env-driven storage config still applies
-  }
-  const { StorageServicePlugin } = await import('@objectstack/service-storage');
-  const { options } = resolveStorageCapabilityArg(process.env.OS_STORAGE_ROOT);
-  plugins.push(new StorageServicePlugin({ ...options, registerRoutes: false }));
-  return plugins;
 }
 
 /**

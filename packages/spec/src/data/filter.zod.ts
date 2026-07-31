@@ -206,8 +206,15 @@ export type FilterCondition = {
 /**
  * Zod schema for recursive filter validation.
  * Uses z.lazy() to handle recursive structure.
+ *
+ * Annotated with BOTH type arguments (#4195). `z.ZodType<T>` leaves `Input`
+ * at its `unknown` default, and that `unknown` propagates: every schema that
+ * embeds this one reports `unknown` for the corresponding key of its own
+ * `z.input`, so the authoring surface underneath goes unchecked. Nothing here
+ * carries a `.default()` or a `.transform()`, so input and output are the same
+ * type and the second argument is simply the first.
  */
-export const FilterConditionSchema: z.ZodType<FilterCondition> = z.lazy(() =>
+export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> = z.lazy(() =>
   z.record(z.string(), z.unknown()).and(
     z.object({
       $and: z.array(FilterConditionSchema).optional(),
@@ -331,8 +338,13 @@ export type NormalizedFilter = {
  * annotation. Annotating with `z.ZodType<any>` (as this did before #4171) made
  * the exported `NormalizedFilter` resolve to `any`, so the adapters that walk
  * this AST were writing against a type that constrained nothing.
+ *
+ * Both type arguments are given (#4195): this AST is produced by the normalizer
+ * rather than authored, and carries no `.default()` or `.transform()`, so input
+ * and output are the same type. Leaving `Input` at its `unknown` default would
+ * make `z.input` of anything embedding it `unknown` for no reason.
  */
-export const NormalizedFilterSchema: z.ZodType<NormalizedFilter> = z.lazy(() =>
+export const NormalizedFilterSchema: z.ZodType<NormalizedFilter, NormalizedFilter> = z.lazy(() =>
   z.object({
     $and: z.array(
       z.union([

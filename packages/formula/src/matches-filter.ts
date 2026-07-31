@@ -17,7 +17,7 @@
  */
 
 import type { FilterCondition } from '@objectstack/spec/data';
-import { nextUtcCalendarDay } from '@objectstack/spec/data';
+import { nextUtcCalendarDay, utcInstantMs } from '@objectstack/spec/data';
 
 /** True iff `record` satisfies `filter`. A null/empty filter matches everything. */
 export function matchesFilterCondition(record: Record<string, unknown>, filter: FilterCondition | null | undefined): boolean {
@@ -70,15 +70,15 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
   switch (op) {
     case '$eq': return v === null ? actual == null : looseEq(actual, v);
     case '$ne': return v === null ? actual != null : !looseEq(actual, v);
-    case '$gt': return actual != null && v != null && (actual as never) > (v as never);
-    case '$gte': return actual != null && v != null && (actual as never) >= (v as never);
-    case '$lt': return actual != null && v != null && (actual as never) < (v as never);
+    case '$gt': return actual != null && v != null && order(actual, v, (a, b) => a > b);
+    case '$gte': return actual != null && v != null && order(actual, v, (a, b) => a >= b);
+    case '$lt': return actual != null && v != null && order(actual, v, (a, b) => a < b);
     case '$lte': return actual != null && v != null && lteBound(actual, v);
     case '$in': return Array.isArray(v) && v.some((x) => looseEq(actual, x));
     case '$nin': return Array.isArray(v) && !v.some((x) => looseEq(actual, x));
     case '$between':
       return Array.isArray(v) && v.length === 2 && actual != null && v[0] != null && v[1] != null
-        && (actual as never) >= (v[0] as never) && lteBound(actual, v[1]);
+        && order(actual, v[0], (a, b) => a >= b) && lteBound(actual, v[1]);
     case '$contains': return typeof actual === 'string' && typeof v === 'string' && actual.includes(v);
     case '$notContains': return !(typeof actual === 'string' && typeof v === 'string' && actual.includes(v));
     case '$startsWith': return typeof actual === 'string' && typeof v === 'string' && actual.startsWith(v);
@@ -110,8 +110,43 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
 function lteBound(actual: unknown, bound: unknown): boolean {
   if (bound == null) return false;
   const nextDay = nextUtcCalendarDay(bound);
-  if (nextDay != null) return (actual as never) < (nextDay as never);
-  return (actual as never) <= (bound as never);
+  if (nextDay != null) return order(actual, nextDay, (a, b) => a < b);
+  return order(actual, bound, (a, b) => a <= b);
+}
+
+/**
+ * Apply an ordering comparison, lifting the pair to instants when exactly one
+ * side is a JS `Date` — the cross-type case JS relational operators answer
+ * `false` to unconditionally (they coerce with hint `number`, so the `Date`
+ * becomes its epoch and the ISO string becomes `NaN`).
+ *
+ * This is not a hypothetical pairing on this surface: the RLS `check`
+ * post-image is the caller's RAW write payload (`{ ...opCtx.data }` in
+ * `plugin-security`, built before any driver `formatInput` converges it), so an
+ * SDK write of `new Date()` lands here as a `Date` while the policy's comparand
+ * is the platform's wire text — and the mirror pairing arrives too, because a
+ * CEL `today()` lowers to a `Date` against a record holding canonical text.
+ * Measured against the shared matrix, 10 of 16 cases dropped every
+ * `Date`-valued row; fail-closed makes that a **denied write**, the write-side
+ * twin of #4047's missing rows and the same failure direction D-D2 recorded
+ * for the bare-day upper bound.
+ *
+ * Deliberately narrow. The lift triggers only when one operand is a `Date`
+ * AND {@link utcInstantMs} can read both as instants, so every comparison that
+ * worked before is byte-identical: string-vs-string keeps ISO lexicographic
+ * ordering, number-vs-number stays numeric, and a `Field.time` wall clock —
+ * which denotes no instant — is left alone rather than being given an invented
+ * calendar day. Anything that cannot be lifted falls through to the original
+ * comparison, so the security posture never becomes more permissive than the
+ * operands actually justify.
+ */
+function order(actual: unknown, bound: unknown, cmp: (a: never, b: never) => boolean): boolean {
+  if (actual instanceof Date || bound instanceof Date) {
+    const a = utcInstantMs(actual);
+    const b = utcInstantMs(bound);
+    if (a !== null && b !== null) return cmp(a as never, b as never);
+  }
+  return cmp(actual as never, bound as never);
 }
 
 /** Resolve a `{ $field: 'path' }` reference against the record; else passthrough. */

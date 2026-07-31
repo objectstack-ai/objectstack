@@ -112,7 +112,7 @@ export function zonedDateStartToUtcMs(ymd: string, tz?: string): number {
  * Re-exported here so the published `@objectstack/core` surface is unchanged
  * for the drivers and analytics strategies that already import it from here.
  */
-export { nextUtcCalendarDay } from '@objectstack/spec/data';
+export { nextUtcCalendarDay, utcInstantMs } from '@objectstack/spec/data';
 
 /**
  * Granularity of a canonical date-bucket key. Mirrors `@objectstack/spec`'s

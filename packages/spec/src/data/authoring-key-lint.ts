@@ -178,9 +178,10 @@ export const STACK_KEY_GUIDANCE: Readonly<
  *
  * `functions` is listed for the same reason (a name → handler map the runtime
  * resolves string-named hooks against); the schema happens to declare it too,
- * so it self-excludes. `onDisable` is deliberately ABSENT: it is declared in
- * the protocol but no kernel, runtime or service ever calls it, so a value
- * written there really does go nowhere and the lint should say so.
+ * so it self-excludes. `onDisable` is deliberately ABSENT: no kernel, runtime
+ * or service ever called it (the protocol declared it until #4212 retired the
+ * whole uninvoked lifecycle family), so a value written there really does go
+ * nowhere and the lint should say so.
  *
  * Single source of truth — the CLI's `GRAFTABLE_RUNTIME_MEMBERS` is derived
  * from this, so the list that decides what gets grafted and the list that

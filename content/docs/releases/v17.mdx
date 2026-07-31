@@ -903,6 +903,7 @@ import or the authored key.
 | view: list `responsive`/`performance`, form `defaultSort`/`aria` | no renderer read any of them; list `aria`/`data` **and form `data`** stay live — `defineForm` writes `data: { provider: 'schema', schemaId }` onto every metadata form (#3896 close-out) |
 | `dashboard.aria` / `.performance` / widget `performance` (+ `PerformanceConfigSchema`) | no renderer applied them; virtual scrolling is the live top-level `virtualScroll` (#3896 close-out) |
 | `agent.knowledge` (+ `AIKnowledgeSchema`) | declaring sources/indexes never scoped retrieval — `search_knowledge` takes `sourceIds` from the LLM's tool-call arguments (#3896 close-out) |
+| `PluginLifecycleSchema` (`onInstall`/`onEnable`/`onDisable`/`onUninstall`/`onUpgrade`) + `UpgradeContextSchema` + the `ObjectStackPlugin` interface family (`@objectstack/spec/system`) | a plugin lifecycle the kernel never implemented — the real contract is `init`/`start`/`destroy`; code written against the hooks silently never ran (#4212) |
 | `skill.triggerPhrases` | phrases were never matched; activation is `triggerConditions` + the agent's `skills[]` allowlist (#3896 close-out) |
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
@@ -982,6 +983,30 @@ ledger against what records actually hold. The **deployment-level flag it
 records** — never the platform version — is what authorises both strict media
 value shapes and irreversible file collection. Upgrading changes neither;
 running the migration does.
+
+**The non-media classes have their own gate** (#3438) — references (`lookup`,
+`master_detail`, `user`, `tree`) and structured JSON (`location`, `address`,
+`composite`, `repeater`, `record`, `vector`):
+
+```bash
+os migrate value-shapes           # scan: reports, writes nothing
+os migrate value-shapes --apply   # scan, then record the flag if clean
+```
+
+A separate flag because it attests a separate fact: the file migration says file
+values were converted and their ownership reconciled, which tells you nothing
+about whether a `lookup` id or a `location` payload is well formed. This one
+converts nothing — a malformed `location` is application data only its author
+can correct — so it reports the object, field, type, count, sample record ids
+and parse issue, and you re-run until it is clean. `OS_ALLOW_LAX_VALUE_SHAPES=1`
+re-opens leniency while diagnosing.
+
+**A database created by 17 attests both flags at creation** (#3438), so a new
+deployment enforces from its first boot instead of waiting for someone to run a
+migration that, for an empty store, does nothing. The platform attests only a
+store it watched itself create — every table made by that boot, none found
+already there; an upgraded or restored database attests nothing and produces its
+evidence by running the command.
 
 **Released-file collection is live behind that same flag** (#3459). On a
 verified deployment, a field file whose one owning record lets go — the field
@@ -1298,7 +1323,11 @@ objectui commits on top of the pin 16.1.0 shipped.
   media value shapes *and* released-file collection for this deployment, so
   read the report before you `--apply`. Do **not** reach for
   `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` to get there: it opts every value class
-  in at once, including ones with no migration behind them.
+  in at once, regardless of which migrations this deployment has actually run.
+- **Reference and structured-JSON values:** run `os migrate value-shapes` and
+  fix what it reports before `--apply`. It converts nothing — the values it
+  names are application data — and a scan that was truncated or could not read
+  an object fails the gate even at zero violations.
 - **Datasources:** verify every declared datasource connects in every
   environment — a bound datasource that cannot connect now fails the boot
   instead of failing every later query.

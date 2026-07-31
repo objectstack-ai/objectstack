@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
+import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
@@ -143,6 +144,8 @@ export default defineStack({
     type: 'app',
     name: '${toTitleCase(name)}',
     description: '${toTitleCase(name)} application built with ObjectStack',
+    // Protocol major this app is authored against (ADR-0087 load-time check).
+    engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
 
   objects: Object.values(objects),
@@ -215,6 +218,8 @@ export default defineStack({
     type: 'plugin',
     name: '${toTitleCase(name)} Plugin',
     description: 'ObjectStack Plugin: ${toTitleCase(name)}',
+    // Protocol major this plugin is authored against (ADR-0087 load-time check).
+    engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
 
   objects: Object.values(objects),
@@ -270,6 +275,8 @@ export default defineStack({
     type: 'app',
     name: '${toTitleCase(name)}',
     description: '',
+    // Protocol major this app is authored against (ADR-0087 load-time check).
+    engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
 });
 `,

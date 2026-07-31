@@ -14,6 +14,23 @@
  * the sweep proves the converged storage answers every shared case. Cases
  * carrying a token spelling also run through `resolveFilterTokens` at the
  * pinned `TEMPORAL_NOW` — the D-A3 "token → row results" axis (#4081).
+ *
+ * The last two describes add the **storage-form axis** (#4191): rows that
+ * entered the table BEFORE any schema was declared, in the raw pre-#4047
+ * forms, and were therefore never touched by the write path. That is not a
+ * hypothetical population here — it is precisely what D-E3 says this driver
+ * has to converge:
+ *
+ * > `driver-memory` converges the rows already in a table when the schema
+ * > arrives, which is what catches `initialData` fixtures and
+ * > persistence-adapter restores (both land before any schema is declared).
+ *
+ * `initialData` is the named case and the one seeded here: `connect()` pushes
+ * the fixtures straight into the table, `syncSchema` then runs the retroactive
+ * pass. The claim under test is that the pass leaves the table answering the
+ * SAME row-id sets as the canonical sweep — the in-memory analogue of the
+ * `backfillCanonicalDatetimes` sweeps in `driver-sql`, and the half of D-E3
+ * that had no coverage at all.
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -29,6 +46,37 @@ import { InMemoryDriver } from './memory-driver.js';
 
 const resolveTokens = <T,>(filter: T): T =>
   resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
+
+/**
+ * The pre-#4047 storage forms, per the shared axis's seeding basis: `native`
+ * → the raw platform-native instant (a JS `Date`, what an SDK caller or this
+ * driver's own timestamp defaults produced), `wire` → raw text the write path
+ * never rewrote (the zone-naive `YYYY-MM-DD HH:MM:SS` a `CURRENT_TIMESTAMP`
+ * default or a restored snapshot carries). Neither is this driver's canon —
+ * canonical UTC ISO text for `datetime`, bare-day text for `date` (D-E2) — so
+ * the fixture is genuinely un-converged on both halves rather than only one.
+ */
+const legacyRows = () =>
+  TEMPORAL_ROWS.map((r) => ({
+    id: r.id,
+    at: r.writerForm === 'native' ? new Date(r.at) : r.at.replace('T', ' ').replace('Z', ''),
+    on: r.writerForm === 'native' ? new Date(r.on) : r.on,
+    why: r.why,
+  }));
+
+/**
+ * The `Field.time` twin: `native` → a `Date` whose UTC time-of-day is the wall
+ * clock (`a_midnight` becomes the epoch instant itself — the row whose
+ * cross-type comparison hid it from every text bound), `wire` → a full
+ * timestamp still carrying a calendar day, pinned to the fixture's boundary
+ * day so every consumer of this axis seeds the same bytes.
+ */
+const legacyTimeRows = () =>
+  TEMPORAL_TIME_ROWS.map((r) => ({
+    id: r.id,
+    at: r.writerForm === 'native' ? new Date(`1970-01-01T${r.at}Z`) : `2026-07-28T${r.at}Z`,
+    why: r.why,
+  }));
 
 describe('driver-memory — temporal conformance', () => {
   let driver: InMemoryDriver;
@@ -88,6 +136,74 @@ describe('driver-memory — Field.time conformance', () => {
         at: r.writerForm === 'native' ? new Date(`1970-01-01T${r.at}Z`) : r.at,
         why: r.why,
       });
+    }
+  });
+
+  for (const c of TEMPORAL_TIME_CASES) {
+    it(c.name, async () => {
+      const rows = await driver.find('time_conformance', { where: c.filter } as any);
+      const got = (rows as any[]).map((r) => r.id).sort();
+      expect(got, c.note).toEqual([...c.expected].sort());
+    });
+  }
+});
+
+describe('driver-memory — temporal conformance on rows that predate the schema (D-E3)', () => {
+  let driver: InMemoryDriver;
+
+  beforeAll(async () => {
+    // `initialData` lands during connect(), BEFORE any schema is declared, so
+    // nothing coerced these values — the population D-E3 promises to converge.
+    driver = new InMemoryDriver({ initialData: { conformance: legacyRows() } });
+    await driver.connect();
+    // The retroactive pass runs here, on rows this driver never wrote.
+    await driver.syncSchema('conformance', {
+      name: 'conformance',
+      fields: { at: { type: 'datetime' }, on: { type: 'date' }, why: { type: 'string' } },
+    });
+  });
+
+  it('converged every pre-schema row to the storage canon (the premise, so the sweep cannot pass vacuously)', async () => {
+    const rows = await driver.find('conformance', {} as any);
+    expect(rows).toHaveLength(TEMPORAL_ROWS.length);
+    for (const row of rows as any[]) {
+      const expected = TEMPORAL_ROWS.find((r) => r.id === row.id)!;
+      // Canonical UTC ISO text for `datetime`, bare-day text for `date`
+      // (D-E2) — no `Date` object and no zone-naive spelling survives.
+      expect(row.at, `${row.id}.at`).toBe(expected.at);
+      expect(row.on, `${row.id}.on`).toBe(expected.on);
+    }
+  });
+
+  // Literal spellings only: the token axis is orthogonal to storage form and
+  // already swept above — a divergence here is a convergence bug by construction.
+  for (const c of TEMPORAL_CASES) {
+    it(c.name, async () => {
+      const rows = await driver.find('conformance', { where: c.filter } as any);
+      const got = (rows as any[]).map((r) => r.id).sort();
+      expect(got, c.note).toEqual([...c.expected].sort());
+    });
+  }
+});
+
+describe('driver-memory — Field.time conformance on rows that predate the schema (D-E3)', () => {
+  let driver: InMemoryDriver;
+
+  beforeAll(async () => {
+    driver = new InMemoryDriver({ initialData: { time_conformance: legacyTimeRows() } });
+    await driver.connect();
+    await driver.syncSchema('time_conformance', {
+      name: 'time_conformance',
+      fields: { at: { type: 'time' }, why: { type: 'string' } },
+    });
+  });
+
+  it('converged every pre-schema wall clock to the storage canon (the premise)', async () => {
+    const rows = await driver.find('time_conformance', {} as any);
+    expect(rows).toHaveLength(TEMPORAL_TIME_ROWS.length);
+    for (const row of rows as any[]) {
+      const expected = TEMPORAL_TIME_ROWS.find((r) => r.id === row.id)!;
+      expect(row.at, `${row.id}.at`).toBe(expected.at);
     }
   });
 

@@ -110,7 +110,9 @@ const SKILL_MAP: Record<string, string[]> = {
     'kernel/plugin.zod.ts',
     'kernel/context.zod.ts',
     'kernel/service-registry.zod.ts',
-    'kernel/plugin-lifecycle-events.zod.ts',
+    // Lifecycle events: no Zod surface — the registry is the
+    // IPluginLifecycleEvents interface (src/contracts/plugin-lifecycle-events.ts),
+    // covered by the skill's hand-written references/plugin-hooks.md.
     'kernel/plugin-capability.zod.ts',
     'kernel/plugin-loading.zod.ts',
     'kernel/metadata-plugin.zod.ts',
