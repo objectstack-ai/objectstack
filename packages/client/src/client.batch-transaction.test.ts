@@ -33,6 +33,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/runtime';
 import { ObjectStackClient } from './index';
+import type { IHttpServer } from '@objectstack/spec/contracts';
 
 describe('data.batchTransaction (live Hono, #1604)', () => {
     let baseUrl: string;
@@ -103,8 +104,8 @@ describe('data.batchTransaction (live Hono, #1604)', () => {
         await ql.syncObjectSchema('project');
         await ql.syncObjectSchema('task');
 
-        const httpServer = kernel.getService<any>('http.server');
-        baseUrl = `http://localhost:${httpServer.getPort()}`;
+        const httpServer = kernel.getService<IHttpServer>('http.server');
+        baseUrl = `http://localhost:${httpServer.getPort!()}`;
         client = new ObjectStackClient({ baseUrl });
     }, 30_000);
 

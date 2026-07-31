@@ -5,6 +5,7 @@ import { LiteKernel } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { allowPerfDisclosure } from '@objectstack/observability';
+import type { IHttpServer } from '@objectstack/spec/contracts';
 
 /**
  * End-to-end regression for the Server-Timing `db` span (issue #2408).
@@ -41,7 +42,7 @@ describe('Server-Timing db span over a real HTTP server (integration)', () => {
         kernel.use(new HonoServerPlugin({ port: 0, serverTiming: true, cors: false }));
         await kernel.bootstrap();
 
-        const httpServer = kernel.getService<any>('http.server');
+        const httpServer = kernel.getService<IHttpServer>('http.server');
         // A route whose handler runs two real queries through the driver — the
         // same shape as a data-API list that does a find + a follow-up lookup.
         httpServer.get('/widgets', async (_req: any, res: any) => {
@@ -57,7 +58,7 @@ describe('Server-Timing db span over a real HTTP server (integration)', () => {
             allowPerfDisclosure();
             res.json({ all: all.length, one: one.length });
         });
-        baseUrl = `http://127.0.0.1:${httpServer.getPort()}`;
+        baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
     }, 30_000);
 
     afterAll(async () => {

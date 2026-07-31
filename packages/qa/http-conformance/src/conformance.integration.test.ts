@@ -22,6 +22,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createDispatcherPlugin, createRestApiPlugin } from '@objectstack/runtime';
 import { NodeServerPlugin } from './node-plugin.js';
+import type { IHttpServer } from '@objectstack/spec/contracts';
 
 type AdapterCase = {
     label: 'node' | 'hono';
@@ -97,8 +98,8 @@ async function bootStack(makePlugin: () => any, opts: { withAnalytics?: boolean 
     // a 404 OBJECT_NOT_FOUND — a routing-shaped symptom for a DDL-shaped cause.
     await ql.syncObjectSchema('task');
 
-    const httpServer = kernel.getService<any>('http.server');
-    return { kernel, base: `http://127.0.0.1:${httpServer.getPort()}` };
+    const httpServer = kernel.getService<IHttpServer>('http.server');
+    return { kernel, base: `http://127.0.0.1:${httpServer.getPort!()}` };
 }
 
 describe.each(ADAPTERS)('IHttpServer conformance on $label adapter', ({ makePlugin }) => {

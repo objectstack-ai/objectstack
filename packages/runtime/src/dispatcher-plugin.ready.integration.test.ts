@@ -5,6 +5,7 @@ import { LiteKernel } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+import type { IHttpServer } from '@objectstack/spec/contracts';
 
 /**
  * Integration regression for framework #2217 seam #2.
@@ -29,8 +30,8 @@ describe('GET /ready over a real HTTP server (integration)', () => {
 
     await kernel.bootstrap();
 
-    const httpServer = kernel.getService<any>('http.server');
-    baseUrl = `http://127.0.0.1:${httpServer.getPort()}`;
+    const httpServer = kernel.getService<IHttpServer>('http.server');
+    baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
   }, 30_000);
 
   afterAll(async () => {

@@ -20,6 +20,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/runtime';
 import { ObjectStackClient } from './index';
+import type { IHttpServer } from '@objectstack/spec/contracts';
 
 describe('Project-scoped REST routing (live Hono)', () => {
     let baseUrl: string;
@@ -82,8 +83,8 @@ describe('Project-scoped REST routing (live Hono)', () => {
         // write fails with `no such table`.
         await ql.syncObjectSchema('task');
 
-        const httpServer = kernel.getService<any>('http.server');
-        const port = httpServer.getPort();
+        const httpServer = kernel.getService<IHttpServer>('http.server');
+        const port = httpServer.getPort!();
         baseUrl = `http://localhost:${port}`;
     }, 30_000);
 
