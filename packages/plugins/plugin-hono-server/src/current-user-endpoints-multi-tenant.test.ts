@@ -96,7 +96,9 @@ describe('the answer comes from the kernel that OWNS the request (cloud#927)', (
     it('routes /auth/me/localization and /me/apps through the same resolution', async () => {
         const envKernel = kernelWith({
             auth: authFor('usr_env'),
-            objectql: { _registry: { getAllApps: () => [{ name: 'env_app' }] } },
+            // [#4251] `registry`, the public accessor — this stub pinned the
+            // private `_registry` the handler used to reach through `as any`.
+            objectql: { registry: { getAllApps: () => [{ name: 'env_app' }] } },
         });
         const { app } = mount({}, async () => envKernel);
 

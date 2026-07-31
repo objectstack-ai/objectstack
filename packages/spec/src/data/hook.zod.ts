@@ -400,7 +400,7 @@ export const HookContextSchema = lazySchema(() => z.object({
    *
    * Usage in hooks:
    *   const users = ctx.api.object('user');
-   *   const admin = await users.findOne({ filter: { role: 'admin' } });
+   *   const admin = await users.findOne({ where: { role: 'admin' } });
    */
   api: z.unknown().optional().describe('Cross-object data access (ScopedContext)'),
 

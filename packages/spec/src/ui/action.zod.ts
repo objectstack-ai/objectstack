@@ -471,32 +471,21 @@ const actionObject = () => z.object({
    * Compiled-module bodies are not supported. Outbound IO (HTTP, etc.) goes
    * through Connector recipes (separate spec).
    *
-   * **The body's write channel is `ctx.api` — `ctx.record` is READ-ONLY (#4345).**
-   * `ctx.record` is the record the dispatcher pre-fetched: a plain snapshot the
-   * runtime never writes back. `ctx.record.stage = 'won'` therefore mutates a
-   * copy that dies with the sandbox — for a DECLARED field exactly as much as
-   * for a misspelled one — while the action still returns success. To persist:
+   * `ctx.api.object(...)` is the ONLY way a body persists anything. `ctx.input`
+   * is the action's params bag, and `ctx.record` is a snapshot the runtime
+   * never writes back — assigning to it is discarded, declared field or not.
    *
-   * ```js
-   * await ctx.api.object('crm_deal').update({ id: ctx.recordId, stage: 'won' });
-   * ```
+   * Both are checked at author time by `validateActionBodyWrites` in
+   * `@objectstack/lint`: a literal `ctx.api.object('y').update({ x })` naming a
+   * field object `y` never declares warns with a did-you-mean, because the call
+   * succeeds while the unknown column silently never lands (#4271); and a
+   * provably dead `ctx.record.<field> = …` warns as discarded (#4345).
+   * Advisory only, and blind to everything statically unknowable; see
+   * `ScriptBodySchema` for the scope.
    *
-   * (with `capabilities: ['api.write']`). Do not reason by analogy from
-   * `ctx.input`, which IS written back on the hook path.
-   *
-   * Both halves of that write surface are checked at author time, by two rules
-   * answering two different questions — and both advisory, both blind to what
-   * is statically unknowable (see `ScriptBodySchema` for the scope):
-   *
-   * - `validateActionBodyWrites` — a literal `ctx.api.object('y').update({ x })`
-   *   naming a field object `y` never declares warns with a did-you-mean: the
-   *   call succeeds while the unknown column silently never lands (#4271).
-   * - `validateActionRecordWrites` — any literal write to `ctx.record` warns,
-   *   declared or not, because none of them land (#4345). No did-you-mean: the
-   *   field name is not the bug.
-   *
-   * The sandbox reports the second at invocation time too, covering the
-   * computed keys and aliases static analysis cannot see.
+   * The sandbox reports the discarded `ctx.record` writes at INVOCATION time as
+   * well, covering the computed keys, aliases and Studio/API-authored bodies a
+   * parse cannot reach.
    */
   body: HookBodySchema.optional().describe('Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`.'),
 

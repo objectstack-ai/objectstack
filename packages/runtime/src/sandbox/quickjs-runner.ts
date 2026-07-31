@@ -657,7 +657,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     // hook path, which carries no `record` and so installs no proxy.
     if (ctx.record === undefined) return;
     const recordGuard = vm.evalCode(
-      `globalThis.__recordWrites = [];
+      `globalThis.__recordWrites = []; globalThis.__recordEscaped = false;
        (function () {
          var snapshot = __ctx.record;
          if (!snapshot || typeof snapshot !== 'object') return;
@@ -671,6 +671,22 @@ export class QuickJSScriptRunner implements ScriptRunner {
              set: function (t, k, v) { note(k); t[k] = v; return true; },
              deleteProperty: function (t, k) { note(k); delete t[k]; return true; },
              defineProperty: function (t, k, d) { note(k); Object.defineProperty(t, k, d); return true; },
+             // Escape detection. A write is only DEAD if the snapshot never
+             // leaves the body as a value — this is live, and reporting it
+             // would be a false statement, not just noise:
+             //   ctx.record.stage = 'won';
+             //   await ctx.api.object('d').update(ctx.record);   // it lands
+             // Consuming the object whole (marshalling it to a host call,
+             // JSON.stringify, spread, Object.keys, returning it) enumerates
+             // its keys; a plain property READ does not. So an ownKeys AFTER a
+             // write means the written value may have gone somewhere, and the
+             // recorder goes quiet. Same direction the author-time rule takes:
+             // treat ambiguity as live, because a wrong "discarded" is worse
+             // than a missed one.
+             ownKeys: function (t) {
+               if (globalThis.__recordWrites.length > 0) globalThis.__recordEscaped = true;
+               return Reflect.ownKeys(t);
+             },
            });
          };
          var current = wrap(snapshot);
@@ -964,7 +980,9 @@ function readCtxInputJson(vm: QuickJSContext): Record<string, unknown> | undefin
  */
 function readRecordWritesJson(vm: QuickJSContext): string[] | undefined {
   try {
-    const r = vm.evalCode(`JSON.stringify(globalThis.__recordWrites || null)`);
+    const r = vm.evalCode(
+      `JSON.stringify(globalThis.__recordEscaped ? [] : (globalThis.__recordWrites || null))`,
+    );
     if (r.error) {
       r.error.dispose();
       return undefined;

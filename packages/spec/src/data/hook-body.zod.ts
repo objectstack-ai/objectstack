@@ -151,15 +151,12 @@ export type ExpressionBody = z.infer<typeof ExpressionBodySchema>;
  * and nothing else. An action's `ctx.input` is its PARAMS bag, not a record, so
  * it is never resolved against object fields.
  *
- * **`ctx.record` is not a write surface at all (#4345).** The hook path writes
- * `ctx.input` back to the engine; the action path returns only the script's
- * value, so a write to the pre-fetched `ctx.record` snapshot is discarded
- * whether or not the field is declared. That is a DIFFERENT defect from the
- * unknown-column one above — warning on only its undeclared half would imply
- * the declared half persists — which is why the rule above leaves it alone and
- * `validateActionRecordWrites` reports all of it, with the sandbox reporting
- * the same at invocation time. An action persists through
- * `ctx.api.object(...).update({ id: ctx.recordId, … })`.
+ * `ctx.record` is not a write surface at all: the runner passes a snapshot and
+ * never writes it back, so an assignment to it is discarded whether or not the
+ * field is declared. That gets its own warning
+ * (`action-record-write-discarded`, #4345), reported only when `ctx.record`
+ * never leaves the body as a value — mutating the snapshot and then handing it
+ * to an API write is a payload under construction, and is not flagged.
  *
  * @example
  * ```json

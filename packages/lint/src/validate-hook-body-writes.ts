@@ -144,6 +144,17 @@ export const HOOK_BODY_WRITE_PATTERNS: readonly HookBodyWritePattern[] = [
     },
   },
   {
+    // ACTION-only shape (the hook sandbox context has no `ctx.record` at all).
+    // Declared here because this ledger is the extractor's shape inventory, not
+    // any one rule's; every consumer declares which shapes it consumes.
+    id: 'record-property-assign',
+    syntax: "ctx.record.<field> = … | ctx.record['<field>'] ⟨op⟩= …",
+    example: {
+      source: "ctx.record.stage = 'won'; ctx.record['amount'] += 1;",
+      writes: [{ field: 'stage' }, { field: 'amount' }],
+    },
+  },
+  {
     id: 'api-crud-literal',
     syntax:
       "ctx.api.object('<object>').insert({…}) | .create({…}) | .update({…}) | .updateById(id, {…})",
@@ -161,6 +172,44 @@ export const HOOK_BODY_WRITE_PATTERNS: readonly HookBodyWritePattern[] = [
     },
   },
 ];
+
+/** A ledger pattern a given rule does NOT consume, and why. */
+export interface BodyWritePatternExclusion {
+  /** The {@link HOOK_BODY_WRITE_PATTERNS} entry id being excluded. */
+  readonly id: string;
+  /** Why the shape does not mean the same thing on this rule's surface. */
+  readonly reason: string;
+}
+
+/**
+ * The ledger shapes THIS rule consumes.
+ *
+ * Declared rather than implied: before the ledger carried a shape the hook
+ * surface does not have, every write with no `object` was necessarily a
+ * `ctx.input` write, and the rule could branch on that alone. It no longer can
+ * — a `record-property-assign` write also carries no object, and would have
+ * been reported as "the hook writes 'stage' to its input", which is false.
+ * Each consumer declaring its own subset is what stops the next added shape
+ * from silently landing in a branch that was never written for it.
+ */
+export const HOOK_BODY_WRITE_PATTERN_IDS: readonly string[] = [
+  'input-property-assign',
+  'input-object-assign',
+  'api-crud-literal',
+];
+
+/** Ledger shapes this rule leaves alone, each with its reason. */
+export const HOOK_BODY_WRITE_EXCLUSIONS: readonly BodyWritePatternExclusion[] = [
+  {
+    id: 'record-property-assign',
+    reason:
+      'a hook sandbox context has no `ctx.record` at all — `buildSandboxContext` never sets it (a hook’s ' +
+      'record IS `ctx.input`), so the expression throws at run time rather than silently no-op’ing. A loud ' +
+      'failure the author sees on the first run is not this advisory rule’s business',
+  },
+];
+
+const HOOK_APPLICABLE_IDS: ReadonlySet<string> = new Set(HOOK_BODY_WRITE_PATTERN_IDS);
 
 /**
  * `ctx.api.object(name)` write methods → index of the record-payload argument.
@@ -250,16 +299,45 @@ export interface ExtractedHookBodyWrite {
   field: string;
 }
 
+/** Everything one parse of an L2 body yields. */
+export interface ExtractedHookBodyWriteSet {
+  /** Every literal write the {@link HOOK_BODY_WRITE_PATTERNS} ledger declares. */
+  writes: ExtractedHookBodyWrite[];
+  /**
+   * `ctx.record` is handed to something as a VALUE somewhere in the body — an
+   * argument, an assignment RHS, a spread, a return — rather than only having
+   * its properties read and written, or being truthiness/type tested.
+   *
+   * The action rule needs this to tell a dead snapshot write from a live one:
+   * `ctx.record.stage = 'won'; await ctx.api.object('d').update(ctx.record)`
+   * builds a payload and persists it, so the assignment is not a no-op. When
+   * this is true, no record write in the body can be judged, and none is
+   * reported. (One-level aliasing — `const r = ctx.record` — reads as an
+   * escape too, which is the safe direction: it suppresses findings.)
+   */
+  ctxRecordEscapes: boolean;
+}
+
 /**
  * Extract every literal field write the pattern ledger declares from an L2
  * body's source. Parse-only (the source is never executed), error-tolerant
  * (a body with syntax errors simply yields fewer matches), and lazy: the
  * TypeScript compiler is not loaded when no pattern can possibly match.
+ *
+ * Thin projection of {@link extractHookBodyWriteSet} — use that one when the
+ * `ctx.record` liveness signal matters, so the body is parsed once, not twice.
  */
 export function extractHookBodyWrites(source: string): ExtractedHookBodyWrite[] {
+  return extractHookBodyWriteSet(source).writes;
+}
+
+/** {@link extractHookBodyWrites} plus the `ctx.record` liveness signal, one parse. */
+export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteSet {
   // Every recognizable pattern begins at a `ctx` or `Object` identifier — a
   // body containing neither cannot match, and must not pay the compiler load.
-  if (!/\bctx\b/.test(source) && !/\bObject\b/.test(source)) return [];
+  if (!/\bctx\b/.test(source) && !/\bObject\b/.test(source)) {
+    return { writes: [], ctxRecordEscapes: false };
+  }
 
   const tsc = loadTypeScript();
   // The runtime wraps a hook body as `new AsyncFunction('ctx', source)` — a
@@ -274,6 +352,9 @@ export function extractHookBodyWrites(source: string): ExtractedHookBodyWrite[] 
   );
 
   const writes: ExtractedHookBodyWrite[] = [];
+  /** Every `ctx.record` reference, and the subset that is only an access base. */
+  const recordRefs: ts.Node[] = [];
+  const consumedRecordRefs = new Set<ts.Node>();
 
   /** `node` is exactly `ctx.<prop>`. */
   const isCtxDot = (node: ts.Node, prop: string): boolean =>
@@ -282,12 +363,12 @@ export function extractHookBodyWrites(source: string): ExtractedHookBodyWrite[] 
     node.expression.text === 'ctx' &&
     node.name.text === prop;
 
-  /** The literal record-field name of an LHS rooted at `ctx.input`, if any. */
-  const fieldOfInputLhs = (lhs: ts.Expression): string | undefined => {
-    if (tsc.isPropertyAccessExpression(lhs) && tsc.isIdentifier(lhs.name) && isCtxDot(lhs.expression, 'input')) {
+  /** The literal field name of an LHS rooted at `ctx.<prop>`, if any. */
+  const fieldOfCtxLhs = (lhs: ts.Expression, prop: string): string | undefined => {
+    if (tsc.isPropertyAccessExpression(lhs) && tsc.isIdentifier(lhs.name) && isCtxDot(lhs.expression, prop)) {
       return lhs.name.text;
     }
-    if (tsc.isElementAccessExpression(lhs) && isCtxDot(lhs.expression, 'input')) {
+    if (tsc.isElementAccessExpression(lhs) && isCtxDot(lhs.expression, prop)) {
       const arg = lhs.argumentExpression;
       if (tsc.isStringLiteral(arg) || tsc.isNoSubstitutionTemplateLiteral(arg)) return arg.text;
     }
@@ -318,11 +399,64 @@ export function extractHookBodyWrites(source: string): ExtractedHookBodyWrite[] 
       node.operatorToken.kind >= tsc.SyntaxKind.FirstAssignment &&
       node.operatorToken.kind <= tsc.SyntaxKind.LastAssignment
     ) {
-      const field = fieldOfInputLhs(node.left);
-      if (field !== undefined && !INPUT_ENVELOPE_KEYS.has(field)) {
-        writes.push({ patternId: 'input-property-assign', field });
+      const inputField = fieldOfCtxLhs(node.left, 'input');
+      if (inputField !== undefined && !INPUT_ENVELOPE_KEYS.has(inputField)) {
+        writes.push({ patternId: 'input-property-assign', field: inputField });
+      }
+      // Pattern: record-property-assign. No envelope-key filter — `ctx.record`
+      // is a plain snapshot of the record, not the flat-input proxy, so it
+      // carries no operation envelope to exclude.
+      const recordField = fieldOfCtxLhs(node.left, 'record');
+      if (recordField !== undefined) {
+        writes.push({ patternId: 'record-property-assign', field: recordField });
       }
     }
+
+    // `ctx.record` liveness, for the rule that judges whether a record write
+    // can possibly matter. A reference is CONSUMED when the position it sits in
+    // cannot hand the object to anything that might persist it; every other
+    // position — an argument, an assignment RHS, a spread, a return — can.
+    //
+    //   1. the base of a property/element access: `ctx.record.id`,
+    //      `ctx.record.x = 1`, `ctx.record['k']`;
+    //   2. a truthiness or type test. `ctx.record && ctx.record.id` is the
+    //      defensive idiom real action bodies are written with (the showcase's
+    //      own `mark_done` opens with it), and reading a test as an escape
+    //      would suppress the finding on most bodies that have one. A test
+    //      reads the reference and yields a boolean — or, for `&&`/`||`/`??`,
+    //      yields the LEFT operand only when it is falsy, which is null or
+    //      undefined and persists nothing either way. Only the left operand is
+    //      a test: `x || ctx.record` really does evaluate to the object.
+    if (tsc.isPropertyAccessExpression(node) || tsc.isElementAccessExpression(node)) {
+      if (isCtxDot(node.expression, 'record')) consumedRecordRefs.add(node.expression);
+    }
+    if (tsc.isBinaryExpression(node)) {
+      const op = node.operatorToken.kind;
+      if (
+        (op === tsc.SyntaxKind.AmpersandAmpersandToken ||
+          op === tsc.SyntaxKind.BarBarToken ||
+          op === tsc.SyntaxKind.QuestionQuestionToken) &&
+        isCtxDot(node.left, 'record')
+      ) {
+        consumedRecordRefs.add(node.left);
+      }
+    }
+    if (tsc.isPrefixUnaryExpression(node) && node.operator === tsc.SyntaxKind.ExclamationToken) {
+      if (isCtxDot(node.operand, 'record')) consumedRecordRefs.add(node.operand);
+    }
+    if (tsc.isTypeOfExpression(node) && isCtxDot(node.expression, 'record')) {
+      consumedRecordRefs.add(node.expression);
+    }
+    if (
+      (tsc.isIfStatement(node) || tsc.isWhileStatement(node) || tsc.isDoStatement(node)) &&
+      isCtxDot(node.expression, 'record')
+    ) {
+      consumedRecordRefs.add(node.expression);
+    }
+    if (tsc.isConditionalExpression(node) && isCtxDot(node.condition, 'record')) {
+      consumedRecordRefs.add(node.condition);
+    }
+    if (isCtxDot(node, 'record')) recordRefs.push(node);
 
     if (tsc.isCallExpression(node)) {
       const callee = node.expression;
@@ -383,7 +517,10 @@ export function extractHookBodyWrites(source: string): ExtractedHookBodyWrite[] 
     tsc.forEachChild(node, visit);
   };
   visit(sf);
-  return writes;
+  return {
+    writes,
+    ctxRecordEscapes: recordRefs.some((ref) => !consumedRecordRefs.has(ref)),
+  };
 }
 
 /**
@@ -404,7 +541,7 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
     const source = body.source;
     if (typeof source !== 'string' || source.trim() === '') return;
 
-    const writes = extractHookBodyWrites(source);
+    const writes = extractHookBodyWrites(source).filter((w) => HOOK_APPLICABLE_IDS.has(w.patternId));
     if (writes.length === 0) return;
 
     objectFields ??= indexObjectFields(stack);

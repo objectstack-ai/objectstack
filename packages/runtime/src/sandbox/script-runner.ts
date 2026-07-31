@@ -88,19 +88,20 @@ export interface ScriptContext {
    * (when the dispatcher pre-fetches it). May be undefined for actions
    * declared with `requiresRecord: false` or when no `recordId` was supplied.
    *
-   * **READ-ONLY — it is a pre-fetched snapshot, not a write surface (#4345).**
-   * The action path hands the body a plain copy and returns only the script's
-   * value; there is no `ctx.record` write-back, so `ctx.record.stage = 'won'`
-   * mutates the copy inside the VM and is discarded when the VM is torn down —
-   * for a *declared* field exactly as much as for an unknown one. To persist,
-   * write through the repository: `ctx.api.object('<obj>').update({ id, … })`.
+   * READ-ONLY in effect. `buildActionSandboxContext` passes a plain snapshot
+   * (`unwrapProxyToPlain`), and `boundActionHandler` returns `result.value`
+   * without writing anything back — the hook path's `applyMutationsToInput` has
+   * no action-side counterpart. So `ctx.record.x = …` inside a body mutates a
+   * copy that is then discarded, for DECLARED and undeclared fields alike; to
+   * persist, write through `ctx.api.object(...)`. `@objectstack/lint` warns on
+   * a provably dead assignment (`action-record-write-discarded`, #4345).
    *
-   * Do not read this as `ctx.input`'s sibling: `ctx.input` IS written back on
-   * the hook path ({@link ScriptResult.mutatedInput}), and reasoning by analogy
-   * from that is what makes this trap cost a data loss rather than a typo. The
-   * asymmetry is now reported rather than assumed — writes are recorded and
-   * surfaced via {@link ScriptResult.droppedRecordWrites}, and caught earlier by
-   * `validateActionRecordWrites` in `@objectstack/lint`.
+   * The runtime reports the same thing at INVOCATION time — see
+   * {@link ScriptResult.droppedRecordWrites}. That covers what a parse cannot:
+   * computed keys, aliases, and bodies authored through Studio or the API,
+   * which no lint ever inspects. It only reports; whether the runtime should
+   * instead refuse or honour the write remains open, and logging a discard
+   * prejudges neither answer.
    */
   record?: unknown;
   /** Engine-side `result` (only set for after* hooks). */
@@ -151,8 +152,16 @@ export interface ScriptResult {
    * the snapshot inside the VM — behind an accessor, so a wholesale
    * `ctx.record = {…}` is caught as well and does not swap the recorder out.
    * Being a run-time trap rather than a parse, it sees what static analysis
-   * cannot: computed keys, `Object.assign`, and aliased references
-   * (`const r = ctx.record; r.x = 1`).
+   * cannot: computed keys, `Object.assign`, aliased references
+   * (`const r = ctx.record; r.x = 1`), and bodies authored through Studio or
+   * the API, which no lint ever inspects.
+   *
+   * ONLY dead writes are reported. A snapshot that leaves the body as a value
+   * — `update(ctx.record)`, a spread, a return, a `JSON.stringify` — may well
+   * have carried the write somewhere, so the recorder goes quiet (an `ownKeys`
+   * after a write marks the escape). A plain property read does not rescue it.
+   * Same direction as the author-time rule: a wrong "discarded" asserts
+   * something false about the stored record, which is worse than a miss.
    *
    * `undefined` when the context carried no `record` (every hook, and actions
    * with no pre-fetched record) or when the read-back failed; empty when a

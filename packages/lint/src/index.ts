@@ -261,14 +261,19 @@ export type {
 export {
   validateHookBodyWrites,
   extractHookBodyWrites,
+  extractHookBodyWriteSet,
   HOOK_BODY_WRITE_PATTERNS,
+  HOOK_BODY_WRITE_PATTERN_IDS,
+  HOOK_BODY_WRITE_EXCLUSIONS,
   HOOK_BODY_WRITE_UNKNOWN_FIELD,
 } from './validate-hook-body-writes.js';
 export type {
   HookBodyWriteFinding,
   HookBodyWriteSeverity,
   HookBodyWritePattern,
+  BodyWritePatternExclusion,
   ExtractedHookBodyWrite,
+  ExtractedHookBodyWriteSet,
 } from './validate-hook-body-writes.js';
 
 // The same write-set check on action bodies — same schema, same sandbox, same
@@ -279,32 +284,17 @@ export {
   validateActionBodyWrites,
   ACTION_BODY_WRITE_PATTERNS,
   ACTION_BODY_WRITE_PATTERN_IDS,
+  ACTION_RECORD_WRITE_PATTERNS,
+  ACTION_RECORD_WRITE_PATTERN_IDS,
   ACTION_BODY_WRITE_EXCLUSIONS,
   ACTION_BODY_WRITE_UNKNOWN_FIELD,
+  ACTION_RECORD_WRITE_DISCARDED,
 } from './validate-action-body-writes.js';
 export type {
   ActionBodyWriteFinding,
   ActionBodyWriteSeverity,
   ActionBodyWriteExclusion,
 } from './validate-action-body-writes.js';
-
-// The OTHER half of an action body's write surface, and a different defect:
-// `ctx.record` is a read-only snapshot, so writes to it are discarded for
-// DECLARED fields too (#4345). The rule above deliberately excludes it — see
-// this module for why reporting only the undeclared half would imply the
-// declared half persists. Shares that module's action walk.
-export {
-  validateActionRecordWrites,
-  extractActionRecordWrites,
-  ACTION_RECORD_WRITE_PATTERNS,
-  ACTION_BODY_RECORD_WRITE_DISCARDED,
-} from './validate-action-record-writes.js';
-export type {
-  ActionRecordWriteFinding,
-  ActionRecordWriteSeverity,
-  ActionRecordWritePattern,
-  ExtractedActionRecordWrite,
-} from './validate-action-record-writes.js';
 
 // One entry point for the reference-resolution rules above (#3583 §5 D5).
 // Adding a rule to `REFERENCE_INTEGRITY_RULES` runs it on `validate`, `lint`

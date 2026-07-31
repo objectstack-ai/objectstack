@@ -45,26 +45,6 @@
  * styles, seed replay safety, seed state machines, seed/security posture) stay
  * out — they answer a different question and have their own call sites.
  *
- * ## One deliberate non-member: `validateActionRecordWrites`
- *
- * It resolves nothing against the stack. `ctx.record.<field> = …` in an action
- * body is discarded because the action path has no record write-back at all, so
- * the finding does not depend on whether the field is declared — checking that
- * would in fact be WRONG, since warning only on the unknown half would imply
- * the declared half persists (#4345). By the membership test above it is a
- * shape rule and belongs at its own call sites.
- *
- * It is carried here anyway, as a deliberate widening rather than an oversight,
- * because "its own call sites" is not a neutral alternative: it means three
- * hand-wired commands, and the drift that produces is exactly what this module
- * exists to end — `validateReadonlyFlowWrites`, the closest sibling by subject
- * (a write that silently does not land), still demonstrates it, wired into
- * `validate` and `compile` but not `lint`. The suite's real invariant is that a
- * stack gets the SAME answer from every command; membership by question-shape
- * is how that was described, not what it is for. A future rule may take the
- * same exemption — but it must say so here, in these terms, rather than quietly
- * reading the membership test loosely.
- *
  * ## Known remaining asymmetry
  *
  * `os doctor` runs only `validateWidgetBindings` and is NOT converted here: it
@@ -87,7 +67,6 @@ import { validateAiToolReferences } from './validate-ai-tool-references.js';
 import { validateAiAgentAuthoring } from './validate-ai-agent-authoring.js';
 import { validateHookBodyWrites } from './validate-hook-body-writes.js';
 import { validateActionBodyWrites } from './validate-action-body-writes.js';
-import { validateActionRecordWrites } from './validate-action-record-writes.js';
 
 export type ReferenceIntegritySeverity = 'error' | 'warning';
 
@@ -144,12 +123,18 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // action bodies, run by the same sandbox. Only the `ctx.api` write family
   // carries over — an action's `ctx.input` is its params bag, not a record
   // (see that module's ledger). Lazy on the same terms.
+  //
+  // The ONE member here that emits two rule ids. Besides resolving `ctx.api`
+  // writes against declared fields (`action-body-write-unknown-field`), it
+  // reports a `ctx.record` write that can reach nothing
+  // (`action-record-write-discarded`, #4345) — not a resolution question, so
+  // by the charter above it does not belong in the suite. It rides along
+  // anyway because it falls out of the SAME parse of the SAME source: a
+  // separate member would parse every action body twice to say two things
+  // about one walk, and hand-wiring it into the CLI instead is exactly the
+  // drift this suite exists to end (`validateReadonlyFlowWrites` is the
+  // standing proof — wired into `validate` and `compile`, never into `lint`).
   { name: 'validateActionBodyWrites', run: validateActionBodyWrites },
-  // The half the rule above deliberately leaves alone: writes aimed at
-  // `ctx.record`, discarded for DECLARED fields too (#4345). See "One
-  // deliberate non-member" in this module's header for why a rule that
-  // resolves no name against the stack is nevertheless carried here.
-  { name: 'validateActionRecordWrites', run: validateActionRecordWrites },
 ];
 
 /**

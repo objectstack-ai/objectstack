@@ -348,6 +348,55 @@ describe('QuickJSScriptRunner — ctx.record writes are recorded, not silently d
     expect(r.droppedRecordWrites).toEqual(['stage']);
   });
 
+  // A write is only DEAD if the snapshot never leaves the body as a value.
+  // These four all LAND, so reporting them would be a false statement about the
+  // stored record — worse than saying nothing.
+  describe('a write whose snapshot escapes is live, and stays unreported', () => {
+    const api = { object: () => ({ update: async (d: unknown) => d }) };
+    const live = (source: string) =>
+      runner.runScript(
+        { language: 'js', source, capabilities: ['api.write'] },
+        ctx({ record: { ...record }, api }),
+        actionOpts,
+      );
+
+    it('handed to ctx.api as the payload — the canonical live shape', async () => {
+      const r = await live("ctx.record.stage = 'won'; await ctx.api.object('d').update(ctx.record); return null;");
+      expect(r.droppedRecordWrites).toEqual([]);
+    });
+
+    it('copied out of the body', async () => {
+      const r = await live("ctx.record.stage = 'won'; return { patch: Object.assign({}, ctx.record) };");
+      expect(r.droppedRecordWrites).toEqual([]);
+    });
+
+    it('returned whole', async () => {
+      const r = await live("ctx.record.stage = 'won'; return ctx.record;");
+      expect(r.droppedRecordWrites).toEqual([]);
+    });
+
+    it('serialised', async () => {
+      const r = await live("ctx.record.stage = 'won'; return { n: JSON.stringify(ctx.record).length };");
+      expect(r.droppedRecordWrites).toEqual([]);
+    });
+
+    it('but a property READ does not rescue the write', async () => {
+      // Reading `ctx.record.id` consumes a field, not the object — the
+      // assignment still goes nowhere. This is the distinction that keeps the
+      // signal alive on real bodies: the showcase's own guard idiom below is
+      // exactly this shape.
+      const r = await live(
+        "var id = ctx.recordId || (ctx.record && ctx.record.id); ctx.record.stage = 'won'; return { id: id };",
+      );
+      expect(r.droppedRecordWrites).toEqual(['stage']);
+    });
+
+    it('and enumerating BEFORE any write leaves the recorder armed', async () => {
+      const r = await live("var keys = Object.keys(ctx.record); ctx.record.stage = 'won'; return { n: keys.length };");
+      expect(r.droppedRecordWrites).toEqual(['stage']);
+    });
+  });
+
   it('leaves the hook path alone — a hook ctx carries no record, so nothing is recorded', async () => {
     const r = await runner.runScript(
       { language: 'js', source: 'ctx.input.total = 1; return null;', capabilities: [] },

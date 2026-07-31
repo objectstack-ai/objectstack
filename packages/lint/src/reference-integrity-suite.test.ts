@@ -28,7 +28,6 @@ describe('reference-integrity suite — membership', () => {
       'validateAiAgentAuthoring',
       'validateHookBodyWrites',
       'validateActionBodyWrites',
-      'validateActionRecordWrites',
     ]);
   });
 
@@ -62,28 +61,20 @@ describe('reference-integrity suite — every member actually runs', () => {
     actions: [
       // validateObjectReferences: a param pointing at an object nothing declares.
       { name: 'assign', label: 'Assign', params: [{ name: 'owner', reference: 'user' }] },
-      // validateActionBodyWrites: the L2 body persists a field crm_lead does
-      // not declare — the action returns success and the column never lands
-      // (#4271, the action half of the hook rule below).
+      // validateActionBodyWrites, both of its rule ids from one body:
+      //   - the L2 body persists a field crm_lead does not declare — the action
+      //     returns success and the column never lands (#4271);
+      //   - and it assigns ctx.record, a snapshot the runtime never writes
+      //     back, without ever passing it anywhere (#4345).
       {
         name: 'score_now',
         label: 'Score Now',
         objectName: 'crm_lead',
         body: {
           language: 'js',
-          source: "await ctx.api.object('crm_lead').update({ lead_score: 100 });",
+          source:
+            "ctx.record.name = 'scored'; await ctx.api.object('crm_lead').update({ lead_score: 100 });",
         },
-      },
-      // validateActionRecordWrites: the L2 body assigns to `ctx.record`, a
-      // read-only snapshot — discarded even though `name` IS declared on
-      // crm_lead (#4345). Deliberately a SEPARATE action from the one above:
-      // the two rules answer different questions, and one fixture carrying
-      // both would let either rule's silence hide behind the other's finding.
-      {
-        name: 'mark_assigned',
-        label: 'Mark Assigned',
-        objectName: 'crm_lead',
-        body: { language: 'js', source: "ctx.record.name = 'assigned';" },
       },
     ],
     views: [
@@ -197,7 +188,9 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('agent-authoring-withdrawn');
     expect(rules).toContain('hook-body-write-unknown-field');
     expect(rules).toContain('action-body-write-unknown-field');
-    expect(rules).toContain('action-body-record-write-discarded');
+    // The one member that emits a second rule id — see the suite's comment on
+    // why it rides along instead of becoming its own entry.
+    expect(rules).toContain('action-record-write-discarded');
   });
 
   it('carries a gating flow-template finding through the suite (#3810)', () => {
@@ -219,9 +212,9 @@ describe('reference-integrity suite — every member actually runs', () => {
       expect(typeof f.message).toBe('string');
       expect(typeof f.hint).toBe('string');
     }
-    // Object references run first, action-record writes last.
+    // Object references run first, action-body writes last.
     expect(findings[0].rule).toBe('object-reference-unknown');
-    expect(findings[findings.length - 1].rule).toBe('action-body-record-write-discarded');
+    expect(findings[findings.length - 1].rule).toBe('action-body-write-unknown-field');
   });
 
   it('returns nothing for an empty stack', () => {
