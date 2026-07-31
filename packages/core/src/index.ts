@@ -53,5 +53,7 @@ export type {
     RouteHandler,
     Middleware,
     IDataEngine,
+    IObjectQLEngine,
+    EngineSchemaRegistryView,
     IDataDriver,
 } from '@objectstack/spec/contracts';

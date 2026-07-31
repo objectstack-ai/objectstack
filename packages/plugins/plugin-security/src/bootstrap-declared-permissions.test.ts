@@ -11,7 +11,7 @@ function makeQl(declared: any[] = []) {
   const rows: any[] = [];
   return {
     rows,
-    _registry: { listItems: (type: string) => (type === 'permission' ? declared : []) },
+    registry: { listItems: (type: string) => (type === 'permission' ? declared : []) },
     async find(object: string, q: any) {
       if (object !== 'sys_permission_set') return [];
       const where = q?.where ?? {};
@@ -59,7 +59,7 @@ describe('bootstrapDeclaredPermissions (ADR-0086 D5)', () => {
     const ql = makeQl([declaredSet()]);
     await bootstrapDeclaredPermissions(ql, undefined);
     // simulate a package upgrade changing the shipped grants
-    (ql as any)._registry = {
+    (ql as any).registry = {
       listItems: () => [declaredSet({ objects: { crm_lead: { allowRead: true } } })],
     };
     const r2 = await bootstrapDeclaredPermissions(ql, undefined);

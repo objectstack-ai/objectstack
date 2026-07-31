@@ -35,7 +35,7 @@
 
 import type { HttpProtocolContext, HttpDispatcherResult } from './http-dispatcher.js';
 import type { CoreServiceName } from '@objectstack/spec/system';
-import type { CoreServiceContract, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+import type { CoreServiceContract, IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 
 /**
  * The normalized request slice a domain handler receives. `path` is the
@@ -130,26 +130,17 @@ export interface DomainHandlerDeps {
      * `.registry`; null otherwise). The data-plane domains (/keys today,
      * /data /meta when they migrate) depend on this.
      *
-     * [#4127 batch 4] **Deliberately still `any`, and this is the record of why.**
-     * It looks like it should be `IDataEngine` now — batch 3 evidenced
-     * `objectql: IDataEngine` and this method resolves exactly that slot. It is
-     * not, because this accessor exists to reach the surface `IDataEngine` does
-     * NOT cover: it gates on `.registry`, and its callers use `executeAction`.
-     * Neither is declared on the data-engine contract; `insert`, the third
-     * method they call, is.
-     *
-     * So the slot has two truths and both are real: ObjectQL implements
-     * `IDataEngine` (the plugin registers it as `data` saying exactly that), and
-     * ObjectQL is also wider than `IDataEngine`, with no contract written for
-     * the wider part. Typing this as `IDataEngine` would be the more
-     * comfortable-looking lie — it would force casts at `.registry` and
-     * `executeAction` and bury the gap under them.
-     *
-     * The concrete input for whoever writes ObjectQL's own contract:
-     * `registry` and `executeAction` are what the dispatcher actually needs
-     * from it beyond the data engine.
+     * [#4127 batch 4 → #4251 B3] This was **deliberately `any`** for two
+     * batches, with the record of why kept right here: ObjectQL is wider than
+     * `IDataEngine`, the wider part (`registry`, `executeAction` — exactly
+     * what this accessor's callers use) had no written contract, and typing it
+     * `IDataEngine` would have been "the more comfortable-looking lie" that
+     * buries the gap under casts. That record was the input for
+     * {@link IObjectQLEngine}, which now declares the full engine and is
+     * checked against the class by `implements` — so the honest type finally
+     * exists, and this accessor uses it.
      */
-    getObjectQL(environmentId?: string): Promise<any>;
+    getObjectQL(environmentId?: string): Promise<IObjectQLEngine | null>;
     /**
      * Service lookup on the request's RESOLVED (per-environment) kernel —
      * NOT the default kernel and NOT the scoped-factory path. Domains whose

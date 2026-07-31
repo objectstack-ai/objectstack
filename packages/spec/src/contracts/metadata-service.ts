@@ -409,6 +409,33 @@ export interface IMetadataService {
      */
     watch?(type: string, callback: MetadataWatchCallback): MetadataWatchHandle;
 
+    /**
+     * {@link watch}'s function-return sibling: subscribe to changes of a type,
+     * unsubscribing by calling the returned function.
+     *
+     * [#4251 B3] Declared from the implementation and its one cross-package
+     * caller: `MetadataManager.subscribe` has always existed beside `watch`,
+     * and ObjectQLPlugin's metadata bridge — the re-sync that keeps
+     * runtime-authored hooks/actions live — reaches it through the `metadata`
+     * slot with a `typeof … === 'function'` probe. Optional like `watch`: the
+     * in-memory fallback need not provide it, and the probe is the degraded
+     * path.
+     */
+    subscribe?(type: string, callback: MetadataWatchCallback): () => void;
+
+    /**
+     * Load EVERY item of a type across all loaders — the bulk read the
+     * ObjectQLPlugin bridge boots from (hooks, actions), where {@link list}
+     * serves the registry index.
+     *
+     * [#4251 B3] Same evidence as {@link subscribe}: implemented by
+     * `MetadataManager.loadMany` since the bridge existed, reached through the
+     * slot only via `any`. `options` is the manager's load-options bag,
+     * engine-local in shape — declared `Record<string, unknown>` here; the one
+     * caller passes nothing.
+     */
+    loadMany?<T = unknown>(type: string, options?: Record<string, unknown>): Promise<T[]>;
+
     // ==========================================
     // Import / Export
     // ==========================================

@@ -19,7 +19,7 @@ import {
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
-import type { IDataEngine, IEmailService, ISmsService } from '@objectstack/spec/contracts';
+import type { IDataEngine, IEmailService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
 import {
   AuthManager,
   resolveOidcProviderEnabled,
@@ -44,36 +44,6 @@ import {
   authPluginManifestHeader,
 } from './manifest.js';
 
-/**
- * The `objectql` slot BEYOND `IDataEngine` — the hook and middleware seams this
- * plugin installs on the engine.
- *
- * [#4251] The slot's ledger entry is `IDataEngine` and it covers every read and
- * write below; it does not cover `registerHook` / `registerMiddleware`, and no
- * contract has been written for the wider ObjectQL surface yet (the standing
- * record of why is on `getObjectQL` in `@objectstack/runtime`'s
- * `DomainHandlerContext`). Declared here, narrow and named, so the extension is
- * legible instead of hidden under `any` — and so it is deleted, not migrated,
- * when that contract lands.
- *
- * Both members are optional and every call site already guards with
- * `typeof … === 'function'`: the slot is satisfiable by engines that implement
- * neither (mock mode), and this plugin degrades rather than fails there.
- */
-interface EngineExtensionSurface {
-  registerHook?(
-    event: string,
-    handler: (context: any) => Promise<void> | void,
-    options?: { object?: string | string[]; priority?: number; packageId?: string },
-  ): void;
-  registerMiddleware?(
-    fn: (opCtx: any, next: () => Promise<void>) => Promise<void>,
-    options?: { object?: string },
-  ): void;
-}
-
-/** The engine as this plugin uses it: the data contract plus those two seams. */
-type AuthEngine = IDataEngine & EngineExtensionSurface;
 
 /**
  * The `settings` slot, as this plugin reads it.
@@ -764,7 +734,7 @@ export class AuthPlugin implements Plugin {
       // to platform admin" case where kernel:ready fired before any user
       // existed (same wiring the multi-org bootstrap uses).
       try {
-        const ql = ctx.getService<AuthEngine>('objectql');
+        const ql = ctx.getService<IObjectQLEngine>('objectql');
         if (ql && typeof ql.registerMiddleware === 'function') {
           ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
             await next();
@@ -841,7 +811,7 @@ export class AuthPlugin implements Plugin {
       try {
         // Use the kernel's ObjectQL engine (available + hookable at kernel:ready);
         // the auth manager's getDataEngine() is not yet wired this early.
-        const engine = ctx.getService<AuthEngine>('objectql');
+        const engine = ctx.getService<IObjectQLEngine>('objectql');
         if (!engine || typeof engine.registerHook !== 'function') return;
         const SYSTEM_CTX = { isSystem: true, roles: [], permissions: [] };
         engine.registerHook('afterInsert', async (hookCtx: any) => {
@@ -883,7 +853,7 @@ export class AuthPlugin implements Plugin {
     // bypass — see identity-write-guard.ts for the full contract.
     ctx.hook('kernel:ready', async () => {
       try {
-        const engine = ctx.getService<AuthEngine>('objectql');
+        const engine = ctx.getService<IObjectQLEngine>('objectql');
         if (!engine || typeof engine.registerHook !== 'function') return;
         registerManagedUpdateWhitelist(SystemObjectName.USER, SYS_USER_PROFILE_EDIT_FIELDS);
         // [ADR-0105 D7] Extension fields ObjectStack adds to better-auth-managed
@@ -910,7 +880,7 @@ export class AuthPlugin implements Plugin {
 
     // Register auth middleware on ObjectQL engine (if available)
     try {
-      const ql = ctx.getService<AuthEngine>('objectql');
+      const ql = ctx.getService<IObjectQLEngine>('objectql');
       if (ql && typeof ql.registerMiddleware === 'function') {
         ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
           // If context already has userId or isSystem, skip auth resolution

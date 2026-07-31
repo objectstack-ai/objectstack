@@ -41,6 +41,7 @@ import type { IWorkflowService } from './workflow-service';
 import type { ISecurityService } from './security-service';
 import type { IShareLinkService } from './share-link-service';
 import type { IHttpServer } from './http-server';
+import type { IObjectQLEngine } from './objectql-engine';
 
 /**
  * The evidenced slot → contract bindings.
@@ -126,13 +127,20 @@ export interface ServiceSlotContracts extends CoreServiceContracts {
     /** `plugin-sharing` registers `ShareLinkService`, which declares `implements IShareLinkService`. */
     shareLinks: IShareLinkService;
     /**
-     * An **alias of `data`**, not a second service: `packages/objectql`'s plugin
-     * registers the *same instance* under both names, two lines apart —
-     * `ctx.registerService('objectql', this.ql)` and
-     * `ctx.registerService('data', this.ql)  // ObjectQL implements IDataEngine`.
-     * `data` resolved to `IDataEngine` and `objectql` to `any`, for one object.
+     * The SAME instance as `data`, seen whole. `packages/objectql`'s plugin
+     * registers one object under both names, two lines apart — and the two
+     * entries deliberately differ: `data` is the engine as
+     * {@link IDataEngine} (the data plane, what most consumers should ask
+     * for), `objectql` is the full engine — registry, hook/middleware seams,
+     * runners, boot wiring, ops probes.
+     *
+     * [#4251 B3] Was `IDataEngine` here too, with the remainder recorded as
+     * "wider, contract unwritten" on `DomainHandlerContext.getObjectQL` and
+     * seven consumer-local surface declarations standing in for it. The
+     * contract exists now and `ObjectQL implements IObjectQLEngine` checks it,
+     * so the slot resolves to what its occupant actually is.
      */
-    objectql: IDataEngine;
+    objectql: IObjectQLEngine;
     /**
      * The HTTP server slot — **`http.server` is the canonical name**.
      *

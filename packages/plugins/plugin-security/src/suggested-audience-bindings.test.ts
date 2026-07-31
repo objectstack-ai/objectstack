@@ -27,7 +27,7 @@ function makeQl(packages: any[] = []) {
   return {
     tables,
     insertCalls,
-    _registry: {
+    registry: {
       getAllPackages: () => packages,
       listItems: (_type: string) => [],
     },
@@ -124,7 +124,7 @@ describe('syncAudienceBindingSuggestions (ADR-0090 D5/D9)', () => {
   it('prunes a pending suggestion once its declaration is gone (uninstall)', async () => {
     const ql = makeQl([CRM_PACKAGE]);
     await syncAudienceBindingSuggestions(ql);
-    ql._registry.getAllPackages = () => [];
+    ql.registry.getAllPackages = () => [];
     const out = await syncAudienceBindingSuggestions(ql);
     expect(out.pruned).toBe(1);
     expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(0);

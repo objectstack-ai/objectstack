@@ -3454,7 +3454,7 @@ describe('managed-object write denies wiring (#3325)', () => {
       insert: async (_o: string, d: any) => ({ id: d?.id ?? 'x' }),
       update: async () => {},
       // A better-auth object the static BETTER_AUTH_MANAGED_OBJECTS list does NOT contain.
-      _registry: {
+      registry: {
         listItems: (type: string) =>
           type === 'object' ? [{ name: 'sys_fake_identity', managedBy: 'better-auth' }] : [],
       },

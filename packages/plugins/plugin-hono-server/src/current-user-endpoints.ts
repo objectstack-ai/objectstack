@@ -45,7 +45,7 @@ import {
     type EnableLike,
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/contracts';
+import type { IAuthService, IMetadataService, IObjectQLEngine, Logger } from '@objectstack/spec/contracts';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 
 /** API prefix these endpoints mount under unless the host overrides it. */
@@ -261,37 +261,6 @@ export function foldWildcardSuperUser(objects: Record<string, any>): void {
     }
 }
 
-/**
- * The `objectql` slot BEYOND `IDataEngine` — the schema registry these
- * endpoints read.
- *
- * [#4251] The slot's ledger entry is `IDataEngine` (ObjectQL registers the SAME
- * instance under `data` and `objectql`), and that covers the reads below. It
- * does NOT cover `registry` / `getSchema`, and the honest record of why lives
- * on `getObjectQL` in `@objectstack/runtime`'s `DomainHandlerContext`: ObjectQL
- * is genuinely wider than `IDataEngine`, nobody has written a contract for the
- * wider part, and typing the whole thing `IDataEngine` would be "the more
- * comfortable-looking lie". So the extra surface is declared here, named and
- * narrow, instead of the lookup being erased to `any` — the wider contract, when
- * someone writes it, absorbs this and the declaration is deleted.
- *
- * Every member is optional and every call site probes with `?.`: the slot is
- * satisfied by engines with no registry at all (test fakes, remote engines), and
- * these endpoints degrade rather than fail when it is absent.
- */
-interface EngineRegistrySurface {
-    /**
-     * The engine's schema registry — the PUBLIC accessor. ObjectQL exposes it as
-     * `get registry()` over the private `_registry` field; `_registry` is what
-     * `/me/apps` used to reach through `as any`, two handlers away from the
-     * `/auth/me/permissions` reach for the public one, for the same object.
-     */
-    readonly registry?: {
-        getAllObjects?(): ApiExposureSchemaLike[];
-        getAllApps?(): unknown[];
-    };
-    getSchema?(objectName: string): unknown;
-}
 
 /**
  * The `security.permissions` slot, as these two handlers use it.
@@ -769,7 +738,7 @@ export function registerCurrentUserEndpoints(
             // (created via the admin UI as `sys_permission_set`
             // rows) that aren't in metadata or bootstrap.
             const ql = (() => {
-                try { return ctx.getService<IDataEngine & EngineRegistrySurface>('objectql') ?? null; }
+                try { return ctx.getService<IObjectQLEngine>('objectql') ?? null; }
                 catch { return null; }
             })();
             const dbLoader = ql
@@ -897,9 +866,12 @@ export function registerCurrentUserEndpoints(
             // can attach their effective apiOperations. Guarded — a failure
             // here must never drop the whole response.
             try {
-                const allSchemas: ApiExposureSchemaLike[] = (() => {
-                    try { return ql?.registry?.getAllObjects?.() ?? []; }
-                    catch { return []; }
+                // The contract's registry view returns `unknown[]` (schema
+                // shape is engine-local); narrow to the slice this seeding
+                // reads, as the callers of getSchema below already do.
+                const allSchemas = (() => {
+                    try { return (ql?.registry?.getAllObjects?.() ?? []) as ApiExposureSchemaLike[]; }
+                    catch { return [] as ApiExposureSchemaLike[]; }
                 })();
                 seedSuperUserRestrictedObjects(objects, allSchemas);
             } catch (e: any) {
@@ -980,7 +952,7 @@ export function registerCurrentUserEndpoints(
                 // private `_registry` while `/auth/me/permissions` read the
                 // `registry` getter over the same field, on the same object,
                 // in the same file — visible only once both were typed.
-                const registry = ctx.getService<EngineRegistrySurface>('objectql')?.registry;
+                const registry = ctx.getService<IObjectQLEngine>('objectql')?.registry;
                 for (const app of registry?.getAllApps?.() ?? []) {
                     if ((app as { name?: unknown })?.name) byName.set(String((app as { name: unknown }).name), app);
                 }

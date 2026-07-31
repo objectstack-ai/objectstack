@@ -26,6 +26,7 @@ import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from 
 import {
   IDataDriver,
   IDataEngine,
+  type IObjectQLEngine,
   Logger,
   createLogger,
   withTransientRetry,
@@ -446,7 +447,12 @@ interface SummaryDescriptor {
   filter?: Record<string, unknown>;
 }
 
-export class ObjectQL implements IDataEngine {
+// `implements IObjectQLEngine` is the verification step of #4251 B3: every
+// member the `objectql` slot's contract declares is checked against this class
+// on every build, so the seven consumer-local surface declarations the contract
+// replaced can never silently drift from the engine again. IObjectQLEngine
+// extends IDataEngine, so the old claim rides along.
+export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
    * runs, the active transaction handle lives here so that EVERY data
