@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import type { IStorageService } from '@objectstack/spec/contracts';
+import { keysetWalk } from '@objectstack/types';
 
 /**
  * Legacy file-value backfill (ADR-0104 D3 wave 2).
@@ -228,25 +229,18 @@ export async function backfillFileReferences(
 
   for (const object of scannedObjects) {
     const fileFields = fileFieldsOf(engine, object);
-    let offset = 0;
+    // Seek by `id` (#4363). This walk WRITES to the rows it is reading — the
+    // rewrite below updates each record in place — and an offset counts into a
+    // set the writes are changing underneath it, so rows slide past the cursor
+    // and are never converted. The key does not move when a row is updated, so
+    // the seek is not affected by the very thing this function does.
+    const walk = keysetWalk<Record<string, unknown>>(
+      (q) => engine.find(object, { ...q, fields: ['id', ...fileFields], context: { ...SYSTEM_CTX } }),
+      { pageSize: SCAN_PAGE_SIZE, max: maxPerObject },
+    );
 
-    for (;;) {
-      let page: Array<Record<string, unknown>>;
-      try {
-        page = await engine.find(object, {
-          fields: ['id', ...fileFields],
-          limit: SCAN_PAGE_SIZE,
-          offset,
-          context: { ...SYSTEM_CTX },
-        });
-      } catch (err) {
-        logger.warn(
-          `[storage] backfill: cannot read ${object} (${(err as Error)?.message ?? err}) — skipped`,
-        );
-        break;
-      }
-      if (!page || page.length === 0) break;
-
+    try {
+      for await (const page of walk.pages()) {
       for (const record of page) {
         const recordId = record?.id;
         if (recordId == null) continue;
@@ -376,14 +370,14 @@ export async function backfillFileReferences(
           }
         }
       }
-
-      offset += page.length;
-      if (page.length < SCAN_PAGE_SIZE) break;
-      if (offset >= maxPerObject) {
-        truncated = true;
-        break;
       }
+    } catch (err) {
+      logger.warn(
+        `[storage] backfill: cannot read ${object} (${(err as Error)?.message ?? err}) — skipped`,
+      );
+      continue;
     }
+    if (walk.truncated) truncated = true;
   }
 
   const count = (k: BackfillActionKind) => actions.filter((a) => a.kind === k).length;

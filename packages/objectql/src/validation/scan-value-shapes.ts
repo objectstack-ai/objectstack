@@ -31,6 +31,8 @@
  * fact the validator does not recognise.
  */
 
+import { keysetWalk } from '@objectstack/types';
+
 import {
   valueShapeViolation,
   isScannableValueShapeField,
@@ -125,31 +127,21 @@ export async function scanValueShapes(
 
   for (const object of scannedObjects) {
     const fields = scannableFieldsOf(engine, object);
-    let offset = 0;
+    // Seek by `id` (#4363) rather than counting from the start. This scan
+    // exists to vouch that no stored value is off-shape, and an offset walk
+    // cannot promise it visited every row — the same reason an unreadable
+    // object below closes the gate rather than being skipped quietly.
+    const walk = keysetWalk<Record<string, unknown>>(
+      (q) => engine.find(object, {
+        ...q,
+        fields: ['id', ...fields.map((f) => f.name)],
+        context: { ...SYSTEM_CTX },
+      }),
+      { pageSize: SCAN_PAGE_SIZE, max: maxPerObject },
+    );
 
-    for (;;) {
-      let page: Array<Record<string, unknown>>;
-      try {
-        page = await engine.find(object, {
-          fields: ['id', ...fields.map((f) => f.name)],
-          limit: SCAN_PAGE_SIZE,
-          offset,
-          context: { ...SYSTEM_CTX },
-        });
-      } catch (err) {
-        // An object we cannot read is not an object we may vouch for. Record it
-        // AND truncate: the gate's claim is about all the data, so a hole in
-        // the evidence has to close it.
-        logger.warn(
-          `[value-shape] scan: cannot read ${object} (${(err as Error)?.message ?? err}) — ` +
-            'reported as unreadable; the gate stays closed',
-        );
-        unreadableObjects.push(object);
-        truncated = true;
-        break;
-      }
-      if (!page || page.length === 0) break;
-
+    try {
+      for await (const page of walk.pages()) {
       for (const record of page) {
         scannedRecords++;
         for (const { name, def } of fields) {
@@ -173,14 +165,20 @@ export async function scanValueShapes(
           }
         }
       }
-
-      offset += page.length;
-      if (page.length < SCAN_PAGE_SIZE) break;
-      if (offset >= maxPerObject) {
-        truncated = true;
-        break;
       }
+    } catch (err) {
+      // An object we cannot read is not an object we may vouch for. Record it
+      // AND truncate: the gate's claim is about all the data, so a hole in
+      // the evidence has to close it.
+      logger.warn(
+        `[value-shape] scan: cannot read ${object} (${(err as Error)?.message ?? err}) — ` +
+          'reported as unreadable; the gate stays closed',
+      );
+      unreadableObjects.push(object);
+      truncated = true;
+      continue;
     }
+    if (walk.truncated) truncated = true;
   }
 
   const list = [...findings.values()].sort((a, b) => b.count - a.count);

@@ -21,20 +21,38 @@ const REGISTRY: Record<string, any> = {
   tag: { fields: { id: { type: 'text' }, label: { type: 'text' } } },
 };
 
+/**
+ * Executes the subset of the query language this scan emits. Since #4363 that
+ * is a KEYSET walk — `orderBy` on the key plus a `$gt` seek AND-ed onto the
+ * caller's filter — so the fake grew `$and` and `$gt`, and `offset` is gone.
+ *
+ * `offset` now THROWS rather than being served: this scan decides which files
+ * are still referenced, and an offset walk cannot promise it visited every row.
+ * A fake that quietly honored one would let that regression back in with every
+ * assertion still green.
+ */
 function fakeEngine(tables: Record<string, Array<Record<string, unknown>>>): VerifyReferencesEngine {
-  const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
-    Object.entries(where).every(([k, v]) => {
+  const matches = (row: Record<string, unknown>, where: unknown): boolean => {
+    if (where == null) return true;
+    const w = where as Record<string, any>;
+    if (Array.isArray(w.$and)) return w.$and.every((c: unknown) => matches(row, c));
+    return Object.entries(w).every(([k, v]) => {
       if (v && typeof v === 'object' && '$ne' in (v as any)) return row[k] !== (v as any).$ne;
+      if (v && typeof v === 'object' && '$gt' in (v as any)) return String(row[k]) > String((v as any).$gt);
       return row[k] === v;
     });
+  };
   return {
     getObject: (name) => REGISTRY[name],
     getConfigs: () => REGISTRY,
     async find(object, options: any) {
-      const rows = (tables[object] ?? []).filter((r) => matches(r, options?.where ?? {}));
-      const start = typeof options?.offset === 'number' ? options.offset : 0;
-      const end = typeof options?.limit === 'number' ? start + options.limit : undefined;
-      return rows.slice(start, end);
+      if (options?.offset !== undefined) {
+        throw new Error('offset paging cannot promise a full walk — expected a keyset seek (#4363)');
+      }
+      const key = options?.orderBy?.[0]?.field;
+      const rows = (tables[object] ?? []).filter((r) => matches(r, options?.where));
+      const ordered = key ? [...rows].sort((a, b) => String(a[key]).localeCompare(String(b[key]))) : rows;
+      return typeof options?.limit === 'number' ? ordered.slice(0, options.limit) : ordered;
     },
   };
 }
@@ -191,6 +209,9 @@ describe('verifyFileReferences (ADR-0104 D3 wave 2 — R4 gate)', () => {
   });
 
   // ── Mechanics ─────────────────────────────────────────────────────
+  // The fake engine refuses an `offset`, so this also asserts the walk seeks
+  // (#4363) rather than counting from the start — which is what makes "every
+  // row was visited" a promise rather than a hope.
   it('pages through records rather than reading one unbounded page', async () => {
     const many = Array.from({ length: 1200 }, (_, i) => ({ id: `p${i}`, image: `file_${i}` }));
     const engine = fakeEngine({
