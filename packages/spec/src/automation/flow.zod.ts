@@ -212,10 +212,40 @@ export const FlowNodeSchema = lazySchema(() => z.object({
     timerDuration: z.string().optional().describe('ISO 8601 duration (e.g., "PT1H") or wait time for timer events'),
     /** Signal name to listen for — for signal/webhook events */
     signalName: z.string().optional().describe('Named signal or webhook event to wait for'),
-    /** Timeout before auto-failing or continuing — optional guard */
-    timeoutMs: z.number().int().min(0).optional().describe('Maximum wait time before timeout (ms)'),
-    /** Action to take on timeout */
-    onTimeout: z.enum(['fail', 'continue']).default('fail').describe('Behavior when the wait times out'),
+
+    /**
+     * `wait` never had a timeout. Both keys below described one and neither
+     * delivered it (#4158) — the pair is retired in 18 rather than left standing
+     * as a promise the runtime does not keep (PD #10).
+     *
+     * `timeoutMs` said "maximum wait time" and its ONLY reader used it as the
+     * timer *duration* when `timerDuration` was absent — so it did something, just
+     * not what it said. `timerDuration` already expresses that (`parseIsoDuration`
+     * accepts a bare number as milliseconds), which is why the conversion can move
+     * it losslessly instead of dropping it.
+     *
+     * `onTimeout` had ZERO readers anywhere. Setting it changed nothing, and the
+     * showcase set it — a declared default (`'fail'`) stamped on every wait node
+     * that no code ever consulted.
+     *
+     * Real timeout semantics — resume the run at a deadline and either fail the
+     * node or continue past it — remain unimplemented. If they are wanted, they
+     * should be built to a requirement, not retrofitted to fit two keys that
+     * happened to be declared.
+     */
+    timeoutMs: retiredKey(
+      '`waitEventConfig.timeoutMs` was removed in @objectstack/spec 18 (#4158). It documented a '
+      + 'timeout guard that never existed: nothing ever failed or resumed a wait on a deadline. Its '
+      + 'only reader treated it as the timer DURATION when `timerDuration` was absent, so use '
+      + '`timerDuration` — it accepts a bare number as milliseconds, making `timeoutMs: 60000` and '
+      + "`timerDuration: 60000` the same wait. Stored flows are converted automatically.",
+    ),
+    onTimeout: retiredKey(
+      '`waitEventConfig.onTimeout` was removed in @objectstack/spec 18 (#4158). It had no readers at '
+      + 'all — no code path ever inspected it, so neither `fail` nor `continue` ever happened. Delete '
+      + 'the key. There is no replacement: `wait` has no timeout, and a wait node resumes only when '
+      + 'its timer elapses or its signal arrives.',
+    ),
   }).optional().describe('Configuration for wait node event resumption'),
 
   /**

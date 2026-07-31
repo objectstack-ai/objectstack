@@ -64,14 +64,11 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
       const runId = variables.get('$runId');
 
       if (eventType === 'timer') {
-        // `timeoutMs` doubling as a duration is pre-existing behaviour, kept
-        // deliberately — the declared meaning is a timeout guard, and `wait` has
-        // no timeout implementation at all (`onTimeout` has zero readers). That
-        // gap is #4158; changing it here would be a behaviour change riding on a
-        // contract cleanup.
-        const durationMs =
-          parseIsoDuration(wec.timerDuration) ??
-          (typeof wec.timeoutMs === 'number' ? wec.timeoutMs : undefined);
+        // One source for the wait length. `timeoutMs` used to double as this
+        // when `timerDuration` was absent — it was retired in protocol 18 (#4158)
+        // precisely because that is not what it said it did, and the conversion
+        // rewrites it to `timerDuration`, so there is one spelling left.
+        const durationMs = parseIsoDuration(wec.timerDuration);
 
         // Persist the wake deadline as node output: the engine writes output
         // to variables (`<nodeId>.waitUntil`) *before* snapshotting the
