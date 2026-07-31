@@ -68,6 +68,7 @@ import { validateAiAgentAuthoring } from './validate-ai-agent-authoring.js';
 import { validateHookBodyWrites } from './validate-hook-body-writes.js';
 import { validateActionBodyWrites } from './validate-action-body-writes.js';
 import { validateFlowNodeWrites } from './validate-flow-node-writes.js';
+import { validateReadonlyFlowWrites } from './validate-readonly-flow-writes.js';
 
 export type ReferenceIntegritySeverity = 'error' | 'warning';
 
@@ -133,8 +134,8 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // anyway because it falls out of the SAME parse of the SAME source: a
   // separate member would parse every action body twice to say two things
   // about one walk, and hand-wiring it into the CLI instead is exactly the
-  // drift this suite exists to end (`validateReadonlyFlowWrites` is the
-  // standing proof — wired into `validate` and `compile`, never into `lint`).
+  // drift this suite exists to end — which `validateReadonlyFlowWrites` was
+  // the standing proof of, until it joined the suite below.
   { name: 'validateActionBodyWrites', run: validateActionBodyWrites },
   // The third surface that writes a record field set: a flow `update_record`
   // node's `config.fields`. Same question as the two rules above, but the map
@@ -143,6 +144,16 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // standing "prefer a flow node, it's checked" advice was the least true of
   // the three until it landed.
   { name: 'validateFlowNodeWrites', run: validateFlowNodeWrites },
+  // The OTHER question about that same `config.fields` map: not "does this
+  // field exist?" but "is it writable?" — a `runAs:'user'` update_record
+  // writing a static-`readonly` field is stripped by the engine and the step
+  // still reports success (#2948/#3425). It walks the identical map the rule
+  // above walks, so the two splitting call sites was never defensible: hand-
+  // wired into `validate` and `compile` only, it left `os lint` PASSING a flow
+  // `os validate` refuses — and this one gates, so the divergence shipped a
+  // build the other command would have stopped. Joining the suite is the whole
+  // fix; the two hand-wired call sites are deleted with it (#4345 follow-up).
+  { name: 'validateReadonlyFlowWrites', run: validateReadonlyFlowWrites },
 ];
 
 /**

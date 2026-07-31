@@ -29,6 +29,7 @@ describe('reference-integrity suite — membership', () => {
       'validateHookBodyWrites',
       'validateActionBodyWrites',
       'validateFlowNodeWrites',
+      'validateReadonlyFlowWrites',
     ]);
   });
 
@@ -51,7 +52,10 @@ describe('reference-integrity suite — every member actually runs', () => {
     objects: [
       {
         name: 'crm_lead',
-        fields: { name: { type: 'text', label: 'Name' } },
+        fields: {
+          name: { type: 'text', label: 'Name' },
+          locked: { type: 'boolean', label: 'Locked', readonly: true },
+        },
         // validateSearchableFields: `budget` is not a field on crm_lead, so the
         // ADR-0061 declaration is stale — the engine drops it and searches a
         // narrower set than the object declares.
@@ -157,6 +161,12 @@ describe('reference-integrity suite — every member actually runs', () => {
       {
         name: 'lead_followup',
         type: 'record_change',
+        // validateReadonlyFlowWrites: a runAs:'user' update_record writing a
+        // static-`readonly` field. The engine strips it and the step still
+        // reports success (#2948/#3425) — a certainty, so it GATES. Walks the
+        // same `config.fields` map validateFlowNodeWrites does, which is why
+        // the two must not diverge across commands again.
+        runAs: 'user',
         nodes: [
           { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created' } },
           // validateFlowTemplatePaths: `budget` is not a field on crm_lead. In a
@@ -177,6 +187,17 @@ describe('reference-integrity suite — every member actually runs', () => {
             id: 'stamp',
             type: 'update_record',
             config: { objectName: 'crm_lead', fields: { lead_score: 100 } },
+          },
+          // validateReadonlyFlowWrites: the OTHER question about that same
+          // `config.fields` map — `locked` exists but is static-`readonly`, so
+          // under this flow's `runAs:'user'` the engine strips it and the step
+          // still reports success (#2948/#3425). A separate node from `stamp`
+          // on purpose: one node carrying both defects would let either rule
+          // go silent behind the other's finding.
+          {
+            id: 'lock',
+            type: 'update_record',
+            config: { objectName: 'crm_lead', fields: { locked: true } },
           },
         ],
       },
@@ -204,6 +225,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     // why it rides along instead of becoming its own entry.
     expect(rules).toContain('action-record-write-discarded');
     expect(rules).toContain('flow-node-write-unknown-field');
+    expect(rules).toContain('flow-update-readonly-field');
   });
 
   it('carries a gating flow-template finding through the suite (#3810)', () => {
@@ -225,9 +247,9 @@ describe('reference-integrity suite — every member actually runs', () => {
       expect(typeof f.message).toBe('string');
       expect(typeof f.hint).toBe('string');
     }
-    // Object references run first, flow-node writes last.
+    // Object references run first, readonly flow writes last.
     expect(findings[0].rule).toBe('object-reference-unknown');
-    expect(findings[findings.length - 1].rule).toBe('flow-node-write-unknown-field');
+    expect(findings[findings.length - 1].rule).toBe('flow-update-readonly-field');
   });
 
   it('returns nothing for an empty stack', () => {

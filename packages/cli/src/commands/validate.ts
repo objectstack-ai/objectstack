@@ -28,7 +28,6 @@ import { validateCapabilityReferences } from '@objectstack/lint';
 import { validateVisibilityPredicates } from '@objectstack/lint';
 import { validateSecurityPosture, validateOrgAxisRedLines } from '@objectstack/lint';
 import { validateFlowTriggerReadiness } from '@objectstack/lint';
-import { validateReadonlyFlowWrites } from '@objectstack/lint';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
 import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
 import { lintUniqueDeclarations } from '../lint/data-model-rules.js';
@@ -540,41 +539,6 @@ export default class Validate extends Command {
       //     flow whose filter token the runtime refuses (#3810) for as long as
       //     this call site was the only one.
 
-      // 3e2. [#3425] Readonly flow-write guardrail. A `runAs:user` update_record
-      //      that writes a static-`readonly` field is a SILENT no-op — the engine
-      //      strips it from the UPDATE payload (#2948) yet the step reports
-      //      success. This is the shift-left of the run-time strip warning
-      //      (#3407/#3413): a static readonly + literal field is a certain no-op
-      //      → error (gates); a `readonlyWhen` field is per-record-state → advisory.
-      if (!flags.json) printStep('Checking readonly flow writes (#3425)...');
-      const readonlyWriteFindings = validateReadonlyFlowWrites(normalized as Record<string, unknown>);
-      const readonlyWriteErrors = readonlyWriteFindings.filter((f) => f.severity === 'error');
-      const readonlyWriteWarnings = readonlyWriteFindings.filter((f) => f.severity === 'warning');
-      if (readonlyWriteErrors.length > 0) {
-        if (flags.json) {
-          await emitJson({
-            valid: false,
-            errors: readonlyWriteErrors,
-            duration: timer.elapsed(),
-          });
-          this.exit(1);
-        }
-        console.log('');
-        printError(`Readonly flow-write check failed (${readonlyWriteErrors.length} issue${readonlyWriteErrors.length > 1 ? 's' : ''})`);
-        for (const f of readonlyWriteErrors.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
-        this.exit(1);
-      }
-      if (!flags.json) {
-        for (const f of readonlyWriteWarnings.slice(0, 50)) {
-          console.log(chalk.yellow(`  ⚠ ${f.where}: ${f.message}`));
-          console.log(chalk.dim(`      ${f.hint}`));
-        }
-      }
-
       // 3e3. [#3782] The four authoring lints that live in the CLI itself rather
       //      than in `@objectstack/lint`. Every other gate on this command is a
       //      `@objectstack/lint` import, so these four were only ever reachable
@@ -749,7 +713,7 @@ export default class Validate extends Command {
           // the suite's warnings, though the failure path (above) and the console
           // both did. Same shape of bug as the dropped errors — computed, then
           // discarded — so it is fixed rather than reproduced under a new name.
-          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...refWarnings, ...readonlyWriteWarnings, ...authoringLintWarnings, ...unknownKeyWarnings, ...securityAdvisories, ...capProviderWarnings],
+          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...refWarnings, ...authoringLintWarnings, ...unknownKeyWarnings, ...securityAdvisories, ...capProviderWarnings],
           conversions: conversionNotices,
           specVersionGap: specGap,
           duration: timer.elapsed(),
