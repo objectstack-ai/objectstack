@@ -35,19 +35,6 @@ import {
 
 import type { IHttpServer } from '@objectstack/spec/contracts';
 
-/**
- * The `http-server` slot plus the one member this plugin needs from it.
- *
- * [#4251] `IHttpServer` is a real contract (`@objectstack/spec/contracts`) and
- * this slot is bound to it — but `getRawApp()` is NOT on it, deliberately: the
- * contract is framework-agnostic and the raw app is the framework's own handle
- * (Hono here). So the escape is one named member returning `any`, scoped to the
- * one thing that genuinely cannot be typed framework-agnostically, instead of
- * the whole lookup collapsing to `any`. The probe below is what runs when a
- * host serves the slot with an adapter that exposes no raw app.
- */
-type RawAppHost = IHttpServer & { getRawApp?(): any };
-
 const MARKETPLACE_PREFIX = '/api/v1/marketplace';
 
 /**
@@ -196,9 +183,14 @@ export class MarketplaceProxyPlugin implements Plugin {
                 manifest?.register?.(MARKETPLACE_BROWSE_UI_BUNDLE);
             } catch { /* no manifest service */ }
 
-            let httpServer: RawAppHost | undefined;
+            // [#4251] `http.server` is the canonical name (the only one every
+            // provider registers — runtime's `config.server` path registers no
+            // alias, which made this alias-only read an empty-slot miss there).
+            // The alias fallback dies with the alias registrations.
+            let httpServer: IHttpServer | undefined;
             try {
-                httpServer = ctx.getService<RawAppHost>('http-server');
+                httpServer = ctx.getService<IHttpServer>('http.server')
+                    ?? ctx.getService<IHttpServer>('http-server');
             } catch {
                 ctx.logger?.warn?.('[MarketplaceProxyPlugin] http-server not available — marketplace routes not mounted');
                 return;

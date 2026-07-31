@@ -35,7 +35,8 @@ export class NodeServerPlugin implements Plugin {
 
     init = async (ctx: PluginContext) => {
         // Same service names as the primary adapter, so every consumer that
-        // resolves 'http.server' / 'http-server' works unchanged.
+        // resolves 'http.server' (canonical) or its deprecated 'http-server'
+        // alias (#4251 — dropped with the alias) works unchanged.
         ctx.registerService('http.server', this.server);
         ctx.registerService('http-server', this.server);
         ctx.logger.debug('Node HTTP server service registered', { serviceName: 'http.server' });

@@ -15,6 +15,7 @@ import type { IAutomationService } from './automation-service';
 import type { INotificationService } from './notification-service';
 import type { II18nService } from './i18n-service';
 import type { IDataEngine } from './data-engine';
+import type { IHttpServer } from './http-server';
 import type { ISecurityService } from './security-service';
 import type { IShareLinkService } from './share-link-service';
 
@@ -77,6 +78,17 @@ describe('slot → contract ledger beyond the enum (#4127 batch 3)', () => {
     it('maps the evidenced non-core slots', () => {
         type _Security = Expect<Equals<ServiceSlotContract<'security'>, ISecurityService>>;
         type _ShareLinks = Expect<Equals<ServiceSlotContract<'shareLinks'>, IShareLinkService>>;
+        type _Http = Expect<Equals<ServiceSlotContract<'http.server'>, IHttpServer>>;
+        expect(true).toBe(true);
+    });
+
+    it('resolves the deprecated http-server alias to the same contract as http.server', () => {
+        // [#4251] Same instance, two registration names — hono-plugin and qa's
+        // node-plugin register both two lines apart, the alias commented "for
+        // backward compatibility". Two different contracts here would claim two
+        // services. The alias dies at a release boundary; this pin moves to the
+        // canonical entry alone when it does.
+        type _Alias = Expect<Equals<ServiceSlotContract<'http-server'>, ServiceSlotContract<'http.server'>>>;
         expect(true).toBe(true);
     });
 
@@ -89,7 +101,7 @@ describe('slot → contract ledger beyond the enum (#4127 batch 3)', () => {
 
     it('holds exactly the non-core slots whose contract is written', () => {
         const extra: Array<Exclude<keyof ServiceSlotContracts, keyof CoreServiceContracts>> = [
-            'security', 'shareLinks', 'objectql',
+            'security', 'shareLinks', 'objectql', 'http.server', 'http-server',
         ];
         const slots = new Set<string>(CoreServiceName.options);
         for (const key of extra) {
@@ -98,7 +110,7 @@ describe('slot → contract ledger beyond the enum (#4127 batch 3)', () => {
             // into `CoreServiceContracts` and this assertion is what catches it.
             expect(slots.has(key), `'${key}' is a CoreServiceName — move its entry into CoreServiceContracts`).toBe(false);
         }
-        expect(extra).toHaveLength(3);
+        expect(extra).toHaveLength(5);
     });
 
     it('still resolves a slot with no written contract to unknown', () => {

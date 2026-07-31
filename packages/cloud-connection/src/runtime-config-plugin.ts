@@ -44,19 +44,6 @@ import { resolveCloudUrl } from './cloud-url.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 
 /**
- * The `http-server` slot plus the one member this plugin needs from it.
- *
- * [#4251] `IHttpServer` is a real contract (`@objectstack/spec/contracts`) and
- * this slot is bound to it — but `getRawApp()` is NOT on it, deliberately: the
- * contract is framework-agnostic and the raw app is the framework's own handle
- * (Hono here). So the escape is one named member returning `any`, scoped to the
- * one thing that genuinely cannot be typed framework-agnostically, instead of
- * the whole lookup collapsing to `any`. The probe below is what runs when a
- * host serves the slot with an adapter that exposes no raw app.
- */
-type RawAppHost = IHttpServer & { getRawApp?(): any };
-
-/**
  * The `env-registry` slot's hostname resolvers — see the call site for both
  * spellings. Async by contract: the consumer awaits the result, and declaring
  * it `unknown` would only have moved the erasure one line down.
@@ -196,9 +183,12 @@ export class RuntimeConfigPlugin implements Plugin {
 
     start = async (ctx: PluginContext): Promise<void> => {
         ctx.hook('kernel:ready', async () => {
-            let httpServer: RawAppHost | undefined;
+            // [#4251] Canonical name first — see marketplace-proxy-plugin for
+            // the alias-only-miss this fixes; the fallback dies with the alias.
+            let httpServer: IHttpServer | undefined;
             try {
-                httpServer = ctx.getService<RawAppHost>('http-server');
+                httpServer = ctx.getService<IHttpServer>('http.server')
+                    ?? ctx.getService<IHttpServer>('http-server');
             } catch {
                 ctx.logger?.warn?.('[RuntimeConfigPlugin] http-server not available — runtime/config not mounted');
                 return;

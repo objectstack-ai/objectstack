@@ -40,6 +40,7 @@ import type { II18nService } from './i18n-service';
 import type { IWorkflowService } from './workflow-service';
 import type { ISecurityService } from './security-service';
 import type { IShareLinkService } from './share-link-service';
+import type { IHttpServer } from './http-server';
 
 /**
  * The evidenced slot → contract bindings.
@@ -132,6 +133,29 @@ export interface ServiceSlotContracts extends CoreServiceContracts {
      * `data` resolved to `IDataEngine` and `objectql` to `any`, for one object.
      */
     objectql: IDataEngine;
+    /**
+     * The HTTP server slot — **`http.server` is the canonical name**.
+     *
+     * [#4251] Entered when the false `UNCONTRACTED_SLOTS` exemption was
+     * revoked: the exemption claimed "no IHttpServer contract exists" while
+     * this contract existed and eight call sites already resolved the slot
+     * through it. Every provider registers the canonical name — hono-plugin's
+     * own registration comment reads "Register HTTP server service as
+     * IHttpServer" — and it is the ONLY name present on all provider paths
+     * (`runtime.ts`'s `config.server` path registers no alias).
+     */
+    'http.server': IHttpServer;
+    /**
+     * **Deprecated alias** of {@link ServiceSlotContracts['http.server']} —
+     * the same instance under a second name. plugin-hono-server and qa's
+     * node-plugin register both, two lines apart, the alias explicitly
+     * commented "for backward compatibility"; `runtime.ts`'s `config.server`
+     * path registers ONLY the canonical name, so a reader of this alias alone
+     * finds an empty slot there. New code reads `http.server`; readers of the
+     * alias migrate as touched, and the alias registrations are dropped at a
+     * release boundary once none remain.
+     */
+    'http-server': IHttpServer;
 }
 
 /**

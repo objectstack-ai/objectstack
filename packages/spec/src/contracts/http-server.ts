@@ -186,4 +186,22 @@ export interface IHttpServer {
      * value is unspecified.
      */
     getPort?(): number;
+
+    /**
+     * The underlying framework's own app object (Hono's `Hono`, Express's
+     * `Express`, …) — THE deliberate framework-specific escape hatch on this
+     * otherwise framework-agnostic contract.
+     *
+     * [#4251] Declared here because four independent consumers were each
+     * declaring it locally (`IHttpServer & { getRawApp?(): any }` in
+     * cloud-connection ×2, metadata's HMR routes, and cloud's serverless
+     * node-server) — four copies of one truth, which is the failure mode that
+     * produced the false `http.server` lint exemption. The return type is
+     * `any` ON PURPOSE and only here: the handle's real type belongs to the
+     * framework, and naming it would give this contract a framework
+     * dependency. Consumers that mount framework-native routes feature-detect
+     * this member and degrade when it is absent — an adapter is NOT required
+     * to expose its internals.
+     */
+    getRawApp?(): any;
 }

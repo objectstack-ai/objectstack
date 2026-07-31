@@ -48,6 +48,7 @@ import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { LocalManifestSource, type InstalledManifestEntry } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
+import type { IHttpServer } from '@objectstack/spec/contracts';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -120,9 +121,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             await this.rehydrate(ctx);
 
             // 2. Mount HTTP endpoints.
-            let httpServer: any;
+            // [#4251] Canonical name first — see marketplace-proxy-plugin.
+            let httpServer: IHttpServer | undefined;
             try {
-                httpServer = ctx.getService('http-server');
+                httpServer = ctx.getService<IHttpServer>('http.server')
+                    ?? ctx.getService<IHttpServer>('http-server');
             } catch {
                 ctx.logger?.warn?.('[MarketplaceInstallLocal] http-server not available — install endpoints not mounted');
                 return;

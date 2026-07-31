@@ -328,18 +328,31 @@ export interface IMetadataService {
     /**
      * Register multiple metadata items in a single batch.
      * More efficient than individual register calls.
+     *
+     * [#4251] `options` also carries {@link MetadataWriteOptions} — the
+     * implementation has always intersected it in (`notify` is destructured on
+     * the first line of `MetadataManager.bulkRegister`), but the contract
+     * declared only the bulk knobs, so a caller typed to the contract could
+     * not reach the write options at all. Same shape as the `IDataEngine`
+     * read-methods gap: the erasures this issue sweeps are sometimes the
+     * contract's own doing.
      * @param items - Array of { type, name, data } to register
-     * @param options - Bulk operation options
+     * @param options - Bulk operation knobs plus the standard write options
      * @returns Bulk operation result with success/failure counts
      */
-    bulkRegister?(items: Array<{ type: string; name: string; data: unknown }>, options?: { continueOnError?: boolean; validate?: boolean }): Promise<MetadataBulkResult>;
+    bulkRegister?(items: Array<{ type: string; name: string; data: unknown }>, options?: { continueOnError?: boolean; validate?: boolean } & MetadataWriteOptions): Promise<MetadataBulkResult>;
 
     /**
      * Unregister multiple metadata items in a single batch.
+     *
+     * [#4251] `options` declared from the implementation's signature —
+     * `bulkRegister` beside it always had an options parameter while this one
+     * had none, and `MetadataManager.bulkUnregister` accepts it.
      * @param items - Array of { type, name } to unregister
+     * @param options - Standard write options
      * @returns Bulk operation result
      */
-    bulkUnregister?(items: Array<{ type: string; name: string }>): Promise<MetadataBulkResult>;
+    bulkUnregister?(items: Array<{ type: string; name: string }>, options?: MetadataWriteOptions): Promise<MetadataBulkResult>;
 
     // ==========================================
     // Overlay / Customization Management
