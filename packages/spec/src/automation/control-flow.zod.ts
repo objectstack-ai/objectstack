@@ -49,6 +49,7 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { FlowNodeSchema, FlowEdgeSchema } from './flow.zod';
 import type { FlowNodeParsed, FlowEdgeParsed } from './flow.zod';
+import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
 
 // ─── Canonical construct type ids ────────────────────────────────────
 
@@ -322,11 +323,16 @@ interface RegionSlot {
 }
 
 /**
- * The region slots one node carries — the single place that knows where each
- * ADR-0031 container keeps its nested graph(s). Three passes read it
- * ({@link validateControlFlow}, {@link normalizeControlFlowRegions},
- * {@link collectFlowGraphs}), which is exactly why it is one function: a fourth
- * container construct is added here once, not in three walks that drift.
+ * Resolve one node's region slots against the shared declaration
+ * ({@link FLOW_REGION_SLOTS_BY_TYPE}, #4401) — binding each declared slot to
+ * the value it holds, the Zod schema that value parses as, and a diagnostic
+ * label.
+ *
+ * The three passes in this module read it ({@link validateControlFlow},
+ * {@link normalizeControlFlowRegions}, {@link collectFlowGraphs}). WHERE the
+ * slots are is no longer stated here — that moved to `region-slots.ts` so the
+ * conversion walk and the lint walk read the same list. What stays here is the
+ * schema half, which is this module's business.
  *
  * Emits a slot for a declared key even when its value is not region-shaped —
  * `validateControlFlow` needs to reject that, not skip it.
@@ -334,34 +340,34 @@ interface RegionSlot {
 function regionSlotsOf(node: FlowNodeParsed): RegionSlot[] {
   const cfg = node.config as Record<string, unknown> | undefined;
   if (!cfg) return [];
+  const declared = FLOW_REGION_SLOTS_BY_TYPE.get(node.type);
+  if (!declared) return [];
 
-  if (node.type === LOOP_NODE_TYPE) {
-    return cfg.body == null
-      ? []
-      : [{ raw: cfg.body, key: 'body', label: `loop '${node.id}' body`, schema: FlowRegionSchema }];
-  }
-  if (node.type === PARALLEL_NODE_TYPE && Array.isArray(cfg.branches)) {
-    return cfg.branches.map((raw, index) => ({
-      raw,
-      key: 'branches',
-      index,
-      label: `parallel '${node.id}' branch ${index}`,
-      // A branch also carries an optional `name`, which the plain region schema
-      // (a non-strict `z.object`) would strip.
-      schema: ParallelBranchSchema,
-    }));
-  }
-  if (node.type === TRY_CATCH_NODE_TYPE) {
-    const slots: RegionSlot[] = [];
-    if (cfg.try != null) {
-      slots.push({ raw: cfg.try, key: 'try', label: `try_catch '${node.id}' try`, schema: FlowRegionSchema });
+  const slots: RegionSlot[] = [];
+  for (const { key, arity } of declared) {
+    const value = cfg[key];
+    if (arity === 'many') {
+      if (!Array.isArray(value)) continue;
+      value.forEach((raw, index) => slots.push({
+        raw,
+        key,
+        index,
+        label: `${node.type} '${node.id}' ${singularize(key)} ${index}`,
+        // A branch also carries an optional `name`, which the plain region
+        // schema (a non-strict `z.object`) would strip.
+        schema: ParallelBranchSchema,
+      }));
+      continue;
     }
-    if (cfg.catch != null) {
-      slots.push({ raw: cfg.catch, key: 'catch', label: `try_catch '${node.id}' catch`, schema: FlowRegionSchema });
-    }
-    return slots;
+    if (value == null) continue;
+    slots.push({ raw: value, key, label: `${node.type} '${node.id}' ${key}`, schema: FlowRegionSchema });
   }
-  return [];
+  return slots;
+}
+
+/** `branches` → `branch`, for the per-item label of a `many` slot. */
+function singularize(key: string): string {
+  return key.endsWith('es') ? key.slice(0, -2) : key.replace(/s$/, '');
 }
 
 /**

@@ -2,9 +2,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  LoopConfigSchema,
-  ParallelConfigSchema,
-  TryCatchConfigSchema,
+  FLOW_REGION_SLOTS,
+  FLOW_REGION_CONFIG_KEYS,
 } from '@objectstack/spec/automation';
 
 import {
@@ -17,49 +16,21 @@ import {
 
 const node = (id: string, extra: Record<string, unknown> = {}) => ({ id, type: 'script', ...extra });
 
-describe('REGION_SLOTS — pinned against the spec, not restated', () => {
-  // The ledger's job is to make a NEW region-bearing construct fail here rather
-  // than become a fifth silent blind spot. Derived behaviourally from the
-  // spec's own config schemas: a region slot is one that accepts `{nodes: […]}`.
-  const REGION_BEARING_CONFIGS = {
-    try_catch: TryCatchConfigSchema,
-    loop: LoopConfigSchema,
-    parallel: ParallelConfigSchema,
-  } as const;
-
-  /** Keys of `schema` that accept a region (or an array of them). */
-  const regionKeysOf = (schema: { safeParse: (v: unknown) => { success: boolean; data?: unknown } }): string[] => {
-    // `label` is required by FlowNodeSchema — a probe node without it fails the
-    // parse and would make every slot look non-region.
-    const region = { nodes: [{ id: 'probe', type: 'script', label: 'Probe' }], edges: [] };
-    const probes: Record<string, unknown> = {
-      // Required siblings so the parse reaches the region keys at all.
-      collection: '{items}',
-      try: region,
-      catch: region,
-      body: region,
-      branches: [{ nodes: region.nodes, edges: [] }, { nodes: region.nodes, edges: [] }],
-    };
-    const parsed = schema.safeParse(probes);
-    if (!parsed.success) return [];
-    const data = parsed.data as Record<string, unknown>;
-    return Object.keys(data).filter((k) => {
-      const v = data[k];
-      if (Array.isArray(v)) return v.every((e) => !!e && typeof e === 'object' && Array.isArray((e as never)['nodes']));
-      return !!v && typeof v === 'object' && Array.isArray((v as Record<string, unknown>).nodes);
-    });
-  };
-
-  it('declares exactly the region slots each construct actually accepts', () => {
-    for (const [type, schema] of Object.entries(REGION_BEARING_CONFIGS)) {
-      expect([...(REGION_SLOTS.get(type) ?? [])].sort(), `region slots for '${type}'`).toEqual(
-        regionKeysOf(schema).sort(),
-      );
-    }
+/**
+ * The behavioural probe that used to live here — deriving each construct's
+ * region keys from its own config schema — moved to `region-slots.test.ts` in
+ * the spec, next to the single declaration it now reconciles (#4401). This side
+ * only has to prove the projection is faithful; a renamed or added slot fails
+ * over there, once, for all three walks.
+ */
+describe('REGION_SLOTS — projected from the spec, not restated', () => {
+  it('carries every declared slot, grouped by container type', () => {
+    const projected = [...REGION_SLOTS].flatMap(([type, keys]) => keys.map(key => `${type}.${key}`)).sort();
+    expect(projected).toEqual(FLOW_REGION_SLOTS.map(s => `${s.nodeType}.${s.key}`).sort());
   });
 
-  it('derives REGION_CONFIG_KEYS from the per-type slots', () => {
-    expect([...REGION_CONFIG_KEYS].sort()).toEqual([...new Set([...REGION_SLOTS.values()].flat())].sort());
+  it('shares the flat config-key set by reference', () => {
+    expect(REGION_CONFIG_KEYS).toBe(FLOW_REGION_CONFIG_KEYS);
   });
 });
 

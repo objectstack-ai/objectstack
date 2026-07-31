@@ -13,46 +13,28 @@
  * preserved all the way up.
  */
 
+import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
+
 type Dict = Record<string, unknown>;
 
 function isDict(v: unknown): v is Dict {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-/**
- * Where each ADR-0031 structured container carries its nested region(s) — the
- * map that makes {@link mapFlowNodes} reach a node inside a `loop` body, a
- * `parallel` branch, or a `try_catch` block (#4347).
+/*
+ * Reaching a node inside an ADR-0031 region (#4347) is what makes a conversion
+ * position-independent. A pass that walked only `flows[].nodes[]` saw the
+ * container and stopped: the same node converted at the top level and did not
+ * one level in — a `webhook` callout inside a loop body kept a type no executor
+ * owns (the run fails), and a `delete_record` kept `config.filters`, leaving the
+ * canonical `filter` the executor reads absent, which is the erased-condition
+ * hazard `flow-node-crud-filter-alias` exists to prevent.
  *
- * A region is a self-contained mini-flow (`{ nodes, edges }`) living in the
- * container's OPEN `config` record, so a pass that walked only
- * `flows[].nodes[]` saw the container and stopped there. The consequence was
- * **position-dependent metadata**: the same node converted at the top level and
- * did not one level in — a `webhook` callout inside a loop body kept its
- * protocol-11 type (no executor owns that id, so the run fails), and a
- * `delete_record` kept `config.filters`, leaving the canonical `filter` the
- * executor reads absent — the erased-condition hazard
- * `flow-node-crud-filter-alias` exists to prevent. Same flow, same
- * `registerFlow` call, different outcome by nesting depth.
- *
- * Declared here rather than imported from `automation/control-flow.zod.ts` to
- * keep this module free of schema imports (it is a pure shape walker). The ids
- * and keys are pinned to that module's `LOOP_NODE_TYPE` / `PARALLEL_NODE_TYPE` /
- * `TRY_CATCH_NODE_TYPE` and to the `LoopConfigSchema` / `ParallelConfigSchema` /
- * `TryCatchConfigSchema` shapes by a reconciliation test (`region-walk.test.ts`),
- * so a new construct cannot be added there and silently go unwalked here.
- *
- * A `Map` rather than an object literal so a node whose `type` is
- * `'constructor'` / `'__proto__'` cannot reach `Object`'s prototype chain.
+ * WHERE those regions live is declared once in `automation/region-slots.ts`
+ * (#4401) — an import-free data module, so this stays the pure shape walker it
+ * was written as and still shares one table with the schema-side walks and the
+ * lint walk.
  */
-export const FLOW_REGION_SLOTS: ReadonlyMap<
-  string,
-  ReadonlyArray<{ readonly key: string; readonly many: boolean }>
-> = new Map([
-  ['loop', [{ key: 'body', many: false }]],
-  ['parallel', [{ key: 'branches', many: true }]],
-  ['try_catch', [{ key: 'try', many: false }, { key: 'catch', many: false }]],
-]);
 
 /**
  * Depth ceiling for the region recursion. Containers nest, but not deeply, and
@@ -105,15 +87,15 @@ function mapNodeTree(
 ): Dict {
   const mapped = mapper(node, path);
   if (depth >= MAX_REGION_DEPTH) return mapped;
-  const slots = typeof mapped.type === 'string' ? FLOW_REGION_SLOTS.get(mapped.type) : undefined;
+  const slots = typeof mapped.type === 'string' ? FLOW_REGION_SLOTS_BY_TYPE.get(mapped.type) : undefined;
   if (!slots) return mapped;
   const config = mapped.config;
   if (!isDict(config)) return mapped;
 
   let nextConfig = config;
-  for (const { key, many } of slots) {
+  for (const { key, arity } of slots) {
     const raw = nextConfig[key];
-    if (many) {
+    if (arity === 'many') {
       if (!Array.isArray(raw)) continue;
       let branchesChanged = false;
       const nextBranches = raw.map((branch, i) => {
