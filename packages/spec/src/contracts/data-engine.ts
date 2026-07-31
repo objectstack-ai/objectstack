@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import {
+  BaseEngineOptions,
   EngineQueryOptions,
   DataEngineInsertOptions,
   EngineUpdateOptions,
@@ -50,13 +51,29 @@ export interface WriteObservabilityOptions {
  */
 
 export interface IDataEngine {
-  find(objectName: string, query?: EngineQueryOptions): Promise<any[]>;
-  findOne(objectName: string, query?: EngineQueryOptions): Promise<any>;
+  /**
+   * Read methods take the execution context in a TRAILING options argument,
+   * the same position the write methods take theirs.
+   *
+   * [#4251] Declared because the implementation and its callers were already
+   * there: ObjectQL's `find`/`findOne`/`count`/`aggregate` have taken this
+   * argument since the read/write split was unified, and its own doc explains
+   * why — the same `{ context }` object was correct as the 3rd arg to `insert`
+   * but SILENTLY DROPPED as the 3rd arg to `find`, so an intended `isSystem`
+   * bypass just vanished (control-plane reads coming back empty once
+   * org-scoping hooks landed). The contract kept only `query.context`, so
+   * every caller passing the trailing one — the current-user endpoints'
+   * permission-set loader among them — had to reach it through `any`, which is
+   * exactly the erasure this issue is sweeping. `query.context` remains
+   * supported; when both are given, `options.context` wins.
+   */
+  find(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any[]>;
+  findOne(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any>;
   insert(objectName: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any>;
   update(objectName: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<any>;
   delete(objectName: string, options?: EngineDeleteOptions): Promise<any>;
-  count(objectName: string, query?: EngineCountOptions): Promise<number>;
-  aggregate(objectName: string, query: EngineAggregateOptions): Promise<any[]>;
+  count(objectName: string, query?: EngineCountOptions, options?: BaseEngineOptions): Promise<number>;
+  aggregate(objectName: string, query: EngineAggregateOptions, options?: BaseEngineOptions): Promise<any[]>;
 
   /**
    * Vector Search (AI/RAG)
