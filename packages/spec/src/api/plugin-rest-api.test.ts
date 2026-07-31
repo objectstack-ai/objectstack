@@ -484,7 +484,13 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_DATA_CRUD_ROUTES.methods).toContain('createData');
       expect(DEFAULT_DATA_CRUD_ROUTES.methods).toContain('updateData');
       expect(DEFAULT_DATA_CRUD_ROUTES.methods).toContain('deleteData');
-      expect(DEFAULT_DATA_CRUD_ROUTES.endpoints).toHaveLength(5);
+      // 6 = the CRUD five + POST /:object/query, the QueryAST-in-body spelling
+      // of findData the servers have always mounted but this table omitted
+      // until its request contract was wired (#3899).
+      expect(DEFAULT_DATA_CRUD_ROUTES.endpoints).toHaveLength(6);
+      const queryEndpoint = DEFAULT_DATA_CRUD_ROUTES.endpoints?.find(e => e.path === '/:object/query');
+      expect(queryEndpoint?.method).toBe('POST');
+      expect(queryEndpoint?.requestSchema).toBe('FindDataRequestSchema');
     });
 
     it('should validate DEFAULT_BATCH_ROUTES', () => {
@@ -507,11 +513,17 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_NOTIFICATION_ROUTES.prefix).toBe('/api/v1/notifications');
       expect(DEFAULT_NOTIFICATION_ROUTES.service).toBe('notification');
       expect(DEFAULT_NOTIFICATION_ROUTES.category).toBe('notification');
-      expect(DEFAULT_NOTIFICATION_ROUTES.methods).toContain('registerDevice');
       expect(DEFAULT_NOTIFICATION_ROUTES.methods).toContain('listNotifications');
       expect(DEFAULT_NOTIFICATION_ROUTES.methods).toContain('markNotificationsRead');
       expect(DEFAULT_NOTIFICATION_ROUTES.methods).toContain('markAllNotificationsRead');
-      expect(DEFAULT_NOTIFICATION_ROUTES.endpoints).toHaveLength(7);
+      // 3 = list + read + read/all, the routes the dispatcher actually mounts.
+      // The devices/preferences endpoints this table used to declare were
+      // removed as server routes in #3612 (in fact never built) and are gone
+      // from the catalog too (#3899) — same cure as DEFAULT_AI_ROUTES (#3718).
+      expect(DEFAULT_NOTIFICATION_ROUTES.endpoints).toHaveLength(3);
+      const paths = DEFAULT_NOTIFICATION_ROUTES.endpoints?.map(e => e.path) ?? [];
+      expect(paths).not.toContain('/devices');
+      expect(paths).not.toContain('/preferences');
     });
 
     it('declares no AI routes — this table cannot vouch for a Cloud/EE surface (#3718)', () => {
@@ -559,8 +571,10 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_AUTOMATION_ROUTES.service).toBe('automation');
       expect(DEFAULT_AUTOMATION_ROUTES.category).toBe('automation');
       expect(DEFAULT_AUTOMATION_ROUTES.methods).toContain('triggerAutomation');
-      // POST /trigger + GET /actions (ADR-0018 action descriptor registry)
+      // POST /trigger/:name (the mounted path — flow name rides the PATH,
+      // #3899) + GET /actions (ADR-0018 action descriptor registry)
       expect(DEFAULT_AUTOMATION_ROUTES.endpoints).toHaveLength(2);
+      expect(DEFAULT_AUTOMATION_ROUTES.endpoints?.[0].path).toBe('/trigger/:name');
       // Automation trigger should have extended timeout
       expect(DEFAULT_AUTOMATION_ROUTES.endpoints?.[0].timeout).toBe(120000);
       // The actions endpoint exposes the live registry and is cacheable.

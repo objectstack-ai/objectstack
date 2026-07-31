@@ -763,7 +763,11 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
       summary: 'Get specific metadata item',
       description: 'Returns a specific metadata item by type and name',
       tags: ['Metadata'],
-      requestSchema: 'GetMetaItemRequestSchema',
+      // No `requestSchema` (#3899): every input (`:type`, `:name`, `?packageId`)
+      // is path/query-bound, so `GetMetaItemRequestSchema` — still the protocol
+      // METHOD contract — can never be violated by a request body. Declaring it
+      // here read as "this endpoint 400s a bad body", a validation no route
+      // performs or could perform.
       responseSchema: 'GetMetaItemResponseSchema',
       cacheable: true,
       cacheTtl: 3600,
@@ -777,7 +781,11 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
       summary: 'Create or update metadata item',
       description: 'Creates or updates a metadata item',
       tags: ['Metadata'],
-      requestSchema: 'SaveMetaItemRequestSchema',
+      // No `requestSchema` (#3899): `SaveMetaItemRequestSchema.item` is
+      // `z.unknown()`, so an entry parse can never fail — the declaration
+      // promised a gate with no teeth. The REAL request gate is the metadata
+      // layer's per-type validation behind `saveMetaItem`, which rejects an
+      // off-spec item with 422 + `issues`.
       responseSchema: 'SaveMetaItemResponseSchema',
       permissions: ['metadata.write'],
       cacheable: false,
@@ -810,8 +818,32 @@ export const DEFAULT_DATA_CRUD_ROUTES: RestApiRouteRegistration = {
       summary: 'Query records',
       description: 'Query records with filtering, sorting, and pagination',
       tags: ['Data'],
-      requestSchema: 'FindDataRequestSchema',
+      // No `requestSchema` (#3899): a GET carries its query in the query
+      // string, where every value is a string — `FindDataRequestSchema`'s typed
+      // `query` (QuerySchema: numeric limit/offset, structured where) cannot
+      // describe it, and nothing ever validated it. The schema-guarded spelling
+      // of this operation is `POST /:object/query` below.
       responseSchema: 'ListRecordResponseSchema',
+      permissions: ['data.read'],
+      cacheable: false,
+    },
+    {
+      // The QueryAST-in-body spelling of `findData` — what `client.data.query()`
+      // posts. Mounted by `@objectstack/rest` since forever, but absent from
+      // this table until #3899 wired its request contract: the body is the
+      // QueryAST (`spec/data/query.zod.ts`), validated at the route via
+      // `FindDataRequestSchema` with the PATH object written last (#3946), so a
+      // malformed body 400s instead of degrading into an unfiltered full read.
+      method: 'POST',
+      path: '/:object/query',
+      handler: 'findData',
+      category: 'data',
+      public: false,
+      summary: 'Advanced query (QueryAST in body)',
+      description: 'Query records with a structured QueryAST request body (filter, sort, aggregation, expansion)',
+      tags: ['Data'],
+      requestSchema: 'FindDataRequestSchema',
+      responseSchema: 'FindDataResponseSchema',
       permissions: ['data.read'],
       cacheable: false,
     },
@@ -824,7 +856,8 @@ export const DEFAULT_DATA_CRUD_ROUTES: RestApiRouteRegistration = {
       summary: 'Get record by ID',
       description: 'Retrieve a single record by its ID',
       tags: ['Data'],
-      requestSchema: 'IdRequestSchema',
+      // No `requestSchema` (#3899): `:id` is path-bound and always a string —
+      // `IdRequestSchema` can never be violated by a request body.
       responseSchema: 'SingleRecordResponseSchema',
       permissions: ['data.read'],
       cacheable: false,
@@ -838,7 +871,12 @@ export const DEFAULT_DATA_CRUD_ROUTES: RestApiRouteRegistration = {
       summary: 'Create record',
       description: 'Create a new record',
       tags: ['Data'],
-      requestSchema: 'CreateRequestSchema',
+      // Was 'CreateRequestSchema' — the generic service-contract envelope
+      // (`{ data }`), which is NOT what this route receives: the wire body IS
+      // the bare record. `CreateDataRequestSchema` is the protocol request the
+      // route assembles ({ object } from the path + `data` = body) and, since
+      // #3899, validates before dispatch.
+      requestSchema: 'CreateDataRequestSchema',
       responseSchema: 'SingleRecordResponseSchema',
       permissions: ['data.create'],
       cacheable: false,
@@ -852,7 +890,11 @@ export const DEFAULT_DATA_CRUD_ROUTES: RestApiRouteRegistration = {
       summary: 'Update record',
       description: 'Update an existing record',
       tags: ['Data'],
-      requestSchema: 'UpdateRequestSchema',
+      // Was 'UpdateRequestSchema' — same mismatch as create: the wire body is
+      // the bare field patch (plus optional `expectedVersion`, stripped into
+      // its own protocol field). `UpdateDataRequestSchema` is what the route
+      // assembles from path + body and, since #3899, validates.
+      requestSchema: 'UpdateDataRequestSchema',
       responseSchema: 'SingleRecordResponseSchema',
       permissions: ['data.update'],
       cacheable: false,
@@ -866,7 +908,8 @@ export const DEFAULT_DATA_CRUD_ROUTES: RestApiRouteRegistration = {
       summary: 'Delete record',
       description: 'Delete a record by ID',
       tags: ['Data'],
-      requestSchema: 'IdRequestSchema',
+      // No `requestSchema` (#3899): DELETE carries no body; `:id` is
+      // path-bound (`?expectedVersion` rides the query string / If-Match).
       responseSchema: 'DeleteResponseSchema',
       permissions: ['data.delete'],
       cacheable: false,
@@ -918,6 +961,10 @@ export const DEFAULT_BATCH_ROUTES: RestApiRouteRegistration = {
       // Was 'CreateManyRequestSchema' — a name no schema ever exported (the real
       // request contract is CreateManyDataRequestSchema in protocol.zod.ts). A
       // dangling documentation reference; point it at the schema that exists.
+      // NOTE the wire body is the BARE records array (what `client.data
+      // .createMany` posts); the route assembles `{ object }` from the path +
+      // `records` = body and, since #3899, validates that assembly before
+      // dispatch.
       requestSchema: 'CreateManyDataRequestSchema',
       responseSchema: 'BatchUpdateResponseSchema',
       permissions: ['data.create', 'data.batch'],
@@ -981,62 +1028,19 @@ export const DEFAULT_NOTIFICATION_ROUTES: RestApiRouteRegistration = {
   service: 'notification',
   category: 'notification',
   methods: [
-    'registerDevice', 'unregisterDevice',
-    'getNotificationPreferences', 'updateNotificationPreferences',
     'listNotifications', 'markNotificationsRead', 'markAllNotificationsRead',
   ],
   authRequired: true,
+  // The device-registration and preferences endpoints are GONE from this table
+  // (#3899). `POST/DELETE /devices*` and `GET/PATCH /preferences` were removed
+  // as SERVER routes in #3612 — in fact they were never built ("the
+  // /notifications/devices and /notifications/preferences server routes that
+  // ADR-0012 describes were never built", packages/client/src/index.ts) — yet
+  // this table kept declaring them, requestSchema and all, so the catalog
+  // promised validation on routes that 404. Same disease, same cure as
+  // DEFAULT_AI_ROUTES (#3718). The `RegisterDevice*` / `*Preferences*` schemas
+  // in protocol.zod.ts remain exported as protocol-method contracts.
   endpoints: [
-    {
-      method: 'POST',
-      path: '/devices',
-      handler: 'registerDevice',
-      category: 'notification',
-      public: false,
-      summary: 'Register device for push notifications',
-      description: 'Registers a device token for receiving push notifications',
-      tags: ['Notifications'],
-      requestSchema: 'RegisterDeviceRequestSchema',
-      responseSchema: 'RegisterDeviceResponseSchema',
-      cacheable: false,
-    },
-    {
-      method: 'DELETE',
-      path: '/devices/:deviceId',
-      handler: 'unregisterDevice',
-      category: 'notification',
-      public: false,
-      summary: 'Unregister device',
-      description: 'Removes a device from push notification registration',
-      tags: ['Notifications'],
-      responseSchema: 'UnregisterDeviceResponseSchema',
-      cacheable: false,
-    },
-    {
-      method: 'GET',
-      path: '/preferences',
-      handler: 'getNotificationPreferences',
-      category: 'notification',
-      public: false,
-      summary: 'Get notification preferences',
-      description: 'Returns current user notification preferences',
-      tags: ['Notifications'],
-      responseSchema: 'GetNotificationPreferencesResponseSchema',
-      cacheable: false,
-    },
-    {
-      method: 'PATCH',
-      path: '/preferences',
-      handler: 'updateNotificationPreferences',
-      category: 'notification',
-      public: false,
-      summary: 'Update notification preferences',
-      description: 'Updates user notification preferences',
-      tags: ['Notifications'],
-      requestSchema: 'UpdateNotificationPreferencesRequestSchema',
-      responseSchema: 'UpdateNotificationPreferencesResponseSchema',
-      cacheable: false,
-    },
     {
       method: 'GET',
       path: '',
@@ -1237,14 +1241,26 @@ export const DEFAULT_AUTOMATION_ROUTES: RestApiRouteRegistration = {
   endpoints: [
     {
       method: 'POST',
-      path: '/trigger',
+      // Was '/trigger' — a path no server has ever mounted. The real mounts
+      // are `POST /trigger/:name` (what `client.automation.trigger()` calls)
+      // and the alias `POST /:name/trigger`; the flow name rides the PATH, not
+      // the body (#3899).
+      path: '/trigger/:name',
       handler: 'triggerAutomation',
       category: 'automation',
       public: false,
       summary: 'Trigger automation',
-      description: 'Triggers an automation flow or script by name',
+      description:
+        'Triggers an automation flow by name (path param). Alias mount: POST /:name/trigger. '
+        + 'The body is the flow trigger context ({ recordId?, objectName?, params? }; unknown '
+        + 'top-level keys are forwarded as flow params).',
       tags: ['Automation'],
-      requestSchema: 'AutomationTriggerRequestSchema',
+      // No `requestSchema` (#3899): 'AutomationTriggerRequestSchema'
+      // ({ trigger, payload }) described a wire shape this route never had —
+      // the name is path-bound and the body is a lenient params bag translated
+      // by the dispatcher's `buildAutomationContext`. Declaring that schema
+      // here promised a 400 nothing performs; it remains exported as the
+      // protocol-method contract only.
       responseSchema: 'AutomationTriggerResponseSchema',
       permissions: ['automation.trigger'],
       timeout: 120000, // 2 minutes for long-running automations

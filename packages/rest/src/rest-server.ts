@@ -3968,9 +3968,28 @@ export class RestServer {
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'create')) return;
+                        // [#3899] The wire body IS the record. Validate the
+                        // assembled protocol request (`CreateDataRequestSchema`,
+                        // catalog `requestSchema`) so a non-record body — an
+                        // array, a string, a number — answers 400 instead of
+                        // reaching the engine as `data`. Per-field checks stay
+                        // downstream (object metadata / validation rules); this
+                        // gate is about the SHAPE the contract declares.
+                        const { CreateDataRequestSchema } = await import('@objectstack/spec/api');
+                        const createInput = { object: req.params.object, data: req.body ?? {} };
+                        const parsedCreate = (CreateDataRequestSchema as any).safeParse(createInput);
+                        if (!parsedCreate.success) {
+                            res.status(400).json({
+                                error: 'Invalid create request',
+                                code: 'VALIDATION_FAILED',
+                                fields: zodIssuesToFields(parsedCreate.error?.issues, createInput),
+                                object: req.params?.object,
+                            });
+                            return;
+                        }
                         const result = await p.createData({
                             object: req.params.object,
-                            data: req.body,
+                            data: req.body ?? {},
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         } as any);
@@ -4007,9 +4026,36 @@ export class RestServer {
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'list')) return;
+                        // [#3899] Validate the QueryAST body against the declared
+                        // contract (`FindDataRequestSchema`, catalog `requestSchema`).
+                        // A malformed body used to be forwarded as-is — and since a
+                        // dropped/mistyped clause does not narrow a query, it WIDENS
+                        // it, `{"filter": …}` degraded into an unfiltered full read
+                        // with a 200. The PATH object is written last (#3946) so a
+                        // body `object` can neither dodge the `enforceApiAccess`
+                        // gate above nor move the read. Validation only: the merged
+                        // ORIGINAL body is forwarded, not the parse output, so the
+                        // schema cannot inject defaults the engine did not receive
+                        // before (the analytics-entry precedent, #3878).
+                        const { FindDataRequestSchema } = await import('@objectstack/spec/api');
+                        const rawQuery = req.body ?? {};
+                        const query = (rawQuery && typeof rawQuery === 'object' && !Array.isArray(rawQuery))
+                            ? { ...rawQuery, object: req.params.object }
+                            : rawQuery; // non-object bodies go to the schema as-is and fail with `query: invalid_type`
+                        const findInput = { object: req.params.object, query };
+                        const parsedFind = (FindDataRequestSchema as any).safeParse(findInput);
+                        if (!parsedFind.success) {
+                            res.status(400).json({
+                                error: 'Invalid query request',
+                                code: 'VALIDATION_FAILED',
+                                fields: zodIssuesToFields(parsedFind.error?.issues, findInput),
+                                object: req.params?.object,
+                            });
+                            return;
+                        }
                         const result = await p.findData({
                             object: req.params.object,
-                            query: req.body || {},
+                            query,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         } as any);
@@ -4059,10 +4105,32 @@ export class RestServer {
                             data = rest;
                         }
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'update')) return;
+                        // [#3899] Same gate as create: the wire body is the bare
+                        // field patch (`expectedVersion` already stripped above),
+                        // validated as the assembled `UpdateDataRequestSchema`
+                        // request so a non-record body 400s instead of reaching
+                        // the engine.
+                        const { UpdateDataRequestSchema } = await import('@objectstack/spec/api');
+                        const updateInput = {
+                            object: req.params.object,
+                            id: req.params.id,
+                            data: data ?? {},
+                            ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+                        };
+                        const parsedUpdateOne = (UpdateDataRequestSchema as any).safeParse(updateInput);
+                        if (!parsedUpdateOne.success) {
+                            res.status(400).json({
+                                error: 'Invalid update request',
+                                code: 'VALIDATION_FAILED',
+                                fields: zodIssuesToFields(parsedUpdateOne.error?.issues, updateInput),
+                                object: req.params?.object,
+                            });
+                            return;
+                        }
                         const result = await p.updateData({
                             object: req.params.object,
                             id: req.params.id,
-                            data,
+                            data: data ?? {},
                             ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
@@ -7173,11 +7241,29 @@ export class RestServer {
                         // [#3391] bulk ∧ child(body.operation) — the object must grant
                         // the `bulk` primitive AND the batched write kind.
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: req.body?.operation })) return;
-                        // [#3939] `BatchUpdateRequestSchema` declared `max(200)`,
-                        // but this route hands the body straight to the protocol
-                        // without validating it — so nothing enforced the bound.
-                        if (Array.isArray(req.body?.records)
-                            && this.enforceBatchSize(res, req.body.records.length, maxBatch, req.params?.object)) return;
+                        // [#3899] Validate against the declared contract
+                        // (`BatchUpdateRequestSchema`, catalog `requestSchema`) —
+                        // this route used to hand the body straight to the
+                        // protocol, so `{ operation: 'updat', records: {} }`
+                        // reached the engine as-is. Validation only: the ORIGINAL
+                        // body is forwarded, not the parse output, so
+                        // `BatchOptionsSchema`'s defaults (e.g. `atomic: true`)
+                        // are not injected into a request that never sent them.
+                        const { BatchUpdateRequestSchema } = await import('@objectstack/spec/api');
+                        const batchInput = req.body ?? {};
+                        const parsedBatch = (BatchUpdateRequestSchema as any).safeParse(batchInput);
+                        if (!parsedBatch.success) {
+                            res.status(400).json({
+                                error: 'Invalid batch request',
+                                code: 'VALIDATION_FAILED',
+                                fields: zodIssuesToFields(parsedBatch.error?.issues, batchInput),
+                                object: req.params?.object,
+                            });
+                            return;
+                        }
+                        // [#3939] Cap AFTER the shape check, so a caller gets the
+                        // more specific answer first.
+                        if (this.enforceBatchSize(res, parsedBatch.data.records.length, maxBatch, req.params?.object)) return;
                         const result = await p.batchData!({
                             object: req.params.object,
                             request: req.body,
@@ -7210,9 +7296,27 @@ export class RestServer {
                         if (this.enforceAuth(req, res, context)) return;
                         // [#3391] bulk ∧ create — createMany requires the `bulk` primitive.
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'create' })) return;
-                        // [#3939] Body IS the records array on this route.
-                        if (Array.isArray(req.body)
-                            && this.enforceBatchSize(res, req.body.length, maxBatch, req.params?.object)) return;
+                        // [#3899] Body IS the records array on this route (what
+                        // `client.data.createMany` posts). Validate the assembled
+                        // protocol request (`CreateManyDataRequestSchema`, catalog
+                        // `requestSchema`) so `{ records: [...] }` — updateMany's
+                        // envelope, an easy cross-route slip — or any other
+                        // non-array body 400s instead of reaching the engine as a
+                        // single garbage "record".
+                        const { CreateManyDataRequestSchema } = await import('@objectstack/spec/api');
+                        const createManyInput = { object: req.params.object, records: req.body ?? [] };
+                        const parsedCreateMany = (CreateManyDataRequestSchema as any).safeParse(createManyInput);
+                        if (!parsedCreateMany.success) {
+                            res.status(400).json({
+                                error: 'Invalid createMany request — the body must be a JSON array of record objects',
+                                code: 'VALIDATION_FAILED',
+                                fields: zodIssuesToFields(parsedCreateMany.error?.issues, createManyInput),
+                                object: req.params?.object,
+                            });
+                            return;
+                        }
+                        // [#3939] Cap AFTER the shape check.
+                        if (this.enforceBatchSize(res, parsedCreateMany.data.records.length, maxBatch, req.params?.object)) return;
                         const result = await p.createManyData!({
                             object: req.params.object,
                             records: req.body || [],

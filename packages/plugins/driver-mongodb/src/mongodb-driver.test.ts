@@ -1,27 +1,19 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { MongoDBDriver } from './mongodb-driver.js';
+import { createTestMongod } from './test-mongod.js';
 
 // `mongodb-memory-server` downloads a real MongoDB binary from
 // fastdl.mongodb.org on first use. In sandboxed / offline CI that download can
-// fail; when it does we **skip** this suite rather than failing the whole
-// package's test run (and, with it, the monorepo `Test Core` job). The startup
-// is attempted once here so availability is known at collection time — a
-// throwing `beforeAll` would *fail* every test instead of skipping it.
-let sharedMongod: MongoMemoryServer | undefined;
-try {
-  sharedMongod = await MongoMemoryServer.create({
-    instance: { launchTimeout: 60_000 },
-  });
-} catch (err) {
-  // eslint-disable-next-line no-console
-  console.warn(
-    '[driver-mongodb] Skipping MongoDBDriver suite — mongodb-memory-server could not start ' +
-      `(MongoDB binary unavailable / download blocked): ${(err as Error)?.message ?? String(err)}`,
-  );
-}
+// fail — or HANG, which this suite could not express until `createTestMongod`
+// put a deadline on the wait (see that module); both now land on the same skip.
+// When it does we **skip** this suite rather than failing the whole package's
+// test run (and, with it, the monorepo `Test Core` job). The startup is
+// attempted once here so availability is known at collection time — a throwing
+// `beforeAll` would *fail* every test instead of skipping it.
+const sharedMongod: MongoMemoryServer | undefined = await createTestMongod('MongoDBDriver');
 
 describe.skipIf(!sharedMongod)('MongoDBDriver', () => {
   const mongod = sharedMongod as MongoMemoryServer;

@@ -529,7 +529,7 @@ const result = AiAgentCapabilities.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | The unique machine name of the object to query (e.g. "account"). |
-| **query** | `{ object: string; fields?: string[]; where?: any; search?: object; … }` | optional | Structured query definition (filter, sort, select, pagination). |
+| **query** | `{ object: string; fields?: string[]; where?: any; search?: string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }; … }` | optional | Structured query definition (filter, sort, select, pagination). |
 
 
 ---

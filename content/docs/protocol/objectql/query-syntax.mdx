@@ -64,7 +64,8 @@ interface QueryAST {
   object: string;                          // Target object (required)
   fields?: FieldNode[];                    // Projection (SELECT) — field names
   where?: FilterCondition;                 // Filtering (WHERE) — MongoDB-style $op
-  search?: FullTextSearch;                 // Full-text search ($search)
+  search?: string | FullTextSearch;        // Full-text search — the query text (canonical), or the structured form
+  searchFields?: string[];                 // Narrow the search (server-intersected — narrows only, never widens)
   orderBy?: SortNode[];                    // Ordering (ORDER BY)
   limit?: number;                          // Max records (LIMIT)
   offset?: number;                         // Skip records (OFFSET)
@@ -751,25 +752,36 @@ an `$or` of `$contains` predicates across the object's server-resolved searchabl
 already runs `$or`/`$contains`, so no driver support is needed (`SqlDriver` reports
 `supports.fullTextSearch: false`).
 
+`search` takes the **query text itself** — that is the canonical spelling (ADR-0061 D1:
+the client says *what* to search for, the server decides *which fields*), and it is what
+every surface sends. The structured form is equivalent for the two members that drive
+the expansion, and carries the experimental knobs below:
+
 ```typescript
+// Canonical — the server resolves the fields from object metadata
 const query: QueryAST = {
   object: 'article',
-  search: {
-    query: 'ObjectStack tutorial',
-    fields: ['title', 'content'],
-  },
+  search: 'ObjectStack tutorial',
+  searchFields: ['title', 'content'],   // optional narrowing
+  limit: 10,
+};
+
+// Structured form — `query` + `fields` mean exactly the same thing
+const structured: QueryAST = {
+  object: 'article',
+  search: { query: 'ObjectStack tutorial', fields: ['title', 'content'] },
   limit: 10,
 };
 ```
 
-Field resolution is server-side and never client-trusted: `search.fields` is
-**intersected** with the object's declared `searchableFields` (or, absent those, an
-auto-default of the name field plus short-text/enum fields), so naming a field outside
-that set can never widen the search — and over the REST/protocol ingress it is
-`400 INVALID_FIELD` outright (#4254), because the engine-side intersection alone used to
-drop the unknown name and fall back to scanning the full searchable set. Internal
-callers reaching `engine.find()` directly keep the tolerant intersection.
-Multiple whitespace-separated terms are AND-ed and
+Field resolution is server-side and never client-trusted: the requested fields
+(`searchFields`, or `search.fields` in the structured form) are **intersected** with the
+object's declared `searchableFields` (or, absent those, an auto-default of the name field
+plus short-text/enum fields), so naming a field outside that set can never widen the
+search — and over the REST/protocol ingress it is `400 INVALID_FIELD` outright (#4254),
+because the engine-side intersection alone used to drop the unknown name and fall back to
+scanning the full searchable set. Internal callers reaching `engine.find()` directly keep
+the tolerant intersection. Multiple whitespace-separated terms are AND-ed and
 fields are OR-ed. Case sensitivity is the **driver's**, not the expansion's: the
 expansion emits a plain `$contains`, which `SqlDriver` compiles to a parameterised
 `LIKE '%…%'` with no case folding — so the dialect's own `LIKE`/collation rules decide —

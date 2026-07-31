@@ -52,7 +52,7 @@ const result = FieldMapping.parse(data);
 | **fieldMapping** | `{ source: string \| string[]; target: string \| string[]; transform: Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>; params?: object }[]` | ✅ |  |
 | **mode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ |  |
 | **upsertKey** | `string[]` | optional | Fields to match for upsert (e.g. email) |
-| **extractQuery** | `{ object: string; fields?: string[]; where?: any; search?: object; … }` | optional | Query to run for export only |
+| **extractQuery** | `{ object: string; fields?: string[]; where?: any; search?: string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }; … }` | optional | Query to run for export only |
 | **errorPolicy** | `Enum<'skip' \| 'abort' \| 'retry'>` | ✅ |  |
 | **batchSize** | `number` | ✅ |  |
 
