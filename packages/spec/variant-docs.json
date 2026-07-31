@@ -13,7 +13,22 @@
     "  generated-reference-only — the type is documented solely under content/docs/references/,",
     "      which build-docs.ts generates FROM these schemas. Generated docs cannot drift.",
     "  not-authorable — wire protocol, engine RPC, or a runtime-derived discriminator. Nobody",
-    "      hand-writes the variant, so no hand-written doc owes it a mention."
+    "      hand-writes the variant, so no hand-written doc owes it a mention.",
+    "",
+    "AUDIT NOTE (#4001 follow-up). `generated-reference-only` is the weaker of the two: it",
+    "does not say the variant is un-authorable, only that nobody has written a guide for it.",
+    "Every such entry was re-checked against the docs tree, which moved four of the original",
+    "seven:",
+    "  - widget implementation became GOVERNED. protocol/objectui/widget-contract.mdx has",
+    "    documented all three variants in a `Widget Source` section the whole time; the gate",
+    "    could not see them because its matcher was blind to YAML. Fixed in the matcher.",
+    "  - tenant isolation and settings-manifest handler became NOT-AUTHORABLE. Both reasons",
+    "    already said the words (`operator-set`, `consumed by Setup/Studio`); the label just",
+    "    disagreed with them.",
+    "  - the remaining exemptions now state the gap plainly instead of pointing at the",
+    "    generated page as if it settled the question. Connector authentication is the one",
+    "    worth acting on: it is tenant-authored (ADR-0097 declarative `connectors:`) and the",
+    "    repo has no hand-written connector guide at all."
   ],
   "entries": [
     {
@@ -53,44 +68,44 @@
     {
       "key": "type:inline|npm|remote",
       "label": "widget implementation",
-      "exempt": "generated-reference-only",
-      "reason": "Documented at content/docs/references/ui/widget.mdx, generated from WidgetManifestSchema."
+      "docs": ["content/docs/protocol/objectui/widget-contract.mdx"],
+      "note": "Was exempt as generated-reference-only until the #4001 audit: the page's `Widget Source` section documents all three variants, but in YAML examples, which the coverage matcher could not see. The exemption was recording a gate blind-spot as a doc gap."
     },
     {
       "key": "type:cron|interval|once",
       "label": "job schedule",
       "exempt": "generated-reference-only",
-      "reason": "Documented at content/docs/references/system/job.mdx."
+      "reason": "No hand-written guide covers the Job type; content/docs/references/system/job.mdx is generated from JobSchema. Note that automation/flows.mdx's `schedule: { type: 'cron' }` is a DIFFERENT surface — a flow start node's own config (flow.zod.ts tombstones a top-level `schedule`) — so it neither documents nor governs this union."
     },
     {
       "key": "type:api-key|basic|bearer|none|oauth2",
       "label": "connector authentication",
       "exempt": "generated-reference-only",
-      "reason": "Documented at content/docs/references/integration/connector-auth.mdx."
+      "reason": "DOCUMENTATION GAP, not a non-authorable surface — the strongest candidate among the exemptions for a real guide. Connector auth IS tenant-authored (ADR-0097 materializes a declarative `connectors:` entry naming a `provider` into a live connector at boot), but the repo has no hand-written connector page at all: the only prose is one paragraph inside automation/flows.mdx about the `connector_action` node. Until a guide exists there is nothing for this entry to bind to; when one is written, bind it and delete this exemption."
     },
     {
       "key": "type:api-key|basic|bearer|none",
       "label": "connector auth (environment-artifact projection)",
       "exempt": "generated-reference-only",
-      "reason": "Narrower projection of the connector-auth union carried in the deploy artifact; same generated reference."
+      "reason": "The declarative connector-instance auth shape (ADR-0097), reached via EnvironmentArtifactSchema.metadata.connectors[].auth. It carries a `credentialRef` rather than an inline secret, and omits `oauth2` because the authorization-code/refresh lifecycle is the enterprise tier (ADR-0015) — not because the artifact narrows it. Inherits the gap above; a connector guide would govern both."
     },
     {
       "key": "strategy:isolated_db|isolated_schema|shared_schema",
       "label": "tenant isolation strategy",
-      "exempt": "generated-reference-only",
-      "reason": "Documented at content/docs/references/system/tenant.mdx. Operator-set, not tenant-authored."
+      "exempt": "not-authorable",
+      "reason": "Chosen by the operator when a tenant is provisioned, not written into any tenant's metadata — so no hand-written authoring page owes it a mention. (Was labelled generated-reference-only, though its own reason already said `operator-set`; the generated page at content/docs/references/system/tenant.mdx remains the reference.)"
     },
     {
       "key": "type:cast|constant|javascript|lookup|map",
       "label": "sync mapping transform",
       "exempt": "generated-reference-only",
-      "reason": "Generated reference only; no hand-written page covers the sync transform set yet."
+      "reason": "DOCUMENTATION GAP. `mappings:` is authored on a stack (releases/v12.mdx records `defineMapping`), but no hand-written page covers the transform set — the only prose that names a mapping at all is protocol/kernel/config-resolution.mdx, on a different subject. Lower priority than the connector gap: the transforms are a closed, self-describing set. Bind a page here when one is written."
     },
     {
       "key": "kind:action|http|navigate",
       "label": "settings-manifest handler",
-      "exempt": "generated-reference-only",
-      "reason": "Generated reference only; consumed by Setup/Studio, not tenant-authored metadata."
+      "exempt": "not-authorable",
+      "reason": "Declared by a settings manifest that Setup/Studio ships and consumes; it is not part of the metadata a tenant authors. (Was labelled generated-reference-only, though its own reason already said so.)"
     },
     {
       "key": "viewKind:form|list",

@@ -26,13 +26,25 @@
 // renamed union) both fail: no new undeclared surface, no stale claims.
 //
 // WHAT "MENTIONED" MEANS — and what this gate does NOT prove. A variant counts as
-// documented if the bound doc contains either `<discriminator>: '<variant>'` (the code-
-// sample form) or `` `<variant>` `` (the prose/table form). The second form is
-// deliberately loose, and for short generic variants (`object`, `api`, `value`) it can
-// match an unrelated sentence — so a pass here means "the page at least says the word",
-// NOT "the page documents it correctly". This gate catches the omission that shipped for
-// months; it is not a substitute for reading the page. Tightening the loose form would
-// cost more false failures than the precision is worth.
+// documented if the bound doc contains any of three forms:
+//
+//   `<discriminator>: '<variant>'`   the quoted code-sample form (JS/TS/JSON)
+//   `` `<variant>` ``                the prose/table form
+//   `<discriminator>: <variant>`     a whole YAML mapping line (optionally + `# comment`)
+//
+// The YAML form was added after the widget-implementation union (#4001 audit) showed the
+// cost of leaving it out: `protocol/objectui/widget-contract.mdx` carries a "Widget Source"
+// section documenting all three of `npm` / `remote` / `inline` in YAML examples — and the
+// gate could not see any of them, because YAML does not quote scalar values. The entry sat
+// exempt as "generated-reference-only", i.e. the ledger recorded a doc gap that did not
+// exist while the real gap — a matcher blind to half the repo's example dialect — stayed
+// invisible. It is anchored to a full line so it stays as tight as the quoted form.
+//
+// The prose form is deliberately loose, and for short generic variants (`object`, `api`,
+// `value`) it can match an unrelated sentence — so a pass here means "the page at least
+// says the word", NOT "the page documents it correctly". This gate catches the omission
+// that shipped for months; it is not a substitute for reading the page. Tightening the
+// loose form would cost more false failures than the precision is worth.
 //
 // Usage:
 //   tsx check-variant-docs.mts          # fail on undeclared/orphaned/undocumented
@@ -186,7 +198,10 @@ for (const e of ledger.entries) {
   const undocumented = u.variants.filter((v) => {
     const anchored = new RegExp(`${esc(u.disc)}\\s*:\\s*['"\`]${esc(v)}['"\`]`);
     const token = new RegExp('`' + esc(v) + '`');
-    return !anchored.test(blob) && !token.test(blob);
+    // YAML mapping line: unquoted scalar, so it must be anchored to the whole
+    // line (trailing `# comment` allowed) to stay as tight as the quoted form.
+    const yaml = new RegExp(`^\\s*${esc(u.disc)}\\s*:\\s*${esc(v)}\\s*(#.*)?$`, 'm');
+    return !anchored.test(blob) && !token.test(blob) && !yaml.test(blob);
   });
   if (undocumented.length) {
     errors.push(
