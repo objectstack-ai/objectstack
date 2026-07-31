@@ -44,5 +44,9 @@
     "type": "git",
     "url": "https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/plugins/plugin-webhooks"
-  }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
 }

@@ -34,5 +34,9 @@
     "sharing",
     "rbac",
     "security"
+  ],
+  "files": [
+    "dist",
+    "README.md"
   ]
 }
