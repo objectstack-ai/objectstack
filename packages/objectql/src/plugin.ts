@@ -1579,8 +1579,9 @@ export class ObjectQLPlugin implements Plugin {
     let loadStandaloneActions: (() => Promise<any[]>) | undefined;
     try {
       const meta = ctx.getService<IMetadataService>('metadata');
-      if (meta && typeof meta.loadMany === 'function') {
-        loadStandaloneActions = () => meta.loadMany('action');
+      const loadMany = meta?.loadMany;
+      if (meta && typeof loadMany === 'function') {
+        loadStandaloneActions = () => loadMany.call(meta, 'action');
       }
     } catch { /* no metadata service — registry objects still audit */ }
     this.lastGovernanceFingerprint = await runActionGovernanceInventory({

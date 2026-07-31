@@ -59,7 +59,7 @@ import { matchesFilterCondition } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
 import { assertReadableQueryFields } from './predicate-guard.js';
 import { PermissionDeniedError } from './errors.js';
-import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
+import { assertEngineOwnedWriteAllowed, type EngineOwnedSchemaLike } from './system-write-guard.js';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
 import {
   backfillOrgAdminGrants,
@@ -877,7 +877,11 @@ export class SecurityPlugin implements Plugin {
       // construction. Runs BEFORE the empty-principal fall-open so engine-owned
       // tables fail CLOSED for principal-less-but-user-context callers.
       assertEngineOwnedWriteAllowed(
-        typeof ql?.getSchema === 'function' ? ql.getSchema(opCtx.object) : undefined,
+        // The contract's getSchema returns `unknown` (schema shape is
+        // engine-local); narrow to the slice the guard reads.
+        typeof ql?.getSchema === 'function'
+          ? ql.getSchema(opCtx.object) as EngineOwnedSchemaLike | undefined
+          : undefined,
         opCtx.operation,
         opCtx.context,
       );
