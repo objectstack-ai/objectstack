@@ -5,8 +5,8 @@
  * Run **every** generated-artifact gate and report **all** stale artifacts in one
  * pass.
  *
- * CI runs these gates as separate sequential steps across two jobs, so the first
- * stale artifact masks the rest: you fix it, push, and discover the next one on
+ * CI runs these gates as separate sequential steps, so the first stale artifact
+ * masks the rest: you fix it, push, and discover the next one on
  * the following run. That happened twice on #4040 (`check:docs`, then
  * `check:api-surface`) and twice again on #4161 (`check:spec-changes`, then
  * `check:upgrade-guide`) — four pushes spent learning something one local run
@@ -153,11 +153,12 @@ const fix = process.argv.includes('--fix');
 // individual steps, so an unclassified `check:`/`gen:` script kept every CI gate
 // green while this wrapper exited red on `main` before running a single gate.
 // Twice in three days — #4177 (fixed only by colliding with #4194) and #4232
-// (caught wiring this flag in). ci.yml's `check-generated` job cannot host the
-// fix: its `generated` paths filter does not watch packages/spec/package.json,
-// the one file every offending PR must touch — both offenders skipped that job
-// entirely. So lint.yml's unfiltered, required "TypeScript Type Check" job runs
-// this mode instead. Reads package.json and the arrays above; no build, <1s.
+// (caught wiring this flag in). It could not go in ci.yml's `check-generated`
+// job: that job was gated on a `generated` paths filter that never watched
+// packages/spec/package.json, the one file every offending PR must touch, so
+// both offenders skipped it entirely. #4291 deleted that job and its filter and
+// moved every gate to lint.yml's unfiltered, required "TypeScript Type Check"
+// job, which runs this mode too. Reads package.json and the arrays above; <1s.
 const reconcileOnly = process.argv.includes('--reconcile-only');
 const scripts = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).scripts ?? {};
 reconcileLedger(scripts);

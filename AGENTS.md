@@ -229,10 +229,12 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 ### Touched `packages/spec`? Regenerate its artifacts BEFORE pushing
 
 `packages/spec` has **eight** checked-in generated artifacts, each with its own CI gate.
-They live in two different jobs (`TypeScript Type Check` in `lint.yml`, `Check Generated
-Artifacts` in `ci.yml`), and each job runs its gates **sequentially** — so the first
-stale artifact masks every one behind it, and you get one red build per artifact instead
-of one for all of them. Match the change to the gate and regenerate up front:
+All of them live in one job — `TypeScript Type Check` in `lint.yml`, which is required and
+has no paths filter, so no gate can go dormant on the PR that breaks it (#4291 retired the
+filtered `Check Generated Artifacts` job for exactly that reason). That job runs its gates
+**sequentially**, so the first stale artifact masks every one behind it, and you get one
+red build per artifact instead of one for all of them. Match the change to the gate and
+regenerate up front:
 
 | You changed | Gate that fails | Regenerate with `pnpm --filter @objectstack/spec …` |
 |:---|:---|:---|
