@@ -6,24 +6,30 @@ description: Complete inventory of ObjectStack kernel services with protocol met
 # Kernel Services Checklist
 
 <Callout type="warn">
-**This checklist is out of date.** It predates several packages that have since
-shipped — SQL and MongoDB drivers, automation, realtime, storage, and more (see
-[Plugins & Packages](/docs/plugins/packages) for the current catalog). Keep it
-for the protocol-method inventory; treat the per-service status columns as
-historical until this page is regenerated.
+**This page is hand-maintained.** The per-slot Provider column mirrors
+`CORE_SERVICE_PROVIDER` (`packages/spec/src/system/core-services.zod.ts`), which
+is the CI-guarded source of truth; the method inventories mirror the per-domain
+contracts in `packages/spec/src/api/protocol.zod.ts`. When the two disagree,
+the code wins. See [Plugins & Packages](/docs/plugins/packages) for the full
+package catalog.
 </Callout>
 
 The ObjectStack protocol defines **16 kernel services** registered via the `CoreServiceName` enum (the never-implemented `graphql` entry was removed in v17). Each service maps to a set of protocol methods governed by its per-domain contract (`DataProtocol`, `MetadataProtocol`, ...) — the transitional `ObjectStackProtocol` composition alias was dissolved in v17 (ADR-0076 D9); capability availability comes from the runtime discovery `services` registry.
 
-**Key architecture principle**: The kernel itself only provides **data** and **metadata** (framework). Everything else — including **auth** and **automation** — is delivered by **plugins**. The current `@objectstack/objectql` package is an example kernel implementation to get the basic API running; production kernels will be rebuilt as new plugins.
+**Key architecture principle**: the kernel guarantees only **data** and **metadata**, and even those are filled by packages (`@objectstack/objectql`, `@objectstack/metadata`) rather than baked in — the kernel's own contribution is an in-memory fallback for the `core` slots that have one (`metadata`, `cache`, `queue`, `job`, `i18n` — **not** `auth`). Everything else — including **auth** and **automation** — is delivered by plugins. `@objectstack/objectql` is an example kernel implementation to get the basic API running; production kernels will be rebuilt as separate plugins.
 
 <Callout type="info">
-**Last Updated**: February 2026
+**Legend**
 
-- ✅ Implemented — 18 protocol methods (kernel-provided)
-- ⚠️ Framework — metadata (in-memory registry, DB persistence pending)
-- 🟡 In Development — auth (plugin structure complete, logic planned)
-- ❌ Plugin Required — 38 protocol methods (to be delivered by plugins)
+- ✅ Implemented — the 17 kernel-provided protocol methods (`DataProtocol` 9 + `MetadataProtocol` 8)
+- ⚠️ Framework — the slot is filled by the kernel's in-memory fallback: real reads and
+  writes, no persistence (self-declares `degraded`, ADR-0076 D12)
+- ❌ Plugin Required — the remaining 36 methods declared across the other per-domain
+  contracts (`analytics` 2, `automation` 1, `packages` 6, `views` 5, `permissions` 3,
+  `workflow` 3, `realtime` 6, `notification` 7, `i18n` 3). *Declared* is not *routed*:
+  `packages` is answered kernel-side by the `/packages` dispatcher domain over the
+  ObjectQL registry, `i18n` has a kernel in-memory fallback, and `views` / `permissions` /
+  `workflow` have no implementation anywhere — the rest wait on whatever fills the slot
 </Callout>
 
 ---
@@ -34,10 +40,10 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 ┌─────────────────────────────────────────────────────────┐
 │                     Kernel Layer                         │
 │  ┌──────────────────┐  ┌──────────────────────────────┐ │
-│  │  metadata (⚠️)   │  │  data (✅)                   │ │
-│  │  In-memory only   │  │  ObjectQL example kernel     │ │
-│  │  DB persistence   │  │  Will be rebuilt as plugins  │ │
-│  │  pending          │  │                              │ │
+│  │  metadata (✅)    │  │  data (✅)                   │ │
+│  │  MetadataPlugin   │  │  ObjectQL example kernel     │ │
+│  │  → sys_metadata   │  │  Will be rebuilt as plugins  │ │
+│  │  (in-mem fallback)│  │                              │ │
 │  └──────────────────┘  └──────────────────────────────┘ │
 ├─────────────────────────────────────────────────────────┤
 │                    Plugin Layer                           │
@@ -45,8 +51,9 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 │  workflow, ui, realtime, notification, ai, i18n,         │
 │  search, file-storage, cache, queue, job                 │
 │                                                          │
-│  Discovery API reports: enabled/unavailable/degraded     │
-│  per service so clients adapt their UI accordingly       │
+│  Discovery API reports availability per service          │
+│  (available / degraded / stub / unavailable) so          │
+│  clients adapt their UI accordingly                      │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -56,22 +63,49 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 
 | # | Service Name | Criticality | Methods | Status | Provider |
 |:--|:-------------|:------------|:--------|:-------|:---------|
-| 1 | **metadata** | `core` | 8 | ⚠️ Framework | Kernel (in-memory) |
+| 1 | **metadata** | `core` | 8 | ✅ Implemented (kernel fallback is ⚠️ in-memory) | `@objectstack/metadata` |
 | 2 | **data** | `required` | 9 | ✅ Implemented | `@objectstack/objectql` |
 | 3 | **analytics** | `optional` | 2 | ❌ Plugin Required | `@objectstack/service-analytics` |
-| 4 | **auth** | `core` | — | 🟡 In Development | `@objectstack/plugin-auth` |
-| 5 | **ui** | `optional` | 5 | ❌ Plugin Required | TBD plugin |
-| 6 | **workflow** | `optional` | 3 | ❌ Plugin Required | TBD plugin |
-| 7 | **automation** | `optional` | 1 | ❌ Plugin Required | TBD plugin |
-| 8 | **realtime** | `optional` | 6 | ❌ Plugin Required | TBD plugin |
-| 9 | **notification** | `optional` | 7 | ❌ Plugin Required | TBD plugin |
-| 10 | **ai** | `optional` | 3 | ❌ Plugin Required | TBD plugin |
+| 4 | **auth** | `core` | — | ✅ Implemented | `@objectstack/plugin-auth` |
+| 5 | **ui** | `optional` | 5 | ❌ Nothing fills this slot | `@objectstack/metadata-protocol` — `/ui/view` is served by its `protocol` service, not by a `ui` service |
+| 6 | **workflow** | `optional` | 3 | ❌ Nothing ships | — |
+| 7 | **automation** | `optional` | 1 | ❌ Plugin Required | `@objectstack/service-automation` |
+| 8 | **realtime** | `optional` | 6 | ❌ Plugin Required (in-process only — no HTTP/WS route is mounted) | `@objectstack/service-realtime` |
+| 9 | **notification** | `optional` | 7 | ❌ Plugin Required | `@objectstack/service-messaging` |
+| 10 | **ai** | `optional` | — | ❌ Nothing ships in this repo | `@objectstack/service-ai` (Cloud/EE — not installable, so the table entry is `null`) |
 | 11 | **i18n** | `core` | 3 | ✅ Built-in (in-memory fallback) | `@objectstack/service-i18n` |
-| 12 | **file-storage** | `optional` | — | ❌ Plugin Required | TBD plugin |
-| 13 | **search** | `optional` | — | ❌ Plugin Required | TBD plugin |
+| 12 | **file-storage** | `optional` | — | ❌ Plugin Required | `@objectstack/service-storage` |
+| 13 | **search** | `optional` | — | ❌ Nothing ships | — |
 | 14 | **cache** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-cache` |
 | 15 | **queue** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-queue` |
 | 16 | **job** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-job` |
+
+<Callout type="info">
+The Provider column mirrors `CORE_SERVICE_PROVIDER` in
+`@objectstack/spec/system` — the single table discovery reads when it tells a
+caller what to install for an empty slot, and the value it reports as
+`provider`. Two caveats. The table carries **no entry for
+`metadata` or `data`**: those are filled by the engine itself, never by an
+installable optional package, so they need no remedy (`NO_REMEDY_SLOTS` in the
+guard script). And `null` there does **not** always mean "nothing ships" — it
+means "no name belongs in an `Install X` sentence", which covers two cases:
+
+- **Nothing provides the slot at all** — `search`, `workflow` (and the retired
+  `graphql`). Discovery says exactly that rather than naming a plausible
+  package: `No implementation ships for the '<slot>' slot — register a service
+  under it to enable`.
+- **A provider exists but cannot be installed** — `ai`. `@objectstack/service-ai`
+  registers the slot in `objectstack-ai/cloud` and is `private: true`.
+
+Two slots therefore override the generic line with a hand-written
+`REMEDY_DETAIL` sentence: `ui`, because the package named does not fill the
+slot (`Served by the protocol service — register MetadataPlugin
+(@objectstack/metadata-protocol) to enable`), and `ai` (`Provided by
+@objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation
+ships in the open framework`). `scripts/check-service-providers.mjs` fails CI
+if a name in the table is not a real workspace package, or if a
+`CoreServiceName` slot other than `data`/`metadata` is missing from it.
+</Callout>
 
 <Callout type="warn">
 **Criticality Levels**
@@ -82,10 +116,12 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 
 ---
 
-## 1. metadata Service ⚠️ Framework
+## 1. metadata Service ✅ Implemented
 
 **Service Name**: `metadata` · **Criticality**: `core`  
-**Implementation**: Kernel — `SchemaRegistry` (in-memory)  
+**Implementation**: `MetadataPlugin` (`@objectstack/metadata`) — persisted to `sys_metadata`.
+Fallbacks: the kernel's in-memory `createMemoryMetadata` (`@objectstack/core`) when nothing
+registers the slot, over ObjectQL's in-memory `SchemaRegistry` of artifact-loaded metadata.  
 **Route Mounts**: `/api/v1/meta`, `/api/v1`, `/api/v1/packages`
 
 ### Protocol Methods
@@ -101,16 +137,18 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 | `getMetaItemCached` | `GetMetaItemCachedRequest → GetMetaItemCachedResponse` | ✅ |
 | `getUiView` | `GetUiViewRequest → GetUiViewResponse` | ✅ |
 
-### Current Limitations
+### Former Gaps — all now closed
 
-The metadata service is a **framework** — it works with an in-memory `SchemaRegistry` loaded from YAML/TS config files at startup.
+Every gap this section used to list has shipped. Only the kernel's own
+in-memory fallback is still a "framework": it serves real reads and writes but
+never reaches disk, which is exactly what it self-declares (`degraded`).
 
-| Gap | Description | Priority |
-|:----|:------------|:--------:|
-| **DB Persistence** | Shipped: `MetadataPlugin` (`@objectstack/metadata`) persists to `sys_metadata`; only the kernel's in-memory fallback is non-persistent | Shipped |
-| **Multi-instance Sync** | No mechanism to share metadata changes across instances | P1 |
-| **Migration / Versioning** | No schema diff or migration tooling | P1 |
-| **Hot Reload** | Metadata changes require restart | P2 |
+| Former gap | Where it landed |
+|:----|:------------|
+| **DB Persistence** | `MetadataPlugin` (`@objectstack/metadata`) persists to `sys_metadata`; only the kernel's in-memory fallback is non-persistent |
+| **Multi-instance Sync** | `MetadataClusterBridgePlugin` (`@objectstack/service-cluster`) bridges the `metadata.changed` channel onto the cluster pub/sub bus, so a mutation on one node invalidates peer registry caches. Needs a `cluster` service and a metadata service exposing `attachClusterPubSub()` |
+| **Migration / Versioning** | `os diff <before> <after>` compares two configurations and flags breaking changes; `os migrate plan` / `os migrate apply` reconcile the physical database against metadata |
+| **Hot Reload** | `MetadataPlugin` watches its sources (`watch`) and the compiled artifact (`artifactWatch`) with chokidar; `os dev` rebuilds and the server reloads without a restart |
 
 ### Discovery: Per-Service Status
 
@@ -243,62 +281,104 @@ empty slot does. The implementations that really do the work in memory declare
 
 ---
 
-## 4. auth Service 🟡 In Development
+## 4. auth Service ✅ Implemented
 
 **Service Name**: `auth` · **Criticality**: `core`  
+**Implementation**: `AuthPlugin` → `AuthManager` (`@objectstack/plugin-auth`, built on better-auth)  
 **Route Mount**: `/api/v1/auth` — only exposed when a plugin registers the auth service
 
 <Callout type="warn">
 **The kernel does NOT handle auth.** Install an auth plugin to enable authentication. Without it, the discovery response shows `auth: { enabled: false, status: "unavailable" }`.
 </Callout>
 
-### Plugin Requirements
+### Where each capability lives
 
-The `auth` service covers both **authentication** (identity) and **authorization** (permissions). There is no separate `permission` service in `CoreServiceName`.
+The `auth` service covers **authentication** (identity). **Authorization** is not a
+`CoreServiceName` slot at all — there is no `permission` service; the evaluators are
+registered under their own names (`security.permissions`, `security.rls`,
+`security.fieldMasker`) by `@objectstack/plugin-security`.
 
-| Module | Area | Description | Priority |
-|:-------|:-----|:------------|:--------:|
-| **Identity Provider** | Authentication | JWT issuance/verification, session management | P0 |
-| **User CRUD** | Authentication | Create / read / update / delete users | P0 |
-| **Role Management** | Authentication | Role definitions, role-user associations | P0 |
-| **Permission Engine** | Authorization | Object-level and field-level permissions | P0 |
-| **OAuth2 / OIDC** | Authentication | Third-party login (Google, GitHub, etc.) | P1 |
-| **Sharing Rules** | Authorization | Record-level sharing and visibility | P1 |
-| **Row-Level Security** | Authorization | Automatic query filtering by user context | P1 |
-| **Multi-tenancy** | Authentication | Space / Tenant isolation | P1 |
-| **Territory Management** | Authorization | Data territory assignment and access | P2 |
-| **SCIM** | Authentication | Enterprise user provisioning protocol | P2 |
+| Module | Area | Ships in |
+|:-------|:-----|:---------|
+| **Identity Provider** | Authentication | `@objectstack/plugin-auth` — better-auth sessions + `jose` JWTs (`auth-manager.ts`) |
+| **User CRUD** | Authentication | `@objectstack/plugin-auth` — `admin-user-endpoints.ts`, `admin-import-users.ts` |
+| **Role Management** | Authorization | `@objectstack/plugin-security` — owns role / permission-set / user-permission-set / role-permission-set objects (ADR-0029 K2) |
+| **Permission Engine** | Authorization | `@objectstack/plugin-security` — `security.permissions` (object) + `security.fieldMasker` (field) |
+| **OAuth2 / OIDC** | Authentication | `@objectstack/plugin-auth` — `@better-auth/oauth-provider`, `@better-auth/sso` |
+| **Sharing Rules** | Authorization | `@objectstack/plugin-sharing` — `sharing`, `sharingRules`, `shareLinks` services |
+| **Row-Level Security** | Authorization | `@objectstack/plugin-security` — `security.rls` (`rls-compiler.ts`) |
+| **Multi-tenancy** | Authentication | `@objectstack/plugin-auth` — the `tenancy` service (`tenancy-service.ts`, ADR-0093/ADR-0105) |
+| **Territory access** | Authorization | Not a separate module: expressed as an RLS dynamic-membership predicate (`current_user.territory_account_ids`, staged in `ExecutionContext.rlsMembership`) |
+| **SCIM** | Authentication | `@objectstack/plugin-auth` — `@better-auth/scim`, gated by `OS_SCIM_ENABLED` |
 
-### Spec Files: `identity.zod.ts`, `permission.zod.ts`, `organization.zod.ts`, `auth-config.zod.ts`, `tenant.zod.ts`
+### Spec Files: `identity/identity.zod.ts`, `identity/organization.zod.ts`, `security/permission.zod.ts`, `system/auth-config.zod.ts`, `system/tenant.zod.ts` (all under `packages/spec/src/`)
 
 ---
 
-## 5–7. Business Services ❌ Plugin Required
+## 5–7. Business Services
 
-### 5. ui Service — 5 methods
-`listViews`, `getView`, `createView`, `updateView`, `deleteView`  
-View CRUD, layout engine, action registry, permission filtering.
+### 5. ui Service — 5 declared methods, none routed ❌
+`listViews`, `getView`, `createView`, `updateView`, `deleteView`
 
-### 6. workflow Service — 3 methods
+<Callout type="warn">
+These five are **optional members of `ViewProtocol` that nothing implements and no
+route reaches** — `view` is a metadata type, so view CRUD goes through the metadata
+API (`/api/v1/meta`), not through them. Nothing anywhere registers the `ui` slot
+either (#4093 / #4146), so `CORE_SERVICE_PROVIDER.ui` names
+`@objectstack/metadata-protocol` rather than a `ui` plugin: the one route the `/ui`
+domain serves is `GET /api/v1/ui/view/:object[/:type]`, which calls `getUiView` on
+the **`protocol`** service that `assembleMetadataProtocol()` registers (invoked by
+`ObjectQLPlugin`, or by the standalone `createMetadataProtocolPlugin()`). Without it
+the domain answers **501** with that remedy spelled out, not a generic "install a ui
+plugin".
+</Callout>
+
+### 6. workflow Service — 3 methods ❌ Nothing ships
 `getWorkflowConfig`, `getWorkflowState`, `workflowTransition`  
-State machine transitions. Approve/reject are no longer workflow methods — per ADR-0019 they moved to the request-id-based approvals API under `/api/v1/approvals`.
+State machine transitions. No package registers the `workflow` slot
+(`CORE_SERVICE_PROVIDER.workflow` is `null`). Approve/reject are not workflow
+methods — per ADR-0019 they moved to the request-id-based approvals API under
+`/api/v1/approvals` (`POST /requests/:id/{approve,reject,recall}`, served by
+`@objectstack/plugin-approvals`).
 
-### 7. automation Service — 1 method
+### 7. automation Service — 1 method ✅ `@objectstack/service-automation`
 `triggerAutomation`  
 Trigger engine, event triggers from ObjectQL hooks, flow executor, scheduled triggers.
+The `/automation` dispatcher domain gates on `isServiceServeable`, so a slot filled by
+a self-declared stub answers as an empty one.
 
 ---
 
-## 8–11. Communication Services ❌ Plugin Required
+## 8–11. Communication Services
 
-### 8. realtime — 6 methods
+### 8. realtime — 6 methods · `@objectstack/service-realtime`
 `realtimeConnect`, `realtimeDisconnect`, `realtimeSubscribe`, `realtimeUnsubscribe`, `setPresence`, `getPresence`
 
-### 9. notification — 7 methods
+<Callout type="warn">
+`service-realtime` is an **in-process pub/sub bus**, not an HTTP/WS surface. The
+dispatcher has no `/realtime` branch and no plugin mounts one, so `routes.realtime`
+is **never advertised** — an advertised route would 404 (ADR-0076 D12, #2462), and
+`features.websockets` is hardcoded `false` for the same reason. These six
+`RealtimeProtocol` members are declared and unrouted; when the service is registered
+both discovery builders report the slot `degraded` with a message saying the bus is
+in-process only and no HTTP/WS surface is mounted. Re-advertising waits on a real
+transport.
+</Callout>
+
+### 9. notification — 7 methods · `@objectstack/service-messaging`
 `registerDevice`, `unregisterDevice`, `getNotificationPreferences`, `updateNotificationPreferences`, `listNotifications`, `markNotificationsRead`, `markAllNotificationsRead`
 
-### 10. ai — 3 methods
-`aiNlq`, `aiSuggest`, `aiInsights`
+The slot name is `notification` (singular) and the package that fills it shares no word
+with it — which is why the remedy sentence is looked up in `CORE_SERVICE_PROVIDER`
+rather than derived from the slot name. The `/notifications` domain currently routes
+the inbox subset: `GET /notifications` → `listInbox`, `POST /notifications/read` →
+`markRead`, `POST /notifications/read/all` → `markAllRead`. All three are **optional**
+on `INotificationService` — a send-only provider (SMTP, Twilio, a webhook) fills the
+slot legitimately without an inbox, and each route probes its own method and answers
+501 when absent.
+
+### 10. ai — contract removed ❌
+~~`aiNlq`, `aiSuggest`, `aiInsights`~~
 
 <Callout type="warn">
 Removed. These three were **optional** protocol methods (`aiNlq?` …) that no
@@ -309,6 +389,8 @@ methods that called them were deleted outright (#3718). The AI service that
 does exist (`service-ai`, Cloud/EE) serves a different surface — chat,
 complete, models, conversations, agents — and `client.ai` was rebuilt against
 those real routes, so this entry describes a contract that no longer exists.
+The `ai` slot still exists in `CoreServiceName`, but nothing in this repo fills
+it (`CORE_SERVICE_PROVIDER.ai` is `null`).
 </Callout>
 
 ### 11. i18n — 3 methods
@@ -324,7 +406,7 @@ those real routes, so this entry describes a contract that no longer exists.
 | Environment | Provider | Registration |
 |:------------|:---------|:-------------|
 | **Production** | `I18nServicePlugin` | File-based `FileI18nAdapter` loads JSON locale files from disk |
-| **In-memory fallback** | `@objectstack/core` (`createMemoryI18n`) | Registered by `AppPlugin` when the stack declares translation bundles and no i18n service is present; self-describes as `degraded` (ADR-0076 D12) |
+| **In-memory fallback** | `@objectstack/core` (`createMemoryI18n`) | Two paths, same factory: the kernel pre-injects it for any unfilled `core` slot (`CORE_FALLBACK_FACTORIES`), and `AppPlugin` registers it during `start` when the stack declares translation bundles and no i18n service is present. Self-describes as `degraded` (ADR-0076 D12) |
 | **Development** | `DevPlugin` | Auto-wires `I18nServicePlugin` when the stack declares translations; otherwise the AppPlugin fallback above applies. DevPlugin registers no stub of its own (ADR-0115) |
 
 ```typescript
@@ -382,45 +464,48 @@ AppPlugin will:
 
 | Service | Description |
 |:--------|:------------|
-| **file-storage** | Unified upload/download/delete. Drivers: local FS, S3, MinIO. |
-| **search** | Full-text search. Drivers: in-memory, Elasticsearch, Meilisearch. |
-| **cache** | General-purpose cache. In-memory fallback; Redis via `@objectstack/service-cache`. |
-| **queue** | Message queue. In-memory fallback; durable DB-backed adapter via `@objectstack/service-queue` (no BullMQ/Redis adapter is shipped). |
-| **job** | Scheduled task execution. In-memory fallback; cron-based, concurrency control. |
+| **file-storage** | Unified upload/download/delete via `@objectstack/service-storage`, which mounts `/api/v1/storage` itself. Adapters: local FS and S3 (the S3 adapter's `endpoint` + path-style options cover S3-compatible services such as MinIO and R2). |
+| **search** | **Nothing ships.** `ISearchService` and the engine enum (`elasticsearch`, `meilisearch`, …) exist in `@objectstack/spec`, but no package implements the contract or registers the `search` slot, so `CORE_SERVICE_PROVIDER.search` is `null`. |
+| **cache** | General-purpose cache. In-memory fallback; memory or Redis adapter via `@objectstack/service-cache`. |
+| **queue** | Message queue. In-memory fallback; durable DB-backed adapter (`sys_job_queue`) via `@objectstack/service-queue` (no BullMQ/Redis adapter is shipped). |
+| **job** | Scheduled task execution via `@objectstack/service-job`. In-memory fallback; interval, cron, and DB-backed adapters with concurrency policy. |
 
 ---
 
-## Recommended Development Phases
+## Roadmap Status
 
-### Phase 1: Foundation (P0)
+The three-phase build-out this page used to propose has landed, under package names
+that are `service-*` more often than `plugin-*`. Use the real names — a remedy naming
+a package that cannot be installed is a dead end, which is why
+`CORE_SERVICE_PROVIDER` is CI-checked against the workspace.
 
-| Plugin | Description |
+### Shipped
+
+| Capability | Package |
 |:-------|:------------|
-| **plugin-auth** | Identity engine — JWT, sessions, user CRUD, roles |
-| **plugin-ui** | View CRUD — core low-code capability |
-| **plugin-cache** | General-purpose cache — performance infrastructure |
-| **Metadata DB** | Solve metadata persistence (SchemaRegistry → database) |
+| Identity engine — sessions, JWT, user CRUD, OAuth2/OIDC, SCIM | `@objectstack/plugin-auth` |
+| RBAC, field-level permissions, RLS | `@objectstack/plugin-security` |
+| Record sharing + share links | `@objectstack/plugin-sharing` |
+| Metadata persistence (`sys_metadata`), HMR, cluster cache invalidation | `@objectstack/metadata` · `@objectstack/service-cluster` |
+| Cache — memory + Redis adapters | `@objectstack/service-cache` |
+| Flow orchestration, triggers, approval-node pauses | `@objectstack/service-automation` |
+| Internationalization | `@objectstack/service-i18n` |
+| File storage — local FS + S3 | `@objectstack/service-storage` |
+| DB drivers — PostgreSQL / MySQL / SQLite (Knex), MongoDB, SQLite-WASM, in-memory | `@objectstack/driver-sql` · `driver-mongodb` · `driver-sqlite-wasm` · `driver-memory` |
+| Notification engine + inbox | `@objectstack/service-messaging` |
+| Scheduled tasks — interval, cron, DB-backed | `@objectstack/service-job` |
+| Message queue — memory + durable DB-backed | `@objectstack/service-queue` |
+| Realtime pub/sub (in-process; **no HTTP/WS surface yet**) | `@objectstack/service-realtime` |
 
-### Phase 2: Business Engine (P1)
+### Still open
 
-| Plugin | Description |
+| Slot | State |
 |:-------|:------------|
-| **service-automation** | Flow orchestration, state-machine adjacent execution, approval-node pauses |
-| **plugin-automation** | Triggers + flow orchestration |
-| **plugin-i18n** | Internationalization |
-| **plugin-storage** | File storage (local + S3) |
-| **DB drivers** | PostgreSQL, MySQL, MongoDB, SQLite |
-
-### Phase 3: Advanced Capabilities (P2)
-
-| Plugin | Description |
-|:-------|:------------|
-| **plugin-realtime** | WebSocket / SSE real-time push |
-| **plugin-notification** | Notification engine |
-| **plugin-ai** | Chat, completion, models, conversations (`service-ai`, Cloud/EE) |
-| **plugin-search** | Full-text search |
-| **plugin-job** | Scheduled tasks |
-| **plugin-queue** | Message queue |
+| **ui** | Nothing registers the slot. `ViewProtocol`'s five methods are declared and unrouted; view CRUD runs through `/api/v1/meta`, and `/api/v1/ui/view/:object` is served by the `protocol` service. |
+| **workflow** | Nothing ships. `WorkflowProtocol`'s three methods have no implementation and no consumer. |
+| **search** | Nothing ships. Contract and engine enum exist in `@objectstack/spec` only. |
+| **ai** | Nothing in this repo — `service-ai` (chat, completion, models, conversations) is Cloud/EE. |
+| **realtime transport** | The service exists but no WebSocket/SSE route is mounted, so `routes.realtime` is deliberately never advertised. |
 
 ---
 
@@ -428,11 +513,19 @@ AppPlugin will:
 
 ```typescript
 import type { Plugin } from '@objectstack/core';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 
 let authService: AuthServiceImpl;
 
 export const authPlugin: Plugin = {
-  name: 'plugin-auth',
+  // Plugin names are reverse-domain (e.g. 'com.objectstack.auth'),
+  // not the npm package name.
+  name: 'com.example.auth',
+
+  // ADR-0116 — declare what init() needs and what it unconditionally
+  // registers, so a misordering is a named boot error instead of a crash.
+  requiresServices: ['data'],
+  providesServices: ['auth'],
 
   async init(ctx) {
     // Register the 'auth' CoreServiceName value
@@ -442,8 +535,11 @@ export const authPlugin: Plugin = {
   },
 
   async start(ctx) {
-    const auth = ctx.getService<IAuthService>('auth');
-    await auth.onReady();
+    // Late-bind anything that must wait for every plugin to be up.
+    // (There is no `onReady()` on IAuthService — that is your own type's API.)
+    ctx.hook('kernel:ready', async () => {
+      await authService.connect();
+    });
   },
 
   // destroy() takes no arguments — capture what you need in module scope
@@ -454,9 +550,13 @@ export const authPlugin: Plugin = {
 ```
 
 When a plugin registers a service, the discovery endpoint automatically updates:
-- `services.auth.enabled` → `true`, `status` → `"available"`, `route` → `"/api/v1/auth"`
+- `services.auth.enabled` → `true`, `status` → `"available"`, `handlerReady` → `true`,
+  `route` → `"/api/v1/auth"` (unless the instance self-declares `stub`/`degraded` via
+  `__serviceInfo`, which is reported verbatim instead)
 - `routes.auth` → `"/api/v1/auth"` appears in routes
-- `features` capability flags update accordingly
+- `features` flags follow for the slots that have one — `search`, `files`,
+  `analytics`, `ai`, `workflow`, `notifications`, `i18n` (`websockets` is hardcoded
+  `false`; there is no `features.auth`)
 
 ---
 

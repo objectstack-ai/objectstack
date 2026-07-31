@@ -10,8 +10,9 @@
  * [#4058] Self-describes as `degraded`, not `stub` (ADR-0076 D12): this is a
  * real cache — it stores, expires, and reports true stats — just process-local
  * and unshared. The non-standard `_fallback: true` it used to carry was read by
- * nothing (`readServiceSelfInfo` knows `__serviceInfo` and the legacy `_dev`),
- * so discovery reported it as fully `available`. `handlerReady: false` because
+ * nothing (`readServiceSelfInfo` reads only `__serviceInfo` — `_dev`, the other
+ * marker it knew back then, was itself retired in #4319), so discovery reported
+ * it as fully `available`. `handlerReady: false` because
  * no HTTP surface is mounted for `cache` at all — the same reason realtime
  * reports false.
  */

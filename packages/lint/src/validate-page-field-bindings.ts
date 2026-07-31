@@ -59,22 +59,10 @@ export interface PageFieldFinding {
 }
 
 import { walkPageComponents, type AnyRec } from './page-walk.js';
-
-/**
- * Registry-injected fields present on (almost) every object but NOT declared in
- * `object.fields`. Copied verbatim from `validate-widget-bindings` so the two
- * rules agree on what counts as a field. Deliberately generous: over-inclusion
- * costs at worst a missed warning on a `systemFields: false` object; under-
- * inclusion costs a false one, and a false finding is what makes authors stop
- * trusting the linter (ADR-0072 D1). Real pages DO reference these — e.g.
- * `sys_user.page.ts` lists `created_at` in a related-list's columns.
- */
-const SYSTEM_FIELDS = new Set<string>([
-  'id',
-  'created_at', 'created_by', 'updated_at', 'updated_by',
-  'owner_id', 'organization_id', 'tenant_id', 'user_id',
-  'deleted_at',
-]);
+// Real pages DO reference registry-injected columns — e.g. `sys_user.page.ts`
+// lists `created_at` in a related-list's columns — so the shared set is load-
+// bearing here, not merely defensive.
+import { SYSTEM_FIELDS } from './system-fields.js';
 
 function asArray(v: unknown): AnyRec[] {
   if (Array.isArray(v)) return v as AnyRec[];

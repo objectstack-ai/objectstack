@@ -19,7 +19,7 @@ Triggered by the Kernel during bootstrap and shutdown:
 | Event | Description |
 | :--- | :--- |
 | `kernel:ready` | All plugins have successfully started. System is live. |
-| `kernel:bootstrapped` | Fired after every `kernel:ready` handler has settled, before `kernel:listening`. The "all bootstrap + seed data is ready" anchor — use it for reconcile/backfill work that consumes data a later-starting plugin produces during `kernel:ready`. |
+| `kernel:bootstrapped` | Fired after every `kernel:ready` handler has settled, before `kernel:listening`. The "all **synchronous** bootstrap has settled" anchor — use it for reconcile/backfill work that consumes data a later-starting plugin produces during `kernel:ready`. It does **not** guarantee app *seed* data has settled: an inline seed that overruns `OS_INLINE_SEED_BUDGET_MS` (default 8s) keeps seeding in the background and can outlast even `kernel:listening`. Subscribe to `app:seeded` for the true per-app seed-settle point. |
 | `kernel:listening` | Fired after every `kernel:ready` and `kernel:bootstrapped` handler has completed (e.g. the HTTP server is accepting connections). |
 | `kernel:shutdown` | Shutdown signal received. Plugins should clean up resources. |
 
@@ -61,7 +61,7 @@ The Data Engine runs hooks around record reads and mutations. Write operations f
 | `beforeUpdate` / `afterUpdate` | Around record update — single-id **and** bulk (`multi: true`). |
 | `beforeDelete` / `afterDelete` | Around record deletion — single-id **and** bulk (`multi: true`). |
 
-Reads fire `beforeFind` / `afterFind`, for **both** `find` and `findOne` (one read event covers every read shape). There are no per-method (`findOne`/`count`/`aggregate`) or `*Many` events: read authorization and row filtering are handled by RLS/permission rules, field masking by field-level metadata, and bulk writes by the same `before*`/`after*` write events (with the row-scoping predicate in `ctx.input.ast`).
+Reads fire `beforeFind` / `afterFind`, for **both** `find` and `findOne` (one read event covers every read shape). There are no per-method (`findOne`/`count`/`aggregate`) or `*Many` events: read authorization and row filtering are handled by RLS/permission rules, field masking by field-level metadata, and bulk writes by the same `before*`/`after*` write events (a bulk write leaves `ctx.input.id` undefined and carries the caller's predicate in `ctx.input.options.where`; the middleware-composed row-scoping AST stays on the engine's internal operation context and is **not** exposed on `ctx.input`).
 
 ### The HookContext
 
@@ -71,10 +71,10 @@ Every data hook is a single-argument handler `(ctx: HookContext) => void | Promi
 | :--- | :--- |
 | `ctx.object` | Target object name (immutable). |
 | `ctx.event` | Current lifecycle event, e.g. `'beforeInsert'` (immutable). |
-| `ctx.input` | **Mutable** input. Shapes: insert `{ data }`, update `{ id, data }`, delete `{ id }`. Modify this to change the operation. |
+| `ctx.input` | **Mutable** input. Shapes: find `{ ast, options }`, insert `{ data, options }`, update `{ id, data, options }`, delete `{ id, options }`. Modify this to change the operation. |
 | `ctx.result` | Operation result, available in `after*` events (mutable). |
 | `ctx.previous` | Record state before the operation (update/delete). |
-| `ctx.session` | Auth/tenancy info (`userId`, `organizationId`, `roles`, …). |
+| `ctx.session` | Auth/tenancy info (`userId`, `organizationId`, `positions`, `accessToken`, …). Absent entirely when the call carried no identity envelope. |
 | `ctx.api` | Scoped cross-object data access. |
 
 ### Registering Data Hooks
@@ -95,18 +95,20 @@ engine.registerHook('afterInsert', async (ctx) => {
 
 ### Error Handling
 
-What happens when a data hook throws is governed by the hook's **`onError`** policy (`'abort'` | `'log'`, default `'abort'`):
-
-- `onError: 'abort'` (default) — the error rolls back the transaction (when the hook is blocking), cancelling the operation.
-- `onError: 'log'` — the error is logged and execution continues; the operation is **not** cancelled.
+A hook registered in code with `engine.registerHook()` always propagates: the engine awaits each handler in turn and never catches, so a throw aborts the operation.
 
 ```typescript
 engine.registerHook('beforeInsert', async (ctx) => {
   if (ctx.object === 'invoice' && !ctx.input.data.customer_id) {
-    throw new Error('Invoice must have a customer'); // Aborts the insert (default onError)
+    throw new Error('Invoice must have a customer'); // Aborts the insert
   }
 });
 ```
+
+Hooks declared as **`Hook` metadata** additionally honour an **`onError`** policy (`'abort'` | `'log'`, default `'abort'`). It is a metadata field — `registerHook()` has no `onError` option:
+
+- `onError: 'abort'` (default) — the error propagates, rolling back the transaction (when the hook is blocking) and cancelling the operation.
+- `onError: 'log'` — the error is logged and swallowed; the operation is **not** cancelled.
 
 ### Ordering
 

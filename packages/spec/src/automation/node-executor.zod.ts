@@ -243,12 +243,18 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    * `config`. Drives Studio form generation. Optional — actions with no config
    * omit it.
    *
-   * **What actually validates against this, and what does not** (#4027). An
-   * earlier revision of this doc claimed `registerFlow()` checks that `config`
-   * satisfies `configSchema`. It does not, and never did — `FlowNodeSchema.config`
-   * is `z.record(z.unknown())`, so no layer rejects an undeclared or misspelled
-   * config key at author time. What *is* enforced:
+   * **What actually validates against this, and what does not** (#4027,
+   * tightened by #4277). `FlowNodeSchema.config` is `z.record(z.unknown())`,
+   * so the flow-level parse never types a node's config — enforcement is
+   * layered on top:
    *
+   *  - **Unknown keys are rejected at `registerFlow()`** (#4277, tightening
+   *    the #4059 warning): a config key this schema does not declare fails
+   *    registration with the path, the declared key set, a did-you-mean, and
+   *    a per-key tombstone where one exists. The walk stops at keyValue maps
+   *    (`additionalProperties: true` — those keys are author data) and
+   *    exempts `assignment` wholesale (its top-level keys ARE the author's
+   *    variable names).
    *  - **Expression slots are validated.** Every property marked
    *    `xExpression: 'expression'` (bare CEL) is parse-checked at `registerFlow()`
    *    and by `objectstack validate`, via the `FLOW_NODE_EXPRESSION_PATHS` ledger
@@ -256,17 +262,20 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    *    unvalidated the way `screen.fields[].visibleWhen` did for four months
    *    (#3528). Slots marked `xExpression: 'template'` are recorded but not
    *    checked: no validator implements the single-brace `{var}` dialect they use.
-   *  - **Everything else is designer-facing only.** Types, `required`, `enum` and
-   *    unknown keys are not enforced anywhere. Do not rely on this schema as a
-   *    runtime guard; an executor must still validate its own config.
+   *  - **Types and `required` are enforced at execute time for the
+   *    contract-carrying builtins** (#4277): those executors `parse()` their
+   *    config against the Zod contracts in `io-node-config.zod.ts` /
+   *    `builtin-node-config.zod.ts` / `control-flow.zod.ts`, refusing the node
+   *    (guard, not routable) on violation. For a plugin-contributed executor
+   *    this schema remains designer-facing — the plugin must still validate
+   *    its own config, and SHOULD follow the same parse pattern.
    *
-   * The schema is also hand-written per executor rather than derived from the
-   * code that reads `config`, so a property can be declared without being read
-   * (or read without being declared) with nothing to reconcile the two. Only the
-   * expression subset has a ratchet today.
+   * The schema is hand-written per executor rather than derived from the code
+   * that reads `config`; the form↔Zod ledger tests in `service-automation`
+   * reconcile the two for the builtins.
    */
   configSchema: z.unknown().optional()
-    .describe('JSON Schema for the node config (drives the designer form; only declared expression slots are validated)'),
+    .describe('JSON Schema for the node config (drives the designer form; undeclared keys are rejected at registration)'),
 
   // ── capabilities ──────────────────────────────────────────────────
   /** Supports async pause/resume (e.g. wait, human_task). */

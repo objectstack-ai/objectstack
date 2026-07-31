@@ -41,7 +41,9 @@ jobs:
     runs-on: ubuntu-latest
     # Two full passes of everything, dogfood included. Generous, but bounded —
     # an unbounded job is what let a hung Test Core sit for GitHub's 6h default
-    # while the PR read as "still running" rather than broken.
+    # while the PR read as "still running" rather than broken. Since #4314 the
+    # primary stall detector is run-with-stall-guard on each pass (labeled red
+    # after 15 min of frozen output); this is the pure backstop.
     timeout-minutes: 120
     steps:
       - name: Checkout repository
@@ -77,9 +79,14 @@ jobs:
 
       # Deliberately NOT `continue-on-error`. If pass 1 is red the suite is
       # simply broken on main and that is worth failing on; this gate adds pass
-      # 2, it does not replace the ordinary signal.
+      # 2, it does not replace the ordinary signal. The stall guard (#4250,
+      # #4314) bounds a frozen-output hang at 15 min instead of letting a
+      # nightly nobody watches sit until the 120-min timeout; on a stall it
+      # exits 75 and its banner in the log names the last output line.
       - name: Test suite — pass 1
-        run: pnpm turbo run test --concurrency=4 --force
+        run: |
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass1.log" --stall-minutes 15 -- \
+            pnpm turbo run test --concurrency=4 --force
 
       # Informational only. A stray `.objectstack/` is how the #4065 class shows
       # up on disk, so printing what pass 1 left behind turns a pass-2 failure
@@ -95,14 +102,27 @@ jobs:
           echo "Files inside them:"
           find . -path ./node_modules -prune -o -type d -name '.objectstack' -exec find {} -type f \; || true
 
+      # A pass-2 red normally means rerun-UNSAFE — but a stall (guard exit 75)
+      # says nothing about working-tree pollution, and the #4065 error text
+      # would send whoever triages it hunting for state leaks that aren't
+      # there. Keep the two verdicts apart.
       - name: Test suite — pass 2 (same working tree)
         run: |
-          set -o pipefail
-          if ! pnpm turbo run test --concurrency=4 --force; then
+          status=0
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass2.log" --stall-minutes 15 -- \
+            pnpm turbo run test --concurrency=4 --force || status=$?
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          elif [ "$status" -eq 75 ]; then
+            echo "::error::Pass 2 STALLED — frozen output, killed by run-with-stall-guard"
+            echo "::error::(see #4250). This is NOT a rerun-safety verdict: a stall says"
+            echo "::error::nothing about working-tree pollution. Rerun the workflow; if it"
+            echo "::error::stalls again at the same file, note the occurrence on #4250."
+          else
             echo "::error::The suite passes once and fails on a second run in the same"
             echo "::error::working tree. Something under test writes state into the tree and"
             echo "::error::reads it back on the next run. Ordinary CI cannot see this — every"
             echo "::error::other job is a fresh clone, so every other job is always run #1."
             echo "::error::See the on-disk state reported above, and #4065 for the pattern."
-            exit 1
           fi
+          exit "$status"

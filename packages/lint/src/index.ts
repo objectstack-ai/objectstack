@@ -194,6 +194,15 @@ export {
 } from './validate-object-references.js';
 export type { ObjectRefFinding, ObjectRefSeverity } from './validate-object-references.js';
 
+export {
+  validateSearchableFields,
+  SEARCHABLE_FIELD_UNKNOWN,
+} from './validate-searchable-fields.js';
+export type {
+  SearchableFieldFinding,
+  SearchableFieldSeverity,
+} from './validate-searchable-fields.js';
+
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
 export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';
 
@@ -248,6 +257,36 @@ export type {
   AiAgentAuthoringFinding,
   AiAgentAuthoringSeverity,
 } from './validate-ai-agent-authoring.js';
+
+export {
+  validateHookBodyWrites,
+  extractHookBodyWrites,
+  HOOK_BODY_WRITE_PATTERNS,
+  HOOK_BODY_WRITE_UNKNOWN_FIELD,
+} from './validate-hook-body-writes.js';
+export type {
+  HookBodyWriteFinding,
+  HookBodyWriteSeverity,
+  HookBodyWritePattern,
+  ExtractedHookBodyWrite,
+} from './validate-hook-body-writes.js';
+
+// The same write-set check on action bodies — same schema, same sandbox, same
+// silent no-op. Its ledger is a declared partition of HOOK_BODY_WRITE_PATTERNS
+// (only the `ctx.api` family survives the context change), so the two rules
+// share one extractor rather than growing two.
+export {
+  validateActionBodyWrites,
+  ACTION_BODY_WRITE_PATTERNS,
+  ACTION_BODY_WRITE_PATTERN_IDS,
+  ACTION_BODY_WRITE_EXCLUSIONS,
+  ACTION_BODY_WRITE_UNKNOWN_FIELD,
+} from './validate-action-body-writes.js';
+export type {
+  ActionBodyWriteFinding,
+  ActionBodyWriteSeverity,
+  ActionBodyWriteExclusion,
+} from './validate-action-body-writes.js';
 
 // One entry point for the reference-resolution rules above (#3583 §5 D5).
 // Adding a rule to `REFERENCE_INTEGRITY_RULES` runs it on `validate`, `lint`

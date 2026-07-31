@@ -463,7 +463,7 @@ describe('DataEngineFindRequestSchema', () => {
     expect(request.query?.where).toBeDefined();
   });
 
-  it('should accept find with legacy params (backward compat)', () => {
+  it('folds legacy params into their canonical keys and drops the aliases (#3795)', () => {
     const request = DataEngineFindRequestSchema.parse({
       method: 'find',
       object: 'account',
@@ -476,10 +476,69 @@ describe('DataEngineFindRequestSchema', () => {
       },
     });
 
-    expect(request.query?.filter).toEqual({ status: 'active' });
-    expect(request.query?.select).toEqual(['id', 'name']);
-    expect(request.query?.skip).toBe(10);
-    expect(request.query?.populate).toEqual(['owner']);
+    // Legacy input stays accepted (backward compat) — but the parsed output
+    // speaks canonical QueryAST only, so no consumer re-implements precedence.
+    expect(request.query?.where).toEqual({ status: 'active' });
+    expect(request.query?.fields).toEqual(['id', 'name']);
+    expect(request.query?.orderBy).toEqual([{ field: 'name', order: 'asc' }]);
+    expect(request.query?.offset).toBe(10);
+    expect(request.query?.expand).toEqual({ owner: { object: 'owner' } });
+    for (const alias of ['filter', 'select', 'sort', 'skip', 'populate']) {
+      expect(request.query && alias in request.query).toBe(false);
+    }
+  });
+
+  it('lowers the record sort spellings while folding (#3795)', () => {
+    const named = DataEngineFindRequestSchema.parse({
+      method: 'find',
+      object: 'account',
+      query: { sort: { name: 'desc' } },
+    });
+    expect(named.query?.orderBy).toEqual([{ field: 'name', order: 'desc' }]);
+
+    const numeric = DataEngineFindRequestSchema.parse({
+      method: 'find',
+      object: 'account',
+      query: { sort: { created_at: 1, name: -1 } },
+    });
+    expect(numeric.query?.orderBy).toEqual([
+      { field: 'created_at', order: 'asc' },
+      { field: 'name', order: 'desc' },
+    ]);
+  });
+
+  it('tolerates a redundant identical spelling, refuses a conflicting one (#3795)', () => {
+    const redundant = DataEngineFindRequestSchema.parse({
+      method: 'find',
+      object: 'account',
+      query: { fields: ['id'], select: ['id'] },
+    });
+    expect(redundant.query?.fields).toEqual(['id']);
+    expect(redundant.query && 'select' in redundant.query).toBe(false);
+
+    const conflict = DataEngineFindRequestSchema.safeParse({
+      method: 'find',
+      object: 'account',
+      query: { fields: ['id'], select: ['name'] },
+    });
+    expect(conflict.success).toBe(false);
+    if (!conflict.success) {
+      expect(conflict.error.issues[0].message).toMatch(/Send exactly one/);
+    }
+  });
+
+  it('refuses a conflicting value on every alias pair (#3795)', () => {
+    const cases: Array<Record<string, unknown>> = [
+      { filter: { a: 1 }, where: { b: 2 } },
+      { select: ['a'], fields: ['b'] },
+      { sort: [{ field: 'a', order: 'asc' }], orderBy: [{ field: 'b', order: 'asc' }] },
+      { skip: 1, offset: 2 },
+      { populate: ['a'], expand: { b: { object: 'b' } } },
+    ];
+    for (const query of cases) {
+      const result = DataEngineFindRequestSchema.safeParse({ method: 'find', object: 'account', query });
+      expect(result.success, `${Object.keys(query).join('+')} must be refused`).toBe(false);
+    }
   });
 });
 
@@ -496,7 +555,7 @@ describe('DataEngineFindOneRequestSchema', () => {
     expect(request.method).toBe('findOne');
   });
 
-  it('should accept find one with legacy params (backward compat)', () => {
+  it('folds legacy params into canonical keys (backward compat input, #3795)', () => {
     const request = DataEngineFindOneRequestSchema.parse({
       method: 'findOne',
       object: 'account',
@@ -506,7 +565,9 @@ describe('DataEngineFindOneRequestSchema', () => {
       },
     });
 
-    expect(request.query?.filter).toEqual({ id: '123' });
+    expect(request.query?.where).toEqual({ id: '123' });
+    expect(request.query?.fields).toEqual(['id', 'name']);
+    expect(request.query && 'filter' in request.query).toBe(false);
   });
 });
 
@@ -561,7 +622,7 @@ describe('DataEngineUpdateRequestSchema', () => {
     expect(request.id).toBe('123');
   });
 
-  it('should accept update with legacy filter (backward compat)', () => {
+  it('folds a legacy filter into where (backward compat input, #3795)', () => {
     const request = DataEngineUpdateRequestSchema.parse({
       method: 'update',
       object: 'account',
@@ -572,7 +633,8 @@ describe('DataEngineUpdateRequestSchema', () => {
       },
     });
 
-    expect(request.options?.filter).toEqual({ category: 'premium' });
+    expect(request.options?.where).toEqual({ category: 'premium' });
+    expect(request.options && 'filter' in request.options).toBe(false);
     expect(request.options?.multi).toBe(true);
   });
 
@@ -603,7 +665,7 @@ describe('DataEngineDeleteRequestSchema', () => {
     expect(request.id).toBe('123');
   });
 
-  it('should accept delete with legacy filter (backward compat)', () => {
+  it('folds a legacy filter into where (backward compat input, #3795)', () => {
     const request = DataEngineDeleteRequestSchema.parse({
       method: 'delete',
       object: 'account',
@@ -613,7 +675,8 @@ describe('DataEngineDeleteRequestSchema', () => {
       },
     });
 
-    expect(request.options?.filter).toEqual({ status: 'archived' });
+    expect(request.options?.where).toEqual({ status: 'archived' });
+    expect(request.options && 'filter' in request.options).toBe(false);
     expect(request.options?.multi).toBe(true);
   });
 
@@ -654,7 +717,7 @@ describe('DataEngineCountRequestSchema', () => {
     expect(request.query?.where).toBeDefined();
   });
 
-  it('should accept count with legacy filter (backward compat)', () => {
+  it('folds a legacy filter into where (backward compat input, #3795)', () => {
     const request = DataEngineCountRequestSchema.parse({
       method: 'count',
       object: 'account',
@@ -663,7 +726,17 @@ describe('DataEngineCountRequestSchema', () => {
       },
     });
 
-    expect(request.query?.filter).toEqual({ status: 'active' });
+    expect(request.query?.where).toEqual({ status: 'active' });
+    expect(request.query && 'filter' in request.query).toBe(false);
+  });
+
+  it('refuses filter + where with different values (#3795)', () => {
+    const result = DataEngineCountRequestSchema.safeParse({
+      method: 'count',
+      object: 'account',
+      query: { filter: { a: 1 }, where: { b: 2 } },
+    });
+    expect(result.success).toBe(false);
   });
 });
 

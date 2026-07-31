@@ -53,8 +53,10 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
     }),
     async execute(node, variables, context) {
       const cfg = (node.config ?? {}) as Record<string, unknown>;
-      const flowName =
-        typeof cfg.flowName === 'string' ? cfg.flowName : typeof cfg.flow === 'string' ? cfg.flow : undefined;
+      // The historical `flow` alias is canonicalized at load by the ADR-0087 D2
+      // conversion 'flow-node-subflow-flow-alias' (#4278), so only the
+      // canonical key is read here (contract: SubflowConfigSchema).
+      const flowName = typeof cfg.flowName === 'string' ? cfg.flowName : undefined;
       if (!flowName) {
         return refuseNode(`subflow '${node.id}': config.flowName is required`);
       }

@@ -16,7 +16,8 @@
   "scripts": {
     "build": "tsup --config ../../tsup.config.ts",
     "dev": "tsc -w",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",

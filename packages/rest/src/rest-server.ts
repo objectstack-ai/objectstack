@@ -612,14 +612,21 @@ function isExpectedDataStatus(status: number): boolean {
 /**
  * Malformed-query rejections from the list normalizer (`findData`). They are
  * 400s the CALLER caused by naming a parameter the API does not have
- * (`UNSUPPORTED_QUERY_PARAM`, #2926 ⑩) or a field the object does not have
- * (`INVALID_FIELD`, #4134) — a client mistake the response already explains,
+ * (`UNSUPPORTED_QUERY_PARAM`, #2926 ⑩), a field the object does not have
+ * (`INVALID_FIELD`, #4134 / #4226 / #4254), or a filter/sort/aggregation
+ * value the spec cannot read (`INVALID_FILTER` #4181, `INVALID_SORT` #4226,
+ * `INVALID_QUERY` #4254) — a client mistake the response already explains,
  * not a server fault worth an "[REST] Unhandled error" line per request.
+ * The filter and sort codes joined this list late: both shipped without it,
+ * so every rejection they produced was ALSO logged as an unhandled error.
  */
 function isExpectedQueryRejection(body: Record<string, unknown> | undefined): boolean {
     return body?.code === 'UNSUPPORTED_QUERY_PARAM'
         || body?.code === 'INVALID_FIELD'
-        || body?.code === 'INVALID_REQUEST';
+        || body?.code === 'INVALID_REQUEST'
+        || body?.code === 'INVALID_FILTER'
+        || body?.code === 'INVALID_SORT'
+        || body?.code === 'INVALID_QUERY';
 }
 
 /**

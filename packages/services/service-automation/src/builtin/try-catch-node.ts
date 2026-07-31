@@ -1,18 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
-import type { FlowRegionParsed } from '@objectstack/spec/automation';
+import { defineActionDescriptor, TryCatchConfigSchema } from '@objectstack/spec/automation';
+import type { TryCatchConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
-
-interface RetryPolicy {
-  maxRetries?: number;
-  retryDelayMs?: number;
-  backoffMultiplier?: number;
-  maxRetryDelayMs?: number;
-  jitter?: boolean;
-}
+import { parseNodeConfig } from './parse-config.js';
 
 /**
  * `try_catch` built-in node — **structured try/catch/retry** (ADR-0031 §Decision 3).
@@ -77,23 +70,25 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
       },
     }),
     async execute(node, variables, context) {
-      const cfg = (node.config ?? {}) as Record<string, unknown>;
-      const tryRegion = cfg.try as FlowRegionParsed | undefined;
-      const catchRegion = cfg.catch as FlowRegionParsed | undefined;
-      const errorVariable =
-        typeof cfg.errorVariable === 'string' && cfg.errorVariable ? cfg.errorVariable : '$error';
-      const retry = (cfg.retry ?? {}) as RetryPolicy;
-
-      if (tryRegion == null) {
-        return { success: false, error: `try_catch '${node.id}': config.try region is required` };
-      }
+      // Parse against the ADR-0031 contract. Note the retry defaults now come
+      // from the CONTRACT (RetryPolicySchema): a declared `retry` block that
+      // omits `retryDelayMs` gets the documented 1000ms base delay, where this
+      // executor historically filled in 0 — the declared default is the
+      // enforced one (#4277).
+      const parsed = parseNodeConfig<TryCatchConfigParsed>('try_catch', node.id, TryCatchConfigSchema, node.config);
+      if (!parsed.ok) return parsed.refusal;
+      const cfg = parsed.config;
+      const tryRegion = cfg.try;
+      const catchRegion = cfg.catch;
+      const errorVariable = cfg.errorVariable || '$error';
+      const retry = cfg.retry;
 
       const ctxOrEmpty = context ?? ({} as AutomationContext);
-      const maxRetries = typeof retry.maxRetries === 'number' ? retry.maxRetries : 0;
-      const baseDelay = typeof retry.retryDelayMs === 'number' ? retry.retryDelayMs : 0;
-      const multiplier = typeof retry.backoffMultiplier === 'number' ? retry.backoffMultiplier : 1;
-      const maxDelay = typeof retry.maxRetryDelayMs === 'number' ? retry.maxRetryDelayMs : 30000;
-      const useJitter = retry.jitter === true;
+      const maxRetries = retry?.maxRetries ?? 0;
+      const baseDelay = retry?.retryDelayMs ?? 0;
+      const multiplier = retry?.backoffMultiplier ?? 1;
+      const maxDelay = retry?.maxRetryDelayMs ?? 30000;
+      const useJitter = retry?.jitter === true;
 
       // Run the try region, retrying with exponential backoff up to maxRetries.
       let lastError = 'unknown error';

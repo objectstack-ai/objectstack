@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { readFileSync } from 'node:fs';
+
 import tsParser from '@typescript-eslint/parser';
 
 // Flat ESLint config — guards against memory-bloating import patterns.
@@ -66,16 +68,52 @@ const SLOT_LOOKUPS = ['resolveService', 'getService', 'getRequestKernelService']
 // eslint-disable comments on purpose: exceptions belong in one reviewable
 // place, not sprinkled through the code. Deleting a name from this list is how
 // the exemption ends once that contract gets written.
-const UNCONTRACTED_SLOTS = ['protocol', 'mcp', 'kernel-resolver', 'scope-manager'].join('|');
+//
+// Entries are spliced into a regex, so escape metacharacters (`http\\.server`).
+// `http.server` is served by three providers (plugin-hono-server, runtime's
+// config.server path, qa's node-plugin) and no IHttpServer contract exists;
+// callers read only `getPort()`.
+const UNCONTRACTED_SLOTS = ['protocol', 'mcp', 'kernel-resolver', 'scope-manager', 'http\\.server'].join('|');
 
-const SLOT_LOOKUP_ANY_MESSAGE =
-  'Do not annotate a service-lookup result as `any` — the lookup already returns ' +
-  'the slot\'s contract (#4168/#4176/#4202), and this switches that checking off ' +
+// Exported so `scripts/check-slot-lookup-ratchet.mjs` can identify THIS rule's
+// reports among the other `no-restricted-syntax` rules, by exact message —
+// the counter and the rule must never be able to disagree about what counts.
+export const SLOT_LOOKUP_ANY_MESSAGE =
+  'Do not erase a service-lookup result to `any` (`: any`, `as any`, or a ' +
+  '`getService<any>(…)` type argument) — the lookup already returns the slot\'s ' +
+  'contract (#4168/#4176/#4202), and this switches that checking off ' +
   'for the call site while looking identical to code that has it. Every such ' +
   'annotation found so far was hiding a real gap, including a project-membership ' +
-  'gate that silently stopped gating. If the slot genuinely has no contract, add ' +
-  'its name to UNCONTRACTED_SLOTS in eslint.config.mjs with a note, so the ' +
-  'exemption is reviewed once and visible in one place — see issue #4127.';
+  'gate that silently stopped gating and two datasource-registration branches ' +
+  'probing a method no metadata service has (#4251). Pass the slot\'s contract ' +
+  'type instead (`getService<IDataEngine>(\'data\')`). If the slot genuinely has ' +
+  'no contract, add its name to UNCONTRACTED_SLOTS in eslint.config.mjs with a ' +
+  'note, so the exemption is reviewed once and visible in one place — see ' +
+  'issues #4127 and #4251.';
+
+// [#4251] The sweep ratchet, read from `scripts/slot-lookup-baseline.json`.
+//
+// Those files hold pre-existing lookup-erasure sites — `getService<any>(…)`,
+// `: any`, or `as any` — that predate the rule reaching them: the rule's scope
+// was packages/runtime only until #4251 widened it, and the type-argument
+// selector did not exist. 171 sites in 40 files at the widening; they are
+// grandfathered BY FILE for the same reason UNCONTRACTED_SLOTS is central —
+// `--no-inline-config` means the escape must live in config, and one shrinking
+// list is the ratchet made visible. Batches remove entries as they sweep (see
+// #4214 for the batch pattern and its yield — these sites are where the erased
+// contracts live).
+//
+// The baseline is the SINGLE SOURCE: its keys are these ignores and its values
+// are the per-file counts `pnpm check:slot-lookup` enforces. That coupling is
+// the point (#4320 was found the same way — a promise nothing checked). A bare
+// file list made three moves invisible: adding a file to silence lint, adding
+// NEW violations to an already-listed file (they rode the entry silently), and
+// clearing a file without dropping its entry (the list stops meaning anything).
+// The counted baseline fails all three, and `--update` is the only way to move
+// it — downward.
+const SLOT_LOOKUP_UNSWEPT = Object.keys(JSON.parse(
+  readFileSync(new URL('./scripts/slot-lookup-baseline.json', import.meta.url), 'utf8'),
+));
 
 export default [
   {
@@ -200,6 +238,14 @@ export default [
   // having — a deliberate gap is a reviewed line in this file, a careless one
   // is a build failure, and the two stop looking identical in the code.
   //
+  // [#4251] Scope is all of packages/ — the rule shipped scoped to
+  // packages/runtime while the composition roots (rest, plugins/*, services/*)
+  // held 77 of the 80 known sites, an unlinted majority that looked covered.
+  // Per-package curation would recreate that gap one package at a time, so the
+  // scope is total and the not-yet-swept files are grandfathered individually
+  // in the counted baseline above — a shrinking list under `check:slot-lookup`,
+  // not a silent boundary.
+  //
   // KNOWN RESIDUAL: a wrapper whose own return type is annotated
   // (`const getEngine = async (): Promise<any> => …resolveService(…)`) erases
   // the slot type just as effectively, and this selector cannot see it — the
@@ -207,8 +253,8 @@ export default [
   // existed (share-links `getEngine`, fixed in batch 4). Catching that shape
   // needs type information, so it belongs to a typed-lint pass, not here.
   {
-    files: ['packages/runtime/**/*.{ts,mts,cts}'],
-    ignores: ['**/node_modules/**', '**/dist/**'],
+    files: ['packages/**/*.{ts,tsx,mts,cts}'],
+    ignores: ['**/node_modules/**', '**/dist/**', ...SLOT_LOOKUP_UNSWEPT],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
@@ -229,6 +275,17 @@ export default [
             'TSAsExpression[typeAnnotation.type="TSAnyKeyword"]' +
             `:has(CallExpression[callee.property.name=/^(${SLOT_LOOKUPS})$/]` +
             `:not(:has(Literal[value=/^(${UNCONTRACTED_SLOTS})$/])))`,
+          message: SLOT_LOOKUP_ANY_MESSAGE,
+        },
+        {
+          // `ctx.getService<any>('data')` — the type-argument form (#4251).
+          // No annotation, no `as`, and the contract is erased all the same;
+          // this is the shape 80 sites actually used while the two selectors
+          // above matched zero of them.
+          selector:
+            `CallExpression[callee.property.name=/^(${SLOT_LOOKUPS})$/]` +
+            '[typeArguments.params.0.type="TSAnyKeyword"]' +
+            `:not(:has(Literal[value=/^(${UNCONTRACTED_SLOTS})$/]))`,
           message: SLOT_LOOKUP_ANY_MESSAGE,
         },
       ],

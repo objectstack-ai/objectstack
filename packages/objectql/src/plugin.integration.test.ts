@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '../src/plugin';
 import { ObjectSchema } from '@objectstack/spec/data';
@@ -10,7 +10,21 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
   let kernel: ObjectKernel;
 
   beforeEach(() => {
-    kernel = new ObjectKernel({ logLevel: 'silent' });
+    // logger.level — NOT `logLevel`, which ObjectKernelConfig never had: every
+    // kernel here logged its whole bootstrap at info while declaring itself
+    // silent, ~40 boots' worth of noise per run in the Test Core log (#4250).
+    // gracefulShutdown:false — a test kernel must not install process-wide
+    // SIGINT/SIGTERM handlers: vitest recycles each fork worker with SIGTERM,
+    // and a kernel that intercepts it makes worker exit depend on the kernel's
+    // async shutdown race instead of Node's default die-on-signal.
+    kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+  });
+
+  afterEach(async () => {
+    // Shut down what we booted: a kernel left running defers its plugins'
+    // stop() work (engine destroy, driver disconnect) to worker teardown,
+    // where nothing awaits or reports it.
+    if (kernel.getState() === 'running') await kernel.shutdown();
   });
 
   describe('Simple Mode (ObjectQL-only)', () => {

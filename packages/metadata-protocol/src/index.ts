@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-export { ObjectStackProtocolImplementation, ConcurrentUpdateError, normalizeViewMetadata, graftNormalizedOperators } from './protocol.js';
+export { ObjectStackProtocolImplementation, ConcurrentUpdateError, normalizeViewMetadata, graftNormalizedOperators, stripReadDecorations } from './protocol.js';
 export { createMetadataProtocolPlugin, assembleMetadataProtocol } from './plugin.js';
 export type { MetadataProtocolPluginOptions } from './plugin.js';
 export type { UninstallCleanup, UninstallCleanupOutcome } from './protocol.js';

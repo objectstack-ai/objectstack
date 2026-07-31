@@ -25,12 +25,15 @@
  * `map.input`), and the undeclared `map.flow` alias, which graduated into the
  * ADR-0087 D2 conversion layer like `notify.source` before it.
  *
- * ## What these schemas are (and are not) wired to
+ * ## What these schemas are wired to (#4277)
  *
- * Contract exports only — no engine path `parse()`s a node config with them
- * today, so registering a flow behaves exactly as before. Wiring the executors
- * to parse is deliberately deferred until the #4059 undeclared-key warning has
- * measured a release's worth of real metadata (#4045 step 3b).
+ * Live execute-time contracts: each executor `parse()`s its config against
+ * its schema before running (`service-automation`'s `parse-config.ts`), so
+ * type and `required` violations refuse the node as a guard. All of these
+ * parse the RAW stored config — their typed slots are strings (or `unknown`
+ * where values interpolate), so `{token}` templates pass and resolve at the
+ * executor's existing interpolation points. Unknown keys are rejected earlier,
+ * at `registerFlow()` (the tightened #4059 check); the parse here strips them.
  *
  * Deliberately absent:
  *  - `assignment` — its config cannot be described by a fixed key set: with no
@@ -38,8 +41,13 @@
  *    names (logic-nodes.ts). The ledger test pins that exemption with its
  *    reason instead of pretending a shape.
  *  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
- *    deliberately-schemaless class (config-schemas.test.ts); their contracts
- *    live elsewhere (edges, sibling blocks, conditional forms).
+ *    descriptor-schemaless class (config-schemas.test.ts). `wait` and
+ *    `connector_action` keep their contracts in FlowNodeSchema's sibling
+ *    blocks (`waitEventConfig` / `connectorConfig`); the other three publish
+ *    executor-derived config contracts in `schemaless-node-config.zod.ts`
+ *    (#4278) — separate from this module because they must NOT grow into
+ *    descriptor `configSchema`s (the forms they describe stay hand-written in
+ *    objectui, reconciled by a test there).
  */
 
 import { z } from 'zod';

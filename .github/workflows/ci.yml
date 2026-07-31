@@ -145,12 +145,22 @@ jobs:
       # stall — a labeled red naming the last output line — instead of a
       # 20-minute wait for a human (or the job timeout) to notice. 10 min is
       # ~5× the longest healthy quiet gap and still under half a normal run.
+      #
+      # NODE_OPTIONS arms every node process (vitest workers included) to dump
+      # a diagnostic report on SIGUSR2; on a stall the guard signals the frozen
+      # process group and digests the reports into the log — exact JS stack for
+      # a process whose event loop is alive, and a named "no report = blocked
+      # loop" verdict for one that is sync-spinning. The next #4250 occurrence
+      # identifies its own culprit instead of costing a diagnosis.
       - name: Run affected tests (PR)
         if: github.event_name == 'pull_request'
         env:
           TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
+          NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
         run: |
-          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 -- \
+          mkdir -p "$RUNNER_TEMP/stall-reports"
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 \
+            --report-dir "$RUNNER_TEMP/stall-reports" -- \
             pnpm turbo run test --affected --filter=!@objectstack/dogfood --concurrency=4
 
       # Push to main: full run. Spec's suite runs here plain (uninstrumented);
@@ -161,8 +171,12 @@ jobs:
       # Dogfood job runs it.
       - name: Run all tests (push)
         if: github.event_name == 'push'
+        env:
+          NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
         run: |
-          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 -- \
+          mkdir -p "$RUNNER_TEMP/stall-reports"
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 \
+            --report-dir "$RUNNER_TEMP/stall-reports" -- \
             pnpm turbo run test --filter=!@objectstack/dogfood --concurrency=4
 
       # Runs even when the suite failed — that is when it earns its keep. A red
@@ -177,6 +191,19 @@ jobs:
             exit 0
           fi
           node scripts/check-test-completeness.mjs "$RUNNER_TEMP/test-core.log"
+
+      # A stall's full diagnostic reports (JS stacks, libuv handles, heap
+      # summary per process) outlive the in-log digest — keep them so a #4250
+      # occurrence can be dissected offline. Free when nothing stalled: the
+      # directory is empty and if-no-files-found skips the upload.
+      - name: Upload stall diagnostic reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stall-reports-test-core
+          path: ${{ runner.temp }}/stall-reports/
+          if-no-files-found: ignore
+          retention-days: 14
 
       # Seed the shared Turbo cache from main only (see the restore step
       # above). always(): keep the seed fresh even when a test fails, matching
@@ -312,6 +339,19 @@ jobs:
       # The whole driver-sql suite runs under the skewed process zone — not
       # just the live-server files — so a TZ-sensitive assumption anywhere in
       # the driver's tests fails here before it can ship.
+      #
+      # run-with-stall-guard: same wiring as Test Core (see the comment there;
+      # #4250). Both of this job's test legs have hit the same nondeterministic
+      # stall (#4331) — once frozen mid-file in core's kernel.test, once silent
+      # for 24 minutes AFTER every suite printed `Done` (a process that never
+      # exited) — and each burned the full 30-minute job timeout to end as an
+      # uninformative "The operation was canceled". The guard watches output
+      # silence, so both shapes become a labeled red naming the last line after
+      # 10 quiet minutes, and its process-group kill takes down whatever
+      # refused to exit. `--log` is the guard's own tee (mandatory); no
+      # completeness guard reads these files yet. The zone-assert `node -e`
+      # stays outside the wrapper: a one-shot print cannot stall, and the
+      # guard should time the suite only.
       - name: Run driver-sql suite against both live servers
         env:
           TZ: America/New_York
@@ -323,7 +363,8 @@ jobs:
           # everything still passes — the same vacuous-pass hole the live-server
           # suites close by asserting a non-UTC SERVER.
           node -e "const tz=Intl.DateTimeFormat().resolvedOptions().timeZone,off=new Date().getTimezoneOffset();if(!tz||tz==='UTC'||off===0){console.error('process zone is '+tz+' (offset '+off+') — this job must run skewed');process.exit(1)}console.log('process zone: '+tz+' (offset '+off+')')"
-          pnpm --filter @objectstack/driver-sql test
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/temporal-driver-sql.log" --stall-minutes 10 -- \
+            pnpm --filter @objectstack/driver-sql test
 
       # The non-SQL half of the same axis. `driver-sql` has run under a skewed
       # process zone since #3979, but the other backends the temporal
@@ -359,13 +400,17 @@ jobs:
           # everything still passes — the same vacuous-pass hole the live-server
           # suites close by asserting a non-UTC SERVER.
           node -e "const tz=Intl.DateTimeFormat().resolvedOptions().timeZone,off=new Date().getTimezoneOffset();if(!tz||tz==='UTC'||off===0){console.error('process zone is '+tz+' (offset '+off+') — this job must run skewed');process.exit(1)}console.log('process zone: '+tz+' (offset '+off+')')"
-          pnpm \
-            --filter @objectstack/core \
-            --filter @objectstack/formula \
-            --filter @objectstack/driver-memory \
-            --filter @objectstack/driver-mongodb \
-            --filter @objectstack/service-analytics \
-            test
+          # Stall guard: same wiring and rationale as the driver-sql step above
+          # (#4250/#4331) — the "silent after every suite printed Done"
+          # occurrence was on THIS leg.
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/temporal-non-sql.log" --stall-minutes 10 -- \
+            pnpm \
+              --filter @objectstack/core \
+              --filter @objectstack/formula \
+              --filter @objectstack/driver-memory \
+              --filter @objectstack/driver-mongodb \
+              --filter @objectstack/service-analytics \
+              test
 
   dogfood:
     # Sharded 2-way: the suite is ~60 independent test files, each booting its
@@ -378,7 +423,10 @@ jobs:
     needs: filter
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Backstop only — the stall guard on the test step is the primary detector
+    # for a #4250-style hang (see Test Core). 30 min is ~2.5× the slower shard
+    # (shard 1 runs the verify-CLI step too, ~12 min all in).
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -436,11 +484,21 @@ jobs:
       # break, which was green on every static gate). The `--` args reach the
       # package's `vitest run` and are hashed into the turbo task, so each
       # shard caches independently.
+      # run-with-stall-guard: same wiring as Test Core (see the comment there;
+      # #4250/#4314) — it tees to dogfood.log itself for the completeness guard
+      # below, propagates the suite's real exit status (no `| tee` + pipefail),
+      # and turns frozen output into a labeled red after 10 min of silence.
+      # Dogfood boots real engines in-process — exactly the population #4250's
+      # stalls came from. NODE_OPTIONS + --report-dir arm the stall forensics
+      # (SIGUSR2 stack harvest) — see the Test Core comment.
       - name: Boot example apps and exercise real user flows
+        env:
+          NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
         run: |
-          set -o pipefail
-          pnpm turbo run test --filter=@objectstack/dogfood -- --shard=${{ matrix.shard }}/2 \
-            2>&1 | tee "$RUNNER_TEMP/dogfood.log"
+          mkdir -p "$RUNNER_TEMP/stall-reports"
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood.log" --stall-minutes 10 \
+            --report-dir "$RUNNER_TEMP/stall-reports" -- \
+            pnpm turbo run test --filter=@objectstack/dogfood -- --shard=${{ matrix.shard }}/2
 
       # Dogfood boots real apps in-process, so a native/OOM abort is likelier
       # here than in the unit suites — and a shard that dies silently looks like
@@ -453,6 +511,17 @@ jobs:
             exit 0
           fi
           node scripts/check-test-completeness.mjs "$RUNNER_TEMP/dogfood.log"
+
+      # Same offline-forensics artifact as Test Core; shard-scoped name so the
+      # two matrix jobs don't collide.
+      - name: Upload stall diagnostic reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stall-reports-dogfood-${{ matrix.shard }}
+          path: ${{ runner.temp }}/stall-reports/
+          if-no-files-found: ignore
+          retention-days: 14
 
       # Replaces the former auto-verify dogfood tests: runs the published
       # `objectstack verify` engine over each example app through the CLI —

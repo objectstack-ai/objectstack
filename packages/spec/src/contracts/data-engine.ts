@@ -10,6 +10,7 @@ import {
   DataEngineRequest,
   DroppedFieldsEvent,
 } from '../data/index.js';
+import type { IDataDriver } from './data-driver.js';
 
 /**
  * In-process write-observability hooks for `insert`/`update` (#3407).
@@ -71,4 +72,19 @@ export interface IDataEngine {
    * Execute raw command (Escape hatch)
    */
   execute?(command: any, options?: Record<string, any>): Promise<any>;
+
+  /**
+   * Driver registry — optional: only engines that own a named-driver registry.
+   *
+   * [#4251] Declared because the binding is evidenced, not to fill the table:
+   * ObjectQL implements both (`packages/objectql/src/engine.ts`, the `drivers`
+   * map), and DefaultDatasourcePlugin reads them to re-register the default
+   * driver as a `driver.<name>` kernel service — the surface `os migrate`
+   * (SQL_DRIVER_SERVICES) and serve's storage detection locate drivers
+   * through. Optional because `IDataEngine` is also satisfied by engines with
+   * no such registry (test fakes, remote/virtual engines); callers probe with
+   * `?.`, which is what the runtime caller already did while typed `any`.
+   */
+  getDefaultDriverName?(): string | undefined;
+  getDriverByName?(name: string): IDataDriver | undefined;
 }

@@ -1006,10 +1006,10 @@ export class HttpDispatcher {
         //
         // Honest capabilities (ADR-0076 D12, #2462): a registered service that
         // self-identifies as a stub / dev fake / degraded fallback (via the
-        // `__serviceInfo` marker or plugin-dev's legacy `_dev: true`) is
-        // reported with its declared status — never as `available` — so
-        // consumers (AI agents, the console) don't mistake a fake capability
-        // for a real one.
+        // `__serviceInfo` marker — the one marker left since #4319 retired the
+        // legacy `_dev` alias) is reported with its declared status — never as
+        // `available` — so consumers (AI agents, the console) don't mistake a
+        // fake capability for a real one.
         const svcAvailable = (route?: string, provider?: string, svc?: unknown) => {
             const self = svc ? readServiceSelfInfo(svc) : undefined;
             if (self) {

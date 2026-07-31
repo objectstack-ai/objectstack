@@ -26,6 +26,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # The slot-lookup ratchet compares the baseline against its state at
+          # the merge base with main — the only way to see a file being ADDED
+          # to the grandfather list. A shallow clone has no merge base, and the
+          # check would degrade to "not verified" on every run.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -56,6 +62,15 @@ jobs:
       # only, so no build step needed.
       - name: ESLint
         run: pnpm lint
+
+      # Slot-lookup sweep ratchet (#4251). `pnpm lint` above bans erasing a
+      # service-lookup result to `any` across packages/, but the files still
+      # holding pre-existing sites are grandfathered by path — and an ignored
+      # file is ignored COMPLETELY, so new erasures added to one ride the old
+      # entry in silence. This re-measures those files with the grandfathering
+      # lifted and holds them to a per-file count, so the list can only shrink.
+      - name: Slot-lookup ratchet
+        run: pnpm check:slot-lookup
 
       # Raw NUL guard (#3127): one literal U+0000 byte makes grep/ripgrep treat
       # the whole file as binary and silently return ZERO matches — the file drops
@@ -236,6 +251,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Coverage meta-gate (#4311): 66 of 77 workspace packages build with tsup
+      # (esbuild transpile, no type check) and `vitest run` does not type-check
+      # either, so a package without a `typecheck` script has NO tsc reading its
+      # src/ or its tests at all — 380 real errors had accumulated that way,
+      # invisible to every green build. This gate makes the hole itself the
+      # failure: every package either declares `typecheck` (run by the turbo
+      # step below) or carries a measured DEBT/EXEMPT entry in the script's
+      # ledger, reconciled in both directions so the ledger can only shrink.
+      # Reads package.json files only; no build, sub-second.
+      - name: Check every package is type-check covered or ledgered
+        run: pnpm check:type-check-coverage
+
       - name: Type check (@objectstack/spec)
         run: pnpm --filter @objectstack/spec exec tsc --noEmit
 
@@ -350,6 +377,19 @@ jobs:
       # packages/qa/ (#3037).
       - name: Build workspace packages
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
+
+      # The per-package `typecheck` scripts the coverage gate above requires
+      # (#4311). tsc resolves workspace imports through each dependency's built
+      # dist/*.d.ts, so the task carries `dependsOn: ^build` in turbo.json —
+      # which also builds the handful of nested packages (packages/plugins/*,
+      # packages/services/*, …) the build step's direct-children glob misses
+      # when no example depends on them. Three filters because the bare
+      # `./packages/*` glob only matches direct children (see the build step's
+      # comment): the nested group dirs and apps/ (docs) need their own globs.
+      # Examples and the downstream contract keep their dedicated steps below —
+      # they are distinct gates, not bulk coverage.
+      - name: Type check workspace packages
+        run: pnpm exec turbo run typecheck --filter='./packages/*' --filter='./packages/*/*' --filter='./apps/*'
 
       - name: Type check example apps
         run: pnpm --filter './examples/*' run typecheck

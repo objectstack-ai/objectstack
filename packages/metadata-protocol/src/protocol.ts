@@ -18,8 +18,16 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
-import { parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
+import {
+    parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES,
+    AggregationFunction, DateGranularity, resolveSearchFieldResolution,
+    SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
+    RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
+    type QueryAliasConflict, type QueryAliasSlot,
+    type DroppedFieldsEvent, type QueryAST,
+} from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
+import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed } from '@objectstack/spec/kernel';
@@ -353,6 +361,50 @@ function describeMalformedFilter(filter: unknown[]): string {
             `expected a condition array or a logical keyword.`;
     }
     return `${JSON.stringify(filter)} is not a recognised filter shape.`;
+}
+
+/**
+ * Keys the READ path stamps onto a served metadata document, which therefore
+ * must never survive back into a persisted body (#4326).
+ *
+ * Both are recomputed on every read, so persisting them stores a stale copy of
+ * something the reader already replaces:
+ *   - `_diagnostics` — the spec-validation verdict `decorateMetadataItem`
+ *     spreads onto every `getMetaItem`/`getMetaItems` result. A second producer
+ *     stamps the same key: view-container expansion records a name-collision
+ *     rename warning (`stampRenameWarning`, spec/ui/view.zod.ts). Both are
+ *     derived from the document, so neither belongs inside it;
+ *   - `_draft` — the preview badge added by draft reads. Draft-ness lives in
+ *     the row's `state` column and the `mode` parameter, never in the body.
+ *
+ * Deliberately NOT stripped, though they share the underscore spelling: the
+ * ADR-0010 protection envelope (`_lock`, `_lockReason`, `_provenance`) and
+ * `_packageId`. Those are envelope state the write path legitimately carries
+ * and merges (see `mergeArtifactProtection`) — not read-time decoration.
+ */
+const READ_ONLY_DECORATIONS = ['_diagnostics', '_draft'] as const;
+
+/**
+ * Remove {@link READ_ONLY_DECORATIONS} from an about-to-persist body.
+ *
+ * A **silent** strip, unlike the layered-envelope rejection in `saveMetaItem`:
+ * that envelope is a wrong document the caller must fix, whereas these keys are
+ * our own decoration riding along on a document that is otherwise exactly what
+ * the author edited. Rejecting the standard GET → edit → PUT round-trip would
+ * be hostile; stripping restores the invariant that a round-trip persists the
+ * body byte-identical.
+ *
+ * Returns the SAME reference when there is nothing to strip, so the common path
+ * allocates nothing (the discipline {@link graftNormalizedOperators} follows).
+ * Non-object inputs pass through — the caller's own validation owns those.
+ */
+export function stripReadDecorations(item: unknown): unknown {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    const dict = item as Record<string, unknown>;
+    if (!READ_ONLY_DECORATIONS.some((k) => k in dict)) return item;
+    const next = { ...dict };
+    for (const k of READ_ONLY_DECORATIONS) delete next[k];
+    return next;
 }
 
 /**
@@ -795,6 +847,17 @@ const QUERY_AST_KEYS: Readonly<Record<keyof QueryAST, true>> = {
 };
 
 /**
+ * [#4254] The two aggregation vocabularies, read off the SPEC's own enums so a
+ * function or granularity added there is admitted here without a second edit —
+ * the same both-directions pinning `QUERY_AST_KEYS` gets from `keyof QueryAST`.
+ * They exist because the in-memory aggregation path answers an unknown member
+ * with a silent placeholder (`null` result / raw-value buckets) rather than an
+ * error, so the ingress must be the layer that refuses one.
+ */
+const AGGREGATION_FUNCTIONS: ReadonlySet<string> = new Set(AggregationFunction.options);
+const DATE_GRANULARITIES: ReadonlySet<string> = new Set(DateGranularity.options);
+
+/**
  * [#4134] Every query-parameter name `findData` consumes itself, consulted
  * AFTER the alias normalization in `findData` has run — so the wire spellings
  * that get rewritten (`$top`→`top`→`limit`, `select`→`fields`, `sort`→
@@ -869,6 +932,49 @@ const ODATA_SPELLING: Readonly<Record<string, string>> = {
 };
 
 /**
+ * [#3795] The spec's alias table ({@link RPC_QUERY_ALIAS_SLOTS}) extended with
+ * the wire-only spellings no schema declares: `filters` (documented plural
+ * alias of the `filter` transport param) and the OData `$filter` / `$expand`.
+ * Every spelling of one QueryAST slot resolves through ONE fold — the four
+ * slots that used to resolve backwards (canonical consulted last), each in its
+ * own open-coded way, are the reason the table lives in the spec and not here.
+ */
+const WIRE_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = (() => {
+    const extra: Record<string, readonly string[]> = {
+        where: ['filters', '$filter'],
+        expand: ['$expand'],
+    };
+    return RPC_QUERY_ALIAS_SLOTS.map((slot) => ({
+        canonical: slot.canonical,
+        aliases: [...slot.aliases, ...(extra[slot.canonical] ?? [])],
+    }));
+})();
+
+/**
+ * [#4181 → #3795] Spellings of ONE slot carrying DIFFERENT values. Two values
+ * for one slot cannot be reconciled — merging them would invent an intent the
+ * caller never expressed, and picking one is the silent drop itself — so an
+ * ambiguous request is refused. Redundant identical spellings pass. #4181
+ * established this on the filter slot; the fold now applies it to all five.
+ *
+ * `spellingFor` maps each folded name back to the wire spelling the caller
+ * actually wrote (`$orderby`, not `orderBy`) — the #4226 discipline.
+ */
+function conflictingQueryParamsError(
+    conflict: QueryAliasConflict,
+    spellingFor: (name: string) => string,
+): Error {
+    const names = conflict.spellings.map((s) => `'${spellingFor(s)}'`).join(', ');
+    const err: any = new Error(
+        `Conflicting query parameters: ${names} are spellings of the same parameter `
+        + `(canonical '${conflict.canonical}') and were given different values. Send exactly one.`,
+    );
+    err.status = 400;
+    err.code = 'INVALID_REQUEST';
+    return err;
+}
+
+/**
  * [#4181] A filter the normalizer cannot turn into a usable `FilterCondition`
  * by any route other than the array shapes {@link malformedFilterArrayError}
  * already diagnoses: unparseable JSON, or JSON that parses to something no
@@ -925,6 +1031,39 @@ function invalidSortError(
     );
     err.status = 400;
     err.code = 'INVALID_SORT';
+    err.param = param;
+    Object.assign(err, opts?.extra ?? {});
+    return err;
+}
+
+/**
+ * [#4254] An aggregation-axis value (`groupBy` / `aggregations`) whose SHAPE
+ * the spec's `QueryAST` cannot read — a non-array, an entry that names no
+ * field, a function or granularity outside the spec enums, a missing alias.
+ *
+ * Carries `INVALID_QUERY` — the standard-catalog code (`errors.zod.ts`,
+ * "Malformed query syntax") that had sat in the catalog with no emitter since
+ * it was written, exactly as `INVALID_SORT` had before #4226. Shape mistakes
+ * get their own code because they are not about any FIELD: `INVALID_FIELD` on
+ * these axes is reserved for a well-formed entry naming a column the object
+ * does not have.
+ *
+ * The message spells out what the dropped/misread value used to do, because
+ * that is the part the caller cannot infer: every one of these shapes was
+ * silently ignored (rows returned ungrouped) or silently mis-answered
+ * (`null` aggregates, one raw-value bucket per row) with an ordinary 200.
+ */
+function invalidQueryError(
+    param: string,
+    detail: string,
+    opts?: { hint?: string, extra?: Record<string, unknown> },
+): Error {
+    const err: any = new Error(
+        `Query parameter '${param}' ${detail}.`
+        + (opts?.hint ?? ''),
+    );
+    err.status = 400;
+    err.code = 'INVALID_QUERY';
     err.param = param;
     Object.assign(err, opts?.extra ?? {});
     return err;
@@ -1545,6 +1684,47 @@ export class ObjectStackProtocolImplementation implements
      * {@link MetadataAuthoringGate}.
      */
     private authoringGates = new Map<string, MetadataAuthoringGate>();
+
+    /**
+     * Once-per-process dedupe for stored-row conversion notices
+     * (`conversionId|type|name`). `getMetaItems`/`getMetaItem` re-read
+     * sys_metadata on every call, so without this a single legacy row would
+     * warn on every list request instead of once.
+     */
+    private storedConversionWarned = new Set<string>();
+
+    /**
+     * Canonicalize a stored `sys_metadata` body on rehydration (#3903;
+     * ADR-0087 addendum "stored metadata replays the chain").
+     *
+     * Every seam that turns a row's `metadata` JSON into an in-memory item
+     * funnels through here, so a row written under a past protocol is read
+     * in today's canonical shape — parity with what the authored load path
+     * has always done, extended by the full-chain replay data at rest needs
+     * (a stored row has no author for a tombstone to teach).
+     *
+     * `flow` is deliberately skipped: flow-node conversions carry an
+     * open-namespace conflict guard that needs the automation engine's live
+     * executor registry (`reservedNodeTypes`), which this layer does not
+     * have. Flows canonicalize at `AutomationEngine.registerFlow` — the
+     * execution seam — with the same full-chain policy.
+     */
+    private convertStoredItem(type: string, data: unknown): unknown {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (singular === 'flow') return data;
+        return applyConversionsToStoredItem(singular, data, {
+            onNotice: (n) => {
+                const name = (data as { name?: unknown } | null | undefined)?.name;
+                const key = `${n.conversionId}|${singular}|${String(name ?? '')}`;
+                if (this.storedConversionWarned.has(key)) return;
+                this.storedConversionWarned.add(key);
+                console.warn(
+                    `[Protocol] stored ${singular}/${String(name ?? '<unnamed>')} carries a pre-protocol shape; ` +
+                    `${n.message} The row itself is unchanged — re-save it (Studio edit → save) to persist the canonical shape.`,
+                );
+            },
+        });
+    }
 
     constructor(
         engine: IDataEngine,
@@ -2300,14 +2480,19 @@ export class ObjectStackProtocolImplementation implements
             const records = Array.from(mergedMap.values());
             if (records && records.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
-                // Parse each overlay body once and surface its persisted
+                // Parse each overlay body once — replaying the stored-row
+                // conversion chain (#3903) so every consumer of this list sees
+                // the canonical protocol shape — and surface its persisted
                 // software-package binding so the sidebar package filter and
                 // provenance classification see overlay rows the way they see
                 // registry items.
                 const overlays = records.map((record) => {
-                    const data = typeof record.metadata === 'string'
-                        ? JSON.parse(record.metadata)
-                        : record.metadata;
+                    const data = this.convertStoredItem(
+                        String(record.type ?? request.type),
+                        typeof record.metadata === 'string'
+                            ? JSON.parse(record.metadata)
+                            : record.metadata,
+                    ) as any;
                     const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
                     if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                         (data as any)._packageId = recPkg;
@@ -2391,7 +2576,10 @@ export class ObjectStackProtocolImplementation implements
                     // previews only its own package's entry, so two packages'
                     // same-name drafts stay distinct. Draft rows win over active.
                     const drafts = draftRecords.map((record) => {
-                        const data = typeof record.metadata === 'string' ? JSON.parse(record.metadata) : record.metadata;
+                        const data = this.convertStoredItem(
+                            String(record.type ?? request.type),
+                            typeof record.metadata === 'string' ? JSON.parse(record.metadata) : record.metadata,
+                        ) as any;
                         const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
                         if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                             (data as any)._packageId = recPkg;
@@ -2560,9 +2748,12 @@ export class ObjectStackProtocolImplementation implements
                 };
                 const draftRec = (orgId ? await findDraft(orgId) : undefined) ?? await findDraft(null);
                 if (draftRec) {
-                    const draftItem = typeof draftRec.metadata === 'string'
-                        ? JSON.parse(draftRec.metadata)
-                        : draftRec.metadata;
+                    const draftItem = this.convertStoredItem(
+                        String(draftRec.type ?? request.type),
+                        typeof draftRec.metadata === 'string'
+                            ? JSON.parse(draftRec.metadata)
+                            : draftRec.metadata,
+                    ) as any;
                     if (draftItem && typeof draftItem === 'object') {
                         const recPkg = (draftRec as { package_id?: string | null }).package_id ?? undefined;
                         if (recPkg && (draftItem as any)._packageId === undefined) (draftItem as any)._packageId = recPkg;
@@ -2617,9 +2808,12 @@ export class ObjectStackProtocolImplementation implements
             const record = (orgId ? await findOverlay(orgId) : undefined)
                 ?? await findOverlay(null);
             if (record) {
-                item = typeof record.metadata === 'string'
-                    ? JSON.parse(record.metadata)
-                    : record.metadata;
+                item = this.convertStoredItem(
+                    String(record.type ?? request.type),
+                    typeof record.metadata === 'string'
+                        ? JSON.parse(record.metadata)
+                        : record.metadata,
+                );
                 // Surface the persisted software-package binding (parity with
                 // the list path in getMetaItems) so provenance/UI can read it.
                 const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
@@ -2895,14 +3089,20 @@ export class ObjectStackProtocolImplementation implements
             if (orgId) {
                 const rec = await findOverlay(orgId);
                 if (rec) {
-                    overlay = typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata;
+                    overlay = this.convertStoredItem(
+                        String(rec.type ?? request.type),
+                        typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata,
+                    );
                     overlayScope = 'org';
                 }
             }
             if (overlay === null) {
                 const rec = await findOverlay(null);
                 if (rec) {
-                    overlay = typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata;
+                    overlay = this.convertStoredItem(
+                        String(rec.type ?? request.type),
+                        typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata,
+                    );
                     overlayScope = 'env';
                 }
             }
@@ -3193,7 +3393,7 @@ export class ObjectStackProtocolImplementation implements
      *   object-existence gate above already warns once when the registry itself
      *   is missing, so this stays quiet rather than warning twice per process.
      */
-    private resolveQueryFields(object: string): { known: ReadonlySet<string>, declared: readonly string[], fields: any } | null {
+    private resolveQueryFields(object: string): { known: ReadonlySet<string>, declared: readonly string[], fields: any, schema: any } | null {
         const schema: any = this.engine?.registry?.getObject?.(object);
         const declared = schema?.fields;
         if (!declared || typeof declared !== 'object') return null;
@@ -3208,7 +3408,7 @@ export class ObjectStackProtocolImplementation implements
         known.add('id');
         known.add('created_at');
         known.add('updated_at');
-        return { known, declared: fieldNames, fields: declared };
+        return { known, declared: fieldNames, fields: declared, schema };
     }
 
     /**
@@ -3462,6 +3662,391 @@ export class ObjectStackProtocolImplementation implements
         throw err;
     }
 
+    /**
+     * [#4254] SEARCH-FIELDS axis. A `searchFields` override naming something
+     * `search` cannot scan is refused (`400 INVALID_FIELD`).
+     *
+     * This axis is the `select` failure with the sign flipped OUTWARD. The
+     * engine's `resolveSearchFields` drops unknown names and, when that leaves
+     * the override empty, falls back to the FULL allowed set — the exact
+     * two-step #4226 closed on projections, except that where a widened
+     * projection returns extra columns, a widened search returns extra ROWS:
+     * `?search=alpha&searchFields=<typo>` matched rows the caller's narrowing
+     * excluded, in a response with nothing to distinguish it from a satisfied
+     * one. `searchFields` exists only to narrow (ADR-0061: the override is
+     * "intersected with the allowed set — it can narrow the scan, never widen
+     * it"), so failing open to a wider scan is the one direction it must never
+     * take. Its only in-framework caller today is `GET /data/:object/export` —
+     * the same route whose `search` support just shipped precisely so an
+     * export would stop downloading "the unsearched superset … in a file that
+     * looks authoritative".
+     *
+     * Two rejections, one code, different messages, because the fixes differ
+     * (the same split the expand axis draws): a name that is no field at all
+     * is a typo, while a REAL field outside the searchable set needs the
+     * OBJECT changed — added to a declared `searchableFields`, or declared
+     * searchable at all when the auto-default excludes its type. The allowed
+     * set itself comes from {@link resolveSearchFieldResolution} in
+     * `@objectstack/spec/data` — the same function the engine's search
+     * expansion consumes — so this gate cannot admit a field the engine would
+     * then decline to scan, nor refuse one it would.
+     *
+     * Names are judged EXACTLY (no dotted-head tolerance): the engine
+     * intersects the override with the allowed set by exact string, so
+     * `owner_id.name` — plausible from the select/sort axes — would be
+     * silently dropped there, and this gate letting it through would
+     * reintroduce the fallback it exists to close.
+     */
+    private assertSearchFieldsAreSearchable(object: string, requested: unknown, param: string): void {
+        // Shape first, BEFORE the field-map tiering below — same order as the
+        // projection gate (#4196): a registry-less host, which skips the name
+        // checks, still must not carry an unreadable override to an engine
+        // that would ignore it and scan the default set.
+        let names: readonly string[];
+        if (typeof requested === 'string') {
+            names = requested.split(',').map((s) => s.trim()).filter(Boolean);
+        } else if (Array.isArray(requested)) {
+            const badShape = requested.findIndex((f) => typeof f !== 'string');
+            if (badShape !== -1) {
+                const err: any = new Error(
+                    `'${param}' entry #${badShape + 1} on object '${object}' is not a field name. `
+                    + `'${param}' narrows which columns 'search' scans, as a comma-separated string `
+                    + 'or an array of field names.',
+                );
+                err.code = 'INVALID_FIELD';
+                err.status = 400;
+                err.object = object;
+                err.param = param;
+                throw err;
+            }
+            names = requested;
+        } else {
+            const err: any = new Error(
+                `'${param}' on object '${object}' must be a comma-separated string or an array of `
+                + `field names, received ${requested === null ? 'null' : typeof requested}. It narrows `
+                + "which columns 'search' scans; a value the server cannot read would have been "
+                + 'ignored, leaving the search over the DEFAULT columns instead.',
+            );
+            err.code = 'INVALID_FIELD';
+            err.status = 400;
+            err.object = object;
+            err.param = param;
+            throw err;
+        }
+        // An empty override is ABSENT — the engine falls through to the
+        // allowed set for it, which for a caller who named nothing is the
+        // answer they asked for, not a widened one.
+        if (names.length === 0) return;
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const { allowed, source } = resolveSearchFieldResolution({
+            fields: gate.fields,
+            searchableFields: gate.schema?.searchableFields,
+            // [ADR-0079] Same precedence the engine's search expansion applies:
+            // `nameField` is canonical, `displayNameField` the honored alias.
+            displayField: gate.schema?.nameField ?? gate.schema?.displayNameField,
+        });
+        const allowedSet = new Set(allowed);
+        // A name in the object's own `searchableFields` that names no field is
+        // a STALE DECLARATION — a bug on the OBJECT, not on the request. It
+        // matters because clients echo the declaration verbatim (objectui's
+        // list search sends `$searchFields: schema.searchableFields`), so
+        // calling it "unknown" would send the caller hunting a typo they
+        // never made. Same split the expand axis draws for a lookup whose
+        // `reference` was never authored.
+        const declaredSet = new Set<string>(Array.isArray(gate.schema?.searchableFields) ? gate.schema.searchableFields : []);
+        const unknown = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && !declaredSet.has(n));
+        const staleDeclared = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && declaredSet.has(n));
+        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n));
+        const [offenders, reason] =
+            unknown.length > 0 ? [unknown, 'unknown' as const]
+            : staleDeclared.length > 0 ? [staleDeclared, 'stale-declared' as const]
+            : [unsearchable, 'unsearchable' as const];
+        if (offenders.length === 0) return;
+        const first = offenders[0];
+        let detail: string;
+        if (reason === 'stale-declared') {
+            detail = `Field '${first}' on object '${object}' is declared in 'searchableFields' but `
+                + 'does not exist'
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + '. The declaration is stale — searching it can never match, and the engine '
+                + "silently skipped it. Fix the object's 'searchableFields' to name real fields.";
+        } else if (reason === 'unknown') {
+            // A dotted path is a special unknown: plausible vocabulary from the
+            // select/sort axes, but search scans this object's own columns.
+            const dottedHint = first.includes('.') && gate.known.has(first.split('.')[0])
+                ? " 'search' scans this object's own columns; a related record's column cannot be a search target."
+                : suggestFieldName(first, gate.declared);
+            detail = `Unknown field '${first}' on object '${object}'`
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + `. '${param}' narrows which columns 'search' scans, so a name the object does not `
+                + 'declare cannot narrow anything — and the engine used to drop it and scan the '
+                + 'default columns instead, answering a NARROWER search with a WIDER one.'
+                + dottedHint;
+        } else if (source === 'declared') {
+            detail = `Field '${first}' on object '${object}' is not searchable`
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + `. The object declares 'searchableFields' (${allowed.join(', ')}), which is the set `
+                + "'search' scans — a field outside it cannot be a search target until it is added there.";
+        } else {
+            const meta = gate.fields[first];
+            const why = !meta || SEARCH_AUTO_EXCLUDED_FIELDS.has(first)
+                ? 'a system/audit column, which the default never includes'
+                : meta.hidden
+                    ? 'hidden'
+                    : `type '${meta.type}'`;
+            detail = `Field '${first}' on object '${object}' is not searchable`
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + `. With no 'searchableFields' declared, 'search' scans the text-like columns `
+                + `(${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')}), and '${first}' is `
+                + why
+                + ". Declare 'searchableFields' on the object to choose the searchable set explicitly.";
+        }
+        const err: any = new Error(detail);
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = first;
+        err.fields = offenders;
+        err.object = object;
+        err.param = param;
+        throw err;
+    }
+
+    /**
+     * [#4254] GROUP-BY axis. A grouping target the object does not have is
+     * refused (`400 INVALID_FIELD`); a grouping target the spec cannot read is
+     * refused as a shape (`400 INVALID_QUERY`).
+     *
+     * The failure this closes is the quietest of the family: the in-memory
+     * aggregation path projects an unknown column as `null` for every row, so
+     * ALL rows land in one bucket — `groupBy=[<typo>]` answered
+     * `[{ <typo>: null, n: <true row count> }]`, a structurally perfect result
+     * identical to "this column really holds a single value". A chart draws
+     * one bar; nothing anywhere says the grouping never ran. And the answer
+     * depended on which backend a deployment happens to sit on: a driver with
+     * native aggregation hands `GROUP BY <typo>` to its database instead
+     * (whose refusal `SqlDriver` may or may not surface), while the in-memory
+     * fallback invents the one-bucket result — the "two routes, opposite
+     * answers" split #4226 closed, relocated one axis over. Refusing at the
+     * shared ingress is what makes the two paths agree.
+     *
+     * Names are judged EXACTLY, not by dotted head: the aggregation contract
+     * groups by THIS object's columns (`row[field]` verbatim on the in-memory
+     * path, a bare column reference in pushed-down SQL), so a dotted path can
+     * only ever produce the null bucket.
+     */
+    private assertGroupByFieldsExist(object: string, groupBy: unknown): void {
+        if (groupBy === undefined || groupBy === null) return;
+        if (!Array.isArray(groupBy)) {
+            throw invalidQueryError(
+                'groupBy',
+                `must be an array of grouping targets (a field name, or { field, dateGranularity } `
+                + `for date bucketing), received ${typeof groupBy}`,
+                {
+                    hint: ' A value the server cannot read used to be ignored — the rows came back '
+                        + 'UNGROUPED, looking exactly like a query that never asked for grouping. '
+                        + `Send e.g. { "groupBy": ["status"] } in the 'POST /data/:object/query' body.`,
+                    extra: { object },
+                },
+            );
+        }
+        if (groupBy.length === 0) return;
+        const fieldsToCheck: string[] = [];
+        for (let i = 0; i < groupBy.length; i++) {
+            const entry = groupBy[i];
+            if (typeof entry === 'string') {
+                fieldsToCheck.push(entry);
+                continue;
+            }
+            if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+                throw invalidQueryError(
+                    'groupBy',
+                    `entry #${i + 1} on object '${object}' is not a grouping target — expected a `
+                    + `field name or { field, dateGranularity }, received `
+                    + `${entry === null ? 'null' : Array.isArray(entry) ? 'an array' : typeof entry}`,
+                    { extra: { object } },
+                );
+            }
+            if (typeof entry.field !== 'string' || entry.field.length === 0) {
+                throw invalidQueryError(
+                    'groupBy',
+                    `entry #${i + 1} on object '${object}' names no field — the structured form is `
+                    + `{ field, dateGranularity?, alias? }`,
+                    { extra: { object } },
+                );
+            }
+            if (entry.dateGranularity !== undefined && !DATE_GRANULARITIES.has(entry.dateGranularity)) {
+                throw invalidQueryError(
+                    'groupBy',
+                    `entry #${i + 1} on object '${object}' buckets by '${String(entry.dateGranularity)}', `
+                    + `which is not a date granularity (${[...DATE_GRANULARITIES].join(' / ')})`,
+                    {
+                        hint: ' An unknown granularity used to fall through to one bucket per raw '
+                            + 'value — date bucketing that silently never bucketed.',
+                        extra: { object },
+                    },
+                );
+            }
+            fieldsToCheck.push(entry.field);
+        }
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const unknown = fieldsToCheck.filter((f) => !gate.known.has(f));
+        if (unknown.length === 0) return;
+        const first = unknown[0];
+        const dottedHint = first.includes('.') && gate.known.has(first.split('.')[0])
+            ? " Grouping runs over this object's own columns; a related record's column cannot be a "
+              + 'grouping target.'
+            : suggestFieldName(first, gate.declared);
+        const err: any = new Error(
+            `Unknown field '${first}' on object '${object}'`
+            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
+            + `. 'groupBy' buckets rows by a column's values, so an unknown column puts every row `
+            + 'in ONE bucket keyed null — a result indistinguishable from a column that really '
+            + 'holds a single value.'
+            + dottedHint,
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = first;
+        err.fields = unknown;
+        err.object = object;
+        err.param = 'groupBy';
+        throw err;
+    }
+
+    /**
+     * [#4254] AGGREGATIONS axis. An aggregation over a field the object does
+     * not have is refused (`400 INVALID_FIELD`); an entry the spec cannot read
+     * is refused as a shape (`400 INVALID_QUERY`).
+     *
+     * The stakes are the highest of the three #4254 axes because the wrong
+     * answer is a NUMBER: the in-memory path collects `undefined` for every
+     * row and `sum` folds those to 0, so `sum(<typo>)` answered `0` — the same
+     * `0` a genuinely empty quarter produces, in a report whose whole job is
+     * to be believed. (`avg`/`min`/`max` answer `null`, `count(<typo>)` counts
+     * nothing — every function has a plausible-looking value for a column that
+     * is not there.)
+     *
+     * The shape checks pin the rest of the spec's `AggregationNode` contract,
+     * because each violation also had a silent placeholder instead of an
+     * error: a function outside the spec enum computed `null`, a missing
+     * `alias` keyed the result column `"undefined"`, and a field-less
+     * aggregation is only meaningful as `count(*)` — for every other function
+     * it answered `null`/`0` while looking like a served query. `count` with
+     * no field (or the explicit `'*'` sentinel) is the one legitimate
+     * field-less form and passes.
+     */
+    private assertAggregationFieldsExist(object: string, aggregations: unknown): void {
+        if (aggregations === undefined || aggregations === null) return;
+        if (!Array.isArray(aggregations)) {
+            throw invalidQueryError(
+                'aggregations',
+                `must be an array of { function, field?, alias } entries, received `
+                + `${typeof aggregations}`,
+                {
+                    hint: ' A value the server cannot read used to be ignored — the rows came back '
+                        + 'raw and unaggregated. Send e.g. { "aggregations": [{ "function": "sum", '
+                        + `"field": "amount", "alias": "total" }] } in the 'POST /data/:object/query' body.`,
+                    extra: { object },
+                },
+            );
+        }
+        if (aggregations.length === 0) return;
+        const fieldsToCheck: string[] = [];
+        for (let i = 0; i < aggregations.length; i++) {
+            const entry = aggregations[i];
+            if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+                throw invalidQueryError(
+                    'aggregations',
+                    `entry #${i + 1} on object '${object}' is not an aggregation — expected `
+                    + `{ function, field?, alias }, received `
+                    + `${entry === null ? 'null' : Array.isArray(entry) ? 'an array' : typeof entry}`,
+                    { extra: { object } },
+                );
+            }
+            if (typeof entry.function !== 'string' || !AGGREGATION_FUNCTIONS.has(entry.function)) {
+                throw invalidQueryError(
+                    'aggregations',
+                    `entry #${i + 1} on object '${object}' uses `
+                    + (typeof entry.function === 'string'
+                        ? `'${entry.function}', which is not an aggregation function`
+                        : 'no aggregation function')
+                    + ` (${[...AGGREGATION_FUNCTIONS].join(' / ')})`,
+                    {
+                        hint: ' An unknown function used to compute null for every group while the '
+                            + 'response looked served.',
+                        extra: { object },
+                    },
+                );
+            }
+            if (typeof entry.alias !== 'string' || entry.alias.length === 0) {
+                throw invalidQueryError(
+                    'aggregations',
+                    `entry #${i + 1} on object '${object}' has no 'alias' — the alias names the `
+                    + `result column (without one it came back keyed "undefined")`,
+                    { extra: { object } },
+                );
+            }
+            if (entry.field === undefined || entry.field === null) {
+                if (entry.function !== 'count') {
+                    throw invalidQueryError(
+                        'aggregations',
+                        `entry '${entry.alias}' on object '${object}' applies '${entry.function}' to no `
+                        + `field. Only 'count' may omit the field (count(*), every row); '${entry.function}' `
+                        + 'needs a column to compute over — without one it answered null while looking served',
+                        { extra: { object } },
+                    );
+                }
+                continue;
+            }
+            if (typeof entry.field !== 'string') {
+                throw invalidQueryError(
+                    'aggregations',
+                    `entry '${entry.alias}' on object '${object}' has a non-string 'field' `
+                    + `(received ${typeof entry.field})`,
+                    { extra: { object } },
+                );
+            }
+            if (entry.field === '*') {
+                if (entry.function !== 'count') {
+                    throw invalidQueryError(
+                        'aggregations',
+                        `entry '${entry.alias}' on object '${object}' applies '${entry.function}' to '*'. `
+                        + `'*' is the count-all sentinel and only 'count' reads it`,
+                        { extra: { object } },
+                    );
+                }
+                continue;
+            }
+            fieldsToCheck.push(entry.field);
+        }
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const unknown = fieldsToCheck.filter((f) => !gate.known.has(f));
+        if (unknown.length === 0) return;
+        const first = unknown[0];
+        const dottedHint = first.includes('.') && gate.known.has(first.split('.')[0])
+            ? " Aggregation runs over this object's own columns; a related record's column cannot "
+              + 'be aggregated.'
+            : suggestFieldName(first, gate.declared);
+        const err: any = new Error(
+            `Unknown field '${first}' on object '${object}'`
+            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
+            + `. An aggregation computes over a column's values, so an unknown column could only `
+            + 'aggregate blanks — sum answered 0 and avg/min/max answered null, each '
+            + 'indistinguishable from the same result over real data.'
+            + dottedHint,
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = first;
+        err.fields = unknown;
+        err.object = object;
+        err.param = 'aggregations';
+        throw err;
+    }
+
     async findData(request: { object: string, query?: any, context?: any }) {
         // [#3770] Existence first: an unregistered object is a 404 before any
         // query parameter is even parsed, so an unknown name can never be
@@ -3530,35 +4115,39 @@ export class ObjectStackProtocolImplementation implements
             delete options[dollar];
         }
 
-        // Numeric fields — normalize top → limit, skip → offset
+        // [#3795] One slot, one value. Every alias spelling of the five
+        // QueryAST slots resolves HERE, by the spec's own table, before the
+        // per-slot wire coercion below ever runs — so that coercion reads
+        // canonical keys only. An alias alone folds into its canonical key;
+        // redundant identical spellings collapse; different values for one
+        // slot are refused (the #4181 rule, generalized from the filter slot
+        // to all five — four of which used to resolve BACKWARDS here, each in
+        // its own way, disagreeing with the spec's documented precedence and
+        // with the runtime dispatcher's copy of the same fold).
+        //
+        // `arrivedAs` remembers which spelling carried each slot's value;
+        // composed with `wireSpelling` it names the parameter the caller
+        // actually wrote in every rejection below (#4226).
+        const spellingFor = (name: string): string => wireSpelling[name] ?? name;
+        const arrivedAs = foldQueryAliasSlots(options, WIRE_QUERY_ALIAS_SLOTS, (conflict) => {
+            throw conflictingQueryParamsError(conflict, spellingFor);
+        });
+        const slotParam = (canonical: string): string => spellingFor(arrivedAs[canonical] ?? canonical);
+
+        // Numeric fields — normalize top → limit ($top is the OData layer,
+        // outside the #3795 slot table), then coerce querystring strings.
         if (options.top != null) {
             options.limit = Number(options.top);
             delete options.top;
         }
-        if (options.skip != null) {
-            options.offset = Number(options.skip);
-        }
-        // Deleted unconditionally, unlike `top` (a declared QueryAST key the
-        // engine aliases itself): `skip` is wire-only, so a null/undefined one
-        // left behind would reach the #4134 field gate below and be reported as
-        // an unknown FIELD — a confusing rejection for a real parameter.
-        delete options.skip;
         if (options.limit != null) options.limit = Number(options.limit);
         if (options.offset != null) options.offset = Number(options.offset);
 
-        // Select → fields: comma-separated string → array
-        const projectionKey = options.select !== undefined ? (wireSpelling.select ?? 'select') : 'fields';
-        if (typeof options.select === 'string') {
-            options.fields = options.select.split(',').map((s: string) => s.trim()).filter(Boolean);
-        } else if (Array.isArray(options.select)) {
-            options.fields = options.select;
-        }
-        if (options.select !== undefined) delete options.select;
-
-        // fields: comma-separated string → array. Clients may pass `?fields=name`
-        // directly (not only via the `?select=` alias above) — a single-value
-        // querystring param arrives as a bare string, which drivers' `.map()`
+        // Projection: comma-separated string → array. A single-value
+        // querystring param arrives as a bare string — `?fields=name` or the
+        // folded `?select=` / `$select` spellings — which drivers' `.map()`
         // calls over `query.fields` would otherwise throw on.
+        const projectionKey = slotParam('fields');
         if (typeof options.fields === 'string') {
             options.fields = options.fields.split(',').map((s: string) => s.trim()).filter(Boolean);
         } else if (options.fields !== undefined && !Array.isArray(options.fields)) {
@@ -3569,7 +4158,7 @@ export class ObjectStackProtocolImplementation implements
         // returned MORE than was asked for.
         this.assertProjectionFieldsExist(request.object, options.fields, projectionKey);
 
-        // Sort/orderBy → orderBy: every wire spelling → SortNode[].
+        // Sort: every wire shape → SortNode[].
         //
         // [#4226] `normalizeSortNodes` folds the two shapes that used to fall
         // through this block untouched — `string[]` and `{field: direction}` —
@@ -3577,10 +4166,8 @@ export class ObjectStackProtocolImplementation implements
         // an array" simply skipped the branch, leaving a value on `orderBy`
         // that `SqlDriver`'s `Array.isArray` guard then declined to turn into
         // an ORDER BY clause: no sort, no error, no way to tell.
-        const usesOrderBy = options.orderBy !== undefined && options.orderBy !== null;
-        const sortValue = usesOrderBy ? options.orderBy : options.sort;
-        const sortKey = usesOrderBy ? (wireSpelling.orderBy ?? 'orderBy') : 'sort';
-        delete options.sort;
+        const sortValue = options.orderBy;
+        const sortKey = slotParam('orderBy');
         if (sortValue === undefined || sortValue === null) {
             // Nothing to sort by — and an explicit `orderBy: null` must not ride
             // to the engine as a value every driver quietly declines to read.
@@ -3597,41 +4184,15 @@ export class ObjectStackProtocolImplementation implements
             else delete options.orderBy;
         }
 
-        // Filter/filters/$filter → where: normalize all filter aliases.
-        //
-        // [#4181] These four names are FOUR SPELLINGS OF ONE SLOT (`filters` is
-        // documented as a deprecated alias of `filter`), so `??` picking the
-        // first non-null silently discarded the others: a body carrying both
-        // `where` and a different `filter` ran the `filter` and dropped the
-        // `where` with no signal. Two different values for one slot cannot be
-        // reconciled — merging them would invent an intent the caller never
-        // expressed, and picking one is the silent drop itself — so an
-        // ambiguous request is refused. Redundant identical spellings are
-        // harmless and pass.
-        const filterAliases = (['filter', 'filters', '$filter', 'where'] as const)
-            .filter((k) => options[k] !== undefined)
-            .map((k) => ({ key: k, value: options[k] }));
-        if (filterAliases.length > 1) {
-            const distinct = new Set(filterAliases.map((a) => JSON.stringify(a.value)));
-            if (distinct.size > 1) {
-                const err: any = new Error(
-                    `Conflicting filter parameters: ${filterAliases.map((a) => `'${a.key}'`).join(', ')} `
-                    + 'are aliases for the same filter and were given different values. Send exactly one.',
-                );
-                err.status = 400;
-                err.code = 'INVALID_REQUEST';
-                throw err;
-            }
-        }
+        // Filter: the folded slot value → a usable `FilterCondition` on
+        // `where`, or a rejection. The four spellings of this slot
+        // (`where`/`filter`/`filters`/`$filter`) already resolved through the
+        // #3795 fold above — #4181's one-slot-one-value rule, which this block
+        // pioneered before the fold generalized it.
+        const filterKey = slotParam('where');
 
-        const filterValue = options.filter ?? options.filters ?? options.$filter ?? options.where;
-        const filterKey = filterAliases[0]?.key ?? 'filter';
-        delete options.filter;
-        delete options.filters;
-        delete options.$filter;
-
-        if (filterValue !== undefined) {
-            let parsedFilter = filterValue;
+        if (options.where !== undefined) {
+            let parsedFilter = options.where;
             // A blank `?filter=` is ABSENT, not malformed — the same `length > 0`
             // guard the export route applies before parsing. Deleting `where`
             // here (rather than leaving `''` on it) is what lets every consumer
@@ -3696,31 +4257,24 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // Populate/expand/$expand → expand (Record<string, QueryAST>)
-        const populateValue = options.populate;
-        const expandValue = options.$expand ?? options.expand;
+        // Expand: the folded slot value → `Record<string, QueryAST>`. A comma
+        // list (string) and a name array both lower to `{name: {object: name}}`;
+        // the advanced `{rel: QueryAST}` map a caller may send directly on
+        // `POST /data/:object/query` passes through as-is. Lowering the ARRAY
+        // shape here (not just the string) also closes a pre-#3795 gap: a raw
+        // name array used to survive this block whole, so the #4226 gate read
+        // its INDICES as relation names and refused real requests with
+        // "Unknown field '0'".
+        const expandValue = options.expand;
         const expandNames: string[] = [];
-        if (typeof populateValue === 'string') {
-            expandNames.push(...populateValue.split(',').map((s: string) => s.trim()).filter(Boolean));
-        } else if (Array.isArray(populateValue)) {
-            expandNames.push(...populateValue);
+        if (typeof expandValue === 'string') {
+            expandNames.push(...expandValue.split(',').map((s: string) => s.trim()).filter(Boolean));
+        } else if (Array.isArray(expandValue)) {
+            expandNames.push(...expandValue);
         }
-        if (!expandNames.length && expandValue) {
-            if (typeof expandValue === 'string') {
-                expandNames.push(...expandValue.split(',').map((s: string) => s.trim()).filter(Boolean));
-            } else if (Array.isArray(expandValue)) {
-                expandNames.push(...expandValue);
-            }
-        }
-        delete options.populate;
-        delete options.$expand;
-        // Clean up non-object expand (e.g. string) BEFORE the Record conversion
-        // below, so that populate-derived names can create the expand Record even
-        // when a legacy string expand was also present.
-        if (typeof options.expand !== 'object' || options.expand === null) {
+        if (typeof options.expand !== 'object' || options.expand === null || Array.isArray(options.expand)) {
             delete options.expand;
         }
-        // Only set expand if not already an object (advanced usage)
         if (expandNames.length > 0 && !options.expand) {
             options.expand = {} as Record<string, any>;
             for (const rel of expandNames) {
@@ -3733,6 +4287,25 @@ export class ObjectStackProtocolImplementation implements
         // rather than `expandNames` is what covers the second one.
         if (options.expand && typeof options.expand === 'object') {
             this.assertExpandTargetsExist(request.object, Object.keys(options.expand));
+        }
+
+        // [#4254] The `searchFields` override is validated on the value the
+        // ENGINE will read — the standalone parameter when present, otherwise
+        // the object-form `search: { query, fields }` a `POST` body may carry
+        // (same precedence as the engine's own `searchFields ?? search.fields`,
+        // and the same shapes: the engine accepts the comma-string and array
+        // forms from either slot). Checked whether or not a `search` term rode
+        // along: the caller named fields either way, and a stale override is
+        // the same typo before the search that will eventually use it is added.
+        if (options.searchFields != null) {
+            this.assertSearchFieldsAreSearchable(
+                request.object, options.searchFields, wireSpelling.searchFields ?? 'searchFields',
+            );
+        } else if (options.search !== null && typeof options.search === 'object'
+            && (options.search as any)?.fields != null) {
+            this.assertSearchFieldsAreSearchable(
+                request.object, (options.search as any).fields, wireSpelling.search ?? 'search',
+            );
         }
 
         // Boolean fields
@@ -3818,6 +4391,15 @@ export class ObjectStackProtocolImplementation implements
                 ? implicitFilters
                 : { $and: [explicitWhere, implicitFilters] };
         }
+
+        // [#4254] The aggregation axes name fields too, and were the last
+        // read-path axes that answered a wrong name with a plausible result
+        // (one null-keyed bucket; sum = 0). Validated before the routing
+        // below so an unreadable SHAPE cannot slip past the `Array.isArray`
+        // routing guard and ride to `engine.find` as ignored AST junk —
+        // rows returned ungrouped, looking exactly like a served query.
+        this.assertGroupByFieldsExist(request.object, options.groupBy);
+        this.assertAggregationFieldsExist(request.object, options.aggregations);
 
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
         // engine.find() does not do in-memory aggregation fallback, so without
@@ -5241,6 +5823,15 @@ export class ObjectStackProtocolImplementation implements
         if (!request.item) {
             throw new Error('Item data is required');
         }
+        // Drop OUR OWN read decorations before anything reads the body (#4326).
+        // The write path persists verbatim by design (ADR-0005 §Validation), so
+        // the standard Studio round-trip — GET (decorated) → edit → PUT the whole
+        // body — would otherwise bake a read-time verdict into the row, its
+        // checksum, and every history diff. See {@link stripReadDecorations} for
+        // why this is a silent strip and which underscore keys are NOT touched.
+        // Placed first so the destructive-change diff, the schema gate, the
+        // authoring gate and the persisted body all see the same document.
+        request.item = stripReadDecorations(request.item);
         // Per-item lifecycle (ADR-0005 §"Drafts"). Default is `'publish'`
         // (legacy semantics — save goes straight live) to keep callers
         // that predate the draft/publish split working. Studio's
@@ -6717,7 +7308,14 @@ export class ObjectStackProtocolImplementation implements
             const newName = renameName(row.name);
             let item: any;
             try {
-                item = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {});
+                // Canonicalize the source row before re-saving (#3903): the copy
+                // is a NEW write and must pass today's schema gate, so a legacy
+                // shape the chain owns is lifted rather than failing the copy —
+                // duplication never mints new rows in a pre-protocol dialect.
+                item = this.convertStoredItem(
+                    String(row.type),
+                    typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {}),
+                );
             } catch {
                 failed.push({ type: row.type, name: row.name, error: 'unparseable metadata' });
                 continue;
@@ -7504,10 +8102,29 @@ export class ObjectStackProtocolImplementation implements
      * Per ADR-0005, project-kernel mode ALSO hydrates from sys_metadata —
      * customization overlay rows must survive restart. Scope filter
      * (`environment_id = this.environmentId ?? null`) keeps tenants isolated.
+     *
+     * #3903 — two contract duties run per row, and their split is deliberate:
+     *
+     *  1. **Convert** ({@link convertStoredItem}): the full ADR-0087 chain
+     *     replays, so a row written under a past protocol registers in the
+     *     canonical shape. Chain-owned history therefore stops presenting as
+     *     "invalid metadata" at all.
+     *  2. **Diagnose, never drop**: what still fails the type's current spec
+     *     schema *after* conversion is a genuine contract violation — counted
+     *     in `invalid`, warned with a stable `[metadata_spec_invalid]` marker,
+     *     and STILL registered. Boot-time refusal would unhook the metadata
+     *     from every serving surface (an object row backs live tables; an
+     *     unregistered item cannot even be listed, opened, or fixed in
+     *     Studio), turning an upgrade into a data outage. The enforcing gates
+     *     live where an author is present to act: `saveMetaItem` rejects new
+     *     writes (422), and the read surfaces badge the row via
+     *     `_diagnostics`. This is that same read-side verdict, surfaced once
+     *     at boot where operators look.
      */
-    async loadMetaFromDb(): Promise<{ loaded: number; errors: number }> {
+    async loadMetaFromDb(): Promise<{ loaded: number; errors: number; invalid: number }> {
         let loaded = 0;
         let errors = 0;
+        let invalid = 0;
         try {
             // ADR-0005 (revised 2026-05): hydrate only env-wide rows
             // (organization_id IS NULL). Per-org overlays are loaded on
@@ -7520,11 +8137,26 @@ export class ObjectStackProtocolImplementation implements
             const records = await this.engine.find('sys_metadata', { where });
             for (const record of records) {
                 try {
-                    const data = typeof record.metadata === 'string'
-                        ? JSON.parse(record.metadata)
-                        : record.metadata;
+                    const data = this.convertStoredItem(
+                        String(record.type),
+                        typeof record.metadata === 'string'
+                            ? JSON.parse(record.metadata)
+                            : record.metadata,
+                    );
                     // Normalize DB type to singular (DB may store legacy plural forms)
                     const normalizedType = PLURAL_TO_SINGULAR[record.type] ?? record.type;
+                    const verdict = computeMetadataDiagnostics(normalizedType, data);
+                    if (verdict && !verdict.valid) {
+                        invalid++;
+                        const first = verdict.errors?.[0];
+                        console.warn(
+                            `[Protocol] [metadata_spec_invalid] stored ${normalizedType}/${record.name} fails the ` +
+                            `current spec schema even after conversion` +
+                            (first ? ` (${first.path || '<root>'}: ${first.message})` : '') +
+                            `. Registered anyway so it stays serveable and fixable — correct it in Studio ` +
+                            `(the read carries the full _diagnostics), or delete the sys_metadata row.`,
+                        );
+                    }
                     if (normalizedType === 'object') {
                         this.engine.registry.registerObject(data as any, record.packageId || 'sys_metadata');
                     } else {
@@ -7553,7 +8185,7 @@ export class ObjectStackProtocolImplementation implements
                 console.warn(`[Protocol] DB hydration skipped: ${e.message}`);
             }
         }
-        return { loaded, errors };
+        return { loaded, errors, invalid };
     }
 
     // ==========================================

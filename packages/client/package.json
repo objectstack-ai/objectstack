@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsup --config ../../tsup.config.ts",
     "test": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",

@@ -79,29 +79,34 @@ function flowWithHandler(name: string, node: Record<string, unknown>) {
  * that starts failing for a DIFFERENT reason does not pass vacuously.
  */
 const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; expect: string }> = [
+    // Since #4277 a missing REQUIRED key is refused by the executor's contract
+    // parse (parse-config.ts) before the hand-written guard runs, so those
+    // entries pin the parse refusal's fragment. The classification is the
+    // point of this inventory and is unchanged: a contract violation is wrong
+    // metadata, so it must stay a guard — un-routable.
     {
         name: 'get_record without objectName',
         why: 'a required config key — no run can supply it',
         node: { type: 'get_record', config: { filter: { id: 'x' } } },
-        expect: 'objectName required',
+        expect: 'does not satisfy the get_record contract',
     },
     {
         name: 'create_record without objectName',
         why: 'a required config key',
         node: { type: 'create_record', config: { fields: { a: 1 } } },
-        expect: 'objectName required',
+        expect: 'does not satisfy the create_record contract',
     },
     {
         name: 'update_record without objectName',
         why: 'a required config key',
         node: { type: 'update_record', config: { fields: { a: 1 } } },
-        expect: 'objectName required',
+        expect: 'does not satisfy the update_record contract',
     },
     {
         name: 'delete_record without objectName',
         why: 'a required config key',
         node: { type: 'delete_record', config: { filter: { id: 'x' } } },
-        expect: 'objectName required',
+        expect: 'does not satisfy the delete_record contract',
     },
     {
         name: 'get_record whose filter lost a condition (#3810)',
@@ -128,7 +133,7 @@ const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; 
         name: 'http without url',
         why: 'a required config key',
         node: { type: 'http', config: { method: 'GET' } },
-        expect: 'url is required',
+        expect: 'does not satisfy the http contract',
     },
     {
         name: 'subflow without flowName',

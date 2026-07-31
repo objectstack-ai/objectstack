@@ -682,7 +682,7 @@ describe('HttpDispatcher', () => {
             // (retired with this change). A stub slot is an empty slot.
             it('returns unhandled when the analytics slot holds a self-declared stub, without calling it', async () => {
                 const stub = {
-                    _dev: true,
+                    __serviceInfo: { status: 'stub' },
                     query: vi.fn().mockResolvedValue({ rows: [], fields: [] }),
                     getMeta: vi.fn().mockResolvedValue([]),
                     generateSql: vi.fn().mockResolvedValue({ sql: '', params: [] }),
@@ -1326,9 +1326,12 @@ describe('HttpDispatcher', () => {
             );
 
             expect(result.handled).toBe(true);
-            // top → limit and skip → offset are normalized by the dispatcher
+            // Wire params ride through VERBATIM (#3795): the dispatcher used to
+            // carry its own top→limit / skip→offset fold next to findData's —
+            // two copies of one precedence, disagreeing on three alias pairs.
+            // Folding is owned by the protocol normalizer alone now.
             expect(mockProtocol.findData).toHaveBeenCalledWith(
-                { object: 'task', query: { populate: 'assignee,project', limit: '10', offset: '0' } }
+                { object: 'task', query: { populate: 'assignee,project', top: '10', skip: '0' } }
             );
         });
 
@@ -2463,9 +2466,9 @@ describe('HttpDispatcher', () => {
             expect(info.services.realtime.status).toBe('unavailable');
         });
 
-        it('reports a _dev-marked stub service as stub, never available', async () => {
+        it('reports a stub-marked service as stub, never available', async () => {
             (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
-                if (name === 'ai') return { _dev: true, chat: vi.fn() };
+                if (name === 'ai') return { __serviceInfo: { status: 'stub', message: 'Development stub — not a production implementation' }, chat: vi.fn() };
                 return null;
             });
 
@@ -2501,7 +2504,7 @@ describe('HttpDispatcher', () => {
         // `handlerReady: false` says more than `unavailable` would.
         it('stops advertising the analytics route for a stub, while still reporting it as a stub', async () => {
             (kernel as any).getService = vi.fn().mockImplementation((name: string) =>
-                name === 'analytics' ? { _dev: true, query: vi.fn() } : null,
+                name === 'analytics' ? { __serviceInfo: { status: 'stub' }, query: vi.fn() } : null,
             );
 
             const info = await dispatcher.getDiscoveryInfo('/api/v1');

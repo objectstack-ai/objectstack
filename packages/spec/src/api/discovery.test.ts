@@ -918,16 +918,21 @@ describe('Service self-description marker (ADR-0076 D12, #2462)', () => {
     expect(readServiceSelfInfo(svc)?.handlerReady).toBe(false);
   });
 
-  it('readServiceSelfInfo normalizes the legacy _dev marker to a stub', () => {
-    const info = readServiceSelfInfo({ _dev: true, chat: () => 'fake' });
-    expect(info?.status).toBe('stub');
-    expect(info?.handlerReady).toBe(false);
-    expect(info?.message).toContain('plugin-dev');
+  // The retired markers read as unmarked — i.e. as fully real. That is the
+  // deliberate cost of collapsing three dialects into one (#4319): a service
+  // still carrying `_dev` / `_fallback` is now OVER-reported, not under-. It is
+  // acceptable only because both had zero producers left when they went (the
+  // `_fallback` case never worked at all — nothing ever read it, which is how
+  // the kernel fallbacks came to be reported `available` in the first place),
+  // and because keeping a boolean alive cannot express the `stub` / `degraded`
+  // split that every consumer gates on.
+  it('readServiceSelfInfo does not recognize the retired _dev / _fallback markers', () => {
+    expect(readServiceSelfInfo({ _dev: true, chat: () => 'fake' })).toBeUndefined();
+    expect(readServiceSelfInfo({ _fallback: true, get: () => undefined })).toBeUndefined();
   });
 
   it('readServiceSelfInfo ignores malformed markers', () => {
     expect(readServiceSelfInfo({ [SERVICE_SELF_INFO_KEY]: { status: 'available' } })).toBeUndefined();
     expect(readServiceSelfInfo({ [SERVICE_SELF_INFO_KEY]: 'stub' })).toBeUndefined();
-    expect(readServiceSelfInfo({ _dev: 'yes' })).toBeUndefined();
   });
 });

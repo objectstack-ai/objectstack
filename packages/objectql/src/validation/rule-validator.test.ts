@@ -57,9 +57,23 @@ describe('field requiredWhen enforcement (B2)', () => {
   it('a write that FIXES the legacy violation passes', () => {
     expect(() => evaluateValidationRules(invoiceFields, { amount: 25 }, 'update', { previous: { status: 'sent' } })).not.toThrow();
   });
-  it('honors the conditionalRequired alias', () => {
-    const f = { fields: { amount: { type: 'currency', conditionalRequired: "record.status == 'sent'" } } };
-    expect(() => evaluateValidationRules(f, { status: 'sent' }, 'insert')).toThrow(ValidationError);
+  // #3903 — the `conditionalRequired` alias read is RETIRED. Stored pre-17
+  // rows are lowered to `requiredWhen` by the ADR-0087 chain at rehydration
+  // (`applyConversionsToStoredItem`), so this validator only ever sees the
+  // canonical key; raw legacy input no longer gets a consumer-side fallback.
+  it('does NOT read the retired conditionalRequired alias (PD #12 — no dialect fallback)', () => {
+    const f = { fields: { amount: { type: 'currency', conditionalRequired: "record.status == 'sent'" } } } as any;
+    expect(() => evaluateValidationRules(f, { status: 'sent' }, 'insert')).not.toThrow();
+  });
+  it('enforces the rule once the stored-conversion chain has lowered the alias', async () => {
+    const { applyConversionsToStoredItem } = await import('@objectstack/spec');
+    const storedRow = {
+      name: 'invoice',
+      fields: { amount: { type: 'currency', conditionalRequired: "record.status == 'sent'" } },
+    };
+    const converted = applyConversionsToStoredItem('object', storedRow) as any;
+    expect(converted.fields.amount.requiredWhen).toBe("record.status == 'sent'");
+    expect(() => evaluateValidationRules(converted, { status: 'sent' }, 'insert')).toThrow(ValidationError);
   });
 });
 

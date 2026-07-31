@@ -6,6 +6,7 @@ import {
   REACT_CHART_AGGREGATE_INVALID,
   REACT_CHART_AXIS_UNKNOWN,
 } from './validate-react-page-props.js';
+import { SEARCHABLE_FIELD_UNKNOWN } from './validate-searchable-fields.js';
 
 const page = (source: string) => ({ pages: [{ name: 'p', kind: 'react', source }] });
 
@@ -237,6 +238,112 @@ describe('validateReactPageProps — <ObjectChart> bindings (#3701)', () => {
 
   it('leaves a chart with no aggregate alone (dataset-bound or data-bound)', () => {
     const f = validateReactPageProps(chartPage(chart(`objectName="invoice"`)));
+    expect(f).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// <ListView> searchableFields (#4329) — the react-surface twin of the
+// metadata rule `searchable-field-unknown` (#4328). Same core, so the same
+// skips and the same dotted-path strictness; these tests pin the JSX-specific
+// seams (static-value resolution, spread, where/path shape).
+// ─────────────────────────────────────────────────────────────────────────
+
+const account = {
+  name: 'crm_account',
+  fields: {
+    name: { type: 'text' },
+    billing_email: { type: 'email' },
+    owner_id: { type: 'lookup', reference: 'sys_user' },
+  },
+};
+
+const listPage = (source: string, objects: unknown[] = [account]) => ({
+  objects,
+  pages: [{ name: 'p', kind: 'react', source }],
+});
+
+const list = (attrs: string) => `function Page(){ return <ListView ${attrs} />; }`;
+
+describe('validateReactPageProps — <ListView> searchableFields (#4329)', () => {
+  it('passes a declaration whose every entry resolves', () => {
+    const f = validateReactPageProps(
+      listPage(list(`objectName="crm_account" searchableFields={['name', 'billing_email']}`)),
+    );
+    expect(f).toEqual([]);
+  });
+
+  it('flags a stale entry, gating, under the metadata rule id', () => {
+    const f = validateReactPageProps(
+      listPage(list(`objectName="crm_account" searchableFields={['name', 'email']}`)),
+    );
+
+    expect(f).toHaveLength(1);
+    expect(f[0].rule).toBe(SEARCHABLE_FIELD_UNKNOWN);
+    // `error`, like the metadata surface: objectui echoes the prop verbatim as
+    // the `$searchFields` override, so a stale entry is the same 400-in-waiting.
+    expect(f[0].severity).toBe('error');
+    expect(f[0].where).toBe('page "p" › <ListView>');
+    // The entry index is part of the path so the author can go straight to it.
+    expect(f[0].path).toBe('pages[0].source › searchableFields[1]');
+    expect(f[0].message).toContain('"email"');
+    expect(f[0].message).toContain('crm_account');
+    expect(f[0].hint).toContain('400 INVALID_FIELD');
+  });
+
+  it('suggests the real field when the stale name is close to one', () => {
+    const f = validateReactPageProps(
+      listPage(list(`objectName="crm_account" searchableFields={['biling_email']}`)),
+    );
+    expect(f[0].message).toContain('Did you mean "billing_email"?');
+  });
+
+  it('accepts registry-injected system columns absent from authored fields', () => {
+    const f = validateReactPageProps(
+      listPage(list(`objectName="crm_account" searchableFields={['name', 'created_at', 'owner_id']}`)),
+    );
+    expect(f).toEqual([]);
+  });
+
+  it('flags a dotted path — search cannot resolve the traversal', () => {
+    const f = validateReactPageProps(
+      listPage(list(`objectName="crm_account" searchableFields={['owner_id.name']}`)),
+    );
+    expect(f).toHaveLength(1);
+    expect(f[0].hint).toContain("scans this object's own columns");
+  });
+
+  it('skips an object this stack does not define', () => {
+    const f = validateReactPageProps(
+      listPage(list(`objectName="pkg_contract" searchableFields={['no_such_field']}`)),
+    );
+    expect(f).toEqual([]);
+  });
+
+  it('skips an object with no authored field map (external / introspected)', () => {
+    const f = validateReactPageProps(
+      listPage(list(`objectName="external_invoice" searchableFields={['doc_no']}`), [
+        { name: 'external_invoice', external: { datasource: 'erp' } },
+      ]),
+    );
+    expect(f).toEqual([]);
+  });
+
+  it('skips a value built from a variable (not knowable at build time)', () => {
+    const f = validateReactPageProps(
+      listPage(
+        'function Page(){ const sf = ["nope"]; return <ListView objectName="crm_account" searchableFields={sf} />; }',
+      ),
+    );
+    expect(f).toEqual([]);
+  });
+
+  it('skips everything behind a spread (props may come from it)', () => {
+    const f = validateReactPageProps(
+      listPage(
+        'function Page(){ const p = {}; return <ListView objectName="crm_account" {...p} searchableFields={["nope"]} />; }',
+      ),
+    );
     expect(f).toEqual([]);
   });
 });

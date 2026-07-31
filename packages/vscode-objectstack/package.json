@@ -56,7 +56,8 @@
   "scripts": {
     "build": "tsc -p ./tsconfig.json",
     "watch": "tsc -watch -p ./tsconfig.json",
-    "package": "vsce package"
+    "package": "vsce package",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/vscode": "^1.125.0",

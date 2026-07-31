@@ -70,7 +70,7 @@ Canonical cross-paradigm action/node descriptor (ADR-0018)
 | **icon** | `string` | optional | Icon id resolved by the designer |
 | **category** | `Enum<'logic' \| 'data' \| 'io' \| 'human' \| 'control' \| 'custom'>` | ✅ | Palette category |
 | **paradigms** | `Enum<'flow' \| 'approval'>[]` | ✅ | Authoring surfaces that may offer this action |
-| **configSchema** | `any` | optional | JSON Schema for the node config (drives the designer form; only declared expression slots are validated) |
+| **configSchema** | `any` | optional | JSON Schema for the node config (drives the designer form; undeclared keys are rejected at registration) |
 | **supportsPause** | `boolean` | ✅ | Supports async pause/resume |
 | **supportsCancellation** | `boolean` | ✅ | Supports cancellation |
 | **supportsRetry** | `boolean` | ✅ | Supports retry on failure |

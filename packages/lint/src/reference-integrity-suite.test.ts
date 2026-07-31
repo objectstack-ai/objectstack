@@ -16,6 +16,7 @@ describe('reference-integrity suite — membership', () => {
   it('holds exactly the reference-resolution rules, in report order', () => {
     expect(REFERENCE_INTEGRITY_RULES.map((r) => r.name)).toEqual([
       'validateObjectReferences',
+      'validateSearchableFields',
       'validateActionNameRefs',
       'validatePageFieldBindings',
       'validateChartBindings',
@@ -25,6 +26,8 @@ describe('reference-integrity suite — membership', () => {
       'validateAiSurfaceAffinity',
       'validateAiToolReferences',
       'validateAiAgentAuthoring',
+      'validateHookBodyWrites',
+      'validateActionBodyWrites',
     ]);
   });
 
@@ -48,12 +51,28 @@ describe('reference-integrity suite — every member actually runs', () => {
       {
         name: 'crm_lead',
         fields: { name: { type: 'text', label: 'Name' } },
+        // validateSearchableFields: `budget` is not a field on crm_lead, so the
+        // ADR-0061 declaration is stale — the engine drops it and searches a
+        // narrower set than the object declares.
+        searchableFields: ['name', 'budget'],
         permissions: {},
       },
     ],
     actions: [
       // validateObjectReferences: a param pointing at an object nothing declares.
       { name: 'assign', label: 'Assign', params: [{ name: 'owner', reference: 'user' }] },
+      // validateActionBodyWrites: the L2 body persists a field crm_lead does
+      // not declare — the action returns success and the column never lands
+      // (#4271, the action half of the hook rule below).
+      {
+        name: 'score_now',
+        label: 'Score Now',
+        objectName: 'crm_lead',
+        body: {
+          language: 'js',
+          source: "await ctx.api.object('crm_lead').update({ lead_score: 100 });",
+        },
+      },
     ],
     views: [
       {
@@ -118,6 +137,16 @@ describe('reference-integrity suite — every member actually runs', () => {
     // validateAiToolReferences: a tool name nothing declares, registers, or
     // materialises (the HotCRM fictional-tool class).
     skills: [{ name: 'metadata_authoring', surface: 'build', tools: ['forecast_revenue'] }],
+    hooks: [
+      // validateHookBodyWrites: the L2 body writes a field crm_lead does not
+      // declare — runs clean in the sandbox, never lands in the record (#4271).
+      {
+        name: 'score_lead',
+        object: 'crm_lead',
+        events: ['beforeInsert'],
+        body: { language: 'js', source: "ctx.input.lead_score = 100;" },
+      },
+    ],
     flows: [
       {
         name: 'lead_followup',
@@ -144,6 +173,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     const rules = new Set(findings.map((f) => f.rule));
 
     expect(rules).toContain('object-reference-unknown');
+    expect(rules).toContain('searchable-field-unknown');
     expect(rules).toContain('action-name-undefined');
     expect(rules).toContain('page-field-unknown');
     expect(rules).toContain('chart-measure-unknown');
@@ -153,6 +183,8 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('ai-skill-surface-mismatch');
     expect(rules).toContain('ai-skill-tool-unresolved');
     expect(rules).toContain('agent-authoring-withdrawn');
+    expect(rules).toContain('hook-body-write-unknown-field');
+    expect(rules).toContain('action-body-write-unknown-field');
   });
 
   it('carries a gating flow-template finding through the suite (#3810)', () => {
@@ -174,9 +206,9 @@ describe('reference-integrity suite — every member actually runs', () => {
       expect(typeof f.message).toBe('string');
       expect(typeof f.hint).toBe('string');
     }
-    // Object references run first, agent-authoring last.
+    // Object references run first, action-body writes last.
     expect(findings[0].rule).toBe('object-reference-unknown');
-    expect(findings[findings.length - 1].rule).toBe('agent-authoring-withdrawn');
+    expect(findings[findings.length - 1].rule).toBe('action-body-write-unknown-field');
   });
 
   it('returns nothing for an empty stack', () => {
