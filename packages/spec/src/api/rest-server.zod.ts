@@ -123,7 +123,7 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
    * Which is the exact failure mode this key's removal is about.
    */
   requireAuth: retiredKey(
-    '`api.requireAuth` was removed in @objectstack/spec 18 (#3963). Anonymous access to object data '
+    '`api.requireAuth` was removed in @objectstack/spec 17 (#3963). Anonymous access to object data '
     + 'is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. '
     + 'To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a '
     + "share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of "

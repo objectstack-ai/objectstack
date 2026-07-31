@@ -41,7 +41,7 @@ non-strict `BaseQuerySchema`, so authoring either fails `tsc` (input type
 `never`) and a query still carrying one — even as an empty array — fails to
 parse with the prescription itself. `QueryAST` is a request shape, never stored
 in stack metadata, so there is no `os migrate meta` step: the removals are
-registered as protocol-18 **semantic** migrations (`query-joins-retired`,
+registered as protocol-17 **semantic** migrations (`query-joins-retired`,
 `query-window-functions-retired`), the #4196 precedent.
 
 Compat note for the REST boundary: both names remain **reserved** list-query

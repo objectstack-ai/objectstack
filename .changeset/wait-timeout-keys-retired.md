@@ -5,7 +5,7 @@
 
 feat(spec)!: retire `waitEventConfig.timeoutMs` / `.onTimeout` — `wait` never had a timeout (#4158)
 
-Both keys described a timeout and neither delivered one, so protocol 18 removes the pair
+Both keys described a timeout and neither delivered one, so protocol 17 removes the pair
 rather than leaving a promise the runtime does not keep (PD #10).
 
 - **`onTimeout`** had **zero** readers. No path ever inspected it, so neither `'fail'` nor
@@ -38,5 +38,5 @@ tombstones name the replacement.
 
 One fixture interaction worth recording: the #4045 lift fixture used
 `waitEventConfig.timeoutMs` to demonstrate its fourth ledger entry, and the fixture
-harness replays the whole table — so its `after` described an end state protocol 18 makes
+harness replays the whole table — so its `after` described an end state protocol 17 makes
 unreachable. It now lifts `eventType` instead. The harness caught this itself.

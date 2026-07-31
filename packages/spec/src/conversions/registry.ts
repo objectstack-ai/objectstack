@@ -1198,7 +1198,7 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
             { id: 'n3', type: 'wait', config: { eventType: 'signal', signal: 'order_paid' } },
             // Partially shadowed: `timerDuration` is already declared, so the
             // loose `duration` stays put untouched; only `eventType` lifts.
-            // (Deliberately not `timeoutMs` — protocol 18 retires that key
+            // (Deliberately not `timeoutMs` — protocol 17 retires that key
             // (#4158), and the fixture harness replays the WHOLE table, so an
             // `after` naming it would describe an end state that no longer
             // exists.)
@@ -2081,7 +2081,7 @@ const skillTriggerPhrasesRemoved: MetadataConversion = {
  * shape. Newest majors last; ordering within a major is application order.
  */
 /**
- * Stack `api.requireAuth` → dropped (protocol 18, #3963).
+ * Stack `api.requireAuth` → dropped (protocol 17, #3963).
  *
  * NOT a rename — there is no key to move the value to. The deployment-wide
  * anonymous-access opt-out is retired: auth is a kernel concern, and anonymous
@@ -2099,7 +2099,7 @@ const skillTriggerPhrasesRemoved: MetadataConversion = {
  */
 const stackApiRequireAuthRemoved: MetadataConversion = {
   id: 'stack-api-require-auth-removed',
-  toMajor: 18,
+  toMajor: 17,
   retiredFromLoadPath: true,
   surface: 'stack.api.requireAuth',
   summary: "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (#3963)",
@@ -2124,7 +2124,7 @@ const stackApiRequireAuthRemoved: MetadataConversion = {
 
 /**
  * `waitEventConfig.timeoutMs` / `.onTimeout` removed — `wait` never had a timeout
- * (protocol 18, #4158).
+ * (protocol 17, #4158).
  *
  * Both keys described a timeout and neither delivered one. `onTimeout` had **zero**
  * readers: no path ever inspected it, so neither `'fail'` nor `'continue'` ever
@@ -2179,7 +2179,7 @@ function removeWaitTimeoutKeys(stack: Dict, emit: Emit): Dict {
 
 const flowNodeWaitTimeoutKeysRemoved: MetadataConversion = {
   id: 'flow-node-wait-timeout-keys-removed',
-  toMajor: 18,
+  toMajor: 17,
   retiredFromLoadPath: true,
   surface: 'flow.node.waitEventConfig',
   summary:
@@ -2255,8 +2255,6 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     dashboardInertKeysRemoved,
     agentKnowledgeRemoved,
     skillTriggerPhrasesRemoved,
-  ],
-  18: [
     stackApiRequireAuthRemoved,
     flowNodeWaitTimeoutKeysRemoved,
   ],
