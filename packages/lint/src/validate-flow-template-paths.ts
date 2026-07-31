@@ -55,6 +55,8 @@
 //   - Structured scalar heads (`json` / `composite` / `repeater` / `record`) may
 //     carry legitimate sub-paths — their `.<sub>` access is left alone.
 
+import { SYSTEM_FIELDS } from './system-fields.js';
+
 export type FlowTemplatePathSeverity = 'error' | 'warning';
 
 export interface FlowTemplatePathFinding {
@@ -86,24 +88,16 @@ function asArray(v: unknown): AnyRec[] {
   return [];
 }
 
-// System/audit columns the platform injects on every object — always
-// addressable in a `{record.<col>}` template even though they are not authored
-// fields. Mirrors `validateFormLayout`'s system-field set plus the audit/tenant
-// columns from `FIELD_GROUP_SYSTEM_FIELDS`.
-const SYSTEM_FIELDS: ReadonlySet<string> = new Set([
-  'id',
-  'name',
-  'owner',
-  'owner_id',
-  'created_at',
-  'created_by',
-  'updated_at',
-  'updated_by',
-  'organization_id',
-  'tenant_id',
-  'is_deleted',
-  'deleted_at',
-  'record_type',
+// Path heads addressable in a `{record.<col>}` template without being authored
+// fields: the package-shared registry-injected columns (`system-fields.ts`,
+// #4330) plus three heads this rule has always exempted. `name`, `owner` and
+// `record_type` are NOT registry-injected system columns (`name` in particular
+// is an ordinary authored field on most objects), so they stay rule-local —
+// see the shared module's note — instead of widening every field-existence
+// rule in the package.
+const IMPLICIT_HEADS: ReadonlySet<string> = new Set([
+  ...SYSTEM_FIELDS,
+  'name', 'owner', 'record_type',
 ]);
 
 // Field types that address ANOTHER object — a `.<subfield>` hop through one is
@@ -332,7 +326,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
           // A trailing numeric segment is an array index (#1872), not a hop.
           const nextIsIdentifier = hasSubPath && !/^\d+$/.test(rest[1]);
 
-          const isKnown = fieldTypes.has(head) || SYSTEM_FIELDS.has(head);
+          const isKnown = fieldTypes.has(head) || IMPLICIT_HEADS.has(head);
 
           if (!isKnown) {
             if (seenUnknown.has(head)) continue;

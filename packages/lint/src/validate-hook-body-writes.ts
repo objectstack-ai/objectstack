@@ -43,6 +43,8 @@ import { createRequire } from 'node:module';
 import type ts from 'typescript';
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 
+import { SYSTEM_FIELDS } from './system-fields.js';
+
 // The TypeScript compiler must NOT be imported at module top level: it is
 // ~9 MB of CJS, and @objectstack/lint sits on the kernel boot path — while
 // this gate only parses when a hook actually carries an L2 JS body. Same
@@ -175,18 +177,17 @@ const API_WRITE_METHODS: ReadonlyMap<string, number> = new Map([
 const INPUT_ENVELOPE_KEYS: ReadonlySet<string> = new Set(['id', 'options', 'ast', 'data']);
 
 /**
- * Registry-injected columns present on (almost) every object but absent from
- * `object.fields` — always legitimately writable by automation. The UNION of
- * the sets the other field-resolving rules carry, because the cost asymmetry
- * is the same everywhere: over-inclusion is at worst a missed finding,
- * under-inclusion is a false one.
+ * Columns always legitimately writable by automation without appearing in
+ * `object.fields`: the package-shared registry-injected columns
+ * (`system-fields.ts`, #4330) plus the UNION of its sibling rules' local
+ * exemptions (`_id`/`name`/`space` from validate-translation-references,
+ * `name`/`owner`/`record_type` from validate-flow-template-paths) — because
+ * the cost asymmetry is the same everywhere: over-inclusion is at worst a
+ * missed finding, under-inclusion is a false one.
  */
-const SYSTEM_FIELDS: ReadonlySet<string> = new Set([
-  'id', '_id', 'name', 'space',
-  'owner', 'owner_id', 'user_id',
-  'created_at', 'created_by', 'updated_at', 'updated_by',
-  'organization_id', 'tenant_id',
-  'is_deleted', 'deleted_at', 'record_type',
+const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
+  ...SYSTEM_FIELDS,
+  '_id', 'name', 'space', 'owner', 'record_type',
 ]);
 
 type AnyRec = Record<string, unknown>;
@@ -414,7 +415,7 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
         // missing on EVERY named target (a multi-target body may branch per
         // object, so a partial miss is not statically wrong).
         if (!inputJudgeable) continue;
-        if (SYSTEM_FIELDS.has(w.field)) continue;
+        if (IMPLICIT_FIELDS.has(w.field)) continue;
         if (targetSets.some((s) => s!.has(w.field))) continue;
 
         reported.add(dedupeKey);
@@ -438,7 +439,7 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
         // ctx.api write → the named object.
         const known = objectFields!.get(w.object);
         if (!known) continue; // object declared by another package — cannot judge
-        if (SYSTEM_FIELDS.has(w.field) || known.has(w.field)) continue;
+        if (IMPLICIT_FIELDS.has(w.field) || known.has(w.field)) continue;
 
         reported.add(dedupeKey);
         findings.push({
@@ -468,7 +469,7 @@ function unionCandidates(targetSets: ReadonlyArray<Set<string> | undefined>): st
 
 /** Did-you-mean (declared + system columns as candidates) plus the fix. */
 function fixHint(field: string, declared: string[]): string {
-  const suggestion = formatSuggestion(findClosestMatches(field, [...declared, ...SYSTEM_FIELDS]));
+  const suggestion = formatSuggestion(findClosestMatches(field, [...declared, ...IMPLICIT_FIELDS]));
   return (
     (suggestion ? `${suggestion} ` : '') +
     `Fix the field name, or declare '${field}' on the object. Only the literal write patterns in ` +

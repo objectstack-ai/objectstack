@@ -28,6 +28,8 @@ import { createRequire } from 'node:module';
 import type ts from 'typescript';
 import { REACT_BLOCKS, chartAggregateResultKeys } from '@objectstack/spec/ui';
 
+import { SYSTEM_FIELDS } from './system-fields.js';
+
 // The TypeScript compiler must NOT be imported at module top level: it is
 // ~9 MB of CJS (~70 ms+ to parse, worse on container cold starts), and
 // @objectstack/lint sits on the kernel boot path — while this gate only runs
@@ -201,19 +203,6 @@ export const REACT_CHART_AGGREGATE_INVALID = 'react-chart-aggregate-invalid';
 export const REACT_CHART_AXIS_UNKNOWN = 'react-chart-axis-unknown';
 
 const CHART_FUNCTIONS = ['count', 'sum', 'avg', 'min', 'max'] as const;
-
-/**
- * Registry-injected fields present on (almost) every object but absent from
- * `object.fields`. Same set as `validate-page-field-bindings`, for the same
- * reason: over-inclusion costs at worst a missed finding, under-inclusion
- * costs a false one.
- */
-const SYSTEM_FIELDS = new Set<string>([
-  'id',
-  'created_at', 'created_by', 'updated_at', 'updated_by',
-  'owner_id', 'organization_id', 'tenant_id', 'user_id',
-  'deleted_at',
-]);
 
 /**
  * Both `objects` and an object's `fields` are authored either as an array of

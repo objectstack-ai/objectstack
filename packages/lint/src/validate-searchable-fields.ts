@@ -57,9 +57,9 @@
  *   2. An object that declares no field map at all — external objects and
  *      datasource-introspected schemas whose columns are resolved at runtime.
  *   3. Registry-injected system columns, which are searchable at runtime but
- *      never appear in authored `fields`. Derived from the spec's own
- *      declarations rather than hand-copied: this package already carries five
- *      slightly-different copies of that list (#3786's lesson, unlearned).
+ *      never appear in authored `fields` — the package-shared `SYSTEM_FIELDS`
+ *      (`system-fields.ts`), derived from the spec's own declarations rather
+ *      than hand-copied (#4330).
  *
  * Dotted paths are NOT skipped here, unlike every sibling rule. Elsewhere
  * `owner_id.name` is left alone because the query engine resolves the traversal;
@@ -68,8 +68,7 @@
  * one wrong spelling most likely to be borrowed from `select`/`sort`.
  */
 
-import { FIELD_GROUP_SYSTEM_FIELDS } from '@objectstack/spec/data';
-import { SystemFieldName } from '@objectstack/spec/system';
+import { SYSTEM_FIELDS } from './system-fields.js';
 
 export const SEARCHABLE_FIELD_UNKNOWN = 'searchable-field-unknown';
 
@@ -91,18 +90,6 @@ export interface SearchableFieldFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-/**
- * Registry-injected columns that are addressable at runtime without being
- * authored in `fields`. DERIVED from the spec's two declarations —
- * `FIELD_GROUP_SYSTEM_FIELDS` (audit provenance + tenant + soft-delete) and
- * `SystemFieldName` (the protocol-level ids) — so it cannot drift from them the
- * way five hand-copied variants in this package already have.
- */
-const SYSTEM_FIELDS: ReadonlySet<string> = new Set<string>([
-  ...FIELD_GROUP_SYSTEM_FIELDS,
-  ...Object.values(SystemFieldName),
-]);
 
 /** Coerce a collection (array or name-keyed map) to an array of records. */
 function asArray(v: unknown): AnyRec[] {

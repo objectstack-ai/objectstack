@@ -3,6 +3,8 @@
 import { isIncoherentAggregate } from '@objectstack/spec/data';
 import { ChartTypeSchema } from '@objectstack/spec/ui';
 
+import { SYSTEM_FIELDS } from './system-fields.js';
+
 /**
  * Build-time dashboard widget binding diagnostics (issues #1719, #1721).
  *
@@ -221,26 +223,10 @@ const DATE_RANGE_FILTER_NAME = 'dateRange';
  * Default field of the built-in date range when `dateRange.field` is omitted.
  * MUST track objectui `dashboard-filters.ts` `DATE_RANGE_DEFAULT_FIELD` — the
  * runtime this check shadows. `created_at` is a registry-injected system field
- * (below), so a bare `dateRange` never false-positives.
+ * (the package-shared `SYSTEM_FIELDS`, `system-fields.ts`), so a bare
+ * `dateRange` never false-positives.
  */
 const DATE_RANGE_DEFAULT_FIELD = 'created_at';
-
-/**
- * Registry-injected fields present on (almost) every object but NOT declared in
- * `object.fields`, so a dashboard filter targeting one must not be flagged as a
- * missing column. Superset of the objectql registry's `applySystemFields`
- * (audit columns, ownership, tenant, soft-delete) and spec's `SystemFieldName`.
- * Deliberately generous: the cost of over-inclusion is at worst a missed error
- * on a `systemFields: false` object (rare); the cost of under-inclusion is a
- * false build failure on the ubiquitous `dateRange` → `created_at` default. The
- * near-zero-false-positive bias mirrors ADR-0032's field-ref validator.
- */
-const SYSTEM_FIELDS = new Set<string>([
-  'id',
-  'created_at', 'created_by', 'updated_at', 'updated_by',
-  'owner_id', 'organization_id', 'tenant_id', 'user_id',
-  'deleted_at',
-]);
 
 interface DashFilterDef {
   /** Stable filter name — the key widgets bind against in `filterBindings`. */
