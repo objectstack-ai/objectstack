@@ -81,7 +81,23 @@ To use a capability locally, install its real service — e.g. `@objectstack/ser
 
 ## Production guard
 
-`init()` throws when `NODE_ENV === 'production'`: the assembly is built around a well-known default auth secret and a seeded dev admin. If you really mean it, set `OS_ALLOW_DEV_PLUGIN=1`.
+`init()` throws when `NODE_ENV === 'production'`: the assembly is built around a well-known default auth secret and a seeded dev admin. Nothing swallows the throw on a real boot path — `os serve` prints the message and exits `1`.
+
+If you really mean it (a staging box that pins `NODE_ENV=production`, a smoke test), set `OS_ALLOW_DEV_PLUGIN` to a truthy value (`1` / `true` / `on` / `yes`).
+
+Taking that hatch is never silent. The boot log names the hazards that are actually live for your configuration, and the ready banner repeats the brand, so a process running the dev assembly cannot look like an ordinary production start:
+
+```
+⚠ DEV ASSEMBLY UNDER NODE_ENV=production (OS_ALLOW_DEV_PLUGIN is set) — the boot guard was
+  explicitly overridden. This process is running the DEVELOPMENT assembly, which is not
+  hardened for production traffic (ADR-0115 D6).
+    • Auth secret is the default published inside @objectstack/plugin-dev. It is public, so
+      anyone can mint a session this stack accepts. Pass `authSecret` explicitly.
+    • Data goes to the in-memory driver with persistence disabled — every record is lost
+      when this process exits.
+```
+
+The dev-admin seed is deliberately *not* on that list: `plugin-auth`'s seeding is hard-gated to `NODE_ENV === 'development'`, so it cannot fire on this path.
 
 ## API Endpoints (when all services enabled)
 

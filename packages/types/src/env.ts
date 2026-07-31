@@ -192,6 +192,28 @@ export function resolveAllowDriverConnectFailure(): boolean {
 }
 
 /**
+ * Escape hatch for plugin-dev's production boot guard (ADR-0115 D6, #3900).
+ *
+ * `DevPlugin.init()` refuses to run under `NODE_ENV=production`: the stack it
+ * assembles is built around an auth secret published inside the npm package and
+ * an in-memory driver with persistence off, neither of which a production
+ * deployment should acquire by accident. Setting this to a truthy value
+ * (`true`/`1`/`on`/`yes`, case-insensitive) boots anyway, in an explicitly
+ * degraded state that is branded in the boot log and on the ready banner.
+ * Defaults OFF — an unset flag means "fail fast".
+ *
+ * Lives here rather than as a bare `process.env[…] === '1'` inside plugin-dev so
+ * that the whole `OS_ALLOW_*` family answers to one truthy vocabulary: the
+ * strict `=== '1'` it replaced fails CLOSED on `OS_ALLOW_DEV_PLUGIN=true`, which
+ * is safe but reads to an operator as the flag being broken.
+ */
+export function resolveAllowDevPlugin(): boolean {
+  const raw = readEnvWithDeprecation('OS_ALLOW_DEV_PLUGIN', [], { silent: true });
+  if (raw == null) return false;
+  return ['1', 'true', 'on', 'yes'].includes(String(raw).trim().toLowerCase());
+}
+
+/**
  * SINGLE decision point for "is the MCP HTTP surface (`/api/v1/mcp`) on?".
  *
  * MCP is a core platform capability and defaults ON: an unset
