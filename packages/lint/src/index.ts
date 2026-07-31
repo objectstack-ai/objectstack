@@ -261,14 +261,19 @@ export type {
 export {
   validateHookBodyWrites,
   extractHookBodyWrites,
+  extractHookBodyWriteSet,
   HOOK_BODY_WRITE_PATTERNS,
+  HOOK_BODY_WRITE_PATTERN_IDS,
+  HOOK_BODY_WRITE_EXCLUSIONS,
   HOOK_BODY_WRITE_UNKNOWN_FIELD,
 } from './validate-hook-body-writes.js';
 export type {
   HookBodyWriteFinding,
   HookBodyWriteSeverity,
   HookBodyWritePattern,
+  BodyWritePatternExclusion,
   ExtractedHookBodyWrite,
+  ExtractedHookBodyWriteSet,
 } from './validate-hook-body-writes.js';
 
 // The same write-set check on action bodies — same schema, same sandbox, same
@@ -279,8 +284,11 @@ export {
   validateActionBodyWrites,
   ACTION_BODY_WRITE_PATTERNS,
   ACTION_BODY_WRITE_PATTERN_IDS,
+  ACTION_RECORD_WRITE_PATTERNS,
+  ACTION_RECORD_WRITE_PATTERN_IDS,
   ACTION_BODY_WRITE_EXCLUSIONS,
   ACTION_BODY_WRITE_UNKNOWN_FIELD,
+  ACTION_RECORD_WRITE_DISCARDED,
 } from './validate-action-body-writes.js';
 export type {
   ActionBodyWriteFinding,

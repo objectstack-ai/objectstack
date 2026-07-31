@@ -148,9 +148,15 @@ export type ExpressionBody = z.infer<typeof ExpressionBodySchema>;
  * An **action** body carrying this same schema is checked by the sibling rule
  * `validateActionBodyWrites`, over the subset of that ledger which survives the
  * context change — `ctx.api.object('y').insert|create|update|updateById({ x })`
- * and nothing else. An action's `ctx.input` is its PARAMS bag, not a record,
- * and `ctx.record` is a snapshot the runner never writes back, so neither is a
- * record-write surface and neither is resolved against object fields.
+ * and nothing else. An action's `ctx.input` is its PARAMS bag, not a record, so
+ * it is never resolved against object fields.
+ *
+ * `ctx.record` is not a write surface at all: the runner passes a snapshot and
+ * never writes it back, so an assignment to it is discarded whether or not the
+ * field is declared. That gets its own warning
+ * (`action-record-write-discarded`, #4345), reported only when `ctx.record`
+ * never leaves the body as a value — mutating the snapshot and then handing it
+ * to an API write is a payload under construction, and is not flagged.
  *
  * @example
  * ```json

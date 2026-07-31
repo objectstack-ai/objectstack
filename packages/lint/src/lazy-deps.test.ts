@@ -1,13 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // Boot-path contract: importing @objectstack/lint must NOT load its heavy,
-// gate-only dependencies. The package sits on the kernel boot path, while
-// each dep below serves a gate that only runs when a `kind:'react'` page is
-// actually validated — so each must load lazily, on first use:
+// gate-only dependencies. The package sits on the kernel boot path, while each
+// dep below serves gates that only run when a particular, uncommon piece of
+// metadata is actually validated — so each must load lazily, on first use:
 //   - `typescript` (~9 MB, and has been pruned from production images before
-//     — see validate-react-page-props.ts), loaded by the react-props gate;
+//     — see validate-react-page-props.ts), loaded by the react-props gate AND
+//     by the L2 body write-set gates (validate-hook-body-writes.ts since
+//     #4271, validate-action-body-writes.ts since #4345);
 //   - `sucrase` (~1.5 MB), loaded by the react syntax gate
 //     (validate-react-pages.ts).
+//
+// "A react page" was the whole story when this file was written; it is not any
+// more, and the cases below say which trigger they are pinning. Keep them
+// named that way — a test called "until a react page is validated" that also
+// covers hook and action bodies is a test nobody can read against its subject.
 //
 // Guarded at three levels because vitest inlines static imports through its
 // transform (they never hit the native require cache), so an in-worker
@@ -15,7 +22,7 @@
 //   1. structural — no src file may eagerly `import ... from` a lazy dep
 //      (only `import type`, which erases at build);
 //   2. built dist — child `node` processes import both dist formats and prove
-//      each dep is absent until a react page is validated (skipped when dist
+//      each dep is absent until the metadata that needs it is validated (skipped when dist
 //      has not been built);
 //   3. behavioral — each lazy path really loads its dep on demand and the
 //      gate still produces findings.
@@ -62,8 +69,8 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
   });
 
   // Reused by both dist probes: import the dist entry, prove no lazy dep came
-  // with it, then run each react-page gate and prove exactly its own dep loads
-  // — and that the gate still produces its finding.
+  // with it, then run each gate and prove exactly its own dep loads — and that
+  // the gate still produces its finding.
   const reactStack = (source: string) => `{ pages: [{ name: 'r', kind: 'react', source: ${JSON.stringify(source)} }] }`;
   const childBody = `
     const probe = require('node:module').createRequire(process.cwd() + '/probe.js');
@@ -79,7 +86,7 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       if (loaded('typescript')) fail('the hook-body write gate on an L1-only stack must not load typescript');
       mod.validateActionBodyWrites(jsAction('input.x > 0', 'expression'));
       mod.validateActionBodyWrites(jsAction('ctx.input.amout = 1;'));
-      if (loaded('typescript')) fail('the action-body write gate must not load typescript for a body that never touches ctx.api');
+      if (loaded('typescript')) fail('the action-body write gate must not load typescript for a body that reaches neither ctx.api nor ctx.record');
       const syntax = mod.validateReactPages(${reactStack('function Page(){ return <div>oops; }')});
       if (!loaded('sucrase')) fail('sucrase was not loaded by a react-page syntax validation');
       if (loaded('typescript')) fail('the syntax gate must not load typescript');
@@ -89,6 +96,8 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       if (!hookWrites.some((f) => f.rule === 'hook-body-write-unknown-field')) fail('hook-body write gate produced no finding');
       const actionWrites = mod.validateActionBodyWrites(jsAction("await ctx.api.object('a').update({ amout: 1 });"));
       if (!actionWrites.some((f) => f.rule === 'action-body-write-unknown-field')) fail('action-body write gate produced no finding');
+      const recordWrites = mod.validateActionBodyWrites(jsAction("ctx.record.amount = 1;"));
+      if (!recordWrites.some((f) => f.rule === 'action-record-write-discarded')) fail('action-body record-write gate produced no finding');
       const props = mod.validateReactPageProps(${reactStack('function Page(){ return <ObjectForm mode="edit" />; }')});
       if (!loaded('typescript')) fail('typescript was not loaded by a react-page props validation');
       if (!props.some((f) => f.rule === 'react-prop-missing-required')) fail('props gate produced no finding');
@@ -96,7 +105,7 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
     };
   `;
 
-  it.skipIf(!existsSync(join(distDir, 'index.cjs')))('built CJS dist does not load a lazy dep until a react page is validated', () => {
+  it.skipIf(!existsSync(join(distDir, 'index.cjs')))('built CJS dist loads no lazy dep at import time, and each only on its own trigger', () => {
     const out = execFileSync(
       process.execPath,
       ['-e', `${childBody}; check(require(${JSON.stringify(join(distDir, 'index.cjs'))}));`],
@@ -105,7 +114,7 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
     expect(out).toContain('OK');
   }, COLD_LOAD_TIMEOUT_MS);
 
-  it.skipIf(!existsSync(join(distDir, 'index.js')))('built ESM dist does not load a lazy dep until a react page is validated', () => {
+  it.skipIf(!existsSync(join(distDir, 'index.js')))('built ESM dist loads no lazy dep at import time, and each only on its own trigger', () => {
     const out = execFileSync(
       process.execPath,
       [
@@ -136,15 +145,16 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
     expect(validateHookBodyWrites({ hooks: [hook(undefined)] })).toEqual([]);
     expect(validateHookBodyWrites({ hooks: [hook({ language: 'expression', source: 'input.x > 0' })] })).toEqual([]);
     expect(validateHookBodyWrites({ hooks: [hook({ language: 'js', source: 'return 1;' })] })).toEqual([]);
-    // Action bodies narrow it further: the only pattern the action rule carries
-    // is rooted at `ctx.api`, so even an L2 body that writes params never parses.
+    // Action bodies narrow it further: both patterns the action rule carries
+    // are rooted at `ctx.api` or `ctx.record`, so an L2 body that only writes
+    // params never parses at all.
     const action = (body: unknown) => ({ name: 'act', label: 'Act', objectName: 'a', body });
     expect(validateActionBodyWrites({ actions: [action(undefined)] })).toEqual([]);
     expect(validateActionBodyWrites({ actions: [action({ language: 'expression', source: 'input.x > 0' })] })).toEqual([]);
     expect(
       validateActionBodyWrites({
         objects: [{ name: 'a', fields: { amount: {} } }],
-        actions: [action({ language: 'js', source: 'ctx.input.amout = 1; ctx.record.nope = 2;' })],
+        actions: [action({ language: 'js', source: 'ctx.input.amout = 1; return { ok: true };' })],
       }),
     ).toEqual([]);
     for (const dep of LAZY_DEPS) {
@@ -175,6 +185,13 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       actions: [action({ language: 'js', source: "await ctx.api.object('a').update({ amout: 1 });" })],
     });
     expect(actionWrites.some((f) => f.rule === 'action-body-write-unknown-field' && f.severity === 'warning')).toBe(
+      true,
+    );
+    const recordWrites = validateActionBodyWrites({
+      objects: [{ name: 'a', fields: { amount: {} } }],
+      actions: [action({ language: 'js', source: 'ctx.record.amount = 1;' })],
+    });
+    expect(recordWrites.some((f) => f.rule === 'action-record-write-discarded' && f.severity === 'warning')).toBe(
       true,
     );
 
