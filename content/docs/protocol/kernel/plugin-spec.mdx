@@ -859,8 +859,8 @@ Always include migration guide in CHANGELOG.md for major versions.
 - `account.owner` field (use `account.owner_id` instead)
 
 ### Migration
-The `onUpgrade` lifecycle hook runs automatically when the package is upgraded
-to v2.0.0 and renames the field on existing records.
+Upgrading to v2.0.0 applies the metadata migration that renames the field on
+existing records (ADR-0087). No plugin code runs at upgrade.
 ```
 
 ### 3. Pin Core Dependencies

@@ -232,6 +232,63 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
+  describe('flow-node-wait-timeout-keys-removed (#4158)', () => {
+    const wecFlow = (waitEventConfig: Record<string, unknown>) => ({
+      flows: [
+        {
+          name: 'settle',
+          label: 'Settle',
+          type: 'autolaunched',
+          edges: [],
+          nodes: [
+            { id: 'n1', type: 'start', label: 'Start' },
+            { id: 'w', type: 'wait', label: 'Wait', waitEventConfig },
+          ],
+        },
+      ],
+    });
+    const wecOf = (stack: Record<string, unknown>) => (stack.flows as any[])[0].nodes[1].waitEventConfig;
+    // Retired from the load path, so the default `applyConversions` skips it —
+    // exactly like `stack-api-require-auth-removed`.
+    const convert = (stack: Record<string, unknown>) => collectConversionNotices(stack, { includeRetired: true });
+
+    it('moves `timeoutMs` to `timerDuration` as a STRING the schema accepts', () => {
+      const { stack, notices } = convert(wecFlow({ eventType: 'timer', timeoutMs: 60_000 }));
+      expect(wecOf(stack)).toEqual({ eventType: 'timer', timerDuration: '60000' });
+      expect(notices).toHaveLength(1);
+      // The move is only lossless if the result still parses — `timerDuration` is
+      // `z.string()`, so carrying the number across would have broken the block.
+      expect(() => FlowSchema.parse((stack.flows as any[])[0])).not.toThrow();
+    });
+
+    it('drops `timeoutMs` instead of moving it when `timerDuration` already won', () => {
+      const { stack, notices } = convert(
+        wecFlow({ eventType: 'timer', timerDuration: 'PT5M', timeoutMs: 999 }),
+      );
+      expect(wecOf(stack)).toEqual({ eventType: 'timer', timerDuration: 'PT5M' });
+      expect(notices).toHaveLength(1);
+    });
+
+    it('drops `onTimeout` — it never had a reader, so there is nothing to preserve', () => {
+      const { stack, notices } = convert(wecFlow({ eventType: 'timer', timerDuration: 'PT1M', onTimeout: 'continue' }));
+      expect(wecOf(stack)).toEqual({ eventType: 'timer', timerDuration: 'PT1M' });
+      expect(notices).toHaveLength(1);
+    });
+
+    it('leaves a block carrying neither key untouched', () => {
+      const { stack, notices } = convert(wecFlow({ eventType: 'signal', signalName: 'paid' }));
+      expect(wecOf(stack)).toEqual({ eventType: 'signal', signalName: 'paid' });
+      expect(notices).toHaveLength(0);
+    });
+
+    it('tombstones both keys so a source that skipped conversion is rejected, not stripped', () => {
+      for (const bad of [{ timeoutMs: 60_000 }, { onTimeout: 'continue' }]) {
+        const flow = (wecFlow({ eventType: 'timer', timerDuration: 'PT1M', ...bad }).flows as any[])[0];
+        expect(() => FlowSchema.parse(flow), `${Object.keys(bad)[0]} must be rejected`).toThrow(/4158/);
+      }
+    });
+  });
+
   describe('flow-node-wait-event-config-lift (PD #12 retirement, #4045)', () => {
     /**
      * One `wait` node in a flow that `FlowSchema` can actually parse — `label` is

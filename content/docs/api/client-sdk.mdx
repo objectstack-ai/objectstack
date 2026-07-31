@@ -315,8 +315,9 @@ await client.notifications.markAllRead();
 // through sys_inbox_message and tracks read-state in sys_notification_receipt.
 // These helpers will be repointed during the objectui bell cut-over.
 
-// AI — served by `service-ai` (Cloud/EE); 404s "AI service is not configured"
-// when the plugin is absent, so check `discovery.services` first.
+// AI — served by `service-ai` (Cloud/EE). Without it the route is mounted but
+// unimplemented, so it answers 501 and discovery reports the slot unavailable
+// with the same sentence; check `discovery.services` first.
 const answer = await client.ai.chat({
   messages: [{ role: 'user', content: 'How many open orders this quarter?' }],
   conversationId,                        // omit to have one created and echoed back

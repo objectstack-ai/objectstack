@@ -22,9 +22,28 @@ describe('CORE_SERVICE_PROVIDER', () => {
         expect(CORE_SERVICE_PROVIDER['notification']).toBe('@objectstack/service-messaging');
     });
 
-    it('uses null — not a plausible name — for slots nothing implements', () => {
+    it('uses null — not a plausible name — where no package can be installed', () => {
         for (const slot of ['ai', 'search', 'workflow', 'graphql']) {
-            expect(CORE_SERVICE_PROVIDER[slot], `${slot} must have no provider`).toBeNull();
+            expect(CORE_SERVICE_PROVIDER[slot], `${slot} must name no installable package`).toBeNull();
+        }
+    });
+
+    // `null` covers two different situations, and only one of them means
+    // "nothing exists". Verified against objectstack-ai/cloud: nothing there
+    // registers search/workflow/graphql, but `@objectstack/service-ai` does
+    // register `ai` — it is simply `private: true`, so there is no package to
+    // install and no name that belongs in an "Install X" sentence.
+    it('still says something ships for a slot whose provider is real but uninstallable', () => {
+        const ai = serviceUnavailableMessage('ai');
+        expect(ai).not.toMatch(/No implementation ships/);
+        expect(ai).toContain('@objectstack/service-ai');
+        expect(ai).toMatch(/Cloud\/Enterprise/);
+        // Still not an instruction a reader could act on and fail at.
+        expect(ai).not.toMatch(/^Install /);
+
+        // The genuinely-empty slots keep the plain sentence.
+        for (const slot of ['search', 'workflow', 'graphql']) {
+            expect(serviceUnavailableMessage(slot), slot).toMatch(/No implementation ships/);
         }
     });
 
