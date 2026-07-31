@@ -170,28 +170,103 @@ function distance(a: string, b: string): number {
 }
 
 /**
+ * object name → declared field names. `null` marks an object with no readable
+ * field map, so "declared nothing" stays distinguishable from "not in stack".
+ * Exported alongside `checkSearchableFieldList` so every surface that authors
+ * a searchable set resolves against the identical index (#4329).
+ */
+export function indexObjectSearchTargets(
+  stack: Record<string, unknown>,
+): Map<string, Set<string> | null> {
+  const fieldsByObject = new Map<string, Set<string> | null>();
+  if (!isRec(stack)) return fieldsByObject;
+  for (const obj of asArray(stack.objects)) {
+    const name = strName(obj.name);
+    if (name) fieldsByObject.set(name, declaredFieldNames(obj));
+  }
+  return fieldsByObject;
+}
+
+/**
+ * Check one `searchableFields` array against the field map `fieldsByObject`
+ * holds for `objectName` — the shared core behind every surface that authors a
+ * searchable set: the object/list-view metadata walked by
+ * `validateSearchableFields` below, and the react page surface
+ * (`<ListView searchableFields={…}>`, `validate-react-page-props`), which
+ * reuses it so the two surfaces agree on what counts as a field — same three
+ * skips, same dotted-path strictness (#4329).
+ *
+ * `subject` names the declaration for the message, since an object's own set
+ * and a view's narrowing of it are fixed differently; the entry index is
+ * appended to `path` so the author can go straight to the stale name.
+ */
+export function checkSearchableFieldList(
+  declared: unknown,
+  objectName: string | undefined,
+  fieldsByObject: ReadonlyMap<string, Set<string> | null>,
+  where: string,
+  path: string,
+  subject: string,
+): SearchableFieldFinding[] {
+  const findings: SearchableFieldFinding[] = [];
+  if (!Array.isArray(declared) || declared.length === 0) return findings;
+  if (!objectName) return findings; // nothing to resolve against
+  if (!fieldsByObject.has(objectName)) return findings; // ① object from another package
+  const known = fieldsByObject.get(objectName);
+  if (!known) return findings; // ② external / introspected — no authored field map
+
+  for (let i = 0; i < declared.length; i++) {
+    const entry = declared[i];
+    // Pre-parse input may carry junk here; a non-string is a SHAPE error the
+    // schema owns, not a dangling reference.
+    const name = strName(entry);
+    if (!name) continue;
+    if (known.has(name) || SYSTEM_FIELDS.has(name)) continue; // ③ system column
+
+    const dotted = name.includes('.');
+    findings.push({
+      severity: 'error',
+      rule: SEARCHABLE_FIELD_UNKNOWN,
+      where,
+      path: `${path}[${i}]`,
+      message:
+        `${subject} entry "${name}" is not a field on object "${objectName}". ` +
+        `The declaration is stale: searching it can never match, and the engine ` +
+        `silently drops it — leaving a narrower search than declared, or the ` +
+        `auto-default set once every entry is dropped.` +
+        (dotted ? '' : suggest(name, known)),
+      hint:
+        (dotted
+          ? `'search' scans this object's own columns, so a related record's ` +
+            `column cannot be a search target — expand the relation and search ` +
+            `the related object, or copy the value onto a formula field here. `
+          : `Fix the name, or add "${name}" to ${objectName}.fields. `) +
+        `Clients echo this declaration verbatim as the '$searchFields' ` +
+        `override, so a stale entry becomes a 400 INVALID_FIELD on list ` +
+        `search (#4254), not just a quietly narrowed one.` +
+        (known.size > 0 ? ` Object fields: ${[...known].sort().join(', ')}.` : ''),
+    });
+  }
+  return findings;
+}
+
+/**
  * Validate every `searchableFields` declaration in the stack — the object's own
  * (the canonical set, ADR-0061) and the list views that narrow it. Returns
  * findings (empty = clean).
+ *
+ * The react page surface (`<ListView searchableFields={…}>`) is deliberately
+ * NOT walked here: its declaration lives inside JSX source, and
+ * `validate-react-page-props` — the gate that already parses that source —
+ * runs the same `checkSearchableFieldList` core on it (#4329).
  */
 export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[] {
   const findings: SearchableFieldFinding[] = [];
   if (!isRec(stack)) return findings;
 
-  // object name → declared field names. `null` marks an object with no readable
-  // field map, so "declared nothing" stays distinguishable from "not in stack".
   const objects = asArray(stack.objects);
-  const fieldsByObject = new Map<string, Set<string> | null>();
-  for (const obj of objects) {
-    const name = strName(obj.name);
-    if (name) fieldsByObject.set(name, declaredFieldNames(obj));
-  }
+  const fieldsByObject = indexObjectSearchTargets(stack);
 
-  /**
-   * Check one `searchableFields` array against `objectName`'s field map.
-   * `subject` names the declaration for the message, since an object's own
-   * set and a view's narrowing of it are fixed differently.
-   */
   const check = (
     declared: unknown,
     objectName: string | undefined,
@@ -199,44 +274,9 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
     path: string,
     subject: string,
   ) => {
-    if (!Array.isArray(declared) || declared.length === 0) return;
-    if (!objectName) return; // nothing to resolve against
-    if (!fieldsByObject.has(objectName)) return; // ① object from another package
-    const known = fieldsByObject.get(objectName);
-    if (!known) return; // ② external / introspected — no authored field map
-
-    for (let i = 0; i < declared.length; i++) {
-      const entry = declared[i];
-      // Pre-parse input may carry junk here; a non-string is a SHAPE error the
-      // schema owns, not a dangling reference.
-      const name = strName(entry);
-      if (!name) continue;
-      if (known.has(name) || SYSTEM_FIELDS.has(name)) continue; // ③ system column
-
-      const dotted = name.includes('.');
-      findings.push({
-        severity: 'error',
-        rule: SEARCHABLE_FIELD_UNKNOWN,
-        where,
-        path: `${path}[${i}]`,
-        message:
-          `${subject} entry "${name}" is not a field on object "${objectName}". ` +
-          `The declaration is stale: searching it can never match, and the engine ` +
-          `silently drops it — leaving a narrower search than declared, or the ` +
-          `auto-default set once every entry is dropped.` +
-          (dotted ? '' : suggest(name, known)),
-        hint:
-          (dotted
-            ? `'search' scans this object's own columns, so a related record's ` +
-              `column cannot be a search target — expand the relation and search ` +
-              `the related object, or copy the value onto a formula field here. `
-            : `Fix the name, or add "${name}" to ${objectName}.fields. `) +
-          `Clients echo this declaration verbatim as the '$searchFields' ` +
-          `override, so a stale entry becomes a 400 INVALID_FIELD on list ` +
-          `search (#4254), not just a quietly narrowed one.` +
-          (known.size > 0 ? ` Object fields: ${[...known].sort().join(', ')}.` : ''),
-      });
-    }
+    findings.push(
+      ...checkSearchableFieldList(declared, objectName, fieldsByObject, where, path, subject),
+    );
   };
 
   // ── The object's own canonical set, and its built-in named list views ──

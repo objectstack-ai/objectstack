@@ -17,6 +17,9 @@
 //   - <ObjectChart>'s data BINDINGS, by reading the attribute VALUES (#3701,
 //     retargeted to the spec shape in #3729). See the block comment above
 //     `checkObjectChart`.
+//   - <ListView>'s `searchableFields` entries, resolved against the bound
+//     object's declared fields (#4329) — the react-surface twin of the
+//     metadata rule `searchable-field-unknown`, sharing its core.
 //
 // Reading values is opt-in per block and per prop: everything below evaluates
 // only STATIC literals (`objectName="invoice"`, an `aggregate={{…}}` object
@@ -27,6 +30,10 @@
 import { createRequire } from 'node:module';
 import type ts from 'typescript';
 import { REACT_BLOCKS, chartAggregateResultKeys } from '@objectstack/spec/ui';
+import {
+  checkSearchableFieldList,
+  indexObjectSearchTargets,
+} from './validate-searchable-fields.js';
 
 // The TypeScript compiler must NOT be imported at module top level: it is
 // ~9 MB of CJS (~70 ms+ to parse, worse on container cold starts), and
@@ -387,6 +394,11 @@ function checkObjectChart(
 export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
   const findings: ReactPropFinding[] = [];
   const objectFields = indexObjectFields(stack);
+  // A separate index for the searchableFields check, built by the metadata
+  // rule's own indexer: it keeps `null` for an object with no authored field
+  // map (external / datasource-introspected), a distinction `indexObjectFields`
+  // flattens — and one this check must honor so both surfaces skip alike.
+  const searchTargets = indexObjectSearchTargets(stack);
   const pages = asArray(stack.pages);
   for (let p = 0; p < pages.length; p++) {
     const page = pages[p];
@@ -453,6 +465,24 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
           // can see are an incomplete picture — skip rather than guess.
           if (tag === 'ObjectChart' && !hasSpread) {
             checkObjectChart({ values, where, path }, objectFields, findings);
+          }
+          // <ListView searchableFields> names fields on the bound object — the
+          // react-surface twin of `searchable-field-unknown` (#4329). It runs
+          // the metadata rule's own core, so the skips (cross-package object,
+          // no authored field map, system columns) and the dotted-path
+          // strictness match by construction. A non-static value — either
+          // attribute — bails inside the checker: unresolvable is not wrong.
+          if (tag === 'ListView' && !hasSpread) {
+            findings.push(
+              ...checkSearchableFieldList(
+                values.get('searchableFields'),
+                strOf(values.get('objectName')),
+                searchTargets,
+                where,
+                `${path} › searchableFields`,
+                'searchableFields',
+              ),
+            );
           }
         }
       }
