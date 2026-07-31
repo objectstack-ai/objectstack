@@ -1401,6 +1401,435 @@ objectui commits on top of the pin 16.1.0 shipped.
   `plugin-map` default import is dropped to match), `chalk` 5→6, and `jsdom`
   29→30 (dev) — relevant if you build the Console from source.
 
+## Landed since 17.0.0-rc.0
+
+These changes are on `main` after the `rc.0` cut and **roll into 17.0.0-rc.1** —
+backend from the pending changesets (334 at the time of writing, 40 of them
+`major`-class), Console from the objectui pin advancing
+`4a4829d0ef39 → 7d9734d5e321` (79 commits, released as **objectui 17.1.0**).
+Sourced from each repo's own changesets.
+
+One reading note: this page documents the whole 17.0.0 train and has been kept
+current as the train moved, so the *largest* post-rc.0 landings are already
+documented in place in the sections above rather than repeated here:
+
+- **ADR-0110 action-declaration admission** (#3935) — including its post-rc.0
+  revision: the `OS_ALLOW_UNDECLARED_ACTIONS` valve was **removed before 17
+  ships**; the refusal has no opt-out.
+- **ADR-0104 D2 action params strict by default** (#3438) — the
+  `OS_ACTION_PARAMS_STRICT_ENABLED` opt-in era ends;
+  `OS_ALLOW_LAX_ACTION_PARAMS=1` is the escape hatch — plus the D1 evidence
+  gates (`os migrate value-shapes`, fresh-datastore attestation, released-file
+  collection behind the verified file migration).
+- **ADR-0113** — `required` becomes the write contract; `storage.notNull` owns
+  the column.
+- **ADR-0114** — the closed field-error catalog and the `fieldErrors` →
+  `fields` rename (#3977).
+- **The #4001 unknown-key strictness campaign's later clicks** — permission
+  sets + flows, RLS / sharing rules / positions, approval configs, hooks +
+  datasources, and the app shell & navigation tree, all `.strict()` with
+  self-fixing errors.
+- **The seven protocol-17 retirements** — `api.requireAuth` (#3963), the wait
+  `timeoutMs`/`onTimeout` pair (#4158), `query.joins`/`windowFunctions`
+  (#4286), the `fields[]` object form (#4196), `query.cursor` / `distinct`
+  (#4286), `BatchOptions.validateOnly` (#4052) — and #4350's correction
+  re-labelling them protocol **17** (their tombstones said "18", so
+  `os migrate meta` was stepping over the two stack conversions and the
+  generated upgrade guide omitted all seven).
+- **The #4212 retirement family** — the plugin lifecycle hooks, the typed-event
+  cluster, `ObjectQLEngine.use()`, the Dev Mode Plugin Protocol (#4149).
+- **The #3896 security sweep's enforcement half** — criteria-less sharing
+  rules share nothing, RLS `enabled` is enforced, RLS `priority` and the four
+  inert tool keys are removed.
+- **Flow `errorHandling.maxRetries` has one default** (#4247), **per-run flow
+  summaries** (#4354), and **file-backed SQLite in WAL mode** (#3941).
+
+What follows is the rest of the window: first the metadata- and
+protocol-facing changes an upgrading application developer must read, then the
+platform capabilities an administrator gains, then the Console delta.
+
+### Breaking / behavior — protocol & wire
+
+- **The actions route speaks HTTP (#3962, #3951, #3937, #3913).** The
+  accidental 200-with-inner-envelope double wrap is gone; the contract is now
+  identical to `/data`: ran-and-returned = **200** `{success: true, data:
+  <handler return>}`, single wrap; ran-and-rejected (business rule /
+  validation) = **400** with `error.details.code: 'VALIDATION_FAILED' |
+  'FLOW_FAILED'` and per-field `fields[]`; not-dispatched = a real 404/403/503
+  (an unknown action used to come back `{"success":true,"data":{"success":
+  false}}`); crashed (`TypeError`, driver class, sandbox timeout) = **500**,
+  visible to gateway error rates and APM instead of arriving as a green 200.
+  Five defects traced to the extra layer, including the Console's green toast
+  on failed actions and `redirectUrl` never firing. Object-less actions
+  canonically key on `'global'` and the `POST /actions//:action` shape is
+  mounted. `client.actions.*` callers need no change — the SDK still never
+  throws, and folds every failure into `{success: false, error}`.
+- **`POST /actions/:object/:action` dispatches on the declared `type`
+  (#3915).** A `flow` action executes via the automation service **as the
+  caller** — `userId` / positions / permissions / tenant forwarded, so a
+  `runAs: 'user'` flow enforces RLS as the invoker instead of the user-less
+  UNSCOPED path — and the params bag is seeded with `recordId` (+ the declared
+  `recordIdParam`); `url`/`modal`/`form`/`api` actions answer 400 naming what
+  to call instead of a registry miss. Standalone `defineAction` artifacts and
+  Studio-authored action rows now resolve on REST with their
+  `requiredPermissions` enforced (previously MCP-only). Script action bodies
+  run with a bound, attributed `ctx.api` — owner-scoped writes stop dying
+  `FORBIDDEN`, and body writes are stamped with the caller and tenant and
+  join the open transaction.
+- **A list query either applies or fails (#4121, #4134, #4164, #4181, #4226,
+  #4254, #4256).** Every input of the list/read surface now either takes
+  effect or answers 400 — nothing is silently dropped: a `?filter=` that does
+  not parse (or parses to a non-filter) is `400 INVALID_FILTER` — it used to
+  return the **unfiltered** table as a clean 200; unknown fields in `sort` /
+  `select` / `expand` / `searchFields` / `groupBy` / `aggregations` are
+  `400 INVALID_SORT` / `INVALID_FIELD` (a typo'd `select` returned **every**
+  column against FLS and data minimisation; an unknown `groupBy` collapsed N
+  groups into one; `sum(<typo>)` folded to `0` — indistinguishable from a real
+  zero in a report); an unknown bare query parameter is `400 INVALID_FIELD`
+  with the canonical suggestion (`?pageSize=5` used to become a zero-matching
+  filter answering `total: 0`); a dotted-path sort (`?sort=account.name`) is
+  rejected with the denormalisation prescription; explicit `filter` + bare
+  field parameters compose with `$and` instead of dropping the implicit half;
+  and two sort spellings that silently never applied — the SDK's declared
+  `orderBy: string[]` and the `{field: direction}` map — now actually sort.
+  Export honours the searched view (`search=` / `searchFields=`, #4181).
+- **Unsorted paged reads are deterministic (#4363, #3821).** A `limit`/`offset`
+  read with no `orderBy` — the shape every list view without a configured sort
+  sends — is now ordered by the unique key on SQL and MongoDB, and any
+  non-empty `orderBy` gains a unique tie-breaker, so page 2 can no longer
+  repeat a row while another row is never served.
+- **Query options fold once, everywhere (#3795, #4346, #4371).** The five RPC
+  aliases (`filter`→`where`, `select`→`fields`, `sort`→`orderBy`,
+  `skip`→`offset`, `populate`→`expand`) resolve through one spec-owned fold
+  with one precedence — four of five pairs were inverted between readers, so
+  `?select=a&fields=b` answered `[a]` on one path and `[b]` on the other. The
+  fold now covers **every** engine method: `findOne` / `count` / `update` /
+  `delete` / `aggregate` with `{filter}` used to match **every row** —
+  `update(data, {filter, multi: true})` rewrote the whole table and
+  `delete({filter, multi: true})` emptied it. Conflicting spellings
+  (`{where: X, filter: Y}`, `{top: 1, limit: 3}`) are refused naming both;
+  direct engine callers passing wire-only spellings or unknown option keys now
+  get an error naming the canonical key instead of silence (#4371) — which
+  also fixed queue purge, which passed a key the engine never read and so
+  deleted nothing.
+- **`query.having` is enforced (#4286 follow-up).** Declared since AST v2 and
+  executed by nothing, `having` now filters aggregated rows on both the
+  native-driver path and the in-memory fallback, with `$and`/`$or`/`$not` and
+  loud rejection of unknown operators. A query that carried it was silently
+  returning every group.
+- **Request bodies validate at the entry (#3899, #3878).** Catalog-declared
+  `requestSchema`s are enforced with `400 VALIDATION_FAILED` + `fields[]`: a
+  garbage `POST /data/:object/query` body used to degrade into an unfiltered
+  full read, `POST /automation/:name/toggle {"enable": false}` used to
+  **enable** the flow and answer 200, and a misnamed `POST /notifications/read`
+  key was a 200 no-op. `/analytics/query` and `/analytics/sql` validate the
+  **bare `AnalyticsQuery`** at the entry — the `{cube, query, format}`
+  envelope dialect of the retired shim is tombstoned, and the filter field is
+  `where`, not `filters` — instead of dying downstream as a 500 SQL syntax
+  error.
+- **Bulk writes are bounded and bound to the path (#3939, #3933, #3897,
+  #3946).** The declared 200-row batch cap is now real on all five bulk routes
+  (`400 BATCH_TOO_LARGE`, governed by `batch.maxBatchSize`, 1..1000); a body
+  `object` can no longer move a bulk write or a `/data/:object/query` read to
+  a different object than the gated URL object; `deleteMany` builds its
+  predicate from the validated id list only — caller `options.where` used to
+  widen a one-id request into deleting everything the caller could see — and
+  per-id deletes now run `deleteBehavior` cascades and RLS/FLS under the
+  caller (its response becomes the structured `BatchUpdateResponse`); and a
+  caller-supplied `context` is dropped at ingress on these paths (#3960 — it
+  could previously become the execution context, `{isSystem: true}` included,
+  where no server context resolved).
+- **Response envelopes converge (#3843, #3983, #4038, #4053, #4224).** The
+  settings, datasource-admin, external-datasource, package and share-link
+  route modules emit the declared envelope — payload under `data`, errors as
+  structured `{code, message}` on the ADR-0112 ledger — which un-broke two
+  shipped SDK methods (`client.shareLinks.create()` / `.list()`); the
+  dispatcher's duplicate top-level payload keys are gone; `GET /ai/agents`
+  (the last unenveloped SDK route) conforms; `/api/settings/*` error extras
+  move under `error.details`, with `SETTINGS_VALIDATION.fields` becoming
+  ADR-0114 `FieldError[]`. Raw-`fetch` callers of these routes add one `.data`
+  hop and read `error.code`; SDK callers are shielded — and the client now
+  normalizes both server envelope families, so `err.code` is always the
+  semantic string, never the HTTP status number (#3918).
+- **Field validation speaks the caller's language (#3957).** Built-in
+  field-validation messages render in the request's locale (en, zh-CN, ja-JP,
+  es-ES — `Accept-Language` / `?locale`, falling back to the workspace
+  locale), name the field by its translated label, and carry a structured
+  `constraint` (`min`/`max`/`actual`/…). Match on `code` and `constraint`,
+  not English message text; any built-in is overridable per deployment via
+  `validation.field.<messageKey>` translation keys.
+- **An absent capability answers honestly (#4093, #4113, #3891, #4087,
+  ADR-0115).** The last fabricating fallbacks are deleted. A mounted domain
+  with no implementation answers **501 naming the package to install**
+  (`/automation`, `/notifications`, `/ui/*`, `/ai/*` — previously misleading
+  404/503s that sent operators chasing phantom routing bugs). `/auth/*`
+  without an auth service answers 501 instead of a **200 carrying a fabricated
+  session for any email and any password** — the mock shipped in production
+  `@objectstack/runtime` and told clients the one thing a server must never
+  lie about. The degraded analytics shim — which dropped the caller's
+  ExecutionContext, so authenticated callers got **aggregates over rows RLS
+  would hide**, and read a non-contract `filters` key — is removed: without
+  `@objectstack/service-analytics` the routes are not mounted (404), and
+  discovery reports `analytics: unavailable` instead of hardcoding it always-on
+  (#3989, #4010). The dispatcher's dead `/storage` bridge (which could never
+  complete a request, and whose wildcard shadowed the real presigned
+  `service-storage` routes) is removed. DevPlugin's stub table is retired —
+  an empty slot in dev behaves exactly as in production, and the allow-all
+  permissions / no-row-filter RLS / unmasked-field dev fakes now **fail
+  closed** like production does. Discovery computes every slot's verdict from
+  the registered service's own `__serviceInfo` (the `_dev: true` marker is
+  retired), its remedy strings name real packages (ten of fifteen previously
+  named packages that do not exist), and a slot self-declaring
+  `handlerReady: false` is answered like an empty slot instead of having its
+  fabricated 200 served (#4058, #4089, #4130).
+- **`HonoServerPlugin` is a transport adapter (#4073).** Its raw data-C+R
+  surface, its third (pre-`DiscoverySchema`) discovery payload and the
+  `registerStandardEndpoints` flag are deleted — data and discovery each have
+  exactly one owner (`@objectstack/rest`; the runtime dispatcher). Every
+  composed host (`os serve`, `objectstack dev`, cloud) already answered
+  byte-identically. The three current-user endpoints (`/auth/me/permissions`,
+  `/auth/me/localization`, `/me/apps`) register unconditionally — no longer
+  hostage to the flag — yield correctly around the auth wildcard in either
+  registration order (#4088, #4117), and resolve per request through the
+  multi-tenant `kernel-resolver` seam, so authenticated tenant callers on a
+  routing host stop being told `{authenticated: false}` (cloud#927).
+- **The memory driver is pure in-memory again (#4065, #4083).** A bare
+  `new InMemoryDriver()` — and a declared `driver: 'memory'` datasource —
+  silently wrote `.objectstack/data/memory-driver.json` into the working
+  directory and reloaded it on the next boot; the `persistence: 'auto'`
+  default drifted from the accepted opt-in design (#815) and is now `false`.
+  Durability is explicit (`{ persistence: 'file' }`, per-datasource
+  destinations), and the driver's "production-ready" claim is trimmed: it
+  stores no constraints — use in-memory SQLite when constraints matter.
+  `os init` scaffolds stop naming `driver-memory` as a dependency.
+- **The `artifact-api` metadata source is removed (#4246).** Zero consumers
+  existed and half its URL contract had been dead since v5.0.
+  `{ mode: 'local-file', path }` is the single artifact source (it accepts the
+  public/commit-pinned cloud URLs); a still-configured `artifact-api` throws
+  loudly at `start()` instead of silently falling through to filesystem
+  scanning.
+- **Smaller wire corrections:** the plural `/meta/:type` spellings no longer
+  skip the book-audience / app-RBAC / dashboard gates the singular spellings
+  enforced (#3984); `book.audience: 'public'` genuinely serves anonymously on
+  secure deployments (#3963 step 2) — review books that declare it, they are
+  now really public; three orphan operator vocabularies with zero importers
+  leave the spec (objectui#2945 Track A); `DriverPlugin`'s inert
+  `{datasourceName, registerAsDefault}` options are retired (#4320); the
+  legacy `_dev: true` service marker is retired in favour of `__serviceInfo`;
+  and exported spec types stop resolving to `any` (`NavigationItem`,
+  `FormField`, `QueryAST['fields']`, the `z.input` sides of the recursive
+  schemas) — authoring code whose invalid shapes previously compiled clean
+  now fails `tsc` with the real error, gated by the new `check:exported-any`
+  (#4171, #4195, #4221).
+
+### Breaking / behavior — metadata authoring & runtime
+
+- **Flow-node config is enforced end to end (#4277, #4045, #4027, #4347,
+  #4389).** The twelve contract-carrying builtins `parse()` their `config`
+  before executing — a violation refuses the node as a guard naming every
+  violated path; `registerFlow` **rejects** undeclared config keys (exact
+  path, declared key set, did-you-mean, per-key tombstones like
+  `screen.visibleIf` → `visibleWhen`) and warns on keys a `configSchema` does
+  not declare; declared bare-CEL slots are validated
+  (`screen.fields[].visibleWhen` authored as `'{var} == true'` shipped a
+  forever-paused run); and ADR-0031 regions (`loop.body`,
+  `parallel.branches[]`, `try_catch.try/catch`) are walked by conversions,
+  validators and lint alike, so nested nodes stop escaping every check. A
+  legacy `{var}` condition carrying an unresolved dotted reference now
+  refuses instead of comparing strings — `'oppRecord.amount > 500000'` was
+  constantly true: a gate that never gated.
+- **Flow-node aliases graduate to conversions (ADR-0087 D2).** `subflow` and
+  `map` `config.flow` → `flowName` (#4278, #4045), `notify`'s nested
+  `source: {object, id}` → `sourceObject`/`sourceId`, and `connector_action`'s
+  mis-rooted config lifts onto `connectorConfig` — Studio-authored connector
+  nodes never dispatched; stored flows are healed at load. All protocol-17
+  windows applied by `os migrate meta` and at every rehydration seam,
+  alongside the seven #3796 aliases documented above.
+- **A blank hook target is refused.** `object: ''` / `[]` silently registered
+  the hook on **every object in the tenant**; a wildcard must now be the
+  visible `'*'`, and `bindHooksToEngine`'s `strict` option actually fails
+  fast. `defineHook()` lands so convention-scanned hook files get the same
+  parse-at-import treatment as the rest of the define family (#4269).
+- **Stored metadata replays the conversion chain (#3903).** Studio- and
+  API-written rows at rest go through the same ADR-0087 machinery as authored
+  source at every read seam (including `registerFlow` rehydration) — a stored
+  action with the removed `execute` dispatches via `target` again; boot
+  hydration validates each row post-conversion and diagnoses invalid ones
+  with `[metadata_spec_invalid]` instead of shrugging.
+- **Studio's metadata forms tell the truth (#3786).** Four of seventeen forms
+  had drifted from their schemas, so controls saved nothing: the Object →
+  Capabilities toggles bound a key the schema does not declare (all seven
+  dead — Track history, Searchable, API enabled, Files, Feeds, Activities,
+  Clone), and the Fields grid offered sixteen undeclared keys (PII, Encrypted,
+  Indexed, …) while missing the canonical spellings for five renames. Forms
+  are reconciled and gated registry-wide; re-author anything configured
+  through the dead controls.
+- **Authored view filters compile (#3948, #4029).** Eight canonical
+  `VIEW_FILTER_OPERATORS` members (`equals`, `before`, `after`, …) that
+  validation accepted but the AST refused now lower to real queries on every
+  driver, and an uncompilable filter element **throws** instead of matching
+  every row. `saveMeta` persists canonical operator spellings, so the ~30-entry
+  legacy alias bridge stops growing and can eventually retire
+  (objectui#2945).
+- **Analytics stops guessing (#4157, #4128, #4033).** An undeclared measure or
+  an out-of-vocabulary measure `type` **errors** instead of silently answering
+  `COUNT(*)` (revenue charts that were quietly row counts now say so); the
+  silently-dropped filter family — `$between`, `$null`, `$startsWith` /
+  `$endsWith`, inverted `$exists: false`, `$notContains`, and the `$or`/`$not`
+  combinators — now actually filters, so dashboards stop drawing every row;
+  time-bucketed queries project their bucket column (a trend chart got N
+  values and no x-axis). Time-typed dimensions gain chronological default
+  order, and `ReportSchema.order` becomes a declarable ordering lowered into
+  the dataset selection (#3916).
+- **Temporal correctness lands as one campaign (ADR-0053).** `Field.datetime`
+  and `Field.time` get one canonical storage form per backend — mixed
+  epoch/ISO storage made a two-sided date window return **zero rows** on
+  SQLite while matches existed, and MySQL moves to `DATETIME(3)` with
+  UTC-pinned connections (REST datetime writes on MySQL previously failed
+  outright); legacy columns converge at schema sync and `os migrate plan`
+  lists the in-place work with row counts (#3912, #3994, #4047, #3954). A
+  bare `YYYY-MM-DD` upper bound covers its whole calendar day across SQL /
+  memory / MongoDB / the RLS write-side evaluator — dashboards lost the final
+  day's rows after midnight, and a `{ $lte: '{today}' }` RLS `check` policy
+  denied every write made after 00:00 (#3777, #4042). The type-blind
+  evaluators compare a JS `Date` against wire text correctly — fail-closed
+  RLS was denying legitimate SDK writes whose payload carried `new Date()`
+  (#4191). `date` `NOW()` defaults resolve UTC on every dialect (#4022). A
+  shared conformance matrix in `@objectstack/spec/data` is asserted by five
+  backends so none of these classes can silently re-drift.
+- **Sharing authority is real authority (ADR-0111, #3902).** The
+  share-management surface authenticated the caller and then ran under
+  `SYSTEM_CTX` — **any signed-in user could revoke anyone's share, enumerate
+  who-sees-what, write self-grants, and define org-wide sharing rules**. Now:
+  `canManageShares` (system, record owner, Modify All Data, or hierarchy
+  write-scope depth) is enforced in the service on every
+  `/data/:object/:id/shares` verb; `listShares` is management-gated and the
+  open `sys_record_share` read surface is self-scoped for non-admins; the
+  whole `/sharing/rules` surface requires the new **`manage_sharing`**
+  capability (seeded into `admin_full_access`); an `edit`-level share no
+  longer confers **delete** (`canDelete` = ownership, write depth, or
+  `modifyAllRecords`; bulk deletes stop widening through shares); revoke
+  validates the share belongs to the URL's record; grants on objects the
+  sharing gates never consult fail `SHARING_NOT_ENABLED` instead of sitting
+  inert; and a record's owner or a Modify-All admin — not just the minter —
+  can revoke a share link.
+
+### Security corrections
+
+Beyond the sharing-authority work and the #3896 enforcement half documented
+above, four fail-opens were found and closed in this window — all ship in
+rc.1, and administrators should know what changed:
+
+- **The project-membership gate never ran (#4127 sweep).**
+  `enforceProjectMembership` probed the auth service through a shape it never
+  had, so `userId` stayed unset and a **signed-in non-member passed the
+  gate** on every deployment with project scoping on. Found by the new typed
+  service-slot lint; the lint stays on to keep the class closed.
+- **Analytics answered without a caller (#3891).** The degraded shim served
+  RLS-free, tenant-unscoped aggregates (removed — see above).
+- **Dev stubs inverted their decisions (ADR-0115, #4093).** With
+  `plugin-security` absent, dev filled the slots with allow-all / no-RLS /
+  unmasked fakes behind one warn line; the slots now stay empty and fail
+  closed, and `plugin-dev` refuses `NODE_ENV=production` outright
+  (`OS_ALLOW_DEV_PLUGIN=1` overrides, and now brands the boot loudly instead
+  of starting silent, #3900).
+- **Imported users skipped field coercion (#4251 sweep).** The
+  `/admin/import-users` route probed a method its service never had, so rows
+  reached `sys_user` uncoerced on every deployment. The same typed-slot
+  campaign fixed `handleAuth` reaching the (now deleted) mock instead of the
+  real auth service, and `/analytics/sql` crashing 500 on providers without
+  `generateSql`.
+
+### New capabilities (backend)
+
+- **Approvals grow up as a decision surface.** A `decisionOutputs` entry can
+  declare `required: true` — an approve carrying a blank routing value is
+  refused before any write, instead of the next node faulting or the run
+  stalling (objectui#2955); a reassign writes structured `reassign_from` /
+  `reassign_to` parties that timelines render without free-text archaeology
+  (#4365); and a `runAs: 'system'` flow's writes are audited as
+  `svc:flow:<flowName>` instead of "Unknown user" (#4366).
+- **Run summaries learn honesty about side effects (#4395, #4396).**
+  `connector_action` and mutating `http` nodes report `unmeasuredEffect` (the
+  platform cannot know whether `crm.push_opportunity` writes), an
+  `unmeasured_count` column joins `sys_automation_run`, and the broken-sweep
+  detector becomes `selected > 0 AND acted = 0 AND unmeasured = 0` — without
+  the third clause it would fire on every healthy connector-driven flow.
+- **Scheduled jobs actually fire.** Cron jobs registered before
+  `kernel:ready` landed on a placeholder adapter that silently ignores `cron`
+  schedules — in the default configuration a business plugin's cron jobs
+  never ran. Early registrations now migrate onto the DB-backed adapter, so
+  operators will observe scheduled work starting to happen.
+- **`os migrate` keeps its promises (#3917, #3924, #3954, #3955, #3978).**
+  Zero database writes before the confirmation prompt (boot-time DDL is
+  deferred and rendered in the plan); a busy SQLite database is detected —
+  file-descriptor probe naming the holding pid, which works on the default
+  rollback-journal mode — and refused without `--force`; the plan lists
+  in-place datetime/time normalisation with row counts so large rewrites can
+  be scheduled into maintenance windows; zh-locale deployments stop being told
+  to drop their live pinyin `__search` companion columns as "destructive
+  orphans"; and virtual formula fields stop appearing as forever-pending work.
+- **Boot tells operators the truth (#4012, #4085, #4095, #4110, #4096, #4167,
+  #4002).** Plugin boot-phase warnings survive the startup banner (previously
+  discarded wholesale — including the ADR-0110 action-governance inventory);
+  `os serve <config>` boots a fresh project with no compiled artifact instead
+  of dying with a misleading error, and grafts the config module's
+  `onEnable`/`functions` onto artifact boots so declared `script` actions stop
+  404ing; a **named** artifact path that does not exist fails the boot naming
+  the path — it used to print "Server is ready" over an empty platform;
+  `OS_STORAGE_ROOT` actually takes effect (uploads land under
+  `.objectstack/data/uploads` from the first byte) and the spurious every-boot
+  "storage adapter swapped" warning fires only on a real move; `stack.storage`
+  — never a declared key, silently ignored — is linted with the two working
+  channels named (`OS_STORAGE_*`, Setup → Settings); and authored `api.*`
+  keys survive the serve-time config merge instead of being replaced
+  wholesale.
+- **Platform infrastructure is composable (#4243, #4270, ADR-0116).**
+  `sys_migration` and `sys_secret` move to `PlatformObjectsPlugin`, so a
+  kernel without storage or settings keeps its migration ledger and its
+  encrypted-secret store — `Field.secret()` writes previously threw on
+  settings-less kernels. The kernel `Plugin` contract gains declared ordering
+  (`optionalDependencies`, `requiresServices`, `providesServices`) with
+  boot-time validation that names both plugins, both slots, and the fix;
+  `PLATFORM_ALWAYS_ON_CAPABILITIES` is a published export, so hosts stop
+  hand-mirroring the always-on slate (cloud's mirror had silently lost `sms`,
+  `messaging` and `analytics`). Graceful shutdown disconnects datasource
+  pools through the one datasource path, and adopted pools are never closed
+  by a kernel that does not own them (#3993).
+- **Seeds load what you wrote (#3911, #3932).** Natural-key **arrays** resolve
+  for `multiple: true` lookups (previously dropped with a warn), and dropped
+  unusable references are counted and named in the boot banner
+  (`showcase 42 ok / 3 lost links`) instead of the load reading clean.
+- **Authoring lints gather the evidence (#3786, #4120, #4271, #4254, #3991).**
+  The advisory `lintUnknownAuthoringKeys` reports every silently-stripped
+  object/field key across all sixteen metadata collections — with
+  rename/retirement guidance and nested-metadata descent — through
+  `defineStack`, `os validate` and `os compile`; error-severity
+  reference-integrity rules gate flow `update_record` / `create_record`
+  writes to undeclared fields and stale `searchableFields` declarations;
+  hook and action bodies get the same write-set analysis as advisories, plus
+  a runtime report for dead `ctx.record` writes (#4345); and a field carrying
+  both per-tenant `unique: true` and a global unique index is flagged before
+  the second tenant finds out.
+- **Service slots are typed contracts (#4251, #4127).** `IObjectQLEngine`
+  lands (the seven consumer-local stand-in surfaces die), `getService`
+  resolves through a slot→contract ledger, and a shrinking baseline bans
+  `any`-typed lookups. This campaign is what surfaced the membership
+  fail-open, the import-coercion miss and the cron-adapter migration above —
+  the ratchet keeps the class closed.
+- **Declared UI slots become authorable.** `FormSection.pane` places sections
+  in split forms explicitly (objectui#2153), and `element:button`'s
+  `properties.action` gains `InlineActionSchema` — previously authorable only
+  via `as any` (objectui#2997).
+- **Package hygiene reaches consumers (#4261, #4248, #4097).** `CHANGELOG.md`
+  ships in every tarball again — 68 of 69 packages had silently severed the
+  delivery path for exactly the FROM→TO migration notes an upgrading agent
+  greps after a tombstone error; twenty packages stop shipping raw sources
+  and tests to npm; `os init` stamps `engines: { protocol: '^17' }` so new
+  packages join the ADR-0087 load-time handshake; and `spec-changes.json`,
+  the generated upgrade guide and the `spec_changes` MCP tool actually
+  report the 16 → 17 chain (they still said 16.0.0).
+
 ## Upgrade checklist
 
 ### 17.0.0
@@ -1500,6 +1929,52 @@ objectui commits on top of the pin 16.1.0 shipped.
   to `isolated`.
 - **Approvals readers:** anything that listed requests tenant-wide must now be a
   participant or hold the admin override.
+- **Raw-HTTP action callers:** branch on the HTTP status — non-2xx is the
+  failure, and a 200's `data` is the handler's return directly, one wrap less
+  (#3962). Crashes are 500s now; treat them as server faults. SDK callers
+  need no change.
+- **List-query callers:** malformed filters and unknown
+  `sort`/`select`/`expand`/`groupBy`/`aggregations`/`searchFields` names now
+  answer 400 instead of silently over- or under-returning — fix the request
+  the error names, and note that previously-ignored `orderBy: string[]` and
+  `{field: direction}` sorts now actually apply.
+- **Raw-`fetch` readers** of the settings / datasource-admin /
+  external-datasource / package / share-link routes: read the payload under
+  `data` and errors as `error.code` / `error.message` (#3843, #3983).
+- **Bulk callers:** stay under `batch.maxBatchSize` (default 200, raisable to
+  1000) or chunk; stop sending `object` / `context` in bulk bodies (ignored);
+  read `deleteMany`'s new structured `BatchUpdateResponse` (#3939, #3897).
+- **Analytics clients:** send the bare `AnalyticsQuery` shape (`where`, not
+  `filters`; no `{cube, query, format}` envelope) (#3878). Embedded /
+  programmatic hosts must install `@objectstack/service-analytics` — the
+  context-less fallback is gone (#3891).
+- **Bare `HonoServerPlugin` hosts:** mount `@objectstack/rest` or the runtime
+  dispatcher for data/discovery — the convenience surface and its flag are
+  deleted (#4073).
+- **Direct `new InMemoryDriver()` / `driver: 'memory'` users:** pass
+  `{ persistence: 'file' }` if you relied on the accidental durability, and
+  delete stale `.objectstack/data/memory-driver.json` files (#4065, #4083).
+- **`artifact-api` sources:** switch to the `local-file` URL form or
+  `os package install` — a configured `artifact-api` now fails the boot
+  (#4246).
+- **Hand-built kernels:** compose `PlatformObjectsPlugin` if you relied on
+  storage/settings registering `sys_migration` / `sys_secret` (#4243, #4270);
+  declare the ADR-0116 ordering fields on plugins that resolve services in
+  `init()`.
+- **SQLite operators:** back up with `sqlite3 app.db ".backup …"` — a bare
+  file copy can miss committed transactions in the WAL sidecars — and set
+  `OS_DATABASE_SQLITE_JOURNAL_MODE=delete` on NFS/SMB (#3941).
+- **Dev setups:** the fabricating stubs are gone — install the real plugin
+  for any slot a dev call now finds absent, and note `plugin-dev` refuses
+  `NODE_ENV=production` without `OS_ALLOW_DEV_PLUGIN=1` (ADR-0115).
+- **Sharing admins:** grant the new `manage_sharing` capability to roles that
+  administer sharing rules, and expect edit-level shares to stop conferring
+  delete (ADR-0111).
+- **Flow authors:** rename aliased node-config keys (`subflow`/`map`
+  `flow` → `flowName`, notify `to`/`subject`/`body`/`url` →
+  `recipients`/`title`/`message`/`actionUrl`, script `functionName`/`input` →
+  `function`/`inputs`) or run `os migrate meta` — the conversion windows
+  close at protocol 18 (#3796, #4278, #4045).
 
 ## References
 
@@ -1516,3 +1991,22 @@ derivation) · #3760 (user-less runs) · #3855 (alias retirement) ·
 #3563/#3587/#3612/#3718 (route ledger + SDK surface) · #2462 (GraphQL removal) ·
 #3741/#3758/#3826 (datasource fail-fast) · #3696 (per-tenant `unique`) ·
 #3676/#3778/#3847 (i18n contract conformance).
+
+Landed since rc.0: ADR-0110 (action declaration admission) · ADR-0111 (sharing
+authority) · ADR-0112 (error-code vocabulary) · ADR-0113 (`required` split) ·
+ADR-0114 (field-error catalog) · ADR-0115 (no fabricating fallbacks) ·
+ADR-0116 (declared plugin ordering) · ADR-0053 (temporal semantics) ·
+#3962/#3951 (actions speak HTTP) · #3915 (action type dispatch) ·
+#4121/#4134/#4164/#4181/#4226/#4254/#4256/#4363 (list queries apply or fail) ·
+#3795/#4346/#4371 (one alias fold) · #3899/#3878 (request-body validation) ·
+#3939/#3897/#3933/#3946/#3960 (bulk binding + caps) · #3843/#3983/#4038/#4053
+(envelope convergence) · #3957 (localized validation) · #4093/#4113/#3891/#4087
+(honest absence) · #4073 (Hono transport adapter) · #4065/#4083 (memory-driver
+persistence) · #4246 (`artifact-api` removal) · #3903 (stored-metadata
+conversion replay) · #4277/#4045/#4027/#4347 (flow config enforcement) ·
+#3948/#4029 (view-filter operator parity) · #4157/#4128 (analytics stops
+guessing) · #3916 (report ordering) · #4350 (protocol-17 relabel) ·
+#4127/#4251 (typed service slots + fail-open fixes) · #3917/#3924 (`os migrate`
+occupancy + deferred DDL) · #4243/#4270 (platform-objects infrastructure) ·
+#4395/#4396 (unmeasured effects) · #4365/#4366 (approval reassign + audit
+attribution) · #4261/#4248 (published-files hygiene).
