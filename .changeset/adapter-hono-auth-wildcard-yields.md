@@ -1,5 +1,5 @@
 ---
-"@objectstack/adapter-hono": patch
+"@objectstack/hono": patch
 ---
 
 fix(adapters/hono): the auth wildcard yields paths the auth service does not own (#4117)

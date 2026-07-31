@@ -219,9 +219,11 @@ Sort results with `orderBy` (array of sort nodes):
 <Callout type="info">
 Over the REST/protocol ingress, `orderBy` also accepts `'-created_at'`,
 `['-created_at']` and `{created_at: 'desc'}`, all normalized to the node array
-above. A sort naming a field the object does not have — or an `order` that is
-neither `asc` nor `desc` — is `400 INVALID_SORT` there rather than a dropped
-sort. Internal callers reaching `engine.find()` directly are unaffected.
+above. A sort naming a field the object does not have, an `order` that is
+neither `asc` nor `desc`, or a dotted path into a related record
+(`account.company_name` — sort reaches only the queried object's own columns)
+is `400 INVALID_SORT` there rather than a dropped sort. Internal callers
+reaching `engine.find()` directly are unaffected.
 </Callout>
 
 ---

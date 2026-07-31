@@ -894,7 +894,9 @@ function unusableFilterError(param: string, detail: string): Error {
 
 /**
  * [#4226] A sort the normalizer cannot turn into a usable `SortNode[]`, or one
- * that names a field the object does not have.
+ * that names a field the object does not have — or, since #4256, a dotted path
+ * (`account.company_name`) that would have to cross into a related record no
+ * driver joins for.
  *
  * Carries `INVALID_SORT` — the standard-catalog code (`errors.zod.ts`,
  * "Invalid sort specification") that had sat in the catalog with no emitter
@@ -3254,26 +3256,61 @@ export class ObjectStackProtocolImplementation implements
      * The colon form gets its own hint: `?sort=title:desc` is the spelling
      * `GET /data/:object/export` accepts, and a caller who moved between the
      * two routes deserves better than "no such field 'title:desc'".
+     *
+     * [#4256] A dotted path (`?sort=account.company_name`) is refused on the
+     * same terms — the last sort shape that still degraded silently after
+     * #4226. Its head segment being a real field is what carried it past the
+     * unknown-field check while no driver could then order by it: `SqlDriver`
+     * hands the path to Knex, which renders `"account"."company_name"` against
+     * a table that was never joined, and the #3821 unknown-column backstop
+     * retries WITHOUT the sort; Mongo and the memory driver resolve the path
+     * against the row itself, where a foreign key is a scalar id, so every
+     * value is missing and the ordering is a no-op. Unknown heads keep the
+     * typo-shaped rejection above (reported first, like the expand gate's
+     * `unknown` > `not-a-reference` precedence); a dotted path on a real head
+     * gets a message that says which relationship it tried to cross and
+     * prescribes what `query-syntax.mdx` has prescribed since #4240:
+     * denormalise the value onto the queried object and sort by that.
      */
     private assertSortFieldsExist(object: string, orderBy: ReadonlyArray<{ field: string }>, param: string): void {
         if (orderBy.length === 0) return;
         const gate = this.resolveQueryFields(object);
         if (!gate) return;
-        const unknown = orderBy
-            .map((s) => String(s.field))
-            .filter((f) => !gate.known.has(f.split('.')[0]));
-        if (unknown.length === 0) return;
-        const first = unknown[0];
-        const hint = first.includes(':')
-            ? ` The list route spells a direction with a space or a leading '-'`
-              + ` ('sort=${first.split(':')[0]} desc', 'sort=-${first.split(':')[0]}');`
-              + " 'field:direction' is the export route's spelling."
-            : suggestFieldName(first, gate.declared);
+        const names = orderBy.map((s) => String(s.field));
+        const unknown = names.filter((f) => !gate.known.has(f.split('.')[0]));
+        if (unknown.length > 0) {
+            const first = unknown[0];
+            const hint = first.includes(':')
+                ? ` The list route spells a direction with a space or a leading '-'`
+                  + ` ('sort=${first.split(':')[0]} desc', 'sort=-${first.split(':')[0]}');`
+                  + " 'field:direction' is the export route's spelling."
+                : suggestFieldName(first, gate.declared);
+            throw invalidSortError(
+                param,
+                `sorts by '${first}', which is not a field on object '${object}'`
+                + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : ''),
+                { hint, extra: { field: first, fields: unknown, object } },
+            );
+        }
+        const dotted = names.filter((f) => f.includes('.'));
+        if (dotted.length === 0) return;
+        const first = dotted[0];
+        const head = first.split('.')[0];
+        const headDef: any = gate.fields[head];
+        const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
         throw invalidSortError(
             param,
-            `sorts by '${first}', which is not a field on object '${object}'`
-            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : ''),
-            { hint, extra: { field: first, fields: unknown, object } },
+            (crossesRelation
+                ? `sorts by '${first}', which follows the relationship '${head}' into another object — `
+                  + `sort reaches only columns of '${object}' itself`
+                : `sorts by '${first}', a dotted path — sort reaches only whole columns of '${object}', `
+                  + "not values inside them")
+            + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
+            {
+                hint: ` Denormalise the value onto '${object}' (a formula or rollup field that`
+                    + ' copies it into a real column) and sort by that.',
+                extra: { field: first, fields: dotted, object },
+            },
         );
     }
 
