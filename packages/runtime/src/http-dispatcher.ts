@@ -6,6 +6,7 @@ import {
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage } from '@objectstack/spec/system';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 import { readServiceSelfInfo, DispatcherErrorCode } from '@objectstack/spec/api';
 import { apiErrorResponse } from './error-envelope.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -395,7 +396,10 @@ export class HttpDispatcher {
         }
         let unhealthy: string[] = [];
         try {
-            let engine: any;
+            // [#4251] `checkDriversHealth` is ObjectQL's, not `IDataEngine`'s —
+            // declared narrow rather than erased; the probe below is what runs
+            // when the slot holds an engine without a driver-health surface.
+            let engine: (IDataEngine & { checkDriversHealth?(): Promise<unknown> }) | undefined;
             try {
                 engine = (this.kernel as any)?.getService?.('data');
             } catch {

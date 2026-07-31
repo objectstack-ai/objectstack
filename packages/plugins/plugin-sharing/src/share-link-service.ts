@@ -358,7 +358,7 @@ export class ShareLinkService implements IShareLinkService {
     const rows = await this.engine.find('sys_share_link', {
       where,
       limit: 200,
-      sort: [{ field: 'created_at', order: 'desc' }],
+      orderBy: [{ field: 'created_at', order: 'desc' }],
       context: context.isSystem ? SYSTEM_CTX : context,
     } as any);
     return Array.isArray(rows) ? (rows as ShareLink[]) : [];

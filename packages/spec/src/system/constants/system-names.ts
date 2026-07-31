@@ -124,7 +124,7 @@ export type SystemUserId = typeof SystemUserId[keyof typeof SystemUserId];
  *
  * // Use the constant to reference the owner field in queries
  * const myRecords = await engine.find('project', {
- *   filters: [SystemFieldName.OWNER_ID, '=', currentUserId],
+ *   where: { [SystemFieldName.OWNER_ID]: currentUserId },
  * });
  * ```
  */

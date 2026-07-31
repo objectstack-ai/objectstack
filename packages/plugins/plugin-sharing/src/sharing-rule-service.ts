@@ -135,7 +135,7 @@ export class SharingRuleService implements ISharingRuleService {
       : (typeof input.criteria === 'string' ? input.criteria : JSON.stringify(input.criteria));
 
     const existing = await this.engine.find('sys_sharing_rule', {
-      filter: orgId ? { name: input.name, organization_id: orgId } : { name: input.name },
+      where: orgId ? { name: input.name, organization_id: orgId } : { name: input.name },
       limit: 1,
       context: SYSTEM_CTX,
     });
@@ -214,7 +214,7 @@ export class SharingRuleService implements ISharingRuleService {
     const orgId = (context as any)?.organizationId ?? (context as any)?.tenantId;
     if (orgId) where.organization_id = orgId;
     const rows = await this.engine.find('sys_sharing_rule', {
-      filter: where,
+      where,
       orderBy: [{ field: 'name', order: 'asc' }],
       limit: 1000,
       context: SYSTEM_CTX,
@@ -227,13 +227,13 @@ export class SharingRuleService implements ISharingRuleService {
     if (!idOrName) return null;
     const orgId = (context as any)?.organizationId ?? (context as any)?.tenantId;
     const byId = await this.engine.find('sys_sharing_rule', {
-      filter: { id: idOrName },
+      where: { id: idOrName },
       limit: 1,
       context: SYSTEM_CTX,
     });
     if (Array.isArray(byId) && byId[0]) return rowFromRule(byId[0]);
     const byName = await this.engine.find('sys_sharing_rule', {
-      filter: orgId ? { name: idOrName, organization_id: orgId } : { name: idOrName },
+      where: orgId ? { name: idOrName, organization_id: orgId } : { name: idOrName },
       limit: 1,
       context: SYSTEM_CTX,
     });
@@ -408,7 +408,7 @@ export class SharingRuleService implements ISharingRuleService {
     users: string[],
   ): Promise<SharingRuleEvaluationResult> {
     const existing = await this.engine.find('sys_record_share', {
-      filter: { source: 'rule', source_id: rule.id },
+      where: { source: 'rule', source_id: rule.id },
       fields: ['id', 'record_id', 'recipient_id', 'access_level'],
       limit: 100000,
       context: SYSTEM_CTX,
@@ -485,7 +485,7 @@ export class SharingRuleService implements ISharingRuleService {
     users: string[],
   ): Promise<SharingRuleEvaluationResult> {
     const existing = await this.engine.find('sys_record_share', {
-      filter: { source: 'rule', source_id: rule.id, record_id: recordId },
+      where: { source: 'rule', source_id: rule.id, record_id: recordId },
       fields: ['id', 'record_id', 'recipient_id', 'access_level'],
       limit: 1000,
       context: SYSTEM_CTX,
@@ -555,7 +555,7 @@ export class SharingRuleService implements ISharingRuleService {
 
   private async purgeRuleGrants(ruleId: string): Promise<number> {
     const existing = await this.engine.find('sys_record_share', {
-      filter: { source: 'rule', source_id: ruleId },
+      where: { source: 'rule', source_id: ruleId },
       fields: ['id'],
       limit: 100000,
       context: SYSTEM_CTX,

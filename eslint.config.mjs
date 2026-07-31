@@ -115,6 +115,98 @@ const SLOT_LOOKUP_UNSWEPT = Object.keys(JSON.parse(
   readFileSync(new URL('./scripts/slot-lookup-baseline.json', import.meta.url), 'utf8'),
 ));
 
+// [#4251] The FOURTH erasure shape: the declaration and the lookup split apart.
+//
+//   let ql: any;
+//   try { ql = ctx.getService('objectql'); } catch { /* optional */ }
+//
+// The contract is erased exactly as in `const ql: any = ctx.getService(…)`, and
+// all three selectors below miss it: selector 1 needs the call inside the
+// declarator (here the declarator has no init), selector 2 needs `as`, selector
+// 3 needs a type argument. 23 sites repo-wide used it, 12 of them in files no
+// longer grandfathered — i.e. lint covered them and said nothing. Worse, that
+// number GREW with every batch: sweeping a file removes it from the baseline,
+// and the baseline's monotonicity check means it can never be re-added, so each
+// batch converted more of this shape from "grandfathered" into "silently clean".
+// A ratchet that looks cleaner the more you use it is the #4342 failure again.
+//
+// This is a RULE and not a fourth selector because esquery cannot do it. A
+// selector can match `AssignmentExpression:has(CallExpression[…])`, but it
+// cannot tell which declaration the assigned identifier resolves to — so it
+// would equally flag the correctly-typed form this whole work line is trying to
+// produce (`let i18nService: II18nService | undefined; i18nService = …`, 8 such
+// sites today, in runtime/app-plugin.ts and service-automation among others).
+// Resolving the identifier to its declaration needs SCOPE analysis, which is
+// cheap and needs no type information — so this stays out of the typed-lint
+// pass that the KNOWN RESIDUAL below still waits on.
+const slotLookupPlugin = {
+  rules: {
+    'no-any-assignment': {
+      meta: {
+        type: 'problem',
+        docs: { description: 'Ban assigning a service-lookup result to an `any`-declared variable.' },
+        schema: [],
+        messages: { erased: SLOT_LOOKUP_ANY_MESSAGE },
+      },
+      create(context) {
+        const lookupNames = new Set(SLOT_LOOKUPS.split('|'));
+        const uncontracted = new RegExp(`^(${UNCONTRACTED_SLOTS})$`);
+
+        /** The slot-lookup call inside `node`, or null. Mirrors the selectors' `:has`. */
+        const findLookupCall = (node) => {
+          let found = null;
+          const walk = (n) => {
+            if (found || !n || typeof n.type !== 'string') return;
+            if (
+              n.type === 'CallExpression' &&
+              n.callee?.type === 'MemberExpression' &&
+              lookupNames.has(n.callee.property?.name)
+            ) {
+              // Same exemption channel as the selectors: the slot name is read
+              // off a literal argument, so an UNCONTRACTED_SLOTS lookup is
+              // legitimately `any` and must not be reported.
+              const exempt = n.arguments.some(
+                (a) => a?.type === 'Literal' && uncontracted.test(String(a.value)),
+              );
+              if (!exempt) { found = n; return; }
+            }
+            for (const key of Object.keys(n)) {
+              if (key === 'parent') continue;
+              const child = n[key];
+              if (Array.isArray(child)) child.forEach(walk);
+              else if (child && typeof child.type === 'string') walk(child);
+            }
+          };
+          walk(node);
+          return found;
+        };
+
+        /** True when `name` resolves, in scope, to a variable declared `: any`. */
+        const declaredAny = (name, node) => {
+          let scope = context.sourceCode.getScope(node);
+          for (; scope; scope = scope.upper) {
+            const variable = scope.variables.find((v) => v.name === name);
+            if (!variable) continue;
+            return variable.defs.some(
+              (d) => d.node?.id?.typeAnnotation?.typeAnnotation?.type === 'TSAnyKeyword',
+            );
+          }
+          return false;
+        };
+
+        return {
+          AssignmentExpression(node) {
+            if (node.left.type !== 'Identifier') return;
+            if (!findLookupCall(node.right)) return;
+            if (!declaredAny(node.left.name, node)) return;
+            context.report({ node, messageId: 'erased' });
+          },
+        };
+      },
+    },
+  },
+};
+
 export default [
   {
     files: ['**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'],
@@ -259,7 +351,12 @@ export default [
       parser: tsParser,
       parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
     },
+    plugins: { 'slot-lookup': slotLookupPlugin },
     rules: {
+      // The split-declaration form (#4251) — see `slotLookupPlugin`. Reports the
+      // SAME message as the three selectors below, so `check:slot-lookup` counts
+      // all four shapes without knowing there are four.
+      'slot-lookup/no-any-assignment': 'error',
       'no-restricted-syntax': ['error',
         {
           // `const svc: any = await deps.resolveService('auth', env)`

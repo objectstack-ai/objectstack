@@ -24,7 +24,7 @@ deliberately when there is a real need.
   rather than being silently stripped (the ADR-0104 / #3733 quiet-failure class).
   The `BatchOptions` type's `validateOnly` becomes `never`.
 - The retirement is HTTP-only (the key never appeared in stored stack metadata),
-  so it is recorded as a semantic migration on the protocol-18 chain step
+  so it is recorded as a semantic migration on the protocol-17 chain step
   (`batch-options-validate-only-retired`) — a TODO for API callers, not a stack
   conversion.
 

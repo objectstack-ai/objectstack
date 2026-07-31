@@ -3561,7 +3561,7 @@ export class ObjectStackProtocolImplementation implements
                 `'${param}' entry #${badShape + 1} on object '${object}' is not a field name.`
                 + (retiredForm
                     ? ' The nested-select object form `{ field, fields, alias }` was removed in '
-                      + '@objectstack/spec 18 (#4196) — no engine or driver ever read it.'
+                      + '@objectstack/spec 17 (#4196) — no engine or driver ever read it.'
                     : '')
                 + " Select related records with `expand` (`expand=owner` / `{ expand: { owner: "
                 + "{ object: 'user', fields: ['name'] } } }`), or name one related column with a "
@@ -4453,7 +4453,7 @@ export class ObjectStackProtocolImplementation implements
             // `distinct` used to suppress the count here too — #4286 finding 2:
             // the flag's ONLY observable effect platform-wide, on a capability
             // that never deduplicated a row. Removed with `query.distinct`
-            // (tombstoned in spec 18); `total`/`hasMore` are truthful again.
+            // (tombstoned in spec 17); `total`/`hasMore` are truthful again.
             const countable = options.search == null;
             if (countable) {
                 try {

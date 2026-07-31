@@ -869,6 +869,63 @@ somewhere else and did, in three different somewhere-elses: `error.details.code`
   the opposite of `ApiErrorSchema` for the same field, which is what let the
   deviation stand.
 
+### Anonymous access is denied unconditionally — `api.requireAuth` is gone (#3963)
+
+`api.requireAuth` was a deployment-wide opt-out: one boolean that let a stack
+serve its **entire** data plane to unauthenticated callers. Auth is a kernel
+concern, not a deployment posture, so the key is retired and anonymous access to
+object data is now denied on every HTTP surface. A stack that mounts no auth at
+all fails at boot when it would serve a data API, instead of receiving an
+implicit fail-open.
+
+Publish public surfaces by **declaration** instead — each derives its own narrow
+authorization rather than opening the whole data plane: a public form view
+(`sharing.allowAnonymous`), a share-link token (read as SYSTEM), or
+`book.audience: 'public'` (ADR-0046 §6.7). `os migrate meta` drops the key and
+emits a notice telling you where public access has to be re-declared.
+
+### `wait` never had a timeout — `timeoutMs` / `onTimeout` are retired (#4158)
+
+Both keys described a timeout and neither delivered one.
+`waitEventConfig.onTimeout` had **zero** readers — no path ever inspected it, so
+neither `fail` nor `continue` ever happened, while its `.default('fail')`
+stamped a decision nothing made onto every wait node.
+`waitEventConfig.timeoutMs` said "maximum wait time before timeout", but its
+only reader used it as the timer *duration* when `timerDuration` was absent: it
+did something, just not what it claimed. A wait resumes when its timer elapses
+or its signal arrives — never on a deadline.
+
+`os migrate meta` converts `timeoutMs` → `timerDuration` (stringified — a bare
+numeric string reads as milliseconds, so the wait is unchanged) and drops it
+outright when `timerDuration` was already set. `onTimeout` is deleted; there is
+no replacement. Real timeout semantics are left to be built to a requirement
+rather than retrofitted onto two keys that happened to be declared.
+
+### The query request surface sheds five inert keys (#4196, #4286)
+
+`QueryAST` is a **request** shape — never stored in stack metadata — so these
+are caller-side edits, not a source rewrite: `os migrate meta` has nothing to
+convert. Each key now fails to parse with its prescription, and authoring one is
+a `tsc` error at the call site.
+
+| Removed | Why | Use instead |
+|---|---|---|
+| `fields[]` object form `{ field, fields, alias }` | inert end to end — every reader treats the list as `string[]`, so it was dropped by the SQL and memory drivers, projected as a column named `"[object Object]"` by MongoDB, and refused by the REST ingress | `expand`, or a dotted path for a single related column (`fields: ['owner.name']`) |
+| `query.joins` | no engine or driver ever read it; the name squatted on the reserved REST parameter set (the `JoinNode`/`JoinType`/`JoinStrategy` cluster goes with it) | `expand` — the engine resolves it via batch `$in` queries |
+| `query.windowFunctions` | `find()` never applied one, so every OVER clause was silently dropped; `WindowFunctionNode` declared `field`/`over`/`frame` members the live door never read | `aggregations` + `groupBy`; embedders on a SQL datasource call `SqlDriver.findWithWindowFunctions()` |
+| `query.cursor` | no driver implemented keyset pagination — the cursor was accepted and ignored, so every page came back identical and a caller looping "until `hasMore` is false" never terminates | a `where` predicate on your sort key (`{ created_at: { $gt: last.created_at } }`) with the matching `orderBy` |
+| `query.distinct` | **mis-wired**, not merely dead: no driver rendered SELECT DISTINCT, and its only observable effect was suppressing the REST list count — callers got duplicate rows *and* a degraded `total`/`hasMore` | `groupBy`, the `count_distinct` aggregation, or the drivers' `distinct(object, field)` door |
+
+`QueryBuilder.cursor()` and `QueryBuilder.distinct()` are deleted with their
+keys. The count suppression goes too, so `total` is truthful again for queries
+that used to send `distinct`.
+
+`BatchOptions.validateOnly` (#4052) is retired on the same grounds: it promised
+a dry-run ("validate records without persisting") that no batch surface ever
+honoured — `updateManyData`, `deleteManyData` and `batchData` persisted
+regardless, so a caller sending it to *preview* a mutation got it executed. It
+is HTTP-only; stop sending it.
+
 ### Dead spec clusters removed
 
 **App shell (2026-06 liveness audit, #4001 app step).** `App.version`,
@@ -1389,6 +1446,19 @@ objectui commits on top of the pin 16.1.0 shipped.
   dashboard/widget `aria`/`performance`, `agent.knowledge` and
   `skill.triggerPhrases`. If you set `flow.active: false` expecting a flow to
   stop, set `status: 'obsolete'` — the flag never worked.
+- **Anonymous access:** delete `api.requireAuth` (`os migrate meta` does it). If
+  you relied on `requireAuth: false` to serve something publicly, re-declare it
+  narrowly — a public form view, a share link, or `book.audience: 'public'` —
+  and make sure the stack mounts auth at all, or it now fails at boot.
+- **Wait nodes:** `os migrate meta` moves `waitEventConfig.timeoutMs` onto
+  `timerDuration` and drops `onTimeout`. Anything that expected a wait to end on
+  a deadline never did — build the deadline explicitly if you need one.
+- **Query callers:** these are request shapes, so the chain cannot fix them for
+  you. Drop `joins`, `windowFunctions`, `cursor` and `distinct` from queries and
+  the `{ field, fields, alias }` object form from `fields[]`; replace
+  `QueryBuilder.cursor()`/`.distinct()` call sites. Stop sending
+  `options.validateOnly` to `/batch`, `/updateMany` and `/deleteMany` — it never
+  previewed anything, it persisted.
 - **Required fields:** run `os migrate meta` — it stamps
   `storage: { notNull: true }` onto every pre-17 `required: true` field so your
   columns keep their exact constraints. New fields: `required: true` alone

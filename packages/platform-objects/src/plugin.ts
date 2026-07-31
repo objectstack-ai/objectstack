@@ -4,7 +4,20 @@ import { SetupAppTranslations } from './apps/translations/index.js';
 import { MetadataFormsTranslations } from './metadata-translations/index.js';
 import { SysMigration } from './system/sys-migration.object.js';
 import { SysSecret } from './system/sys-secret.object.js';
-import { attestFreshDatastore } from './system/migration-flag.js';
+import { attestFreshDatastore, type MigrationFlagEngine } from './system/migration-flag.js';
+import type { II18nService } from '@objectstack/spec/contracts';
+
+/**
+ * The `objectql` slot's fresh-datastore attestation seam.
+ *
+ * [#4251] Not on `IDataEngine` — these are ObjectQL's own migration-flag
+ * accessors, and the probe at the call site is what runs when the slot holds an
+ * engine without them. Declared narrow and named instead of erased to `any`.
+ */
+interface FreshDatastoreEngine extends MigrationFlagEngine {
+  wasDatastoreCreatedFromEmpty?(): boolean;
+  invalidateDataMigrationFlags?(): void;
+}
 
 /**
  * `PlatformObjectsPlugin`
@@ -95,7 +108,9 @@ export class PlatformObjectsPlugin {
     // service-storage). A store that was found rather than created attests
     // nothing and keeps producing evidence by scan.
     ctx?.hook?.('kernel:ready', async () => {
-      let engine: any;
+      // [#4251] The fresh-datastore attestation seam is ObjectQL's own, not
+      // `IDataEngine`'s; declared here rather than erased to `any`.
+      let engine: FreshDatastoreEngine | undefined;
       try {
         engine = ctx.getService?.('objectql');
       } catch {
@@ -120,7 +135,7 @@ export class PlatformObjectsPlugin {
     });
 
     ctx?.hook?.('kernel:ready', async () => {
-      let i18n: any;
+      let i18n: II18nService | undefined;
       try {
         i18n = ctx.getService?.('i18n');
       } catch {

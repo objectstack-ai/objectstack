@@ -15,6 +15,7 @@ import {
 } from '@objectstack/core';
 import { isServiceServeable } from '../service-serveable.js';
 import { capabilityUnavailable } from './unavailable.js';
+import type { IAIService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -31,7 +32,7 @@ export function createAiDomain(deps: DomainHandlerDeps): DomainRoute {
  * Resolves the AI service and its built-in route handlers, then dispatches.
  */
 export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, method: string, body: any, query: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-    let aiService: any;
+    let aiService: IAIService | undefined;
     try {
         aiService = await deps.resolveService('ai');
     } catch {

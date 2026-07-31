@@ -215,7 +215,10 @@ describe('validateReadonlyFlowWrites', () => {
     expect(findings).toEqual([]);
   });
 
-  it('does NOT flag an unknown field (not this rule’s concern)', () => {
+  // Unknown fields belong to `flow-node-write-unknown-field`
+  // (validate-flow-node-writes.ts). Pinned here so the two rules cannot start
+  // double-reporting the same key.
+  it('does NOT flag an unknown field (the flow-node write rule owns that)', () => {
     const findings = validateReadonlyFlowWrites({
       objects: [opportunityObject],
       flows: [flowWith({ nonexistent_field: 'x' }, { runAs: 'user' })],

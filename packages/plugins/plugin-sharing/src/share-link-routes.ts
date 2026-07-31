@@ -301,7 +301,7 @@ export function registerShareLinkRoutes(
       const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
       const rows = await engine.find('ai_messages', {
         where: { conversation_id: resolved.link.record_id },
-        sort: [{ field: 'created_at', order: 'asc' }],
+        orderBy: [{ field: 'created_at', order: 'asc' }],
         limit: 500,
         context: SYSTEM_CTX,
       } as any);

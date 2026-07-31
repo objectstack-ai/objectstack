@@ -7,7 +7,7 @@ import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
-import type { IMetadataService, II18nService } from '@objectstack/spec/contracts';
+import type { IDataEngine, IJobService, IMetadataService, II18nService } from '@objectstack/spec/contracts';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
@@ -32,6 +32,54 @@ const SEED_WRITE_OPTIONS = { context: { isSystem: true, skipTriggers: true, seed
  * hooks that drive the org-scoped `sys_app` catalog. Standalone (single-tenant)
  * usages may omit this — no catalog hooks are emitted in that case.
  */
+/**
+ * The `objectql` slot BEYOND `IDataEngine` — the seams AppPlugin installs on the
+ * engine.
+ *
+ * [#4251] The slot's ledger entry is `IDataEngine`, and it covers the `insert`
+ * calls in this file and nothing else here. Everything below is ObjectQL's own
+ * surface, for which no contract has been written — the standing record of why
+ * is on `getObjectQL` in {@link DomainHandlerContext}. Declared narrow and named
+ * so the extension is legible rather than erased to `any`; whoever writes
+ * ObjectQL's contract absorbs this and deletes it.
+ *
+ * The members are declared REQUIRED even though a kernel may hold an engine
+ * that implements none of them: every call site already probes with
+ * `typeof … === 'function'` and degrades there, and that runtime guard is the
+ * real defence. Marking them optional here would only turn each guarded
+ * invocation into a `possibly undefined` error and push the code back toward
+ * the `any` this rule exists to remove.
+ */
+interface AppEngineSurface {
+    bindHooks(hooks: unknown[], options: Record<string, unknown>): void;
+    registerAction(objectKey: string, name: string, handler: unknown, packageId: string): void;
+    registerDriver(driver: unknown): void;
+    setDatasourceMapping(rules: unknown): void;
+    setDefaultBodyRunner(runner: unknown): void;
+    setDefaultActionRunner(
+        runner: (actionDef: any) => ((ctx: any) => Promise<unknown>) | undefined,
+    ): void;
+    setHookMetricsRecorder(recorder: unknown): void;
+    getHookMetricsRecorder(): any;
+    readonly registry?: { setInitialDisabledPackageIds?: (ids: Iterable<string>) => void };
+    /**
+     * The idempotence guards for the two runners above, read directly.
+     *
+     * These are NOT part of any declared API: the engine attaches them with
+     * `(this as any)._defaultBodyRunner = runner` and publishes no reader, so
+     * "has another AppPlugin already installed one?" has no answer except
+     * reaching for the field. Declared here to keep that reach visible instead
+     * of laundering it through `any` — the fix is a public accessor on the
+     * engine beside `getHookMetricsRecorder`, which already exists for exactly
+     * this question about the metrics recorder. Filed on #4251.
+     */
+    _defaultBodyRunner?: unknown;
+    _defaultActionRunner?: unknown;
+}
+
+/** The engine as AppPlugin uses it: the data contract plus those seams. */
+type AppEngine = IDataEngine & AppEngineSurface;
+
 export interface AppPluginProjectContext {
     environmentId: string;
     organizationId: string;
@@ -271,9 +319,9 @@ export class AppPlugin implements Plugin {
             ctx.logger.info('[AppPlugin] OS_DISABLE_AUTHORED_HOOKS=1 — runtime-authored hook bodies will not execute');
             return;
         }
-        let ql: any;
+        let ql: AppEngine | undefined;
         try {
-            ql = ctx.getService('objectql');
+            ql = ctx.getService<AppEngine>('objectql');
         } catch {
             return; // no engine on this kernel — nothing to wire
         }
@@ -309,9 +357,9 @@ export class AppPlugin implements Plugin {
             ctx.logger.info('[AppPlugin] OS_DISABLE_AUTHORED_ACTIONS=1 — runtime-authored action bodies will not execute');
             return;
         }
-        let ql: any;
+        let ql: AppEngine | undefined;
         try {
-            ql = ctx.getService('objectql');
+            ql = ctx.getService<AppEngine>('objectql');
         } catch {
             return; // no engine on this kernel — nothing to wire
         }
@@ -339,9 +387,9 @@ export class AppPlugin implements Plugin {
      * idempotent across the multiple AppPlugins a multi-app env installs.
      */
     private installHookMetricsTiming(ctx: PluginContext): void {
-        let ql: any;
+        let ql: AppEngine | undefined;
         try {
-            ql = ctx.getService('objectql');
+            ql = ctx.getService<AppEngine>('objectql');
         } catch {
             return; // no engine on this kernel — nothing to wire
         }
@@ -380,9 +428,9 @@ export class AppPlugin implements Plugin {
         // Retrieve ObjectQL engine from services
         // ctx.getService throws when a service is not registered, so we
         // must use try/catch instead of a null-check.
-        let ql: any;
+        let ql: AppEngine | undefined;
         try {
-            ql = ctx.getService('objectql');
+            ql = ctx.getService<AppEngine>('objectql');
         } catch {
             // Service not registered — handled below
         }
@@ -733,8 +781,8 @@ export class AppPlugin implements Plugin {
                     : [];
             if (jobs.length > 0) {
                 ctx.hook('kernel:ready', async () => {
-                    let svc: any;
-                    try { svc = ctx.getService('job'); } catch { /* not installed */ }
+                    let svc: IJobService | undefined;
+                    try { svc = ctx.getService<IJobService>('job'); } catch { /* not installed */ }
                     if (!svc || typeof svc.schedule !== 'function') {
                         ctx.logger.warn('[AppPlugin] job service not registered — skipping declarative jobs', {
                             appId, jobCount: jobs.length,

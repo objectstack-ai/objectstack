@@ -67,6 +67,7 @@ import { validateAiToolReferences } from './validate-ai-tool-references.js';
 import { validateAiAgentAuthoring } from './validate-ai-agent-authoring.js';
 import { validateHookBodyWrites } from './validate-hook-body-writes.js';
 import { validateActionBodyWrites } from './validate-action-body-writes.js';
+import { validateFlowNodeWrites } from './validate-flow-node-writes.js';
 
 export type ReferenceIntegritySeverity = 'error' | 'warning';
 
@@ -135,6 +136,13 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // drift this suite exists to end (`validateReadonlyFlowWrites` is the
   // standing proof — wired into `validate` and `compile`, never into `lint`).
   { name: 'validateActionBodyWrites', run: validateActionBodyWrites },
+  // The third surface that writes a record field set: a flow `update_record`
+  // node's `config.fields`. Same question as the two rules above, but the map
+  // is structural metadata rather than parsed JS, so a finding is a certainty
+  // and gates (`error`) — see that module for why, and why the docs' long-
+  // standing "prefer a flow node, it's checked" advice was the least true of
+  // the three until it landed.
+  { name: 'validateFlowNodeWrites', run: validateFlowNodeWrites },
 ];
 
 /**

@@ -289,7 +289,7 @@ export class QueryBuilder<T = any> {
   }
 
   // `cursor()` and `distinct()` were REMOVED with `query.cursor` /
-  // `query.distinct` (#4286, spec 18): no driver ever implemented keyset
+  // `query.distinct` (#4286, spec 17): no driver ever implemented keyset
   // pagination or SELECT DISTINCT, so both minted keys the engine ignored —
   // `cursor` re-served page 1 forever, `distinct`'s only effect was silently
   // degrading the REST count. Express a keyset as a `where` predicate on the

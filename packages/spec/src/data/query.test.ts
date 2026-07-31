@@ -91,7 +91,7 @@ describe('FieldNode — the nested-select object form is REMOVED (#4196)', () =>
 
   it('rejects the object form with the removal prescription, not a type mismatch', () => {
     expect(() => FieldNodeSchema.parse({ field: 'owner', fields: ['name'] }))
-      .toThrow(/nested-select object form.*removed in @objectstack\/spec 18.*expand/s);
+      .toThrow(/nested-select object form.*removed in @objectstack\/spec 17.*expand/s);
     // …and through the query it is reached from, since that is where an author
     // writes it.
     expect(() => QuerySchema.parse({

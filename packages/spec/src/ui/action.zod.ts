@@ -482,6 +482,10 @@ const actionObject = () => z.object({
    * provably dead `ctx.record.<field> = …` warns as discarded (#4345).
    * Advisory only, and blind to everything statically unknowable; see
    * `ScriptBodySchema` for the scope.
+   *
+   * The sandbox reports the discarded `ctx.record` writes at INVOCATION time as
+   * well, covering the computed keys, aliases and Studio/API-authored bodies a
+   * parse cannot reach.
    */
   body: HookBodySchema.optional().describe('Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`.'),
 

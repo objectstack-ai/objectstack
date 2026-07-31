@@ -57,7 +57,7 @@ export function bindRuleProvenanceStamp(engine: MinimalEngine, logger?: MinimalL
         // current row ourselves (system ctx: this is a provenance check, not
         // an authorization decision).
         const rows = await engine.find('sys_sharing_rule', {
-          filter: { id },
+          where: { id },
           fields: ['id', 'managed_by', 'customized'],
           limit: 1,
           context: SYSTEM_CTX,

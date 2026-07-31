@@ -280,7 +280,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
      * silently strip it and the author's intent would vanish without a word.
      */
     requireAuth: retiredKey(
-      '`api.requireAuth` was removed in @objectstack/spec 18 (#3963). Anonymous access to object data '
+      '`api.requireAuth` was removed in @objectstack/spec 17 (#3963). Anonymous access to object data '
       + 'is now always denied. Delete the key; publish public surfaces by declaration instead — a public '
       + "form view, a share link, or `book.audience: 'public'`. A stack that mounts no auth at all now "
       + 'fails at boot rather than silently serving object data to anonymous callers.',

@@ -130,7 +130,7 @@ interface AggregationNode {
 // `expand`, not from inside this list.
 //
 // The `{ field, fields, alias }` nested-select member this union used to carry
-// was REMOVED in protocol 18 (#4196): nothing produced it and nothing read
+// was REMOVED in protocol 17 (#4196): nothing produced it and nothing read
 // `.fields`/`.alias`, so it was dropped by the SQL and memory drivers,
 // projected as a column named "[object Object]" by MongoDB, and refused as an
 // unknown field by the REST ingress. `expand` is the one spelling.

@@ -393,7 +393,11 @@ export class QuickJSScriptRunner implements ScriptRunner {
           const value = resStr === 'null' ? undefined : safeJsonParse(resStr);
           // Capture mutated ctx.input so the host can write through.
           const mutatedInput = readCtxInputJson(vm);
-          return { value, mutatedInput, durationMs: Date.now() - start };
+          // …and the ctx.record writes the host will NOT write through, so it
+          // can say so instead of dropping them silently (#4345).
+          const droppedRecordWrites =
+            args.ctx.record !== undefined ? readRecordWritesJson(vm) : undefined;
+          return { value, mutatedInput, droppedRecordWrites, durationMs: Date.now() - start };
         }
 
         const budget = budgetError(pumps);
@@ -640,6 +644,84 @@ export class QuickJSScriptRunner implements ScriptRunner {
       throw new SandboxError(`failed to install ctx.api.transaction: ${formatErr(msg)}`);
     }
     sugar.value.dispose();
+
+    // `ctx.record` is a READ-ONLY snapshot: the action path returns the script's
+    // value and never writes the record back, so `ctx.record.x = …` is discarded
+    // — for a declared field exactly as much as for an unknown one (#4345). The
+    // write still WORKS inside the VM (the trap forwards it, so a body using the
+    // snapshot as scratch keeps its reads coherent); what changes is that it is
+    // no longer SILENT. Recording it here rather than diffing a post-run dump is
+    // what makes the signal exact: the trap fires for computed keys,
+    // `Object.assign`, and aliases (`const r = ctx.record; r.x = 1`) — the cases
+    // both a dump-diff and the author-time lint miss — and costs nothing on the
+    // hook path, which carries no `record` and so installs no proxy.
+    if (ctx.record === undefined) return;
+    const recordGuard = vm.evalCode(
+      `globalThis.__recordWrites = []; globalThis.__recordEscaped = false;
+       (function () {
+         var snapshot = __ctx.record;
+         if (!snapshot || typeof snapshot !== 'object') return;
+         var note = function (k) {
+           // Symbol keys are never record fields; forward them unrecorded.
+           if (typeof k === 'symbol') return;
+           if (globalThis.__recordWrites.indexOf(k) < 0) globalThis.__recordWrites.push(k);
+         };
+         var wrap = function (target) {
+           return new Proxy(target, {
+             set: function (t, k, v) { note(k); t[k] = v; return true; },
+             deleteProperty: function (t, k) { note(k); delete t[k]; return true; },
+             defineProperty: function (t, k, d) { note(k); Object.defineProperty(t, k, d); return true; },
+             // Escape detection. A write is only DEAD if the snapshot never
+             // leaves the body as a value — this is live, and reporting it
+             // would be a false statement, not just noise:
+             //   ctx.record.stage = 'won';
+             //   await ctx.api.object('d').update(ctx.record);   // it lands
+             // Consuming the object whole (marshalling it to a host call,
+             // JSON.stringify, spread, Object.keys, returning it) enumerates
+             // its keys; a plain property READ does not. So an ownKeys AFTER a
+             // write means the written value may have gone somewhere, and the
+             // recorder goes quiet. Same direction the author-time rule takes:
+             // treat ambiguity as live, because a wrong "discarded" is worse
+             // than a missed one.
+             ownKeys: function (t) {
+               if (globalThis.__recordWrites.length > 0) globalThis.__recordEscaped = true;
+               return Reflect.ownKeys(t);
+             },
+           });
+         };
+         var current = wrap(snapshot);
+         // An accessor, not a plain assignment, so that replacing the snapshot
+         // WHOLESALE (\`ctx.record = { stage: 'won' }\`) is caught too. A bare
+         // proxy would be swapped out by that write and every later field write
+         // would go unrecorded — the one shape where the recorder could have
+         // gone quiet exactly when the author was most sure they had persisted.
+         Object.defineProperty(__ctx, 'record', {
+           configurable: true,
+           enumerable: true,
+           get: function () { return current; },
+           set: function (v) {
+             if (v && typeof v === 'object') {
+               // Report the replacement's own keys: that is what the author
+               // believed they were writing.
+               Object.keys(v).forEach(note);
+               current = wrap(v);
+             } else {
+               note('(whole record replaced)');
+               current = v;
+             }
+           },
+         });
+       })();`,
+    );
+    if (recordGuard.error) {
+      const msg = vm.dump(recordGuard.error);
+      recordGuard.error.dispose();
+      // Fatal, like the sugar above: the snippet interpolates no caller data, so
+      // a failure here means the VM is broken, not that some record shape defeated
+      // it. Falling back would silently restore the very blind spot this closes.
+      throw new SandboxError(`failed to install the ctx.record write recorder: ${formatErr(msg)}`);
+    }
+    recordGuard.value.dispose();
   }
 }
 
@@ -882,6 +964,34 @@ function readCtxInputJson(vm: QuickJSContext): Record<string, unknown> | undefin
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * After the script has settled, dump the keys the write-recorder proxy saw on
+ * `ctx.record` (#4345). Those writes are discarded — the action path has no
+ * record write-back — so the host reports them rather than staying silent.
+ *
+ * Returns `undefined` if the read fails or the recorder was never installed;
+ * `[]` when the snapshot was present and untouched, which is the common case
+ * and the one that must stay quiet.
+ */
+function readRecordWritesJson(vm: QuickJSContext): string[] | undefined {
+  try {
+    const r = vm.evalCode(
+      `JSON.stringify(globalThis.__recordEscaped ? [] : (globalThis.__recordWrites || null))`,
+    );
+    if (r.error) {
+      r.error.dispose();
+      return undefined;
+    }
+    const s = vm.dump(r.value);
+    r.value.dispose();
+    if (typeof s !== 'string' || s === 'null') return undefined;
+    const parsed = safeJsonParse(s);
+    return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === 'string') : undefined;
   } catch {
     return undefined;
   }
