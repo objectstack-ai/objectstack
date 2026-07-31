@@ -20,6 +20,8 @@ import type {
   MetadataHistoryRecord,
 } from '@objectstack/spec/system';
 import { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
+import { applyConversionsToStoredItem } from '@objectstack/spec';
+import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
 import type { MetadataLoader } from './loader-interface.js';
 import { calculateChecksum } from '../utils/metadata-history-utils.js';
@@ -463,8 +465,24 @@ export class DatabaseLoader implements MetadataLoader {
   }
 
   /**
-   * Convert a database row to a metadata payload.
-   * Parses the JSON `metadata` column back into an object.
+   * Once-per-process dedupe for stored-row conversion notices — `load` /
+   * `loadMany` are hot read paths (cached, but re-hit on every TTL expiry),
+   * so a legacy row must warn once, not once per cache miss.
+   */
+  private storedConversionWarned = new Set<string>();
+
+  /**
+   * Convert a LIVE database row to a metadata payload.
+   *
+   * Parses the JSON `metadata` column back into an object, then replays the
+   * full ADR-0087 conversion chain over it (#3903): rows written under a past
+   * protocol are served canonical, exactly like the metadata-protocol's
+   * `sys_metadata` seams. History rows do NOT pass through here — history
+   * readers parse inline and stay verbatim, as a record of what was written.
+   *
+   * `flow` is skipped for the same reason the protocol skips it: flow-node
+   * conversions need the automation engine's live executor registry for their
+   * open-namespace conflict guard; flows canonicalize at `registerFlow`.
    */
   private rowToData(row: Record<string, unknown>): Record<string, unknown> | null {
     if (!row || !row.metadata) return null;
@@ -473,7 +491,18 @@ export class DatabaseLoader implements MetadataLoader {
       ? JSON.parse(row.metadata as string)
       : row.metadata;
 
-    return payload as Record<string, unknown>;
+    const singular = PLURAL_TO_SINGULAR[row.type as string] ?? (row.type as string);
+    if (singular === 'flow') return payload as Record<string, unknown>;
+    return applyConversionsToStoredItem(singular, payload as Record<string, unknown>, {
+      onNotice: (n) => {
+        const key = `${n.conversionId}|${singular}|${String(row.name ?? '')}`;
+        if (this.storedConversionWarned.has(key)) return;
+        this.storedConversionWarned.add(key);
+        console.warn(
+          `[DatabaseLoader] stored ${singular}/${String(row.name ?? '<unnamed>')} carries a pre-protocol shape; ${n.message}`,
+        );
+      },
+    });
   }
 
   /**

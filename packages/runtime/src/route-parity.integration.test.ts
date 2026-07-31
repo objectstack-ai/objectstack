@@ -123,7 +123,7 @@ async function bootServe(stubOpts: { notification?: boolean; mcp?: boolean } = {
     // Register stub services FIRST so identity + capability services are live
     // for both registration paths (mirrors a provisioned `os serve`).
     kernel.use(stubServicesPlugin(stubOpts));
-    kernel.use(new HonoServerPlugin({ port: 0, registerStandardEndpoints: true, cors: false }));
+    kernel.use(new HonoServerPlugin({ port: 0, cors: false }));
     kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false, requireAuth: true }));
     await kernel.bootstrap();
     const httpServer = kernel.getService<any>('http.server');

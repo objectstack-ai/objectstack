@@ -74,7 +74,7 @@ Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. 
    When renaming a legacy var, use `readEnvWithDeprecation('OS_NEW', 'LEGACY')` from `@objectstack/types` (keeps legacy working one release). Third-party exceptions kept as-is: `NODE_ENV`, `HOME`, `OPENAI_API_KEY`, `TURSO_*`, OAuth `*_CLIENT_ID/SECRET`, `RESEND_API_KEY`, `POSTMARK_TOKEN`, `AI_GATEWAY_*`, `SMTP_*`. See #1382.
 10. **File issues for out-of-scope findings — don't silently expand scope or leave them buried.** When you hit a bug, gap, or unenforced capability that's unrelated to the current task, or too large to fix in scope, open a GitHub issue (`gh issue create`) with a clear repro/decision and link it from your PR. Corollary: **never advertise or demo a capability the runtime doesn't actually deliver** (declared ≠ enforced) — fix it, trim it, or file an issue, but don't fake coverage. Example: the spec once declared 9 validation-rule types while the write-path validator enforced only 3 (`state_machine`/`script`/`cross_field`); the gap was filed as #1475 rather than demoed in the showcase, then closed by **trimming** what could never be enforced (`unique`/`async`/`custom`) and **implementing** the rest — the spec now declares 6 and `rule-validator.ts` handles all 6. Note how narrow that claim stayed even so: the evaluator was wired into insert and single-id update only, so a bulk `updateMany` silently skipped every rule — a second `declared ≠ enforced` gap one layer down, at the **call site** rather than the `switch`; filed as #3106 and closed by evaluating the bulk match set per row. A `case` label is not enforcement; check the **call site**.
 11. **Worktree-first — never edit on the shared `main` checkout.** This repo is edited by **multiple agents at once**; the shared `main` tree has its HEAD switched and reset *under you*, silently clobbering uncommitted work. Before your **first file edit**, you MUST be in a dedicated worktree on a feature branch: `git worktree add ../objectstack-<task> -b <branch> main && cd ../objectstack-<task> && pnpm install`. A PreToolUse hook (`.claude/hooks/guard-main-checkout.sh`) **enforces** this — it blocks `Edit`/`Write`/`NotebookEdit` unless the edited file is in a dedicated **worktree** — a feature branch on the *shared* checkout is **not** enough (it still gets switched under you) — and it checks the **edited file's own repo**, so sibling repos (`objectui`/`cloud`) you touch are covered too (override for a deliberate non-task fix with `OS_ALLOW_MAIN_EDITS=1`). Full playbook below.
-12. **Contract-first — fix the metadata, not the runtime.** This is a metadata-driven framework: `packages/spec` is the one contract between metadata *producers* and the runtime/renderers that *consume* it. When a piece of metadata "doesn't work," ask **first**: *is it spec-compliant? is this the long-term-correct direction?* If the metadata is wrong, fix it at the **producer** and **reject it at authoring/publish** (validation / lint) so the error surfaces loudly — do **not** add a lenient alias or `??` fallback in the consumer (a node executor, the REST layer, a renderer) to tolerate off-spec input. A tolerant fallback fossilizes the wrong convention into a second de-facto contract, dilutes the spec, and hides the producer's bug — one strict contract beats N dialects. This is an **internal** contract (we own both ends), so "be liberal in what you accept" (Postel) does **not** apply — that's for untrusted boundaries. Change the **spec** only when the spec itself is genuinely wrong, and then deliberately (edit the Zod schema + migrate), never by accreting consumer-side fallbacks. The `cfg.filter ?? cfg.filters` / `cfg.objectName ?? cfg.object` fallbacks the flow executors once carried are **debt to pay down, not a pattern to copy** — and the way they are being paid down is the pattern to copy. `filters` → `filter` has **graduated** into the ADR-0087 D2 conversion layer (`flow-node-crud-filter-alias`): rewritten to the canonical key at load, including the `AutomationEngine.registerFlow` rehydration seam, so the CRUD executors read `cfg.filter` directly and no consumer-side fallback survives. `object` → `objectName` and the six open-coded stragglers #3796 tracked (notify `to`/`subject`/`body`/`url`, script `functionName`/`input`) graduated the same way at protocol 17 (`flow-node-crud-object-alias`, `flow-node-notify-config-aliases`, `flow-node-script-config-aliases`), emptying the `readAliasedConfig` executor shim — deleted with them. When you must tolerate an alias at all, declare it as a conversion-layer entry (never a bare `??`, and no new executor shims) so it is declared, loud, tested, and *removable on a schedule*. *Worked example:* an AI-authored `create_record` used `fieldValues` / `today()` / `{{trigger.record.id}}` while the executor reads `fields` / `{TODAY()}` / `{record.id}` → the fix was correcting the authoring skill + a publish-gate lint that rejects the wrong shape (cloud#688), **not** a `cfg.fields ?? cfg.fieldValues` runtime alias (framework#2419, rejected). Strengthens #5.
+12. **Contract-first — fix the metadata, not the runtime.** This is a metadata-driven framework: `packages/spec` is the one contract between metadata *producers* and the runtime/renderers that *consume* it. When a piece of metadata "doesn't work," ask **first**: *is it spec-compliant? is this the long-term-correct direction?* If the metadata is wrong, fix it at the **producer** and **reject it at authoring/publish** (validation / lint) so the error surfaces loudly — do **not** add a lenient alias or `??` fallback in the consumer (a node executor, the REST layer, a renderer) to tolerate off-spec input. A tolerant fallback fossilizes the wrong convention into a second de-facto contract, dilutes the spec, and hides the producer's bug — one strict contract beats N dialects. This is an **internal** contract (we own both ends), so "be liberal in what you accept" (Postel) does **not** apply — that's for untrusted boundaries. Change the **spec** only when the spec itself is genuinely wrong, and then deliberately (edit the Zod schema + migrate), never by accreting consumer-side fallbacks. The `cfg.filter ?? cfg.filters` / `cfg.objectName ?? cfg.object` fallbacks the flow executors once carried are **debt to pay down, not a pattern to copy** — and the way they are being paid down is the pattern to copy. `filters` → `filter` has **graduated** into the ADR-0087 D2 conversion layer (`flow-node-crud-filter-alias`): rewritten to the canonical key at load, including the `AutomationEngine.registerFlow` rehydration seam, so the CRUD executors read `cfg.filter` directly and no consumer-side fallback survives. `object` → `objectName` and the six open-coded stragglers #3796 tracked (notify `to`/`subject`/`body`/`url`, script `functionName`/`input`) graduated the same way at protocol 17 (`flow-node-crud-object-alias`, `flow-node-notify-config-aliases`, `flow-node-script-config-aliases`), emptying the `readAliasedConfig` executor shim — deleted with them. When you must tolerate an alias at all, declare it as a conversion-layer entry (never a bare `??`, and no new executor shims) so it is declared, loud, tested, and *removable on a schedule*. Stored `sys_metadata` rows (data at rest) are covered from the other side: every rehydration seam replays the **full** conversion chain — retired entries included — via `applyConversionsToStoredItem` (#3903, ADR-0087 addendum), so a consumer never needs its own accommodation for a legacy stored shape either. *Worked example:* an AI-authored `create_record` used `fieldValues` / `today()` / `{{trigger.record.id}}` while the executor reads `fields` / `{TODAY()}` / `{record.id}` → the fix was correcting the authoring skill + a publish-gate lint that rejects the wrong shape (cloud#688), **not** a `cfg.fields ?? cfg.fieldValues` runtime alias (framework#2419, rejected). Strengthens #5.
 
 ---
 
@@ -362,6 +362,47 @@ export class MyPlugin implements Plugin {
   async destroy()                 { /* cleanup */ }
 }
 ```
+
+---
+
+## Route & surface ownership
+
+Four rules, each paid for by a real bug. They matter more than usual here because
+this repo is largely written by agents, and every one of them is a trap that
+reads as reasonable code.
+
+**1. One route, one owner.** Never add a second implementation of a path that
+another package already serves, however convenient. A shadowed duplicate is code
+that `grep` finds and the runtime never runs — the exact input that makes an
+agent (or a human) reason confidently from dead code. It also silently forks
+every future invariant: the retired hono `/data` surface had to re-learn the
+anonymous-deny gate (#2567), honest batch capability reporting (#3298) and
+discovery accuracy (#4018), each after the fact, each because someone fixed the
+real owner and never knew about the copy. Retired in #4073.
+
+**2. Explicit composition over default magic.** A capability that appears
+because of a default nobody wrote down is invisible at every call site — and
+call sites are the primary evidence an agent reasons from. #4073's own first
+analysis checked *who passes the option* and missed *who relies on the default*;
+the correction is in that issue's opening paragraph. If a host should get a
+surface, it should mount it.
+
+**3. Absence must be loud.** A composition that legitimately serves nothing
+should say so once at boot, naming the remedy — never leave a bare 404 to be
+diagnosed. The same rule applies to tooling: a verifier that silently degrades
+(reusing a stale build, skipping a check it could not run) is worse than no
+verifier, because it reports success. Prefer failing to falling back.
+
+**4. Machine-readable surfaces must not lie.** `/discovery` and friends are read
+by SDKs, codegen and AI clients. Advertise only what is actually mounted, and
+mount everything advertised (ADR-0076 D12) — a wrong answer here propagates into
+everything built on top of it.
+
+**Verifying any of this:** "who serves this path" is a question about the
+composed, *provisioned* runtime — not about which plugin declares it, not about
+registration order, and not about a minimal harness that merely boots. #4073 was
+answered wrongly three times, once per each of those shortcuts. Boot the real
+composition with its real services, or do not claim an answer.
 
 ---
 

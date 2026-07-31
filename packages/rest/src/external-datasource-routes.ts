@@ -43,6 +43,10 @@ import { sendOk, sendError } from '@objectstack/types';
  * non-envelope `500 { error: 'No response from handler' }` — while the SAME two
  * service operations, reached through `service-datasource/admin-routes.ts`,
  * answered 400. One operation, one failure contract now, on both paths.
+ * #4264 closed the same gap on the two routes #4249 left uncovered —
+ * `refreshCatalog` / `validateAll` — whose throws (unknown datasource,
+ * unreachable remote, metadata-store failure) took the same uncaught path to
+ * that adapter 500. Every service call this module makes is now wrapped.
  *
  * Note `POST /validate` keeps its `ok` — unlike the `{ ok: true, key }` #3689
  * retired from storage, that one was a private second word for `success`, while
@@ -69,8 +73,13 @@ export function registerExternalDatasourceRoutes(
   const unavailable = (res: any) =>
     sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The external-datasource service is not available.');
 
-  /** An introspection refusal — same code as the admin-routes path (#4249). */
-  const introspectionRefused = (res: any, err: unknown) =>
+  /**
+   * A refusal from the external-datasource service — same code as the
+   * admin-routes path (#4249). Named after the service, not one operation:
+   * since #4264 every route here except the import (which has its own
+   * registered code) answers its catch with this.
+   */
+  const refused = (res: any, err: unknown) =>
     sendError(res, 400, 'EXTERNAL_DATASOURCE_ERROR', err instanceof Error ? err.message : String(err));
 
   // List remote tables (optionally filtered by ?schema=).
@@ -82,7 +91,7 @@ export function registerExternalDatasourceRoutes(
       const tables = await svc.listRemoteTables(req.params.name, { schema });
       sendOk(res, { tables });
     } catch (err) {
-      introspectionRefused(res, err);
+      refused(res, err);
     }
   });
 
@@ -98,7 +107,7 @@ export function registerExternalDatasourceRoutes(
       );
       sendOk(res, { draft });
     } catch (err) {
-      introspectionRefused(res, err);
+      refused(res, err);
     }
   });
 
@@ -130,16 +139,24 @@ export function registerExternalDatasourceRoutes(
   server.post(`${ext}/refresh-catalog`, async (req: any, res: any) => {
     const svc = externalService();
     if (!svc?.refreshCatalog) return unavailable(res);
-    const catalog = await svc.refreshCatalog(req.params.name);
-    sendOk(res, { catalog });
+    try {
+      const catalog = await svc.refreshCatalog(req.params.name);
+      sendOk(res, { catalog });
+    } catch (err) {
+      refused(res, err);
+    }
   });
 
   // Validate the federated objects on this datasource.
   server.post(`${ext}/validate`, async (req: any, res: any) => {
     const svc = externalService();
     if (!svc?.validateAll) return unavailable(res);
-    const report = await svc.validateAll();
-    const results = (report.results ?? []).filter((r: any) => r.datasource === req.params.name);
-    sendOk(res, { ok: results.every((r: any) => r.ok), results });
+    try {
+      const report = await svc.validateAll();
+      const results = (report.results ?? []).filter((r: any) => r.datasource === req.params.name);
+      sendOk(res, { ok: results.every((r: any) => r.ok), results });
+    } catch (err) {
+      refused(res, err);
+    }
   });
 }

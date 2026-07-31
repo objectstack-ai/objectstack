@@ -91,7 +91,8 @@ Install the plugin in your ObjectStack project:
 pnpm add @objectstack/plugin-auth
 ```
 
-The plugin requires Better-Auth as a peer dependency, which will be automatically installed.
+Better-Auth is a direct runtime dependency of the plugin, not a peer dependency,
+so the command above installs it for you — you never add `better-auth` yourself.
 
 ---
 
@@ -376,8 +377,10 @@ once (never overwriting your edits) and can be changed under Setup →
 Notification Templates. The locale follows the deployment default
 (`localization.locale` setting) with a `zh-CN → zh → en` fallback chain;
 holes are `{{code}}`, `{{appName}}`, `{{minutes}}` (OTP) and `{{appName}}`,
-`{{baseUrl}}` (invitation). Template lookups are best-effort — an outage
-falls back to the built-in text and never blocks an OTP send.
+`{{loginUrl}}` (invitation — `{{baseUrl}}`, the bare origin, is still
+interpolated for tenant templates written against the older text). Template
+lookups are best-effort — an outage falls back to the built-in text and never
+blocks an OTP send.
 
 ---
 
@@ -799,9 +802,9 @@ every row through better-auth so the accounts are login-capable:
   link, or a password-reset link) and the Console detects the missing password
   (`hasLocalPassword()`) and offers set-initial-password.
 - `mode: 'insert' | 'upsert'` with `matchBy: 'email' | 'phone'`. Upsert
-  updates only touch profile fields (`name`, `phone_number`, `role`) — a
-  re-imported file can never modify an existing user's email or reset their
-  password.
+  updates only touch profile fields (`name`, `image`, `phone_number`, `role`)
+  — a re-imported file can never modify an existing user's email or reset
+  their password.
 - Synchronous only, at most 500 rows per request (password hashing is
   CPU-bound); split larger files into batches. Imports are not undoable.
 
@@ -1050,7 +1053,7 @@ AuthPlugin is designed to work in **both** server and MSW/mock (browser-only) en
 ### How It Works
 
 - **Server mode** (HonoServerPlugin active): AuthPlugin registers HTTP routes at `/api/v1/auth/*` and forwards all requests to better-auth.
-- **MSW/mock mode** (no HTTP server): AuthPlugin gracefully skips route registration but still registers the `auth` service. The `HttpDispatcher` provides mock fallback responses for core auth endpoints.
+- **MSW/mock mode** (no HTTP server): AuthPlugin gracefully skips route registration but still registers the `auth` service. The dispatcher's `/auth` domain then bridges straight to that service's `handleRequest()` — it has no mock fallback of its own, and answers `501` when the `auth` slot is empty (see below).
 
 ### Minimal Configuration for Mock Mode
 

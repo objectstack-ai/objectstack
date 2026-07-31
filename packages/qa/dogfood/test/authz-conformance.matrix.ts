@@ -80,15 +80,15 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // just REST `/data`. Each sibling surface that reaches ObjectQL consults the
   // same unconditional anonymous-deny (#2567); these rows pin every entry point
   // so a new ungated surface (or a silent regression) fails CI, not review.
+  //
+  // The raw-hono `/data` row was retired with its surface (#4073): those routes
+  // were duplicate supply that this plugin no longer serves, so there is no
+  // entry point left to gate there. The invariant is unchanged — it simply has
+  // one fewer implementation to hold it in.
   { id: 'anonymous-deny-meta', summary: 'anonymous-deny on the metadata endpoints (#2567 surface 1)', state: 'enforced',
     enforcement: 'rest/rest-server.ts registerMetadataEndpoints guarded registrar (enforceAuth → shouldDenyAnonymous) — every /meta route inherits the gate; runtime/http-dispatcher.ts handleMetadata mirrors it for the dispatcher metadata catch-all',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
     covers: ['meta:rest-server.ts:registerMetadataEndpoints', 'meta:http-dispatcher.ts:handleMetadata'] },
-  { id: 'anonymous-deny-hono-data', summary: 'anonymous-deny on the raw-hono standard /data routes (#2567 surface 3)', state: 'enforced',
-    enforcement: 'plugin-hono-server/hono-plugin.ts denyAnonymous gate (shouldDenyAnonymous) on the standard /data routes — unconditional anonymous-deny, mirroring rest-server.ts',
-    proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
-    covers: ['data:hono-plugin.ts:POST /data/:object', 'data:hono-plugin.ts:GET /data/:object/:id', 'data:hono-plugin.ts:GET /data/:object'],
-    note: 'These routes delegate straight to ObjectQL and were only shadowed when the REST plugin registered the same paths FIRST — so the posture depended on plugin registration order (a load-order change silently reopened it, no test failing). Gating each route makes the deny decision a property of this entry point too. Handler-level proof in plugin-hono-server/hono-anonymous-deny.test.ts.' },
 
   // ── #2992 / ADR-0096 D4 — latent execution surfaces (pre-wiring identity
   // admission). Neither surface is reachable by a client today; these rows

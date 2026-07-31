@@ -16,6 +16,7 @@ describe('reference-integrity suite — membership', () => {
   it('holds exactly the reference-resolution rules, in report order', () => {
     expect(REFERENCE_INTEGRITY_RULES.map((r) => r.name)).toEqual([
       'validateObjectReferences',
+      'validateSearchableFields',
       'validateActionNameRefs',
       'validatePageFieldBindings',
       'validateChartBindings',
@@ -48,6 +49,10 @@ describe('reference-integrity suite — every member actually runs', () => {
       {
         name: 'crm_lead',
         fields: { name: { type: 'text', label: 'Name' } },
+        // validateSearchableFields: `budget` is not a field on crm_lead, so the
+        // ADR-0061 declaration is stale — the engine drops it and searches a
+        // narrower set than the object declares.
+        searchableFields: ['name', 'budget'],
         permissions: {},
       },
     ],
@@ -144,6 +149,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     const rules = new Set(findings.map((f) => f.rule));
 
     expect(rules).toContain('object-reference-unknown');
+    expect(rules).toContain('searchable-field-unknown');
     expect(rules).toContain('action-name-undefined');
     expect(rules).toContain('page-field-unknown');
     expect(rules).toContain('chart-measure-unknown');

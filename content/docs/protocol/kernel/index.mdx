@@ -176,12 +176,16 @@ const apiKey =
 
 **Kernel Approach:**
 ```typescript
-// Declarative merge strategy
-const config = context.config.resolve('stripe.apiKey', {
-  sources: ['environment', 'tenant', 'plugin', 'default'],
-  required: true
+// One resolver, one precedence order — the `settings` service
+// (SettingsService, registered by SettingsServicePlugin)
+const settings = ctx.getService<any>('settings');
+const { value, source, locked } = await settings.get('stripe', 'apiKey', {
+  tenantId,
+  userId,
 });
-// Kernel merges in precedence order, validates, throws clear error if missing
+// Cascade: OS_STRIPE_APIKEY (env) > global > tenant > user > registered default.
+// `source` names the winning scope; `locked: true` means a higher scope pinned it
+// (a write to a locked key throws SettingsLockedError).
 ```
 
 **Business Value:** Configuration errors dropped 90% after adopting Kernel. New engineers can understand config logic in 5 minutes instead of 5 hours.
@@ -214,7 +218,7 @@ const config = context.config.resolve('stripe.apiKey', {
 **Kernel Solution:**
 - **Package Manifest:** The `manifest` block in `objectstack.config.ts` (compiled to `objectstack.json`) declares what a package provides and needs
 - **Dependency Resolution:** Automatic validation that plugin versions are compatible with core platform
-- **Lifecycle:** every plugin implements `init` / `start` / `destroy`, driven by `kernel.bootstrap()` and shutdown
+- **Lifecycle:** every plugin implements a **required** `init` hook plus optional `start` / `destroy` hooks, driven by `kernel.bootstrap()` and shutdown
 - **Sandboxing:** Plugins can't access each other's data or crash each other
 
 **Results:**
@@ -234,7 +238,7 @@ const config = context.config.resolve('stripe.apiKey', {
 - **i18n Standard:** Translation bundles with fallback chains (`de-AT` → `de` → `en`)
 - **Region Config:** Configuration profiles per region (defaults + region overrides)
 - **Plugin System:** Regional plugins (SEPA plugin for EU, ACH plugin for US)
-- **Locale Resolution:** Automatic detection from user preferences, IP geolocation, or explicit selection
+- **Locale Resolution:** Automatic detection from the user's localization settings or the request's `Accept-Language` header, with explicit selection as an override
 
 **Results:**
 - Launched in 12 countries in 4 months (previously 18-month estimate)
@@ -265,57 +269,57 @@ await kernel.use(new ObjectQLPlugin());
 // Phase 3 — application metadata (objects, views, apps, flows, agents…)
 await kernel.use(new AppPlugin(stack));
 
-// Phase 4 — host (HTTP / Studio / MCP server, optional)
+// Phase 4 — host (HTTP via HonoServerPlugin, MCP via MCPServerPlugin; optional)
 // await kernel.use(new HonoServerPlugin({ port: 3000 }));
 
 // Phase 5 — start everything
 await kernel.bootstrap();
 ```
 
-The kernel validates each plugin at `use()`, then `bootstrap()` runs every
-plugin's `init` in registration order followed by every plugin's `start`, and
-exposes the resulting services through DI.
+The kernel validates each plugin's structure and version compatibility at
+`use()`, then `bootstrap()` topologically sorts the registry — each plugin's
+declared `dependencies` are hoisted ahead of it, registration order breaking
+ties — and runs every plugin's `init` (kernel Phase 1) followed by every
+plugin's `start` (kernel Phase 2), exposing the resulting services through DI.
+It then fires `kernel:ready`, `kernel:bootstrapped`, and `kernel:listening` in
+that order.
 
 ### 2. Request Handling
 ```typescript
 // Incoming API request: GET /api/v1/data/account/123
-async function handleRequest(req) {
-  // Kernel provides context
-  const context = await Kernel.createContext({
-    tenantId: req.headers['x-tenant-id'],
-    userId: req.user.id,
-    locale: req.headers['accept-language'],
-  });
-  
-  // Kernel resolves configuration
-  const config = context.config.resolve();
-  
-  // ObjectQL executes query
-  const account = await ObjectQL.findById('account', '123', {
-    context,  // Kernel injects permissions, audit, etc.
-  });
-  
-  // ObjectUI renders response
-  const view = await ObjectUI.render('account_detail', {
-    record: account,
-    locale: context.locale,  // Kernel provides i18n
-  });
-  
-  // Kernel logs audit trail
-  context.audit.log('account.view', { accountId: '123' });
-  
-  return view;
-}
+//
+// The transport plugin (HonoServerPlugin) hands the raw request to the REST
+// layer, which resolves ONE identity envelope and threads it into the engine:
+
+// 1. Identity — resolveExecutionContext() reads the better-auth session (or
+//    API key), aggregates positions/permission sets/RLS membership, and layers
+//    locale + timezone on top. It always resolves; anonymous yields
+//    `{ isSystem: false, positions: [], permissions: [] }`.
+const context = await resolveExecutionContext({ getService, getQl, request });
+// → ExecutionContext { userId, tenantId, locale, timezone, positions,
+//                      permissions, isSystem, ... }
+
+// 2. Data — the context rides along as `context`, on the query itself or on
+//    the engine's trailing options argument (the engine merges both). It is
+//    what permissions and RLS are enforced against.
+const ql = ctx.getService<any>('objectql');
+const account = await ql.findOne('account', { where: { id: '123' }, context });
 ```
+
+Auditing is not called by hand at the request boundary: `AuditPlugin` subscribes
+to the engine's data hooks and writes audit records as a side effect of the
+operation.
 
 ### 3. Package Installation
 ```typescript
-// Install a package: os package install @vendor/salesforce-sync
+// Install a package: os package install com.vendor.salesforce-sync
+// (the argument is a reverse-domain manifest id, or a path to a compiled
+//  artifact JSON for an air-gapped install)
 //
 // A package is METADATA — no package code executes at install time.
 // What actually happens:
 //
-// 1. Validate — manifest shape, engines.protocol compatibility (ADR-0087),
+// 1. Validate — manifest shape, engines.protocol compatibility (ADR-0025 §3.2),
 //    artifact signature.
 // 2. Register — registry.installPackage() gates the namespace and records
 //    the InstalledPackage; the durable copy lands in `sys_packages` and is
@@ -344,10 +348,11 @@ permissions.grant('admin', 'accounts', 'read');
 **Good (Declarative):**
 ```yaml
 # objectstack.config.ts — declared via defineStack({ ... })
+# `objects` is a list; each object's `fields` is a MAP keyed by snake_case name
 objects:
   - name: account
     fields:
-      - name: name
+      name:
         type: text
 # PermissionSet grants use allow* flags (not role/object/access)
 permissions:
@@ -388,18 +393,37 @@ packages/plugins/plugin-slack-integration/
   README.md
 ```
 
+<Callout type="warn">
+  The scaffold still emits an `initialize` method. The kernel's plugin contract
+  only invokes `init` / `start` / `destroy`, and `init` is **required** — rename
+  `initialize` to `init` in the generated `src/index.ts` or `kernel.use()`
+  rejects the plugin outright with
+  `Failed to load plugin: slack-integration - Plugin init function is required`.
+</Callout>
+
 ### Configuration Management
 ```typescript
-// Define plugin configuration schema
-export const configSchema = z.object({
-  apiKey: z.string().describe('Slack API Key'),
-  channel: z.string().default('#general'),
-  enabled: z.boolean().default(true),
-});
-
-// Access in plugin code
-const config = context.config.get('slack', configSchema);
-// Kernel validates against schema, throws clear error if invalid
+// A plugin object may carry a Zod `configSchema` describing its settings.
+// NOTE: the kernel RECORDS the schema but does not enforce it yet — `use()`
+// takes no config argument, so the loader has nothing to parse and logs
+// "config validation postponed" instead of running the schema. Treat
+// `configSchema` as a declaration of shape, and validate values you actually
+// depend on yourself.
+export const slackPlugin: Plugin = {
+  name: 'slack-integration',
+  version: '0.1.0',
+  configSchema: z.object({
+    apiKey: z.string().describe('Slack API Key'),
+    channel: z.string().default('#general'),
+    enabled: z.boolean().default(true),
+  }),
+  async init(ctx) {
+    // Runtime-resolved values come from the `settings` service, not from a
+    // `config` object on the context — there is no `ctx.config`.
+    const settings = ctx.getService<any>('settings');
+    const { value: channel } = await settings.get('slack', 'channel', {});
+  },
+};
 ```
 
 ### Internationalization
@@ -417,9 +441,12 @@ const config = context.config.get('slack', configSchema);
   "slack.error.invalid_channel": "Kanal {{channel}} nicht gefunden"
 }
 
-// Use in code
-const message = context.i18n.t('slack.button.send');
-// Kernel automatically uses user's locale
+// Use in code — the i18n service is resolved from the registry, and the
+// locale is an explicit argument (take it from the ExecutionContext).
+const i18n = ctx.getService<II18nService>('i18n');
+const message = i18n.t('slack.button.send', context.locale);
+// t(key, locale, params?) interpolates {{params}} and falls back to the
+// configured fallback locale, returning the key itself when nothing matches.
 ```
 
 ## Best Practices
@@ -429,7 +456,7 @@ const message = context.i18n.t('slack.button.send');
 
 **Why:** Keeps core stable. Plugins evolve independently. Customers pay for only what they use.
 
-**Example:** Don't build email sending into Kernel core. Create `@objectstack/email` plugin. Customers who don't send emails don't load the plugin (smaller memory footprint, faster boot).
+**Example:** Don't build email sending into Kernel core. Ship it as the `@objectstack/plugin-email` package. Customers who don't send emails don't load the plugin (smaller memory footprint, faster boot).
 
 ### 2. Configuration Over Code
 **Principle:** Behavior should be configurable without code changes.
@@ -443,7 +470,7 @@ const message = context.i18n.t('slack.button.send');
 
 **Why:** Easier to add multi-tenancy later = rebuild entire system.
 
-**Example:** Don't store config in global variables. Use `context.config.get()` which automatically scopes to current tenant.
+**Example:** Don't store config in global variables. Read through the `settings` service — `settings.get(namespace, key, { tenantId, userId })` walks the global → tenant → user cascade for you.
 
 ### 4. Version Everything
 **Principle:** All artifacts (plugins, schemas, configs) have semantic versions.
@@ -457,7 +484,14 @@ const message = context.i18n.t('slack.button.send');
 
 **Why:** Catch errors before customers see them.
 
-**Example:** Plugin requires `apiKey` config. If missing, Kernel throws error during boot with clear message: "Plugin @vendor/slack requires config key 'slack.apiKey' (not found in environment, tenant, or default config)".
+**Example:** Wiring, not config, is what the kernel currently enforces at boot. A plugin that declares a dependency the kernel never received fails `bootstrap()` outright — `[Kernel] Dependency 'com.objectstack.engine.objectql' not found for plugin 'com.objectstack.audit'` — and a dependency cycle throws `[Kernel] Circular dependency detected: <plugin>`. Boot stops there instead of a request failing later.
+
+<Callout type="warn">
+  Plugin `configSchema` is **not** part of this fail-fast path yet. The loader
+  stores the schema and postpones the check, so a missing or malformed value in
+  a plugin's config will not stop boot today. Validate config you depend on in
+  your own `init`.
+</Callout>
 
 ## Comparison: Kernel vs Alternatives
 

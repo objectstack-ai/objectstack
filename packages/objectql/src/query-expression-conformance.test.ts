@@ -350,6 +350,77 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
     });
 
     // ─────────────────────────────────────────────────────────────
+    // SORT — dotted paths (#4256)
+    // ─────────────────────────────────────────────────────────────
+
+    it('the foreign-key column itself still sorts — the gate is about the dot, not the relationship', async () => {
+        await expect(protocol.findData({ object: 'showcase_task', query: { sort: 'project_id' } }))
+            .resolves.toMatchObject({ records: expect.any(Array) });
+        await expect(protocol.findData({ object: 'showcase_task', query: { sort: '-parent_id' } }))
+            .resolves.toMatchObject({ records: expect.any(Array) });
+    });
+
+    it.each([
+        ['bare string', { sort: 'project_id.name' }],
+        ['descending', { sort: '-project_id.name' }],
+        ['second of two', { sort: 'title,project_id.name' }],
+        ['string array', { orderBy: ['project_id.name'] }],
+        ['SortNode array', { orderBy: [{ field: 'project_id.name', order: 'desc' }] }],
+        ['direction map', { orderBy: { 'project_id.name': 'desc' } }],
+        ['OData spelling', { $orderby: 'project_id.name' }],
+    ])('a dotted path into a related object is a 400, not insertion order — %s', async (_label, query) => {
+        // The head segment (`project_id`) is a real field, which is exactly
+        // what carried this shape past the #4226 gate while no driver could
+        // then order by it: SQL renders `"project_id"."name"` against a table
+        // that was never joined and the #3821 backstop retries WITHOUT the
+        // sort; Mongo and the memory driver resolve the path against the row,
+        // where the foreign key is a scalar id. The last sort response that
+        // looked applied and was not.
+        await expect(protocol.findData({ object: 'showcase_task', query }))
+            .rejects.toMatchObject({
+                status: 400,
+                code: 'INVALID_SORT',
+                field: 'project_id.name',
+                object: 'showcase_task',
+            });
+    });
+
+    it('the dotted rejection names the relationship it tried to cross and prescribes the fix', async () => {
+        await expect(protocol.findData({ object: 'showcase_task', query: { sort: 'project_id.name' } }))
+            .rejects.toThrow(/follows the relationship 'project_id'[\s\S]*formula or rollup/);
+    });
+
+    it('a dotted path under a non-reference head is refused on the same axis, minus the relationship claim', async () => {
+        // `title.length` reaches into a VALUE, not a related record. Telling
+        // this caller they "followed a relationship" would be false — `title`
+        // holds text — so the message states the contract instead.
+        await expect(protocol.findData({ object: 'showcase_task', query: { sort: 'title.length' } }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_SORT', field: 'title.length' });
+        await expect(protocol.findData({ object: 'showcase_task', query: { sort: 'title.length' } }))
+            .rejects.toThrow(/whole columns/);
+    });
+
+    it('an unknown head keeps the typo answer — dotted precedence mirrors the expand gate', async () => {
+        // `?sort=no_such.title` was a 400 before this gate existed (judged on
+        // its head segment) and must keep reading as a typo, not as a
+        // relationship crossing; a list carrying both mistakes reports the
+        // typo first, like expand's `unknown` > `not-a-reference`.
+        await expect(protocol.findData({ object: 'showcase_task', query: { sort: 'no_such.title' } }))
+            .rejects.toThrow(/not a field on object/);
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { sort: 'no_such.title,project_id.name' },
+        })).rejects.toMatchObject({ code: 'INVALID_SORT', field: 'no_such.title' });
+    });
+
+    it('the "latest N by a related column" footgun is closed too', async () => {
+        // `?sort=-project_id.created_at&top=2` used to answer 200 with an
+        // arbitrary 2 of 5 — indistinguishable from the real latest-2.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { sort: '-project_id.created_at', top: 2 },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_SORT', field: 'project_id.created_at' });
+    });
+
+    // ─────────────────────────────────────────────────────────────
     // SELECT — control group, then rejected
     // ─────────────────────────────────────────────────────────────
 

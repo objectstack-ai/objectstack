@@ -2,7 +2,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { createMemoryMetadata } from '@objectstack/core';
+import { createMemoryMetadata, CORE_FALLBACK_FACTORIES } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
 
 describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => {
@@ -217,6 +217,31 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     expect(discovery.services.data.route).toBe('/api/v1/data');
     expect(discovery.services.data.provider).toBe('objectql');
     expect(discovery.services.data.message).toBeUndefined();
+  });
+
+  // ── The class-wide gate (#3898): the fake INVENTORY, not spot checks ──────
+  // Same gate as the dispatcher's: every in-memory fallback the kernel can
+  // auto-register (CORE_FALLBACK_FACTORIES — the complete fake inventory now
+  // that plugin-dev's stub table is retired, ADR-0115, and the `_fallback`
+  // marker was eliminated rather than recognized, #4058 step 1) goes through
+  // THIS builder too and must never come out `available`. Table-driven so a
+  // new fallback is gated the day it is added; cache/queue/job had no
+  // per-slot pin here either.
+  it('reports every CORE_FALLBACK_FACTORIES product as degraded, never available (#3898)', async () => {
+    expect(Object.keys(CORE_FALLBACK_FACTORIES).length).toBeGreaterThan(0);
+
+    for (const [slot, factory] of Object.entries(CORE_FALLBACK_FACTORIES)) {
+      const mockServices = new Map<string, any>();
+      mockServices.set(slot, factory());
+
+      protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+      const reported = (await protocol.getDiscovery()).services[slot];
+
+      expect(reported, `services.${slot}`).toBeDefined();
+      expect(reported.enabled, `services.${slot}.enabled`).toBe(true);
+      expect(reported.status, `services.${slot}.status`).toBe('degraded');
+      expect(reported.message, `services.${slot}.message`).toBeTruthy();
+    }
   });
 
   // #3891 — the degraded ObjectQL fallback is retired. Analytics is an
