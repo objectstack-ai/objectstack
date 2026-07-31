@@ -17,7 +17,25 @@ import {
   intersectFieldMasks,
 } from './explain-engine.js';
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
-import type { II18nService } from '@objectstack/spec/contracts';
+import type { IDataEngine, II18nService, IMetadataService } from '@objectstack/spec/contracts';
+
+/**
+ * The `objectql` slot as this plugin's start-up path checks it: the data
+ * contract plus the middleware seam it installs.
+ *
+ * [#4251] `registerMiddleware` is ObjectQL's own, not `IDataEngine`'s, and the
+ * probe right below is what the plugin does when it is absent. Declared narrow
+ * and named rather than erased — see the standing record on `getObjectQL` in
+ * `@objectstack/runtime` for why ObjectQL's wider contract stays unwritten.
+ */
+type SecurityEngineSurface = IDataEngine & {
+  registerMiddleware?(
+    fn: (opCtx: any, next: () => Promise<void>) => Promise<void>,
+    options?: { object?: string },
+  ): void;
+  /** Schema lookup the engine-owned write guard reads `managedBy` off of. */
+  getSchema?(objectName: string): any;
+};
 import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
 import { bootstrapDeclaredPermissions, upsertPackagePermissionSet, readDeclared } from './bootstrap-declared-permissions.js';
 import { applyManagedWriteDenies } from './managed-object-write-denies.js';
@@ -472,12 +490,12 @@ export class SecurityPlugin implements Plugin {
     ctx.logger.info('Starting Security Plugin...');
 
     // Get required services
-    let ql: any;
-    let metadata: any;
+    let ql: SecurityEngineSurface | undefined;
+    let metadata: IMetadataService | undefined;
 
     try {
-      ql = ctx.getService('objectql');
-      metadata = ctx.getService('metadata');
+      ql = ctx.getService<SecurityEngineSurface>('objectql');
+      metadata = ctx.getService<IMetadataService>('metadata');
     } catch (e) {
       ctx.logger.warn('ObjectQL or metadata service not available, security middleware not registered');
       return;

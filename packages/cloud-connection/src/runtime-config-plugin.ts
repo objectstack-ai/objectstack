@@ -41,6 +41,31 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveCloudUrl } from './cloud-url.js';
+import type { IHttpServer } from '@objectstack/spec/contracts';
+
+/**
+ * The `http-server` slot plus the one member this plugin needs from it.
+ *
+ * [#4251] `IHttpServer` is a real contract (`@objectstack/spec/contracts`) and
+ * this slot is bound to it — but `getRawApp()` is NOT on it, deliberately: the
+ * contract is framework-agnostic and the raw app is the framework's own handle
+ * (Hono here). So the escape is one named member returning `any`, scoped to the
+ * one thing that genuinely cannot be typed framework-agnostically, instead of
+ * the whole lookup collapsing to `any`. The probe below is what runs when a
+ * host serves the slot with an adapter that exposes no raw app.
+ */
+type RawAppHost = IHttpServer & { getRawApp?(): any };
+
+/**
+ * The `env-registry` slot's hostname resolvers — see the call site for both
+ * spellings. Async by contract: the consumer awaits the result, and declaring
+ * it `unknown` would only have moved the erasure one line down.
+ */
+interface EnvRegistrySurface {
+    resolveByHostname?(hostname: string): Promise<any>;
+    resolveHostname?(hostname: string): Promise<any>;
+}
+
 
 /**
  * Feature-flag overrides a host's distribution policy can derive per request.
@@ -171,9 +196,9 @@ export class RuntimeConfigPlugin implements Plugin {
 
     start = async (ctx: PluginContext): Promise<void> => {
         ctx.hook('kernel:ready', async () => {
-            let httpServer: any;
+            let httpServer: RawAppHost | undefined;
             try {
-                httpServer = ctx.getService('http-server');
+                httpServer = ctx.getService<RawAppHost>('http-server');
             } catch {
                 ctx.logger?.warn?.('[RuntimeConfigPlugin] http-server not available — runtime/config not mounted');
                 return;
@@ -194,8 +219,14 @@ export class RuntimeConfigPlugin implements Plugin {
             // kernel router uses (env-registry). Falls back to the static
             // payload when the host doesn't map to any env (e.g. a marketing
             // root or a CLI-served single-env runtime).
-            let envRegistry: any = null;
-            try { envRegistry = ctx.getService('env-registry'); } catch { /* not mounted (file/CLI mode) */ }
+            // [#4251] `env-registry` has no written contract, so the two
+            // hostname resolvers this reads are declared here rather than
+            // erased. Both spellings are probed below because the slot has two
+            // providers that disagree — declaring them is what makes that
+            // disagreement visible instead of a pair of `?.` guesses.
+            let envRegistry: EnvRegistrySurface | null = null;
+            try { envRegistry = ctx.getService<EnvRegistrySurface>('env-registry') ?? null; }
+            catch { /* not mounted (file/CLI mode) */ }
 
             // Merge the distribution's feature overrides over the static base.
             // Arbitrary keys returned by the host pass through verbatim — the

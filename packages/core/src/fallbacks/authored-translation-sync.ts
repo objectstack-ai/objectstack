@@ -44,6 +44,7 @@
  */
 
 import { LEGACY_OBJECT_FIRST_KEYS } from '@objectstack/spec/system';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 
 import { deepMerge } from './memory-i18n.js';
 
@@ -62,6 +63,22 @@ interface MinimalCtx {
  * no-op, so the layer is computed once per change instead of N times.
  */
 const OWNER_PROP = '__authoredTranslationSyncOwner';
+
+/**
+ * The `i18n` slot as this wirer uses it: the authored-layer replace seam, plus
+ * the ownership marker stamped on the instance.
+ *
+ * [#4251] `replaceAuthoredTranslations` is NOT on `II18nService` — it is the
+ * authored-overlay seam service-i18n grew for this sync, and every call site
+ * probes for it. `OWNER_PROP` is this module's own marker, stamped on whatever
+ * object occupies the slot so two wirers cannot both drive one instance.
+ * Declared here rather than erased to `any` so both facts stay legible: what
+ * the slot must supply, and what this module writes onto it.
+ */
+interface AuthoredTranslationSink {
+  replaceAuthoredTranslations(layer: Record<string, unknown>): void;
+  [OWNER_PROP]?: symbol;
+}
 
 // Deliberately narrow (language + optional script/region only): item names
 // are snake_case, so a permissive multi-segment pattern would classify names
@@ -157,8 +174,8 @@ export function wireAuthoredTranslationSync(ctx: MinimalCtx): void {
   if (typeof ctx.hook !== 'function') return;
 
   const token = Symbol('authored-translation-sync');
-  const resolveOwnedI18n = (): any | null => {
-    let i18n: any;
+  const resolveOwnedI18n = (): AuthoredTranslationSink | null => {
+    let i18n: AuthoredTranslationSink | undefined;
     try { i18n = ctx.getService('i18n'); } catch { return null; }
     if (!i18n || typeof i18n.replaceAuthoredTranslations !== 'function') return null;
     const current = i18n[OWNER_PROP];
@@ -176,7 +193,7 @@ export function wireAuthoredTranslationSync(ctx: MinimalCtx): void {
     const run = chain.then(async () => {
       const i18n = resolveOwnedI18n();
       if (!i18n) return;
-      let engine: any;
+      let engine: IDataEngine | undefined;
       try { engine = ctx.getService('objectql'); } catch { return; }
       if (!engine || typeof engine.find !== 'function') return;
       const layer = await readAuthoredTranslationLayer(engine, ctx.logger);
