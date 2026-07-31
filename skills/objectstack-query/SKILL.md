@@ -278,10 +278,11 @@ Sort with `orderBy` — an array of sort nodes:
 
 ### Keyset Pagination (Performant)
 
-> ⚠️ **`cursor` is schema-reserved — NOT executed by the engine yet.** The
-> `cursor` property validates against `QuerySchema`, but no engine or driver
-> code reads it — a query carrying `cursor` silently returns **page 1
-> forever**. Do keyset pagination manually with `where` + `orderBy` + `limit`:
+> ⛔ **`query.cursor` was REMOVED in `@objectstack/spec` 18 (#4286).** No
+> engine or driver ever read it — a query carrying `cursor` silently returned
+> **page 1 forever**. The key is tombstoned (a query carrying it fails to
+> parse with the prescription) and `QueryBuilder.cursor()` is gone. Do keyset
+> pagination with `where` + `orderBy` + `limit`:
 
 ```typescript
 // First page

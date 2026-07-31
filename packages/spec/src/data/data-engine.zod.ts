@@ -2,7 +2,8 @@
 
 import { z } from 'zod';
 import { FilterConditionSchema } from './filter.zod';
-import { SortNodeSchema, QuerySchema, FullTextSearchSchema, FieldNodeSchema, AggregationNodeSchema } from './query.zod';
+import { SortNodeSchema, QuerySchema, FullTextSearchSchema, FieldNodeSchema, AggregationNodeSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED } from './query.zod';
+import { retiredKey } from '../shared/retired-key';
 import { ExecutionContextSchema } from '../kernel/execution-context.zod';
 
 /**
@@ -111,8 +112,8 @@ export const EngineQueryOptionsSchema = lazySchema(() => BaseEngineOptionsSchema
   /** Alias for limit (OData compatibility) */
   top: z.number().optional(),
 
-  /** Cursor for keyset pagination */
-  cursor: z.record(z.string(), z.unknown()).optional(),
+  /** Keyset cursor — REMOVED (#4286); same tombstone as `QuerySchema.cursor`. */
+  cursor: retiredKey(QUERY_CURSOR_REMOVED),
 
   /** Full-text search configuration */
   search: FullTextSearchSchema.optional(),
@@ -127,8 +128,8 @@ export const EngineQueryOptionsSchema = lazySchema(() => BaseEngineOptionsSchema
    */
   expand: z.lazy(() => z.record(z.string(), QuerySchema)).optional(),
 
-  /** SELECT DISTINCT flag */
-  distinct: z.boolean().optional(),
+  /** SELECT DISTINCT — REMOVED (#4286); same tombstone as `QuerySchema.distinct`. */
+  distinct: retiredKey(QUERY_DISTINCT_REMOVED),
 }).describe('QueryAST-aligned query options for IDataEngine.find() operations'));
 
 // --------------------------------------------------------------------------

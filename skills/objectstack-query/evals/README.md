@@ -15,7 +15,7 @@ subset the engine actually executes.
    not a `joins` array (removed in #4286).
 3. **Pagination pattern** — "Implement infinite scroll for a feed." Expect
    manual keyset pagination (`where` on the sort key + `orderBy` + `limit`);
-   fail if the answer uses the schema-reserved `cursor` property.
+   fail if the answer uses the removed `cursor` property (#4286).
 4. **Aggregation correctness** — "Count deals by region and show total
    revenue." Expect `groupBy` + `count`/`sum` with aliases; on SQL targets
    the answer must stay within `count`/`sum`/`avg`/`min`/`max`.

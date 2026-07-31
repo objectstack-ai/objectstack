@@ -237,23 +237,24 @@ sort. Internal callers reaching `engine.find()` directly are unaffected.
 }
 ```
 
-### Cursor-Based Pagination (Keyset) — not implemented
+### Keyset Pagination — a `where` predicate on the sort key
+
+`query.cursor` was **removed in `@objectstack/spec` 18** (#4286): nothing on the server
+ever read it, so a cursor query silently returned the same first page every time. The
+key is tombstoned and `QueryBuilder.cursor()` was removed with it. Express the keyset
+directly — seek past the last row instead of offsetting:
 
 ```typescript
+// Next page after `last` — every driver executes this, with canonicalised comparands
 {
-  limit: 20,
-  cursor: { id: 100 }  // Opaque keyset cursor (e.g. last seen sort-key values)
+  where: { created_at: { $gt: last.created_at } },
+  orderBy: [{ field: 'created_at', order: 'asc' }],
+  limit: 20
 }
 ```
 
-<Callout type="warn">
-`cursor` is declared on `QuerySchema` as an opaque record (`Record<string, unknown>`)
-and `QueryBuilder.cursor()` will set it on a query, but **nothing on the server reads
-it** — the query engine, the REST query dispatcher, and the SQL / in-memory / MongoDB
-drivers all ignore it, so a cursor query silently returns the same first page every
-time. Use `limit` + `offset` until keyset pagination is wired up. (There is no
-`keyset`/`after` query property either.)
-</Callout>
+(A first-class cursor, if ever designed, will be a response-minted opaque token — the
+pattern the metadata-revision / flow-run / notification list endpoints already use.)
 
 ---
 
@@ -506,22 +507,24 @@ report/dashboard metadata.
 
 ## Distinct & Group By
 
-### Distinct Records
+### Distinct Records — removed flag, three live spellings
+
+The top-level `query.distinct` flag was **removed in `@objectstack/spec` 18** (#4286):
+no driver's `find()` ever applied it, and its only observable effect was mis-wired —
+it silently suppressed the REST list count while still returning duplicate rows (the
+count is truthful again). The key is tombstoned and `QueryBuilder.distinct()` was
+removed with it. What actually deduplicates:
 
 ```typescript
-{
-  object: 'task',
-  fields: ['category'],
-  distinct: true
-}
+// Unique combinations → groupBy
+{ object: 'task', groupBy: ['category'] }
+
+// Deduplicated count → count_distinct
+{ object: 'task', aggregations: [{ function: 'count_distinct', field: 'category', alias: 'categories' }] }
 ```
 
-<Callout type="warn">
-The top-level `distinct: true` flag is defined in `QuerySchema` but isn't applied by any
-driver's `find()` (SQL, in-memory, and MongoDB all ignore it). A separate
-`driver.distinct(object, field)` method exists on the SQL and in-memory drivers, but it isn't
-called by `ObjectQL.find()`/`.aggregate()`, so it isn't reachable through a normal query.
-</Callout>
+A separate `driver.distinct(object, field)` method also exists on the SQL and
+in-memory drivers (driver-level; not called by `ObjectQL.find()`/`.aggregate()`).
 
 ### Group By with Having
 

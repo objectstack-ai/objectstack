@@ -68,15 +68,9 @@ describe('QuerySchema - Basic', () => {
     expect(() => QuerySchema.parse(query)).not.toThrow();
   });
 
-  it('should accept query with distinct', () => {
-    const query: QueryAST = {
-      object: 'account',
-      fields: ['status'],
-      distinct: true,
-    };
-
-    expect(() => QuerySchema.parse(query)).not.toThrow();
-  });
+  // 'query with distinct' moved to the retirement pins (#4286): the tombstone
+  // refuses the key; unique values go through groupBy / count_distinct / the
+  // drivers' distinct(object, field) door.
 });
 
 /**
@@ -511,6 +505,42 @@ describe('QueryAST.windowFunctions — REMOVED (#4286)', () => {
   });
 });
 
+describe('QueryAST.cursor — REMOVED (#4286)', () => {
+  it('rejects a caller-built cursor with the prescription pointing at the manual keyset', () => {
+    expect(() => QuerySchema.parse({ object: 'customer', cursor: { id: 'rec_9' } }))
+      .toThrow(/query\.cursor.*removed.*where.*sort key/s);
+    expect(() => QuerySchema.parse({ object: 'customer', cursor: {} }))
+      .toThrow(/query\.cursor.*removed/s);
+  });
+
+  it('still accepts absence, and the manual keyset parses', () => {
+    expect(() => QuerySchema.parse({ object: 'customer', cursor: undefined })).not.toThrow();
+    expect(() => QuerySchema.parse({
+      object: 'customer',
+      where: { created_at: { $gt: '2026-01-01T00:00:00.000Z' } },
+      orderBy: [{ field: 'created_at', order: 'asc' }],
+      limit: 10,
+    })).not.toThrow();
+  });
+});
+
+describe('QueryAST.distinct — REMOVED (#4286)', () => {
+  it('rejects the flag with the prescription naming the live spellings — either value', () => {
+    expect(() => QuerySchema.parse({ object: 'account', distinct: true }))
+      .toThrow(/query\.distinct.*removed.*count_distinct/s);
+    // `distinct: false` was as inert as true — the tombstone refuses any value.
+    expect(() => QuerySchema.parse({ object: 'account', distinct: false }))
+      .toThrow(/query\.distinct.*removed/s);
+  });
+
+  it('per-aggregation `distinct` is a DIFFERENT, live member and still parses', () => {
+    expect(() => QuerySchema.parse({
+      object: 'order',
+      aggregations: [{ function: 'count', field: 'customer_id', distinct: true, alias: 'unique_customers' }],
+    })).not.toThrow();
+  });
+});
+
 describe('QuerySchema - Complex Queries', () => {
   it('should accept complex query with aggregations, HAVING, ordering and paging', () => {
     const query: QueryAST = {
@@ -536,7 +566,6 @@ describe('QuerySchema - Complex Queries', () => {
     const query: QueryAST = {
       object: 'order',
       fields: ['id', 'customer_id', 'amount'],
-      distinct: true,
       where: { status: 'completed' },
       expand: { customer_id: { object: 'customer', fields: ['name'] } },
       aggregations: [
@@ -706,23 +735,6 @@ describe('QuerySchema - Type Coercion Edge Cases', () => {
     });
   });
 
-  it('should handle boolean flags', () => {
-    const query: QueryAST = {
-      object: 'account',
-      fields: ['name'],
-      distinct: true,
-    };
-
-    expect(() => QuerySchema.parse(query)).not.toThrow();
-
-    const query2: QueryAST = {
-      object: 'account',
-      fields: ['name'],
-      distinct: false,
-    };
-
-    expect(() => QuerySchema.parse(query2)).not.toThrow();
-  });
 
   it('should handle default sort order', () => {
     const query: QueryAST = {

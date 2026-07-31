@@ -3827,7 +3827,11 @@ export class ObjectStackProtocolImplementation implements
         let total = records.length;
         let hasMore = false;
         if (pageLimit !== undefined) {
-            const countable = options.search == null && options.distinct == null;
+            // `distinct` used to suppress the count here too — #4286 finding 2:
+            // the flag's ONLY observable effect platform-wide, on a capability
+            // that never deduplicated a row. Removed with `query.distinct`
+            // (tombstoned in spec 18); `total`/`hasMore` are truthful again.
+            const countable = options.search == null;
             if (countable) {
                 try {
                     total = await this.engine.count(request.object, {
