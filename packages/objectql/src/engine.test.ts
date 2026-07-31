@@ -202,7 +202,7 @@ describe('ObjectQL Engine', () => {
             // Mock Schema: Object uses default datasource
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', datasource: 'default', fields: {} });
 
-            await engine.find('task', { filters: [] });
+            await engine.find('task', {});
             
             expect(mockDriver.find).toHaveBeenCalled();
             expect(mockDriver2.find).not.toHaveBeenCalled();
@@ -212,7 +212,7 @@ describe('ObjectQL Engine', () => {
             // Mock Schema: Object uses 'mongo' datasource
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'log', datasource: 'mongo', fields: {} });
 
-            await engine.find('log', { filters: [] });
+            await engine.find('log', {});
             
             expect(mockDriver.find).not.toHaveBeenCalled();
             expect(mockDriver2.find).toHaveBeenCalled();
@@ -615,12 +615,12 @@ describe('ObjectQL Engine', () => {
         const lastFindOpts = () => (mockDriver.find as any).mock.calls.at(-1)?.[2];
 
         it('find: context from the trailing options arg reaches the driver', async () => {
-            await engine.find('task', { filters: [] }, { context: { tenantId: 't-opts' } as any });
+            await engine.find('task', {}, { context: { tenantId: 't-opts' } as any });
             expect(lastFindOpts()).toMatchObject({ tenantId: 't-opts' });
         });
 
         it('find: context inside the query still works (legacy form)', async () => {
-            await engine.find('task', { filters: [], context: { tenantId: 't-query' } as any });
+            await engine.find('task', { context: { tenantId: 't-query' } as any });
             expect(lastFindOpts()).toMatchObject({ tenantId: 't-query' });
         });
 
@@ -635,7 +635,7 @@ describe('ObjectQL Engine', () => {
 
         it('findOne accepts context via the trailing options arg', async () => {
             (mockDriver.findOne as any).mockResolvedValue({ id: '1' });
-            await engine.findOne('task', { filters: [] }, { context: { tenantId: 't-fo' } as any });
+            await engine.findOne('task', {}, { context: { tenantId: 't-fo' } as any });
             expect((mockDriver.findOne as any).mock.calls.at(-1)?.[2]).toMatchObject({ tenantId: 't-fo' });
         });
 
@@ -653,12 +653,12 @@ describe('ObjectQL Engine', () => {
         // honoring of the option lives in @objectstack/driver-sql, and the audit
         // hook + readonly whitelist in plugin.integration.test.ts.
         it('threads preserveAudit from the context into the driver options (#3493)', async () => {
-            await engine.find('task', { filters: [] }, { context: { preserveAudit: true } as any });
+            await engine.find('task', {}, { context: { preserveAudit: true } as any });
             expect(lastFindOpts()).toMatchObject({ preserveAudit: true });
         });
 
         it('does NOT set preserveAudit when the context omits it (opt-in)', async () => {
-            await engine.find('task', { filters: [] }, { context: { tenantId: 't' } as any });
+            await engine.find('task', {}, { context: { tenantId: 't' } as any });
             expect(lastFindOpts()?.preserveAudit).toBeUndefined();
         });
     });
@@ -681,27 +681,27 @@ describe('ObjectQL Engine', () => {
 
         it('threads accessible_org_ids as tenantIds under the group posture', async () => {
             (engine as any).setTenancyPostureProvider(() => 'group');
-            await engine.find('task', { filters: [] }, { context: groupCtx });
+            await engine.find('task', {}, { context: groupCtx });
             expect(lastFindOpts()).toMatchObject({ tenantId: 'org_a', tenantIds: ['org_a', 'org_b'] });
         });
 
         it('no provider (no enforcement layer) → equality only, never widened', async () => {
-            await engine.find('task', { filters: [] }, { context: groupCtx });
+            await engine.find('task', {}, { context: groupCtx });
             expect(lastFindOpts()?.tenantIds).toBeUndefined();
             expect(lastFindOpts()).toMatchObject({ tenantId: 'org_a' });
         });
 
         it('isolated posture → equality only (the union is a group-only widening)', async () => {
             (engine as any).setTenancyPostureProvider(() => 'isolated');
-            await engine.find('task', { filters: [] }, { context: groupCtx });
+            await engine.find('task', {}, { context: groupCtx });
             expect(lastFindOpts()?.tenantIds).toBeUndefined();
         });
 
         it('group with an absent/empty accessible set → equality only (fail toward isolation)', async () => {
             (engine as any).setTenancyPostureProvider(() => 'group');
-            await engine.find('task', { filters: [] }, { context: { tenantId: 'org_a', accessible_org_ids: [] } as any });
+            await engine.find('task', {}, { context: { tenantId: 'org_a', accessible_org_ids: [] } as any });
             expect(lastFindOpts()?.tenantIds).toBeUndefined();
-            await engine.find('task', { filters: [] }, { context: { tenantId: 'org_a' } as any });
+            await engine.find('task', {}, { context: { tenantId: 'org_a' } as any });
             expect(lastFindOpts()?.tenantIds).toBeUndefined();
         });
 
@@ -723,13 +723,13 @@ describe('ObjectQL Engine', () => {
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({
                 name: 'sys_license', tenancy: { enabled: false }, fields: {},
             } as any);
-            await engine.find('sys_license', { filters: [] }, { context: { tenantId: 'org_admin' } as any });
+            await engine.find('sys_license', {}, { context: { tenantId: 'org_admin' } as any });
             expect(lastFindOpts()?.tenantId).toBeUndefined();
         });
 
         it('still stamps tenantId for objects without a tenancy declaration', async () => {
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', fields: {} } as any);
-            await engine.find('task', { filters: [] }, { context: { tenantId: 'org_a' } as any });
+            await engine.find('task', {}, { context: { tenantId: 'org_a' } as any });
             expect(lastFindOpts()).toMatchObject({ tenantId: 'org_a' });
         });
 
@@ -737,7 +737,7 @@ describe('ObjectQL Engine', () => {
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({
                 name: 'task', tenancy: { enabled: true }, fields: {},
             } as any);
-            await engine.find('task', { filters: [] }, { context: { tenantId: 'org_a' } as any });
+            await engine.find('task', {}, { context: { tenantId: 'org_a' } as any });
             expect(lastFindOpts()).toMatchObject({ tenantId: 'org_a' });
         });
 
@@ -745,7 +745,7 @@ describe('ObjectQL Engine', () => {
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({
                 name: 'sys_license', tenancy: { enabled: false }, fields: {},
             } as any);
-            await engine.find('sys_license', { filters: [] }, {
+            await engine.find('sys_license', {}, {
                 context: { tenantId: 'org_admin', timezone: 'Asia/Shanghai' } as any,
             });
             expect(lastFindOpts()).toMatchObject({ timezone: 'Asia/Shanghai' });
@@ -761,7 +761,7 @@ describe('ObjectQL Engine', () => {
             // tenantId — deliberate cross-checks stay possible.
             await engine.find(
                 'sys_license',
-                { filters: [], tenantId: 'org_explicit' } as any,
+                { tenantId: 'org_explicit' } as any,
                 { context: { timezone: 'UTC' } as any },
             );
             expect(lastFindOpts()).toMatchObject({ tenantId: 'org_explicit' });

@@ -134,7 +134,9 @@ describe('OIDC authorization-code flow (oauth-provider 1.7)', () => {
 
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     const rows = await ql.find('sys_oauth_access_token', {
-      filters: [['client_id', '=', CLIENT_ID]],
+      // `where`, not the wire spelling `filters` — that key was silently
+      // dropped (#4371), so this assertion used to scan the whole table.
+      where: { client_id: CLIENT_ID },
       context: { isSystem: true },
     });
     const list = Array.isArray(rows) ? rows : (rows?.records ?? []);

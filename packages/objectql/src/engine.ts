@@ -11,6 +11,8 @@ import {
   EngineCountOptions,
   RPC_QUERY_ALIAS_SLOTS,
   foldQueryAliasSlots,
+  QUERY_CURSOR_REMOVED,
+  QUERY_DISTINCT_REMOVED,
   type QueryAliasSlot,
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
@@ -153,6 +155,112 @@ const WIRE_ONLY_CANONICAL_SHAPES: Record<string, string> = {
   offset: 'a number of rows to skip',
   expand: 'a record of { relationName: QueryAST }',
 };
+
+/**
+ * [#4371 option 2] The driver-option keys the engine forwards verbatim: on
+ * `find`/`findOne`/`update`/`delete` the option bag IS the base of the driver
+ * options (`buildDriverOptions(object, ctx, bag)`), which is how a caller's
+ * explicit `tenantId` / `bypassTenantAudit` reaches the driver (pinned in
+ * engine.test.ts). `count`/`aggregate` never forward the bag, so these keys
+ * are deliberately NOT legal there — accepting them would be the exact
+ * silently-ignored contract this gate exists to close.
+ */
+const ENGINE_DRIVER_PASSTHROUGH_KEYS = [
+  'transaction', 'tenantId', 'tenantIds', 'timezone', 'bypassTenantAudit', 'preserveAudit',
+] as const;
+
+/**
+ * [#4371 option 2] Per-method legal option keys. An option bag key outside
+ * the method's set is REJECTED at the entry point: the engine executes none
+ * of them, so the call would otherwise succeed with the option silently
+ * ignored — the `declared ≠ enforced` shape (PD #10) one layer below the
+ * wire-alias rejection above.
+ *
+ * Sources, in order: the method's `Engine*OptionsSchema` declared keys (minus
+ * the `retiredKey` tombstones `cursor`/`distinct`, which get their tombstone
+ * quoted instead of a generic rejection — the schema keeps them ONLY to carry
+ * that message, and this runtime path never parses); `searchFields` (read by
+ * `find` at the `$search` expansion, sent by the protocol layer);
+ * `onFieldsDropped` (`WriteObservabilityOptions` — contract-declared,
+ * unrepresentable in the serializable Zod schema); and the driver
+ * pass-through keys above. The alias spellings (`filter`/`top`) are folded
+ * and deleted BEFORE this check runs, so they never reach it.
+ *
+ * A drift pin in engine-unknown-option.test.ts asserts each set equals its
+ * schema's shape (minus tombstones, plus the documented extras) so a key
+ * added to the spec cannot be silently rejected here.
+ */
+const ENGINE_FIND_OPTION_KEYS: ReadonlySet<string> = new Set([
+  'context', 'where', 'fields', 'orderBy', 'limit', 'offset',
+  'search', 'searchFields', 'expand',
+  ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
+]);
+const ENGINE_UPDATE_OPTION_KEYS: ReadonlySet<string> = new Set([
+  'context', 'where', 'upsert', 'multi', 'returning', 'onFieldsDropped',
+  ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
+]);
+const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
+  'context', 'where', 'multi',
+  ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
+]);
+const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where']);
+const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
+  'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
+]);
+
+/** Tombstoned option keys: rejected with the spec's own removal notice. */
+const ENGINE_RETIRED_OPTION_MESSAGES: Record<string, string> = {
+  cursor: QUERY_CURSOR_REMOVED,
+  distinct: QUERY_DISTINCT_REMOVED,
+};
+
+/**
+ * The per-method legal key sets, exported for the drift pin ONLY
+ * (engine-unknown-option.test.ts asserts each set against its schema's shape,
+ * so a key added to the spec cannot be silently rejected here). Not a public
+ * API surface — consumers pass options, they do not read this table.
+ */
+export const ENGINE_OPTION_KEY_SETS: Readonly<Record<string, ReadonlySet<string>>> = {
+  find: ENGINE_FIND_OPTION_KEYS,
+  findOne: ENGINE_FIND_OPTION_KEYS,
+  update: ENGINE_UPDATE_OPTION_KEYS,
+  delete: ENGINE_DELETE_OPTION_KEYS,
+  count: ENGINE_COUNT_OPTION_KEYS,
+  aggregate: ENGINE_AGGREGATE_OPTION_KEYS,
+};
+
+/**
+ * Reject option-bag keys the engine does not execute (#4371 option 2).
+ *
+ * Runs AFTER `foldEngineOptionAliases`, so alias spellings are already folded
+ * away (or thrown on). `null`-valued keys pass — a `null` is a withdrawal
+ * carrying no intent a drop could lose, same rule as the fold. Retired keys
+ * (`cursor`/`distinct`) quote their tombstone. Everything else gets the legal
+ * key set, so the error carries the fix.
+ */
+function rejectUnknownEngineOptions(
+  object: string,
+  operation: string,
+  bag: object | undefined,
+  legal: ReadonlySet<string>,
+): void {
+  if (!bag) return;
+  let unknown: string[] | undefined;
+  for (const [key, value] of Object.entries(bag)) {
+    if (value == null || legal.has(key)) continue;
+    (unknown ??= []).push(key);
+  }
+  if (!unknown) return;
+  const details = unknown.map((k) =>
+    ENGINE_RETIRED_OPTION_MESSAGES[k] ? `'${k}': ${ENGINE_RETIRED_OPTION_MESSAGES[k]}` : `'${k}'`,
+  );
+  throw new Error(
+    `${operation}('${object}') does not recognise option${unknown.length > 1 ? 's' : ''} ` +
+    `${details.join('; ')}. The engine executes none of ${unknown.length > 1 ? 'them' : 'it'}, ` +
+    `so the call would succeed with the option silently ignored (#4371). ` +
+    `Legal keys for ${operation}: ${[...legal].sort().join(', ')}.`,
+  );
+}
 
 /**
  * Fold the deprecated alias spellings of an engine option bag into their
@@ -2697,6 +2805,25 @@ export class ObjectQL implements IDataEngine {
     if (!objectSchema || !objectSchema.fields) return records;
 
     for (const [fieldName, nestedAST] of Object.entries(expand)) {
+      // [#4371] The nested AST is caller-authored too: a wire spelling inside
+      // `expand: { rel: { sort } }` used to be silently dropped exactly like
+      // the top-level bag (this loop reads only canonical keys). Same
+      // rejection, scoped to the four wire-only pairs — the nested shape is a
+      // QueryAST, not an option bag, so the option-key gate does not apply.
+      if (nestedAST && typeof nestedAST === 'object') {
+        for (const slot of ENGINE_WIRE_ONLY_SLOTS) {
+          for (const alias of slot.aliases) {
+            if ((nestedAST as Record<string, unknown>)[alias] != null) {
+              throw new Error(
+                `expand['${fieldName}'] on '${objectName}' does not accept '${alias}': it is a wire ` +
+                `spelling of '${slot.canonical}', folded by the RPC/protocol layer — a direct engine ` +
+                `call bypasses that fold, so the value would be silently dropped, not applied. Pass ` +
+                `'${slot.canonical}' (${WIRE_ONLY_CANONICAL_SHAPES[slot.canonical] ?? 'the canonical QueryAST shape'}) instead.`,
+              );
+            }
+          }
+        }
+      }
       const fieldDef = objectSchema.fields[fieldName];
 
       // Skip if field not found or not a relationship type.
@@ -2996,9 +3123,14 @@ export class ObjectQL implements IDataEngine {
     // folded — a direct call carrying one used to have it silently dropped
     // (#4371, three shipped instances in #4370).
     query = foldEngineOptionAliases(object, 'find', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
+    rejectUnknownEngineOptions(object, 'find', query, ENGINE_FIND_OPTION_KEYS);
     this.logger.debug('Find operation starting', { object, query });
     const driver = this.getDriver(object);
-    const ast: QueryAST = { object, ...query };
+    // `object` LAST: the resolved name must win. Spread-first used to let a
+    // stray `query.object` overwrite it, splitting the AST's object from the
+    // table actually queried (#4371 option-2 survey) — every middleware and
+    // hook reading `ast.object` would have been lied to.
+    const ast: QueryAST = { ...query, object };
     // Remove context from the AST — it's not a driver concern
     delete (ast as any).context;
 
@@ -3013,10 +3145,14 @@ export class ObjectQL implements IDataEngine {
     // is intersected with the allowed set. All drivers already execute
     // `$or`/`$contains`, so this needs no driver changes.
     {
-      const _searchRaw = (ast as any).search ?? (ast as any).$search;
+      // The `$search`/`$searchFields` OData spellings are NOT read here: the
+      // protocol layer normalizes them to the bare keys before the engine
+      // (protocol.ts findData), and a direct engine call carrying one is an
+      // unknown option — rejected above, not silently dropped (#4371).
+      const _searchRaw = (ast as any).search;
       if (_searchRaw != null && _findSchema?.fields) {
-        const _reqFields = (ast as any).searchFields ?? (ast as any).$searchFields
-          ?? (typeof (ast as any).search === 'object' ? (ast as any).search?.fields : undefined);
+        const _reqFields = (ast as any).searchFields
+          ?? (typeof _searchRaw === 'object' ? _searchRaw?.fields : undefined);
         const _searchFilter = expandSearchToFilter(_searchRaw, {
           fields: _findSchema.fields as any,
           searchableFields: (_findSchema as any).searchableFields,
@@ -3030,9 +3166,7 @@ export class ObjectQL implements IDataEngine {
         }
       }
       delete (ast as any).search;
-      delete (ast as any).$search;
       delete (ast as any).searchFields;
-      delete (ast as any).$searchFields;
     }
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
@@ -3134,9 +3268,12 @@ export class ObjectQL implements IDataEngine {
     // Wire-only spellings are rejected, same as find() (#4371) — `sort`
     // matters here too: findOne({ sort }) means "first row of THIS order".
     query = foldEngineOptionAliases(objectName, 'findOne', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
+    rejectUnknownEngineOptions(objectName, 'findOne', query, ENGINE_FIND_OPTION_KEYS);
     this.logger.debug('FindOne operation', { objectName });
     const driver = this.getDriver(objectName);
-    const ast: QueryAST = { object: objectName, ...query, limit: 1 };
+    // `object` after the spread for the same reason as find(); `limit: 1`
+    // last — findOne is single-row by contract.
+    const ast: QueryAST = { ...query, object: objectName, limit: 1 };
     // Remove context from the AST — it's not a driver concern
     delete (ast as any).context;
 
@@ -3507,6 +3644,7 @@ export class ObjectQL implements IDataEngine {
      // `options.where` only, so an unfolded `{ filter }` left the AST with no
      // predicate at all and a `multi: true` update rewrote EVERY row.
      options = foldEngineOptionAliases(object, 'update', options, ENGINE_WHERE_SLOTS);
+     rejectUnknownEngineOptions(object, 'update', options, ENGINE_UPDATE_OPTION_KEYS);
 
      // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
      // The read path resolves them; without the same call here the SAME filter
@@ -3905,6 +4043,7 @@ export class ObjectQL implements IDataEngine {
     // above (#4346): unfolded, a `multi: true` delete with `{ filter }` had no
     // predicate on its AST and emptied the table.
     options = foldEngineOptionAliases(object, 'delete', options, ENGINE_WHERE_SLOTS);
+    rejectUnknownEngineOptions(object, 'delete', options, ENGINE_DELETE_OPTION_KEYS);
 
     // Expand `{filter-placeholder}` values before the id is extracted — same
     // reasoning as update() above (#3810).
@@ -4037,6 +4176,7 @@ export class ObjectQL implements IDataEngine {
      // Fold the `filter` alias into `where` (#4346) — the AST below reads
      // `query.where` only, so an unfolded `{ filter }` counted the whole table.
      query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
+     rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
      const driver = this.getDriver(object);
 
      // The AST must ride on the opCtx so the security/sharing middlewares can
@@ -4117,6 +4257,7 @@ export class ObjectQL implements IDataEngine {
       // Fold the `filter` alias into `where` (#4346) — the AST below reads
       // `query.where` only, so an unfolded `{ filter }` aggregated every row.
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
+      rejectUnknownEngineOptions(object, 'aggregate', query, ENGINE_AGGREGATE_OPTION_KEYS);
       this.rejectCredentialAggregation(object, query);
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);

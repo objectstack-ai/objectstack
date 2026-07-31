@@ -3426,6 +3426,7 @@
     "data/EngineQueryOptions:offset",
     "data/EngineQueryOptions:orderBy",
     "data/EngineQueryOptions:search",
+    "data/EngineQueryOptions:searchFields",
     "data/EngineQueryOptions:top",
     "data/EngineQueryOptions:where",
     "data/EngineUpdateOptions:context",

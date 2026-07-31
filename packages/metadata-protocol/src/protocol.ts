@@ -4434,6 +4434,35 @@ export class ObjectStackProtocolImplementation implements
             };
         }
 
+        // [#4371 option 2] Strip the PROTOCOL-layer keys off the bag before it
+        // becomes the engine option bag — the engine now rejects option keys
+        // it does not execute, and these belong to this layer, not to it:
+        // - `object`: the POST-body convenience copy of the route object
+        //   (reserved above so it is not read as a field filter). It used to
+        //   ride the spread into the engine AST and OVERRIDE the resolved
+        //   object, splitting `ast.object` from the table actually queried —
+        //   a mismatch is refused, never resolved by picking a winner.
+        // - `count`: a response-shape flag this method consumed above.
+        // - QueryAST tombstones (`cursor`/`joins`/`windowFunctions`/
+        //   `distinct`): reserved at the wire gate so they are not read as
+        //   field filters; on the wire they stay ignored-with-tombstone-docs
+        //   (schema parse is where they 400), and they must not leak to the
+        //   engine as junk.
+        // - `having`: consumed by the aggregate branch above; the find path
+        //   cannot serve it.
+        if (options.object != null && options.object !== request.object) {
+            const err: any = new Error(
+                `Conflicting object: the route addresses '${request.object}' but the query body ` +
+                `says '${options.object}'. The body 'object' key is a convenience copy of the ` +
+                'route object and must match it.',
+            );
+            err.status = 400;
+            err.code = 'QUERY_OBJECT_MISMATCH';
+            throw err;
+        }
+        for (const k of ['object', 'count', 'joins', 'windowFunctions', 'cursor', 'distinct', 'having']) {
+            delete options[k];
+        }
         const records = await this.engine.find(request.object, options);
         // Pagination metadata. When a `limit` is present the response is a single
         // page, so `records.length` is the page size — NOT the match total. Run a

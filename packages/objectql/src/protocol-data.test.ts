@@ -26,6 +26,40 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
     // ═══════════════════════════════════════════════════════════════
 
     describe('findData', () => {
+        // [#4371 option 2] The engine rejects option keys it does not execute,
+        // so the protocol layer must not leak its OWN vocabulary onto the
+        // engine bag. These keys are reserved at the wire gate (not read as
+        // field filters) and consumed — or deliberately ignored — here.
+        it('strips protocol-layer keys (object/count/tombstones/having) off the engine bag', async () => {
+            await protocol.findData({
+                object: 'task',
+                query: {
+                    object: 'task', count: 'true', cursor: 'c1', distinct: 'true',
+                    joins: [], windowFunctions: [], having: { n: 1 },
+                    where: { status: 'open' },
+                },
+            });
+            const opts = mockEngine.find.mock.calls[0][1];
+            expect(opts.where).toEqual({ status: 'open' });
+            for (const k of ['object', 'count', 'joins', 'windowFunctions', 'cursor', 'distinct', 'having']) {
+                expect(opts[k], `'${k}' must not reach the engine bag`).toBeUndefined();
+            }
+        });
+
+        it('a body `object` matching the route is a tolerated convenience copy', async () => {
+            await protocol.findData({ object: 'task', query: { object: 'task', limit: 5 } });
+            const opts = mockEngine.find.mock.calls[0][1];
+            expect(opts.object).toBeUndefined();
+            expect(opts.limit).toBe(5);
+        });
+
+        it('a body `object` that CONTRADICTS the route is refused, never resolved by picking a winner', async () => {
+            await expect(
+                protocol.findData({ object: 'task', query: { object: 'sys_user', where: { a: 1 } } }),
+            ).rejects.toMatchObject({ status: 400, code: 'QUERY_OBJECT_MISMATCH' });
+            expect(mockEngine.find).not.toHaveBeenCalled();
+        });
+
         it('normalizes $search/$searchFields (OData) to bare search/searchFields, not implicit filters', async () => {
             await protocol.findData({ object: 'showcase_account', query: { $search: 'retail', $searchFields: ['name', 'industry'] } });
             const opts = mockEngine.find.mock.calls[0][1];
