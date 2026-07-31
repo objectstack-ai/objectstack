@@ -28,7 +28,7 @@ cannot express.
 | Anything that pauses: approvals, screens, timers, signals | **Flow** — a hook runs inline and cannot pause |
 | Scheduled or date-relative sweeps ("30 days before `end_date`") | **Flow** (`schedule` / `timeRelative`) |
 | Mutating the pending record in the same write, before it is saved | **Before hook** |
-| An invariant enforced on every write path, across objects, no matter who writes | **Hook** — the backstop role |
+| An invariant enforced on every write path, across objects, no matter who writes | **Hook** — the backstop duty itself |
 | Read-side interception (`beforeFind` / `afterFind`) | **Hook** — flows have no read events |
 
 Two structural reasons to prefer the flow when either could work:
