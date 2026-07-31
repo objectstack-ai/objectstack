@@ -15,7 +15,8 @@
   },
   "scripts": {
     "build": "tsup --config ../../tsup.config.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

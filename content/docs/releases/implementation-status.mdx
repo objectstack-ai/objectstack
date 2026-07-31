@@ -19,6 +19,7 @@ This matrix is generated from actual codebase analysis and represents the curren
 |:------:|:-------|:------------|
 | ✅ | **Fully Implemented** | Production-ready implementation with all core features |
 | ⚠️ | **Partially Implemented** | Basic implementation, missing advanced features |
+| 🟡 | **Partially Delivered** | Shipping implementation; full protocol parity still in progress |
 | 🚧 | **In Progress** | Currently being developed |
 | 📋 | **Planned** | Scheduled for future implementation |
 | ❌ | **Not Implemented** | Protocol defined but not yet implemented |
@@ -159,14 +160,14 @@ This matrix is generated from actual codebase analysis and represents the curren
 | **HTTP Server** | ❌ | ✅ | ✅ | ❌ | ✅ Full |
 | **Endpoint** | ✅ | ❌ | ✅ | ❌ | ✅ Full |
 | **Router** | ✅ | ✅ | ✅ | ❌ | ✅ Full |
-| **Discovery** | ❌ | ✅ | ✅ | ✅ | ✅ Full |
+| **Discovery** | ✅ | ✅ | ✅ | ✅ | ✅ Full |
 | **Contract** | ✅ | ✅ | ❌ | ❌ | ⚠️ Partial |
 | **Protocol** | ❌ | ✅ | ❌ | ✅ | ✅ Full |
 | **Errors** | ✅ | ✅ | ✅ | ✅ | ✅ Full |
 | **HTTP Cache** | ✅ | ✅ | ✅ | ✅ | ✅ Full |
 | **Batch** | ✅ | ✅ | ✅ | ✅ | ✅ Full |
 
-The data (`/api/v1/data`), metadata (`/api/v1/meta`), and batch endpoints are implemented in `@objectstack/rest` (`rest-server.ts`); `@objectstack/runtime` re-exports `RestServer` from that package and provides the underlying HTTP server/dispatcher.
+The data (`/api/v1/data`), metadata (`/api/v1/meta`), discovery (`/api/v1/discovery`), and batch endpoints are implemented in `@objectstack/rest` (`rest-server.ts` — `registerDiscoveryEndpoints`); `@objectstack/runtime` re-exports `RestServer` from that package and provides the underlying HTTP server/dispatcher.
 
 **REST Endpoints Implemented:**
 
@@ -196,8 +197,8 @@ Every route carries the `/api/v1` prefix. When project scoping is enabled each r
 |:---------|:-------------:|:------:|:------|
 | **Analytics** | ✅ | ✅ | ObjectQL aggregation plus `@objectstack/service-analytics` dataset execution; analytics read scope auto-bridges to `security.getReadFilter` for RLS-aware dashboards/reports |
 | **OData** | ❌ | 📋 | Protocol defined, not implemented |
-| **Realtime** | @objectstack/service-realtime | ⚠️ | Realtime service with in-memory adapter shipped; production adapters in progress |
-| **WebSocket** | @objectstack/service-realtime | ⚠️ | Transport provided via the realtime service in-memory adapter |
+| **Realtime** | @objectstack/service-realtime | ⚠️ | Realtime service shipped, but only the process-local `'memory'` adapter (`in-memory-realtime-adapter.ts`); a Redis-backed HA adapter is a post-GA fast-follow |
+| **WebSocket** | ❌ | 📋 | Protocol defined (`spec/api/websocket.zod.ts`); no WebSocket transport ships in any package — the realtime service is in-process pub/sub, not a socket transport |
 
 ---
 
@@ -309,21 +310,26 @@ describe that separate runtime.
 |:---------|:-----------------:|:-------------:|:------:|
 | **Agent** | ✅ | ObjectOS runtime | ✅ Agent runtime |
 | **Model Registry** | ✅ | ObjectOS runtime | ✅ Model registry |
-| **RAG Pipeline** | ✅ | @objectstack/service-knowledge | ⚠️ Knowledge service + `knowledge-memory` / `knowledge-ragflow` / `embedder-openai` plugins |
-| **NLQ** | ✅ | ObjectOS runtime | ⚠️ Data-query tools |
+| **RAG Pipeline** | ⚠️ | @objectstack/service-knowledge | ⚠️ Knowledge service + `knowledge-memory` / `knowledge-ragflow` / `embedder-openai` plugins; spec defines the retrieval binding (`ai/knowledge-source.zod.ts`, `ai/knowledge-document.zod.ts`), not a pipeline DSL |
+| **NLQ** | ❌ | ObjectOS runtime | ⚠️ Data-query tools |
 | **Conversation** | ✅ | ObjectOS runtime | ✅ In-memory + ObjectQL conversation services |
-| **Agent Action** | ✅ | ObjectOS runtime | ⚠️ Action/data/knowledge tools |
-| **Cost** | ✅ | ❌ | ❌ Spec only |
-| **Predictive** | ✅ | ❌ | ❌ Spec only |
-| **Orchestration** | ✅ | ObjectOS runtime | ⚠️ Agent tool orchestration |
-| **Feedback Loop** | ✅ | ObjectOS runtime | ⚠️ Eval harness |
-| **DevOps Agent** | ✅ | ❌ | ❌ Spec only |
+| **Agent Action** | ✅ | ObjectOS runtime | ⚠️ Action/data/knowledge tools (`tool.zod.ts` + `action_<name>` tools) |
+| **Cost** | ✅ | ❌ | ❌ Spec only — `usage.zod.ts` accounts tokens/per-call cost; no budget enforcement |
+| **Predictive** | ❌ | ❌ | ❌ Not defined |
+| **Orchestration** | ❌ | ObjectOS runtime | ⚠️ Agent tool orchestration |
+| **Feedback Loop** | ❌ | ObjectOS runtime | ⚠️ Eval harness |
+| **DevOps Agent** | ❌ | ❌ | ❌ Not defined |
 
 **Notes:**
-- Complete AI protocol suite defined
+- The `@objectstack/spec/ai` surface is deliberately narrow — Agent, Skill, Tool,
+  Conversation, Model Registry, Embedding, Usage, MCP, plus the knowledge-source /
+  knowledge-document and solution-blueprint schemas. Application-level protocols
+  (DevOps agents, predictive pipelines, AIOps, orchestration plans, NLQ services,
+  RAG-pipeline DSLs, budget enforcement) were **removed in v1** and have no schema
+  today — see the scope note in `packages/spec/src/ai/index.ts`
 - The ObjectOS runtime ships agents, model registry, conversation, tools, skills, and an eval harness
 - RAG/embedding is provided by `@objectstack/service-knowledge` plus the `knowledge-memory`, `knowledge-ragflow`, and `embedder-openai` plugins (all open)
-- Cost tracking, predictive, and the DevOps agent protocols remain spec-only
+- Token/cost accounting has a schema (`ai/usage.zod.ts`) but no shipping enforcement; the predictive and DevOps-agent protocols are not defined in spec at all
 
 ---
 
@@ -431,7 +437,7 @@ There is no MSW package in this repo — browser API mocking is a devDependency 
 - [x] Multi-tenancy — verified cross-organization isolation on `pnpm dev:crm` (Alice@OrgAlpha vs. Bob@OrgBeta only see their own records across `sys_organization`, `sys_member`, `sys_user`, and `sys_*_permission_set` link tables)
 - [x] Legacy `objectql.registerTenantMiddleware` removed — SecurityPlugin is now the sole tenant-isolation authority
 - [x] Organization-Wide Defaults / sharing model — `private`, `public_read`, `public_read_write`, and `controlled_by_parent` enforced via `plugin-sharing` + `plugin-security`, proven by dogfood over the real HTTP stack (ADR-0056). Canonical vocabulary only — legacy aliases removed from the enum (ADR-0090 D4); unset custom-object OWD resolves to `private` (ADR-0090 D1)
-- [x] Sharing Rule evaluator — criteria rules re-evaluated on `afterInsert` / `afterUpdate` (`plugin-sharing/rule-hooks.ts`); enforced recipients are user / position / `unit_and_subordinates` (business-unit-subtree widening, ADR-0057 D5 / ADR-0090 D3); owner-type rules and group/guest recipients remain `[experimental — not enforced]`
+- [x] Sharing Rule evaluator — criteria rules re-evaluated on `afterInsert` / `afterUpdate` (`plugin-sharing/rule-hooks.ts`); every authorable recipient maps 1:1 onto an enforced `expandRecipient` branch (`plugin-sharing/sharing-rule-service.ts`) — `user`, `team`, `position`, `business_unit`, and `unit_and_subordinates` (business-unit-subtree widening, ADR-0057 D5 / ADR-0090 D3). Under ADR-0078 enforce-or-remove, `criteria` is now the only rule *type* (owner-type rules were removed from the authoring surface because the static materialiser cannot track live membership), the `group` recipient was renamed to `team`, `guest` was removed, and `queue` stays reserved in the runtime contract but deliberately non-authorable
 - [x] Everyone-baseline suggestion — a permission set may set `isDefault: true` as the install-time suggestion to bind it to the built-in `everyone` position; resolved per-request as an additive baseline, no fallback cliff (ADR-0090 D5)
 - [x] Default-deny for anonymous traffic — the global default-deny landed (ADR-0056 D2) and the `api.requireAuth` opt-out was then **removed** in `@objectstack/spec` 18 (#3963): the key is tombstoned and rejected at parse time, the deny decision is centralised in `@objectstack/core` `security/anonymous-deny.ts`, and public forms self-authorize via `publicFormGrant` (Option A)
 - [ ] Studio RLS visual editor
@@ -455,11 +461,11 @@ There is no MSW package in this repo — browser API mocking is a devDependency 
 |:---------|:---------------:|:-------|
 | **Data** | 16 | Core modeling, hooks, and query engine fully implemented; document/mapping/external-lookup still pending |
 | **UI** | 10 | Studio/ObjectUI render most authored surfaces (🟡); full cross-surface renderer parity in progress |
-| **API** | 14 | REST/HTTP/discovery/batch fully implemented; OData pending; GraphQL removed from the plan |
+| **API** | 14 | REST/HTTP/discovery/batch fully implemented; OData and the WebSocket transport pending; GraphQL removed from the plan |
 | **System** | 39 | Logging, audit, job, translation, metrics, cache, notification implemented; encryption partial (local crypto provider); several governance services pending |
 | **Auth** (plugin) | 10 | Identity/organizations live (`plugin-auth`), permission + RLS live (`plugin-security`), OWD + sharing rules live (`plugin-sharing`); SCIM is opt-in |
 | **Automation** (plugin) | 7 | Flow, workflow, approval, webhook, and triggers implemented; ETL/Sync pending |
-| **AI** | 12 | Agents, model registry, conversation, tools, RAG implemented (ObjectOS runtime + open knowledge plugins); cost/predictive/DevOps-agent pending |
+| **AI** | 12 | Agents, model registry, conversation, tools, RAG implemented (ObjectOS runtime + open knowledge plugins); cost accounting has a schema but no enforcement, and the predictive / DevOps-agent protocols are not defined in spec |
 | **Integration** | 7 | REST/OpenAPI/MCP/Slack connectors, file storage, and queue implemented; GitHub/Vercel connectors pending |
 | **QA** | 1 | Fully implemented |
 

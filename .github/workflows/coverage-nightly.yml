@@ -52,8 +52,12 @@ jobs:
       # The spec package sits at the root of the workspace graph (no workspace
       # deps) and its suite reads src/ directly, so no build step is needed —
       # same reason lint.yml's typecheck gates run pre-build.
+      # Stall guard (#4250, #4314): a frozen-output hang becomes a labeled red
+      # after 10 min of silence instead of sitting until the job timeout.
       - name: Generate coverage report
-        run: pnpm --filter @objectstack/spec test:coverage
+        run: |
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/spec-coverage.log" --stall-minutes 10 -- \
+            pnpm --filter @objectstack/spec test:coverage
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v7

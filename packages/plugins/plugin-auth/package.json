@@ -15,7 +15,8 @@
   },
   "scripts": {
     "build": "tsup --config ../../../tsup.config.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@better-auth/core": "1.7.0-rc.2",

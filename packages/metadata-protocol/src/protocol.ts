@@ -18,7 +18,7 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
-import { parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
+import { parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots, type QueryAliasConflict, type QueryAliasSlot, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
@@ -865,6 +865,49 @@ const ODATA_SPELLING: Readonly<Record<string, string>> = {
     top: '$top', skip: '$skip', sort: '$orderby', search: '$search',
     filter: '$filter', select: '$select', expand: '$expand',
 };
+
+/**
+ * [#3795] The spec's alias table ({@link RPC_QUERY_ALIAS_SLOTS}) extended with
+ * the wire-only spellings no schema declares: `filters` (documented plural
+ * alias of the `filter` transport param) and the OData `$filter` / `$expand`.
+ * Every spelling of one QueryAST slot resolves through ONE fold — the four
+ * slots that used to resolve backwards (canonical consulted last), each in its
+ * own open-coded way, are the reason the table lives in the spec and not here.
+ */
+const WIRE_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = (() => {
+    const extra: Record<string, readonly string[]> = {
+        where: ['filters', '$filter'],
+        expand: ['$expand'],
+    };
+    return RPC_QUERY_ALIAS_SLOTS.map((slot) => ({
+        canonical: slot.canonical,
+        aliases: [...slot.aliases, ...(extra[slot.canonical] ?? [])],
+    }));
+})();
+
+/**
+ * [#4181 → #3795] Spellings of ONE slot carrying DIFFERENT values. Two values
+ * for one slot cannot be reconciled — merging them would invent an intent the
+ * caller never expressed, and picking one is the silent drop itself — so an
+ * ambiguous request is refused. Redundant identical spellings pass. #4181
+ * established this on the filter slot; the fold now applies it to all five.
+ *
+ * `spellingFor` maps each folded name back to the wire spelling the caller
+ * actually wrote (`$orderby`, not `orderBy`) — the #4226 discipline.
+ */
+function conflictingQueryParamsError(
+    conflict: QueryAliasConflict,
+    spellingFor: (name: string) => string,
+): Error {
+    const names = conflict.spellings.map((s) => `'${spellingFor(s)}'`).join(', ');
+    const err: any = new Error(
+        `Conflicting query parameters: ${names} are spellings of the same parameter `
+        + `(canonical '${conflict.canonical}') and were given different values. Send exactly one.`,
+    );
+    err.status = 400;
+    err.code = 'INVALID_REQUEST';
+    return err;
+}
 
 /**
  * [#4181] A filter the normalizer cannot turn into a usable `FilterCondition`
@@ -3589,35 +3632,39 @@ export class ObjectStackProtocolImplementation implements
             delete options[dollar];
         }
 
-        // Numeric fields — normalize top → limit, skip → offset
+        // [#3795] One slot, one value. Every alias spelling of the five
+        // QueryAST slots resolves HERE, by the spec's own table, before the
+        // per-slot wire coercion below ever runs — so that coercion reads
+        // canonical keys only. An alias alone folds into its canonical key;
+        // redundant identical spellings collapse; different values for one
+        // slot are refused (the #4181 rule, generalized from the filter slot
+        // to all five — four of which used to resolve BACKWARDS here, each in
+        // its own way, disagreeing with the spec's documented precedence and
+        // with the runtime dispatcher's copy of the same fold).
+        //
+        // `arrivedAs` remembers which spelling carried each slot's value;
+        // composed with `wireSpelling` it names the parameter the caller
+        // actually wrote in every rejection below (#4226).
+        const spellingFor = (name: string): string => wireSpelling[name] ?? name;
+        const arrivedAs = foldQueryAliasSlots(options, WIRE_QUERY_ALIAS_SLOTS, (conflict) => {
+            throw conflictingQueryParamsError(conflict, spellingFor);
+        });
+        const slotParam = (canonical: string): string => spellingFor(arrivedAs[canonical] ?? canonical);
+
+        // Numeric fields — normalize top → limit ($top is the OData layer,
+        // outside the #3795 slot table), then coerce querystring strings.
         if (options.top != null) {
             options.limit = Number(options.top);
             delete options.top;
         }
-        if (options.skip != null) {
-            options.offset = Number(options.skip);
-        }
-        // Deleted unconditionally, unlike `top` (a declared QueryAST key the
-        // engine aliases itself): `skip` is wire-only, so a null/undefined one
-        // left behind would reach the #4134 field gate below and be reported as
-        // an unknown FIELD — a confusing rejection for a real parameter.
-        delete options.skip;
         if (options.limit != null) options.limit = Number(options.limit);
         if (options.offset != null) options.offset = Number(options.offset);
 
-        // Select → fields: comma-separated string → array
-        const projectionKey = options.select !== undefined ? (wireSpelling.select ?? 'select') : 'fields';
-        if (typeof options.select === 'string') {
-            options.fields = options.select.split(',').map((s: string) => s.trim()).filter(Boolean);
-        } else if (Array.isArray(options.select)) {
-            options.fields = options.select;
-        }
-        if (options.select !== undefined) delete options.select;
-
-        // fields: comma-separated string → array. Clients may pass `?fields=name`
-        // directly (not only via the `?select=` alias above) — a single-value
-        // querystring param arrives as a bare string, which drivers' `.map()`
+        // Projection: comma-separated string → array. A single-value
+        // querystring param arrives as a bare string — `?fields=name` or the
+        // folded `?select=` / `$select` spellings — which drivers' `.map()`
         // calls over `query.fields` would otherwise throw on.
+        const projectionKey = slotParam('fields');
         if (typeof options.fields === 'string') {
             options.fields = options.fields.split(',').map((s: string) => s.trim()).filter(Boolean);
         } else if (options.fields !== undefined && !Array.isArray(options.fields)) {
@@ -3628,7 +3675,7 @@ export class ObjectStackProtocolImplementation implements
         // returned MORE than was asked for.
         this.assertProjectionFieldsExist(request.object, options.fields, projectionKey);
 
-        // Sort/orderBy → orderBy: every wire spelling → SortNode[].
+        // Sort: every wire shape → SortNode[].
         //
         // [#4226] `normalizeSortNodes` folds the two shapes that used to fall
         // through this block untouched — `string[]` and `{field: direction}` —
@@ -3636,10 +3683,8 @@ export class ObjectStackProtocolImplementation implements
         // an array" simply skipped the branch, leaving a value on `orderBy`
         // that `SqlDriver`'s `Array.isArray` guard then declined to turn into
         // an ORDER BY clause: no sort, no error, no way to tell.
-        const usesOrderBy = options.orderBy !== undefined && options.orderBy !== null;
-        const sortValue = usesOrderBy ? options.orderBy : options.sort;
-        const sortKey = usesOrderBy ? (wireSpelling.orderBy ?? 'orderBy') : 'sort';
-        delete options.sort;
+        const sortValue = options.orderBy;
+        const sortKey = slotParam('orderBy');
         if (sortValue === undefined || sortValue === null) {
             // Nothing to sort by — and an explicit `orderBy: null` must not ride
             // to the engine as a value every driver quietly declines to read.
@@ -3656,41 +3701,15 @@ export class ObjectStackProtocolImplementation implements
             else delete options.orderBy;
         }
 
-        // Filter/filters/$filter → where: normalize all filter aliases.
-        //
-        // [#4181] These four names are FOUR SPELLINGS OF ONE SLOT (`filters` is
-        // documented as a deprecated alias of `filter`), so `??` picking the
-        // first non-null silently discarded the others: a body carrying both
-        // `where` and a different `filter` ran the `filter` and dropped the
-        // `where` with no signal. Two different values for one slot cannot be
-        // reconciled — merging them would invent an intent the caller never
-        // expressed, and picking one is the silent drop itself — so an
-        // ambiguous request is refused. Redundant identical spellings are
-        // harmless and pass.
-        const filterAliases = (['filter', 'filters', '$filter', 'where'] as const)
-            .filter((k) => options[k] !== undefined)
-            .map((k) => ({ key: k, value: options[k] }));
-        if (filterAliases.length > 1) {
-            const distinct = new Set(filterAliases.map((a) => JSON.stringify(a.value)));
-            if (distinct.size > 1) {
-                const err: any = new Error(
-                    `Conflicting filter parameters: ${filterAliases.map((a) => `'${a.key}'`).join(', ')} `
-                    + 'are aliases for the same filter and were given different values. Send exactly one.',
-                );
-                err.status = 400;
-                err.code = 'INVALID_REQUEST';
-                throw err;
-            }
-        }
+        // Filter: the folded slot value → a usable `FilterCondition` on
+        // `where`, or a rejection. The four spellings of this slot
+        // (`where`/`filter`/`filters`/`$filter`) already resolved through the
+        // #3795 fold above — #4181's one-slot-one-value rule, which this block
+        // pioneered before the fold generalized it.
+        const filterKey = slotParam('where');
 
-        const filterValue = options.filter ?? options.filters ?? options.$filter ?? options.where;
-        const filterKey = filterAliases[0]?.key ?? 'filter';
-        delete options.filter;
-        delete options.filters;
-        delete options.$filter;
-
-        if (filterValue !== undefined) {
-            let parsedFilter = filterValue;
+        if (options.where !== undefined) {
+            let parsedFilter = options.where;
             // A blank `?filter=` is ABSENT, not malformed — the same `length > 0`
             // guard the export route applies before parsing. Deleting `where`
             // here (rather than leaving `''` on it) is what lets every consumer
@@ -3755,31 +3774,24 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // Populate/expand/$expand → expand (Record<string, QueryAST>)
-        const populateValue = options.populate;
-        const expandValue = options.$expand ?? options.expand;
+        // Expand: the folded slot value → `Record<string, QueryAST>`. A comma
+        // list (string) and a name array both lower to `{name: {object: name}}`;
+        // the advanced `{rel: QueryAST}` map a caller may send directly on
+        // `POST /data/:object/query` passes through as-is. Lowering the ARRAY
+        // shape here (not just the string) also closes a pre-#3795 gap: a raw
+        // name array used to survive this block whole, so the #4226 gate read
+        // its INDICES as relation names and refused real requests with
+        // "Unknown field '0'".
+        const expandValue = options.expand;
         const expandNames: string[] = [];
-        if (typeof populateValue === 'string') {
-            expandNames.push(...populateValue.split(',').map((s: string) => s.trim()).filter(Boolean));
-        } else if (Array.isArray(populateValue)) {
-            expandNames.push(...populateValue);
+        if (typeof expandValue === 'string') {
+            expandNames.push(...expandValue.split(',').map((s: string) => s.trim()).filter(Boolean));
+        } else if (Array.isArray(expandValue)) {
+            expandNames.push(...expandValue);
         }
-        if (!expandNames.length && expandValue) {
-            if (typeof expandValue === 'string') {
-                expandNames.push(...expandValue.split(',').map((s: string) => s.trim()).filter(Boolean));
-            } else if (Array.isArray(expandValue)) {
-                expandNames.push(...expandValue);
-            }
-        }
-        delete options.populate;
-        delete options.$expand;
-        // Clean up non-object expand (e.g. string) BEFORE the Record conversion
-        // below, so that populate-derived names can create the expand Record even
-        // when a legacy string expand was also present.
-        if (typeof options.expand !== 'object' || options.expand === null) {
+        if (typeof options.expand !== 'object' || options.expand === null || Array.isArray(options.expand)) {
             delete options.expand;
         }
-        // Only set expand if not already an object (advanced usage)
         if (expandNames.length > 0 && !options.expand) {
             options.expand = {} as Record<string, any>;
             for (const rel of expandNames) {

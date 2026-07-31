@@ -8,7 +8,7 @@ description: Define strict business logic constraints prevents AI hallucinations
 The **State Machine** (`state_machine` validation rule) lets you define the "Constitution" of a record's lifecycle: the legal `status` transitions a record may take. It is a **flat, textbook finite-state-machine** transition table that the write path enforces.
 
 <Callout type="info">
-  Per [ADR-0020](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0020-state-machine-converge-and-enforce.md), a state machine is **one of the object's `validations`** — a rule with `type: 'state_machine'`. There is no top-level `stateMachine`/`stateMachines` property on an object, and the older XState-style shape (hierarchical states, `on`/`cond`/`actions`, `meta.aiInstructions`) was retired. A flat `{ from: [to] }` transition table is the only enforced shape.
+  Per [ADR-0020](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0020-state-machine-converge-and-enforce.md), a state machine is **one of the object's `validations`** — a rule with `type: 'state_machine'`. There is no top-level `stateMachine`/`stateMachines` property on an object, and the older XState-style shape (hierarchical states, `on`/`cond`/`actions`, `meta.aiInstructions`) was retired **as a record-lifecycle declaration** — nothing on the write path reads it. A flat `{ from: [to] }` transition table is the only enforced shape.
 </Callout>
 
 ## Why State Machines?
@@ -56,13 +56,19 @@ export const PurchaseRequest = ObjectSchema.create({
       // below). `initialStates` — the optional FSM entry point that locks
       // which states a record may be CREATED in (#3165) — is checked on
       // INSERT, so to use it here you'd also add 'insert' to `events`.
-      // Otherwise the field's `default: true` option is the starting value.
+      // Otherwise INSERT is unchecked by this rule and ANY declared option is
+      // a legal starting value. (An option's `default: true` is an authoring
+      // hint — only a field-level `defaultValue` fills an omitted field.)
       events: ['update'],
       message: 'Invalid purchase status transition.',
       transitions: {
         draft: ['pending'],
         pending: ['approved', 'rejected'],
-        // `approved` and `rejected` are dead-end states (no outgoing edges).
+        // Terminal states need an EXPLICIT empty array to be enforced: a
+        // state with no key at all is one the checker cannot reason about,
+        // so it does not block moves out of it (see "Enforcement semantics").
+        approved: [],
+        rejected: [],
       },
     },
   ],
@@ -85,25 +91,27 @@ A `state_machine` rule shares the common validation-rule fields (`name`, `label`
 
 ### Transitions
 
-`transitions` is the whole legal graph. The keys are current state values; each value is the list of states the record may move *to*. A state with no key (or an empty array) is a dead-end with no outgoing edges.
+`transitions` is the whole legal graph. The keys are current state values; each value is the list of states the record may move *to*. An **explicit empty array** is an enforced dead-end — every move to another state is rejected. A state with **no key at all** is different: the checker has nothing to reason about there and lets the write through (see [Enforcement semantics](#enforcement-semantics)), so declare `[]` when you mean "terminal".
 
 ```typescript
 transitions: {
   draft: ['pending'],
   pending: ['approved', 'rejected'],
+  approved: [], // terminal — enforced
+  rejected: [], // terminal — enforced
 }
 ```
 
 ### Enforcement semantics
 
-- **On insert**, the `transitions` table is not consulted — there is no prior state to transition from. If the rule declares `initialStates`, the created value must be one of them, or the write is rejected with `invalid_initial_state` (the FSM entry point). Without `initialStates`, insert is a no-op and the starting value is constrained only by the field-level `select` check — typically the option marked `default: true`.
-- **On update**, if the state field changed and the new value is **not** in `transitions[oldValue]`, the write is rejected.
-- The check is **lenient where it cannot reason**: if the prior state is not described by the table (e.g. legacy or externally-written data), it does not block.
+- **On insert**, the `transitions` table is not consulted — there is no prior state to transition from. If the rule declares `initialStates`, the created value must be one of them, or the write is rejected with `invalid_initial_state` (the FSM entry point). Without `initialStates`, insert is a no-op and the starting value is constrained only by the field-level `select` option-membership check (`invalid_option`), so any declared option is a legal start.
+- **On update**, if the state field changed and the new value is **not** in `transitions[oldValue]`, the write is rejected. Clearing the field (writing `null`) is exempt.
+- The check is **lenient where it cannot reason**: if the prior state has no key in `transitions` (legacy or externally-written data, or a state you simply forgot to declare), it does not block. Only an explicit `[]` makes a state a hard dead-end.
 - Only a rule with `severity: 'error'` (the default) blocks the write; `warning`/`info` are logged.
 - **Seed writes are exempt** (#3433). Curated seed data — package bootstrap fixtures, marketplace templates, per-org replay, all loaded by `SeedLoaderService` — is a snapshot of established facts, not a record walking its lifecycle, so it bypasses the `state_machine` rule entirely: a seed may be born mid-lifecycle (a `completed` project, a `closed_won` opportunity) and neither `initialStates` (insert) nor `transitions` (update) is enforced. Every *other* validation still runs, so a seed must still satisfy field shape, `format`, `script`, and the rest. `os lint` warns when a seeded value is not a state the machine declares, so a typo is still caught before boot.
 - **A "historical" data import is exempt too** (#3479). Migrating established facts — a batch of already-`closed` tickets, `closed_won` deals — is the same "snapshot, not a lifecycle event" situation. Set `treatAsHistorical: true` on the import request (default **off**) and the runner puts `skipStateMachine` on the write context, so `initialStates` doesn't reject those mid-lifecycle rows. A normal import leaves it off and still walks the FSM — the strict behavior is the default, so the exemption is always an explicit opt-in.
 - **`treatAsHistorical` also preserves the original audit timeline** (#3493). Skipping the FSM is only half of migrating established facts; the other half is keeping *when* they happened and *who* did them. Under the same flag the write context also carries `preserveAudit`, which (1) makes `updated_at` / `updated_by` **client-preferred** — a supplied historical last-modified survives instead of being stamped with the import instant, symmetric with how `created_at` / `created_by` already behave on insert — and (2) admits a **whitelist** through the static-`readonly` write strip: the audit/timestamp family plus author-declared business `readonly` fields (`closed_at`, `resolved_by`, …), so an `upsert` refresh no longer silently drops them. Platform-managed `system` columns outside that family (`organization_id` and other tenancy/generated columns) stay stripped — a historical import reinstates facts, it does not forge tenancy. Like the FSM exemption this is opt-in: a normal write still auto-stamps `updated_at`/`updated_by` and strips `readonly` exactly as before, and permissions / RLS / field-level security are unchanged.
-- **Undoing a historical import is symmetric** (#3549 / #3556). The import undo (`POST /data/import/jobs/:jobId/undo`) logically rolls back a finished job — deleting the rows it created and restoring the captured pre-import snapshot on the rows it updated. That restore write now carries `preserveAudit` too, but **only** when the job was flagged `treatAsHistorical`, so the snapshotted `updated_at` / `updated_by` and business `readonly` fields (`closed_at`, …) are reinstated verbatim instead of being re-stamped to the undo instant. Without it the undo would silently overwrite the very timeline the historical import preserved; a normal (non-historical) import's undo keeps the default stamp/strip.
+- **Undoing a historical import is symmetric** (#3549 / #3556). The import undo (`POST /api/v1/data/import/jobs/:jobId/undo`) logically rolls back a finished job — deleting the rows it created and restoring the captured pre-import snapshot on the rows it updated. That restore write now carries `preserveAudit` too, but **only** when the job was flagged `treatAsHistorical`, so the snapshotted `updated_at` / `updated_by` and business `readonly` fields (`closed_at`, …) are reinstated verbatim instead of being re-stamped to the undo instant. Without it the undo would silently overwrite the very timeline the historical import preserved; a normal (non-historical) import's undo keeps the default stamp/strip.
 
 ### Conditional transitions
 
@@ -113,7 +121,7 @@ A `state_machine` rule has no per-transition guard. To gate a transition on a pr
 
 Because the transition table is data, both UIs and Agents can ask "from this state, what's legal next?" instead of parsing a formula.
 
-- **In code**, `legalNextStates(objectSchema, field, currentState)` from `@objectstack/objectql` returns the declared next states, `[]` for a known dead-end, or `null` when no `state_machine` rule governs the field.
+- **In code**, `legalNextStates(objectSchema, field, currentState)` from `@objectstack/objectql` returns the declared next states, `[]` when the state has no outgoing edges (an explicit `[]` **or** a state the table never mentions — introspection does not distinguish the two, enforcement does), or `null` when no `state_machine` rule governs the field.
 - **Over HTTP**, `GET /api/v1/meta/objects/:name/state/:field?from=:state` returns `{ object, field, from, next }`, where `next` is the legal-next list (or `null`).
 
 <Callout type="info">

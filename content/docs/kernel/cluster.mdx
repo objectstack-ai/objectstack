@@ -83,19 +83,32 @@ These four are the minimum sufficient set. Higher-level facilities
 
 - **No native job queue primitive.** A job queue is `KV + Lock + PubSub`
   composed; expressing it directly in the cluster layer would couple the
-  protocol to a specific queue shape. `service-queue` builds on the primitives
-  instead.
+  protocol to a specific queue shape. `service-queue` is expected to build on
+  the primitives instead — today it ships memory and DB adapters only and does
+  not consume the cluster service.
 - **No native cache primitive.** Caches are `KV + PubSub` (read the value,
-  subscribe to the invalidation channel). `service-cache` builds on the
-  primitives instead.
+  subscribe to the invalidation channel). `service-cache` is expected to build
+  on the primitives instead — today it ships a memory adapter plus a Redis
+  adapter skeleton that throws `RedisCacheAdapter not yet implemented`, and it
+  does not consume the cluster service either.
 - **No native stream/Kafka primitive.** Streaming is intentionally out of
   scope for v1. It can be added as a fifth primitive later without changing
   the four above.
 
 ## 4. Event scope and delivery semantics
 
-The single biggest source of cluster bugs is "I called `eventBus.emit(...)`
-and assumed everyone would hear it". Every emit must answer three questions:
+The single biggest source of cluster bugs is "I published an event and assumed
+everyone would hear it". Every emit must answer three questions:
+
+> **Status: protocol only.** The three fields below exist as
+> `EventMetadata.cluster` (`EventClusterOptionsSchema` in
+> `kernel/cluster.zod.ts`, wired into `kernel/events/core.zod.ts`), but **no
+> runtime consumes them** — there is no `eventBus` object in the codebase at
+> all. The kernel's plugin event API is `ctx.hook(name, handler)` /
+> `ctx.trigger(name, ...args)`, neither of which takes cluster metadata. The
+> shipped cross-node path today is a direct `cluster.pubsub.publish(...)` call
+> (§6.2, §7.3). §4.1-§4.4 define what these enum values are *supposed* to mean
+> once a bus reads them.
 
 ### 4.1 Scope — who receives this event?
 
@@ -133,6 +146,11 @@ deliverySemantics: 'best-effort' | 'at-least-once' | 'exactly-once'
   returns. Survives node crash. Handlers must be **idempotent** —
   duplicates are possible during retry. Use for: webhook outbox, audit
   shipping, async job enqueue.
+  **No shipped driver provides this yet.** The `redis` driver publishes over
+  plain Redis pub/sub, which is *at-most-once* — fire-and-forget, no
+  persistence, no replay for a node that was down at publish time. Only route
+  cache-invalidation hints through it; anything that must survive a crash needs
+  a durable outbox of its own.
 - **`exactly-once`** — Reserved keyword; **not implemented in v1**. The
   protocol accepts the enum value so future runtimes can add it without a
   breaking change. Startup rejection of this value is *intended* behaviour
@@ -153,29 +171,56 @@ partition keys: record id, tenant id, conversation id.
 When unset, no ordering is guaranteed — handlers may run in parallel and
 out of emit order.
 
+> **Status: accepted but ignored.** `PublishOptions.partitionKey` is part of
+> the `IPubSub` contract and callers already pass it (the metadata manager
+> keys on `` `${type}:${name}` ``), but both shipped drivers take the options
+> bag as an unused `_opts` parameter. The memory driver's synchronous
+> single-process fan-out preserves emit order anyway; the redis driver gives
+> you whatever ordering Redis pub/sub does. Do not rely on cross-key ordering
+> guarantees yet.
+
 ### 4.4 The combined contract
 
+The three fields compose into one `EventMetadata.cluster` block:
+
 ```ts
-eventBus.emit('account.updated', payload, {
+// target shape — parses today, nothing reads it yet
+const metadata = {
+  source: 'my-plugin',
+  timestamp: new Date().toISOString(),
   cluster: {
     scope: 'cluster',
     deliverySemantics: 'at-least-once',
     partitionKey: payload.id,
   },
+}
+```
+
+Once a bus honours it, that combination is the intended way to invalidate a
+per-record cache entry across a cluster: the `cluster` scope reaches every
+node, `at-least-once` guarantees no node misses the invalidation across a
+crash, and `partitionKey` ensures that two rapid updates to the same record
+are applied in order.
+
+Until then, the working equivalent is a direct publish on the cluster
+service — it accepts `partitionKey` (see the §4.3 caveat) and gives
+best-effort delivery only:
+
+```ts
+import type { IClusterService } from '@objectstack/spec/contracts'
+
+const cluster = ctx.getService<IClusterService>('cluster')
+await cluster.pubsub.publish('account.updated', payload, {
+  partitionKey: payload.id,
 })
 ```
 
-This is the **only** correct way to invalidate a per-record cache entry
-across a cluster: the `cluster` scope reaches every node, `at-least-once`
-guarantees no node misses the invalidation across a crash, and
-`partitionKey` ensures that two rapid updates to the same record are
-applied in order.
-
 ## 5. Service scope and leader election
 
-Every service registered with the kernel must declare its **cluster scope**.
-This is independent of DI lifecycle scope (`singleton` / `transient` /
-`scoped`); it answers a different question.
+Every service registered with the kernel has a **cluster scope**. The
+annotation is optional — omitting it is equivalent to
+`{ clusterScope: 'node' }`. This is independent of DI lifecycle scope
+(`singleton` / `transient` / `scoped`); it answers a different question.
 
 | `clusterScope` | Meaning |
 |----------------|---------|
@@ -236,11 +281,15 @@ registration (`ServiceMetadata.cluster` / `ServiceFactoryRegistration.cluster`
 When a service declares `clusterScope: 'cluster'`, the runtime will
 automatically:
 
-1. Wrap `onEnable` so the work only starts after lock acquisition (for
-   `leader-elected`).
+1. Wrap the plugin's `start(ctx)` so the work only begins after lock
+   acquisition (for `leader-elected`).
 2. Refresh the lock TTL via heartbeat while the node is healthy.
-3. Release the lock on `onDisable` or graceful shutdown.
+3. Release the lock on `destroy()` / the `kernel:shutdown` hook.
 4. Emit a leadership-change event so dependent services can react.
+
+(The kernel's plugin contract is `init(ctx)` / `start(ctx)` / `destroy()`. The
+`onEnable` / `onDisable` family was retired from the protocol — it never had
+an invocation site — so do not reach for it here.)
 
 A plugin author writing a cron scheduler will **not** write any lock code —
 they declare scope and strategy, and the runtime does the rest.
@@ -278,18 +327,24 @@ invalidation evicts a "newer" value the node has already learned about.
 ### 6.2 The metadata change event
 
 **Current behaviour.** Cross-node metadata invalidation already works, but
-it does **not** go through `eventBus.emit`. The metadata manager fans out
-over the cluster PubSub channel `metadata.changed` (note: dot, not colon)
-with the payload shape `ClusterMetadataChangedPayload`:
+not through any event bus (there isn't one — see §4). The metadata manager
+fans out over the cluster PubSub channel `metadata.changed` (note: dot, not
+colon) with the payload shape `ClusterMetadataChangedPayload`:
 
 ```ts
-// packages/metadata/src/metadata-manager.ts
-ctx.cluster.pubsub.publish('metadata.changed', {
-  originNode,        // used for loopback suppression
-  type,              // 'object' | 'view' | 'dashboard' | …
-  event,             // the local watch event, replayed verbatim on peers
-})
+// packages/metadata/src/metadata-manager.ts — notifyWatchers()
+this.clusterPubSub.publish('metadata.changed', {
+  originNode: this.clusterNodeId, // used for loopback suppression
+  type,                           // 'object' | 'view' | 'dashboard' | …
+  event,                          // the local watch event, replayed verbatim on peers
+}, { partitionKey: `${type}:${event.name ?? ''}` })
 ```
+
+The transport is handed to the manager by `MetadataClusterBridgePlugin`
+(`@objectstack/service-cluster`), which calls
+`metadata.attachClusterPubSub(cluster.pubsub, cluster.nodeId)` on
+`kernel:ready`. `Runtime` registers that bridge automatically alongside the
+cluster service.
 
 Peers suppress their own messages by `originNode` and replay the watch
 event locally — there is currently **no** `version` / `name` / `tenantId` /
@@ -336,7 +391,8 @@ in §4-§6; this is the cheat sheet.
 
 ### 7.1 "I want to fire an event"
 
-Pick scope first, then delivery, then partition key:
+Target design only — no runtime reads `EventMetadata.cluster` today (§4). Pick
+scope first, then delivery, then partition key:
 
 | You want to…                                | scope     | delivery        | partitionKey  |
 |---------------------------------------------|-----------|-----------------|---------------|
@@ -360,18 +416,36 @@ Ask: **if I deploy 5 nodes, should there be 5 of these or 1?**
   - "Pulls from a shared queue" → `partitioned`
   - "Reacts to events with idempotent writes" → `idempotent-broadcast`
 
+Declaring `cluster` does not yet *do* anything (§5.1) — until Phase 4 lands
+you still have to hold the invariant yourself, either by wrapping the work in
+`cluster.lock.withLock(key, fn)` or by acquiring and releasing by hand the way
+`service-job`'s cron scheduler does (`cluster.lock.acquire(key, { waitMs: 0 })`,
+bail out when it returns `null`, release in a `finally`).
+
 ### 7.3 "I want to read metadata in a long-lived cache"
 
-There is **no** `ctx.cluster.cache(...)` factory. The cluster service
-exposes only the four primitives (`ctx.cluster.{pubsub, lock, kv, counter}`,
-see §3) — caches are *derived* from `KV + PubSub` by `service-cache`, they
-are not a built-in cluster method.
+There is **no** `cluster.cache(...)` factory, and there is no `ctx.cluster`
+property either — `PluginContext` exposes the service-registry family
+(`registerService` / `registerServiceFactory` / `getService` /
+`getServiceScoped` / `getServices` / `replaceService`), `hook` / `trigger`,
+`logger` and `getKernel`. No cluster handle is among them, so resolve the
+cluster service by name:
+
+```ts
+import type { IClusterService } from '@objectstack/spec/contracts'
+
+const cluster = ctx.getService<IClusterService>('cluster')
+```
+
+It exposes only the four primitives (`cluster.{pubsub, lock, kv, counter}`,
+see §3) plus `nodeId` / `driver` / `close()`. Caches are meant to be *derived*
+from `KV + PubSub`; they are not a built-in cluster method.
 
 To keep an in-process metadata cache coherent today, subscribe to the
 metadata change channel via PubSub and invalidate on each notification:
 
 ```ts
-ctx.cluster.pubsub.subscribe('metadata.changed', (msg) => {
+cluster.pubsub.subscribe('metadata.changed', (msg) => {
   const payload = msg.payload // { originNode?, type, event }
   if (payload.type === 'object') {
     myObjectCache.invalidate(payload.event)
@@ -386,29 +460,31 @@ the subscribe call a no-op-equivalent local fan-out on a single node.
 
 ### 7.4 What you must never do
 
-- Never call `setInterval` for cluster-wide periodic work — declare a
-  `cluster`-scoped service with `leader-elected`.
+- Never call `setInterval` for cluster-wide periodic work — gate each tick on
+  `cluster.lock` (and declare `clusterScope: 'cluster'` + `leader-elected` so
+  Phase 4 can take the wiring over from you).
 - Never `SELECT … WHERE status = 'pending' LIMIT 1` without a row lock —
   use `SELECT … FOR UPDATE SKIP LOCKED` (Postgres) or
   `UPDATE … RETURNING` with a `claimed_by` column.
 - Never write into a process-local `Map` and assume other nodes see it —
-  use `ctx.cluster.kv` for shared state.
-- Never `import Redis from 'redis'` directly — go through
-  `ctx.cluster.{pubsub, lock, kv, counter}`.
+  use `cluster.kv` for shared state.
+- Never `import Redis from 'ioredis'` directly — go through
+  `cluster.{pubsub, lock, kv, counter}`.
 
 ## 8. Configuration surface
 
-Cluster behaviour is configured once, at the stack level. The protocol
-ships a single optional field on `defineStack()`:
+Cluster behaviour is configured once, at the runtime level. The shape is
+`ClusterCapabilityConfig` (`kernel/cluster.zod.ts`), and it is passed on the
+`Runtime` constructor:
 
 ```ts
-defineStack({
-  // …existing fields…
+import { Runtime } from '@objectstack/runtime'
+
+const runtime = new Runtime({
   cluster: {
     driver: 'memory',   // default — single-process
-    // driver: 'redis', url: process.env.REDIS_URL,
-    // driver: 'postgres', useExistingPool: true,
-    // driver: 'nats', url: process.env.NATS_URL,
+    // driver: 'redis', url: process.env.OS_REDIS_URL,
+    // driver: 'custom',  // resolved from registerClusterDriver()
 
     nodeId: process.env.NODE_ID,           // optional, auto-generated if absent
     heartbeatMs: 5000,                     // leader-election heartbeat
@@ -420,32 +496,67 @@ defineStack({
 })
 ```
 
+<Callout type="warn">
+  `defineStack()` has **no** `cluster` field — `stack.zod.ts` never gained one.
+  Putting a `cluster` key in a stack definition is silently dropped. Cluster
+  config belongs to the runtime, not the metadata package.
+</Callout>
+
+The same object can be passed lower down when you are wiring the kernel by
+hand, or used to build a bare service:
+
+```ts
+import { ClusterServicePlugin, defineCluster } from '@objectstack/service-cluster'
+
+kernel.use(new ClusterServicePlugin({ config: { driver: 'memory', nodeId: 'web-1' } }))
+
+// …or standalone, outside a kernel
+const cluster = defineCluster({ driver: 'memory' })
+```
+
+Under `os serve` the driver is selected from the environment instead:
+`OS_CLUSTER_DRIVER` (anything other than `memory` triggers a dynamic import of
+`@objectstack/service-cluster-<driver>`) and `OS_REDIS_URL` for the connection
+string. A distribution may register a multi-node gate; when it denies,
+`os serve` logs a warning and downgrades to the single-node in-memory cluster
+rather than failing.
+
 Every cluster primitive selects its implementation from `cluster.driver`.
-When the field is absent, the kernel silently auto-registers the in-memory,
-single-node driver. Emitting a production warning in this case (so operators
-notice that horizontal scale will be incorrect until `cluster.driver` is
-configured) is *intended* but **not yet implemented** — no such warning is
-logged today.
+When the field is absent, `Runtime` auto-registers the in-memory, single-node
+driver (pass `cluster: false` to skip registration entirely). No production
+warning is emitted for that case. There *is* a split-brain guard: if the
+operator declares a multi-node topology via `OS_EXPECT_MULTI_NODE=true` or
+`OS_CLUSTER_REPLICAS` > 1 while the resolved driver is `memory`, startup
+**throws** — override with `OS_ALLOW_MEMORY_CLUSTER_MULTINODE=true`.
 
 ### 8.1 Driver matrix
 
-| Driver       | PubSub                | Lock                       | KV                  | Counter        |
-|--------------|-----------------------|----------------------------|---------------------|----------------|
-| `memory`     | EventEmitter          | in-proc mutex              | Map                 | int            |
-| `redis`      | Redis Pub/Sub Streams | SETNX + TTL + Lua release  | GET/SET             | INCR           |
-| `postgres`   | `LISTEN/NOTIFY`       | advisory locks             | dedicated KV table  | sequence       |
-| `nats`       | NATS subjects + JetStream | KV bucket lock         | KV bucket           | KV INCR        |
+| Driver       | PubSub                | Lock                       | KV                  | Counter        | Ships today |
+|--------------|-----------------------|----------------------------|---------------------|----------------|-------------|
+| `memory`     | in-process fan-out    | per-key FIFO queue + TTL   | Map                 | Map of bigints | ✅ `@objectstack/service-cluster` |
+| `redis`      | `PUBLISH`/`SUBSCRIBE` (at-most-once) | `SET … NX PX` + Lua release/renew | `WATCH`/`MULTI` | `INCRBY`       | ✅ `@objectstack/service-cluster-redis` |
+| `postgres`   | `LISTEN/NOTIFY`       | advisory locks             | dedicated KV table  | sequence       | ❌ not built |
+| `nats`       | NATS subjects + JetStream | KV bucket lock         | KV bucket           | KV INCR        | ❌ not built |
+
+Only `memory` and `redis` are implemented. `postgres` and `nats` are accepted
+by `ClusterDriverSchema` but no package provides them — `defineCluster()`
+throws `Cluster driver "<name>" is not registered` for either. The `custom`
+driver value resolves whatever a plugin registered via
+`registerClusterDriver(name, factory)`.
 
 The `redis` driver is the recommended starting point for production
-ObjectStack deployments: it shares its connection pool with the planned
-`service-cache` Redis adapter (no extra infrastructure once cache is on
-Redis), gives native semantics for every primitive (SETNX/Lua/INCR/PUBSUB),
-and decouples cluster transport from the choice of database driver
-(SQL / Turso / Postgres / SQLite all work the same).
+ObjectStack deployments: it accepts a pre-built ioredis client via
+`driverOptions.client`, so it can share one connection pool with any other
+Redis consumer (the `service-cache` Redis adapter is still a skeleton, so
+there is nothing to share with yet); it gives native semantics for every
+primitive (SET NX/Lua/INCRBY/PUBLISH); and it decouples cluster transport from
+the choice of database driver (SQL / Turso / Postgres / SQLite all work the
+same).
 
-The `postgres` driver remains a viable "single binary, single dependency"
+A `postgres` driver would remain a viable "single binary, single dependency"
 choice for small deployments that already run Postgres and want to avoid
-a Redis dependency. It is deferred to a community/optional driver.
+a Redis dependency, but nobody has built one — it is deferred to a
+community/optional driver against the same `registerClusterDriver()` SPI.
 
 ## 9. Industry alignment
 
@@ -459,7 +570,8 @@ ecosystem; none are novel.
   with invalidation broadcast; leader-elected schedulers. Maps to §6 and
   `leader-elected` strategy.
 - **Odoo `bus.bus`** — Postgres `LISTEN/NOTIFY` for cross-worker fan-out.
-  Validates our `postgres` driver as the right default starting point.
+  Validates `LISTEN/NOTIFY` as a sound transport for the deferred `postgres`
+  driver (§8.1, Phase 5) — ObjectStack shipped `redis` first instead.
 - **Notion / Linear** — Redis pub/sub for realtime fan-out with
   per-document partitioning. Validates `partitionKey` ordering as the
   right primitive.
@@ -482,24 +594,30 @@ v4 consumers.
 3. Extend `kernel/service-registry.zod.ts` `ServiceMetadataSchema` and
    `ServiceFactoryRegistrationSchema` with an optional nested `cluster`
    object (`clusterScope`, `leaderStrategy`).
-4. Add optional `cluster` field to `stack.zod.ts`.
+4. ~~Add optional `cluster` field to `stack.zod.ts`.~~ **Dropped** — cluster
+   config landed on `RuntimeConfig` instead (see §8); `stack.zod.ts` has no
+   `cluster` field.
 
-No runtime changes. After this phase the protocol *describes* cluster
-semantics; nothing *enforces* them.
+Steps 1-3 shipped. No runtime changes in this phase: the protocol *describes*
+cluster semantics; nothing *enforces* them.
 
-### Phase 2 — In-memory runtime (~2 days)
+### Phase 2 — In-memory runtime (~2 days) ✅
 
 Implement `service-cluster` with the `memory` driver only. Every cluster
 primitive works; behaviour on one node is identical to today. This phase
-proves the API shape against real callers (EventBus, service-cache,
-service-job) before committing to a wire format.
+proves the API shape against real callers before committing to a wire format.
+In practice the only callers wired so far are `MetadataClusterBridgePlugin`,
+`service-job`'s cron scheduler, and `service-messaging`'s dispatchers —
+`service-cache` and `service-queue` still do not consume the cluster service.
 
 ### Phase 3 — Redis driver (~2 days) ✅
 
 Implement `redis` driver via `@objectstack/service-cluster-redis`
-(PUBSUB + SETNX/Lua locks + WATCH/MULTI KV + INCR counter). Ships as a
-sibling package so adopters opt in by importing it. Shares its ioredis
-client pool with `service-cache` to avoid double connections.
+(PUBLISH/SUBSCRIBE + `SET NX PX`/Lua locks + WATCH/MULTI KV + INCRBY counter).
+Ships as a sibling package so adopters opt in by importing it — the import
+self-registers the driver via `registerClusterDriver('redis', …)`. It can
+share an ioredis client with other consumers by passing
+`driverOptions.client`, though nothing shares one with it today.
 
 > **Note**: this was switched from "Postgres first" — see commit history.
 > Rationale: Postgres isn't a fixed dependency in the ObjectStack stack,
@@ -508,10 +626,18 @@ client pool with `service-cache` to avoid double connections.
 
 ### Phase 4 — Existing services migrate (~3 days, opportunistic)
 
+Not started. `service-job` already leader-elects by calling
+`cluster.lock.acquire('job:<name>')` directly, but that is hand-rolled — none
+of the declarative wiring below exists yet.
+
 - `service-job` declares `clusterScope: 'cluster' / 'leader-elected'`.
-- `service-cache` switches to `ctx.cluster.cache(...)` factory.
+- `service-cache` gains a cluster-backed cache derived from `KV + PubSub`.
 - `service-realtime` adds cross-node fan-out via PubSub.
-- Webhook dispatcher (planned) uses `partitioned` strategy from day one.
+- Webhook dispatcher declares the `partitioned` strategy. (The behaviour
+  already ships hand-rolled: webhook deliveries drain through
+  `service-messaging`'s `HttpDispatcher`, which walks `partitionCount`
+  partitions behind per-partition `cluster.lock` keys — only the declarative
+  annotation is missing.)
 
 ### Phase 5 — Postgres / NATS drivers (deferred, optional)
 

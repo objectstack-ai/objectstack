@@ -5,7 +5,7 @@ description: Deploy ObjectStack applications to Vercel with the Hono server adap
 
 # Deploy to Vercel
 
-ObjectStack 11 deploys to Vercel in **server mode** — serverless functions running the **Hono** adapter (`@objectstack/hono`). The published ObjectStack Studio/console ships as a static Vite SPA that points at a separate ObjectStack server (via `VITE_SERVER_URL`).
+ObjectStack deploys to Vercel in **server mode** — serverless functions running the **Hono** adapter (`@objectstack/hono`). The Console SPA can also be deployed on its own as a static Vite build that points at a separate ObjectStack server (via `VITE_SERVER_URL`) — but that build comes from the Console source repo ([objectui](https://github.com/objectstack-ai/objectui)), not from the prebuilt `@objectstack/console` package.
 
 <Callout type="warn">
 **Removed in 11.** The in-browser MSW mode (`@objectstack/plugin-msw`) and the Next.js adapter (`@objectstack/nextjs`) are no longer published — use the Hono server path below.
@@ -43,7 +43,7 @@ In Server mode, ObjectStack runs inside Vercel Serverless Functions. API request
 This is a valid self-contained pattern when you want to ship a Vite SPA *and* its API from a single Vercel project: the SPA is served as static assets, and a Hono-based serverless function handles `/api/*` requests.
 
 <Callout type="info">
-The published ObjectStack Studio/console (`@objectstack/console`) does **not** use this topology. It deploys as a pure static SPA with no `api/` function — it is meant to be embedded in, or pointed at, a separate ObjectStack server via `VITE_SERVER_URL`. For that separate server, prefer the CLI (`objectstack serve`) over a hand-rolled Hono function.
+The framework-vendored Console (`@objectstack/console`) does **not** use this topology. It is a **prebuilt, dist-only** package — no source and no build step, just static assets — that an ObjectStack server mounts at `/_console` (`os serve --ui`, on by default). Its bundle is baked same-origin, and `VITE_SERVER_URL` is a build-time Vite flag, so aiming a Console at a *different* origin means building it yourself from the Console source repo ([objectui](https://github.com/objectstack-ai/objectui)). For the server itself, prefer the CLI (`os serve`) over a hand-rolled Hono function.
 </Callout>
 
 **1. Create the kernel singleton** (`api/_kernel.ts` — prefixed with `_` to prevent Vercel from creating a route):
@@ -82,7 +82,10 @@ export async function ensureApp(): Promise<Hono> {
 `InMemoryDriver` keeps this snippet self-contained, but on serverless **all data
 is lost on every cold start** — fine for a demo, wrong for anything real. Before
 going past a proof of concept, swap the driver for a real database (see
-[Database Drivers](/docs/data-modeling/drivers)) and point `OS_DATABASE_URL` at it.
+[Database Drivers](/docs/data-modeling/drivers)). A hand-built kernel does **not**
+resolve `OS_DATABASE_URL` on its own — that precedence lives in the CLI and in
+`createStandaloneStack()` — so read the connection string yourself, e.g.
+`new SqlDriver({ client: 'pg', connection: process.env.OS_DATABASE_URL })`.
 </Callout>
 
 **2. Create the API entrypoint** (`api/index.ts`):
@@ -134,7 +137,7 @@ Setting `VITE_SERVER_URL` to empty string tells the client SDK to use same-origi
 
 Configure these in Vercel Project Settings → Environment Variables:
 
-### Studio / SPA build
+### Console / SPA build
 
 | Variable | Description |
 | :--- | :--- |
@@ -179,7 +182,7 @@ storage for artifacts.
 - [ ] `api/_kernel.ts` boots the kernel with the correct driver
 - [ ] `vercel.json` sets `VITE_USE_MOCK_SERVER=false` and `VITE_SERVER_URL=` (empty)
 - [ ] Rewrite rule routes `/api/*` to `/api` and excludes `/api/` from SPA rewrite
-- [ ] `OS_DATABASE_URL` is configured in Vercel environment variables (for production drivers)
+- [ ] The production connection string is set in Vercel environment variables **and** read explicitly by the driver you construct in `api/_kernel.ts` (`OS_DATABASE_URL` is resolved by the CLI / `createStandaloneStack()`, not by a hand-built kernel)
 - [ ] CORS is configured if frontend and API are on different origins
 
 ---

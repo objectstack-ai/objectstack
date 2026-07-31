@@ -17,18 +17,30 @@ variables, rename them to `OS_<NAMESPACE>_<KEY>`. Everything else is additive.
 
 ### 1. Analytics single-form cutover — datasets are now required (ADR-0021)
 
-The inline analytics author surface is removed from `@objectstack/spec`. Every
-dashboard widget, report, and list chart must now bind a semantic **dataset**
-and select dimensions/measures **by name**. Define a metric once, reference it
-everywhere.
+The inline analytics author surface is removed from the dashboard-widget,
+report, and list-chart schemas in `@objectstack/spec`. Every dashboard widget,
+report, and list chart must now bind a semantic **dataset** and select
+dimensions/measures **by name**. Define a metric once, reference it
+everywhere. (An inline `object`/`objectName` + `aggregate` binding still exists
+elsewhere in the spec — the React `<ObjectChart>` block and the page
+`element:number` component — just not on these three schemas.)
 
 Removed from the spec:
 
 | Schema | Removed properties | Now required |
 |:---|:---|:---|
 | `DashboardWidget` | `object`, `categoryField`, `categoryGranularity`, `valueField`, `aggregate`, `measures` (and the `WidgetMeasure` type) | `dataset` + `values` |
-| `Report` | top-level and joined-block `objectName`, `columns`, `groupingsDown`, `groupingsAcross`, `filter` | `dataset` + `values` (`rows` are the dimensions) |
+| `Report` | top-level and joined-block `objectName`, `columns`, `groupingsDown`, `groupingsAcross`, `filter` | `dataset` + `values` (`rows` are the dimensions; scope filtering moves to `runtimeFilter`) |
 | `ListChart` | `xAxisField`, `yAxisFields`, `aggregation`, `groupByField` | `dataset` + `values` |
+
+> Note: `Report.columns` came back one release later (9.1.0) with a different
+> meaning — on both the report and a joined block it now names the dataset
+> **dimensions across** a `matrix` report, not raw report columns. A later
+> release also flipped `DashboardWidget` to reject *any* undeclared top-level
+> key instead of silently stripping it, so a leftover inline-analytics key is
+> now a hard parse error; the error map also names the pivot `rowField` /
+> `columnField` and list-chart `xAxisField` / `yAxisFields` / `aggregation`
+> spellings.
 
 **Migration:**
 
@@ -63,6 +75,12 @@ Kept: `bar` / `horizontal-bar` / `column`, `line` / `area`, `pie` / `donut` /
 single-value performance family (`metric` / `kpi` / `gauge` / `solid-gauge` /
 `bullet`). Removed variants can return behind an opt-in renderer once a real
 renderer and data model back them.
+
+> Note: stacking has since come back as a property of the *series* rather than
+> a chart family — the renderer now honors `ChartSeries.stack` (series sharing
+> a group id stack, otherwise they group), so a stacked bar or area today is
+> the `bar` / `area` family plus a shared `stack` group id on the series. The
+> taxonomy above is unchanged.
 
 ### 3. Settings env overrides: canonical `OS_<NAMESPACE>_<KEY>` only
 
@@ -124,16 +142,20 @@ Two reliability upgrades to `@objectstack/service-automation`'s durable pause
 Whether a `seed` draft's rows actually materialized used to depend on which
 route you published through — the per-ref publish (used by the Studio home
 banner) never applied them, yielding "Published!" with empty tables. Seed
-application now lives in the protocol itself (`@objectstack/objectql`), so
-every publish path converges on it and reports the outcome under
-`seedApplied`. A seed problem never fails the publish.
+application now lives in the metadata protocol itself (today
+`@objectstack/metadata-protocol`), so every publish path converges on it and
+reports the outcome under `seedApplied`. A seed problem never fails the
+publish — callers must check `seedApplied.success` instead of assuming the data
+went live.
 
 ### AI service: tools stream progress while they run
 
-`ToolExecutionContext.onProgress(part)` lets a long-running tool report
+`ToolExecutionContext.onProgress?.(part)` lets a long-running tool report
 progress before it returns, emitted as custom `data-*` parts on the UI message
 stream (this is what powers the live build tree in Console's Build-with-AI).
-Existing tools that never emit behave exactly as before.
+It is set only on the streaming path (`streamChatWithTools`) and is `undefined`
+for non-streaming/system calls, so tools must call it optionally. Existing
+tools that never emit behave exactly as before.
 
 ### Auth: Google sign-in and an extension hook
 
@@ -195,9 +217,11 @@ release lands.
 The deployment story for cloud-bound apps is now **publish, then install**:
 `os package publish` puts a package version in the cloud catalog, and you
 install it into an environment from that environment's **Marketplace** in
-Console — installing is an explicit step, no longer a side effect of a publish
-flag. The environment's **Installed** view reflects what Cloud has installed,
-so packages installed via the CLI show up there too.
+Console — installing is a separate, explicit step rather than something a
+publish does on its own (a publish installs only when you opt in with
+`os package publish --env <id> --install`). The environment's **Installed**
+view reflects what Cloud has installed, so packages installed via the CLI show
+up there too.
 
 Coming in the next framework release: published packages default to
 **organization visibility**, so they appear in your own environments'
