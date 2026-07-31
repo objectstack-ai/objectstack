@@ -288,21 +288,13 @@ export class QueryBuilder<T = any> {
     return this;
   }
 
-  /**
-   * Set cursor for keyset pagination
-   */
-  cursor(cursor: Record<string, any>): this {
-    (this.query as any).cursor = cursor;
-    return this;
-  }
-
-  /**
-   * Enable SELECT DISTINCT
-   */
-  distinct(): this {
-    (this.query as any).distinct = true;
-    return this;
-  }
+  // `cursor()` and `distinct()` were REMOVED with `query.cursor` /
+  // `query.distinct` (#4286, spec 18): no driver ever implemented keyset
+  // pagination or SELECT DISTINCT, so both minted keys the engine ignored —
+  // `cursor` re-served page 1 forever, `distinct`'s only effect was silently
+  // degrading the REST count. Express a keyset as a `where` predicate on the
+  // sort key; deduplicate with `groupBy` / `count_distinct` or the drivers'
+  // `distinct(object, field)` door.
 
   /**
    * Build the final query AST

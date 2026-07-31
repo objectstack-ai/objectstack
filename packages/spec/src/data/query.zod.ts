@@ -220,6 +220,32 @@ const QUERY_JOINS_REMOVED =
   + 'the engine resolves via batch $in queries, and a single related column is a dotted '
   + "`fields` path (`fields: ['owner.name']`).";
 
+/**
+ * Exported (unlike the two above) because `EngineQueryOptionsSchema`
+ * (`data-engine.zod.ts`) re-declared both keys and tombstones them with the
+ * same prescription — one string, two rejection sites.
+ */
+export const QUERY_CURSOR_REMOVED =
+  '`query.cursor` was removed in @objectstack/spec 18 (#4286, ADR-0049) — no driver ever '
+  + 'implemented keyset pagination, so the cursor was accepted and ignored and every page came '
+  + 'back identical (a caller looping "until hasMore is false" never terminates). Delete the '
+  + 'key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary '
+  + '`where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` '
+  + 'with the matching `orderBy` — which every driver executes with canonicalised comparands. '
+  + 'A first-class cursor, if ever built, will be a response-minted opaque token, not this '
+  + 'caller-built record.';
+
+/** See {@link QUERY_CURSOR_REMOVED} for why this one is exported. */
+export const QUERY_DISTINCT_REMOVED =
+  '`query.distinct` was removed in @objectstack/spec 18 (#4286, ADR-0049 / ADR-0078) — no '
+  + "driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: "
+  + 'the REST list path treated a distinct query as not countable and silently degraded '
+  + '`total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete '
+  + 'the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone '
+  + '(`total` is truthful again). For unique values of one column use the SQL/memory drivers\' '
+  + '`distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated '
+  + 'count, the `count_distinct` aggregation.';
+
 const QUERY_WINDOW_FUNCTIONS_REMOVED =
   '`query.windowFunctions` was removed in @objectstack/spec 18 (#4286, ADR-0049) — `find()` '
   + 'never applied it: no engine or driver read the key on the query path, so every OVER '
@@ -273,7 +299,12 @@ export type FullTextSearch = z.infer<typeof FullTextSearchSchema>;
  * 
  * Updates (v3):
  * - Added `search` parameter for full-text search (P2 requirement)
- * 
+ *
+ * Updates (18 — #4286, ADR-0049 enforce-or-remove):
+ * - `joins` / `windowFunctions` / `cursor` / `distinct` REMOVED (tombstoned;
+ *   each rejection carries its replacement)
+ * - `having` ENFORCED engine-side after aggregation
+ *
  * @example
  * // Simple query: SELECT name, email FROM account WHERE status = 'active'
  * {
@@ -323,7 +354,8 @@ const BaseQuerySchema = z.object({
   limit: z.number().optional().describe('Max records to return (LIMIT)'),
   offset: z.number().optional().describe('Records to skip (OFFSET)'),
   top: z.number().optional().describe('Alias for limit (OData compatibility)'),
-  cursor: z.record(z.string(), z.unknown()).optional().describe('Cursor for keyset pagination'),
+  /** Keyset cursor — REMOVED (#4286): express the keyset as a `where` predicate on the sort key. */
+  cursor: retiredKey(QUERY_CURSOR_REMOVED),
   
   /** Joins — REMOVED (#4286): `expand` is the one spelling for related records. */
   joins: retiredKey(QUERY_JOINS_REMOVED),
@@ -334,14 +366,14 @@ const BaseQuerySchema = z.object({
   /** Group By Clause */
   groupBy: z.array(GroupByNodeSchema).optional().describe('GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing)'),
   
-  /** Having Clause */
-  having: FilterConditionSchema.optional().describe('HAVING clause for aggregation filtering'),
-  
+  /** Having Clause — enforced engine-side after aggregation (#4286 step 3). */
+  having: FilterConditionSchema.optional().describe('HAVING — filter over the AGGREGATED rows (aggregation aliases + groupBy projections); applied engine-side after aggregation'),
+
   /** Window functions — REMOVED from the request surface (#4286); the capability's door is `SqlDriver.findWithWindowFunctions()`. */
   windowFunctions: retiredKey(QUERY_WINDOW_FUNCTIONS_REMOVED),
 
-  /** Subquery flag */
-  distinct: z.boolean().optional().describe('SELECT DISTINCT flag'),
+  /** SELECT DISTINCT — REMOVED (#4286): `groupBy` / `count_distinct` / the drivers' `distinct()` door are the live spellings. */
+  distinct: retiredKey(QUERY_DISTINCT_REMOVED),
 });
 
 /**

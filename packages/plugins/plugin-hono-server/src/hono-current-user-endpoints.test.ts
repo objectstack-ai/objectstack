@@ -1,20 +1,19 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #4073 — `registerStandardEndpoints` used to gate two unrelated things:
+// #4073 — the three current-user endpoints are this plugin's SOLE supply, and
+// nothing may gate them.
 //
-//   * DUPLICATE supply — raw `/data` C+R that `@objectstack/rest` also serves
-//     (and, registering first, really serves), plus a discovery the dispatcher
-//     and REST own (#4018).
-//   * SOLE supply — `/auth/me/permissions`, `/auth/me/localization`, `/me/apps`.
-//     Nothing else in the platform mounts these: `packages/rest` and
-//     `packages/runtime` register no `/me/*` route, the console's whole
-//     permission layer reads `/auth/me/permissions`, and `core`'s auth gate
-//     allow-lists `/me/apps` + `/me/localization` as endpoints a gated user MUST
-//     still reach. `os serve` gets them only via the flag's `true` default.
+// `packages/rest` and `packages/runtime` register no `/me/*` route at all. The
+// console's whole permission layer reads `/auth/me/permissions`, and `core`'s
+// auth gate allow-lists `/me/apps` + `/me/localization` as endpoints a gated
+// user MUST still reach. They used to sit behind `registerStandardEndpoints`
+// alongside a duplicate `/data` + discovery surface — one flag over two opposite
+// things, so turning it off took the console down with it. The split landed
+// first (#4144); the duplicate half has since been deleted outright, and these
+// endpoints are all this plugin serves beyond the socket itself.
 //
-// So turning the flag off took the console down with it. These tests pin the
-// split: the flag now covers the duplicate half only, and the current-user
-// endpoints are registered whatever it says.
+// These tests pin both halves of that end state: the `/me/*` routes mount on a
+// plain boot, and nothing of the retired surface comes back.
 
 import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
@@ -32,8 +31,8 @@ const ME_ROUTES = [
  * registered — the actual wiring, not a hand-picked pair of method calls, so a
  * regression that re-gates the current-user endpoints is caught here.
  */
-async function boot(registerStandardEndpoints: boolean) {
-    const plugin = new HonoServerPlugin({ port: 0, registerStandardEndpoints, cors: false });
+async function boot() {
+    const plugin = new HonoServerPlugin({ port: 0, cors: false });
     const readyHooks: Array<() => unknown> = [];
     const ctx: any = {
         logger: { info() {}, debug() {}, warn() {}, error() {} },
@@ -57,41 +56,31 @@ function paths(app: any): string[] {
     return (app.routes ?? []).map((r: any) => r.path);
 }
 
-describe('current-user endpoints are not gated by registerStandardEndpoints (#4073)', () => {
-    it('mounts /me/* with the convenience surface OFF', async () => {
-        const app = await boot(false);
+describe('current-user endpoints are this plugin\'s own supply (#4073)', () => {
+    it('mounts /me/* on a plain boot', async () => {
+        const app = await boot();
         for (const route of ME_ROUTES) {
-            expect(paths(app), `${route} must survive registerStandardEndpoints:false`).toContain(route);
+            expect(paths(app), `${route} must be mounted — this plugin is their only provider`).toContain(route);
         }
     });
 
-    it('mounts /me/* with the convenience surface ON (unchanged for os serve)', async () => {
-        const app = await boot(true);
-        for (const route of ME_ROUTES) expect(paths(app)).toContain(route);
-    });
-
-    it('still gates the duplicate half — no /data CRUD, no /discovery when OFF', async () => {
-        const app = await boot(false);
-        const registered = paths(app);
+    it('mounts nothing of the retired convenience surface', async () => {
+        // The raw `/data` CRUD and the third discovery payload are gone (#4073);
+        // their owners are @objectstack/rest and the runtime dispatcher. If any
+        // of these come back, one route has two owners again (ADR-0076 D11).
+        const registered = paths(await boot());
 
         expect(registered).not.toContain('/api/v1/data/:object');
         expect(registered).not.toContain('/api/v1/discovery');
         expect(registered).not.toContain('/.well-known/objectstack');
     });
 
-    it('registers the duplicate half when ON', async () => {
-        const registered = paths(await boot(true));
-
-        expect(registered).toContain('/api/v1/data/:object');
-        expect(registered).toContain('/api/v1/discovery');
-    });
-
-    it('answers /me/* with the flag OFF instead of 404ing', async () => {
-        const app = await boot(false);
+    it('answers /me/* rather than 404ing', async () => {
+        const app = await boot();
 
         // No auth service is wired, so each endpoint takes its anonymous branch
         // — which is a real answer, not the "route does not exist" 404 the
-        // console used to get when the flag was off.
+        // console used to get when these sat behind the retired flag.
         const permissions = await app.request('http://localhost/api/v1/auth/me/permissions');
         expect(permissions.status).toBe(200);
         expect(await permissions.json()).toEqual({ authenticated: false });
@@ -105,18 +94,16 @@ describe('current-user endpoints are not gated by registerStandardEndpoints (#40
         expect(await apps.json()).toEqual({ apps: [] });
     });
 
-    it('registers /me/* BEFORE the CRUD block — the order plugin-auth collides with', async () => {
-        // plugin-auth mounts a TERMINAL `rawApp.all('/api/v1/auth/*')` from its
-        // own kernel:ready hook, so `/auth/me/*` only wins the match by being
-        // registered first. The split must not have moved these later.
-        const registered = paths(await boot(true));
-        const firstMe = registered.indexOf('/api/v1/auth/me/permissions');
-        const firstData = registered.indexOf('/api/v1/data/:object');
-
-        expect(firstMe).toBeGreaterThanOrEqual(0);
-        expect(firstData).toBeGreaterThanOrEqual(0);
-        expect(firstMe).toBeLessThan(firstData);
-    });
+    /**
+     * The case that used to live here pinned `/me/*` registering BEFORE this
+     * plugin's own CRUD block, because plugin-auth mounts a catch-all over
+     * `/api/v1/auth/*` and `/auth/me/*` won the match only by registering
+     * first. Both halves of that are gone: the CRUD block was deleted (#4073),
+     * and #4088 made the auth catch-all fall through for paths better-auth does
+     * not implement, so the surface no longer depends on `kernel.use()` order
+     * at all. `plugin-auth/auth-catchall-fallthrough.test.ts` pins that
+     * directly, registering the catch-all FIRST — the order that used to fail.
+     */
 });
 
 // cloud#924 — #4079 freed these three from the wrong flag, but left the SUPPLY

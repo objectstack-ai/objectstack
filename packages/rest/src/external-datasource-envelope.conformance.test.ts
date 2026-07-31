@@ -227,6 +227,29 @@ describe('external-datasource envelope (#3843) — error bodies', () => {
         { params: { name: 'ext', remote: 'customers' } },
       ),
     },
+    {
+      // #4264: the two rows below are the routes #4249 left uncovered — no
+      // `catch` at all, so these throws surfaced as the adapter's non-envelope
+      // `500 { error: 'No response from handler' }`, the real cause swallowed.
+      name: 'a catalog refresh the service refuses',
+      status: 400,
+      code: 'EXTERNAL_DATASOURCE_ERROR',
+      run: () => drive(
+        mount({ refreshCatalog: async () => { throw new Error('unknown datasource "ext"'); } }),
+        'POST',
+        `${EXT}/refresh-catalog`,
+      ),
+    },
+    {
+      name: 'a validation sweep the service refuses',
+      status: 400,
+      code: 'EXTERNAL_DATASOURCE_ERROR',
+      run: () => drive(
+        mount({ validateAll: async () => { throw new Error('metadata store offline'); } }),
+        'POST',
+        `${EXT}/validate`,
+      ),
+    },
   ];
 
   for (const c of CASES) {

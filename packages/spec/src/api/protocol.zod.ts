@@ -10,7 +10,8 @@ import {
   DeleteManyRequestSchema,
 } from './batch.zod';
 import { MetadataCacheRequestSchema, MetadataCacheResponseSchema } from './http-cache.zod';
-import { QuerySchema } from '../data/query.zod';
+import { QuerySchema, QUERY_DISTINCT_REMOVED } from '../data/query.zod';
+import { retiredKey } from '../shared/retired-key';
 import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
 import { 
   AnalyticsQueryRequestSchema,  
@@ -335,7 +336,8 @@ export const HttpFindQueryParamsSchema = lazySchema(() => z.object({
     + 'Resolved to populate array and passed to the engine for batch $in expansion.'
   ),
   search: z.string().optional().describe('Full-text search query.'),
-  distinct: z.coerce.boolean().optional().describe('SELECT DISTINCT flag.'),
+  /** `?distinct` — REMOVED (#4286): the querystring spelling of `query.distinct`, same tombstone. */
+  distinct: retiredKey(QUERY_DISTINCT_REMOVED),
   count: z.coerce.boolean().optional().describe('Include total count in response.'),
 }));
 

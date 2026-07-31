@@ -16,7 +16,6 @@
   "scripts": {
     "build": "tsup --config ../../tsup.config.ts",
     "dev": "tsc -w",
-    "lint": "eslint src",
     "test": "vitest run"
   },
   "dependencies": {

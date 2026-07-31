@@ -365,6 +365,47 @@ export class MyPlugin implements Plugin {
 
 ---
 
+## Route & surface ownership
+
+Four rules, each paid for by a real bug. They matter more than usual here because
+this repo is largely written by agents, and every one of them is a trap that
+reads as reasonable code.
+
+**1. One route, one owner.** Never add a second implementation of a path that
+another package already serves, however convenient. A shadowed duplicate is code
+that `grep` finds and the runtime never runs — the exact input that makes an
+agent (or a human) reason confidently from dead code. It also silently forks
+every future invariant: the retired hono `/data` surface had to re-learn the
+anonymous-deny gate (#2567), honest batch capability reporting (#3298) and
+discovery accuracy (#4018), each after the fact, each because someone fixed the
+real owner and never knew about the copy. Retired in #4073.
+
+**2. Explicit composition over default magic.** A capability that appears
+because of a default nobody wrote down is invisible at every call site — and
+call sites are the primary evidence an agent reasons from. #4073's own first
+analysis checked *who passes the option* and missed *who relies on the default*;
+the correction is in that issue's opening paragraph. If a host should get a
+surface, it should mount it.
+
+**3. Absence must be loud.** A composition that legitimately serves nothing
+should say so once at boot, naming the remedy — never leave a bare 404 to be
+diagnosed. The same rule applies to tooling: a verifier that silently degrades
+(reusing a stale build, skipping a check it could not run) is worse than no
+verifier, because it reports success. Prefer failing to falling back.
+
+**4. Machine-readable surfaces must not lie.** `/discovery` and friends are read
+by SDKs, codegen and AI clients. Advertise only what is actually mounted, and
+mount everything advertised (ADR-0076 D12) — a wrong answer here propagates into
+everything built on top of it.
+
+**Verifying any of this:** "who serves this path" is a question about the
+composed, *provisioned* runtime — not about which plugin declares it, not about
+registration order, and not about a minimal harness that merely boots. #4073 was
+answered wrongly three times, once per each of those shortcuts. Boot the real
+composition with its real services, or do not claim an answer.
+
+---
+
 ## Post-Task Checklist
 
 1. `pnpm test` — verify nothing broke.

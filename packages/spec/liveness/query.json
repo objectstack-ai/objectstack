@@ -1,6 +1,6 @@
 {
   "type": "query",
-  "_note": "QuerySchema (BaseQuerySchema + expand) — packages/spec/src/data/query.zod.ts. NOT a registered metadata type: QueryAST is the REQUEST surface (the client SDK QueryBuilder's output; the POST /data/:object/query body), governed via the gate's SPEC_ONLY_SCHEMAS override like webhook (#4286). It is authorable by every API caller yet never stored as stack metadata, which is why no other gate reached it: this ledger read the metadata-type registry, check:authorable-surface walks the same registry, and check:exported-any is a type-resolution gate. Seeded 2026-07-31 from the #4286 sweep — joins/windowFunctions REMOVED (tombstoned; protocol-18 semantic migrations), search sub-flags + aggregations.filter marked experimental at the schema, cursor/distinct/having dead pending their #4286 dispositions. The main executor evidence below: objectql engine find/aggregate and the drivers' find paths.",
+  "_note": "QuerySchema (BaseQuerySchema + expand) — packages/spec/src/data/query.zod.ts. NOT a registered metadata type: QueryAST is the REQUEST surface (the client SDK QueryBuilder's output; the POST /data/:object/query body), governed via the gate's SPEC_ONLY_SCHEMAS override like webhook (#4286). It is authorable by every API caller yet never stored as stack metadata, which is why no other gate reached it: this ledger read the metadata-type registry, check:authorable-surface walks the same registry, and check:exported-any is a type-resolution gate. Seeded 2026-07-31 from the #4286 sweep; closed out same day — joins/windowFunctions/cursor/distinct REMOVED (tombstoned; protocol-18 semantic migrations; the cursor/distinct SDK producers deleted with their keys), having ENFORCED engine-side, search sub-flags + aggregations.filter marked experimental at the schema. The main executor evidence below: objectql engine find/aggregate and the drivers' find paths.",
   "props": {
     "object": {
       "status": "live",
@@ -55,7 +55,7 @@
     "cursor": {
       "status": "dead",
       "verifiedAt": "2026-07-31",
-      "note": "#4286 Tier A: a public SDK method mints it — QueryBuilder.cursor() (packages/client/src/query-builder.ts:294), serialized to the wire at 5 sites in client/src/index.ts, and re-declared on EngineQueryOptionsSchema — but no driver implements keyset pagination, so it has no effect. Disposition PENDING (#4286 step 4): removal is ADR-0087 conversion/tombstone work that must take the SDK producer and the wire sites with it."
+      "note": "REMOVED 2026-07-31 (#4286 step 4, resolved to remove) — tombstoned at the schema (retiredKey; also on EngineQueryOptionsSchema, same prescription) and the shipped producer QueryBuilder.cursor() deleted with it: no driver implemented keyset pagination, so the cursor re-served page 1 forever. The protocol-18 semantic migration `query-cursor-retired` carries it (request surface, no source to rewrite). The entry stays because retiredKey keeps the key in the walked shape. Manual keyset (a `where` predicate on the sort key) is the documented pattern; a first-class cursor, if ever designed, will be a response-minted opaque token. NOTE: the `cursor: string` params on listRevisions / flow-runs / notifications in client/src/index.ts are those endpoints' own server-minted tokens — live, unrelated, untouched."
     },
     "joins": {
       "status": "dead",
@@ -93,9 +93,10 @@
       "evidence": "packages/objectql/src/engine.ts aggregate() forwards groupBy; packages/objectql/src/in-memory-aggregation.ts buckets by it (including dateGranularity fallback)"
     },
     "having": {
-      "status": "dead",
+      "status": "live",
       "verifiedAt": "2026-07-31",
-      "note": "Never delivered: engine.aggregate() rebuilds the AST it hands the driver with exactly object/where/groupBy/aggregations, so a driver that DID implement HAVING would never receive it (#4286 finding 1), and the in-memory fallback has no HAVING stage. The strongest ENFORCE candidate of the #4286 set — a genuinely expected SQL capability the fallback could apply in a few lines — so it is deliberately left declared pending that call (#4286 step 3). The FLS predicate guard already walks it (predicate-guard.ts:64), so enforcing it later leaks nothing."
+      "evidence": "packages/objectql/src/having-filter.ts (the evaluator); packages/objectql/src/engine.ts aggregate() applies it after BOTH the native-driver path and the in-memory fallback; packages/metadata-protocol/src/protocol.ts findData aggregate branch forwards it; packages/spec/src/data/data-engine.zod.ts EngineAggregateOptionsSchema declares it",
+      "note": "ENFORCED 2026-07-31 (#4286 step 3, resolved to enforce): engine-owned, applied AFTER aggregation over the aggregated row's namespace (aggregation aliases + groupBy projections); an unknown operator rejects loudly instead of being ignored. Was #4286 finding 1 — aggregate() rebuilt the driver AST without it, so even a HAVING-implementing driver could never receive it. Native SQL pushdown can come later behind a driver capability flag (the dateGranularity two-tier pattern) without changing semantics. The FLS predicate guard walks it (predicate-guard.ts:64)."
     },
     "windowFunctions": {
       "status": "dead",
@@ -105,8 +106,7 @@
     "distinct": {
       "status": "dead",
       "verifiedAt": "2026-07-31",
-      "authorWarn": true,
-      "note": "#4286 finding 2 — MIS-WIRED, not merely dead (ADR-0078 treats this more harshly): no driver renders SELECT DISTINCT, but metadata-protocol/src/protocol.ts:3816 treats `options.distinct != null` as not-countable, so a distinct query silently skips engine.count() and degrades the REST total/hasMore to a page-local estimate — the caller gets non-distinct rows AND worse pagination metadata. QueryBuilder.distinct() (packages/client/src/query-builder.ts:302) mints it; also declared on EngineQueryOptionsSchema. Disposition PENDING (#4286 step 4): removal or enforcement must handle the count-suppression side effect deliberately either way."
+      "note": "REMOVED 2026-07-31 (#4286 step 4, resolved to remove) — tombstoned at the schema (retiredKey; also on EngineQueryOptionsSchema, same prescription), the shipped producer QueryBuilder.distinct() deleted, AND the mis-wiring deleted with it: finding 2 was that the flag's only observable effect was suppressing the REST list count (protocol.ts `countable`), so callers got duplicate rows plus degraded total/hasMore — worse than dead, a side effect that 'confirmed' a capability that never ran. `total` is truthful for those queries again (the observable REST change, called out in the changeset). The protocol-18 semantic migration `query-distinct-retired` carries it. The entry stays because retiredKey keeps the key in the walked shape. Live spellings: groupBy, count_distinct, the drivers' distinct(object, field) door. AggregationNode.distinct (per-aggregation dedupe) is a different, live member — see aggregations.children."
     },
     "expand": {
       "status": "live",

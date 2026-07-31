@@ -86,26 +86,23 @@ aggregations (never bucket by hand in app code):
 
 ## HAVING Clause
 
-> ⚠️ **Schema-reserved — NOT executed by the engine yet.** `having`
-> validates against `QuerySchema`, but `EngineAggregateOptions` has no
-> `having` property and nothing implements it — the clause is silently
-> dropped and every group is returned. **Working alternative:** post-filter
-> the aggregated rows in application code:
+> ✅ **Enforced since #4286.** The engine applies `having` AFTER aggregation
+> (both the native-driver path and the in-memory fallback), referencing the
+> **aggregated row's columns** — aggregation aliases and groupBy projections.
+> Ordinary FilterCondition operators plus `$and`/`$or`/`$not`; an unknown
+> operator is rejected loudly, never ignored.
 
 ```typescript
-// ❌ having is silently ignored
-// { ..., having: { order_count: { $gt: 5 } } }
-
-// ✅ Aggregate, then filter the result rows in app code
+// ✅ Only customers with more than 5 orders
 const rows = await engine.aggregate('order', {
   groupBy: ['customer_id'],
   aggregations: [{ function: 'count', alias: 'order_count' }],
+  having: { order_count: { $gt: 5 } },
 });
-const frequentCustomers = rows.filter((r) => r.order_count > 5);
 ```
 
-Aggregated result sets are one row per group — usually small enough that an
-app-side filter is cheap. Use `where` to shrink the input rows first.
+`having` filters *groups*; `where` filters the *input rows* before grouping —
+use `where` to shrink the scan, `having` to threshold the aggregates.
 
 ## Filtered Aggregation (FILTER WHERE)
 
@@ -242,15 +239,12 @@ over the two periods and join the buckets in app code.
   groupBy: ['customer_id']
 }
 
-// ❌ Also wrong: having is schema-reserved and silently ignored (see above)
-// { ..., having: { order_count: { $gt: 5 } } }
-
-// ✅ Aggregate, then filter the group rows in app code
+// ✅ Right: `having` references the aggregation ALIAS, after grouping (#4286)
 const rows = await engine.aggregate('order', {
   groupBy: ['customer_id'],
   aggregations: [{ function: 'count', alias: 'order_count' }],
+  having: { order_count: { $gt: 5 } },
 });
-const result = rows.filter((r) => r.order_count > 5);
 ```
 
 ### ❌ Wrong: sum/avg on non-numeric fields

@@ -3,6 +3,7 @@ import { LiteKernel } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
+import { createRestApiPlugin } from '@objectstack/runtime';
 import { ObjectStackClient } from './index';
 
 describe('ObjectStackClient (with Hono Server)', () => {
@@ -25,19 +26,22 @@ describe('ObjectStackClient (with Hono Server)', () => {
             },
         } as any);
         
-        // 2. Setup Hono Plugin
-        // This suite exercises the CLIENT's data operations over the raw-hono
-        // standard endpoints; it wires no auth service. Opt out of the
-        // secure-by-default anonymous-deny posture (#2567) so the anonymous
-        // data CRUD under test stays reachable — the same explicit
-        // `requireAuth: false` a deployment that intentionally serves data
-        // publicly would set. The gate itself is proven in
-        // plugin-hono-server/hono-anonymous-deny.test.ts.
-        const honoPlugin = new HonoServerPlugin({
-            port: 0,
-            registerStandardEndpoints: true,
-        });
+        // 2. Setup Hono Plugin — transport only.
+        //
+        // This suite used to run against the raw-hono standard endpoints. That
+        // surface is gone (#4073): the plugin serves the socket and the
+        // current-user endpoints, and the data + discovery APIs belong to their
+        // owner. What is under test here is the CLIENT — `connect()`, the
+        // discovery handshake, and CRUD over HTTP — so it now runs against the
+        // real owner, which is also what every deployment actually serves.
+        const honoPlugin = new HonoServerPlugin({ port: 0 });
         kernel.use(honoPlugin);
+
+        // `requireAuth: false` keeps the anonymous CRUD under test reachable —
+        // the same explicit opt-out a deployment intentionally serving public
+        // data would set (#2567/#3963); the gate itself is proven in
+        // @objectstack/rest's own suites.
+        kernel.use(createRestApiPlugin({ api: { api: { requireAuth: false } as any } }));
         
         // --- BROKER SHIM START ---
         // HttpDispatcher requires a broker to function. We inject a simple shim.
@@ -152,19 +156,14 @@ describe('ObjectStackClient (with Hono Server)', () => {
         // Client should have populated discovery info
         expect(client['discoveryInfo']).toBeDefined();
 
-        // The standalone hono surface advertises what it actually mounts
-        // (#4018): /data CRUD and the /auth/me/* helpers are registered here,
-        // so both are advertised and both answer.
+        // Discovery is REST's, computed from its registry (#4018 D12: declared
+        // === enforced). Every route it advertises must actually answer.
         const endpoints = client['discoveryInfo']!.routes;
         expect(endpoints.data).toContain('/api/v1/data');
-        expect(endpoints.auth).toContain('/api/v1/auth');
+        expect(endpoints.metadata).toContain('/api/v1/meta');
 
-        // `metadata` is NOT advertised on this boot, and that is the point of
-        // #4018: no plugin here mounts /api/v1/meta (it ships with
-        // @objectstack/rest / the dispatcher), so the old hardcoded table was
-        // promising a route that 404s. Proof the omission is honest:
-        expect(endpoints.metadata).toBeUndefined();
-        expect((await fetch(`${baseUrl}/api/v1/meta/objects`)).status).toBe(404);
+        // Enforced, not just declared — the pairing #4018 exists to hold.
+        expect((await fetch(`${baseUrl}/api/v1/meta/objects`)).status).not.toBe(404);
     });
 
     it('should create and retrieve data via hono', async () => {

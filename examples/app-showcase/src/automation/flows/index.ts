@@ -554,7 +554,9 @@ export const TaskFollowUpFlow = defineFlow({
       label: 'Wait 1 min',
       // Timer wait: suspends the run, then a one-shot job resumes it after the
       // duration. ISO-8601 duration; production reminders would use e.g. 'P3D'.
-      waitEventConfig: { eventType: 'timer', timerDuration: 'PT1M', onTimeout: 'continue' },
+      // No `onTimeout`: it was retired in #4158 because nothing ever read it —
+      // `wait` has no timeout, and this run resumes when the timer elapses.
+      waitEventConfig: { eventType: 'timer', timerDuration: 'PT1M' },
     },
     {
       id: 'remind',

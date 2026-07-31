@@ -278,17 +278,22 @@ console.log(field.maxLength?.toString() ?? 'no limit');
 2. **Limit fields** — Only request fields you need (`fields: ['id', 'name']`)
 3. **Use pagination** — Always set `limit` to avoid returning all records
 4. **Avoid deep nesting** — Limit nested `$and`/`$or` depth
-5. **Use cursor pagination** — For large datasets, cursor-based is faster than offset
+5. **Use keyset pagination** — For large datasets, seeking past the last row is
+   faster than a deep `offset`. Express the keyset as a `where` predicate on the
+   sort key (the `cursor` query property was removed in `@objectstack/spec` 18,
+   #4286 — nothing ever read it)
 
 ```typescript
-// Optimized query
+// Optimized query — next page seeks past the last row instead of offsetting
 {
   object: 'activity',
-  fields: ['id', 'type', 'created_at'],  // Only needed fields
-  where: { type: { $eq: 'login' } },      // On indexed field
+  fields: ['id', 'type', 'created_at'],                    // Only needed fields
+  where: {
+    type: { $eq: 'login' },                                // On indexed field
+    created_at: { $lt: lastSeenCreatedAt },                // Keyset: past the last row
+  },
   orderBy: [{ field: 'created_at', order: 'desc' }],
   limit: 25,
-  cursor: { id: lastSeenId }  // Keyset/cursor pagination (field → last-seen value)
 }
 ```
 

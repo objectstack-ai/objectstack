@@ -147,6 +147,105 @@ describe('DevPlugin', () => {
       const { ctx } = mockCtx();
       await expect(new DevPlugin({ seedAdminUser: false }).init(ctx)).resolves.not.toThrow();
     });
+
+    // [#3900] The hatch used to return silently: the dev assembly booted under
+    // a production NODE_ENV and every log line read like an ordinary start.
+    // An escape hatch that says nothing rebuilds the hole the guard closed.
+    it('brands the override in the boot log, naming the live hazards', async () => {
+      process.env.NODE_ENV = 'production';
+      process.env.OS_ALLOW_DEV_PLUGIN = '1';
+
+      const { ctx } = mockCtx();
+      await new DevPlugin({ seedAdminUser: false }).init(ctx);
+
+      const warns = ctx.logger.warn.mock.calls
+        .map((call: any[]) => call[0])
+        .filter((line: any) => typeof line === 'string');
+
+      expect(warns.some((l: string) => l.includes('DEV ASSEMBLY UNDER NODE_ENV=production'))).toBe(true);
+      expect(warns.some((l: string) => l.includes('OS_ALLOW_DEV_PLUGIN'))).toBe(true);
+      // The default auth secret is published in the package — anyone holding it
+      // can mint a session, so it is named rather than merely implied.
+      expect(warns.some((l: string) => l.includes('Auth secret is the default published'))).toBe(true);
+      expect(warns.some((l: string) => l.includes('persistence disabled'))).toBe(true);
+    });
+
+    it('does not claim the published-secret hazard when authSecret was overridden', async () => {
+      process.env.NODE_ENV = 'production';
+      process.env.OS_ALLOW_DEV_PLUGIN = '1';
+
+      const { ctx } = mockCtx();
+      await new DevPlugin({ seedAdminUser: false, authSecret: 'operator-supplied-secret' }).init(ctx);
+
+      const warns = ctx.logger.warn.mock.calls
+        .map((call: any[]) => call[0])
+        .filter((line: any) => typeof line === 'string');
+
+      // Still branded — the assembly is the hazard, not just its secret.
+      expect(warns.some((l: string) => l.includes('DEV ASSEMBLY UNDER NODE_ENV=production'))).toBe(true);
+      // …but a warning that is false for this deployment is not printed.
+      expect(warns.some((l: string) => l.includes('Auth secret is the default published'))).toBe(false);
+    });
+
+    it('repeats the brand on the ready banner, not only in the init log', async () => {
+      process.env.NODE_ENV = 'production';
+      process.env.OS_ALLOW_DEV_PLUGIN = '1';
+
+      const { ctx } = mockCtx();
+      const plugin = new DevPlugin({ seedAdminUser: false });
+      await plugin.init(ctx);
+      ctx.logger.warn.mockClear();
+      await plugin.start(ctx);
+
+      const warns = ctx.logger.warn.mock.calls
+        .map((call: any[]) => call[0])
+        .filter((line: any) => typeof line === 'string');
+      expect(warns.some((l: string) => l.includes('NOT a production stack'))).toBe(true);
+    });
+
+    // The branding must not fire on the path everyone actually uses, or it is
+    // noise that trains operators to ignore the real thing.
+    it('says nothing about the override on an ordinary dev boot', async () => {
+      process.env.NODE_ENV = 'development';
+      delete process.env.OS_ALLOW_DEV_PLUGIN;
+
+      const { ctx } = mockCtx();
+      const plugin = new DevPlugin({ seedAdminUser: false });
+      await plugin.init(ctx);
+      await plugin.start(ctx);
+
+      const warns = ctx.logger.warn.mock.calls
+        .map((call: any[]) => call[0])
+        .filter((line: any) => typeof line === 'string');
+      expect(warns.some((l: string) => l.includes('DEV ASSEMBLY'))).toBe(false);
+      expect(warns.some((l: string) => l.includes('NOT a production stack'))).toBe(false);
+    });
+
+    // The hatch shares the `OS_ALLOW_*` truthy vocabulary
+    // (`resolveAllowDevPlugin`). The strict `=== '1'` it replaced failed CLOSED
+    // on `=true` — safe, but it reads to an operator as a broken flag.
+    it.each(['true', 'TRUE', 'on', 'yes', ' 1 '])(
+      'accepts OS_ALLOW_DEV_PLUGIN=%j like every other OS_ALLOW_* hatch',
+      async (value) => {
+        process.env.NODE_ENV = 'production';
+        process.env.OS_ALLOW_DEV_PLUGIN = value;
+
+        const { ctx } = mockCtx();
+        await expect(new DevPlugin({ seedAdminUser: false }).init(ctx)).resolves.not.toThrow();
+      },
+    );
+
+    it.each(['0', 'false', 'off', 'no', ''])(
+      'still refuses on a falsy OS_ALLOW_DEV_PLUGIN=%j',
+      async (value) => {
+        process.env.NODE_ENV = 'production';
+        process.env.OS_ALLOW_DEV_PLUGIN = value;
+
+        const { ctx } = mockCtx();
+        await expect(new DevPlugin({ seedAdminUser: false }).init(ctx))
+          .rejects.toThrow(/NODE_ENV=production/);
+      },
+    );
   });
 
   // [ADR-0115 D4] The slots the retired stubs used to fake are filled by the

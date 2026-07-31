@@ -830,7 +830,15 @@ os migrate value-shapes
   and a deployment booting ≥17 with covered fields and no
   `adr-0104-value-shapes` row logs one line at startup saying warn-mode is in
   effect and which command ends it. A gate nobody is told about is served by
-  nobody.
+  nobody. *(Amended as implemented, #4253/#4284: `meta` names the migrations
+  **without** gate status. The status half was a category error this ADR had
+  already corrected — per the 2026-07-27 addendum the gate is per
+  **deployment**, and `meta` acts on **source**, which deploys to zero-or-N of
+  them, so "its" status has no referent at meta time. Status is reported where
+  a datastore is actually open: each migration command reports before it
+  writes, and the boot line carries the live verdict — after #4284, only where
+  that line is true: counting only fields a write would check, silent when an
+  env switch already settled the posture.)*
 
 ### Fresh datastores attest at creation — both flags
 

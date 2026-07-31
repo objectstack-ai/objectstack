@@ -2,7 +2,8 @@
 
 import { z } from 'zod';
 import { FilterConditionSchema } from './filter.zod';
-import { SortNodeSchema, QuerySchema, FullTextSearchSchema, FieldNodeSchema, AggregationNodeSchema } from './query.zod';
+import { SortNodeSchema, QuerySchema, FullTextSearchSchema, FieldNodeSchema, AggregationNodeSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED } from './query.zod';
+import { retiredKey } from '../shared/retired-key';
 import { ExecutionContextSchema } from '../kernel/execution-context.zod';
 
 /**
@@ -111,8 +112,8 @@ export const EngineQueryOptionsSchema = lazySchema(() => BaseEngineOptionsSchema
   /** Alias for limit (OData compatibility) */
   top: z.number().optional(),
 
-  /** Cursor for keyset pagination */
-  cursor: z.record(z.string(), z.unknown()).optional(),
+  /** Keyset cursor — REMOVED (#4286); same tombstone as `QuerySchema.cursor`. */
+  cursor: retiredKey(QUERY_CURSOR_REMOVED),
 
   /** Full-text search configuration */
   search: FullTextSearchSchema.optional(),
@@ -127,8 +128,8 @@ export const EngineQueryOptionsSchema = lazySchema(() => BaseEngineOptionsSchema
    */
   expand: z.lazy(() => z.record(z.string(), QuerySchema)).optional(),
 
-  /** SELECT DISTINCT flag */
-  distinct: z.boolean().optional(),
+  /** SELECT DISTINCT — REMOVED (#4286); same tombstone as `QuerySchema.distinct`. */
+  distinct: retiredKey(QUERY_DISTINCT_REMOVED),
 }).describe('QueryAST-aligned query options for IDataEngine.find() operations'));
 
 // --------------------------------------------------------------------------
@@ -273,6 +274,14 @@ export const EngineAggregateOptionsSchema = lazySchema(() => BaseEngineOptionsSc
    * e.g. [{ function: 'sum', field: 'amount', alias: 'total' }]
    */
   aggregations: z.array(AggregationNodeSchema).optional(),
+  /**
+   * HAVING — a FilterCondition over the AGGREGATED rows, so its namespace is
+   * the aggregated row's own columns: aggregation aliases + groupBy
+   * projections. Enforced ENGINE-side after aggregation (#4286 step 3) —
+   * identical semantics on the native-driver and in-memory paths; drivers do
+   * not receive authority over it.
+   */
+  having: FilterConditionSchema.optional().describe('HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation'),
   /**
    * Reference timezone (IANA name) for date bucketing (ADR-0053 Phase 2).
    * When set to a non-UTC zone, `groupBy` items carrying a `dateGranularity`

@@ -814,22 +814,13 @@ describe('QueryBuilder enhancements', () => {
         });
     });
 
-    it('should set cursor for keyset pagination', () => {
-        const q = createQuery('customer')
-            .cursor({ id: 'last-seen-id', created_at: '2024-01-01' })
-            .build();
-        expect((q as any).cursor).toEqual({
-            id: 'last-seen-id',
-            created_at: '2024-01-01'
-        });
-    });
-
-    it('should enable distinct', () => {
-        const q = createQuery('customer')
-            .select('status')
-            .distinct()
-            .build();
-        expect((q as any).distinct).toBe(true);
+    it('cursor()/distinct() are gone with query.cursor/query.distinct (#4286)', () => {
+        // Both methods minted keys no executor ever read — cursor re-served
+        // page 1 forever; distinct only degraded the REST count. The spec
+        // tombstones reject the keys; the builder no longer produces them.
+        const q: any = createQuery('customer');
+        expect(q.cursor).toBeUndefined();
+        expect(q.distinct).toBeUndefined();
     });
 });
 

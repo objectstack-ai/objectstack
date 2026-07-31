@@ -154,7 +154,7 @@ const CONTROL_PLANE_NAMESPACE = 'projects.';
 /**
  * The AI plane. `/api/v1/ai/*` is served by `service-ai`, a Cloud/EE package in
  * the sibling `cloud` repo; this repo's dispatcher only PROXIES the prefix to
- * whatever `buildAIRoutes()` mounted (or 404s "AI service is not configured").
+ * whatever `buildAIRoutes()` mounted (or 501s when that package is absent).
  * No in-repo ledger can enumerate that table, so — exactly like the control
  * plane above — the prefix is exempt HERE and guarded THERE.
  *

@@ -46,20 +46,17 @@ import type { DomainHandlerDeps } from '../domain-handler-registry.js';
  * entry cannot drift into naming different remedies — and a caller who hits
  * the wall gets the fix without a second round trip.
  *
+ * There is deliberately no per-call message override. One briefly existed for
+ * `ai`, whose provider ships outside this workspace, and it hid the real bug:
+ * the shared table said "nothing ships" for a slot that Cloud/Enterprise does
+ * provide. Teaching the table to say the accurate thing fixed the domain AND
+ * discovery, which the override could only ever have fixed here. A slot whose
+ * sentence is wrong needs the table corrected, not a local exception.
+ *
  * @param slot the `CoreServiceName` key, NOT the route segment — `/notifications`
  *             is served by the `notification` slot, and the remedy is looked up
  *             by slot.
  */
-export function capabilityUnavailable(
-    deps: DomainHandlerDeps,
-    slot: string,
-    /**
-     * Overrides the shared sentence. Only for slots whose provider cannot be
-     * named by `CORE_SERVICE_PROVIDER` — it is verified against workspace
-     * packages, so a real provider that ships outside this repo (`ai`) has no
-     * entry there and would otherwise be described as "nothing ships".
-     */
-    message?: string,
-): HttpDispatcherResult {
-    return { handled: true, response: deps.error(message ?? serviceUnavailableMessage(slot), 501) };
+export function capabilityUnavailable(deps: DomainHandlerDeps, slot: string): HttpDispatcherResult {
+    return { handled: true, response: deps.error(serviceUnavailableMessage(slot), 501) };
 }
