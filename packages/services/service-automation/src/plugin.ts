@@ -3,6 +3,7 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveUserAuthzGrants } from '@objectstack/core';
 import type { IJobService } from '@objectstack/spec/contracts';
+import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import type {
     Connector,
     ConnectorInstanceAuth,
@@ -477,13 +478,24 @@ export class AutomationServicePlugin implements Plugin {
         try {
             const fnRegistry = ctx.getService<{
                 resolveFunction?: (name: string) => ((c: unknown) => unknown) | undefined;
+                // #4396 — the same lookup, with what the function declared about
+                // itself. Optional: an older/foreign `objectql` service exposes
+                // only the handler, and every such function is then read as the
+                // contract's default (pure), exactly as before this existed.
+                resolveFunctionEntry?: (name: string) => {
+                    handler?: (c: unknown) => unknown;
+                    effect?: FlowFunctionEffect;
+                } | undefined;
             }>('objectql');
             if (fnRegistry && typeof fnRegistry.resolveFunction === 'function') {
                 this.engine.setFunctionResolver((name) => {
-                    const fn = fnRegistry.resolveFunction!(name);
-                    return typeof fn === 'function'
-                        ? (fnCtx) => (fn as (c: unknown) => unknown)(fnCtx)
-                        : undefined;
+                    const entry = fnRegistry.resolveFunctionEntry?.(name);
+                    const fn = entry?.handler ?? fnRegistry.resolveFunction!(name);
+                    if (typeof fn !== 'function') return undefined;
+                    return {
+                        handler: (fnCtx) => (fn as (c: unknown) => unknown)(fnCtx),
+                        ...(entry?.effect ? { effect: entry.effect } : {}),
+                    };
                 });
                 ctx.logger.debug('[Automation] script-node function registry bridged to objectql.resolveFunction');
             }

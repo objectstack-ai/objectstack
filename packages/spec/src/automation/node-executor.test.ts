@@ -274,3 +274,23 @@ describe('ActionDescriptorSchema.resumeAuthority', () => {
     expect(() => ActionDescriptorSchema.parse({ ...base, resumeAuthority: 'admin' })).toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// ActionDescriptorSchema — handlerContract (#4396)
+// ---------------------------------------------------------------------------
+describe('ActionDescriptorSchema.handlerContract', () => {
+  const base = { type: 'demo', version: '1.0.0', name: 'Demo' };
+
+  it("defaults to 'none' — most actions invoke no author-supplied code", () => {
+    expect(defineActionDescriptor(base).handlerContract).toBe('none');
+  });
+
+  it("accepts 'pure' for an action whose author code must not write (script)", () => {
+    const desc = defineActionDescriptor({ ...base, type: 'script', handlerContract: 'pure' });
+    expect(desc.handlerContract).toBe('pure');
+  });
+
+  it('rejects an unknown contract rather than publishing a rule nothing defines', () => {
+    expect(() => ActionDescriptorSchema.parse({ ...base, handlerContract: 'sandboxed' })).toThrow();
+  });
+});

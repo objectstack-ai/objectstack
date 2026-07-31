@@ -145,7 +145,19 @@ export async function mergeRuntimeModule(bundle: any, artifactAbsPath: string, t
         const existing = (bundle.functions && typeof bundle.functions === 'object' && !Array.isArray(bundle.functions))
             ? bundle.functions as Record<string, unknown>
             : {};
-        bundle.functions = { ...existing, ...fns };
+        // The module supplies the CALLABLE; the JSON supplies what the function
+        // DECLARED about itself (`{ handler: '<ref>', effect: 'writes' }`,
+        // #4396). A plain overwrite would keep the first and drop the second,
+        // silently un-declaring every writer on the artifact path.
+        const merged: Record<string, unknown> = { ...existing };
+        for (const [name, fn] of Object.entries(fns as Record<string, unknown>)) {
+            const declared = merged[name];
+            merged[name] =
+                typeof fn === 'function' && declared && typeof declared === 'object' && !Array.isArray(declared)
+                    ? { ...(declared as Record<string, unknown>), handler: fn }
+                    : fn;
+        }
+        bundle.functions = merged;
     } catch (err: any) {
         // eslint-disable-next-line no-console
         console.warn(`${tag} runtime module load FAILED: path='${moduleAbsPath}' error=${err?.message ?? err}`);

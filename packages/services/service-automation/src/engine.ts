@@ -6,6 +6,7 @@ import type {
     ActionDescriptor,
     ExecutionStepMetrics,
     ExecutionStepSkipReason,
+    FlowFunctionEffect,
     FlowRunSummary,
 } from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, ScreenSpec } from '@objectstack/spec/contracts';
@@ -315,6 +316,14 @@ export interface RegisteredConnector {
  * (#1870). Mirrors {@link ConnectorActionContext} but carries the node's mapped
  * `input` so the function reads its arguments without reaching into the raw
  * variable map. The function's return value becomes the node output.
+ *
+ * Note what is NOT here: any handle on the data engine. A flow function is a
+ * pure compute step (`ActionDescriptor.handlerContract: 'pure'`, #4396) — it
+ * returns a value and a later declarative node persists it — so the context
+ * gives it nothing to write with. That is as far as the runtime can go: a
+ * function is ordinary host code and may close over a client at module scope,
+ * which is why one that legitimately writes DECLARES it
+ * (`FlowFunctionEffect`) instead of being detected.
  */
 export interface FlowFunctionContext {
     /** Inputs mapped from the node's `config.inputs` (already in scope). */
@@ -335,13 +344,36 @@ export interface FlowFunctionContext {
 export type FlowFunctionHandler = (ctx: FlowFunctionContext) => unknown | Promise<unknown>;
 
 /**
+ * A resolved function: the callable plus what it DECLARED about itself at
+ * registration (#4396).
+ *
+ * The effect is what keeps the run summary honest for the one case the purity
+ * contract does not cover. A `script` step normally reports no record metrics —
+ * accurate, because a pure function's writes are downstream declarative nodes
+ * that count themselves — but a function declared `'writes'` gets its step
+ * marked `unmeasuredEffect`, so the run says "an effect I cannot count"
+ * rather than claiming it wrote nothing.
+ */
+export interface FlowFunctionRegistration {
+    readonly handler: FlowFunctionHandler;
+    /** Declared data effect. Absent ⇒ `'pure'`, the contract's default. */
+    readonly effect?: FlowFunctionEffect;
+}
+
+/**
  * Resolves a function name to its handler. Injected by the host (the automation
- * plugin bridges it to ObjectQL's `resolveFunction`, fed by `bundle.functions`),
+ * plugin bridges it to ObjectQL's function registry, fed by `bundle.functions`),
  * so the engine stays decoupled from any specific function registry. Returns
  * `undefined` for an unknown name, letting the `script` node fail the step
  * loudly instead of silently no-op'ing (#1870).
+ *
+ * A resolver may return the bare handler — which IS the declaration
+ * `effect: 'pure'`, written the short way — or a {@link FlowFunctionRegistration}
+ * carrying what the function declared.
  */
-export type FlowFunctionResolver = (name: string) => FlowFunctionHandler | undefined;
+export type FlowFunctionResolver = (
+    name: string,
+) => FlowFunctionHandler | FlowFunctionRegistration | undefined;
 
 /**
  * Resolves the schema of the object a flow's conditions bind against — its field
@@ -1396,12 +1428,18 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * Resolve a named function for a `script` node. Returns `undefined` when no
-     * resolver is wired or the name is unregistered — the node then fails the
-     * step with a clear error rather than silently no-op'ing.
+     * Resolve a named function for a `script` node, normalized to
+     * {@link FlowFunctionRegistration} so the caller reads the handler and its
+     * declared effect the same way whichever shape the host's resolver returned.
+     * Returns `undefined` when no resolver is wired or the name is unregistered
+     * — the node then fails the step with a clear error rather than silently
+     * no-op'ing.
      */
-    resolveFunction(name: string): FlowFunctionHandler | undefined {
-        return this.functionResolver?.(name) ?? undefined;
+    resolveFunction(name: string): FlowFunctionRegistration | undefined {
+        const resolved = this.functionResolver?.(name);
+        if (!resolved) return undefined;
+        if (typeof resolved === 'function') return { handler: resolved };
+        return typeof resolved.handler === 'function' ? resolved : undefined;
     }
 
     /** Get all registered connector names. */

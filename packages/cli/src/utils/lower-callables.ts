@@ -148,13 +148,23 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     });
     (lowered as Record<string, unknown>).functions = arr;
   } else if (isPlainObject(fnsField)) {
-    const out: Record<string, string> = {};
+    const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(fnsField)) {
       if (typeof value === 'function') {
         const ref = uniqueName(key, taken);
         taken.add(ref);
         functions[ref] = value as AnyFn;
         out[ref] = ref;
+      } else if (isPlainObject(value) && typeof value.handler === 'function') {
+        // A DECLARED entry (`{ handler, effect: 'writes' }`, #4396). Lower the
+        // callable exactly like the bare form and keep the declaration beside
+        // it, so what the function said about itself survives into the
+        // artifact — dropping it here would silently un-declare the function
+        // on every built deployment while it kept working from source.
+        const ref = uniqueName(key, taken);
+        taken.add(ref);
+        functions[ref] = value.handler as AnyFn;
+        out[ref] = { ...value, handler: ref };
       }
     }
     // Preserve any pre-existing string entries (legacy bundles).

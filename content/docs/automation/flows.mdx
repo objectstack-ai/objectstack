@@ -245,6 +245,44 @@ function fails the step loudly rather than passing silently.
 }
 ```
 
+<Callout type="info" title="A flow function is a pure compute step">
+
+It takes its `inputs`, **returns** a value, and a later **declarative** node
+persists that value. Data I/O stays on the flow graph — the function itself does
+no writes, and the runtime hands it nothing to write with (`ctx` carries
+`input` / `variables` / `automation` / `logger`, no data engine). The `script`
+action publishes this as `handlerContract: 'pure'` on its
+[action descriptor](/docs/references/automation/node-executor).
+
+The rule is load-bearing, not stylistic. [Run summaries](#run-summaries) report
+what a run did to the data, and a `script` step reports **no** record metrics
+precisely because of it: every write a pure function causes is a downstream
+`create_record` / `update_record` that counts itself. A function that writes
+behind the platform's back makes its run claim it wrote nothing — the durable
+`sys_automation_run` row then reads exactly like a broken sweep, permanently.
+
+If a function genuinely must write (an upstream billing system, a legacy API),
+**declare it** so the run stays honest:
+
+```typescript
+defineStack({
+  functions: {
+    scoreLead: (ctx) => ({ score: 42 }),                     // pure — the default
+    syncBilling: { handler: syncBilling, effect: 'writes' }, // declared writer
+  },
+});
+```
+
+A step that calls a declared writer is counted as an effect the platform cannot
+measure (`unmeasured`), never as zero — so the broken-sweep query
+`selected > 0 AND acted = 0 AND unmeasured = 0` stops firing on that flow, and
+keeps working on every other flow that calls a function. Declaring changes what
+is *reported*, not what is *allowed*: an undeclared writer is still counted as
+having written nothing, and no runtime check can catch it — a function is
+ordinary host code and may close over a client at module scope.
+
+</Callout>
+
 **Screen (flat fields):**
 
 The default shape. Each field is collected as a **bare flow variable**, so a
@@ -623,7 +661,15 @@ instead:
 | `http`, mutating method, rejected / timed out | `unmeasured` — a 500 can arrive after the write landed |
 | `http`, `durable: true` | `acted: 1` — the outbox row is a real, durable effect |
 | `connector_action` | `unmeasured` |
-| `script` | nothing — a registered function is **contractually pure**: data I/O stays on the flow graph, so every write it causes is a downstream node that counts itself |
+| `script`, function declared pure (the default) | nothing — a registered function is **contractually pure**: data I/O stays on the flow graph, so every write it causes is a downstream node that counts itself |
+| `script`, function declared `effect: 'writes'` | `unmeasured` — the function said it writes where the platform cannot see, so the run says the count is incomplete |
+
+The `script` row is a contract, not a measurement: nothing stops a registered
+function from writing, so an **undeclared** writer still makes its run report
+`acted: 0`. That is why the declaration exists and why it is worth using — see
+[the purity callout](#node-examples). It is also why the reverse fix was
+rejected: marking *every* `script` step `unmeasured` would blind the detector on
+every flow that calls any function, to cover the few that break the rule.
 
 `unmeasured` propagates through `subflow` and `map` roll-ups, so a parent whose
 child dispatched an uncountable effect knows its own `acted` is incomplete.

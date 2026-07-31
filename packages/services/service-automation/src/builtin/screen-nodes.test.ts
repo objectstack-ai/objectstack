@@ -304,3 +304,132 @@ describe('screen node — the field wire payload (#3528)', () => {
         expect(paused.screen!.fields[1].visibleWhen).toBe('tier == "gold" && "{recordId}" != ""');
     });
 });
+
+/**
+ * #4396 — a `script` function is contractually pure, and the run summary counts
+ * on it: the node reports NO record metrics because every write a pure function
+ * causes is a downstream declarative node counting itself. A function that
+ * legitimately writes DECLARES it, and only then does its step report an effect
+ * the platform cannot count.
+ */
+describe('script node — the purity contract and its declared exception (#4396)', () => {
+    let engine: AutomationEngine;
+
+    beforeEach(() => {
+        engine = new AutomationEngine(createTestLogger());
+        registerScreenNodes(engine, createCtx());
+    });
+
+    it("publishes the contract on the action descriptor, where an author can read it", () => {
+        const script = engine.getActionDescriptors().find((d) => d.type === 'script');
+        expect(script?.handlerContract).toBe('pure');
+    });
+
+    it('reports NO metrics for a pure function — absent is the accurate answer, not a guess', async () => {
+        engine.setFunctionResolver(() => () => ({ ai_category: 'billing' }));
+        engine.registerFlow('script_flow', scriptFlow({ function: 'triage', outputVariable: 'ai' }));
+
+        const r = await engine.execute('script_flow', {} as any);
+        expect(r.success).toBe(true);
+        expect(r.summary?.unmeasured).toBe(0);
+        const node = r.summary?.nodes.find((n) => n.nodeId === 'run');
+        expect(node).toMatchObject({ runs: 1, status: 'success' });
+        expect(node?.selected).toBeUndefined();
+        expect(node?.acted).toBeUndefined();
+    });
+
+    it("counts a declared writer's step as an effect it cannot measure", async () => {
+        // The under-report this closes: without the declaration the run below
+        // says `acted: 0` — indistinguishable from a sweep that did nothing.
+        engine.setFunctionResolver((name) =>
+            name === 'syncBilling' ? { handler: () => ({ ok: true }), effect: 'writes' } : undefined);
+        engine.registerFlow('script_flow', scriptFlow({ function: 'syncBilling' }));
+
+        const r = await engine.execute('script_flow', {} as any);
+        expect(r.success).toBe(true);
+        expect(r.summary?.acted).toBe(0);
+        // ...but NOT "measured as zero": the third answer keeps the
+        // broken-sweep query (`acted = 0 AND unmeasured = 0`) off this run.
+        expect(r.summary?.unmeasured).toBe(1);
+        expect(r.summary?.nodes.find((n) => n.nodeId === 'run')?.unmeasured).toBe(1);
+    });
+
+    it('still reports the effect when a declared writer throws — it may have written first', async () => {
+        engine.setFunctionResolver(() => ({
+            handler: () => { throw new Error('upstream 500'); },
+            effect: 'writes',
+        }));
+        engine.registerFlow('script_flow', scriptFlow({ function: 'syncBilling' }));
+
+        const r = await engine.execute('script_flow', {} as any);
+        expect(r.success).toBe(false);
+        expect(r.summary?.unmeasured).toBe(1);
+    });
+
+    it('leaves every OTHER flow measurable — declaring is per function, not per node type', async () => {
+        // The rejected fix was a blanket `unmeasuredEffect` on every script
+        // step, which would have blinded the detector on every flow that calls
+        // any function. A pure call in the same run must still count as
+        // measured.
+        engine.setFunctionResolver((name) =>
+            name === 'syncBilling'
+                ? { handler: () => ({ ok: true }), effect: 'writes' }
+                : () => ({ score: 1 }));
+        engine.registerFlow('mixed', {
+            name: 'mixed', label: 'Mixed', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'pure', type: 'script', label: 'Pure', config: { function: 'scoreLead' } },
+                { id: 'writer', type: 'script', label: 'Writer', config: { function: 'syncBilling' } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'pure' },
+                { id: 'e2', source: 'pure', target: 'writer' },
+                { id: 'e3', source: 'writer', target: 'end' },
+            ],
+        } as any);
+
+        const r = await engine.execute('mixed', {} as any);
+        expect(r.success).toBe(true);
+        expect(r.summary?.unmeasured).toBe(1);
+        expect(r.summary?.nodes.find((n) => n.nodeId === 'pure')?.unmeasured).toBeUndefined();
+        expect(r.summary?.nodes.find((n) => n.nodeId === 'writer')?.unmeasured).toBe(1);
+    });
+
+    it('reads a bare handler as the pure default — the short spelling of the contract', async () => {
+        const calls: unknown[] = [];
+        engine.setFunctionResolver(() => (c: any) => { calls.push(c.input); return 1; });
+        engine.registerFlow('script_flow', scriptFlow({ function: 'scoreLead', inputs: { r: 'x' } }));
+
+        const r = await engine.execute('script_flow', {} as any);
+        expect(r.success).toBe(true);
+        expect(calls).toEqual([{ r: 'x' }]);
+        expect(r.summary?.unmeasured).toBe(0);
+    });
+});
+
+/**
+ * The one part of the purity contract the runtime CAN hold: a flow function is
+ * handed nothing to write with. Not enforcement — a function may close over a
+ * client at module scope — but the day someone adds `ctx.api` here, the
+ * contract stops being about author discipline and starts being a lie, so the
+ * context's shape is pinned rather than left incidental (#4396, issue option 3).
+ */
+describe('FlowFunctionContext carries no data reach (#4396)', () => {
+    it('hands the function input / variables / automation / logger and nothing else', async () => {
+        const engine = new AutomationEngine(createTestLogger());
+        registerScreenNodes(engine, createCtx());
+
+        let seen: Record<string, unknown> | undefined;
+        engine.setFunctionResolver(() => (c: any) => { seen = c; return 1; });
+        engine.registerFlow('script_flow', scriptFlow({ function: 'inspect' }));
+        await engine.execute('script_flow', {} as any);
+
+        expect(Object.keys(seen ?? {}).sort()).toEqual(['automation', 'input', 'logger', 'variables']);
+        // `automation` is the trigger/run context (record, identity, params) —
+        // provenance, not a handle on the data engine.
+        expect(seen!.automation).not.toHaveProperty('api');
+        expect(seen!.automation).not.toHaveProperty('objectql');
+    });
+});

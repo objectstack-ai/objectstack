@@ -47,6 +47,7 @@
 
 import type { IDataEngine } from './data-engine';
 import type { IDataDriver } from './data-driver';
+import type { FlowFunctionEffect, FlowFunctionEntry } from '../automation/flow-function.zod';
 
 /**
  * The engine's schema-registry view — the eight members reached through the
@@ -111,7 +112,16 @@ export interface IObjectQLEngine extends IDataEngine {
         options?: { object?: string | string[]; priority?: number; packageId?: string },
     ): void;
     unregisterHooksByPackage(packageId: string): number;
-    registerFunction(name: string, handler: (context: any) => Promise<void> | void, packageId?: string): void;
+    /**
+     * The third parameter is the owning `packageId`, or a record that also
+     * carries what the function DECLARES about itself (#4396) — today its data
+     * `effect`, which a `script` node reads back to report its run honestly.
+     */
+    registerFunction(
+        name: string,
+        handler: (context: any) => Promise<void> | void,
+        packageIdOrOptions?: string | { packageId?: string; effect?: FlowFunctionEffect },
+    ): void;
     registerMiddleware(
         fn: (opCtx: any, next: () => Promise<void>) => Promise<void>,
         options?: { object?: string },
@@ -121,7 +131,8 @@ export interface IObjectQLEngine extends IDataEngine {
         hooks: unknown[] | undefined,
         opts?: {
             packageId?: string;
-            functions?: Record<string, (context: any) => Promise<void> | void>;
+            /** Handlers, or declaration records stating each function's effect (#4396). */
+            functions?: Record<string, FlowFunctionEntry>;
             bodyRunner?: unknown;
             strict?: boolean;
             warnLegacyHandler?: boolean;

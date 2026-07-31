@@ -165,7 +165,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `external-catalog.zod.ts` | 4 | wire (p) | |
 | `field-value.zod.ts` / `seed.zod.ts` / `validation.zod.ts` | 1 ea | mixed (p) | |
 
-### `automation/` — 98 sites
+### `automation/` — 99 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
@@ -182,6 +182,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `builtin-node-config.zod.ts` | 8 | authorable | Same family (#4045): the CRUD quartet, `screen`, `map`. Written from what the executors read rather than from the descriptors' `configSchema` literals, and reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` — so unlike most rows here, this one already has a drift check of its own. Same candidacy note as `io-node-config` |
 | `schemaless-node-config.zod.ts` | 4 | authorable | Same family, third panel (#4278): `script` / `subflow` / `decision` (+ the decision branch item) — the descriptor-schemaless nodes whose form lives in objectui's hand-written table. Written from the executors; the drift check is objectui's `flow-node-config.spec-reconciliation` test (cross-repo, via the published exports). Contract exports only — nothing parses node config with them yet, so strictness candidacy follows `io-node-config` |
 | `webhook.zod.ts` | 1 | authorable (p) | spec-only (#3461) |
+| `flow-function.zod.ts` | 1 | authorable | `FlowFunctionDeclarationSchema` (#4396) — the `{ handler, effect }` form of a `defineStack({ functions })` entry. Authored, but note what an undeclared key here would be: a sibling of a **live function**, not data. `defineStack`'s union already rejects a record whose `handler` is not callable, and the boot-path reader is the hand-written `normalizeFlowFunctionEntry` rather than a `.parse()` (re-validating a live handler every boot buys nothing), so strictness would bind at authoring only. Candidate on the same verify-first rule as its `*-node-config` neighbours |
 
 ### `security/` — 20 sites
 

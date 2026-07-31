@@ -27,6 +27,10 @@ import { parseNodeConfig } from './parse-config.js';
  *       which the host bridges to `bundle.functions` / `defineStack({ functions })`.
  *   A target that resolves to neither fails the step LOUDLY rather than the old
  *   silent "no-op handler" success, so an unwired callable can't quietly skip.
+ *   The named function is contractually PURE — it returns a value and the flow
+ *   graph persists it — which the descriptor publishes as
+ *   `handlerContract: 'pure'` and a writing function opts out of by declaring
+ *   `effect: 'writes'` where it is registered (#4396).
  */
 
 /**
@@ -204,6 +208,11 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         type: 'script', version: '1.0.0', name: 'Script',
         description: 'Run a custom script action.',
         icon: 'code', category: 'logic', source: 'builtin',
+        // #4396 — the purity rule this executor relies on, published where an
+        // author, a designer and the action catalog can read it. `category:
+        // 'logic'` says nothing about it, so until this field the contract
+        // existed only as a comment inside the call below.
+        handlerContract: 'pure',
       }),
       async execute(node, variables, context) {
         const cfg = (node.config ?? {}) as Record<string, unknown>;
@@ -259,8 +268,8 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           };
         }
 
-        const handler = engine.resolveFunction(target);
-        if (!handler) {
+        const registration = engine.resolveFunction(target);
+        if (!registration) {
           return {
             success: false,
             error:
@@ -276,27 +285,42 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         const input = interpolate(cfg.inputs ?? {}, variables, context) as Record<string, unknown>;
         const outputVariable =
           typeof cfg.outputVariable === 'string' && cfg.outputVariable.trim() ? cfg.outputVariable.trim() : undefined;
+        // Pure-function pattern: the function RETURNS its result; `outputVariable`
+        // exposes it as a flow variable so a later declarative node persists it
+        // (e.g. `update_record fields: { ai_category: '{aiResult.ai_category}' }`).
+        // Data I/O stays on the flow graph — the function itself does no writes.
+        // The descriptor above publishes that as `handlerContract: 'pure'`, and
+        // `FlowFunctionContext` hands the function no data engine to write with.
+        //
+        // #4354 — which is why a pure function's step reports NO metrics: by that
+        // contract every write it causes is a downstream `update_record` counting
+        // itself, so "absent" (this kind of node touches no records) is the
+        // accurate answer, not a guess.
+        //
+        // #4396 — and a function that legitimately writes DECLARES it
+        // (`{ handler, effect: 'writes' }`), which is what turns this step's
+        // silence into an honest "cannot count". Declaring stays per FUNCTION:
+        // a blanket `unmeasuredEffect` on every script step would suppress the
+        // broken-sweep signal on every flow that calls any function, to cover
+        // the few that write. An UNDECLARED writer still under-reports — no
+        // runtime check can catch code that closed over a client at module
+        // scope, so the rule is published rather than policed.
+        const unmeasured = registration.effect === 'writes';
         try {
-          const result = await handler({ input, variables, automation: context, logger: ctx.logger });
-          // Pure-function pattern: the function RETURNS its result; `outputVariable`
-          // exposes it as a flow variable so a later declarative node persists it
-          // (e.g. `update_record fields: { ai_category: '{aiResult.ai_category}' }`).
-          // Data I/O stays on the flow graph — the function itself does no writes.
-          //
-          // #4354 — which is why this node reports NO metrics, deliberately: by
-          // that contract every write it causes is a downstream `update_record`
-          // counting itself, so "absent" (this kind of node touches no records)
-          // is the accurate answer, not a guess. Nothing ENFORCES the purity
-          // though, so a function that writes behind the platform's back makes
-          // its run under-report. Filed as #4396 rather than accommodated: a blanket
-          // `unmeasuredEffect` here would suppress the broken-sweep signal on
-          // every flow that calls any function, to cover a contract violation.
+          const result = await registration.handler({ input, variables, automation: context, logger: ctx.logger });
           if (outputVariable) variables.set(outputVariable, result);
-          return { success: true, output: { function: target, result } };
+          return {
+            success: true,
+            output: { function: target, result },
+            ...(unmeasured ? { metrics: { unmeasuredEffect: true } } : {}),
+          };
         } catch (err) {
           return {
             success: false,
             error: `script function '${target}' (node '${node.id}') failed: ${(err as Error).message}`,
+            // A declared writer that threw may have written before it did, so
+            // the run still cannot claim it counted everything.
+            ...(unmeasured ? { metrics: { unmeasuredEffect: true } } : {}),
           };
         }
       },

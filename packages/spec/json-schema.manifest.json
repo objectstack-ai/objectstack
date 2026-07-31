@@ -554,6 +554,7 @@
     "automation/ExecutionStepSkipReason",
     "automation/Flow",
     "automation/FlowEdge",
+    "automation/FlowFunctionEffect",
     "automation/FlowNode",
     "automation/FlowNodeAction",
     "automation/FlowRegion",

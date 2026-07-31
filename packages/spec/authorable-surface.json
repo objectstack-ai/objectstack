@@ -2128,6 +2128,7 @@
     "automation/ActionDescriptor:configSchema",
     "automation/ActionDescriptor:deprecated",
     "automation/ActionDescriptor:description",
+    "automation/ActionDescriptor:handlerContract",
     "automation/ActionDescriptor:icon",
     "automation/ActionDescriptor:isAsync",
     "automation/ActionDescriptor:maturity",

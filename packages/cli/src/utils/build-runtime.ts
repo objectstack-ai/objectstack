@@ -76,10 +76,13 @@ function collect(cfg) {
       }
     }
   }
-  // Top-level functions map
+  // Top-level functions map — a value is the handler, or a declaration
+  // record stating its effect (\`{ handler, effect: 'writes' }\`).
   if (cfg.functions && !Array.isArray(cfg.functions) && typeof cfg.functions === 'object') {
     for (const [k, v] of Object.entries(cfg.functions)) {
-      if (typeof v === 'function' && REFS.has(k)) out[k] = v;
+      if (!REFS.has(k)) continue;
+      if (typeof v === 'function') out[k] = v;
+      else if (v && typeof v === 'object' && typeof v.handler === 'function') out[k] = v.handler;
     }
   }
   // Top-level functions array

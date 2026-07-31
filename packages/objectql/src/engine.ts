@@ -25,6 +25,7 @@ import {
   isDataMigrationFlagVerified,
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from '@objectstack/spec/kernel';
+import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import {
   IDataDriver,
   IDataEngine,
@@ -433,9 +434,33 @@ export interface HookEntry {
 }
 
 /** Function registry entry — see `registerFunction`. */
-interface FunctionEntry {
+export interface FunctionEntry {
   handler: HookHandler;
   packageId?: string;
+  /**
+   * What this function does to data, as DECLARED at registration (#4396).
+   * Only a `script`-node caller reads it: a flow function is contractually
+   * pure, and the run summary counts on that, so a function that legitimately
+   * writes declares `'writes'` and its step is reported as an effect the
+   * platform cannot count rather than as none. Absent ⇒ `'pure'`.
+   *
+   * Carried on the registry entry rather than beside it because this IS part of
+   * the registration — one registry, and what a caller needs to know about a
+   * function travels with the function.
+   */
+  effect?: FlowFunctionEffect;
+}
+
+/**
+ * Declarations that may accompany a `registerFunction` call. The bare
+ * `packageId` string is still accepted in that position (every existing caller
+ * passes one), so this widens the signature without a migration.
+ */
+export interface FunctionRegistrationOptions {
+  /** Owning package — the unit `unregisterFunctionsByPackage` removes. */
+  packageId?: string;
+  /** Declared data effect (#4396); omit for the pure default. */
+  effect?: FlowFunctionEffect;
 }
 
 /**
@@ -757,19 +782,44 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Register a named function handler that can later be referenced by
-   * string from a `Hook.handler` field. This is the JSON-safe form of
+   * string from a `Hook.handler` field, an `Action.target`, or a flow
+   * `script` node's `config.function`. This is the JSON-safe form of
    * handler binding — declarative metadata persisted to disk or shipped
    * over the wire only carries the name.
+   *
+   * The third parameter accepts either the owning `packageId` (its original
+   * shape, unchanged for every existing caller) or a
+   * {@link FunctionRegistrationOptions} record that also carries what the
+   * function DECLARES about itself — today its data `effect` (#4396).
    */
-  registerFunction(name: string, handler: HookHandler, packageId?: string): void {
+  registerFunction(
+    name: string,
+    handler: HookHandler,
+    packageIdOrOptions?: string | FunctionRegistrationOptions,
+  ): void {
     if (!name || typeof handler !== 'function') return;
-    this.functions.set(name, { handler, packageId });
-    this.logger.debug('Registered function', { name, packageId });
+    const opts: FunctionRegistrationOptions =
+      typeof packageIdOrOptions === 'string' ? { packageId: packageIdOrOptions } : (packageIdOrOptions ?? {});
+    const { packageId, effect } = opts;
+    this.functions.set(name, { handler, packageId, ...(effect ? { effect } : {}) });
+    this.logger.debug('Registered function', { name, packageId, effect });
   }
 
   /** Look up a registered function by name. */
   resolveFunction(name: string): HookHandler | undefined {
     return this.functions.get(name)?.handler;
+  }
+
+  /**
+   * Look up a registered function's FULL entry — the handler plus whatever it
+   * declared about itself (#4396). `resolveFunction` above answers "can I call
+   * it"; a caller that must also report what the call did (the automation
+   * engine's `script` node, feeding the #4354 run summary) needs the
+   * declaration, and reading it off the same registry keeps the two from
+   * drifting.
+   */
+  resolveFunctionEntry(name: string): Readonly<FunctionEntry> | undefined {
+    return this.functions.get(name);
   }
 
   /** Remove all functions registered under a given `packageId`. */

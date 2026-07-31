@@ -885,6 +885,21 @@ them right the first time:
    If you genuinely need data-lifecycle **side effects** (read/write other records),
    that's an L2 **hook** (objectstack-data) — hooks get `ctx.api`; flow functions don't.
 
+   The rule is load-bearing: a `script` step reports **no** record metrics in the
+   run summary *because* every write a pure function causes is a downstream node
+   that counts itself. A function that writes anyway makes its run report
+   `acted: 0` — indistinguishable from a sweep that silently did nothing. When a
+   function must write somewhere the platform cannot see (an upstream billing
+   API), **declare it** so the run stays honest — its step is then counted as an
+   effect that cannot be measured, never as zero:
+
+   ```ts
+   defineStack({ functions: {
+     'helpdesk.aiTriageStub': (ctx) => ({ ai_category: 'other' }),  // pure — the default
+     'billing.sync': { handler: syncBilling, effect: 'writes' },    // declared writer
+   } });
+   ```
+
 10. **Conditions are bare CEL — only the stdlib is callable.** `now()`,
     `today()`, `daysFromNow(n)`, `daysAgo(n)`, `daysBetween(a, b)`, `isBlank(v)`,
     `coalesce(a, b)`, `abs/round/min/max`, `upper/lower/contains/matches`, plus CEL

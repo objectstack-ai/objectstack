@@ -87,3 +87,40 @@ describe('lowerCallables — only `target` binds a handler (#3855)', () => {
     expect(result.functions[ref]()).toBe('preferred');
   });
 });
+
+// ── #4396: a function's DECLARATION survives lowering ───────────────────────
+//
+// `functions: { syncBilling: { handler, effect: 'writes' } }` is how a function
+// that legitimately writes keeps its run's metrics honest. Lowering is the
+// first place a built artifact could lose that: the map branch bound only bare
+// callables, so a declared entry was dropped entirely — the function then went
+// missing from `objectstack.json` AND from the runtime bundle, and every
+// `script` node calling it failed on a built deployment while working from
+// source.
+describe('lowerCallables — declared `functions` entries (#4396)', () => {
+  const functionsOf = (result: { lowered: Record<string, unknown> }) =>
+    (result.lowered as { functions: Record<string, unknown> }).functions;
+
+  it('lowers a bare handler to its ref, unchanged', () => {
+    const result = lowerCallables({ functions: { scoreLead: () => 'scored' } });
+    expect(functionsOf(result).scoreLead).toBe('scoreLead');
+    expect((result.functions.scoreLead as () => string)()).toBe('scored');
+  });
+
+  it('lowers a declared entry and keeps what it declared', () => {
+    const result = lowerCallables({
+      functions: { syncBilling: { handler: () => 'synced', effect: 'writes' } },
+    });
+    expect(functionsOf(result).syncBilling).toEqual({ handler: 'syncBilling', effect: 'writes' });
+    expect((result.functions.syncBilling as () => string)()).toBe('synced');
+    expect(result.count).toBe(1);
+  });
+
+  it('keeps `effect` on the array form too', () => {
+    const result = lowerCallables({
+      functions: [{ name: 'syncBilling', handler: () => 'synced', effect: 'writes' }],
+    });
+    const [entry] = functionsOf(result) as unknown as Array<Record<string, unknown>>;
+    expect(entry).toEqual({ name: 'syncBilling', handler: 'syncBilling', effect: 'writes' });
+  });
+});

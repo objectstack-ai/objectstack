@@ -145,7 +145,7 @@ const result = DecisionCondition.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **actionType** | `string` | optional | How this step runs: a built-in side effect ('email' \| 'slack'), the 'invoke_function' marker, or shorthand for a registered-function name |
-| **function** | `string` | optional | Registered function to call (defineStack(`{ functions }`)); takes precedence over actionType |
+| **function** | `string` | optional | Registered function to call (defineStack(`{ functions }`)); takes precedence over actionType. Contractually pure — it returns a value a later declarative node persists |
 | **inputs** | `Record<string, any>` | optional | Inputs passed to the function (values interpolate `{token}` templates) |
 | **outputVariable** | `string` | optional | Flow variable the function's return value is bound to |
 | **template** | `string` | optional | Built-in side effects only: message template id |

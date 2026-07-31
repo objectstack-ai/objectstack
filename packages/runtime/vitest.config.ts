@@ -15,6 +15,9 @@ export default defineConfig({
       '@objectstack/rest': path.resolve(__dirname, '../rest/src/index.ts'),
       '@objectstack/spec/ai': path.resolve(__dirname, '../spec/src/ai/index.ts'),
       '@objectstack/spec/api': path.resolve(__dirname, '../spec/src/api/index.ts'),
+      // `AppPlugin` reads a bundle function's declared effect off this
+      // namespace (#4396).
+      '@objectstack/spec/automation': path.resolve(__dirname, '../spec/src/automation/index.ts'),
       '@objectstack/spec/contracts': path.resolve(__dirname, '../spec/src/contracts/index.ts'),
       '@objectstack/spec/data': path.resolve(__dirname, '../spec/src/data/index.ts'),
       // Reached via `@objectstack/platform-objects` (sys-user.object.ts), which

@@ -22,6 +22,7 @@
  */
 
 import type { Hook } from '@objectstack/spec/data';
+import { normalizeFlowFunctionEntry, type FlowFunctionEntry } from '@objectstack/spec/automation';
 import type { ObjectQL, HookHandler } from './engine.js';
 import { wrapDeclarativeHook } from './hook-wrappers.js';
 import type { HookMetricsRecorder } from './hook-metrics.js';
@@ -34,8 +35,14 @@ export interface BindHooksOptions {
    * Optional name → function map for resolving string `handler` references.
    * Typically supplied by `defineStack({ functions })` and merged with any
    * functions previously registered on the engine.
+   *
+   * A value may be the handler itself or a declaration record stating what the
+   * function does (`{ handler, effect: 'writes' }`, #4396) — the same two
+   * spellings `defineStack({ functions })` accepts. The declaration is stored
+   * on the registry entry, where the `script` node reads it to report the run's
+   * metrics honestly; hook binding itself only ever needs the handler.
    */
-  functions?: Record<string, HookHandler>;
+  functions?: Record<string, FlowFunctionEntry>;
 
   /**
    * Optional factory that converts a metadata-only `Hook.body` (L1 expression
@@ -104,6 +111,45 @@ export function bindHooksToEngine(
   const logger = opts.logger ?? noopLogger;
   const result: BindHooksResult = { registered: 0, skipped: 0, errors: [] };
 
+  // Pre-load any inline functions supplied via `bundle.functions` so
+  // string-handler resolution works. An entry may declare its effect (#4396);
+  // that declaration is registered WITH the handler, so a later `script`-node
+  // caller reads both off the one registry.
+  //
+  // BEFORE the no-hooks bail-out below, deliberately: `functions` is not a
+  // hook accessory. It also feeds `Action.target` string refs and a flow
+  // `script` node's `config.function`, so a stack that declares functions and
+  // no hooks — the shape #4396's example has — registered NOTHING and every
+  // such `script` node failed with "no function named 'x' is registered",
+  // naming the one thing the author had actually done.
+  if (opts.functions && typeof (engine as any).registerFunction === 'function') {
+    for (const [name, entry] of Object.entries(opts.functions)) {
+      const fn = normalizeFlowFunctionEntry(entry);
+      if (!fn) {
+        logger.warn('[hook-binder] skipping function entry with no callable handler', { name });
+        continue;
+      }
+      if (fn.unrecognizedEffect !== undefined) {
+        logger.warn('[hook-binder] unrecognized function effect — counted as an uncountable write', {
+          name,
+          effect: fn.unrecognizedEffect,
+          expected: "'pure' | 'writes'",
+        });
+      }
+      try {
+        (engine as any).registerFunction(name, fn.handler, {
+          packageId: opts.packageId,
+          effect: fn.effect,
+        });
+      } catch (err: any) {
+        logger.warn('[hook-binder] failed to register function', {
+          name,
+          error: err?.message,
+        });
+      }
+    }
+  }
+
   if (!Array.isArray(hooks) || hooks.length === 0) {
     return result;
   }
@@ -118,21 +164,6 @@ export function bindHooksToEngine(
         packageId: opts.packageId,
         error: err?.message,
       });
-    }
-  }
-
-  // Pre-load any inline functions supplied via `bundle.functions` so
-  // string-handler resolution works.
-  if (opts.functions && typeof (engine as any).registerFunction === 'function') {
-    for (const [name, fn] of Object.entries(opts.functions)) {
-      try {
-        (engine as any).registerFunction(name, fn, opts.packageId);
-      } catch (err: any) {
-        logger.warn('[hook-binder] failed to register function', {
-          name,
-          error: err?.message,
-        });
-      }
     }
   }
 
@@ -276,9 +307,10 @@ function resolveHandler(
   if (typeof h === 'function') return h as HookHandler;
   if (typeof h === 'string' && h.length > 0) {
     // Try the per-bundle map first (hot path during initial bind),
-    // then fall back to whatever the engine already knows.
-    const fromBundle = opts.functions?.[h];
-    if (typeof fromBundle === 'function') return fromBundle;
+    // then fall back to whatever the engine already knows. A declaration
+    // record resolves to its handler — a hook cares only about the callable.
+    const fromBundle = normalizeFlowFunctionEntry(opts.functions?.[h]);
+    if (fromBundle) return fromBundle.handler as HookHandler;
     if (typeof (engine as any).resolveFunction === 'function') {
       const fn = (engine as any).resolveFunction(h);
       if (typeof fn === 'function') return fn as HookHandler;

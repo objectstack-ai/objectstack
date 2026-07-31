@@ -292,6 +292,34 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
     .describe('Suspends the flow awaiting an external reply'),
 
   /**
+   * The effect contract this action places on the AUTHOR-SUPPLIED code it
+   * invokes (#4396).
+   *
+   *  - `'none'` (default) — the action invokes no author code, so there is no
+   *    such contract to state. Nearly every action.
+   *  - `'pure'` — it does, and that code must not perform data I/O: it takes
+   *    its inputs, RETURNS a value, and a later DECLARATIVE node persists the
+   *    result. `script` is the built-in that declares this, and the rule is
+   *    load-bearing rather than stylistic — the node reports no record metrics
+   *    precisely because every write it causes is a downstream `create_record`
+   *    / `update_record` counting itself (#4354). A function that writes anyway
+   *    makes its run under-report.
+   *
+   * It is declared HERE because the alternative — the state this field was
+   * added to leave — was a rule visible only inside the executor's own source:
+   * `category: 'logic'` said nothing about it, so no author, lint or designer
+   * could read the contract the run summary was relying on. A function that
+   * legitimately writes says so on its own registration
+   * (`FlowFunctionEffectSchema`, `defineStack({ functions })`) and its step is
+   * then counted as `unmeasuredEffect` rather than as nothing.
+   *
+   * Declaration, not enforcement: author code can close over a data client at
+   * module scope, and no descriptor field stops that.
+   */
+  handlerContract: z.enum(['none', 'pure']).default('none')
+    .describe("Effect contract for author-supplied code this action invokes: 'none' (invokes none) or 'pure' (must not write — it returns a value and the flow graph persists it)"),
+
+  /**
    * WHO may resume a run this node suspended (#3801). The generic resume
    * route (`POST /automation/:name/runs/:runId/resume`) validates machine
    * state only — the run exists, the flow exists, the suspended node still

@@ -97,14 +97,27 @@ export const SCRIPT_INVOKE_FUNCTION_ACTION_TYPE = 'invoke_function';
  *  4. Anything left in `actionType` (except the
  *     {@link SCRIPT_INVOKE_FUNCTION_ACTION_TYPE} marker) is shorthand for a
  *     function name; a name that resolves to nothing fails the step LOUDLY.
+ *
+ * The invoked function is contractually PURE — it returns its result and the
+ * flow graph persists it (`FlowFunctionEffectSchema`, #4396). The descriptor
+ * publishes that as `handlerContract: 'pure'`, and it is what lets the node
+ * report no record metrics without guessing.
  */
 export const ScriptConfigSchema = lazySchema(() => z.object({
   /** Built-in side-effect id, the `invoke_function` marker, or (shorthand) a registered-function name. */
   actionType: z.string().optional()
     .describe("How this step runs: a built-in side effect ('email' | 'slack'), the 'invoke_function' marker, or shorthand for a registered-function name"),
-  /** Registered function to call (`defineStack({ functions })`) — always wins over `actionType`. */
+  /**
+   * Registered function to call (`defineStack({ functions })`) — always wins
+   * over `actionType`.
+   *
+   * Contractually pure: it takes `inputs`, RETURNS a value, and does no data
+   * I/O of its own. A function that legitimately writes declares
+   * `effect: 'writes'` where it is registered, so the run reports an effect it
+   * cannot count instead of reporting none (#4396).
+   */
   function: z.string().optional()
-    .describe('Registered function to call (defineStack({ functions })); takes precedence over actionType'),
+    .describe('Registered function to call (defineStack({ functions })); takes precedence over actionType. Contractually pure — it returns a value a later declarative node persists'),
   /** Inputs passed to the function; values interpolate `{token}` templates against the live flow variables. */
   inputs: z.record(z.string(), z.unknown()).optional()
     .describe('Inputs passed to the function (values interpolate {token} templates)'),

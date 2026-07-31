@@ -30,6 +30,7 @@ import { ThemeSchema } from './ui/theme.zod';
 
 // Automation Protocol
 import { FlowSchema } from './automation/flow.zod';
+import { FlowFunctionEntrySchema, FlowFunctionEffectSchema } from './automation/flow-function.zod';
 import { JobSchema } from './system/job.zod';
 
 // Security Protocol
@@ -333,23 +334,36 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
   /**
    * Named handler functions for declarative metadata that references
    * handlers by string name (`Hook.handler: 'my_handler'`,
-   * `Action.target: 'my_handler'`). Two accepted shapes:
+   * `Action.target: 'my_handler'`, a `script` node's `config.function`).
+   * Two accepted shapes:
    *
    *   - Map form (preferred): `{ my_handler: (ctx) => {...} }`
    *   - Array form: `[{ name: 'my_handler', handler: (ctx) => {...} }]`
    *
-   * Functions live in code only; they are not serialized into project
-   * artifacts. The `AppPlugin` registers them on the engine before
-   * binding hooks so `string` handlers resolve at startup.
+   * Either shape may state what the function DOES instead of just naming it
+   * (#4396) — `{ my_handler: { handler, effect: 'writes' } }`, or `effect` on
+   * an array entry. A `script` node's function is contractually pure (it
+   * returns a value; the flow graph persists it), and the run summary counts on
+   * that: an undeclared function is counted as having written nothing. A
+   * function that legitimately writes declares `effect: 'writes'` and its step
+   * is reported as an effect the platform cannot count, rather than as none.
+   * See `FlowFunctionEffectSchema` in `@objectstack/spec/automation`.
+   *
+   * The CALLABLE lives in code only — `objectstack build` lowers it to a
+   * handler ref and carries the function itself in the sibling runtime module
+   * (what it declared rides along in the artifact and is re-attached on load).
+   * The `AppPlugin` registers them on the engine before binding hooks so
+   * `string` handlers resolve at startup.
    */
   functions: z.union([
-    z.record(z.string(), z.function()),
+    z.record(z.string(), FlowFunctionEntrySchema),
     z.array(z.object({
       name: z.string(),
       handler: z.function(),
       packageId: z.string().optional(),
+      effect: FlowFunctionEffectSchema.optional(),
     })),
-  ]).optional().describe('Named handler functions referenced by hooks/actions'),
+  ]).optional().describe('Named handler functions referenced by hooks/actions/script nodes (optionally declaring their effect)'),
   mappings: z.array(MappingSchema).optional().describe('Data Import/Export Mappings'),
   analyticsCubes: z.array(CubeSchema).optional().describe('Analytics Semantic Layer Cubes'),
 

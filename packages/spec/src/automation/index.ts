@@ -7,6 +7,7 @@ export * from './control-flow.zod';
 export * from './io-node-config.zod';
 export * from './builtin-node-config.zod';
 export * from './schemaless-node-config.zod';
+export * from './flow-function.zod';
 export { flowForm } from './flow.form';
 export * from './execution.zod';
 export * from './webhook.zod';

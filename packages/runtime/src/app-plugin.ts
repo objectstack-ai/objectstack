@@ -8,6 +8,7 @@ import { recordSeedOutcome } from './seed-summary.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IJobService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
+import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
@@ -638,7 +639,19 @@ export class AppPlugin implements Plugin {
         // cases — both will coexist on the engine.
         try {
             const hooks = collectBundleHooks(this.bundle);
-            const functions = collectBundleFunctions(this.bundle);
+            // Entries, not bare handlers: each function's declared `effect`
+            // (#4396) rides along to the registry, where a `script` node reads
+            // it to report what its run actually did.
+            const functions = collectBundleFunctionEntries(this.bundle);
+            for (const [name, fn] of Object.entries(functions)) {
+                if (fn.unrecognizedEffect === undefined) continue;
+                ctx.logger.warn('[AppPlugin] unrecognized function effect — counted as an uncountable write', {
+                    appId,
+                    name,
+                    effect: fn.unrecognizedEffect,
+                    expected: "'pure' | 'writes'",
+                });
+            }
             if (hooks.length > 0 || Object.keys(functions).length > 0) {
                 if (typeof ql.bindHooks === 'function') {
                     ql.bindHooks(hooks, {
@@ -1384,31 +1397,51 @@ export function collectBundleActions(
 }
 
 /**
- * Collect a name → handler map from `bundle.functions`. Accepted shapes:
+ * Collect a name → {@link NormalizedFlowFunction} map from `bundle.functions`,
+ * keeping each entry's DECLARATION (its data `effect`, #4396) attached to the
+ * handler. Accepted shapes:
  *
- *   - `{ functions: { foo: fn, bar: fn } }`           ← preferred map form
- *   - `{ functions: [{ name: 'foo', handler: fn }] }` ← array of records
+ *   - `{ functions: { foo: fn, bar: fn } }`                        ← preferred map form
+ *   - `{ functions: { foo: { handler: fn, effect: 'writes' } } }`  ← declared map entry
+ *   - `{ functions: [{ name: 'foo', handler: fn, effect: … }] }`   ← array of records
  *
- * String-named hook handlers (`Hook.handler: 'foo'`) are resolved against
- * this map (and the engine's persistent function registry).
+ * The declaration matters at exactly one consumer — a `script` node reporting
+ * what its run did to the data — but it has to survive the collection step to
+ * get there, and dropping it here is how the shape would silently become
+ * unsupported.
  */
-export function collectBundleFunctions(bundle: any): Record<string, (ctx: any) => any> {
-    const out: Record<string, (ctx: any) => any> = {};
+export function collectBundleFunctionEntries(bundle: any): Record<string, NormalizedFlowFunction> {
+    const out: Record<string, NormalizedFlowFunction> = {};
     const merge = (src: any) => {
         if (!src) return;
         if (Array.isArray(src)) {
             for (const item of src) {
-                if (item && typeof item.name === 'string' && typeof item.handler === 'function') {
-                    out[item.name] = item.handler;
-                }
+                if (!item || typeof item.name !== 'string') continue;
+                const fn = normalizeFlowFunctionEntry(item);
+                if (fn) out[item.name] = fn;
             }
         } else if (typeof src === 'object') {
-            for (const [name, fn] of Object.entries(src)) {
-                if (typeof fn === 'function') out[name] = fn as any;
+            for (const [name, entry] of Object.entries(src)) {
+                const fn = normalizeFlowFunctionEntry(entry);
+                if (fn) out[name] = fn;
             }
         }
     };
     merge(bundle?.functions);
     merge(bundle?.manifest?.functions);
+    return out;
+}
+
+/**
+ * Collect a name → handler map from `bundle.functions` — {@link
+ * collectBundleFunctionEntries} with the declarations dropped, for the callers
+ * that only need something callable (string-named hook handlers via
+ * `Hook.handler: 'foo'`, job handlers).
+ */
+export function collectBundleFunctions(bundle: any): Record<string, (ctx: any) => any> {
+    const out: Record<string, (ctx: any) => any> = {};
+    for (const [name, fn] of Object.entries(collectBundleFunctionEntries(bundle))) {
+        out[name] = fn.handler as (ctx: any) => any;
+    }
     return out;
 }
