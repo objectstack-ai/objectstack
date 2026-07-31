@@ -52,7 +52,12 @@ jobs:
     needs: filter
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Backstop only — the stall guard on the test steps is the primary
+    # detector for a #4250-style hang and fires well before this. 30 min is
+    # 2.5-3× a normal run (main ~9.5 min, PR ~12 min), with margin for a cold
+    # Turbo cache; the old 45 left a hung job "running" for half an hour past
+    # any plausible healthy finish.
+    timeout-minutes: 30
     permissions:
       contents: read
 
@@ -117,18 +122,22 @@ jobs:
       # in parallel, and it dominated this job's critical path. The exclusion
       # subtracts from the affected set (verified: turbo unions inclusive
       # filters, then applies `!` negations to the result).
-      # `set -o pipefail` is load-bearing: GitHub runs these with `bash -e`, which
-      # does NOT set it, so `turbo … | tee` would report TEE's status and a
-      # failing suite would go green. That is the same class of bug the tee is
-      # here to catch, so it must not be introduced by the catching.
+      # run-with-stall-guard replaces the old `… 2>&1 | tee $log` +
+      # `set -o pipefail` idiom: the guard tees combined output to the log
+      # itself and propagates the suite's real exit status, so there is no
+      # pipe whose status tee could mask (do not reintroduce `| tee`). Its
+      # actual job is #4250: a run whose output freezes mid-suite while the
+      # job sits in_progress. Silence past --stall-minutes is declared a
+      # stall — a labeled red naming the last output line — instead of a
+      # 20-minute wait for a human (or the job timeout) to notice. 10 min is
+      # ~5× the longest healthy quiet gap and still under half a normal run.
       - name: Run affected tests (PR)
         if: github.event_name == 'pull_request'
         env:
           TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          set -o pipefail
-          pnpm turbo run test --affected --filter=!@objectstack/dogfood --concurrency=4 \
-            2>&1 | tee "$RUNNER_TEMP/test-core.log"
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 -- \
+            pnpm turbo run test --affected --filter=!@objectstack/dogfood --concurrency=4
 
       # Push to main: full run. Spec's suite runs here plain (uninstrumented);
       # the coverage-instrumented pass moved to the nightly Spec Coverage
@@ -139,9 +148,8 @@ jobs:
       - name: Run all tests (push)
         if: github.event_name == 'push'
         run: |
-          set -o pipefail
-          pnpm turbo run test --filter=!@objectstack/dogfood --concurrency=4 \
-            2>&1 | tee "$RUNNER_TEMP/test-core.log"
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 -- \
+            pnpm turbo run test --filter=!@objectstack/dogfood --concurrency=4
 
       # Runs even when the suite failed — that is when it earns its keep. A red
       # suite plus a GREEN completeness check means real test failures; a red
