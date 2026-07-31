@@ -73,7 +73,7 @@ function suite(dialect: 'pg' | 'mysql', url: string | undefined) {
 
     it('a defaulted insert round-trips a valid canonical calendar day', async () => {
       await driver.create(TABLE, { id: 'x', label: 'x' }, { bypassTenantAudit: true });
-      const row: any = await driver.findOne(TABLE, 'x', { bypassTenantAudit: true });
+      const row: any = await driver.findOne(TABLE, { object: TABLE, where: { id: 'x' } }, { bypassTenantAudit: true });
       expect(String(row.due_on)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       // The UTC calendar day only ever differs from this probe's own UTC clock
       // across a midnight boundary — accept today or the day either side rather

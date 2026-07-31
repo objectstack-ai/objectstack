@@ -59,24 +59,24 @@ describe('SqlDriver retention prune on a builtin created_at timestamp column', (
 
     const deleted = await driver.deleteMany(
       'retention_probe',
-      { where: { created_at: { $lt: cutoffIso } } },
+      { object: 'retention_probe', where: { created_at: { $lt: cutoffIso } } },
       { bypassTenantAudit: true },
     );
     expect(deleted).toBe(2);
 
-    const remaining = await driver.find('retention_probe', {});
+    const remaining = await driver.find('retention_probe', { object: 'retention_probe' });
     expect(remaining.map((r: any) => r.id)).toEqual(['new1']);
   });
 
   it('an ISO-8601 cutoff before every row deletes nothing', async () => {
     const deleted = await driver.deleteMany(
       'retention_probe',
-      { where: { created_at: { $lt: '2020-01-01T00:00:00.000Z' } } },
+      { object: 'retention_probe', where: { created_at: { $lt: '2020-01-01T00:00:00.000Z' } } },
       { bypassTenantAudit: true },
     );
     expect(deleted).toBe(0);
 
-    const remaining = await driver.find('retention_probe', {});
+    const remaining = await driver.find('retention_probe', { object: 'retention_probe' });
     expect(remaining.map((r: any) => r.id).sort()).toEqual(['new1', 'old1', 'old2']);
   });
 });

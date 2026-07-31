@@ -62,6 +62,7 @@ describe('SqlDriver datetime filter coercion', () => {
 
   it('matches datetime $gte against an ISO date string', async () => {
     const rows = await driver.find('publication', {
+      object: 'publication',
       where: { published_at: { $gte: '2026-01-01' } },
       orderBy: [{ field: 'published_at', order: 'asc' }],
     });
@@ -70,6 +71,7 @@ describe('SqlDriver datetime filter coercion', () => {
 
   it('matches datetime range with $gte / $lt', async () => {
     const rows = await driver.find('publication', {
+      object: 'publication',
       where: { published_at: { $gte: '2026-01-01', $lt: '2026-05-01' } },
     });
     expect(rows.map((r: any) => r.id)).toEqual(['p2']);
@@ -77,6 +79,7 @@ describe('SqlDriver datetime filter coercion', () => {
 
   it('accepts a full ISO timestamp', async () => {
     const rows = await driver.find('publication', {
+      object: 'publication',
       where: { published_at: { $gte: '2026-05-25T00:00:00.000Z' } },
     });
     expect(rows.map((r: any) => r.id)).toEqual(['p3']);
@@ -84,6 +87,7 @@ describe('SqlDriver datetime filter coercion', () => {
 
   it('accepts a JS Date object', async () => {
     const rows = await driver.find('publication', {
+      object: 'publication',
       where: { published_at: { $gte: new Date('2026-01-01T00:00:00Z') } },
     });
     expect(rows.map((r: any) => r.id).sort()).toEqual(['p2', 'p3']);
@@ -92,6 +96,7 @@ describe('SqlDriver datetime filter coercion', () => {
   it('accepts a numeric epoch millisecond value', async () => {
     const ms = Date.parse('2026-01-01T00:00:00Z');
     const rows = await driver.find('publication', {
+      object: 'publication',
       where: { published_at: { $gte: ms } },
     });
     expect(rows.map((r: any) => r.id).sort()).toEqual(['p2', 'p3']);
@@ -99,6 +104,7 @@ describe('SqlDriver datetime filter coercion', () => {
 
   it('still filters non-date columns normally', async () => {
     const rows = await driver.find('publication', {
+      object: 'publication',
       where: { views: { $gte: 200 } },
     });
     expect(rows.map((r: any) => r.id).sort()).toEqual(['p2', 'p3']);
@@ -106,6 +112,7 @@ describe('SqlDriver datetime filter coercion', () => {
 
   it('matches date (YYYY-MM-DD) columns with ISO comparand', async () => {
     const rows = await driver.find('publication', {
+      object: 'publication',
       where: { period_start: { $gte: '2026-01-01' } },
     });
     expect(rows.map((r: any) => r.id).sort()).toEqual(['p2', 'p3']);

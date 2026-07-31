@@ -377,7 +377,12 @@ export class InMemoryDriver implements IDataDriver {
     return result;
   }
 
-  async create(object: string, data: Record<string, any>, options?: DriverOptions) {
+  // The `IDataDriver.create` return type, spelled out: without it TS infers the
+  // literal built below (`{ id, created_at, updated_at }`) and every OTHER
+  // column of the created row vanishes from the caller's view (#4311 — the
+  // driver's own tests read `.name` off a create() result and no tsc had ever
+  // told them it wasn't there).
+  async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, any>> {
     this.logger.debug('Create operation', { object, hasData: !!data });
     
     const table = this.getTable(object);
@@ -482,7 +487,7 @@ export class InMemoryDriver implements IDataDriver {
   // Bulk Operations
   // ===================================
 
-  async bulkCreate(object: string, dataArray: Record<string, any>[], options?: DriverOptions) {
+  async bulkCreate(object: string, dataArray: Record<string, any>[], options?: DriverOptions): Promise<Record<string, any>[]> {
     this.logger.debug('BulkCreate operation', { object, count: dataArray.length });
     const results = await Promise.all(dataArray.map(data => this.create(object, data, options)));
     this.logger.debug('BulkCreate completed', { object, count: results.length });

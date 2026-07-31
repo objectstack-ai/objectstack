@@ -75,7 +75,7 @@ describe('SqlDriver scalar type fidelity (rating/slider/toggle/progress)', () =>
       },
       { bypassTenantAudit: true },
     );
-    const row = await driver.findOne('zoo', 'z1', { bypassTenantAudit: true });
+    const row = await driver.findOne('zoo', { object: 'zoo', where: { id: 'z1' } }, { bypassTenantAudit: true });
 
     // control
     expect(row.f_number).toBe(42);
@@ -95,8 +95,8 @@ describe('SqlDriver scalar type fidelity (rating/slider/toggle/progress)', () =>
     await driver.create('zoo', { id: 'z2', name: 'B', f_boolean: true, f_toggle: true }, { bypassTenantAudit: true });
     await driver.create('zoo', { id: 'z3', name: 'C', f_boolean: false, f_toggle: false }, { bypassTenantAudit: true });
 
-    const on = await driver.findOne('zoo', 'z2', { bypassTenantAudit: true });
-    const off = await driver.findOne('zoo', 'z3', { bypassTenantAudit: true });
+    const on = await driver.findOne('zoo', { object: 'zoo', where: { id: 'z2' } }, { bypassTenantAudit: true });
+    const off = await driver.findOne('zoo', { object: 'zoo', where: { id: 'z3' } }, { bypassTenantAudit: true });
 
     // control
     expect(on.f_boolean).toBe(true);
@@ -121,7 +121,7 @@ describe('SqlDriver scalar type fidelity (rating/slider/toggle/progress)', () =>
       },
       { bypassTenantAudit: true },
     );
-    const row = await driver.findOne('zoo', 'z4', { bypassTenantAudit: true });
+    const row = await driver.findOne('zoo', { object: 'zoo', where: { id: 'z4' } }, { bypassTenantAudit: true });
 
     expect(row.f_record).toEqual({ home: '+1', work: '+2' });
     expect(row.f_video).toEqual({ url: 'https://cdn/v.mp4', duration: 12 });
@@ -187,7 +187,7 @@ describe('SqlDriver numeric read coercion repairs legacy TEXT columns', () => {
       { id: 'L1', name: 'old-row', f_rating: 4, f_slider: 25, f_progress: 60 },
       { bypassTenantAudit: true },
     );
-    const row = await driver.findOne('legacy', 'L1', { bypassTenantAudit: true });
+    const row = await driver.findOne('legacy', { object: 'legacy', where: { id: 'L1' } }, { bypassTenantAudit: true });
 
     expect(typeof row.f_rating).toBe('number');
     expect(row.f_rating).toBe(4);
@@ -202,7 +202,7 @@ describe('SqlDriver numeric read coercion repairs legacy TEXT columns', () => {
     // Hand-write a row with a null and a non-numeric string straight to the
     // TEXT columns, bypassing the driver, to model messy legacy data.
     await knex('legacy').insert({ id: 'L2', name: 'messy', f_rating: null, f_slider: 'n/a', f_progress: '60' });
-    const row = await driver.findOne('legacy', 'L2', { bypassTenantAudit: true });
+    const row = await driver.findOne('legacy', { object: 'legacy', where: { id: 'L2' } }, { bypassTenantAudit: true });
 
     expect(row.f_rating).toBeNull(); // null stays null, not 0
     expect(row.f_slider).toBe('n/a'); // non-numeric junk is preserved, not NaN

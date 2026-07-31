@@ -99,7 +99,7 @@ describe('SqlDriver external read path — remoteName resolution (ADR-0015)', ()
 
       // count + findOne route to the remote table too.
       expect(await ext.count('ext_customer', {} as any)).toBe(2);
-      const one = await ext.findOne('ext_customer', { where: { name: 'Globex' } } as any);
+      const one = await ext.findOne('ext_customer', { object: 'ext_customer', where: { name: 'Globex' } });
       expect(one?.name).toBe('Globex');
 
       // Filtered reads hit the remote table.

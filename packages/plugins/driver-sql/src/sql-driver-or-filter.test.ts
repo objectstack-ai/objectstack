@@ -56,7 +56,7 @@ describe('SqlDriver filter logic conformance (SQLite)', () => {
   describe('shared conformance cases', () => {
     for (const c of FILTER_LOGIC_CASES) {
       it(c.name, async () => {
-        const rows = await driver.find('t', { where: c.filter });
+        const rows = await driver.find('t', { object: 't', where: c.filter });
         const got = rows
           .map((r: any) => String(r.id))
           .sort((x: string, y: string) => x.localeCompare(y));
@@ -91,6 +91,7 @@ describe('SqlDriver filter logic conformance (SQLite)', () => {
 
     it('matches only the rows inside the abutting windows', async () => {
       const rows = await driver.find('task', {
+        object: 'task',
         where: {
           $or: [
             { end_date: { $gte: '2026-08-07', $lt: '2026-08-08' } },
@@ -103,6 +104,7 @@ describe('SqlDriver filter logic conformance (SQLite)', () => {
 
     it('keeps a window AND-ed with a sibling key in the same branch', async () => {
       const rows = await driver.find('task', {
+        object: 'task',
         where: { $or: [{ id: 'nope' }, { end_date: { $gte: '2026-08-07', $lt: '2026-08-31' }, id: 'd15' }] },
       });
       expect(rows.map((r: any) => r.id)).toEqual(['d15']);
