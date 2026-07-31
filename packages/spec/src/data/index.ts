@@ -72,6 +72,11 @@ export * from './aggregation-policy';
 // enrichment, search field resolution, and lint.
 export * from './display-name';
 
+// `$search` field resolution (ADR-0061) — which columns a search scans.
+// Shared by the objectql engine (search expansion) and the metadata-protocol
+// ingress gate (#4254) so the two cannot drift.
+export * from './search-fields';
+
 // fieldGroups layout derivation (ADR-0085 §5) — the single source of the
 // grouping semantics every renderer (form, detail, drawer, designer) applies.
 export * from './field-group-layout';

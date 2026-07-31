@@ -9,10 +9,11 @@
  * object's *server-resolved* searchable fields — every driver already executes
  * `$or` + `$contains`, so no driver changes are needed.
  *
- * Field resolution (server-side, never client-trusted):
- *   1. an explicit, validated `requestedFields` subset (`$searchFields` override)
- *   2. the object's declared `searchableFields`
- *   3. an auto-default: the name/title field + short-text fields.
+ * Field resolution (server-side, never client-trusted) lives in
+ * `@objectstack/spec/data` (`search-fields.ts`) since #4254, because the REST
+ * ingress gate must consult the SAME rule when it refuses a `$searchFields`
+ * override the engine would not scan — see that module for the precedence
+ * (declared `searchableFields` → auto-default) and the override intersection.
  *
  * Matching: case-insensitive; multiple whitespace-separated terms are AND-ed
  * (every term must hit some field); fields are OR-ed. `select`/`status` columns
@@ -28,40 +29,26 @@
  * invisible to `$searchFields` overrides and to clients).
  */
 
+import {
+  resolveSearchFields,
+  SEARCHABLE_ENUM_TYPES,
+  type SearchFieldMeta,
+  type SearchFieldResolutionOptions,
+} from '@objectstack/spec/data';
 import { SEARCH_COMPANION_FIELD, isCompanionMatchableTerm } from './search-companion.js';
 
-export interface SearchFieldMeta {
-  type?: string;
-  hidden?: boolean;
-  options?: Array<{ label?: string; value: unknown } | string> | unknown;
-}
+export {
+  resolveSearchFields,
+  resolveSearchFieldResolution,
+  SEARCHABLE_TEXTUAL_TYPES,
+  SEARCHABLE_ENUM_TYPES,
+  SEARCH_AUTO_EXCLUDED_FIELDS,
+  SEARCH_AUTO_EXCLUDED_TYPES,
+} from '@objectstack/spec/data';
+export type { SearchFieldMeta } from '@objectstack/spec/data';
 
-export interface ExpandSearchOptions {
-  /** The referenced object's field map (name → metadata). */
-  fields: Record<string, SearchFieldMeta>;
-  /** Object-declared `searchableFields` (the canonical default set). */
-  searchableFields?: string[];
-  /** Validated `$searchFields` override — intersected with the allowed set.
-   *  Accepts an array or a comma-separated string (the form a URL query param
-   *  arrives as). */
-  requestedFields?: string | string[];
-  /** Preferred display field, placed first in the auto-default. */
-  displayField?: string;
-}
-
-/** Short-text field types that make sense as `$contains` search targets. */
-const TEXTUAL_TYPES = new Set(['text', 'email', 'phone', 'url', 'autonumber', 'textarea', 'markdown']);
-/** Enumerated types searched by mapping the query to option values via labels. */
-const ENUM_TYPES = new Set(['select', 'status']);
-/** System / audit / heavy fields never auto-included. */
-const EXCLUDED_FIELDS = new Set([
-  'id', '_id', 'created', 'modified', 'created_at', 'updated_at',
-  'created_by', 'updated_by', 'owner_id', 'organization_id', 'space', 'company_id',
-]);
-const EXCLUDED_TYPES = new Set([
-  'json', 'object', 'grid', 'image', 'file', 'avatar', 'vector', 'location',
-  'geometry', 'secret', 'password', 'encrypted', 'boolean', 'lookup', 'master_detail',
-]);
+/** Historical name for {@link SearchFieldResolutionOptions} — same shape. */
+export type ExpandSearchOptions = SearchFieldResolutionOptions;
 
 export interface NormalizedSearch {
   query: string;
@@ -81,41 +68,6 @@ export function normalizeSearch(raw: unknown): NormalizedSearch {
   return { query: '' };
 }
 
-function autoDefaultFields(fields: Record<string, SearchFieldMeta>, displayField?: string): string[] {
-  const names = Object.keys(fields).filter((f) => {
-    if (EXCLUDED_FIELDS.has(f)) return false;
-    const meta = fields[f];
-    if (!meta || meta.hidden) return false;
-    const t = meta.type;
-    if (!t) return false;
-    if (EXCLUDED_TYPES.has(t)) return false;
-    return TEXTUAL_TYPES.has(t) || ENUM_TYPES.has(t);
-  });
-  // Lead with the display/name field when present.
-  const lead = displayField && fields[displayField] ? displayField
-    : fields.name ? 'name'
-    : fields.title ? 'title'
-    : undefined;
-  if (!lead) return names;
-  return [lead, ...names.filter((f) => f !== lead)];
-}
-
-/** Resolve the effective searchable field set (server-side, validated). */
-export function resolveSearchFields(opts: ExpandSearchOptions): string[] {
-  const all = opts.fields || {};
-  const declared = opts.searchableFields?.filter((f) => all[f]);
-  const allowed = declared && declared.length > 0 ? declared : autoDefaultFields(all, opts.displayField);
-  const requested = typeof opts.requestedFields === 'string'
-    ? opts.requestedFields.split(',').map((f) => f.trim()).filter(Boolean)
-    : opts.requestedFields;
-  if (requested && requested.length > 0) {
-    const allowSet = new Set(allowed);
-    const validated = requested.filter((f) => allowSet.has(f));
-    if (validated.length > 0) return validated;
-  }
-  return allowed;
-}
-
 function optionValuesMatching(meta: SearchFieldMeta, term: string): unknown[] {
   if (!Array.isArray(meta.options)) return [];
   const lc = term.toLowerCase();
@@ -133,7 +85,7 @@ function optionValuesMatching(meta: SearchFieldMeta, term: string): unknown[] {
 }
 
 function fieldClausesForTerm(field: string, term: string, meta: SearchFieldMeta): any[] {
-  if (ENUM_TYPES.has(meta?.type ?? '')) {
+  if (SEARCHABLE_ENUM_TYPES.has(meta?.type ?? '')) {
     const values = optionValuesMatching(meta, term);
     if (values.length > 0) return [{ [field]: { $in: values } }];
     return [{ [field]: { $contains: term } }];
