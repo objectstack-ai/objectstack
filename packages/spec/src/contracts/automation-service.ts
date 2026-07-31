@@ -66,6 +66,18 @@ export interface AutomationContext {
      */
     runAs?: 'system' | 'user';
     /**
+     * Machine name of the flow this run executes, stamped by the engine at run
+     * setup alongside {@link runAs} / {@link flowRunId} (same single
+     * construction point, same lifetime). Provenance, not authorization — no
+     * security middleware keys on it. Its consumer is audit attribution: a
+     * `runAs:'system'` run resolves no user, so `resolveRunDataContext` labels
+     * its data operations `svc:flow:<flowName>` on `ExecutionContext.actor`
+     * (ADR-0014 D2) instead of leaving the audit row unattributed (#4366).
+     *
+     * Callers do NOT set this — the engine derives it, exactly like {@link runAs}.
+     */
+    flowName?: string;
+    /**
      * Id of the run this context belongs to, stamped by the engine at run setup
      * alongside {@link runAs} and carried into every data node's ObjectQL
      * `context` (see `resolveRunDataContext` in @objectstack/service-automation).

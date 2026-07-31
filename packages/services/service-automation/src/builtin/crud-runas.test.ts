@@ -88,8 +88,11 @@ describe('flow.runAs identity enforcement at the data layer (#1888)', () => {
     for (const c of calls) {
       expect(c.ctx, `${c.op} got no context`).toBeTruthy();
       expect(c.ctx.isSystem, `${c.op} not elevated`).toBe(true);
-      // An elevated run is NOT attributed to the triggering user.
+      // An elevated run is NOT attributed to the triggering user…
       expect(c.ctx.userId).toBeUndefined();
+      // …but it IS attributed to the flow, so audit rows never read
+      // "Unknown user" (ADR-0014 D2, #4366).
+      expect(c.ctx.actor, `${c.op} lost the service-principal label`).toBe('svc:flow:sys');
     }
   });
 
@@ -181,9 +184,15 @@ describe('flow.runAs identity enforcement at the data layer (#1888)', () => {
 });
 
 describe('resolveRunDataContext (#1888 unit)', () => {
-  it("maps runAs:'system' to an elevated context", () => {
-    expect(resolveRunDataContext({ runAs: 'system', userId: 'u1' })).toEqual({
-      isSystem: true, positions: [], permissions: [],
+  it("maps runAs:'system' to an elevated context attributed to the flow (#4366)", () => {
+    expect(resolveRunDataContext({ runAs: 'system', userId: 'u1', flowName: 'mirror_status' })).toEqual({
+      isSystem: true, actor: 'svc:flow:mirror_status', positions: [], permissions: [],
+    });
+  });
+
+  it("labels a system run without a flow name as the generic automation principal (#4366)", () => {
+    expect(resolveRunDataContext({ runAs: 'system' })).toEqual({
+      isSystem: true, actor: 'svc:flow:automation', positions: [], permissions: [],
     });
   });
 
@@ -226,7 +235,7 @@ describe('resolveRunDataContext (#1888 unit)', () => {
   it("refuses rather than elevating — runAs:'system' stays the only route to isSystem", () => {
     expect(() => resolveRunDataContext({ runAs: 'user', flowRunId: 'r' })).toThrow();
     expect(resolveRunDataContext({ runAs: 'system', flowRunId: 'r' })).toEqual({
-      isSystem: true, positions: [], permissions: [], flowRunId: 'r',
+      isSystem: true, actor: 'svc:flow:automation', positions: [], permissions: [], flowRunId: 'r',
     });
   });
 });

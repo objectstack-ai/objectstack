@@ -858,6 +858,13 @@ export class ObjectQL implements IDataEngine {
       // Propagate system-elevated flag so hooks can distinguish engine
       // self-writes (e.g. approval status mirror) from genuine user writes.
       ...((execCtx as any).isSystem ? { isSystem: true } : {}),
+      // Propagate the service-principal label (`ExecutionContext.actor`,
+      // e.g. `svc:flow:<name>`) so a non-user write stays attributable in the
+      // audit log — the writer's `userId ?? session.actor` fallback is dead
+      // without this hop (ADR-0014 D2, #4366).
+      ...(typeof (execCtx as any).actor === 'string' && (execCtx as any).actor
+        ? { actor: (execCtx as any).actor }
+        : {}),
       // Propagate the automation-suppression flag so the record-change trigger
       // can skip flow dispatch for seed/bulk writes (ADR: seed loads end-state
       // data, not user events). `skipAutomations` implies `skipTriggers` —
