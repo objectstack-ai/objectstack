@@ -436,15 +436,16 @@ export const DriverInterfaceSchema = lazySchema(() => z.object({
    * Parsing the QueryAST is the responsibility of the driver implementation.
    * 
    * @param object - The name of the object/table to query (e.g. 'account').
-   * @param query - The structured QueryAST (filters, sorts, joins, pagination).
+   * @param query - The structured QueryAST (where, orderBy, fields, pagination).
    * @param options - Driver options.
-   * @returns Array of records.
-   * 
+   *
    * @example
+   * // The engine hands drivers CANONICAL QueryAST keys only — wire spellings
+   * // (`filters`/`sort`/`top`) are folded away before this layer (#4371).
    * await driver.find('account', {
-   *   filters: [['status', '=', 'active'], 'and', ['amount', '>', 500]],
-   *   sort: [{ field: 'created_at', order: 'desc' }],
-   *   top: 10
+   *   where: { status: 'active', amount: { $gt: 500 } },
+   *   orderBy: [{ field: 'created_at', order: 'desc' }],
+   *   limit: 10
    * });
    * @returns Array of records.
    *          MUST return `id` as string. MUST NOT return implementation details like `_id`.
