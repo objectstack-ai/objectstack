@@ -19,7 +19,9 @@ Request bodies are now checked against the schemas the API catalog declares for 
 - `POST /automation` and `PUT /automation/:name` require a flow-definition object, and POST requires a non-empty `name` — a mistyped `name` used to register the flow under the key `undefined` and echo 200.
 - `POST /automation/:name/toggle` is strictly `{ enabled?: boolean }` — `{"enable": false}` (one letter off) used to ENABLE the flow and answer 200 `{enabled: true}`; it is now a 400 naming the offending key. An empty body still means enable.
 
-**Catalog corrections in `@objectstack/spec` (`plugin-rest-api.zod.ts`)** — documentation-only tables, no schema exports changed:
+**`QuerySchema` now declares the search contract ADR-0061 actually serves** (additive): `search` accepts the canonical bare query string as well as the structured `FullTextSearch` form, and the server-validated `searchFields` narrowing is formally declared. Previously the schema declared only the object form while every surface (and the ADR's own conformance proof) sent the string — drift that surfaced the moment request bodies started being validated.
+
+**Catalog corrections in `@objectstack/spec` (`plugin-rest-api.zod.ts`)** — documentation-only tables:
 
 - `DEFAULT_NOTIFICATION_ROUTES` drops the four device/preferences endpoints — those server routes were removed in #3612 (never built), yet the table kept declaring them, `requestSchema` and all.
 - `DEFAULT_AUTOMATION_ROUTES`' trigger endpoint path is corrected `/trigger` → `/trigger/:name` (the mounted path; the flow name rides the path) and its `AutomationTriggerRequestSchema` declaration is removed — that schema never described this route's wire shape.
