@@ -54,6 +54,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '../../src/kernel/metadata-type-schemas';
 import { WebhookSchema } from '../../src/automation/webhook.zod';
+import { QuerySchema } from '../../src/data/query.zod';
 import {
   BOUND_PROOF_PATHS,
   HIGH_RISK_CLASSES,
@@ -77,7 +78,8 @@ const repoRoot = resolve(specRoot, '../..');
 const ledgerRoot = join(specRoot, 'liveness');
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook'];
+// (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query'];
 
 // Spec-only override: governed types whose canonical schema is NOT (yet) in the
 // metadata-type registry, so they can't be resolved via getMetadataTypeSchema.
@@ -93,8 +95,18 @@ const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'po
 // webhook.json), and whether to fold `webhook` back onto the metadata-type
 // registry is the reassessment tracked in #3490. The gate only needs to WALK
 // the schema, not register it — so we resolve it directly.
+//
+// `query` is not a metadata type at all — `QueryAST` is the REQUEST surface:
+// the client SDK QueryBuilder's output and the `POST /data/:object/query`
+// body, authorable by every API caller yet never stored as stack metadata.
+// #4286 found 12 declared members no executor ran, and the reason no gate had
+// noticed: this ledger read only the metadata-type registry, so it governed
+// what authors write into metadata files while nothing governed what callers
+// write into a query. Walking `QuerySchema` here closes that class;
+// `query.json` carries the request-surface verdicts.
 const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   webhook: WebhookSchema,
+  query: QuerySchema,
 };
 
 // ADR-0010 provenance/lock overlay fields — system-stamped, on every type; auto-live.

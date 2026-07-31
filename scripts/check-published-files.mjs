@@ -27,18 +27,26 @@
 //   node scripts/check-published-files.mjs
 //   node scripts/check-published-files.mjs --self-test
 //
-// Four invariants, per non-private workspace package:
+// Five invariants, per non-private workspace package:
 //
 //   DECLARED    `files` exists and is a non-empty array of strings.
+//   COMPLETE    the whitelist covers `CHANGELOG.md` (#4261). AGENTS.md requires
+//               breaking changesets to carry their FROM -> TO migration because
+//               that text ships to consumers inside the npm package and is what
+//               an upgrading agent greps after a tombstone error -- but npm does
+//               not pack CHANGELOG.md unconditionally, so a whitelist that
+//               omits it silently severs that delivery path. 68 of 69 packages
+//               had it severed when #4261 measured.
 //   SUFFICIENT  every path the manifest points at (types, module, exports
 //               subpaths) is covered by it. A whitelist that omits a real entry
 //               point ships a package that cannot resolve -- the opposite
 //               failure, and one this guard would otherwise encourage.
 //   MINIMAL     nothing the whitelist admits is a test, a test-harness config
 //               or build-time tooling.
-//   REGISTERED  any entry beyond `dist` / `README.md` carries a reason in
-//               EXTRA_ENTRIES, reconciled in BOTH directions so a stale
-//               exemption is an error rather than dead text.
+//   REGISTERED  any entry beyond the canonical `dist` / `README.md` /
+//               `CHANGELOG.md` carries a reason in EXTRA_ENTRIES, reconciled in
+//               BOTH directions so a stale exemption is an error rather than
+//               dead text.
 //
 // Deliberately NOT checked: the contents of dist/. It does not exist in a fresh
 // checkout and the lint job does not build, so reading it would make the
@@ -55,9 +63,18 @@ const ROOT = resolve(import.meta.dirname, '..');
 const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 const SELF = 'scripts/check-published-files.mjs';
 
-// Entries every package may declare without justifying itself: the build output
-// and the readme. Anything else is a deliberate decision and needs a reason.
-const CANONICAL = new Set(['dist', 'README.md']);
+// Entries every package may declare without justifying itself: the build
+// output, the readme and the changelog. Anything else is a deliberate decision
+// and needs a reason.
+const CANONICAL = new Set(['dist', 'README.md', 'CHANGELOG.md']);
+
+// Entries every package MUST cover, not merely may declare. CHANGELOG.md is the
+// delivery path the AGENTS.md post-task checklist promises: breaking changesets
+// write their FROM -> TO migration there, and an upgrading agent with only
+// node_modules on disk -- the tombstone-error scenario -- can grep nothing
+// else. npm stopped packing CHANGELOG unconditionally (see ALWAYS_PACKED), so
+// only an explicit `files` entry keeps that promise true (#4261).
+const REQUIRED = ['CHANGELOG.md'];
 
 // Package name -> { files entry -> why it is published }. Reconciled against
 // the manifests on every run: an entry here for a pattern no longer declared is
@@ -72,8 +89,6 @@ const EXTRA_ENTRIES = {
     'llms.txt': 'Protocol summary for LLM consumers.',
     'src/**/*.zod.ts':
       'The Zod schemas are themselves the contract (Prime Directive #1); downstream code imports them directly, so these sources are product rather than build input. Narrowed to *.zod.ts so no test or helper rides along.',
-    'CHANGELOG.md':
-      'Breaking changesets carry their FROM -> TO migration here, which is what an upgrading agent greps after hitting a tombstone error (AGENTS.md post-task checklist).',
     'api-surface.json': 'Export snapshot used by downstream compatibility checks.',
     'spec-changes.json': 'Machine-readable spec change log driving the upgrade guide.',
   },
@@ -110,8 +125,9 @@ const FORBIDDEN = [
 // them would flag packages that work. Measured on npm 10.9.7: packing
 // @objectstack/types with `["dist","README.md"]` yielded LICENSE, README.md and
 // package.json, and @objectstack/cli's `bin/run.js` shipped although `files`
-// never names bin/. CHANGELOG.md is deliberately absent from this set -- npm
-// does not pack it, which is why @objectstack/spec has to list it explicitly.
+// never names bin/. CHANGELOG.md is deliberately absent from this set -- older
+// npm packed it unconditionally, current npm does not -- which is exactly why
+// COMPLETE demands an explicit `files` entry for it (#4261).
 const ALWAYS_PACKED = [
   /^package\.json$/,
   /^readme(\.[^/]+)?$/i,
@@ -242,6 +258,12 @@ function selfTest() {
     ['dist', 'src/index.ts', false],
     ['README.md', 'README.md', true],
     ['README.md', 'docs/README.md', false],
+    // The COMPLETE invariant resolves through this same matcher, so the exact
+    // shapes it depends on are pinned: the literal entry, a directory that
+    // must NOT swallow it, and the near-miss name.
+    ['CHANGELOG.md', 'CHANGELOG.md', true],
+    ['dist', 'CHANGELOG.md', false],
+    ['CHANGELOG.md', 'CHANGELOG.mdx', false],
     ['src/**/*.zod.ts', 'src/data/object.zod.ts', true],
     ['src/**/*.zod.ts', 'src/index.zod.ts', true],
     ['src/**/*.zod.ts', 'src/data/object.test.ts', false],
@@ -327,7 +349,7 @@ for (const dir of workspaceDirs()) {
         'declares no `files` field, so npm packs the whole directory -- src/,',
         'unit tests and build tooling included, with dist/ added on top rather',
         'than instead of them.',
-        'Fix: add "files": ["dist", "README.md"] to its package.json.',
+        'Fix: add "files": ["dist", "README.md", "CHANGELOG.md"] to its package.json.',
       ],
     });
     continue;
@@ -353,6 +375,17 @@ for (const dir of workspaceDirs()) {
   }
 
   const matchers = files.map((f) => ({ pattern: f, match: matcher(f) }));
+
+  // --- COMPLETE ------------------------------------------------------------
+  for (const required of REQUIRED) {
+    if (matchers.some((m) => m.match(required))) continue;
+    lines.push(
+      `omits "${required}" from \`files\`, and npm does not pack it unconditionally, so the`,
+      'migration text breaking changesets are required to carry (AGENTS.md post-task',
+      'checklist) never reaches the consumer an upgrading agent greps for it (#4261).',
+      `Fix: add "${required}" to \`files\`.`,
+    );
+  }
 
   // --- REGISTERED ----------------------------------------------------------
   const registered = EXTRA_ENTRIES[name] ?? {};
@@ -446,7 +479,9 @@ if (problems.length > 0) {
   console.error(
     'Without a `files` whitelist npm packs the whole package directory, so consumers\n' +
       'install TypeScript sources, unit tests and build-time tooling alongside dist/.\n' +
-      'The canonical whitelist is ["dist", "README.md"]; anything more needs a reason.',
+      'The canonical whitelist is ["dist", "README.md", "CHANGELOG.md"]; anything more\n' +
+      'needs a reason, and dropping CHANGELOG.md severs the migration-text delivery\n' +
+      'path AGENTS.md promises (#4261).',
   );
   process.exit(1);
 }
@@ -454,7 +489,7 @@ if (problems.length > 0) {
 const withExtras = [...declaredExtrasByPackage.values()].filter((s) => s.size > 0).length;
 console.log(
   `✓ check:published-files — ${publishable} publishable package(s) of ${members} workspace ` +
-    'member(s) declare a `files` whitelist that covers every entry point and admits no test, ' +
-    `test-harness config or build script; ${withExtras} publish more than dist/ + README.md, ` +
-    'each with a registered reason.',
+    'member(s) declare a `files` whitelist that covers every entry point plus CHANGELOG.md ' +
+    `and admits no test, test-harness config or build script; ${withExtras} publish more ` +
+    'than dist/ + README.md + CHANGELOG.md, each with a registered reason.',
 );

@@ -445,10 +445,12 @@ Load related records through lookup/master_detail fields:
 
 ## Joins
 
-> ⚠️ **Schema-reserved — NOT executed by the engine yet.** `joins` (and the
-> `JoinStrategy` hints) exist only in the `QueryAST` schema — no engine or
-> driver code consumes them, regardless of a driver advertising
-> `supports.joins`. A query carrying `joins` behaves as if they were absent.
+> ⛔ **REMOVED in `@objectstack/spec` 18 (#4286, ADR-0049).** `query.joins`
+> (and the `JoinNode`/`JoinType`/`JoinStrategy` vocabulary) is gone from the
+> `QueryAST` schema — no engine or driver ever consumed it, so it only ever
+> declared a capability that did not run. The key is tombstoned: authoring it
+> is a `tsc` error, and a query carrying it (even `joins: []`) fails to parse
+> with the upgrade prescription. Do not emit `joins`.
 
 **Working alternatives** (both implemented):
 - **`expand`** — load related records through lookup / master_detail fields
@@ -495,20 +497,24 @@ fields match by option *label*, mapped to stored values.
 Omit `fields` to search the object's declared `searchableFields` (or an
 auto-default of name/title + short-text fields), resolved server-side.
 
-> ⚠️ **Schema-reserved — NOT executed by the engine yet:** `fuzzy`, `boost`,
+> ⚠️ **`[EXPERIMENTAL — not enforced]` (#4286):** `fuzzy`, `boost`,
 > `operator`, `minScore`, `language`, and `highlight` validate against the
-> schema but are never read. Terms are always AND-ed; there is no relevance
-> scoring or highlighting.
+> schema but are never read — their `.describe()` markers now say so. Terms
+> are always AND-ed; there is no relevance scoring or highlighting.
 
 ---
 
 ## Window Functions (Analytics)
 
-> ⚠️ **Schema-reserved — NOT executed by the engine yet.** `windowFunctions`
-> exists in the `QueryAST` schema, but the engine never routes it to any
-> driver — the property is silently dropped from ordinary queries. (Even the
-> SQL driver's internal builder drops the `field` argument, so `lag(revenue)`
-> would render as `LAG()`.) Do not emit `windowFunctions`.
+> ⛔ **REMOVED from the request surface in `@objectstack/spec` 18 (#4286).**
+> `query.windowFunctions` is gone from the `QueryAST` schema — the engine
+> never routed it to any driver, so every OVER clause it declared was
+> silently dropped. The key is tombstoned (a query carrying it fails to
+> parse with the prescription), and the `WindowFunction`/`WindowSpec`/
+> `WindowFunctionNode` exports left with it. Do not emit `windowFunctions`.
+> The one live door is the SQL driver's own `findWithWindowFunctions()`
+> method (driver-level, its own flat input shape — and even there the
+> builder drops the `field` argument, so `lag(revenue)` renders as `LAG()`).
 
 **Working alternatives:**
 - **Ranking / top-N per group and running totals:** model them in
@@ -516,13 +522,6 @@ auto-default of name/title + short-text fields), resolved server-side.
   bucketing, `compareTo` for period-over-period) — see **objectstack-ui**.
 - **Ad-hoc analysis:** fetch the ordered rows (`orderBy` + `limit`) and
   compute ranks or running sums in application code.
-
-### Window Function Enum (schema-reserved)
-
-For completeness, the full `WindowFunction` enum declared by the schema:
-`row_number`, `rank`, `dense_rank`, `percent_rank`, `lag`, `lead`,
-`first_value`, `last_value`, `sum`, `avg`, `count`, `min`, `max`.
-None of these execute today.
 
 ---
 
@@ -536,7 +535,7 @@ None of these execute today.
 | Filter parent by child conditions | Nested relation filter |
 | Simple parent→child navigation | `expand` |
 | Paginate/sort a parent's related records | Query the related object directly |
-| Analytical queries across objects | Report/dashboard metadata, or separate queries combined in app code (`joins` is schema-reserved — see above) |
+| Analytical queries across objects | Report/dashboard metadata, or separate queries combined in app code (`joins` was removed in #4286 — see above) |
 
 ### Pagination Pattern for APIs
 

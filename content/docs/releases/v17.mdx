@@ -727,9 +727,9 @@ query dialect only the dispatcher understood.
 async generator, so the request is issued — and an HTTP error thrown — when you
 call it, not when you first iterate.
 
-`service-ai` is a Cloud/EE package: this repo proxies `/api/v1/ai/**` and 404s
-`AI service is not configured` without it, so check `discovery.services` before
-calling. For a React chat UI, `useChat()` (`@ai-sdk/react`) remains the better
+`service-ai` is a Cloud/EE package: this repo proxies `/api/v1/ai/**` and, without
+it, answers 501 — the route is mounted, the implementation is not — so check
+`discovery.services` before calling. For a React chat UI, `useChat()` (`@ai-sdk/react`) remains the better
 client — these methods are for callers that are not components.
 
 The spec's dead AI declarations retire with the namespace:

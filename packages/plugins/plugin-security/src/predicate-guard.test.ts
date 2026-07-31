@@ -29,19 +29,19 @@ describe('collectConditionFields', () => {
 });
 
 describe('collectQueryFields', () => {
-  it('covers where / orderBy / groupBy / having / aggregations / window functions', () => {
+  // `windowFunctions` left this walk with the `QueryAST` key (#4286) — the
+  // tombstone refuses it wherever the schema parses, and no executor ever ran
+  // one off the query path, so there is no clause left to leak through.
+  it('covers where / orderBy / groupBy / having / aggregations', () => {
     const fields = collectQueryFields({
       where: { status: 'open' },
       orderBy: [{ field: 'salary', order: 'desc' }],
       groupBy: ['department', { field: 'hired_at', dateGranularity: 'month' }],
       having: { headcount: { $gt: 3 } },
       aggregations: [{ function: 'sum', field: 'bonus', alias: 'total', filter: { region: 'emea' } }],
-      windowFunctions: [
-        { function: 'row_number', alias: 'r', over: { partitionBy: ['team'], orderBy: [{ field: 'score', order: 'desc' }] } },
-      ],
     });
     expect([...fields].sort()).toEqual([
-      'bonus', 'department', 'headcount', 'hired_at', 'region', 'salary', 'score', 'status', 'team',
+      'bonus', 'department', 'headcount', 'hired_at', 'region', 'salary', 'status',
     ]);
   });
 

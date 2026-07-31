@@ -146,7 +146,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `notification.zod.ts` / `offline.zod.ts` / `report.zod.ts` | 3 ea | authorable (p) | |
 | `sharing.zod.ts` | 2 | authorable (p) | public-sharing config |
 
-### `data/` — 153 sites
+### `data/` — 149 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
@@ -155,7 +155,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `external-lookup.zod.ts` | 12 | mixed (p) | authored config + wire results |
 | `seed-loader.zod.ts` | 12 | mixed (p) | seed file shapes are authored; loader state is runtime |
 | `field.zod.ts` | 11 | authorable | partially strict |
-| `filter.zod.ts` / `query.zod.ts` | 11+9 | open | query dialect — user data flows through; validated semantically elsewhere. `query.zod.ts` dropped one site in #4196: `FieldNodeSchema`'s nested-select object form was declared-but-inert and narrowed to `z.string()`, so the union's second member is gone. Class unchanged |
+| `filter.zod.ts` / `query.zod.ts` | 11+5 | open | query dialect — user data flows through; validated semantically elsewhere. `query.zod.ts` dropped one site in #4196: `FieldNodeSchema`'s nested-select object form was declared-but-inert and narrowed to `z.string()`, so the union's second member is gone. Four more left in #4286 with the `joins`/`windowFunctions` removals: `JoinNodeBaseSchema`, `WindowFunctionNodeSchema`, and `WindowSpecSchema`'s two blocks (outer + `frame`) were deleted with their clusters. Class unchanged |
 | `driver-nosql.zod.ts` / `driver.zod.ts` / `driver-sql.zod.ts` | 10+9+2 | wire | driver capability contracts |
 | `datasource.zod.ts` | 9 | authorable | **strict as of #4001 data step** — all 9: `DatasourceSchema` (+ `pool` / `healthCheck` / `ssl` / `retryPolicy`), `ExternalDatasourceSettingsSchema` (+ `validation`), `DatasourceCapabilities`, `DriverDefinitionSchema`. `config` + `readReplicas` stay `z.record` by construction (per-driver shapes; the driver's own `configSchema` validates them) — which is precisely why the top level had to close: a connection key written one level too high was stripped, and the datasource then connected on driver defaults instead of failing |
 | `analytics.zod.ts` | 8 | mixed (p) | |

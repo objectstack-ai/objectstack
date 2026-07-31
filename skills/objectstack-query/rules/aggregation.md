@@ -160,13 +160,14 @@ const [active] = await engine.aggregate('user', {
 
 ## Window Functions
 
-> ⚠️ **Schema-reserved — NOT executed by the engine yet.** The `QueryAST`
-> schema declares `windowFunctions` (enum: `row_number`, `rank`,
-> `dense_rank`, `percent_rank`, `lag`, `lead`, `first_value`, `last_value`,
-> `sum`, `avg`, `count`, `min`, `max`), but the engine never routes the
-> property to any driver — it is silently dropped. Even the SQL driver's
-> internal builder drops the `field` argument (`lag(revenue)` would render
-> as `LAG()`). Do not emit `windowFunctions` in queries.
+> ⛔ **REMOVED in `@objectstack/spec` 18 (#4286, ADR-0049).** The `QueryAST`
+> schema no longer declares `windowFunctions` — the engine never routed the
+> property to any driver, so it was silently dropped. The key is tombstoned:
+> a query carrying it fails to parse with the upgrade prescription. The one
+> live door is the SQL driver's own `findWithWindowFunctions()` (driver-level,
+> its own flat input shape; even there the builder drops the `field` argument,
+> so `lag(revenue)` renders as `LAG()`). Do not emit `windowFunctions` in
+> queries.
 
 **Working alternatives:**
 

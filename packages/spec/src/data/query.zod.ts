@@ -8,6 +8,7 @@ import { FilterConditionSchema } from './filter.zod';
  * Represents "Order By".
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const SortNodeSchema = lazySchema(() => z.object({
   field: z.string(),
   order: z.enum(['asc', 'desc']).default('asc')
@@ -128,325 +129,28 @@ export const AggregationNodeSchema = lazySchema(() => z.object({
   field: z.string().optional().describe('Field to aggregate (optional for COUNT(*))'),
   alias: z.string().describe('Result column alias'),
   distinct: z.boolean().optional().describe('Apply DISTINCT before aggregation'),
-  filter: FilterConditionSchema.optional().describe('Filter/Condition to apply to the aggregation (FILTER WHERE clause)'),
+  filter: FilterConditionSchema.optional().describe('[EXPERIMENTAL — not enforced] Per-aggregation filter (SQL FILTER (WHERE …)). Neither the SQL builders nor the in-memory fallback applies it (#4286); filter the whole query with `where` instead.'),
 }));
 
-/**
- * Join Type Enum
- * Standard SQL join types for combining tables.
- * 
- * Join Types:
- * - **inner**: Returns only matching rows from both tables (SQL: INNER JOIN)
- * - **left**: Returns all rows from left table, matching rows from right (SQL: LEFT JOIN)
- * - **right**: Returns all rows from right table, matching rows from left (SQL: RIGHT JOIN)
- * - **full**: Returns all rows from both tables (SQL: FULL OUTER JOIN)
- * 
- * @example
- * // SQL: SELECT * FROM orders INNER JOIN customers ON orders.customer_id = customers.id
- * {
- *   object: 'order',
- *   joins: [
- *     {
- *       type: 'inner',
- *       object: 'customer',
- *       on: ['order.customer_id', '=', 'customer.id']
- *     }
- *   ]
- * }
- * 
- * @example
- * // Salesforce SOQL-style: Find all customers and their orders (if any)
- * {
- *   object: 'customer',
- *   joins: [
- *     {
- *       type: 'left',
- *       object: 'order',
- *       on: ['customer.id', '=', 'order.customer_id']
- *     }
- *   ]
- * }
- */
-export const JoinType = z.enum(['inner', 'left', 'right', 'full']);
+// ─── Joins: REMOVED (#4286, ADR-0049) ────────────────────────────────────────
+// The whole join cluster — `JoinType`, `JoinStrategy`, the internal
+// `JoinNodeBaseSchema`, `JoinNodeSchema` and the `JoinNode`/`JoinNodeInput`
+// types — was deleted together with the `query.joins` tombstone below: no
+// engine or driver ever read a query's `joins`, and an exported schema with no
+// consumer reads as a capability (the #3950 precedent). Related records are
+// read through `expand`; a single related column is a dotted `fields` path
+// (`fields: ['owner.name']`).
 
-/**
- * Join Execution Strategy
- * Hints to the query engine on how to execute the join.
- * 
- * Strategies:
- * - **auto**: Engine decides best strategy (Default).
- * - **database**: Push down join to the database (Requires same datasource).
- * - **hash**: Load both sets into memory and hash join (Cross-datasource, memory intensive).
- * - **loop**: Nested loop lookup (N+1 safe version). (Good for small right-side lookups).
- */
-export const JoinStrategy = z.enum(['auto', 'database', 'hash', 'loop']);
-
-/** Non-recursive half of {@link JoinNodeSchema} — every key except `subquery`. */
-const JoinNodeBaseSchema = lazySchema(() => z.object({
-  type: JoinType.describe('Join type'),
-  strategy: JoinStrategy.optional().describe('Execution strategy hint'),
-  object: z.string().describe('Object/table to join'),
-  alias: z.string().optional().describe('Table alias'),
-  on: FilterConditionSchema.describe('Join condition'),
-}));
-
-/**
- * A single join — the TYPE half of {@link JoinNodeSchema}.
- *
- * `subquery` is what makes the schema recursive (through {@link QuerySchema}),
- * so it is declared here rather than inferred: `z.lazy()` needs an annotation,
- * and the `z.ZodType<any>` this carried before #4171 made the exported
- * `JoinNode` — and `QueryAST['joins']` with it — resolve to `any`.
- */
-export type JoinNode = z.infer<typeof JoinNodeBaseSchema> & {
-  /** Join against a derived dataset instead of a plain object/table. */
-  subquery?: QueryAST;
-};
-
-/**
- * The authoring shape of a join — the INPUT half of {@link JoinNodeSchema}
- * (#4195), the same relationship {@link QueryInput} has to {@link QueryAST}.
- *
- * Kept as its own type rather than reusing `JoinNode` because the recursive
- * knot differs: a nested `subquery` is authored, so it is a `QueryInput`, not
- * the parsed `QueryAST`.
- */
-export type JoinNodeInput = z.input<typeof JoinNodeBaseSchema> & {
-  /** Join against a derived dataset instead of a plain object/table. */
-  subquery?: QueryInput;
-};
-
-/**
- * Join Node
- * Represents table joins for combining data from multiple objects.
- * 
- * Joins connect related data across multiple tables using ON conditions.
- * Supports both direct object joins and subquery joins.
- * 
- * @example
- * // SQL: SELECT o.*, c.name FROM orders o INNER JOIN customers c ON o.customer_id = c.id
- * {
- *   object: 'order',
- *   fields: ['id', 'amount'],
- *   joins: [
- *     {
- *       type: 'inner',
- *       object: 'customer',
- *       alias: 'c',
- *       on: ['order.customer_id', '=', 'c.id']
- *     }
- *   ]
- * }
- * 
- * @example
- * // SQL: Multi-table join
- * // SELECT * FROM orders o
- * // INNER JOIN customers c ON o.customer_id = c.id
- * // LEFT JOIN shipments s ON o.id = s.order_id
- * {
- *   object: 'order',
- *   joins: [
- *     {
- *       type: 'inner',
- *       object: 'customer',
- *       alias: 'c',
- *       on: ['order.customer_id', '=', 'c.id']
- *     },
- *     {
- *       type: 'left',
- *       object: 'shipment',
- *       alias: 's',
- *       on: ['order.id', '=', 's.order_id']
- *     }
- *   ]
- * }
- * 
- * @example
- * // Salesforce SOQL: SELECT Name, (SELECT LastName FROM Contacts) FROM Account
- * {
- *   object: 'account',
- *   fields: ['name'],
- *   joins: [
- *     {
- *       type: 'left',
- *       object: 'contact',
- *       on: ['account.id', '=', 'contact.account_id']
- *     }
- *   ]
- * }
- * 
- * @example
- * // Subquery Join: Join with a filtered/aggregated dataset
- * {
- *   object: 'customer',
- *   joins: [
- *     {
- *       type: 'left',
- *       object: 'order',
- *       alias: 'high_value_orders',
- *       on: ['customer.id', '=', 'high_value_orders.customer_id'],
- *       subquery: {
- *         object: 'order',
- *         fields: ['customer_id', 'total'],
- *         filters: ['total', '>', 1000]
- *       }
- *     }
- *   ]
- * }
- */
-export const JoinNodeSchema: z.ZodType<JoinNode, JoinNodeInput> = z.lazy(() =>
-  JoinNodeBaseSchema.extend({
-    subquery: z.lazy(() => QuerySchema).optional().describe('Subquery instead of object'),
-  })
-);
-
-/**
- * Window Function Enum
- * Advanced analytical functions for row-based calculations.
- * 
- * Window Functions:
- * - **row_number**: Sequential number within partition (SQL: ROW_NUMBER() OVER (...))
- * - **rank**: Rank with gaps for ties (SQL: RANK() OVER (...))
- * - **dense_rank**: Rank without gaps (SQL: DENSE_RANK() OVER (...))
- * - **percent_rank**: Relative rank as percentage (SQL: PERCENT_RANK() OVER (...))
- * - **lag**: Access previous row value (SQL: LAG(field) OVER (...))
- * - **lead**: Access next row value (SQL: LEAD(field) OVER (...))
- * - **first_value**: First value in window (SQL: FIRST_VALUE(field) OVER (...))
- * - **last_value**: Last value in window (SQL: LAST_VALUE(field) OVER (...))
- * - **sum/avg/count/min/max**: Aggregates over window (SQL: SUM(field) OVER (...))
- * 
- * @example
- * // SQL: SELECT *, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY amount DESC) as rank
- * //      FROM orders
- * {
- *   object: 'order',
- *   fields: ['id', 'customer_id', 'amount'],
- *   windowFunctions: [
- *     {
- *       function: 'row_number',
- *       alias: 'rank',
- *       over: {
- *         partitionBy: ['customer_id'],
- *         orderBy: [{ field: 'amount', order: 'desc' }]
- *       }
- *     }
- *   ]
- * }
- * 
- * @example
- * // SQL: Running total with SUM() OVER (...)
- * {
- *   object: 'transaction',
- *   fields: ['date', 'amount'],
- *   windowFunctions: [
- *     {
- *       function: 'sum',
- *       field: 'amount',
- *       alias: 'running_total',
- *       over: {
- *         orderBy: [{ field: 'date', order: 'asc' }],
- *         frame: {
- *           type: 'rows',
- *           start: 'UNBOUNDED PRECEDING',
- *           end: 'CURRENT ROW'
- *         }
- *       }
- *     }
- *   ]
- * }
- */
-export const WindowFunction = z.enum([
-  'row_number', 'rank', 'dense_rank', 'percent_rank',
-  'lag', 'lead', 'first_value', 'last_value',
-  'sum', 'avg', 'count', 'min', 'max'
-]);
-
-/**
- * Window Specification
- * Defines PARTITION BY and ORDER BY for window functions.
- * 
- * Window specifications control how window functions compute values:
- * - **partitionBy**: Divide rows into groups (like GROUP BY but without collapsing rows)
- * - **orderBy**: Define order for ranking and offset functions
- * - **frame**: Specify which rows to include in aggregate calculations
- * 
- * @example
- * // Partition by department, order by salary
- * {
- *   partitionBy: ['department'],
- *   orderBy: [{ field: 'salary', order: 'desc' }]
- * }
- * 
- * @example
- * // Moving average with frame specification
- * {
- *   orderBy: [{ field: 'date', order: 'asc' }],
- *   frame: {
- *     type: 'rows',
- *     start: '6 PRECEDING',
- *     end: 'CURRENT ROW'
- *   }
- * }
- */
-export const WindowSpecSchema = lazySchema(() => z.object({
-  partitionBy: z.array(z.string()).optional().describe('PARTITION BY fields'),
-  orderBy: z.array(SortNodeSchema).optional().describe('ORDER BY specification'),
-  frame: z.object({
-    type: z.enum(['rows', 'range']).optional(),
-    start: z.string().optional().describe('Frame start (e.g., "UNBOUNDED PRECEDING", "1 PRECEDING")'),
-    end: z.string().optional().describe('Frame end (e.g., "CURRENT ROW", "1 FOLLOWING")'),
-  }).optional().describe('Window frame specification'),
-}));
-
-/**
- * Window Function Node
- * Represents window function with OVER clause.
- * 
- * Window functions perform calculations across a set of rows related to the current row,
- * without collapsing the result set (unlike GROUP BY aggregations).
- * 
- * @example
- * // SQL: Top 3 products per category
- * // SELECT *, ROW_NUMBER() OVER (PARTITION BY category ORDER BY sales DESC) as rank
- * // FROM products
- * {
- *   object: 'product',
- *   fields: ['name', 'category', 'sales'],
- *   windowFunctions: [
- *     {
- *       function: 'row_number',
- *       alias: 'category_rank',
- *       over: {
- *         partitionBy: ['category'],
- *         orderBy: [{ field: 'sales', order: 'desc' }]
- *       }
- *     }
- *   ]
- * }
- * 
- * @example
- * // SQL: Year-over-year comparison with LAG
- * {
- *   object: 'monthly_sales',
- *   fields: ['month', 'revenue'],
- *   windowFunctions: [
- *     {
- *       function: 'lag',
- *       field: 'revenue',
- *       alias: 'prev_year_revenue',
- *       over: {
- *         orderBy: [{ field: 'month', order: 'asc' }]
- *       }
- *     }
- *   ]
- * }
- */
-export const WindowFunctionNodeSchema = lazySchema(() => z.object({
-  function: WindowFunction.describe('Window function name'),
-  field: z.string().optional().describe('Field to operate on (for aggregate window functions)'),
-  alias: z.string().describe('Result column alias'),
-  over: WindowSpecSchema.describe('Window specification (OVER clause)'),
-}));
+// ─── Window functions: REMOVED (#4286, ADR-0049) ─────────────────────────────
+// The window cluster — `WindowFunction`, `WindowSpecSchema`,
+// `WindowFunctionNodeSchema` and the `WindowFunctionNode`/`WindowSpec` types —
+// was deleted together with the `query.windowFunctions` tombstone below.
+// `find()` never applied a window function, and the one live door —
+// `SqlDriver.findWithWindowFunctions(object, query)` — consumes its own flat
+// driver-level shape (`{ function, alias, partitionBy?, orderBy? }`), NOT this
+// vocabulary: the spec node declared `field`, `over` and `frame` members the
+// door never read, so keeping the schemas would have documented an input no
+// executor accepts (the #3950 orphaned-schema precedent, one layer over).
 
 /**
  * One entry of a select list: a field name.
@@ -501,32 +205,55 @@ export const FieldNodeSchema = z.string({
 });
 
 /**
+ * The prescriptions for the two AST members removed in #4286. Like
+ * {@link FIELD_NODE_OBJECT_FORM_REMOVED}, the rejection is where an author
+ * meets a retirement, so each message carries the FROM → TO mapping. `QueryAST`
+ * is a request shape, never stored in stack metadata, so there is no
+ * `os migrate meta` step — callers rewrite their own queries (the protocol-18
+ * semantic migrations `query-joins-retired` / `query-window-functions-retired`).
+ */
+const QUERY_JOINS_REMOVED =
+  '`query.joins` was removed in @objectstack/spec 18 (#4286, ADR-0049) — no engine or driver '
+  + 'ever read it: a query carrying `joins` behaved exactly as if the key were absent, while '
+  + 'its name squatted on the reserved REST parameter set. Delete the key. Related records are '
+  + "read through `expand` — `expand: { owner: { object: 'user', fields: ['name'] } }` — which "
+  + 'the engine resolves via batch $in queries, and a single related column is a dotted '
+  + "`fields` path (`fields: ['owner.name']`).";
+
+const QUERY_WINDOW_FUNCTIONS_REMOVED =
+  '`query.windowFunctions` was removed in @objectstack/spec 18 (#4286, ADR-0049) — `find()` '
+  + 'never applied it: no engine or driver read the key on the query path, so every OVER '
+  + 'clause it declared was silently dropped. Delete the key. Window functions are a '
+  + 'SQL-driver capability behind `SqlDriver.findWithWindowFunctions(object, query)` '
+  + '(embedder-level; not on the `IDataDriver` contract or the REST surface); request-level '
+  + 'analytics are `aggregations` + `groupBy`.';
+
+/**
  * Full-Text Search Configuration
  * Defines full-text search parameters for text queries.
- * 
- * Supports:
- * - Multi-field search
- * - Relevance scoring
- * - Fuzzy matching
- * - Language-specific analyzers
- * 
+ *
+ * What actually executes (ADR-0061): the engine expands `search` into a
+ * server-resolved cross-field `$or` filter, reading exactly two members —
+ * `query` (the text) and `fields` (which columns to match). The remaining
+ * six flags are declared search-engine affordances no executor receives;
+ * they carry `[EXPERIMENTAL — not enforced]` markers so authoring one is a
+ * declaration, not a silent no-op (#4286, ADR-0078).
+ *
  * @example
  * {
  *   query: "John Smith",
- *   fields: ["name", "email", "description"],
- *   fuzzy: true,
- *   boost: { "name": 2.0, "email": 1.5 }
+ *   fields: ["name", "email", "description"]
  * }
  */
 export const FullTextSearchSchema = lazySchema(() => z.object({
   query: z.string().describe('Search query text'),
   fields: z.array(z.string()).optional().describe('Fields to search in (if not specified, searches all text fields)'),
-  fuzzy: z.boolean().optional().default(false).describe('Enable fuzzy matching (tolerates typos)'),
-  operator: z.enum(['and', 'or']).optional().default('or').describe('Logical operator between terms'),
-  boost: z.record(z.string(), z.number()).optional().describe('Field-specific relevance boosting (field name -> boost factor)'),
-  minScore: z.number().optional().describe('Minimum relevance score threshold'),
-  language: z.string().optional().describe('Language for text analysis (e.g., "en", "zh", "es")'),
-  highlight: z.boolean().optional().default(false).describe('Enable search result highlighting'),
+  fuzzy: z.boolean().optional().default(false).describe('[EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag (#4286).'),
+  operator: z.enum(['and', 'or']).optional().default('or').describe('[EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag (#4286).'),
+  boost: z.record(z.string(), z.number()).optional().describe('[EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results (#4286).'),
+  minScore: z.number().optional().describe('[EXPERIMENTAL — not enforced] Minimum relevance score threshold. No executor scores results (#4286).'),
+  language: z.string().optional().describe('[EXPERIMENTAL — not enforced] Language for text analysis (e.g., "en", "zh", "es"). No executor selects an analyzer (#4286).'),
+  highlight: z.boolean().optional().default(false).describe('[EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights (#4286).'),
 }));
 
 export type FullTextSearch = z.infer<typeof FullTextSearchSchema>;
@@ -566,14 +293,12 @@ export type FullTextSearch = z.infer<typeof FullTextSearchSchema>;
  * }
  * 
  * @example
- * // Full-text search
+ * // Full-text search (ADR-0061: expanded into a cross-field $or)
  * {
  *   object: 'article',
  *   search: {
  *     query: "machine learning",
- *     fields: ["title", "content"],
- *     fuzzy: true,
- *     boost: { "title": 2.0 }
+ *     fields: ["title", "content"]
  *   },
  *   limit: 10
  * }
@@ -600,9 +325,9 @@ const BaseQuerySchema = z.object({
   top: z.number().optional().describe('Alias for limit (OData compatibility)'),
   cursor: z.record(z.string(), z.unknown()).optional().describe('Cursor for keyset pagination'),
   
-  /** Joins */
-  joins: z.array(JoinNodeSchema).optional().describe('Explicit Table Joins'),
-  
+  /** Joins — REMOVED (#4286): `expand` is the one spelling for related records. */
+  joins: retiredKey(QUERY_JOINS_REMOVED),
+
   /** Aggregations */
   aggregations: z.array(AggregationNodeSchema).optional().describe('Aggregation functions'),
   
@@ -612,9 +337,9 @@ const BaseQuerySchema = z.object({
   /** Having Clause */
   having: FilterConditionSchema.optional().describe('HAVING clause for aggregation filtering'),
   
-  /** Window Functions */
-  windowFunctions: z.array(WindowFunctionNodeSchema).optional().describe('Window functions with OVER clause'),
-  
+  /** Window functions — REMOVED from the request surface (#4286); the capability's door is `SqlDriver.findWithWindowFunctions()`. */
+  windowFunctions: retiredKey(QUERY_WINDOW_FUNCTIONS_REMOVED),
+
   /** Subquery flag */
   distinct: z.boolean().optional().describe('SELECT DISTINCT flag'),
 });
@@ -665,9 +390,7 @@ export type SortNode = z.infer<typeof SortNodeSchema>;
 export type AggregationNode = z.infer<typeof AggregationNodeSchema>;
 export type GroupByNode = z.infer<typeof GroupByNodeSchema>;
 export type DateGranularityValue = z.infer<typeof DateGranularity>;
-// `JoinNode` is declared next to its schema — it IS that schema's annotation, so
-// it cannot be inferred back out of it (#4171). `FieldNode` sits there too, but
-// for a different reason since #4196: it is no longer recursive, it is just the
-// name the docs and the engine give to "one entry of a select list".
-export type WindowFunctionNode = z.infer<typeof WindowFunctionNodeSchema>;
-export type WindowSpec = z.infer<typeof WindowSpecSchema>;
+// `FieldNode` is declared next to its schema rather than here: since #4196 it
+// is no longer recursive, it is just the name the docs and the engine give to
+// "one entry of a select list". (`JoinNode` and `WindowFunctionNode`/`WindowSpec`
+// used to sit here too — removed with their clusters, #4286.)
