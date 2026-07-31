@@ -31,15 +31,15 @@ export const SEARCH_SURFACE: ConformanceRow[] = [
     summary: '`object.searchableFields` — canonical allowed-search-field set; auto-default (name/title + short text, secret/PII/json excluded) when unset',
     surface: 'spec/data/object.zod.ts:searchableFields',
     state: 'enforced',
-    enforcement: 'objectql/src/search-filter.ts resolveSearchFields / autoDefaultFields',
+    enforcement: 'spec/data/search-fields.ts resolveSearchFieldResolution (consumed by objectql/src/search-filter.ts)',
     proof: 'showcase-search.dogfood.test.ts',
   },
   {
     id: 'search-fields-override',
-    summary: '`$searchFields` per-query narrowing — validated against the allowed set, can never widen it',
+    summary: '`$searchFields` per-query narrowing — validated against the allowed set, can never widen it; a name outside the set is 400 INVALID_FIELD at the REST ingress (#4254), not silently dropped',
     surface: 'spec/api/query.zod.ts:$searchFields',
     state: 'enforced',
-    enforcement: 'objectql/src/search-filter.ts resolveSearchFields (intersection)',
+    enforcement: 'spec/data/search-fields.ts resolveSearchFields (intersection) + metadata-protocol/src/protocol.ts assertSearchFieldsAreSearchable (ingress gate)',
     proof: 'showcase-search.dogfood.test.ts',
   },
   {

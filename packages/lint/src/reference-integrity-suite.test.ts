@@ -27,6 +27,7 @@ describe('reference-integrity suite — membership', () => {
       'validateAiToolReferences',
       'validateAiAgentAuthoring',
       'validateHookBodyWrites',
+      'validateActionBodyWrites',
     ]);
   });
 
@@ -60,6 +61,18 @@ describe('reference-integrity suite — every member actually runs', () => {
     actions: [
       // validateObjectReferences: a param pointing at an object nothing declares.
       { name: 'assign', label: 'Assign', params: [{ name: 'owner', reference: 'user' }] },
+      // validateActionBodyWrites: the L2 body persists a field crm_lead does
+      // not declare — the action returns success and the column never lands
+      // (#4271, the action half of the hook rule below).
+      {
+        name: 'score_now',
+        label: 'Score Now',
+        objectName: 'crm_lead',
+        body: {
+          language: 'js',
+          source: "await ctx.api.object('crm_lead').update({ lead_score: 100 });",
+        },
+      },
     ],
     views: [
       {
@@ -171,6 +184,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('ai-skill-tool-unresolved');
     expect(rules).toContain('agent-authoring-withdrawn');
     expect(rules).toContain('hook-body-write-unknown-field');
+    expect(rules).toContain('action-body-write-unknown-field');
   });
 
   it('carries a gating flow-template finding through the suite (#3810)', () => {
@@ -192,9 +206,9 @@ describe('reference-integrity suite — every member actually runs', () => {
       expect(typeof f.message).toBe('string');
       expect(typeof f.hint).toBe('string');
     }
-    // Object references run first, hook-body writes last.
+    // Object references run first, action-body writes last.
     expect(findings[0].rule).toBe('object-reference-unknown');
-    expect(findings[findings.length - 1].rule).toBe('hook-body-write-unknown-field');
+    expect(findings[findings.length - 1].rule).toBe('action-body-write-unknown-field');
   });
 
   it('returns nothing for an empty stack', () => {

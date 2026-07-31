@@ -364,6 +364,19 @@ three (only `count`/`sum`/`avg`/`min`/`max` are mapped), and the in-memory drive
 silently returns `null` for them. Avoid these three on SQL- or memory-backed objects.
 </Callout>
 
+<Callout type="info">
+Over the REST/protocol ingress, `groupBy` and `aggregations` are validated
+before they reach any driver. A field the object does not have is
+`400 INVALID_FIELD` — the in-memory fallback used to collapse an unknown
+`groupBy` column into one `null`-keyed bucket, and to answer `sum(<typo>)`
+with `0`. A value the spec cannot read (a non-array, an entry naming no
+field, a function or `dateGranularity` outside the enums above, a missing
+`alias`) is `400 INVALID_QUERY` — those shapes used to be ignored, returning
+ungrouped raw rows. `count` with no `field` (or `field: "*"`) is the one
+legitimate field-less form and passes. Internal callers reaching
+`engine.aggregate()` directly are unaffected.
+</Callout>
+
 ### Aggregation Example
 
 ```typescript
@@ -447,6 +460,17 @@ Only `query` and `fields` are implemented. The engine expands `search` into a dr
 `expandSearchToFilter()` / `normalizeSearch()`, so they have no effect; since #4286 their
 `.describe()` markers say so. Multiple search terms are always AND-ed regardless of
 `operator`.
+</Callout>
+
+<Callout type="info">
+`fields` (and its query-parameter spelling, `?searchFields=` / `?$searchFields=`) can only
+**narrow** the scan within the server-resolved searchable set — the object's declared
+`searchableFields`, or a text-like auto-default when none are declared. Over the
+REST/protocol ingress a name outside that set is `400 INVALID_FIELD`, with distinct
+messages for a field that does not exist and a real field that is not searchable. The
+engine used to drop unknown names and fall back to the full searchable set — a parameter
+that exists to narrow a search, silently widening it. Internal callers reaching
+`engine.find()` directly are unaffected.
 </Callout>
 
 ### Pinyin recall (Chinese deployments)

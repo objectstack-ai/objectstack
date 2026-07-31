@@ -41,6 +41,13 @@
  * is not what the author declared (`applySystemFields` injects the audit /
  * tenant / owner columns at registration), and because expansion is engine
  * work: only the real one can show `$expand` resolving a `tree` field.
+ *
+ * #4254 extends the same machine to the three axes #4226 explicitly left out —
+ * `searchFields`, `groupBy` and `aggregations` — in the second describe block
+ * below. Same ingress, same tiering, same control-group discipline; the new
+ * failure modes are worse only in WHAT they corrupt (`searchFields` changes
+ * the row SET, `groupBy` collapses N groups into one, `sum(<typo>)` answers a
+ * 0 no report can tell from a real one).
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -65,6 +72,12 @@ const taskObject = {
         status: { name: 'status', label: 'Status', type: 'text' as const },
         project_id: { name: 'project_id', label: 'Project', type: 'lookup' as const, reference: 'showcase_project' },
         parent_id: { name: 'parent_id', label: 'Parent', type: 'tree' as const, reference: 'showcase_task' },
+        // [#4254] A searchable long-text column and a NON-searchable numeric
+        // one: `notes` is what `searchFields=notes` legitimately narrows to,
+        // `estimate` is what `sum()` legitimately totals — and what the search
+        // auto-default excludes by TYPE, which is its own rejection.
+        notes: { name: 'notes', label: 'Notes', type: 'textarea' as const },
+        estimate: { name: 'estimate', label: 'Estimate', type: 'number' as const },
     },
 };
 
@@ -89,9 +102,23 @@ function makeMemoryDriver() {
                 if (!v.every((arm) => matchesWhere(row, arm))) return false;
                 continue;
             }
+            // [#4254] `$or` + `$contains` are the shape the engine expands
+            // `search` into (an `$or` of case-insensitive `$contains`, ADR-0061).
+            // Without them the driver would MATCH EVERY ROW for any search, and
+            // the "searchFields really narrows the row set" controls below would
+            // hold vacuously against a search that never filtered anything.
+            if (k === '$or' && Array.isArray(v)) {
+                if (!v.some((arm) => matchesWhere(row, arm))) return false;
+                continue;
+            }
             if (k.startsWith('$')) continue;
             if (v && typeof v === 'object' && '$in' in (v as any)) {
                 if (!(v as any).$in.map(String).includes(String(row[k]))) return false;
+                continue;
+            }
+            if (v && typeof v === 'object' && '$contains' in (v as any)) {
+                const haystack = String(row[k] ?? '').toLowerCase();
+                if (!haystack.includes(String((v as any).$contains).toLowerCase())) return false;
                 continue;
             }
             const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
@@ -648,5 +675,489 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         expect(r.hasMore).toBe(true);
         expect(r.records[0].project_id).toMatchObject({ id: 'p1', name: 'Apollo' });
         expect(Object.keys(r.records[0]).sort()).toEqual(['id', 'project_id', 'title']);
+    });
+});
+
+/**
+ * [#4254] An object that DECLARES `searchableFields` — the other branch of the
+ * allowed-set resolution. `notes` exists and is text, but the declaration
+ * excludes it, which earns its own rejection message (the fix is on the
+ * OBJECT's declaration, not the request's spelling).
+ */
+const memoObject = {
+    name: 'showcase_memo',
+    label: 'Memo',
+    searchableFields: ['title'],
+    fields: {
+        id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+        title: { name: 'title', label: 'Title', type: 'text' as const },
+        notes: { name: 'notes', label: 'Notes', type: 'textarea' as const },
+    },
+};
+
+describe('#4254 — searchFields / groupBy / aggregations on the list path (real ObjectQL engine)', () => {
+    let engine: ObjectQL;
+    let protocol: ObjectStackProtocolImplementation;
+
+    /** Same transcript order as #4226: five rows inserted `C A E B D`. */
+    const INSERTION_ORDER = ['C', 'A', 'E', 'B', 'D'];
+    /** C (the 'done' row) totals 10; the four 'open' rows total 12. */
+    const ESTIMATES: Record<string, number> = { C: 10, A: 1, E: 5, B: 2, D: 4 };
+
+    const titles = (r: any): string[] => r.records.map((x: any) => x.title);
+    const ids = (r: any): string[] => r.records.map((x: any) => x.id);
+
+    beforeEach(async () => {
+        engine = new ObjectQL();
+        const { driver, stores } = makeMemoryDriver();
+        // The issue's transcript runs on the engine's IN-MEMORY aggregation
+        // fallback — the path `engine.aggregate` takes for drivers with no
+        // native `aggregate` (driver-rest, driver-memory, partial SQL
+        // drivers). The fake's one-line `aggregate` stub would both preempt
+        // that path and ignore `groupBy`, making every grouping control below
+        // vacuously green against a grouping that never ran.
+        delete (driver as any).aggregate;
+        engine.registerDriver(driver, true);
+        await engine.init();
+        engine.registry.registerObject(projectObject as any, 'test-package');
+        engine.registry.registerObject(taskObject as any, 'test-package');
+        engine.registry.registerObject(memoObject as any, 'test-package');
+        protocol = new ObjectStackProtocolImplementation(engine);
+
+        const tasks = new Map<string, Record<string, unknown>>();
+        INSERTION_ORDER.forEach((letter, i) => {
+            tasks.set(`t_${letter}`, {
+                id: `t_${letter}`,
+                title: letter,
+                status: i === 0 ? 'done' : 'open',
+                project_id: 'p1',
+                parent_id: letter === 'A' ? null : 't_A',
+                // Only B carries the term in `notes`; only A carries it in
+                // `title`. `?search=a` finding exactly these two rows — and
+                // `searchFields` narrowing to exactly one — is what proves the
+                // search actually scans the columns it says it does.
+                ...(letter === 'B' ? { notes: 'alpha in notes' } : {}),
+                estimate: ESTIMATES[letter],
+                owner_id: 'usr_1',
+                created_at: '2026-07-30T00:00:00.000Z',
+            });
+        });
+        stores.set('showcase_task', tasks);
+        stores.set('showcase_memo', new Map([
+            ['m1', { id: 'm1', title: 'gamma report', notes: 'delta hidden in notes' }],
+            ['m2', { id: 'm2', title: 'delta summary', notes: 'plain' }],
+        ]));
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // SEARCH-FIELDS — control group
+    // ─────────────────────────────────────────────────────────────
+
+    it('search scans the default columns, and searchFields really narrows the row set', async () => {
+        // 'a' hits A in `title` and B in `notes` — two rows, two different
+        // matched columns. The narrowing controls only prove something
+        // because the un-narrowed baseline finds BOTH.
+        expect(titles(await protocol.findData({ object: 'showcase_task', query: { search: 'a' } })))
+            .toEqual(['A', 'B']);
+        expect(titles(await protocol.findData({
+            object: 'showcase_task', query: { search: 'a', searchFields: 'title' },
+        }))).toEqual(['A']);
+        expect(titles(await protocol.findData({
+            object: 'showcase_task', query: { search: 'a', searchFields: ['notes'] },
+        }))).toEqual(['B']);
+        // The object form of `search` carries the same override — in both the
+        // array and comma-string shapes the engine accepts.
+        expect(titles(await protocol.findData({
+            object: 'showcase_task', query: { search: { query: 'a', fields: ['title'] } },
+        }))).toEqual(['A']);
+        expect(titles(await protocol.findData({
+            object: 'showcase_task', query: { search: { query: 'a', fields: 'notes' } },
+        }))).toEqual(['B']);
+    });
+
+    it('a declared searchableFields is the allowed set — search does not scan outside it', async () => {
+        // `delta` sits in m2's title and m1's NOTES; the declaration limits the
+        // scan to `title`, so m1 must not match. This is the declared-branch
+        // control the declared-branch rejection below leans on.
+        expect(ids(await protocol.findData({ object: 'showcase_memo', query: { search: 'delta' } })))
+            .toEqual(['m2']);
+        expect(ids(await protocol.findData({
+            object: 'showcase_memo', query: { search: 'delta', searchFields: 'title' },
+        }))).toEqual(['m2']);
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // SEARCH-FIELDS — rejected
+    // ─────────────────────────────────────────────────────────────
+
+    it('an unknown searchFields no longer WIDENS the search back to the default set', async () => {
+        // The issue's transcript: `?search=a&searchFields=no_such_field` used
+        // to return BOTH matching rows — the engine dropped the unknown name,
+        // the emptied override fell back to every searchable column, and a
+        // parameter whose only purpose is to narrow answered with the WIDER
+        // set. Same two-step #4226 closed on `select`, except this one changes
+        // which ROWS come back.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { search: 'a', searchFields: 'no_such_field' },
+        })).rejects.toMatchObject({
+            status: 400,
+            code: 'INVALID_FIELD',
+            field: 'no_such_field',
+            object: 'showcase_task',
+            param: 'searchFields',
+        });
+    });
+
+    it('a partially-unknown searchFields is refused too — half a narrowing is not the one asked for', async () => {
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { search: 'a', searchFields: 'title,no_such_field' },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'no_such_field' });
+    });
+
+    it.each([
+        ['comma string', { search: 'a', searchFields: 'no_such_field' }, 'searchFields'],
+        ['array', { search: 'a', searchFields: ['no_such_field'] }, 'searchFields'],
+        ['OData spelling', { search: 'a', $searchFields: 'no_such_field' }, '$searchFields'],
+        ['the object form of search', { search: { query: 'a', fields: ['no_such_field'] } }, 'search'],
+        ['the object form with a comma string', { search: { query: 'a', fields: 'no_such_field' } }, 'search'],
+    ])('every override spelling gets the same answer, quoting the parameter the caller wrote — %s', async (_label, query, param) => {
+        await expect(protocol.findData({ object: 'showcase_task', query }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'no_such_field', param });
+    });
+
+    it('a REAL field outside the searchable set is refused with its own reason', async () => {
+        // A different mistake from a typo: `estimate` exists, it just cannot
+        // be a `$contains` target. The message names the auto-default rule and
+        // the field's type, because the fix (declare `searchableFields`) is on
+        // the object.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { search: 'a', searchFields: 'estimate' },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'estimate' });
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { search: 'a', searchFields: 'estimate' },
+        })).rejects.toThrow(/is not searchable.*type 'number'/s);
+        // System columns get the system-column reason, not "unknown".
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { search: 'a', searchFields: 'id' },
+        })).rejects.toThrow(/system\/audit column/);
+    });
+
+    it('outside a DECLARED searchableFields, the message points at the declaration', async () => {
+        // `notes` exists on the memo and is text-like — under the auto-default
+        // it would be searchable. The declaration is what excludes it, so the
+        // rejection must say so rather than call it unknown or untextual.
+        await expect(protocol.findData({
+            object: 'showcase_memo', query: { search: 'delta', searchFields: 'notes' },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'notes' });
+        await expect(protocol.findData({
+            object: 'showcase_memo', query: { search: 'delta', searchFields: 'notes' },
+        })).rejects.toThrow(/declares 'searchableFields'/);
+    });
+
+    it('a STALE searchableFields declaration gets a third message — the bug is on the OBJECT', async () => {
+        // Clients echo the declaration verbatim (objectui's list search sends
+        // `$searchFields: schema.searchableFields`), so a declared entry whose
+        // field was renamed away must not be reported as the caller's typo —
+        // same split #4226 drew for a lookup whose `reference` was never
+        // authored. It is still refused: with every requested name stale, the
+        // engine's fallback would have scanned the default set — the widening
+        // this axis exists to close.
+        engine.registry.registerObject({
+            name: 'showcase_stale',
+            label: 'Stale',
+            searchableFields: ['title', 'ghost'],
+            fields: {
+                id: { name: 'id', label: 'ID', type: 'text', primaryKey: true },
+                title: { name: 'title', label: 'Title', type: 'text' },
+            },
+        } as any, 'test-package');
+        // The engine's own resolution tolerates the stale entry — a search
+        // WITHOUT an override works over the existing subset.
+        await expect(protocol.findData({ object: 'showcase_stale', query: { search: 'x' } }))
+            .resolves.toBeDefined();
+        // The objectui echo: the full declaration, stale entry included.
+        await expect(protocol.findData({
+            object: 'showcase_stale', query: { search: 'x', searchFields: ['title', 'ghost'] },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'ghost' });
+        await expect(protocol.findData({
+            object: 'showcase_stale', query: { search: 'x', searchFields: 'ghost' },
+        })).rejects.toThrow(/declared in 'searchableFields' but does not exist/);
+    });
+
+    it('the override is validated even without a search term riding along', async () => {
+        // The caller named fields either way; a stale override is the same
+        // typo before the `search` that will eventually use it is added. (The
+        // export route only sends `searchFields` alongside `search`, so
+        // nothing in the framework depends on the inert combination.)
+        await expect(protocol.findData({ object: 'showcase_task', query: { searchFields: 'no_such_field' } }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'no_such_field' });
+        await expect(protocol.findData({ object: 'showcase_task', query: { searchFields: 'title' } }))
+            .resolves.toMatchObject({ total: 5 });
+    });
+
+    it('an override the server cannot read is refused rather than ignored', async () => {
+        // A number/object override was silently discarded by the engine —
+        // which left the search over the DEFAULT columns: the same widening,
+        // one shape earlier.
+        for (const searchFields of [42, { fields: 'title' }, true]) {
+            await expect(protocol.findData({
+                object: 'showcase_task', query: { search: 'a', searchFields },
+            })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', param: 'searchFields' });
+        }
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { search: 'a', searchFields: ['title', 42] },
+        })).rejects.toThrow(/entry #2.*is not a field name/s);
+    });
+
+    it('a dotted path is refused with the scans-own-columns hint, not a bare "unknown"', async () => {
+        // Plausible vocabulary from the select/sort axes — but the engine
+        // intersects the override by EXACT name, so a dotted path could only
+        // be dropped (and the search widened) if it were let through.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { search: 'a', searchFields: 'parent_id.title' },
+        })).rejects.toThrow(/scans this object's own columns/);
+    });
+
+    it('an empty override is ABSENT, not malformed', async () => {
+        for (const searchFields of ['', []]) {
+            expect(titles(await protocol.findData({
+                object: 'showcase_task', query: { search: 'a', searchFields },
+            }))).toEqual(['A', 'B']);
+        }
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // GROUP-BY — control group, then rejected
+    // ─────────────────────────────────────────────────────────────
+
+    it('a real groupBy really groups (in-memory fallback path)', async () => {
+        const r: any = await protocol.findData({
+            object: 'showcase_task',
+            query: { groupBy: ['status'], aggregations: [{ function: 'count', alias: 'n' }] },
+        });
+        expect(r.records).toHaveLength(2);
+        expect(r.records).toEqual(expect.arrayContaining([
+            { status: 'done', n: 1 },
+            { status: 'open', n: 4 },
+        ]));
+    });
+
+    it('a date-bucketed groupBy really buckets', async () => {
+        const r: any = await protocol.findData({
+            object: 'showcase_task',
+            query: {
+                groupBy: [{ field: 'created_at', dateGranularity: 'month' }],
+                aggregations: [{ function: 'count', alias: 'n' }],
+            },
+        });
+        expect(r.records).toEqual([{ created_at: '2026-07', n: 5 }]);
+    });
+
+    it('grouping by an unknown field is a 400, not one null-keyed bucket', async () => {
+        // The pre-fix answer was `[{ no_such_field: null, n: 5 }]` — the true
+        // row count under a grouping that never ran, structurally identical to
+        // "this column really holds a single value". A chart draws one bar.
+        await expect(protocol.findData({
+            object: 'showcase_task',
+            query: { groupBy: ['no_such_field'], aggregations: [{ function: 'count', alias: 'n' }] },
+        })).rejects.toMatchObject({
+            status: 400,
+            code: 'INVALID_FIELD',
+            field: 'no_such_field',
+            object: 'showcase_task',
+            param: 'groupBy',
+        });
+    });
+
+    it.each([
+        ['second of two', { groupBy: ['status', 'no_such_field'] }],
+        ['structured form', { groupBy: [{ field: 'no_such_field', dateGranularity: 'month' }] }],
+        ['no aggregations riding along', { groupBy: ['no_such_field'] }],
+    ])('every groupBy spelling of an unknown field gets the same answer — %s', async (_label, query) => {
+        await expect(protocol.findData({ object: 'showcase_task', query }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'no_such_field' });
+    });
+
+    it('a groupBy the spec cannot read is refused as a SHAPE, with its own code', async () => {
+        // Every one of these used to be ignored by the `Array.isArray` routing
+        // guard and ride to `engine.find` as inert AST junk: rows came back
+        // UNGROUPED with a 200, indistinguishable from a query that never
+        // asked for grouping.
+        await expect(protocol.findData({ object: 'showcase_task', query: { groupBy: 'status' } }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_QUERY', param: 'groupBy' });
+        await expect(protocol.findData({ object: 'showcase_task', query: { groupBy: [42] } }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_QUERY' });
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { groupBy: [{ dateGranularity: 'month' }] },
+        })).rejects.toThrow(/names no field/);
+        await expect(protocol.findData({
+            object: 'showcase_task',
+            query: { groupBy: [{ field: 'created_at', dateGranularity: 'fortnight' }] },
+        })).rejects.toThrow(/not a date granularity/);
+    });
+
+    it('grouping by a related column is refused with the runs-own-columns hint', async () => {
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { groupBy: ['parent_id.title'] },
+        })).rejects.toThrow(/this object's own columns/);
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // AGGREGATIONS — control group, then rejected
+    // ─────────────────────────────────────────────────────────────
+
+    it('a real sum really sums (in-memory fallback path)', async () => {
+        const r: any = await protocol.findData({
+            object: 'showcase_task',
+            query: {
+                groupBy: ['status'],
+                aggregations: [{ function: 'sum', field: 'estimate', alias: 'total' }],
+            },
+        });
+        expect(r.records).toEqual(expect.arrayContaining([
+            { status: 'done', total: 10 },
+            { status: 'open', total: 12 },
+        ]));
+    });
+
+    it('count(*) — the one legitimate field-less form — passes, in both spellings', async () => {
+        const bare: any = await protocol.findData({
+            object: 'showcase_task', query: { aggregations: [{ function: 'count', alias: 'n' }] },
+        });
+        expect(bare.records).toEqual([{ n: 5 }]);
+        const star: any = await protocol.findData({
+            object: 'showcase_task', query: { aggregations: [{ function: 'count', field: '*', alias: 'n' }] },
+        });
+        expect(star.records).toEqual([{ n: 5 }]);
+    });
+
+    it('summing an unknown field is a 400, not a 0 no report can question', async () => {
+        // The pre-fix answer was `[{status:'open', s:0}, {status:'done', s:0}]`
+        // — sum folded a column of undefined to 0, the exact number a
+        // genuinely empty quarter produces. avg/min/max answered null the
+        // same way.
+        await expect(protocol.findData({
+            object: 'showcase_task',
+            query: {
+                groupBy: ['status'],
+                aggregations: [{ function: 'sum', field: 'no_such_field', alias: 's' }],
+            },
+        })).rejects.toMatchObject({
+            status: 400,
+            code: 'INVALID_FIELD',
+            field: 'no_such_field',
+            object: 'showcase_task',
+            param: 'aggregations',
+        });
+        // count(field) counts the non-null values of a REAL column — an
+        // unknown one is the same typo as anywhere else.
+        await expect(protocol.findData({
+            object: 'showcase_task',
+            query: { aggregations: [{ function: 'count', field: 'no_such_field', alias: 'n' }] },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'no_such_field' });
+    });
+
+    it('an aggregation the spec cannot read is refused as a SHAPE, with its own code', async () => {
+        // Each of these had a silent placeholder instead of an error: null
+        // results for an unknown function or a field-less sum, a result column
+        // literally keyed "undefined" for a missing alias.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { aggregations: 'sum(estimate)' },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_QUERY', param: 'aggregations' });
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { aggregations: [42] },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_QUERY' });
+        await expect(protocol.findData({
+            object: 'showcase_task',
+            query: { aggregations: [{ function: 'median', field: 'estimate', alias: 'm' }] },
+        })).rejects.toThrow(/not an aggregation function/);
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { aggregations: [{ function: 'sum', field: 'estimate' }] },
+        })).rejects.toThrow(/has no 'alias'/);
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { aggregations: [{ function: 'sum', alias: 's' }] },
+        })).rejects.toThrow(/Only 'count' may omit the field/);
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { aggregations: [{ function: 'sum', field: '*', alias: 's' }] },
+        })).rejects.toThrow(/count-all sentinel/);
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // Composition and tiering
+    // ─────────────────────────────────────────────────────────────
+
+    it('search + searchFields compose with the #4226 axes on one request', async () => {
+        const r: any = await protocol.findData({
+            object: 'showcase_task',
+            query: {
+                filter: JSON.stringify({ status: 'open' }),
+                search: 'a',
+                searchFields: 'title,notes',
+                sort: '-title',
+                select: 'id,title',
+                top: 2,
+            },
+        });
+        expect(titles(r)).toEqual(['B', 'A']);
+        expect(Object.keys(r.records[0]).sort()).toEqual(['id', 'title']);
+    });
+
+    it('where + groupBy + aggregations compose on one request', async () => {
+        const r: any = await protocol.findData({
+            object: 'showcase_task',
+            query: {
+                filter: JSON.stringify({ status: 'open' }),
+                groupBy: ['status'],
+                aggregations: [
+                    { function: 'sum', field: 'estimate', alias: 'total' },
+                    { function: 'count', alias: 'n' },
+                ],
+            },
+        });
+        expect(r.records).toEqual([{ status: 'open', total: 12, n: 4 }]);
+        expect(r.total).toBe(1);
+        expect(r.hasMore).toBe(false);
+    });
+
+    it('an unknown OBJECT is still a 404 — no new axis gate may turn it into a 400', async () => {
+        for (const query of [
+            { search: 'a', searchFields: 'no_such_field' },
+            { groupBy: ['no_such_field'] },
+            { aggregations: [{ function: 'sum', field: 'no_such_field', alias: 's' }] },
+        ]) {
+            await expect(protocol.findData({ object: 'no_such_object', query }))
+                .rejects.toMatchObject({ status: 404, code: 'OBJECT_NOT_FOUND' });
+        }
+    });
+
+    it('a legacy ARRAY field map disables the NAME gates — but shape is still refused', async () => {
+        // Name checks need a field map to consult; the shape of the request
+        // needs nothing. A registry-less/legacy host must not reject real
+        // field names it cannot verify — and must still not carry a groupBy
+        // string or a numeric searchFields to an engine that would ignore it.
+        const arrayEngine: any = {
+            find: async () => [],
+            count: async () => 0,
+            aggregate: async () => [],
+            registry: {
+                getObject: (name: string) => ({
+                    name,
+                    fields: [{ name: 'title' }],
+                    searchableFields: ['title'],
+                }),
+            },
+        };
+        const lenient = new ObjectStackProtocolImplementation(arrayEngine);
+        for (const query of [
+            { search: 'a', searchFields: 'no_such_field' },
+            { groupBy: ['no_such_field'] },
+            { aggregations: [{ function: 'sum', field: 'no_such_field', alias: 's' }] },
+        ]) {
+            await expect(lenient.findData({ object: 'legacy_object', query })).resolves.toBeDefined();
+        }
+        await expect(lenient.findData({ object: 'legacy_object', query: { groupBy: 'status' } }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_QUERY' });
+        await expect(lenient.findData({ object: 'legacy_object', query: { search: 'a', searchFields: 42 } }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD' });
     });
 });

@@ -38,6 +38,13 @@
 // test), so it runs on `os validate`, `os lint` and `os compile` at once.
 // Deliberately NOT in the `defineStack` runtime path: the TypeScript parser
 // has no place on kernel boot (see the lazy-load contract below).
+//
+// ACTION bodies run through the same `HookBodySchema` and the same sandbox, so
+// they get the same treatment from a sibling rule — `validate-action-body-
+// writes.ts`, which reuses this module's extractor, ledger, field index and
+// implicit-field set. It carries only the pattern subset that survives the
+// context change (an action's `ctx.input` is its params bag, not a record);
+// the reasoning is declared as data there, not restated here.
 
 import { createRequire } from 'node:module';
 import type ts from 'typescript';
@@ -184,8 +191,14 @@ const INPUT_ENVELOPE_KEYS: ReadonlySet<string> = new Set(['id', 'options', 'ast'
  * `name`/`owner`/`record_type` from validate-flow-template-paths) — because
  * the cost asymmetry is the same everywhere: over-inclusion is at worst a
  * missed finding, under-inclusion is a false one.
+ *
+ * Exported for `validate-action-body-writes.ts` only (not re-exported from the
+ * package barrel). The action rule is this same check on the other surface that
+ * carries a `HookBodySchema` body, so the two must agree on what is implicitly
+ * writable — a second copy of this extension would drift exactly the way the
+ * five hand-copied lists #4330 collapsed did.
  */
-const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
+export const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
   ...SYSTEM_FIELDS,
   '_id', 'name', 'space', 'owner', 'record_type',
 ]);
@@ -206,8 +219,13 @@ function asArray(v: unknown): AnyRec[] {
   return [];
 }
 
-/** object name → its declared field names (both `fields` authoring shapes). */
-function indexObjectFields(stack: AnyRec): Map<string, Set<string>> {
+/**
+ * object name → its declared field names (both `fields` authoring shapes).
+ *
+ * Exported for `validate-action-body-writes.ts` only (see
+ * {@link IMPLICIT_FIELDS} for why the two rules share rather than copy).
+ */
+export function indexObjectFields(stack: AnyRec): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
   for (const obj of asArray(stack.objects)) {
     const name = typeof obj.name === 'string' ? obj.name : undefined;

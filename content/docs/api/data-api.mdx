@@ -24,7 +24,8 @@ Query records with filtering, sorting, selection, and pagination.
 | `top` | query | Max records to return. No default — omitting it returns all matching records. |
 | `skip` | query | Offset |
 | `expand` | query | Comma-separated list of relations to eager-load. Must name a reference field (`lookup` / `master_detail` / `user` / `tree`) — otherwise `400 INVALID_FIELD`. |
-| `search` | query | Full-text search query |
+| `search` | query | Full-text search term, scanned case-insensitively across the object's searchable fields (its declared `searchableFields`, or a text-like auto-default when none are declared). |
+| `searchFields` | query | Comma-separated subset of the searchable fields for `search` to scan — narrows the scan, never widens it. A name outside the searchable set is `400 INVALID_FIELD`. |
 
 > **Note:** OData-style `$`-prefixed parameters (`$filter`, `$select`, `$orderby`, `$top`, `$skip`, `$expand`, `$count`, `$search`) are also accepted directly on this same endpoint as aliases — they're normalized internally to the parameter names above. There is no separate standalone OData endpoint.
 
@@ -115,6 +116,46 @@ a direction that is neither `asc` nor `desc`) is `400 INVALID_SORT`.
 
 `GET /data/:object/:id` applies the same `select` and `expand` rules, so the
 list and single-record routes cannot disagree about one field map.
+
+#### Neither is a search narrowing, a grouping, or an aggregation
+
+The last three field-naming axes follow the same rule. Each of these used to
+answer `200` with something that looked exactly like a served query — and each
+corrupts something the earlier axes do not:
+
+| Request | Result |
+|:---|:---|
+| `?search=alpha&searchFields=title` | scans only `title` |
+| `?search=alpha&searchFields=no_such_field` | `400 INVALID_FIELD` |
+| `?search=alpha&searchFields=amount` | `400 INVALID_FIELD` — real field, but not searchable |
+| `groupBy: ["status"]` | one bucket per status value |
+| `groupBy: ["no_such_field"]` | `400 INVALID_FIELD` |
+| `aggregations: [{function:"sum", field:"amount", alias:"total"}]` | the real total |
+| `aggregations: [{function:"sum", field:"no_such_field", alias:"total"}]` | `400 INVALID_FIELD` |
+| `aggregations: [{function:"count", alias:"n"}]` | `count(*)` — the one legitimate field-less form |
+
+- **`searchFields`** — the only parameter whose failure changed which **rows**
+  came back. An unknown name used to be dropped, and an override left empty
+  fell back to scanning *every* searchable column: a parameter that exists
+  only to **narrow** a search failed by **widening** it. Three causes get
+  three messages, because the fixes differ: a name that is no field (a typo in
+  the request), a real field outside the searchable set (declare it in
+  `searchableFields`), and a `searchableFields` entry that names no field (a
+  stale declaration — the bug is on the object, and clients that echo the
+  declaration verbatim are told so).
+- **`groupBy`** — an unknown column projected `null` for every row, so all
+  rows fell into **one bucket** whose count is the true row count:
+  structurally perfect, indistinguishable from a column that really holds a
+  single value. A chart draws one bar and nothing says the grouping never ran.
+- **`aggregations`** — `sum` over an unknown column folded blanks to **`0`**,
+  the exact number a genuinely empty quarter produces (`avg`/`min`/`max`
+  answered `null` the same way), in reports whose whole job is to be believed.
+
+A `groupBy` / `aggregations` value the spec cannot read at all — a bare string
+instead of an array, an entry that names no field, a function or date
+granularity outside the spec's enums, a missing `alias` — is
+`400 INVALID_QUERY`: those shapes were silently ignored, returning **ungrouped
+raw rows** with nothing to say the aggregation never happened.
 
 **Response**:
 ```json

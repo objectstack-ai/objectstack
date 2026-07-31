@@ -26,6 +26,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # The slot-lookup ratchet compares the baseline against its state at
+          # the merge base with main — the only way to see a file being ADDED
+          # to the grandfather list. A shallow clone has no merge base, and the
+          # check would degrade to "not verified" on every run.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -56,6 +62,15 @@ jobs:
       # only, so no build step needed.
       - name: ESLint
         run: pnpm lint
+
+      # Slot-lookup sweep ratchet (#4251). `pnpm lint` above bans erasing a
+      # service-lookup result to `any` across packages/, but the files still
+      # holding pre-existing sites are grandfathered by path — and an ignored
+      # file is ignored COMPLETELY, so new erasures added to one ride the old
+      # entry in silence. This re-measures those files with the grandfathering
+      # lifted and holds them to a per-file count, so the list can only shrink.
+      - name: Slot-lookup ratchet
+        run: pnpm check:slot-lookup
 
       # Raw NUL guard (#3127): one literal U+0000 byte makes grep/ripgrep treat
       # the whole file as binary and silently return ZERO matches — the file drops

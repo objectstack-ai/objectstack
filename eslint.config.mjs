@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { readFileSync } from 'node:fs';
+
 import tsParser from '@typescript-eslint/parser';
 
 // Flat ESLint config — guards against memory-bloating import patterns.
@@ -73,7 +75,10 @@ const SLOT_LOOKUPS = ['resolveService', 'getService', 'getRequestKernelService']
 // callers read only `getPort()`.
 const UNCONTRACTED_SLOTS = ['protocol', 'mcp', 'kernel-resolver', 'scope-manager', 'http\\.server'].join('|');
 
-const SLOT_LOOKUP_ANY_MESSAGE =
+// Exported so `scripts/check-slot-lookup-ratchet.mjs` can identify THIS rule's
+// reports among the other `no-restricted-syntax` rules, by exact message —
+// the counter and the rule must never be able to disagree about what counts.
+export const SLOT_LOOKUP_ANY_MESSAGE =
   'Do not erase a service-lookup result to `any` (`: any`, `as any`, or a ' +
   '`getService<any>(…)` type argument) — the lookup already returns the slot\'s ' +
   'contract (#4168/#4176/#4202), and this switches that checking off ' +
@@ -86,62 +91,29 @@ const SLOT_LOOKUP_ANY_MESSAGE =
   'note, so the exemption is reviewed once and visible in one place — see ' +
   'issues #4127 and #4251.';
 
-// [#4251] The sweep ratchet. These files hold pre-existing lookup-erasure
-// sites — `getService<any>(…)`, `: any`, or `as any` — that predate the rule
-// reaching them: the rule's scope was packages/runtime only until #4251
-// widened it, and the type-argument selector did not exist. Enumerated by
-// running this config with this list emptied: 180 sites in 44 files (the
-// issue's 80 was the non-test `<any>` form alone; the annotation forms and
-// test files the old selectors would have caught under a wider scope roughly
-// double it). They are grandfathered BY FILE, here, for the same reason
-// UNCONTRACTED_SLOTS is central: `--no-inline-config` means the escape must
-// live in config, and a shrinking list in one place is the ratchet made
-// visible. Batches remove entries as they sweep (see #4214 for the batch
-// pattern and its yield — these sites are where the erased contracts live).
-// NEVER add an entry: a new file starts covered, and a new violation in a
-// listed file rides an existing entry only until its batch.
-const SLOT_LOOKUP_UNSWEPT = [
-  'packages/cli/src/commands/migrate/files-to-references.ts',
-  'packages/cli/src/commands/migrate/value-shapes.ts',
-  'packages/cli/src/commands/serve.ts',
-  'packages/client/src/client.hono.test.ts',
-  'packages/cloud-connection/src/cloud-connection-plugin.ts',
-  'packages/cloud-connection/src/marketplace-install-local-plugin.ts',
-  'packages/core/examples/kernel-features-example.ts',
-  'packages/metadata-protocol/src/plugin.ts',
-  'packages/metadata/src/plugin.ts',
-  'packages/objectql/src/plugin.integration.test.ts',
-  'packages/objectql/src/plugin.ts',
-  'packages/plugins/plugin-approvals/src/approvals-plugin.ts',
-  'packages/plugins/plugin-approvals/src/status-mirror-cascade.integration.test.ts',
-  'packages/plugins/plugin-audit/src/audit-plugin.ts',
-  'packages/plugins/plugin-auth/src/auth-plugin.ts',
-  'packages/plugins/plugin-email/src/email-plugin.ts',
-  'packages/plugins/plugin-hono-server/src/current-user-endpoints.ts',
-  'packages/plugins/plugin-pinyin-search/src/pinyin-search-plugin.ts',
-  'packages/plugins/plugin-reports/src/reports-plugin.ts',
-  'packages/plugins/plugin-security/src/security-plugin.ts',
-  'packages/plugins/plugin-sharing/src/sharing-plugin.ts',
-  'packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts',
-  'packages/qa/dogfood/test/showcase-agent-intersection.dogfood.test.ts',
-  'packages/qa/dogfood/test/showcase-bu-hierarchy-sharing.dogfood.test.ts',
-  'packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts',
-  'packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts',
-  'packages/rest/src/external-datasource-routes.ts',
-  'packages/rest/src/rest-api-plugin.ts',
-  'packages/services/service-datasource/src/admin-routes.ts',
-  'packages/services/service-job/src/job-service-plugin.ts',
-  'packages/services/service-messaging/src/messaging-service-plugin.test.ts',
-  'packages/services/service-messaging/src/messaging-service-plugin.ts',
-  'packages/services/service-queue/src/queue-service-plugin.ts',
-  'packages/services/service-realtime/src/realtime-service-plugin.ts',
-  'packages/services/service-settings/src/settings-service-plugin.ts',
-  'packages/services/service-sms/src/sms-plugin.ts',
-  'packages/services/service-storage/src/storage-service-plugin.ts',
-  'packages/triggers/trigger-record-change/src/formula-context.test.ts',
-  'packages/triggers/trigger-record-change/src/multilookup-context.test.ts',
-  'packages/triggers/trigger-record-change/src/record-change-integration.test.ts',
-];
+// [#4251] The sweep ratchet, read from `scripts/slot-lookup-baseline.json`.
+//
+// Those files hold pre-existing lookup-erasure sites — `getService<any>(…)`,
+// `: any`, or `as any` — that predate the rule reaching them: the rule's scope
+// was packages/runtime only until #4251 widened it, and the type-argument
+// selector did not exist. 171 sites in 40 files at the widening; they are
+// grandfathered BY FILE for the same reason UNCONTRACTED_SLOTS is central —
+// `--no-inline-config` means the escape must live in config, and one shrinking
+// list is the ratchet made visible. Batches remove entries as they sweep (see
+// #4214 for the batch pattern and its yield — these sites are where the erased
+// contracts live).
+//
+// The baseline is the SINGLE SOURCE: its keys are these ignores and its values
+// are the per-file counts `pnpm check:slot-lookup` enforces. That coupling is
+// the point (#4320 was found the same way — a promise nothing checked). A bare
+// file list made three moves invisible: adding a file to silence lint, adding
+// NEW violations to an already-listed file (they rode the entry silently), and
+// clearing a file without dropping its entry (the list stops meaning anything).
+// The counted baseline fails all three, and `--update` is the only way to move
+// it — downward.
+const SLOT_LOOKUP_UNSWEPT = Object.keys(JSON.parse(
+  readFileSync(new URL('./scripts/slot-lookup-baseline.json', import.meta.url), 'utf8'),
+));
 
 export default [
   {
@@ -271,7 +243,8 @@ export default [
   // held 77 of the 80 known sites, an unlinted majority that looked covered.
   // Per-package curation would recreate that gap one package at a time, so the
   // scope is total and the not-yet-swept files are grandfathered individually
-  // in SLOT_LOOKUP_UNSWEPT above — a shrinking list, not a silent boundary.
+  // in the counted baseline above — a shrinking list under `check:slot-lookup`,
+  // not a silent boundary.
   //
   // KNOWN RESIDUAL: a wrapper whose own return type is annotated
   // (`const getEngine = async (): Promise<any> => …resolveService(…)`) erases
