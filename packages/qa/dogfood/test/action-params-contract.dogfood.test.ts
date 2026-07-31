@@ -7,10 +7,17 @@
 // lookup `p_account`. Its body echoes the received param keys. We drive the
 // real `/actions/:object/:action` route to prove the declared contract is
 // enforced BEFORE the body runs:
-//   - warn-first (default): a malformed bag still passes (legacy callers keep
-//     working; the drift is logged, not fatal).
-//   - strict (OS_ACTION_PARAMS_STRICT_ENABLED=1): the same bag is rejected 400
+//   - default (strict since 17.0, #3438): a malformed bag is rejected 400
 //     before the handler runs; a conformant bag passes.
+//   - escape hatch (OS_ALLOW_LAX_ACTION_PARAMS=1): the same malformed bag is
+//     accepted again, for the operator who must keep an integration
+//     dispatching while they fix its caller.
+//
+// The duals are this way round on purpose. Under warn-first the strict path was
+// the one nobody reached without setting a variable; now the DEFAULT path is
+// what every caller hits, so it is what the gate must prove — and the hatch,
+// which is the branch nobody sets, is exactly the kind of thing that rots
+// unnoticed unless a test drives it.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -28,7 +35,7 @@ describe('dogfood: action param contract enforced at dispatch (ADR-0104 D2)', ()
   }, 60_000);
 
   afterAll(async () => {
-    delete process.env.OS_ACTION_PARAMS_STRICT_ENABLED;
+    delete process.env.OS_ALLOW_LAX_ACTION_PARAMS;
     await stack?.stop();
   });
 
@@ -37,33 +44,29 @@ describe('dogfood: action param contract enforced at dispatch (ADR-0104 D2)', ()
   const badBag = { p_priority: 'NOT_AN_OPTION', bogus: 123 };
   const goodBag = { p_text: 'Hello', p_priority: 'high' };
 
-  it('warn-first (default): a malformed param bag still passes and the body runs', async () => {
-    delete process.env.OS_ACTION_PARAMS_STRICT_ENABLED;
+  it('default: a malformed param bag is rejected 400 before the handler runs', async () => {
+    delete process.env.OS_ALLOW_LAX_ACTION_PARAMS;
     const res = await stack.apiAs(token, 'POST', ACTION_PATH, { params: badBag });
-    expect(res.status, `expected pass-through, got ${res.status}: ${await res.clone().text()}`).toBeLessThan(300);
+    expect(res.status).toBe(400);
+    const text = await res.text();
+    expect(text).toMatch(/p_text/);       // required
+    expect(text).toMatch(/p_priority/);   // bad option
+    expect(text).toMatch(/bogus/);        // unknown key
   });
 
-  it('strict: the same malformed bag is rejected 400 before the handler runs', async () => {
-    process.env.OS_ACTION_PARAMS_STRICT_ENABLED = '1';
+  it('default: a conformant bag passes (dispatcher built-in keys are allowlisted)', async () => {
+    delete process.env.OS_ALLOW_LAX_ACTION_PARAMS;
+    const res = await stack.apiAs(token, 'POST', ACTION_PATH, { params: goodBag });
+    expect(res.status, `expected pass, got ${res.status}: ${await res.clone().text()}`).toBeLessThan(300);
+  });
+
+  it('escape hatch: OS_ALLOW_LAX_ACTION_PARAMS=1 accepts the malformed bag again', async () => {
+    process.env.OS_ALLOW_LAX_ACTION_PARAMS = '1';
     try {
       const res = await stack.apiAs(token, 'POST', ACTION_PATH, { params: badBag });
-      expect(res.status).toBe(400);
-      const text = await res.text();
-      expect(text).toMatch(/p_text/);       // required
-      expect(text).toMatch(/p_priority/);   // bad option
-      expect(text).toMatch(/bogus/);        // unknown key
+      expect(res.status, `expected pass-through, got ${res.status}: ${await res.clone().text()}`).toBeLessThan(300);
     } finally {
-      delete process.env.OS_ACTION_PARAMS_STRICT_ENABLED;
-    }
-  });
-
-  it('strict: a conformant bag passes (dispatcher built-in keys are allowlisted)', async () => {
-    process.env.OS_ACTION_PARAMS_STRICT_ENABLED = '1';
-    try {
-      const res = await stack.apiAs(token, 'POST', ACTION_PATH, { params: goodBag });
-      expect(res.status, `expected pass, got ${res.status}: ${await res.clone().text()}`).toBeLessThan(300);
-    } finally {
-      delete process.env.OS_ACTION_PARAMS_STRICT_ENABLED;
+      delete process.env.OS_ALLOW_LAX_ACTION_PARAMS;
     }
   });
 });

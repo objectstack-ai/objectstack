@@ -21,7 +21,8 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/observability": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
-    "@objectstack/spec": "workspace:*"
+    "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*"
   },
   "peerDependencies": {
     "@aws-sdk/client-s3": "^3.0.0",

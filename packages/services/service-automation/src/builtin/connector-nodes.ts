@@ -36,16 +36,19 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             // Present in both authoring paradigms (ADR-0018 §registry table;
             // workflow_rule retired per ADR-0019).
             paradigms: ['flow', 'approval'],
-            // Config contract — drives the Studio property form and flow validation.
-            configSchema: {
-                type: 'object',
-                required: ['connectorId', 'actionId'],
-                properties: {
-                    connectorId: { type: 'string', description: 'Registered connector name' },
-                    actionId: { type: 'string', description: 'Action key declared by the connector' },
-                    input: { type: 'object', description: 'Mapped inputs for the action' },
-                },
-            },
+            // NO configSchema — deliberate, same class as `wait` (#4045). The
+            // node's contract is not `config` at all: the executor reads only
+            // the declared `FlowNodeSchema.connectorConfig` sibling block.
+            // This descriptor used to publish a configSchema declaring
+            // `connectorId`/`actionId`/`input` — but a published configSchema
+            // by contract describes `node.config` and the Studio inspector
+            // derives its property form from it, rooting every field at
+            // `config.<key>` and REPLACING the client's hand-written
+            // connectorConfig form (with its connector/action pickers). So the
+            // schema steered online authoring to keys the executor never
+            // reads, and the node refused to dispatch. Stored flows that
+            // carry the mis-taught shape are healed at load by the ADR-0087 D2
+            // conversion 'flow-node-connector-config-lift'.
         }),
         async execute(node, variables, context) {
             const cfg = node.connectorConfig;

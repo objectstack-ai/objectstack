@@ -88,7 +88,11 @@ describe('envelopeViolations — what the schema MISSES', () => {
   });
 
   it('a payload left at the top level beside the flag', () => {
-    // The shape `GET /ai/agents` still answers in, minus the flag (#4053).
+    // The shim `GET /ai/agents` would have grown had it kept `agents` alive
+    // beside `data` through the conversion. It did not — both producers moved
+    // the payload rather than mirroring it (#4053) — and this is the check that
+    // would have said so. See `ai-agents-envelope.test.ts` for that route's own
+    // pins, including the half this predicate deliberately does not cover.
     const body = { success: true, data: [], agents: [] };
     expect(parses(body)).toBe(true);
     expect(conformant(body)).toBe(false);

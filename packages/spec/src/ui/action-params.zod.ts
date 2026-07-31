@@ -68,8 +68,10 @@ function isPresent(v: unknown): boolean {
 
 /**
  * Validate a params bag against an action's resolved param declarations.
- * Returns the list of issues (empty = conformant). Does NOT throw — the caller
- * decides warn-vs-reject (ADR-0104 D2 warn-first rollout, R3).
+ * Returns the list of issues (empty = conformant). Does NOT throw — this is a
+ * pure check, and the disposition belongs to the caller: the dispatcher rejects
+ * with a 400 by default (ADR-0104 D2, strict since 17.0), while an authoring or
+ * preview surface may want to render the same issues without failing.
  *
  * Enforced: `required` presence, per-type value shape (via the D1
  * `valueSchemaFor`, so option membership / `multiple` arrays / reference-id

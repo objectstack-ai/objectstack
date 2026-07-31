@@ -839,13 +839,52 @@ describe('MetadataPlugin', () => {
       expect(manager.loadMany).not.toHaveBeenCalled();
     });
 
-    it('artifact-only bootstrap rejects the not-yet-implemented artifact-api source', async () => {
+    // #4246 resolution — the `artifact-api` source is REMOVED, not reserved.
+    // The mode shipped through v17 with zero consumers in any repo (the cloud
+    // runtime uses its own ArtifactApiClient; package distribution into a
+    // running OSS instance goes through @objectstack/cloud-connection), so the
+    // enforce-or-remove call went to remove. What these tests pin is the
+    // failure MODE of the removal: a still-configured 'artifact-api' source —
+    // reachable only from JS callers or config plumbed through `any`, since
+    // the TS union is now single-member — must fail loudly at start(), never
+    // degrade into "no source".
+    it('artifact-only bootstrap rejects the removed artifact-api source with a migration message', async () => {
       const { MetadataPlugin } = await import('./plugin.js');
       const plugin = new MetadataPlugin({
         rootDir: '/tmp/test',
         watch: false,
         config: { bootstrap: 'artifact-only' },
-        artifactSource: { mode: 'artifact-api', url: 'https://example.com/artifact' },
+        artifactSource: { mode: 'artifact-api', url: 'https://example.com' } as any,
+      });
+
+      const manager = (plugin as any).manager;
+      manager.loadMany = vi.fn().mockResolvedValue([]);
+      const fetchMock = vi.fn();
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = fetchMock as any;
+
+      const ctx = createMockPluginContext();
+      try {
+        await plugin.init(ctx);
+        await expect(plugin.start(ctx)).rejects.toThrow(/'artifact-api' source was removed/);
+        // Rejected before any load path was chosen: no fetch, no FS scan.
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(manager.loadMany).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
+
+    // The dangerous degradation the guard exists to prevent: under `eager`,
+    // treating "unsupported source" as "no source" would fall through to the
+    // filesystem scan and boot with whatever happens to be on disk instead of
+    // the artifact the caller named.
+    it('eager bootstrap rejects the removed mode instead of silently falling back to the filesystem scan', async () => {
+      const { MetadataPlugin } = await import('./plugin.js');
+      const plugin = new MetadataPlugin({
+        rootDir: '/tmp/test',
+        watch: false,
+        artifactSource: { mode: 'artifact-api', url: 'https://example.com' } as any,
       });
 
       const manager = (plugin as any).manager;
@@ -853,8 +892,59 @@ describe('MetadataPlugin', () => {
 
       const ctx = createMockPluginContext();
       await plugin.init(ctx);
-      await expect(plugin.start(ctx)).rejects.toThrow(/artifact-api/);
+      await expect(plugin.start(ctx)).rejects.toThrow(/not supported/);
       expect(manager.loadMany).not.toHaveBeenCalled();
+    });
+
+    // The migration target named by the rejection message, pinned so it stays
+    // real: `local-file` with an http(s) URL fetches verbatim and registers
+    // the envelope-wrapped artifact — the shape the control plane's public
+    // /pub/v1/environments/:id/artifact route serves.
+    it('local-file accepts an http(s) URL and registers the fetched artifact envelope', async () => {
+      const { MetadataPlugin } = await import('./plugin.js');
+      const url = 'https://cloud.example.com/pub/v1/environments/env_42/artifact?commit=cmt_1';
+      const envelope = {
+        schemaVersion: '0.1',
+        environmentId: 'env_42',
+        commitId: 'cmt_1',
+        checksum: 'a'.repeat(64),
+        metadata: { objects: [{ name: 'artifact_probe', label: 'Artifact Probe', fields: {} }] },
+      };
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => JSON.stringify(envelope),
+      });
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = fetchMock as any;
+
+      const plugin = new MetadataPlugin({
+        rootDir: '/tmp/test',
+        watch: false,
+        environmentId: 'env_42',
+        config: { bootstrap: 'artifact-only' },
+        artifactSource: { mode: 'local-file', path: url },
+      });
+      const manager = (plugin as any).manager;
+      manager.loadMany = vi.fn().mockResolvedValue([]);
+
+      const ctx = createMockPluginContext();
+      try {
+        await plugin.init(ctx);
+        await plugin.start(ctx);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0][0]).toBe(url);
+        expect(manager.register).toHaveBeenCalledWith(
+          'object',
+          'artifact_probe',
+          expect.objectContaining({ name: 'artifact_probe' }),
+          { notify: false },
+        );
+        expect(manager.loadMany).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = realFetch;
+      }
     });
   });
 });

@@ -46,6 +46,13 @@ function makeMemoryDriver() {
     const matchesWhere = (row: Record<string, unknown>, where: any): boolean => {
         if (!where || typeof where !== 'object') return true;
         for (const [k, v] of Object.entries(where)) {
+            // `$and` must be honored, not skipped — #4164 composes the explicit
+            // filter and the implicit field predicates through it, so a matcher
+            // that ignores `$and` would green-light a merge that does nothing.
+            if (k === '$and' && Array.isArray(v)) {
+                if (!v.every((arm) => matchesWhere(row, arm))) return false;
+                continue;
+            }
             if (k.startsWith('$')) continue;
             const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
             const a = row[k] === undefined ? null : row[k];
@@ -205,5 +212,78 @@ describe('#4134 — unknown list query params (real ObjectQL engine)', () => {
         await expect(
             protocol.findData({ object: 'no_such_object', query: { pageSize: '5' } }),
         ).rejects.toMatchObject({ status: 404, code: 'OBJECT_NOT_FOUND' });
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // #4164 — implicit predicates compose with an explicit filter
+    // ─────────────────────────────────────────────────────────────
+
+    it('a bare field param NARROWS an explicit filter instead of vanishing (#4164)', async () => {
+        // Pre-#4164 the `title` predicate was dropped and this returned all 8
+        // open tasks — over-returning, the mirror of #4134's zeroing.
+        const r: any = await protocol.findData({
+            object: 'showcase_task',
+            query: { filter: JSON.stringify({ status: 'open' }), title: 'Task 3' },
+        });
+        expect(r.total).toBe(1);
+        expect(r.records.map((x: any) => x.id)).toEqual(['t3']);
+    });
+
+    it('contradictory sides intersect to an honest zero — both filters ran', async () => {
+        // 'Task 3' is open, so requiring status=done alongside it matches
+        // nothing. Unlike the #4134 zero, every written predicate was applied.
+        const r: any = await protocol.findData({
+            object: 'showcase_task',
+            query: { filter: JSON.stringify({ status: 'done' }), title: 'Task 3' },
+        });
+        expect(r.total).toBe(0);
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // #4181 — an unappliable filter must not answer like a satisfied one
+    // ─────────────────────────────────────────────────────────────
+
+    it('an unparseable filter 400s instead of returning the UNFILTERED page (#4181)', async () => {
+        // The exact repro: one missing quote. Pre-#4181 this returned
+        // `total: 10` — identical to the no-filter baseline, so a caller whose
+        // filter never ran could not tell from the response.
+        const baseline: any = await protocol.findData({ object: 'showcase_task' });
+        expect(baseline.total).toBe(10);
+
+        await expect(
+            protocol.findData({ object: 'showcase_task', query: { filter: '{status:done' } }),
+        ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    });
+
+    it('the same garbage filter cannot hide behind pagination either', async () => {
+        // Pre-#4181: `total: 10` + 2 records — a perfectly normal-looking page
+        // of an unfiltered set.
+        await expect(
+            protocol.findData({ object: 'showcase_task', query: { filter: '{status:done', top: 2 } }),
+        ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    });
+
+    it('a VALID filter still applies — the guard rejects only what it cannot run', async () => {
+        const r: any = await protocol.findData({
+            object: 'showcase_task',
+            query: { filter: '{"status":"done"}' },
+        });
+        expect(r.total).toBe(2);
+    });
+
+    it('pagination totals are computed over the MERGED predicate', async () => {
+        // 8 open rows share created_at; page of 3 → total must be 8 (the
+        // merged match count), not 10 (unfiltered) nor 3 (page-local).
+        const r: any = await protocol.findData({
+            object: 'showcase_task',
+            query: {
+                filter: JSON.stringify({ status: 'open' }),
+                created_at: '2026-07-30T00:00:00.000Z',
+                top: 3,
+            },
+        });
+        expect(r.records).toHaveLength(3);
+        expect(r.total).toBe(8);
+        expect(r.hasMore).toBe(true);
     });
 });

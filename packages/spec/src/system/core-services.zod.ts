@@ -44,6 +44,92 @@ export const CoreServiceName = z.enum([
 export type CoreServiceName = z.infer<typeof CoreServiceName>;
 
 /**
+ * Which published package actually fills each service slot — or `null` when
+ * **nothing ships for it yet**.
+ *
+ * [#4093 follow-up] Discovery tells a consumer two things about an absent
+ * capability: that it is absent, and what to do about it. The first has been
+ * carefully honest since #2462/#4000; the second was invented from the slot
+ * name. The dispatcher templated `Install a ${slot} plugin to enable` for 12
+ * slots, and metadata-protocol carried a hand-written table in which **ten of
+ * fifteen** names did not exist (`plugin-redis`, `plugin-bullmq`,
+ * `job-scheduler`, `plugin-notifications`, `plugin-storage`, `ui-plugin`,
+ * `plugin-automation`, and `plugin-ai` / `plugin-search` / `plugin-workflow`
+ * for slots nothing implements). That value is also surfaced as `provider`.
+ *
+ * A remedy naming a package that cannot be installed is a dead end handed to
+ * someone at the exact moment they are trying to fix their stack — the same
+ * `declared ≠ enforced` failure this lineage has been closing, one level over:
+ * not "does the capability exist" but "is the fix real". An agent reading
+ * discovery cannot tell the difference between a package it should install and
+ * one that was never written.
+ *
+ * Entries are verified against what actually calls `registerService` for the
+ * slot, not against name similarity, and `scripts/check-service-providers.mjs`
+ * fails CI if any name here is not a real workspace package — so a rename or a
+ * deletion cannot leave a stale instruction behind.
+ *
+ * `null` is a first-class answer, not a gap: for those slots the honest remedy
+ * is "nothing to install", and saying so beats naming a plausible package.
+ */
+export const CORE_SERVICE_PROVIDER: Readonly<Record<string, string | null>> = {
+  // Verified: each of these registers the slot itself.
+  'analytics':    '@objectstack/service-analytics',
+  'auth':         '@objectstack/plugin-auth',
+  'automation':   '@objectstack/service-automation',
+  'cache':        '@objectstack/service-cache',
+  'queue':        '@objectstack/service-queue',
+  'job':          '@objectstack/service-job',
+  'realtime':     '@objectstack/service-realtime',
+  'file-storage': '@objectstack/service-storage',
+  'i18n':         '@objectstack/service-i18n',
+  // The `notification` slot is filled by the messaging service — the one entry
+  // whose package name shares no word with its slot, and the reason a
+  // name-derived guess cannot be right in general.
+  'notification': '@objectstack/service-messaging',
+  // `/ui` is served by the `protocol` service, which MetadataPlugin registers;
+  // the `ui` slot itself has no implementation anywhere (#4093 / #4146).
+  'ui':           '@objectstack/metadata-protocol',
+  // Nothing ships for these. `search` and `workflow` have no consumer either
+  // (ADR-0115 Evidence 5); `graphql` and `ai` have surfaces but no provider.
+  'ai':           null,
+  'search':       null,
+  'workflow':     null,
+  'graphql':      null,
+} as const;
+
+/**
+ * Slots whose remedy needs more than "install X", because **the slot is not
+ * what serves the capability**. `Install <pkg>` would be true but misleading:
+ * it reads as "this package fills this slot", and someone who then checks
+ * discovery still sees the slot empty.
+ *
+ * `/ui` is the case (#4146): it is served by the `protocol` service, and
+ * nothing anywhere registers `ui` — so the sentence has to say what actually
+ * serves it, not just what to install.
+ */
+const REMEDY_DETAIL: Readonly<Record<string, string>> = {
+  'ui': 'Served by the protocol service — register MetadataPlugin (@objectstack/metadata-protocol) to enable',
+};
+
+/**
+ * The remedy line discovery reports for an unavailable slot — the one place
+ * that sentence is written, so the dispatcher and the metadata-protocol
+ * builder cannot tell a consumer to install different things (the drift #4089
+ * and #4130 closed for the `metadata` and `data` entries).
+ *
+ * See {@link CORE_SERVICE_PROVIDER}.
+ */
+export function serviceUnavailableMessage(slot: string): string {
+  const detail = REMEDY_DETAIL[slot];
+  if (detail) return detail;
+  const pkg = CORE_SERVICE_PROVIDER[slot];
+  return pkg
+    ? `Install ${pkg} to enable`
+    : `No implementation ships for the '${slot}' slot — register a service under it to enable`;
+}
+
+/**
  * Service Criticality Level
  * Defines the startup behavior when a service is missing.
  */

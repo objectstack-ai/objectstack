@@ -1,20 +1,45 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * IPluginLifecycleEvents - Typed Plugin Lifecycle Events
- * 
- * Type-safe event definitions for plugin and kernel lifecycle.
- * Provides strong typing for event emitters and listeners.
- * 
- * This replaces the generic Map<string, any[]> approach with typed events.
- */
-
-/**
- * Plugin lifecycle event types and their payloads
+ * IPluginLifecycleEvents — the registry of kernel-bus events that actually fire.
+ *
+ * Every key in this interface is an event some shipping code path triggers via
+ * `ctx.trigger(...)` (or `triggerHook` in the lite kernel), with its payload
+ * tuple as observed at the fire site. The registry is *enforced*, not
+ * aspirational, in two ways:
+ *
+ * - {@link LifecycleEventName} feeds `IPluginContext.hook` / `trigger`
+ *   autocomplete in `@objectstack/core` (as `LifecycleEventName | (string & {})`,
+ *   so custom cross-plugin events remain legal — the bus is open by design).
+ * - `plugin-lifecycle-events.test.ts` pins the key set to the fire-site
+ *   inventory. Adding a key here without a real emitter — or removing one that
+ *   still fires — fails that test with a pointer back to this doc.
+ *
+ * ## Retired names (ADR-0049 enforce-or-remove)
+ *
+ * An earlier revision of this file also declared a typed-event system that was
+ * never built: `kernel:before-init`, `kernel:after-init`, `plugin:registered`,
+ * `plugin:before-init`, `plugin:init`, `plugin:after-init`,
+ * `plugin:before-start`, `plugin:started`, `plugin:after-start`,
+ * `plugin:before-destroy`, `plugin:destroyed`, `plugin:after-destroy`,
+ * `plugin:error`, `service:registered`, `service:unregistered`,
+ * `hook:registered`, `hook:triggered` — seventeen names with no emitter and no
+ * listener anywhere — plus an `ITypedEventEmitter` interface and a parallel
+ * set of Zod payload schemas (`kernel/plugin-lifecycle-events.zod.ts`) with
+ * zero consumers. All of it is retired, same playbook as the PluginSchema
+ * lifecycle-hook retirement (#4212): a declared-but-dead contract reads as a
+ * promise and silently swallows anyone who codes against it. If per-plugin
+ * phase events become real, re-add each name together with its emitter and a
+ * fire-site pointer, and extend the pinning test.
  */
 export interface IPluginLifecycleEvents {
     /**
-     * Emitted when kernel is ready (all plugins initialized)
+     * Emitted when kernel is ready (all plugins initialized).
+     *
+     * Fired by `ObjectKernel.start()` and `LiteKernel.bootstrap()` after every
+     * plugin's `start()` has completed. Handlers run sequentially in plugin
+     * registration order — see `kernel:bootstrapped` for the ordering caveat.
+     *
      * Payload: []
      */
     'kernel:ready': [];
@@ -66,6 +91,13 @@ export interface IPluginLifecycleEvents {
     'kernel:listening': [];
 
     /**
+     * Emitted when kernel is shutting down, before plugins are destroyed.
+     *
+     * Payload: []
+     */
+    'kernel:shutdown': [];
+
+    /**
      * Emitted by the app plugin when an app's inline seed attempt has settled
      * — success, partial (dropped records), or fallback insert. Single-tenant
      * mode only, and only when the app actually has seed datasets.
@@ -87,169 +119,113 @@ export interface IPluginLifecycleEvents {
     'app:seeded': [payload: { appId: string; overBudget: boolean }];
 
     /**
-     * Emitted when kernel is shutting down
-     * Payload: []
+     * Emitted by the metadata plugin's artifact watcher after a changed
+     * `dist/objectstack.json` has been re-parsed and re-registered mid-run.
+     *
+     * `changed` entries are `'{type}/{name}'` strings (e.g.
+     * `'flow/ticket_closed'`). `metadata`, when present, carries the freshly
+     * parsed artifact collections so subscribers can consume the ones that
+     * never reach the MetadataManager (seed datasets under `data` have no
+     * `name`). The app plugin uses it to load seeds for objects that appear
+     * mid-run. The collections shape is owned by `@objectstack/metadata`; the
+     * spec keeps it opaque.
+     *
+     * Payload: [{ changed, metadata? }]
      */
-    'kernel:shutdown': [];
-    
+    'metadata:reloaded': [payload: { changed: string[]; metadata?: unknown }];
+
     /**
-     * Emitted before kernel initialization starts
-     * Payload: []
+     * Emitted by `@objectstack/plugin-auth` while assembling its better-auth
+     * config, BEFORE the auth instance is created. The open extension point
+     * for packages that contribute auth providers (enterprise SSO, hosted
+     * control-plane SSO, …) without forking the auth plugin: handlers mutate
+     * the draft config in place. Both payload types are owned by plugin-auth;
+     * the spec keeps them opaque.
+     *
+     * Payload: [authConfig, ctx]
      */
-    'kernel:before-init': [];
-    
+    'auth:configure': [authConfig: unknown, ctx: unknown];
+
+    // ── The `{service}:ready` convention ─────────────────────────────────
+    // Service plugins announce readiness as `{service}:ready`, passing the
+    // live service instance so sibling plugins can extend it. Each instance
+    // type is owned by its package; the spec keeps them opaque. A new service
+    // adopting the convention adds its concrete name here (custom names are
+    // legal without registration — the bus is open — but a registered name
+    // autocompletes and is pinned to its fire site by the registry test).
+
     /**
-     * Emitted after kernel initialization completes
-     * Payload: [duration: number (milliseconds)]
+     * Emitted by `@objectstack/mcp` once its server runtime is constructed
+     * and tools are registered. Payload: the live `MCPServerRuntime`.
+     *
+     * Payload: [runtime]
      */
-    'kernel:after-init': [duration: number];
-    
+    'mcp:ready': [runtime: unknown];
+
     /**
-     * Emitted when a plugin is registered
-     * Payload: [pluginName: string]
+     * Emitted by `@objectstack/service-automation` at start, once the flow
+     * engine is ready. Payload: the live automation engine.
+     *
+     * Payload: [engine]
      */
-    'plugin:registered': [pluginName: string];
-    
+    'automation:ready': [engine: unknown];
+
     /**
-     * Emitted before a plugin's init method is called
-     * Payload: [pluginName: string]
+     * Emitted by `@objectstack/service-analytics` at start. Payload: the live
+     * analytics service.
+     *
+     * Payload: [service]
      */
-    'plugin:before-init': [pluginName: string];
-    
+    'analytics:ready': [service: unknown];
+
     /**
-     * Emitted when a plugin has been initialized
-     * Payload: [pluginName: string]
+     * Emitted by `@objectstack/service-datasource` at start. Payload: the
+     * live external-datasource service.
+     *
+     * Payload: [service]
      */
-    'plugin:init': [pluginName: string];
-    
+    'external-datasource:ready': [service: unknown];
+
     /**
-     * Emitted after a plugin's init method completes
-     * Payload: [pluginName: string, duration: number (milliseconds)]
+     * Emitted by `@objectstack/service-datasource`'s admin plugin at start.
+     * Payload: the live datasource-admin service.
+     *
+     * Payload: [service]
      */
-    'plugin:after-init': [pluginName: string, duration: number];
-    
+    'datasource-admin:ready': [service: unknown];
+
     /**
-     * Emitted before a plugin's start method is called
-     * Payload: [pluginName: string]
+     * Emitted by the external-validation plugin's background drift checker
+     * (ADR-0015 §5.2), one event per federated object whose remote schema no
+     * longer matches its declared shape. Consumed by audit / notification
+     * services. `diffs` entries are `SchemaDiffEntry` values owned by
+     * `@objectstack/runtime`; the spec keeps them opaque.
+     *
+     * Payload: [{ datasource, object, diffs }]
      */
-    'plugin:before-start': [pluginName: string];
-    
+    'external.schema.drift': [
+        event: { datasource: string; object: string; diffs: unknown[] },
+    ];
+
     /**
-     * Emitted when a plugin has started successfully
-     * Payload: [pluginName: string, duration: number (milliseconds)]
+     * Emitted by the cloud AI service plugin (out-of-repo emitter) with the
+     * dynamic `RouteDefinition[]` it wants mounted; the dispatcher plugin
+     * listens and mounts each route on the HTTP server (environment-scoped
+     * variants included). Because plugin start order is not guaranteed, the
+     * emitter also caches the routes on the kernel as `__aiRoutes` for the
+     * dispatcher to recover when it starts late — see
+     * `DispatcherPlugin` for the recovery half of the protocol.
+     *
+     * Payload: [routes]
      */
-    'plugin:started': [pluginName: string, duration: number];
-    
-    /**
-     * Emitted after a plugin's start method completes
-     * Payload: [pluginName: string, duration: number (milliseconds)]
-     */
-    'plugin:after-start': [pluginName: string, duration: number];
-    
-    /**
-     * Emitted before a plugin's destroy method is called
-     * Payload: [pluginName: string]
-     */
-    'plugin:before-destroy': [pluginName: string];
-    
-    /**
-     * Emitted when a plugin has been destroyed
-     * Payload: [pluginName: string]
-     */
-    'plugin:destroyed': [pluginName: string];
-    
-    /**
-     * Emitted after a plugin's destroy method completes
-     * Payload: [pluginName: string, duration: number (milliseconds)]
-     */
-    'plugin:after-destroy': [pluginName: string, duration: number];
-    
-    /**
-     * Emitted when a plugin encounters an error
-     * Payload: [pluginName: string, error: Error, phase: 'init' | 'start' | 'destroy']
-     */
-    'plugin:error': [pluginName: string, error: Error, phase: 'init' | 'start' | 'destroy'];
-    
-    /**
-     * Emitted when a service is registered
-     * Payload: [serviceName: string]
-     */
-    'service:registered': [serviceName: string];
-    
-    /**
-     * Emitted when a service is unregistered
-     * Payload: [serviceName: string]
-     */
-    'service:unregistered': [serviceName: string];
-    
-    /**
-     * Emitted when a hook is registered
-     * Payload: [hookName: string, handlerCount: number]
-     */
-    'hook:registered': [hookName: string, handlerCount: number];
-    
-    /**
-     * Emitted when a hook is triggered
-     * Payload: [hookName: string, args: any[]]
-     */
-    'hook:triggered': [hookName: string, args: any[]];
+    'ai:routes': [routes: unknown[]];
 }
 
 /**
- * Type-safe event emitter interface
- * Provides compile-time type checking for event names and payloads
+ * Union of every kernel-bus event name that actually fires.
+ *
+ * `IPluginContext.hook` / `trigger` in `@objectstack/core` accept
+ * `LifecycleEventName | (string & {})`: known names autocomplete, custom
+ * cross-plugin event names stay legal.
  */
-export interface ITypedEventEmitter<Events extends Record<string, any[]>> {
-    /**
-     * Register an event listener
-     * @param event - Event name (type-checked)
-     * @param handler - Event handler (type-checked against event payload)
-     */
-    on<K extends keyof Events>(
-        event: K,
-        handler: (...args: Events[K]) => void | Promise<void>
-    ): void;
-    
-    /**
-     * Unregister an event listener
-     * @param event - Event name (type-checked)
-     * @param handler - Event handler to remove
-     */
-    off<K extends keyof Events>(
-        event: K,
-        handler: (...args: Events[K]) => void | Promise<void>
-    ): void;
-    
-    /**
-     * Emit an event with type-checked payload
-     * @param event - Event name (type-checked)
-     * @param args - Event payload (type-checked)
-     */
-    emit<K extends keyof Events>(
-        event: K,
-        ...args: Events[K]
-    ): Promise<void>;
-    
-    /**
-     * Register a one-time event listener
-     * @param event - Event name (type-checked)
-     * @param handler - Event handler (type-checked against event payload)
-     */
-    once?<K extends keyof Events>(
-        event: K,
-        handler: (...args: Events[K]) => void | Promise<void>
-    ): void;
-    
-    /**
-     * Get the number of listeners for an event
-     * @param event - Event name
-     * @returns Number of registered listeners
-     */
-    listenerCount?<K extends keyof Events>(event: K): number;
-    
-    /**
-     * Remove all listeners for an event (or all events if not specified)
-     * @param event - Optional event name
-     */
-    removeAllListeners?<K extends keyof Events>(event?: K): void;
-}
+export type LifecycleEventName = keyof IPluginLifecycleEvents & string;

@@ -1,30 +1,112 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
+import type { ErrorCode } from '@objectstack/spec/api';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+// The declared envelope is written in ONE place for the whole platform (#3973).
+import { sendOk, sendError } from '@objectstack/types';
 import { DRIVER_CATALOG } from './driver-catalog.js';
+
+/**
+ * The services these routes dispatch to.
+ *
+ * Two, not one — which is the whole reason the 503 below is parameterised. The
+ * module is *named* after `datasource-admin` and most of it is served by that
+ * service, but the three schema-introspection routes are served by
+ * `external-datasource`.
+ */
+type ServiceName = 'datasource-admin' | 'external-datasource';
+
+/**
+ * The 400 `error.code` a refusal from each service carries. Both codes are
+ * registered in the error-code ledger (ADR-0112 D3,
+ * `packages/spec/src/api/error-code-ledger.zod.ts`) under this package.
+ *
+ * Keyed by `ServiceName` for the same reason `resolve` below takes one (#4225):
+ * the code is an attribution — the ledger reads `DATASOURCE_ADMIN_ERROR` as "a
+ * refusal from the datasource-admin service" — so it must come from the service
+ * the route dispatches to. It did not until #4249: `badRequest` hard-coded
+ * `DATASOURCE_ADMIN_ERROR`, so a `no such schema` raised by the
+ * external-datasource introspector was reported, machine-readably this time, as
+ * a lifecycle refusal from datasource-admin — the same mis-attribution #4225
+ * fixed in the 503 `message`, one field over.
+ */
+const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
+  'datasource-admin': 'DATASOURCE_ADMIN_ERROR',
+  'external-datasource': 'EXTERNAL_DATASOURCE_ERROR',
+};
 
 /**
  * Datasource lifecycle REST routes (ADR-0015 Addendum §3.5).
  *
- * Mounted under `/api/v1/datasources` and served by the `datasource-admin`
- * service. Every route degrades gracefully
- * (`503 SERVICE_UNAVAILABLE`) when the service is not wired in, and
- * lifecycle/validation failures surface as `400` with the service's message.
+ * Mounted under `/api/v1/datasources`. Every route degrades gracefully
+ * (`503 SERVICE_UNAVAILABLE`) when the service *it* needs is not wired in —
+ * naming that service rather than the one this module is named after (#4225) —
+ * and refusals surface as `400` with the service's message, under the
+ * `error.code` registered for the service that refused (#4249):
+ * `DATASOURCE_ADMIN_ERROR` or `EXTERNAL_DATASOURCE_ERROR`.
+ *
+ * Served by `datasource-admin`:
  *
  *   GET    /datasources              → listDatasources (provenance + health)
+ *   GET    /datasources/:name        → getDatasource (credential-stripped)
  *   POST   /datasources/test         → testConnection (no persistence)
  *   POST   /datasources              → createDatasource (origin: 'runtime')
  *   PATCH  /datasources/:name        → updateDatasource (runtime only)
  *   DELETE /datasources/:name        → removeDatasource (runtime only)
  *
+ * Served by `external-datasource`:
+ *
+ *   GET    /datasources/:name/remote-tables → listRemoteTables
+ *   POST   /datasources/:name/test          → testConnection (a SAVED datasource)
+ *   POST   /datasources/:name/object-draft  → generateObjectDraft
+ *
+ * `GET /datasources/drivers` is static metadata and needs neither service.
+ *
  * Request bodies carry the connection draft inline with an optional cleartext
  * `secret` field; the route splits `secret` out so it never reaches the draft
  * the service persists.
  *
- * Every body — both halves — is built by `sendOk` / `sendError` below, in the
- * envelope `BaseResponseSchema` declares. See those two for what this module
- * emitted before #3843 and why it was the worse of the two drifting dialects.
+ * Every body — both halves — is built by the shared `sendOk` / `sendError`, in
+ * the envelope `BaseResponseSchema` declares (#3843, consolidated in #3973).
+ *
+ * ## What this module emitted before #3843
+ *
+ * `{ error: '<string>' }` — the shape #3675 had already declared wrong for
+ * `service-storage`, with `message` a SIBLING of `error` rather than a field
+ * of it:
+ *
+ *     res.status(400).json({ error: 'datasource_admin_error', message });
+ *
+ * so a caller reading `body.error.message` got `undefined` here and the real
+ * message from the dispatcher — the identical asymmetry #3675 opened on, one
+ * layer over. `ObjectStackClient` sniffs several shapes to paper over the
+ * difference; that shim is the consumer-side symptom Prime Directive #12 says
+ * to cure at the producer.
+ *
+ * The codes follow ADR-0112, which #3841 settled while #3843 was in review:
+ * `error.code` is SCREAMING_SNAKE and `ApiErrorSchema.code` is the closed
+ * `ErrorCode` union — which is now also `sendError`'s parameter type, so an
+ * unregistered code fails to COMPILE rather than failing a schema parse at
+ * runtime (#3973). The old lowercase trio was re-spelled accordingly, and the
+ * generic conditions went to the STANDARD catalog rather than becoming
+ * registered synonyms of it:
+ *
+ *   datasource_admin_unavailable → SERVICE_UNAVAILABLE   (standard)
+ *   not_found                    → RESOURCE_NOT_FOUND    (standard)
+ *   datasource_admin_error       → DATASOURCE_ADMIN_ERROR (registered — a
+ *                                  lifecycle/validation refusal specific to
+ *                                  this service, so not a standard synonym)
+ *
+ * #4249 then split the third row in two: `DATASOURCE_ADMIN_ERROR` had been
+ * carried verbatim onto the three routes served by `external-datasource`,
+ * whose refusals are now the separately registered `EXTERNAL_DATASOURCE_ERROR`
+ * — see `SERVICE_ERROR_CODE` above.
+ *
+ * Which service is unavailable is carried by `message`; the ledger explicitly
+ * asks generic conditions to reuse the catalog instead of registering a
+ * per-service 503. That puts the whole burden of naming the service on one
+ * string — see `resolve` below for how it is kept honest (#4225).
  */
 export function registerDatasourceAdminRoutes(
   server: IHttpServer,
@@ -33,75 +115,47 @@ export function registerDatasourceAdminRoutes(
 ): void {
   const root = `${basePath}/datasources`;
 
-  const adminService = (): any => {
+  /**
+   * Resolve the service a route dispatches to — or answer
+   * `503 SERVICE_UNAVAILABLE` naming THAT service and return `undefined`, which
+   * the caller returns on.
+   *
+   * The name that performs the lookup is the same one that writes the message,
+   * so the two cannot disagree. They did until #4225: a single `unavailable`
+   * helper hard-coded `datasource-admin` while three routes — `GET
+   * /:name/remote-tables`, `POST /:name/test`, `POST /:name/object-draft` —
+   * resolve `external-datasource`. An operator whose federation service was
+   * unwired got told to go look at `datasource-admin`, which was running fine.
+   * Passing the name to the helper instead would have fixed those three; taking
+   * it from the lookup is what stops a tenth route reintroducing the mismatch.
+   *
+   * `method` is the one call the route goes on to make. It is checked here
+   * because "the service is registered" and "this route can use it" are not the
+   * same fact — a host may wire a partial implementation — and this preserves
+   * the per-route capability check the call sites did before.
+   */
+  const resolve = (res: any, service: ServiceName, method: string): any => {
+    let svc: any;
     try {
-      return ctx.getService<any>('datasource-admin');
+      svc = ctx.getService<any>(service);
     } catch {
+      svc = undefined;
+    }
+    if (!svc?.[method]) {
+      sendError(res, 503, 'SERVICE_UNAVAILABLE', `The ${service} service is not available.`);
       return undefined;
     }
-  };
-
-  const externalService = (): any => {
-    try {
-      return ctx.getService<any>('external-datasource');
-    } catch {
-      return undefined;
-    }
+    return svc;
   };
 
   /**
-   * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
-   * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
-   * `{ success: false, error: { code, message } }`.
-   *
-   * Before #3843 this module emitted `{ error: '<string>' }` — the shape #3675
-   * had already declared wrong for `service-storage`, with `message` a SIBLING
-   * of `error` rather than a field of it:
-   *
-   *     res.status(400).json({ error: 'datasource_admin_error', message });
-   *
-   * so a caller reading `body.error.message` got `undefined` here and the real
-   * message from the dispatcher — the identical asymmetry #3675 opened on, one
-   * layer over. `ObjectStackClient` sniffs several shapes to paper over the
-   * difference; that shim is the consumer-side symptom Prime Directive #12 says
-   * to cure at the producer.
-   *
-   * The codes follow ADR-0112, which #3841 settled while this was in review:
-   * `error.code` is SCREAMING_SNAKE and `ApiErrorSchema.code` is now the closed
-   * `ErrorCode` union, so an unregistered code fails schema parse. The old
-   * lowercase trio was re-spelled accordingly, and the generic conditions went to
-   * the STANDARD catalog rather than becoming registered synonyms of it:
-   *
-   *   datasource_admin_unavailable → SERVICE_UNAVAILABLE   (standard)
-   *   not_found                    → RESOURCE_NOT_FOUND    (standard)
-   *   datasource_admin_error       → DATASOURCE_ADMIN_ERROR (registered — a
-   *                                  lifecycle/validation refusal specific to
-   *                                  this service, so not a standard synonym)
-   *
-   * Which service is unavailable is carried by `message`; the ledger explicitly
-   * asks generic conditions to reuse the catalog instead of registering a
-   * per-service 503.
+   * Answer a refusal as `400`, with the code registered for the service the
+   * route dispatches to (`SERVICE_ERROR_CODE`) and the service's own message.
+   * `service` is the same name the route passed to `resolve` — restating it is
+   * what keeps the attribution honest per route (#4249).
    */
-  const sendError = (res: any, status: number, code: string, message: string) =>
-    res.status(status).json({ success: false, error: { code, message } });
-
-  /**
-   * Emit a success body in the DECLARED envelope — `{ success: true, data }`.
-   *
-   * The payload keys are unchanged, just one level deeper: `{ datasources }`
-   * becomes `{ success: true, data: { datasources } }`. `ObjectStackClient`
-   * reads these through `unwrapResponse`, which returns `body.data` when the
-   * flag is present, so the SDK's published return types describe the same
-   * object they always did.
-   */
-  const sendOk = (res: any, data: unknown, status = 200) =>
-    res.status(status).json({ success: true, data });
-
-  const unavailable = (res: any) =>
-    sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The datasource-admin service is not available.');
-
-  const badRequest = (res: any, err: unknown) =>
-    sendError(res, 400, 'DATASOURCE_ADMIN_ERROR', err instanceof Error ? err.message : String(err));
+  const badRequest = (res: any, service: ServiceName, err: unknown) =>
+    sendError(res, 400, SERVICE_ERROR_CODE[service], err instanceof Error ? err.message : String(err));
 
   /** Split an inline `{ secret, ...draft }` body into (draft, secret). */
   const splitSecret = (body: any): { draft: any; secret: any } => {
@@ -118,8 +172,8 @@ export function registerDatasourceAdminRoutes(
 
   // List all datasources with provenance + health.
   server.get(root, async (_req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.listDatasources) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'listDatasources');
+    if (!svc) return;
     const datasources = await svc.listDatasources();
     sendOk(res, { datasources });
   });
@@ -137,13 +191,13 @@ export function registerDatasourceAdminRoutes(
   // definition draft for one table (introspect + type-map, no persistence —
   // the caller creates the object through the normal metadata channel).
   server.get(`${root}/:name/remote-tables`, async (req: any, res: any) => {
-    const svc = externalService();
-    if (!svc?.listRemoteTables) return unavailable(res);
+    const svc = resolve(res, 'external-datasource', 'listRemoteTables');
+    if (!svc) return;
     try {
       const tables = await svc.listRemoteTables(req.params.name);
       sendOk(res, { tables });
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'external-datasource', err);
     }
   });
 
@@ -155,90 +209,90 @@ export function registerDatasourceAdminRoutes(
   // `config` is non-sensitive, plus a `hasSecret` flag). Registered after the
   // static `/drivers` route so that literal segment is never captured as a name.
   server.get(`${root}/:name`, async (req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.getDatasource) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'getDatasource');
+    if (!svc) return;
     try {
       const datasource = await svc.getDatasource(req.params.name);
       if (!datasource) return sendError(res, 404, 'RESOURCE_NOT_FOUND', `Datasource "${req.params.name}" does not exist.`);
       sendOk(res, { datasource });
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'datasource-admin', err);
     }
   });
 
   server.post(`${root}/:name/test`, async (req: any, res: any) => {
-    const svc = externalService();
-    if (!svc?.testConnection) return unavailable(res);
+    const svc = resolve(res, 'external-datasource', 'testConnection');
+    if (!svc) return;
     try {
       const result = await svc.testConnection(req.params.name);
       sendOk(res, result);
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'external-datasource', err);
     }
   });
 
   server.post(`${root}/:name/object-draft`, async (req: any, res: any) => {
-    const svc = externalService();
-    if (!svc?.generateObjectDraft) return unavailable(res);
+    const svc = resolve(res, 'external-datasource', 'generateObjectDraft');
+    if (!svc) return;
     const { table, ...opts } = (req.body as Record<string, unknown>) ?? {};
-    if (!table) return badRequest(res, new Error('Body field "table" is required.'));
+    if (!table) return badRequest(res, 'external-datasource', new Error('Body field "table" is required.'));
     try {
       const draft = await svc.generateObjectDraft(req.params.name, String(table), opts);
       sendOk(res, { draft });
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'external-datasource', err);
     }
   });
 
   // Probe a connection without persisting anything. Registered before the
   // `:name` routes so the literal `test` segment is never captured as a name.
   server.post(`${root}/test`, async (req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.testConnection) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'testConnection');
+    if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
     try {
       const result = await svc.testConnection(draft, secret);
       sendOk(res, { result });
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'datasource-admin', err);
     }
   });
 
   // Create a runtime datasource.
   server.post(root, async (req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.createDatasource) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'createDatasource');
+    if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
     try {
       const datasource = await svc.createDatasource(draft, secret);
       sendOk(res, { datasource }, 201);
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'datasource-admin', err);
     }
   });
 
   // Patch a runtime datasource.
   server.patch(`${root}/:name`, async (req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.updateDatasource) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'updateDatasource');
+    if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
     try {
       const datasource = await svc.updateDatasource(req.params.name, draft, secret);
       sendOk(res, { datasource });
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'datasource-admin', err);
     }
   });
 
   // Remove a runtime datasource.
   server.delete(`${root}/:name`, async (req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.removeDatasource) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'removeDatasource');
+    if (!svc) return;
     try {
       await svc.removeDatasource(req.params.name);
       res.status(204).end();
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'datasource-admin', err);
     }
   });
 }

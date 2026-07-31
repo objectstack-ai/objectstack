@@ -32,5 +32,9 @@
     "knowledge",
     "rag",
     "ragflow"
+  ],
+  "files": [
+    "dist",
+    "README.md"
   ]
 }

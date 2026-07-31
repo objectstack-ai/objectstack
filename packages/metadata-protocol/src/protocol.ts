@@ -18,10 +18,10 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
-import { parseFilterAST, isFilterAST, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
+import { parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
-import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
+import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed } from '@objectstack/spec/kernel';
 import {
     extractProtection,
@@ -298,6 +298,61 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
 function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     return getMetadataTypeSchema(singular) ?? null;
+}
+
+/**
+ * A 400 for a `$filter` ARRAY that looks like a filter AST but is not one.
+ *
+ * The message has to be *actionable from the request*, which is the whole point
+ * of rejecting here rather than letting a driver fail later: the caller sent a
+ * query parameter, so the error names the offending element and the vocabulary
+ * it was checked against — not a driver-internal builder state.
+ *
+ * Diagnoses the three shapes `isFilterAST` refuses, in the order they occur in
+ * practice. #4121. Sibling of {@link unusableFilterError}, which covers the
+ * non-array ways a filter fails to become one (#4181); both emit
+ * `INVALID_FILTER` so the condition has one wire code however it was reached.
+ */
+function malformedFilterArrayError(filter: unknown[]): Error {
+    const detail = describeMalformedFilter(filter);
+    const err: any = new Error(
+        `Malformed $filter: ${detail} A filter array is a comparison ` +
+        `[field, operator, value], a logical node ["and"|"or", ...conditions], or a ` +
+        `list of those. Recognised operators: ${[...VALID_AST_OPERATORS].sort().join(', ')}.`,
+    );
+    err.status = 400;
+    err.code = 'INVALID_FILTER';
+    return err;
+}
+
+/** The specific reason a filter array failed `isFilterAST`, for the message above. */
+function describeMalformedFilter(filter: unknown[]): string {
+    const [first, second] = filter;
+    const isKeyword = typeof first === 'string' && ['and', 'or'].includes(first.toLowerCase());
+
+    // `["and"]` / `["or"]` with nothing to join. The one shape that still
+    // returned every row silently after #3948: the driver sets its join mode,
+    // matches no element, and emits no predicate.
+    if (isKeyword && filter.length < 2) {
+        return `logical node ["${String(first)}"] has no conditions to join.`;
+    }
+    // A bare triple whose operator is outside the AST vocabulary — the original
+    // `before` / `after` / `'not in'` case.
+    if (typeof first === 'string' && !isKeyword && typeof second === 'string'
+        && !VALID_AST_OPERATORS.has(second.toLowerCase())) {
+        return `unrecognised operator "${second}" in [${JSON.stringify(first)}, ...].`;
+    }
+    // An element that is neither a join keyword nor a nested condition.
+    const badIndex = filter.findIndex(
+        (item) => !Array.isArray(item)
+            && !(typeof item === 'string' && ['and', 'or'].includes(item.toLowerCase())),
+    );
+    if (badIndex >= 0 && filter.some((item) => Array.isArray(item))) {
+        const bad = filter[badIndex];
+        return `element ${badIndex} is ${bad === null ? 'null' : typeof bad}, ` +
+            `expected a condition array or a logical keyword.`;
+    }
+    return `${JSON.stringify(filter)} is not a recognised filter shape.`;
 }
 
 /**
@@ -800,6 +855,145 @@ const ODATA_SPELLING: Readonly<Record<string, string>> = {
     filter: '$filter', select: '$select', expand: '$expand',
 };
 
+/**
+ * [#4181] A filter the normalizer cannot turn into a usable `FilterCondition`
+ * by any route other than the array shapes {@link malformedFilterArrayError}
+ * already diagnoses: unparseable JSON, or JSON that parses to something no
+ * driver can read (a number, a bare string, `null`).
+ *
+ * Carries `INVALID_FILTER` — the standard-catalog code (`errors.zod.ts`,
+ * "Invalid filter expression") that #4121 introduced on this same code path for
+ * the array case. One condition, one wire code, however the caller reached it:
+ * a `$filter` array with a bad operator and a `?filter=` that is not JSON are
+ * the same answer to the same question ("this filter cannot run").
+ *
+ * The message states the filter was NOT APPLIED, because that is the part a
+ * caller cannot infer: the pre-#4181 behavior was an ordinary-looking 200 over
+ * the unfiltered set.
+ */
+function unusableFilterError(param: string, detail: string): Error {
+    const err: any = new Error(
+        `Query parameter '${param}' ${detail}. It was not applied, and an unapplied `
+        + 'filter would have returned the unfiltered result set.',
+    );
+    err.status = 400;
+    err.code = 'INVALID_FILTER';
+    err.param = param;
+    return err;
+}
+
+/**
+ * [#4226] A sort the normalizer cannot turn into a usable `SortNode[]`, or one
+ * that names a field the object does not have.
+ *
+ * Carries `INVALID_SORT` — the standard-catalog code (`errors.zod.ts`,
+ * "Invalid sort specification") that had sat in the catalog with no emitter
+ * since it was written. One condition, one wire code, however the caller
+ * reached it.
+ *
+ * The message spells out what an unapplied sort costs, because that is the part
+ * a caller cannot infer from the response: `sort` + `top` is how you ask for
+ * "the latest N", and a dropped sort turns that into an ARBITRARY N with a
+ * perfectly ordinary-looking 200 over it. The rows are all there and all real —
+ * which is exactly why nobody notices.
+ */
+function invalidSortError(
+    param: string,
+    detail: string,
+    opts?: { hint?: string, extra?: Record<string, unknown> },
+): Error {
+    const err: any = new Error(
+        `Query parameter '${param}' ${detail}. It was not applied, and an unapplied `
+        + "sort returns the rows in an arbitrary order — which 'top'/'limit' then "
+        + 'slices into an arbitrary page.'
+        + (opts?.hint ?? ''),
+    );
+    err.status = 400;
+    err.code = 'INVALID_SORT';
+    err.param = param;
+    Object.assign(err, opts?.extra ?? {});
+    return err;
+}
+
+/**
+ * [#4226] Every wire spelling of `sort`/`orderBy`, folded to the one shape the
+ * QueryAST declares (`SortNodeSchema[]`) — or a rejection.
+ *
+ * Four spellings arrive here today and only two of them ever reached a driver:
+ *
+ * | spelling | example | before |
+ * |:---|:---|:---|
+ * | string | `?sort=-created_at` | worked |
+ * | `SortNode[]` | `[{field,order}]` | worked |
+ * | `string[]` | `['-created_at']` | **dropped** — the client's own declared type (`orderBy?: string \| string[] \| SortNode[]`) |
+ * | `Record<field,dir>` | `{created_at:'desc'}` | **dropped** — what `GET /data/:object/export`, `GET /data/import/jobs` and objectui's calendar all emit |
+ *
+ * The two dropped ones never failed: `SqlDriver` guards its ORDER BY clause
+ * with `Array.isArray(query.orderBy)`, so a shape it could not read produced no
+ * clause at all. `GET /data/import/jobs` has been asking for `created_at desc`
+ * and serving insertion order ever since it was written; #4181 taught the
+ * export route to REJECT an unparseable `orderby`, but the parsed result then
+ * fell into this same hole one layer down.
+ *
+ * Normalizing here — in the one shared normalizer every ingress funnels through
+ * — is what gives `GET /data/:object`, `POST /data/:object/query`, the export
+ * route and the runtime dispatcher a single answer instead of four. Anything
+ * that still cannot be read as a sort is a 400 rather than a silent no-op: per
+ * #3948, an unapplied sort must not look like an applied one.
+ */
+function normalizeSortNodes(value: unknown, param: string): Array<{ field: string, order: 'asc' | 'desc' }> {
+    const direction = (raw: unknown, subject: string): 'asc' | 'desc' => {
+        if (raw === undefined || raw === null || raw === '') return 'asc';
+        const dir = String(raw).trim().toLowerCase();
+        if (dir === 'asc' || dir === 'desc') return dir;
+        throw invalidSortError(param, `gives ${subject} the direction '${raw}', which is neither 'asc' nor 'desc'`);
+    };
+    // `-field` / `field` / `field desc` — the querystring shorthand, also used
+    // for each element of the `string[]` form.
+    const fromShorthand = (raw: string): { field: string, order: 'asc' | 'desc' } | undefined => {
+        const trimmed = raw.trim();
+        if (!trimmed) return undefined;
+        if (trimmed.startsWith('-')) {
+            const field = trimmed.slice(1).trim();
+            return field ? { field, order: 'desc' } : undefined;
+        }
+        const [field, order] = trimmed.split(/\s+/);
+        return field ? { field, order: direction(order, `'${field}'`) } : undefined;
+    };
+    const fromElement = (el: unknown, index: number): { field: string, order: 'asc' | 'desc' } | undefined => {
+        if (typeof el === 'string') return fromShorthand(el);
+        if (el && typeof el === 'object' && !Array.isArray(el)) {
+            const node = el as { field?: unknown, order?: unknown };
+            if (typeof node.field === 'string' && node.field.trim()) {
+                return { field: node.field.trim(), order: direction(node.order, `'${node.field}'`) };
+            }
+        }
+        throw invalidSortError(
+            param,
+            `has an entry at position ${index} that names no field (received ${JSON.stringify(el) ?? typeof el})`,
+        );
+    };
+
+    if (value === undefined || value === null || value === '') return [];
+    if (typeof value === 'string') {
+        return value.split(',').map(fromShorthand).filter((s): s is { field: string, order: 'asc' | 'desc' } => !!s);
+    }
+    if (Array.isArray(value)) {
+        return value.map(fromElement).filter((s): s is { field: string, order: 'asc' | 'desc' } => !!s);
+    }
+    if (typeof value === 'object') {
+        const entries = Object.entries(value as Record<string, unknown>);
+        if (entries.length === 0) return [];
+        // A single `SortNode` sent unwrapped (`{field:'x',order:'desc'}`) is the
+        // one-element array it obviously means; anything else is read as the
+        // `{field: direction}` map, whose VALUES must be directions — that check
+        // is what stops a stray object being silently accepted as "no sort".
+        if (typeof (value as any).field === 'string') return [fromElement(value, 0)!];
+        return entries.map(([field, dir]) => ({ field, order: direction(dir, `'${field}'`) }));
+    }
+    throw invalidSortError(param, `is a ${typeof value}, which names no field to sort by`);
+}
+
 /** Fold a parameter name to its near-miss lookup key. */
 function nearMissKey(name: string): string {
     return name.toLowerCase().replace(/[_-]/g, '');
@@ -837,7 +1031,19 @@ function suggestQueryParam(param: string, knownFields: readonly string[]): strin
             + (odata ? ` (OData spelling '${odata}')` : '')
             + '?';
     }
-    const folded = nearMissKey(param);
+    return suggestFieldName(param, knownFields);
+}
+
+/**
+ * [#4226] The field-typo half of {@link suggestQueryParam}, on its own.
+ *
+ * The `sort` / `select` / `expand` axes name a field DIRECTLY, so the
+ * parameter-dialect half above is not merely useless there but actively wrong:
+ * it would answer `?sort=order` with "did you mean the 'sort' query parameter",
+ * which is the parameter the caller already used.
+ */
+function suggestFieldName(name: string, knownFields: readonly string[]): string {
+    const folded = nearMissKey(name);
     // Only worth guessing for names long enough that a small distance is
     // meaningful — at 3 chars everything is within 2 edits of everything.
     if (folded.length >= 4) {
@@ -863,28 +1069,42 @@ function suggestQueryParam(param: string, knownFields: readonly string[]): strin
  * not advertise a route for it (ADR-0076 D12, #2462: an advertised route
  * with no mounted handler 404s and misleads consumers).
  */
-const SERVICE_CONFIG: Record<string, { route?: string; plugin: string }> = {
+/**
+ * [#4093 follow-up] `plugin` is no longer written here. It named the package a
+ * consumer should install, and ten of the fifteen names did not exist —
+ * `plugin-redis` / `plugin-bullmq` / `job-scheduler` / `plugin-notifications` /
+ * `plugin-storage` / `plugin-automation` / `ui-plugin`, plus `plugin-ai`,
+ * `plugin-search` and `plugin-workflow` for slots nothing implements at all.
+ * The value is surfaced as discovery's `provider` and as its remedy line, so a
+ * wrong name is a dead end handed to whoever is trying to fix their stack.
+ *
+ * It now comes from `CORE_SERVICE_PROVIDER` in `@objectstack/spec/system`, the
+ * one table both discovery builders read, verified against what actually
+ * registers each slot and guarded by `scripts/check-service-providers.mjs`.
+ * Only the ROUTE stays local — that is this builder's own knowledge.
+ */
+const SERVICE_CONFIG: Record<string, { route?: string }> = {
     // Plugin-provided like every other optional service since the degraded
     // ObjectQL fallback was retired (#3891): advertised iff the real engine
     // is registered — never hardcoded 'available' (the pre-#2462 lie the
     // fallback existed to paper over).
-    analytics:    { route: '/api/v1/analytics', plugin: 'service-analytics' },
-    auth:         { route: '/api/v1/auth', plugin: 'plugin-auth' },
-    automation:   { route: '/api/v1/automation', plugin: 'plugin-automation' },
-    cache:        { route: '/api/v1/cache', plugin: 'plugin-redis' },
-    queue:        { route: '/api/v1/queue', plugin: 'plugin-bullmq' },
-    job:          { route: '/api/v1/jobs', plugin: 'job-scheduler' },
-    ui:           { route: '/api/v1/ui', plugin: 'ui-plugin' },
-    workflow:     { route: '/api/v1/workflow', plugin: 'plugin-workflow' },
+    analytics:    { route: '/api/v1/analytics' },
+    auth:         { route: '/api/v1/auth' },
+    automation:   { route: '/api/v1/automation' },
+    cache:        { route: '/api/v1/cache' },
+    queue:        { route: '/api/v1/queue' },
+    job:          { route: '/api/v1/jobs' },
+    ui:           { route: '/api/v1/ui' },
+    workflow:     { route: '/api/v1/workflow' },
     // service-realtime is an in-process pub/sub bus; nothing mounts
     // /api/v1/realtime, so no route is advertised (D12, #2462).
-    realtime:     { plugin: 'service-realtime' },
-    notification: { route: '/api/v1/notifications', plugin: 'plugin-notifications' },
-    ai:           { route: '/api/v1/ai', plugin: 'plugin-ai' },
-    i18n:         { route: '/api/v1/i18n', plugin: 'service-i18n' },
-    graphql:      { route: '/graphql', plugin: 'plugin-graphql' },  // GraphQL uses /graphql by convention (not versioned REST)
-    'file-storage': { route: '/api/v1/storage', plugin: 'plugin-storage' },
-    search:       { route: '/api/v1/search', plugin: 'plugin-search' },
+    realtime:     {},
+    notification: { route: '/api/v1/notifications' },
+    ai:           { route: '/api/v1/ai' },
+    i18n:         { route: '/api/v1/i18n' },
+    graphql:      { route: '/graphql' },  // GraphQL uses /graphql by convention (not versioned REST)
+    'file-storage': { route: '/api/v1/storage' },
+    search:       { route: '/api/v1/search' },
 };
 
 /**
@@ -1694,7 +1914,7 @@ export class ObjectStackProtocolImplementation implements
                     enabled: true,
                     status: self?.status ?? (noHttpSurface ? ('degraded' as const) : ('available' as const)),
                     route: advertisedRoute(serviceName, config.route),
-                    provider: config.plugin,
+                    provider: CORE_SERVICE_PROVIDER[serviceName] ?? undefined,
                     ...(noHttpSurface || self?.handlerReady !== undefined
                         ? { handlerReady: noHttpSurface ? false : self?.handlerReady }
                         : {}),
@@ -1709,7 +1929,7 @@ export class ObjectStackProtocolImplementation implements
                 services[serviceName] = {
                     enabled: false,
                     status: 'unavailable' as const,
-                    message: `Install ${config.plugin} to enable`,
+                    message: serviceUnavailableMessage(serviceName),
                 };
             }
         }
@@ -2841,7 +3061,14 @@ export class ObjectStackProtocolImplementation implements
                     readonly: fields[f]?.readonly,
                     type: fields[f]?.type,
                     // Default to 2 columns for most, 1 for textareas
-                    colSpan: (fields[f]?.type === 'textarea' || fields[f]?.type === 'html') ? 2 : 1
+                    colSpan: (fields[f]?.type === 'textarea' || fields[f]?.type === 'html') ? 2 : 1,
+                    // `FormField.span` defaults to 'auto'; this view is hand-built
+                    // rather than run through `FormFieldSchema.parse()`, so the
+                    // default is spelled out to make the returned object a real
+                    // parsed `View` (the same reason the section below states its
+                    // own `collapsible` / `collapsed` / `columns` defaults). Was
+                    // unnoticed while `FormField` resolved to `any` (#4171).
+                    span: 'auto' as const
                 }));
 
              return {
@@ -2925,39 +3152,64 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#4134] Read-path unknown-field gate for the implicit filters `findData`
-     * derives from leftover query parameters.
+     * [#4134] The names a list query may legitimately use on `object`, or
+     * `null` when nothing authoritative is available to check against.
      *
-     * Rejects with the SAME envelope the write path produces for the same
-     * mistake — `400 INVALID_FIELD` + `field` + `object` (see `mapDataError` in
-     * `@objectstack/rest`) — so "does this field exist" has one answer on both
-     * sides of the API instead of being enforced on write and silently
-     * zeroed on read.
+     * ONE resolution shared by all four read axes — filter (#4134), sort,
+     * projection and expand (#4226) — because "does this field exist" is one
+     * question and four answers to it is exactly the state these issues were
+     * filed about. It is also the read half of a question the WRITE path
+     * already answers loudly (`400 INVALID_FIELD` via `mapDataError` in
+     * `@objectstack/rest`).
      *
      * Tiering mirrors {@link assertObjectRegistered}, one level down:
      *
      * - **Schema present with a field map → authoritative.** An unlisted name
      *   is a 400. The registry injects the audit/tenant/owner columns
      *   (`created_at`, `created_by`, `updated_at`, `updated_by`,
-     *   `organization_id`, `owner_id`) into `fields`, so those filter normally;
-     *   `id` is added here because it is the primary key rather than a declared
-     *   field. Dotted paths are judged on their head segment only
-     *   (`owner_id.name`), matching how `engine.find()` validates projections.
+     *   `organization_id`, `owner_id`) into `fields`, so those are usable
+     *   normally; `id` and the two audit timestamps are added defensively
+     *   because they are primary-key/engine-assigned rather than declared, and
+     *   `engine.find()` admits the same three unconditionally — a gate stricter
+     *   than the engine it guards would reject queries that used to work.
      * - **No registry, or a schema with no field map → skip.** Nothing to check
      *   against (registry-less Lite/edge hosts, engine doubles, external
      *   datasources whose columns are not mirrored locally). The
      *   object-existence gate above already warns once when the registry itself
      *   is missing, so this stays quiet rather than warning twice per process.
      */
-    private assertQueryParamsAreFields(object: string, params: readonly string[]): void {
+    private resolveQueryFields(object: string): { known: ReadonlySet<string>, declared: readonly string[], fields: any } | null {
         const schema: any = this.engine?.registry?.getObject?.(object);
         const declared = schema?.fields;
-        if (!declared || typeof declared !== 'object') return;
+        if (!declared || typeof declared !== 'object') return null;
+        // A legacy ARRAY field map is not checkable: `Object.keys` on it yields
+        // '0', '1', '2' …, so every gate below would reject every real field
+        // name. Skipping is the same call the no-field-map case makes — there
+        // is nothing here to answer "does this field exist" with.
+        if (Array.isArray(declared)) return null;
         const fieldNames = Object.keys(declared);
-        if (fieldNames.length === 0) return;
+        if (fieldNames.length === 0) return null;
         const known = new Set(fieldNames);
         known.add('id');
-        const unknown = params.filter((p) => !known.has(String(p).split('.')[0]));
+        known.add('created_at');
+        known.add('updated_at');
+        return { known, declared: fieldNames, fields: declared };
+    }
+
+    /**
+     * [#4134] Read-path unknown-field gate for the implicit filters `findData`
+     * derives from leftover query parameters.
+     *
+     * Rejects with the SAME envelope the write path produces for the same
+     * mistake — `400 INVALID_FIELD` + `field` + `object` — so a name that
+     * cannot be written cannot be silently filtered on either. Dotted paths are
+     * judged on their head segment only (`owner_id.name`), matching how
+     * `engine.find()` validates projections.
+     */
+    private assertQueryParamsAreFields(object: string, params: readonly string[]): void {
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const unknown = params.filter((p) => !gate.known.has(String(p).split('.')[0]));
         if (unknown.length === 0) return;
         const first = unknown[0];
         const err: any = new Error(
@@ -2965,13 +3217,198 @@ export class ObjectStackProtocolImplementation implements
             + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
             + '. Query parameters that are not reserved are read as field filters, so an '
             + 'unknown name can only match zero records.'
-            + suggestQueryParam(first, fieldNames),
+            + suggestQueryParam(first, gate.declared),
         );
         err.code = 'INVALID_FIELD';
         err.status = 400;
         err.field = first;
         err.fields = unknown;
         err.object = object;
+        throw err;
+    }
+
+    /**
+     * [#4226] SORT axis. A sort naming a field the object does not have is
+     * refused (`400 INVALID_SORT`) instead of being dropped on the floor.
+     *
+     * The stakes sit between the other two axes: the row SET is unchanged, so
+     * this is not #4181's "returned everything" — but `sort` + `top` is how a
+     * caller asks for "the latest N", and a dropped sort makes that an
+     * arbitrary N that no amount of inspecting the response can reveal.
+     * `SqlDriver` has a deliberate backstop that drops an unknown ORDER BY
+     * column and returns the rows unordered (objectstack#3821 — rows matter
+     * more than their order); that backstop is for a *driver* that has already
+     * been handed the query. Refusing HERE, before it is handed over, is what
+     * keeps it from doubling as a silent tolerance at the API boundary.
+     *
+     * The colon form gets its own hint: `?sort=title:desc` is the spelling
+     * `GET /data/:object/export` accepts, and a caller who moved between the
+     * two routes deserves better than "no such field 'title:desc'".
+     */
+    private assertSortFieldsExist(object: string, orderBy: ReadonlyArray<{ field: string }>, param: string): void {
+        if (orderBy.length === 0) return;
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const unknown = orderBy
+            .map((s) => String(s.field))
+            .filter((f) => !gate.known.has(f.split('.')[0]));
+        if (unknown.length === 0) return;
+        const first = unknown[0];
+        const hint = first.includes(':')
+            ? ` The list route spells a direction with a space or a leading '-'`
+              + ` ('sort=${first.split(':')[0]} desc', 'sort=-${first.split(':')[0]}');`
+              + " 'field:direction' is the export route's spelling."
+            : suggestFieldName(first, gate.declared);
+        throw invalidSortError(
+            param,
+            `sorts by '${first}', which is not a field on object '${object}'`
+            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : ''),
+            { hint, extra: { field: first, fields: unknown, object } },
+        );
+    }
+
+    /**
+     * [#4226] PROJECTION axis. A `select`/`fields` naming a column the object
+     * does not have is refused (`400 INVALID_FIELD`).
+     *
+     * This axis fails in the direction nobody expects. `engine.find()` drops
+     * unknown columns (deliberate `SELECT *` / OData tolerance) and then falls
+     * back to `*` when that leaves the projection empty (so the driver is not
+     * handed an empty SELECT list) — which compose into: `?select=<typo>` asked
+     * for ONE column and got EVERY column. A parameter whose entire purpose is
+     * to return less had "return more" as its failure mode, pointing away from
+     * both FLS and data minimisation.
+     *
+     * Rejecting the partially-unknown case too (`?select=title,no_such`) is the
+     * #3948 reading — an unapplied projection must not look like a satisfied
+     * one — and the same rule the filter axis already lives by. The tolerant
+     * reading (align with Salesforce/OData leniency) would have to explain why
+     * `?status=<typo>` is a 400 and `?select=<typo>` is not, on one endpoint,
+     * about the same field map.
+     *
+     * The engine's tolerance is untouched: it guards INTERNAL callers (hooks,
+     * flows, expand sub-reads, registry-less hosts) that never pass through
+     * this ingress, exactly like the object-existence gate above.
+     *
+     * [#4196] It also owns the projection's SHAPE, which is a different
+     * question from its names and is answered first — see below.
+     */
+    private assertProjectionFieldsExist(object: string, fields: unknown, param: string): void {
+        if (!Array.isArray(fields) || fields.length === 0) return;
+        // [#4196] A non-string entry is the retired nested-select object form
+        // (`{ field, fields, alias }`). It is checked BEFORE the field map,
+        // because it is wrong about the shape rather than about this object —
+        // and a registry-less host, which returns no gate below, would
+        // otherwise let it through to a driver that cannot read it. Until now
+        // it reached `.map(String)` and was refused as the unknown field
+        // `"[object Object]"`: a 400 naming something the caller never wrote.
+        const badShape = fields.findIndex((f) => typeof f !== 'string');
+        if (badShape !== -1) {
+            const entry = fields[badShape];
+            // Only the shape that used to be legal earns the retirement clause.
+            const retiredForm = typeof entry === 'object' && entry !== null && !Array.isArray(entry);
+            const err: any = new Error(
+                `'${param}' entry #${badShape + 1} on object '${object}' is not a field name.`
+                + (retiredForm
+                    ? ' The nested-select object form `{ field, fields, alias }` was removed in '
+                      + '@objectstack/spec 18 (#4196) — no engine or driver ever read it.'
+                    : '')
+                + " Select related records with `expand` (`expand=owner` / `{ expand: { owner: "
+                + "{ object: 'user', fields: ['name'] } } }`), or name one related column with a "
+                + 'dotted path (`select=owner.name`).',
+            );
+            err.code = 'INVALID_FIELD';
+            err.status = 400;
+            err.object = object;
+            err.param = param;
+            throw err;
+        }
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const unknown = (fields as string[]).filter((f) => !gate.known.has(f.split('.')[0]));
+        if (unknown.length === 0) return;
+        const first = unknown[0];
+        const err: any = new Error(
+            `Unknown field '${first}' on object '${object}'`
+            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
+            + `. '${param}' chooses which fields to return; dropping an unknown one silently `
+            + 'answered a NARROWER projection with a WIDER one — a projection naming no known '
+            + 'field fell all the way back to every field.'
+            + suggestFieldName(first, gate.declared),
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = first;
+        err.fields = unknown;
+        err.object = object;
+        err.param = param;
+        throw err;
+    }
+
+    /**
+     * [#4226] EXPAND axis. An `expand`/`populate` naming something the engine
+     * cannot expand is refused (`400 INVALID_FIELD`).
+     *
+     * The lightest of the three — neither the row set nor the returned columns
+     * change, the relation simply is not there — but the response gives the
+     * caller nothing to distinguish "this relation does not exist" from "every
+     * row happens to have a null foreign key", and the client then renders raw
+     * ids where names belong.
+     *
+     * Two rejections, one code, different messages, because the fixes differ:
+     * a name that is no field at all is a typo, while a name that IS a field
+     * but holds no reference (`?expand=title`) is a misunderstanding of what
+     * expansion does. {@link REFERENCE_VALUE_TYPES} is the spec's own list of
+     * types whose value "points at another record … the related record object
+     * in expanded form" — the same set `engine.expandRelatedRecords` resolves,
+     * so this gate cannot drift from what expansion actually delivers.
+     */
+    private assertExpandTargetsExist(object: string, names: readonly string[]): void {
+        if (names.length === 0) return;
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const unknown: string[] = [];
+        const notRelations: string[] = [];
+        const targetless: string[] = [];
+        for (const raw of names) {
+            const name = String(raw);
+            const def: any = gate.fields[name.split('.')[0]];
+            if (!def) { unknown.push(name); continue; }
+            if (!REFERENCE_VALUE_TYPES.has(def.type)) { notRelations.push(name); continue; }
+            // A reference-typed field with no `reference` names no target
+            // object, so `expandRelatedRecords` has nothing to batch-load. That
+            // is an authoring bug on the OBJECT, not on the request, and saying
+            // "not a relationship" about a declared lookup would send the
+            // caller looking in the wrong place.
+            if (!def.reference) targetless.push(name);
+        }
+        const [offenders, reason] =
+            unknown.length > 0 ? [unknown, 'unknown' as const]
+            : notRelations.length > 0 ? [notRelations, 'not-a-reference' as const]
+            : [targetless, 'targetless' as const];
+        if (offenders.length === 0) return;
+        const first = offenders[0];
+        const err: any = new Error(
+            (reason === 'unknown'
+                ? `Unknown field '${first}' on object '${object}'`
+                : reason === 'not-a-reference'
+                    ? `Field '${first}' on object '${object}' is not a relationship`
+                    : `Field '${first}' on object '${object}' declares no target object`)
+            + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+            + '. \'expand\' resolves a reference field into the related record, so '
+            + (reason === 'unknown'
+                ? 'a name the object does not declare can never be expanded.'
+                : reason === 'not-a-reference'
+                    ? `only ${[...REFERENCE_VALUE_TYPES].join(' / ')} fields can be expanded.`
+                    : "the field's `reference` must name the object it points at.")
+            + (reason === 'unknown' ? suggestFieldName(first, gate.declared) : ''),
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = first;
+        err.fields = offenders;
+        err.object = object;
+        err.param = 'expand';
         throw err;
     }
 
@@ -3021,6 +3458,12 @@ export class ObjectStackProtocolImplementation implements
         // implicit-filter pass below and get merged into `where` as
         // bogus field-equality predicates (e.g. `where.$top = "2"`),
         // which silently returns zero rows for every list endpoint.
+        //
+        // [#4226] `wireSpelling` remembers which alias each rewritten slot
+        // arrived under, so a rejection quotes the parameter the caller
+        // actually wrote. Telling someone who sent `?$orderby=…` that
+        // "'orderBy' is invalid" names a parameter absent from their request.
+        const wireSpelling: Record<string, string> = {};
         for (const [dollar, bare] of [
             ['$top', 'top'],
             ['$skip', 'skip'],
@@ -3032,6 +3475,7 @@ export class ObjectStackProtocolImplementation implements
         ] as const) {
             if (options[dollar] != null && options[bare] == null) {
                 options[bare] = options[dollar];
+                wireSpelling[bare] = dollar;
             }
             delete options[dollar];
         }
@@ -3053,6 +3497,7 @@ export class ObjectStackProtocolImplementation implements
         if (options.offset != null) options.offset = Number(options.offset);
 
         // Select → fields: comma-separated string → array
+        const projectionKey = options.select !== undefined ? (wireSpelling.select ?? 'select') : 'fields';
         if (typeof options.select === 'string') {
             options.fields = options.select.split(',').map((s: string) => s.trim()).filter(Boolean);
         } else if (Array.isArray(options.select)) {
@@ -3069,41 +3514,136 @@ export class ObjectStackProtocolImplementation implements
         } else if (options.fields !== undefined && !Array.isArray(options.fields)) {
             delete options.fields;
         }
+        // [#4226] Unknown projection columns are refused rather than dropped —
+        // see `assertProjectionFieldsExist` for why this axis' silent failure
+        // returned MORE than was asked for.
+        this.assertProjectionFieldsExist(request.object, options.fields, projectionKey);
 
-        // Sort/orderBy → orderBy: string → SortNode[] array
-        const sortValue = options.orderBy ?? options.sort;
-        if (typeof sortValue === 'string') {
-            const parsed = sortValue.split(',').map((part: string) => {
-                const trimmed = part.trim();
-                if (trimmed.startsWith('-')) {
-                    return { field: trimmed.slice(1), order: 'desc' as const };
-                }
-                const [field, order] = trimmed.split(/\s+/);
-                return { field, order: (order?.toLowerCase() === 'desc' ? 'desc' : 'asc') as 'asc' | 'desc' };
-            }).filter((s: any) => s.field);
-            options.orderBy = parsed;
-        } else if (Array.isArray(sortValue)) {
-            options.orderBy = sortValue;
-        }
+        // Sort/orderBy → orderBy: every wire spelling → SortNode[].
+        //
+        // [#4226] `normalizeSortNodes` folds the two shapes that used to fall
+        // through this block untouched — `string[]` and `{field: direction}` —
+        // and refuses the ones it cannot read. Before it, "not a string and not
+        // an array" simply skipped the branch, leaving a value on `orderBy`
+        // that `SqlDriver`'s `Array.isArray` guard then declined to turn into
+        // an ORDER BY clause: no sort, no error, no way to tell.
+        const usesOrderBy = options.orderBy !== undefined && options.orderBy !== null;
+        const sortValue = usesOrderBy ? options.orderBy : options.sort;
+        const sortKey = usesOrderBy ? (wireSpelling.orderBy ?? 'orderBy') : 'sort';
         delete options.sort;
+        if (sortValue === undefined || sortValue === null) {
+            // Nothing to sort by — and an explicit `orderBy: null` must not ride
+            // to the engine as a value every driver quietly declines to read.
+            delete options.orderBy;
+        } else {
+            const orderBy = normalizeSortNodes(sortValue, sortKey);
+            // [#4226] Validated on the NORMALIZED nodes, so one gate covers
+            // every spelling — `?sort=no_such`, `['-no_such']`, `{no_such:
+            // 'desc'}` and `[{field:'no_such'}]` are one mistake with one
+            // answer. Assigned only after it passes, so a rejected sort cannot
+            // leave a half-applied one behind.
+            this.assertSortFieldsExist(request.object, orderBy, sortKey);
+            if (orderBy.length > 0) options.orderBy = orderBy;
+            else delete options.orderBy;
+        }
 
-        // Filter/filters/$filter → where: normalize all filter aliases
+        // Filter/filters/$filter → where: normalize all filter aliases.
+        //
+        // [#4181] These four names are FOUR SPELLINGS OF ONE SLOT (`filters` is
+        // documented as a deprecated alias of `filter`), so `??` picking the
+        // first non-null silently discarded the others: a body carrying both
+        // `where` and a different `filter` ran the `filter` and dropped the
+        // `where` with no signal. Two different values for one slot cannot be
+        // reconciled — merging them would invent an intent the caller never
+        // expressed, and picking one is the silent drop itself — so an
+        // ambiguous request is refused. Redundant identical spellings are
+        // harmless and pass.
+        const filterAliases = (['filter', 'filters', '$filter', 'where'] as const)
+            .filter((k) => options[k] !== undefined)
+            .map((k) => ({ key: k, value: options[k] }));
+        if (filterAliases.length > 1) {
+            const distinct = new Set(filterAliases.map((a) => JSON.stringify(a.value)));
+            if (distinct.size > 1) {
+                const err: any = new Error(
+                    `Conflicting filter parameters: ${filterAliases.map((a) => `'${a.key}'`).join(', ')} `
+                    + 'are aliases for the same filter and were given different values. Send exactly one.',
+                );
+                err.status = 400;
+                err.code = 'INVALID_REQUEST';
+                throw err;
+            }
+        }
+
         const filterValue = options.filter ?? options.filters ?? options.$filter ?? options.where;
+        const filterKey = filterAliases[0]?.key ?? 'filter';
         delete options.filter;
         delete options.filters;
         delete options.$filter;
 
         if (filterValue !== undefined) {
             let parsedFilter = filterValue;
-            // JSON string → object
-            if (typeof parsedFilter === 'string') {
-                try { parsedFilter = JSON.parse(parsedFilter); } catch { /* keep as-is */ }
+            // A blank `?filter=` is ABSENT, not malformed — the same `length > 0`
+            // guard the export route applies before parsing. Deleting `where`
+            // here (rather than leaving `''` on it) is what lets every consumer
+            // below test presence with a plain falsy check.
+            if (typeof parsedFilter === 'string' && parsedFilter.trim() === '') {
+                delete options.where;
+            } else {
+                // [#4181] JSON string → object. Parse failure is a REJECTION, not
+                // a fallback. The `catch { /* keep as-is */ }` this replaces left
+                // the raw string on `where`, a shape no driver consumes — so the
+                // filter was dropped whole and `?filter={status:done` (one missing
+                // quote) answered 200 with the UNFILTERED page. Worst member of
+                // the #3948 family: #4134 zeroed, #4164 dropped one predicate,
+                // this returned everything.
+                //
+                // The sibling `GET /data/:object/export` route has rejected this
+                // exact input since it was written (`400 INVALID_REQUEST`,
+                // "filter must be JSON"); the list path was the outlier. The
+                // guard lives HERE, in the shared normalizer, so `GET
+                // /data/:object`, `POST /data/:object/query` and the runtime
+                // dispatcher all inherit one answer instead of three.
+                if (typeof parsedFilter === 'string') {
+                    try {
+                        parsedFilter = JSON.parse(parsedFilter);
+                    } catch {
+                        throw unusableFilterError(filterKey, 'must be valid JSON');
+                    }
+                }
+                // Filter AST array → FilterCondition object
+                if (isFilterAST(parsedFilter)) {
+                    parsedFilter = parseFilterAST(parsedFilter);
+                } else if (Array.isArray(parsedFilter) && parsedFilter.length > 0) {
+                    // [#4121] `isFilterAST` was being read as a *conversion* gate,
+                    // so an array it refused was assigned to `where` unconverted —
+                    // an opaque value the driver then had to make sense of. Every
+                    // driver now fails on it, so this is not a narrowing; it moves
+                    // the failure to where the malformed filter actually arrived,
+                    // with the request's own vocabulary in the message instead of a
+                    // driver-internal one.
+                    //
+                    // It also closes what the driver-side fix could not: a lone
+                    // `['and']` / `['or']` sets the join mode, matches no element,
+                    // and emits NO predicate — the last shape that still returned
+                    // every row silently after #3948. An empty `[]` is left alone:
+                    // it means "no filter", and every path already treats it that
+                    // way — so it falls through to the shape check below, which
+                    // passes it (an array IS an object).
+                    throw malformedFilterArrayError(parsedFilter);
+                }
+                // [#4181] Parsed-but-unusable is the same failure one step later:
+                // `?filter=5` / `?filter="open"` / `?filter=null` all yield a
+                // non-object `where` that no driver reads. #4121 above catches the
+                // array shapes; this catches the scalar ones, and together they are
+                // what lets the #4164 merge below trust `where` to be an object.
+                if (parsedFilter === null || typeof parsedFilter !== 'object') {
+                    throw unusableFilterError(
+                        filterKey,
+                        `must be a filter object or condition array, received ${parsedFilter === null ? 'null' : typeof parsedFilter}`,
+                    );
+                }
+                options.where = parsedFilter;
             }
-            // Filter AST array → FilterCondition object
-            if (isFilterAST(parsedFilter)) {
-                parsedFilter = parseFilterAST(parsedFilter);
-            }
-            options.where = parsedFilter;
         }
 
         // Populate/expand/$expand → expand (Record<string, QueryAST>)
@@ -3136,6 +3676,13 @@ export class ObjectStackProtocolImplementation implements
             for (const rel of expandNames) {
                 options.expand[rel] = { object: rel };
             }
+        }
+        // [#4226] Both routes into `expand` are gated: the comma-list spellings
+        // collected above, and the advanced `{rel: QueryAST}` map a caller may
+        // send directly on `POST /data/:object/query`. Validating the map's KEYS
+        // rather than `expandNames` is what covers the second one.
+        if (options.expand && typeof options.expand === 'object') {
+            this.assertExpandTargetsExist(request.object, Object.keys(options.expand));
         }
 
         // Boolean fields
@@ -3182,27 +3729,44 @@ export class ObjectStackProtocolImplementation implements
         }
 
         // Flat field filters: REST-style query params like ?id=abc&status=open
-        // After extracting all known query parameters, any remaining keys are
-        // treated as implicit field-level equality filters merged into `where`.
-        // Every one of them is a verified field name by this point.
+        // are implicit field-level equality predicates. Every leftover key is a
+        // verified field name by this point — the #4134 gate above runs FIRST,
+        // which is exactly what makes the merge below safe: an unknown name
+        // already 400'd, so nothing merged here can be a predicate that matches
+        // nothing.
         //
-        // The `!options.where` guard is #4134's deliberate scope edge: when an
-        // explicit filter won, a leftover REAL field name is still dropped
-        // silently (it rides on to `engine.find` as a stray AST key no driver
-        // reads). Same disease, opposite direction — over-returning rather than
-        // zeroing — and fixing it means choosing a semantics (AND-merge vs.
-        // reject the conflict), so it is filed as #4164 rather than smuggled in
-        // here. The UNKNOWN half is already loud: the gate above runs before
-        // this branch, so a bad name 400s either way.
-        if (!options.where) {
+        // [#4164] Implicit predicates now COMPOSE with an explicit `where`
+        // instead of being silently dropped. `?filter={...}&status=open` means
+        // what it says — both apply, `{ $and: [explicit, implicit] }` — the
+        // same composition the engine itself uses to fold the `$search`
+        // predicate or an expand's declared filter into an existing `where`,
+        // and a combinator the #3774 conformance suite pins across every
+        // FilterCondition backend. Contradictory sides need no special case:
+        // both predicates apply and the intersection is an HONEST zero (the
+        // filters ran), unlike the pre-#4134 zero (a filter that never ran).
+        // Consuming the keys here also stops them riding to `engine.find` as
+        // stray top-level AST junk, and count() below reads the same
+        // `options.where`, so pagination totals see the merged predicate too.
+        //
+        // #4164 shipped with a `typeof explicitWhere === 'object'` guard here,
+        // because the parse tolerance above could leave a raw unparseable string
+        // on `where` and folding real predicates into that garbage would neither
+        // apply them nor surface the bug. #4181 fixed that at the source — a
+        // filter now either parses to an object or 400s — so `where` is an
+        // object or absent by construction and the guard is gone with it.
+        const explicitWhere = options.where;
+        if (leftoverParams.length > 0) {
             const implicitFilters: Record<string, unknown> = {};
             for (const key of leftoverParams) {
                 implicitFilters[key] = options[key];
                 delete options[key];
             }
-            if (Object.keys(implicitFilters).length > 0) {
-                options.where = implicitFilters;
-            }
+            // An absent or empty explicit filter (`?filter={}`, `?filter=`) is
+            // vacuous — the implicit predicates stand alone rather than being
+            // wrapped in a one-armed `$and`.
+            options.where = !explicitWhere || Object.keys(explicitWhere).length === 0
+                ? implicitFilters
+                : { $and: [explicitWhere, implicitFilters] };
         }
 
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
@@ -3285,10 +3849,18 @@ export class ObjectStackProtocolImplementation implements
         }
 
         // Support fields for single-record retrieval
+        //
+        // [#4226] Gated exactly as on the list path. `GET /data/:object/:id` and
+        // `GET /data/:object` read the same `select`/`expand` against the same
+        // field map, so answering one with a 400 and the other with a silently
+        // widened projection would recreate, one route over, the very split
+        // ("two routes, opposite answers for one input") this issue was filed
+        // about.
         if (request.select) {
             queryOptions.fields = typeof request.select === 'string'
                 ? request.select.split(',').map((s: string) => s.trim()).filter(Boolean)
                 : request.select;
+            this.assertProjectionFieldsExist(request.object, queryOptions.fields, 'select');
         }
 
         // Support expand for single-record retrieval
@@ -3296,6 +3868,7 @@ export class ObjectStackProtocolImplementation implements
             const expandNames = typeof request.expand === 'string'
                 ? request.expand.split(',').map((s: string) => s.trim()).filter(Boolean)
                 : request.expand;
+            this.assertExpandTargetsExist(request.object, expandNames);
             queryOptions.expand = {} as Record<string, any>;
             for (const rel of expandNames) {
                 queryOptions.expand[rel] = { object: rel };

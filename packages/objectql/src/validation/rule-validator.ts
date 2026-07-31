@@ -77,6 +77,7 @@
 
 import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
+import { AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 import Ajv, { type ValidateFunction } from 'ajv';
 import {
   ValidationError,
@@ -380,15 +381,12 @@ export function stripReadonlyFields(
 /**
  * The audit / attribution family — the "original timeline" a historical import
  * (`preserveAudit`) is allowed to reinstate even though these columns are
- * `system` + `readonly`. Kept in sync with the registry's auto-injected audit
- * fields (`packages/objectql/src/registry.ts`).
+ * `system` + `readonly`. DERIVED from the spec's `AUDIT_PROVENANCE_FIELDS`
+ * (#3786) — the same tuple the registry's injection table is keyed by — so
+ * this set and the injected columns cannot drift apart. The old literal here
+ * carried a "kept in sync with the registry" comment and no mechanism.
  */
-const AUDIT_TIMELINE_FIELDS: ReadonlySet<string> = new Set([
-  'created_at',
-  'created_by',
-  'updated_at',
-  'updated_by',
-]);
+const AUDIT_TIMELINE_FIELDS: ReadonlySet<string> = new Set(AUDIT_PROVENANCE_FIELDS);
 
 /**
  * Whether a caller-supplied `readonly` field may be REINSTATED by an opt-in

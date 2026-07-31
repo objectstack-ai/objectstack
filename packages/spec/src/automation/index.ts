@@ -3,6 +3,8 @@
 
 export * from './flow.zod';
 export * from './control-flow.zod';
+export * from './io-node-config.zod';
+export * from './builtin-node-config.zod';
 export { flowForm } from './flow.form';
 export * from './execution.zod';
 export * from './webhook.zod';

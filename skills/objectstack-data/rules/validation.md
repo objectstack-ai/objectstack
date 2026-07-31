@@ -235,9 +235,9 @@ Calling an external API, hitting another object, or running arbitrary code is
 lifecycle hook and throw on failure — the typed, supported extension point:
 
 ```typescript
-import { Hook, HookContext } from '@objectstack/spec/data';
+import { defineHook, HookContext } from '@objectstack/spec/data';
 
-const taxIdCheck: Hook = {
+const taxIdCheck = defineHook({
   name: 'tax_id_external_check',
   object: 'account',
   events: ['beforeInsert', 'beforeUpdate'],
@@ -246,7 +246,7 @@ const taxIdCheck: Hook = {
       throw new Error('Invalid tax ID');
     }
   },
-};
+});
 ```
 
 ## Validation Properties

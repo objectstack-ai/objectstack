@@ -617,7 +617,9 @@ function isExpectedDataStatus(status: number): boolean {
  * not a server fault worth an "[REST] Unhandled error" line per request.
  */
 function isExpectedQueryRejection(body: Record<string, unknown> | undefined): boolean {
-    return body?.code === 'UNSUPPORTED_QUERY_PARAM' || body?.code === 'INVALID_FIELD';
+    return body?.code === 'UNSUPPORTED_QUERY_PARAM'
+        || body?.code === 'INVALID_FIELD'
+        || body?.code === 'INVALID_REQUEST';
 }
 
 /**
@@ -4664,6 +4666,9 @@ export class RestServer {
         //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.)
         //   fields=a,b,c        (default: derive from object schema; falls back to keys of the first row)
         //   filter=<json>       ($filter as URL-encoded JSON, same shape as list endpoint)
+        //   search=<term>       (full-text term, same semantics as the list endpoint's
+        //                        $search; composes with `filter` rather than replacing it)
+        //   searchFields=a,b    (optional ADR-0061 override for which fields `search` scans)
         //   orderby=field:desc  (optional ordering, mirrors $orderby semantics)
         //   header=false        (omit the header row for csv / xlsx; default true)
         //   limit=<n>           (default 10000, hard cap 50000)
@@ -4731,18 +4736,48 @@ export class RestServer {
                     if (typeof q.filter === 'string' && q.filter.length > 0) {
                         try { filter = JSON.parse(q.filter); }
                         catch {
-                            res.status(400).json({ code: 'INVALID_REQUEST', error: 'filter must be JSON' });
+                            res.status(400).json({ code: 'INVALID_FILTER', error: 'filter must be JSON' });
                             return;
                         }
                     } else if (q.filter && typeof q.filter === 'object') {
                         filter = q.filter;
                     }
 
+                    // Full-text term, same semantics as the list endpoint's `$search`.
+                    // Without it this route could only ever mirror the FILTER half of a
+                    // list, so a user who searched and then exported downloaded the
+                    // unsearched superset — more rows than the screen showed, with
+                    // nothing to indicate it. `$search` composes with `$filter` inside
+                    // `findData`, so both halves apply.
+                    const search = typeof q.search === 'string' && q.search.trim().length > 0
+                        ? q.search.trim()
+                        : undefined;
+                    // ADR-0061 override for which fields the term scans. Only meaningful
+                    // alongside `search`; ignored on its own, exactly as in findData.
+                    let searchFields: string[] | undefined;
+                    if (typeof q.searchFields === 'string' && q.searchFields.length > 0) {
+                        searchFields = q.searchFields.split(',').map((s: string) => s.trim()).filter(Boolean);
+                    } else if (Array.isArray(q.searchFields)) {
+                        searchFields = q.searchFields.filter((s: any) => typeof s === 'string' && s.length > 0);
+                    }
+                    if (searchFields && searchFields.length === 0) searchFields = undefined;
+
                     let orderby: any = undefined;
                     if (typeof q.orderby === 'string' && q.orderby.length > 0) {
                         // Accept "field:dir,field2:dir" shorthand or a JSON object.
                         if (q.orderby.startsWith('{') || q.orderby.startsWith('[')) {
-                            try { orderby = JSON.parse(q.orderby); } catch { /* leave undefined */ }
+                            // [#4181] Same rule as `filter` two blocks up: a sort
+                            // the server cannot parse is refused, not dropped.
+                            // Lower stakes than a dropped filter (the row SET is
+                            // unchanged, only its order), but a caller taking
+                            // "latest N" via orderby+top silently got an
+                            // arbitrary N.
+                            try {
+                                orderby = JSON.parse(q.orderby);
+                            } catch {
+                                res.status(400).json({ code: 'INVALID_REQUEST', error: 'orderby must be JSON' });
+                                return;
+                            }
                         } else {
                             const obj: Record<string, 'asc' | 'desc'> = {};
                             for (const part of q.orderby.split(',')) {
@@ -4867,6 +4902,8 @@ export class RestServer {
                             object: objectName,
                             query: {
                                 ...(filter ? { $filter: filter } : {}),
+                                ...(search ? { $search: search } : {}),
+                                ...(search && searchFields ? { $searchFields: searchFields } : {}),
                                 ...(orderby ? { $orderby: orderby } : {}),
                                 ...(expandFields.length > 0 ? { $expand: expandFields.join(',') } : {}),
                                 $top: take,

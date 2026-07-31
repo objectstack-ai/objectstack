@@ -14,6 +14,45 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { matchesRoutePattern } from './route-pattern';
 
+/**
+ * Request headers allowed on preflight, by default.
+ *
+ * **The** default — three Hono-based CORS sites apply it (this package's
+ * `hono-plugin.ts` and the `@objectstack/hono` adapter, which depends on this
+ * package), and they used to each carry their own copy under "keep in sync"
+ * comments. The copies happened to agree; the TSDoc on {@link
+ * HonoCorsOptions.allowHeaders} did not — it had been three headers behind for
+ * long enough to predate multi-tenant routing, so the one description a caller
+ * actually reads was the one that drifted (#3786).
+ *
+ * `X-Tenant-ID` / `X-Environment-Id` route a request to its environment.
+ * `If-Match` carries the OCC token on record PATCHes (objectui's inline edit,
+ * REST `update` with `ifMatch`) — without it in the preflight allow-list every
+ * cross-origin save fails in the browser with "Failed to fetch" (objectui#2572).
+ */
+export const DEFAULT_CORS_ALLOW_HEADERS: readonly string[] = Object.freeze([
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-Tenant-ID',
+    'X-Environment-Id',
+    'If-Match',
+]);
+
+/**
+ * Response headers exposed to cross-origin JS, by default. Same three sites,
+ * same reason as {@link DEFAULT_CORS_ALLOW_HEADERS}.
+ *
+ * `set-auth-token` lets better-auth's `bearer()` plugin hand rotated session
+ * tokens to cross-origin clients (see plugin-auth). `x-objectstack-dropped-fields`
+ * (#3455) exposes the single-write drop warning (#3431); the body `droppedFields`
+ * channel remains the primary, cross-origin-safe surface.
+ */
+export const DEFAULT_CORS_EXPOSE_HEADERS: readonly string[] = Object.freeze([
+    'set-auth-token',
+    'x-objectstack-dropped-fields',
+]);
+
 export interface HonoCorsOptions {
     enabled?: boolean;
     origins?: string | string[];
@@ -21,19 +60,18 @@ export interface HonoCorsOptions {
     /**
      * Request headers allowed on preflight (`Access-Control-Allow-Headers`).
      *
-     * Defaults to `['Content-Type', 'Authorization', 'X-Requested-With']`,
-     * which is sufficient for cookie and bearer-token auth.
+     * Defaults to {@link DEFAULT_CORS_ALLOW_HEADERS} — deliberately a link and
+     * not a restatement. Supplying this REPLACES the default rather than
+     * extending it, so spread the constant if you only mean to add:
+     * `allowHeaders: [...DEFAULT_CORS_ALLOW_HEADERS, 'X-My-Header']`.
      */
     allowHeaders?: string[];
     /**
      * Response headers exposed to JS (`Access-Control-Expose-Headers`).
      *
-     * Defaults to `['set-auth-token', 'x-objectstack-dropped-fields']` so that
-     * better-auth's `bearer()` plugin can hand rotated session tokens to
-     * cross-origin clients, and a browser can read the single-write
-     * `X-ObjectStack-Dropped-Fields` warning header (#3431/#3455). User-supplied
-     * values are merged with these defaults — they are always exposed unless CORS
-     * is disabled entirely.
+     * Defaults to {@link DEFAULT_CORS_EXPOSE_HEADERS}. Unlike `allowHeaders`,
+     * user-supplied values are MERGED with the default — those are always
+     * exposed unless CORS is disabled entirely.
      */
     exposeHeaders?: string[];
     credentials?: boolean;

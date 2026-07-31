@@ -14,6 +14,7 @@ import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 import { isServiceServeable } from '../service-serveable.js';
+import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -56,9 +57,10 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // payload under `data`, the way `SettingsNamespacePayload` moved in #3843,
         // not a flatten to the bare array. That distinction is load-bearing here:
         // `unwrapResponse` returns `data`, so `client.ai.agents.list()` reads
-        // `.agents` off it and keeps working, and it keeps working against cloud's
-        // `service-ai` too while that surface still answers unenveloped. Flattening
-        // to `data: []` would have made `.agents` `undefined` — an empty catalog,
+        // `.agents` off it. It is also what let this side convert first and cloud's
+        // `service-ai` — the route's OTHER producer — follow independently rather
+        // than in lockstep; both answer this shape now (cloud#929). Flattening to
+        // `data: []` would have made `.agents` `undefined` — an empty catalog,
         // which `useAiSurfaceEnabled` turns into "hide the entire AI surface", and
         // which is indistinguishable from the legitimate seat-less/CE state.
         if (method === 'GET' && subPath === '/ai/agents') {
@@ -66,7 +68,14 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         }
         // [#3842] Was a hand-rolled envelope with the status in `code`. It has
         // no header or shape of its own, so it is simply the shared exit now.
-        return { handled: true, response: deps.error('AI service is not configured', 404) };
+        // 501, not 404: `/ai/*` IS mounted, so the request reached a handler
+        // with nothing behind it — see ./unavailable.ts. The message stays
+        // local rather than using the shared sentence: the real provider
+        // (`@objectstack/service-ai`) ships outside this workspace as a
+        // Cloud/EE package, so CORE_SERVICE_PROVIDER — verified against
+        // workspace packages by check:service-providers — records `null` for
+        // this slot and would describe it as "nothing ships", which is wrong.
+        return capabilityUnavailable(deps, 'ai', 'AI service is not configured');
     }
 
     // The AI service exposes route definitions via buildAIRoutes.

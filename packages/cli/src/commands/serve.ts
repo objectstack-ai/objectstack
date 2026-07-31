@@ -673,8 +673,8 @@ export default class Serve extends Command {
         throw new Error(`No default export found in ${args.config}`);
       }
 
-      // Preserve module-level named exports (e.g. `onEnable`, `onDisable`
-      // lifecycle hooks) that would otherwise be dropped when we unwrap
+      // Preserve module-level named exports (e.g. the `onEnable` runtime hook
+      // and `functions`) that would otherwise be dropped when we unwrap
       // `mod.default`. Without this AppPlugin can never invoke runtime hooks
       // declared as `export const onEnable = ...` alongside the default
       // `defineStack(...)` export.
@@ -1490,12 +1490,18 @@ export default class Serve extends Command {
         }
       }
 
-      // 5c. Auto-register PlatformObjectsPlugin so platform-default
+      // 5c. Auto-register PlatformObjectsPlugin. It carries platform
+      // infrastructure every served kernel needs: the `sys_migration`
+      // data-migration flag ledger + fresh-datastore attestation (#4243 —
+      // without it the engine's deployment gates read "no ledger" and fall
+      // back to the lax legacy posture), the `sys_secret` cipher store
+      // (#4270 — the engine's secret-field write path and the datasource
+      // credential binder fail CLOSED without it; the crypto wiring below
+      // assumes the table exists), and the platform-default
       // translation bundles (Setup App + metadata-type configuration
-      // forms shipped by @objectstack/platform-objects) are contributed
-      // into the kernel's i18n service. Without this, Setup nav labels
-      // and metadata-admin form labels fall back to English literals
-      // even when Accept-Language requests another locale.
+      // forms). Without the latter, Setup nav labels and metadata-admin
+      // form labels fall back to English literals even when
+      // Accept-Language requests another locale.
       const hasPlatformObjectsPlugin = plugins.some(
         (p: any) => p?.name === 'com.objectstack.platform-objects'
           || p?.constructor?.name === 'PlatformObjectsPlugin'
@@ -2184,14 +2190,13 @@ export default class Serve extends Command {
             // In production mode we emit a single loud warning so the
             // operator knows to point storage at S3 / GCS / Azure before
             // shipping (data on a single pod is volatile / non-replicated).
-            const storageArg = resolveStorageCapabilityArg(
-              (config as any).storage,
-              process.env.OS_STORAGE_ROOT,
-            );
+            const storageArg = resolveStorageCapabilityArg(process.env.OS_STORAGE_ROOT);
             arg = storageArg.options;
             if (storageArg.localRoot && !isDev) {
+              // Names only the channels that actually work — `config.storage`
+              // was in this sentence and was never read (framework#4167).
               console.warn(chalk.yellow(
-                `  ⚠ StorageServicePlugin using local driver (${storageArg.localRoot}) — switch to S3/GCS/Azure for production (set config.storage or OS_STORAGE_*).`,
+                `  ⚠ StorageServicePlugin using local driver (${storageArg.localRoot}) — switch to S3/GCS/Azure for production (set OS_STORAGE_* or configure storage in Setup → Settings).`,
               ));
             }
           }
@@ -2665,20 +2670,23 @@ export interface StorageCapabilityArg {
  * default IS `./.objectstack/data/uploads`), which swapped the adapter and
  * warned about stranded files — on every boot of a healthy server.
  *
- * A caller-supplied `config.storage` is still forwarded verbatim, including the
- * `driver`/`root` dialect, which the plugin does not read either. That is the
- * same mismatch one layer up and is tracked separately: correcting it means
- * deciding whether the plugin accepts that dialect or the config schema is
- * wrong, and a lenient alias here would fossilize the wrong contract
- * (AGENTS.md Prime Directive #12).
+ * `config.storage` is deliberately NOT read (framework#4167). It was never a
+ * stack key: `ObjectStackDefinitionSchema` does not declare it, and the schema
+ * is not `.strict()`, so `defineStack` — which every documented authoring path
+ * and every compiled artifact goes through — strips it before `serve` could
+ * ever see it. It arrived here only from a bare-object config on the
+ * config-boot path, i.e. one unreachable-in-practice combination, where it then
+ * ALSO carried the `driver`/`root` spelling the plugin does not read. Honouring
+ * it on that one path meant the same authoring key worked in one place and
+ * vanished in every other, which is worse than not having it.
+ *
+ * The storage backend is a deployment concern with two real channels: the
+ * `OS_STORAGE_*` env vars (below) and the `storage` settings namespace, which
+ * is also the one with proper credential handling. Authors who write `storage:`
+ * anyway now get told so — `lintUnknownStackKeys` reports undeclared top-level
+ * keys, and `STACK_KEY_GUIDANCE` names both channels.
  */
-export function resolveStorageCapabilityArg(
-  cfgStorage: any,
-  envRoot?: string,
-): StorageCapabilityArg {
-  if (cfgStorage && (cfgStorage.driver || cfgStorage.adapter)) {
-    return { options: cfgStorage };
-  }
+export function resolveStorageCapabilityArg(envRoot?: string): StorageCapabilityArg {
   const rootDir = envRoot?.trim() || '.objectstack/data/uploads';
   return { options: { adapter: 'local', local: { rootDir } }, localRoot: rootDir };
 }

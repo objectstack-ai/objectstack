@@ -83,6 +83,10 @@ export default defineStack({
     type: 'app',
     name: 'ObjectStack Showcase',
     description: 'Kitchen-sink workspace covering all metadata types, all view types, and the major capability chains.',
+    // Protocol major this package is authored against (ADR-0087). The kernel
+    // checks the range at load time and refuses a major-incompatible runtime
+    // with a structured diagnostic instead of failing deep in a schema parse.
+    engines: { protocol: '^17' },
   },
 
   // Capability tokens the CLI resolves to platform plugins:

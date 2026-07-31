@@ -129,24 +129,24 @@ Classification is per the rule above; **(p)** marks a provisional call made
 from the file's exports/JSDoc rather than a full read — verify before
 tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 
-### `ui/` — 192 sites
+### `ui/` — 197 sites
 
 | File | Sites | Class | Note / next action |
 |---|---|---|---|
-| `action.zod.ts` | 8 | authorable | param schema strict (#3746); remaining blocks ride later steps |
-| `view.zod.ts` | 51 | authorable | partially strict (ADR-0089); long tail of sub-blocks |
+| `action.zod.ts` | 9 | authorable | param schema strict (#3746); remaining blocks ride later steps |
+| `view.zod.ts` | 50 | authorable | partially strict (ADR-0089); long tail of sub-blocks |
 | `component.zod.ts` | 29 | authorable | **next candidate** — SDUI component defs; check React-prop open slots first (p) |
 | `theme.zod.ts` | 14 | authorable (p) | authored themes |
-| `app.zod.ts` | 11 | authorable | **strict as of #4001 PR B** — `AppSchema` + branding / area / context-selector / contribution, and the nav-item union converted to `z.discriminatedUnion('type', …)` (the union-error question, settled empirically: matched-branch-only errors, exact recursive paths, `toJSONSchema` clean). Per-target `params` stay open. PR A (#4142) tombstoned the seven audit-dead keys first |
+| `app.zod.ts` | 18 | authorable | **strict as of #4001 PR B** — `AppSchema` + branding / area / context-selector / contribution, and the nav-item union converted to `z.discriminatedUnion('type', …)` (the union-error question, settled empirically: matched-branch-only errors, exact recursive paths, `toJSONSchema` clean). Per-target `params` stay open. PR A (#4142) tombstoned the seven audit-dead keys first |
 | `dashboard.zod.ts` | 11 | authorable | partially strict |
 | `widget.zod.ts` | 9 | authorable (p) | |
 | `page.zod.ts` | 7 | authorable | partially strict (ADR-0089) |
-| `chart.zod.ts` / `i18n.zod.ts` / `responsive.zod.ts` | 6+6+6 | authorable (p) | i18n label shapes are wide-open records by design — verify |
-| `dataset.zod.ts` / `animation.zod.ts` / `dnd.zod.ts` / `keyboard.zod.ts` / `touch.zod.ts` | 4 ea | authorable (p) | interaction configs |
+| `chart.zod.ts` / `i18n.zod.ts` / `responsive.zod.ts` | 6+6+4 | authorable (p) | i18n label shapes are wide-open records by design — verify |
+| `dataset.zod.ts` / `animation.zod.ts` / `dnd.zod.ts` / `keyboard.zod.ts` / `touch.zod.ts` | 4+4+4+4+7 | authorable (p) | interaction configs |
 | `notification.zod.ts` / `offline.zod.ts` / `report.zod.ts` | 3 ea | authorable (p) | |
 | `sharing.zod.ts` | 2 | authorable (p) | public-sharing config |
 
-### `data/` — 163 sites
+### `data/` — 153 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
@@ -155,21 +155,21 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `external-lookup.zod.ts` | 12 | mixed (p) | authored config + wire results |
 | `seed-loader.zod.ts` | 12 | mixed (p) | seed file shapes are authored; loader state is runtime |
 | `field.zod.ts` | 11 | authorable | partially strict |
-| `filter.zod.ts` / `query.zod.ts` | 11+10 | open | query dialect — user data flows through; validated semantically elsewhere |
+| `filter.zod.ts` / `query.zod.ts` | 11+9 | open | query dialect — user data flows through; validated semantically elsewhere. `query.zod.ts` dropped one site in #4196: `FieldNodeSchema`'s nested-select object form was declared-but-inert and narrowed to `z.string()`, so the union's second member is gone. Class unchanged |
 | `driver-nosql.zod.ts` / `driver.zod.ts` / `driver-sql.zod.ts` | 10+9+2 | wire | driver capability contracts |
-| `datasource.zod.ts` | 9 | authorable (p) | stack-authored config — **candidate** |
+| `datasource.zod.ts` | 9 | authorable | **strict as of #4001 data step** — all 9: `DatasourceSchema` (+ `pool` / `healthCheck` / `ssl` / `retryPolicy`), `ExternalDatasourceSettingsSchema` (+ `validation`), `DatasourceCapabilities`, `DriverDefinitionSchema`. `config` + `readReplicas` stay `z.record` by construction (per-driver shapes; the driver's own `configSchema` validates them) — which is precisely why the top level had to close: a connection key written one level too high was stripped, and the datasource then connected on driver defaults instead of failing |
 | `analytics.zod.ts` | 8 | mixed (p) | |
 | `document.zod.ts` | 8 | wire (p) | |
-| `hook.zod.ts` / `hook-body.zod.ts` | 6+2 | authorable (p) | `defineHook` — **candidate** |
+| `hook.zod.ts` / `hook-body.zod.ts` | 6+2 | mixed | **strict as of #4001 data step** for the AUTHORING shapes: `HookSchema` (+ `retryPolicy`) and both body branches (`ExpressionBodySchema` / `ScriptBodySchema`). `HookContextSchema` and its `session` / `provenance` / `user` blocks are the RUNTIME shape the engine hands a handler — they stay tolerant, and must: strictness there would make an engine-internal enrichment (as `provenance` was in #3712) a breaking change for anyone parsing a context they were given. The file's old blanket `authorable (p)` was too wide — verification split it |
 | `mapping.zod.ts` | 3 | authorable (p) | |
 | `external-catalog.zod.ts` | 4 | wire (p) | |
 | `field-value.zod.ts` / `seed.zod.ts` / `validation.zod.ts` | 1 ea | mixed (p) | |
 
-### `automation/` — 80 sites
+### `automation/` — 89 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
-| `flow.zod.ts` | 12 | authorable | **strict as of #4001** (4 schemas; `FlowVersionHistorySchema` is runtime — stays tolerant) |
+| `flow.zod.ts` | 11 | authorable | **strict as of #4001** (4 schemas; `FlowVersionHistorySchema` is runtime — stays tolerant) |
 | `sync.zod.ts` / `etl.zod.ts` | 12+10 | authorable (p) | authored pipelines — **candidates** |
 | `trigger-registry.zod.ts` | 11 | mixed | descriptors are code-registered (wire-ish); bindings authored |
 | `execution.zod.ts` | 8 | wire | run-state envelopes — never strict |
@@ -178,6 +178,8 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `bpmn-interop.zod.ts` | 5 | wire (p) | interop import shapes |
 | `approval.zod.ts` | 4 | authorable | **strict as of #4001 step 3** — all four authoring schemas (node config / approver / escalation / decision-output). The published JSON schema carries `additionalProperties: false` into the Studio form AND `registerFlow()` config validation (#4027/#4040), so an unknown key in an approval node's `config` is rejected at registration too — verified: `z.toJSONSchema` on the strict lazySchema does not throw (#3746 hazard checked) |
 | `node-executor.zod.ts` | 4 | wire | executor contract |
+| `io-node-config.zod.ts` | 2 | authorable | `NotifyConfigSchema` / `HttpConfigSchema` (#4045) — the sibling contracts that validate the **open** `config` slot on flow `notify` / `http` nodes. Authored per-node, so the open-slot exemption above does not extend to them; candidate once the executors' own drift is verified |
+| `builtin-node-config.zod.ts` | 8 | authorable | Same family (#4045): the CRUD quartet, `screen`, `map`. Written from what the executors read rather than from the descriptors' `configSchema` literals, and reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` — so unlike most rows here, this one already has a drift check of its own. Same candidacy note as `io-node-config` |
 | `webhook.zod.ts` | 1 | authorable (p) | spec-only (#3461) |
 
 ### `security/` — 20 sites
@@ -213,15 +215,9 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 
 ## Next steps (verify-then-enforce, one shape at a time)
 
-1. `data/hook.zod.ts`, `data/datasource.zod.ts` — `defineHook` / stack config
-   (both still provisional (p) classifications — verify before tightening).
-2. The `@objectstack/lint` unknown-key WARNING layer: non-breaking, shippable
-   in a minor, and it extends AI-detectable coverage to every remaining
-   authorable site at once while accumulating evidence (which keys real
-   tenant projects actually carry) for a v18 strict close-out.
-3. Promote this ledger to a machine-checked gate (pattern of
-   `packages/spec/liveness/` + `check:liveness`) once enough of the surface is
-   classified that the table above is enforceable rather than descriptive.
+1. Let the warning layer run in the wild for a release, then schedule the v18
+   strict close-out on what it actually reports — which is the whole point of
+   having built it. Nothing more to do here until there is field data.
 
 Done in step 2: `security/rls.zod.ts` + `security/sharing.zod.ts` strict;
 `PositionSchema` strict with the protection envelope declared (closing the
@@ -240,6 +236,104 @@ Done in the app step, PR A: the seven audit-dead AppSchema keys tombstoned
 (`retiredKey` + `app-dead-authoring-keys-removed` conversion + step-17
 migration entry), clearing the enforce-or-remove precondition for the app
 strict step (PR B).
+
+Done in the data step: `data/hook.zod.ts` + `data/hook-body.zod.ts` +
+`data/datasource.zod.ts` — the last two entries that carried a provisional
+`(p)` classification. Verification changed the answer for one of them: the
+blanket `authorable (p)` on `hook.zod.ts` was too wide, because
+`HookContextSchema` in the same file is a runtime shape and stays tolerant.
+Both types were confirmed authorable the same way — they sit in
+`BUILTIN_METADATA_TYPE_SCHEMAS`, so one shape backs `defineStack()` parsing,
+`/api/v1/meta/types/:type`, and the Studio form.
+
+Measured while doing it, and worth recording because it contradicts the
+assumption the earlier steps were written under: **strictness does not change
+the published JSON Schema.** `build-schemas.ts` converts with the default
+`io: 'output'`, and in output mode zod emits `additionalProperties: false` for
+a `.strip()` object too — the post-parse shape genuinely has no extra keys.
+Verified by regenerating both ways: `Datasource.json` is byte-identical before
+and after. So the JSON Schema had been advertising `additionalProperties: false`
+while the zod parse quietly accepted and dropped unknown keys. These flips align
+the parse with the contract that was already published, rather than widening it.
+(Note this cuts against the `approval.zod.ts` note above, which reads as though
+the flip carried strictness INTO the JSON schema. It did not; approval's schema
+would have said `false` regardless. The registration-time rejection it describes
+is real, but it came from the published schema, not from the flip.)
+
+## The warning layer (was "next step 1" — it already existed)
+
+The `@objectstack/lint` unknown-key WARNING layer this list carried as a pending
+next step **had already been built** by the time the data step landed: #3786's
+`lintUnknownAuthoringKeys` plus #4167's `lintUnknownStackKeys`, exported from
+`@objectstack/spec` and wired into `defineStack()`, `os validate` and
+`os compile` as non-blocking warnings. Anyone reading this file for what to do
+next was being sent to build something that shipped releases ago.
+
+What was genuinely missing was **depth**, not existence. The walk covered each
+metadata item's top level plus one hard-coded descent into `object.fields`,
+which left 227 strip-mode objects nested below those roots reporting nothing —
+concentrated exactly where authoring volume is: `object` 71, `view` 49,
+`page` 24, `dashboard` 18, `agent` 16, `mapping` 14. Those sites were both
+silently eating keys AND contributing nothing to the evidence base the v18
+close-out is supposed to be scheduled on.
+
+The walk now descends the authored value alongside its schema through nested
+objects, arrays and records, applying the same posture rules (`strict` and
+`passthrough` stay silent; only `strip` reports). Unions descend only when the
+authored value picks a branch unambiguously — guessing would invent findings
+against a shape nobody wrote. `object.fields` keeps reporting as `field` with
+its curated guidance, now via an explicit override table rather than a special
+case, so its own nested sites (`fields.*.options[]`, …) are covered too.
+
+Audited after the change, since "our own assets are clean" has been wrong
+before: 43 platform objects + 3 apps + 1 dashboard + 3 pages, and both example
+apps (23 + 6 objects, 20 + 1 pages, 4 + 1 datasets, 3 + 1 dashboards) report
+**zero** unknown keys. No finding this time — worth recording precisely because
+the app step's `ACCOUNT_APP.defaultOpen` came from exactly this class of check.
+
+## This file is now machine-checked
+
+`pnpm --filter @objectstack/spec check:strictness-ledger` (wired into the Spec
+Liveness Check workflow) holds the two claims here that are mechanically
+checkable, so this map cannot go stale in silence again:
+
+- **Site counts.** The method is stated above — `z.object(` occurrences per file
+  — so every number in the triage tables is verifiable. A count that no longer
+  matches means schemas were added or removed under a `Class` verdict nobody
+  re-examined. Touching a file forces you back through this ledger.
+- **Coverage.** Every `*.zod.ts` in a triaged directory that HAS sites must have
+  a row. A new one is undeclared surface. Zero-site files (pure enum/token
+  modules like `data/date-macros.zod.ts`) are skipped — there is nothing to
+  classify — and become reportable the day they grow their first `z.object(`.
+- **Section totals**, and that any row claiming "strict as of" names a file that
+  really contains `.strict()`.
+
+Deliberately NOT checked: the `Class` column. Authorable vs wire vs open is a
+judgement about who writes the input, and this campaign's rule is
+verify-before-tightening. The gate protects the arithmetic and the coverage so
+that judgement is always made against current code.
+
+**What it found on its first run — 11 drifts, in a file being actively edited
+by the campaign that owns it.** Six counts had moved (`ui/app.zod.ts` 11 → 18,
+`ui/touch.zod.ts` 4 → 7, `ui/action.zod.ts` 8 → 9, `ui/view.zod.ts` 51 → 50,
+`ui/responsive.zod.ts` 6 → 4, `automation/flow.zod.ts` 12 → 11), two section
+totals no longer summed, and six files had no row at all. The `app.zod.ts` gap
+was **self-inflicted**: the app step (#4165) added seven schemas to that file
+and updated the row's prose without touching its count. Five of the six
+undeclared files turned out to have zero sites — which is what motivated the
+skip rule above — leaving `automation/io-node-config.zod.ts` as the one genuine
+omission, now classified.
+
+That is the argument for the gate in one paragraph: the people most familiar
+with this ledger, editing it in the same week, still left eleven drifts in it.
+
+**And then it worked for real, before it had even merged.** While the gate sat
+in review, `main` landed `automation/builtin-node-config.zod.ts` (#4045/#4228) —
+eight new sites, sibling to `io-node-config.zod.ts`. Merging `main` turned the
+gate red on a branch whose own diff had not touched a single schema, which is
+precisely the intended behaviour: the file arrived, so someone had to classify
+it. It is now a row. Every existing count survived that merge unchanged, so the
+failure was exactly as narrow as it should have been.
 
 Long tail stays gated on a verification pass per shape — never a one-shot
 "make all ~453 sites strict" (ADR-0054 ratchet; #4001's own recommendation).

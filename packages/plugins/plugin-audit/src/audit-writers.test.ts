@@ -2,6 +2,16 @@
 
 import { describe, it, expect } from 'vitest';
 import { installAuditWriters } from './audit-writers.js';
+// STATIC on purpose (#4186). These were `await import(...)` inside the first
+// localized test's helper, so that one test paid the whole cold-start cost of
+// resolving + transforming @objectstack/core and the translation bundle, while
+// every later case ran warmed in ~1ms. That is a per-test timeout budget spent
+// on module loading: it grew past the 20s override this file used to carry and
+// failed the suite under parallel load. As module-level imports the same work
+// happens during collection, which no single test's timeout is charged for.
+// Do not make these lazy again.
+import { createMemoryI18n } from '@objectstack/core';
+import { AuditTranslations } from './translations/index.js';
 
 /**
  * Regression coverage for #1532 — on single-tenant stacks the
@@ -530,20 +540,15 @@ describe('audit writers — update diff hygiene (objectui detail-history report)
   });
 });
 
-// timeout: the FIRST localized case pays the one-off cost of dynamically
-// importing @objectstack/core + the shipped translation bundle (and, with the
-// #3071 src aliases, their vite transforms). On a shared 4-vCPU CI runner that
-// cold start alone was measured at ~5s — right at vitest's default timeout —
-// while every warmed case runs in ~1ms. 20s bounds the cold start without
-// masking a real hang.
-describe('audit writers — localized activity summaries (framework#3039)', { timeout: 20_000 }, () => {
+// No timeout override: the cold-start cost that used to need one moved to this
+// file's static imports (#4186). Every case here runs in ~1ms, so the default
+// timeout is the honest bound — a case that exceeds it is a real hang.
+describe('audit writers — localized activity summaries (framework#3039)', () => {
   // Real memory i18n (what the kernel registers as the 'i18n' fallback) loaded
   // with this plugin's shipped bundle plus an app-contributed object label —
   // exercises the actual key shapes (`messages.activityCreated`,
   // `objects.{name}.label`) end to end.
-  async function makeI18n() {
-    const { createMemoryI18n } = await import('@objectstack/core');
-    const { AuditTranslations } = await import('./translations/index.js');
+  function makeI18n() {
     const i18n = createMemoryI18n();
     for (const [locale, data] of Object.entries(AuditTranslations)) {
       i18n.loadTranslations(locale, data as Record<string, any>);
@@ -580,7 +585,7 @@ describe('audit writers — localized activity summaries (framework#3039)', { ti
   });
 
   it('localizes verb + object label to the workspace locale (zh-CN)', async () => {
-    const { fire, created } = setup('zh-CN', await makeI18n());
+    const { fire, created } = setup('zh-CN', makeI18n());
 
     await fire('afterInsert', insertCtx());
     await fire('afterDelete', { ...insertCtx(), result: null, __previous: { id: 'q-1', name: 'OC-00001' } });
@@ -590,7 +595,7 @@ describe('audit writers — localized activity summaries (framework#3039)', { ti
   });
 
   it('localizes the generic update fallback', async () => {
-    const { fire, created } = setup('zh-CN', await makeI18n());
+    const { fire, created } = setup('zh-CN', makeI18n());
     await fire('afterUpdate', {
       ...insertCtx(),
       __previous: { id: 'q-1', name: 'OC-00001', status: 'draft' },
@@ -605,7 +610,7 @@ describe('audit writers — localized activity summaries (framework#3039)', { ti
     // localized, label falls back to the authored def label.
     const { fire, created } = setup(
       'zh-CN',
-      await makeI18n(),
+      makeI18n(),
       { crm_lead: { label: 'Lead' } },
       { ...SINGLE_TENANT, crm_lead: ['id', 'name'] },
     );
@@ -631,7 +636,7 @@ describe('audit writers — localized activity summaries (framework#3039)', { ti
   });
 
   it('memoizes the locale lookup per tenant/user scope (hot-path guard)', async () => {
-    const { fire, localeCalls } = setup('zh-CN', await makeI18n());
+    const { fire, localeCalls } = setup('zh-CN', makeI18n());
     await fire('afterInsert', insertCtx());
     await fire('afterInsert', { ...insertCtx(), result: { id: 'q-2', name: 'OC-00002' } });
     expect(localeCalls()).toBe(1);
@@ -662,7 +667,7 @@ describe('audit writers — localized activity summaries (framework#3039)', { ti
   }
 
   it('localizes the @mention notification title to the recipient locale', async () => {
-    const { fire, emits } = setupWithMessaging('zh-CN', await makeI18n());
+    const { fire, emits } = setupWithMessaging('zh-CN', makeI18n());
     await fire('afterInsert', {
       object: 'sys_comment',
       input: {},

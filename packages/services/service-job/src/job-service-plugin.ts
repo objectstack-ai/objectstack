@@ -83,7 +83,7 @@ export class JobServicePlugin implements Plugin {
     const choice = this.options.adapter ?? 'auto';
 
     if (choice === 'interval') {
-      this.intervalAdapter = new IntervalJobAdapter(this.options.interval);
+      this.intervalAdapter = new IntervalJobAdapter({ ...this.options.interval, logger: ctx.logger });
       ctx.registerService('job', this.intervalAdapter);
       ctx.logger.info('JobServicePlugin: registered IntervalJobAdapter (in-memory)');
       return;
@@ -99,7 +99,7 @@ export class JobServicePlugin implements Plugin {
     // 'auto' or 'db' — register a placeholder Interval adapter synchronously
     // so callers can `getService('job')` during init, then upgrade in kernel:ready
     // when the objectql engine is wired.
-    this.intervalAdapter = new IntervalJobAdapter(this.options.interval);
+    this.intervalAdapter = new IntervalJobAdapter({ ...this.options.interval, logger: ctx.logger });
     ctx.registerService('job', this.intervalAdapter);
 
     ctx.hook('kernel:ready', async () => {
@@ -112,6 +112,17 @@ export class JobServicePlugin implements Plugin {
           ctx.logger.warn('JobServicePlugin: db adapter requested but no ObjectQL engine — staying on IntervalJobAdapter');
         } else {
           ctx.logger.info('JobServicePlugin: no ObjectQL engine — staying on IntervalJobAdapter');
+        }
+        // Jobs stuck on the placeholder include cron schedules that
+        // will never fire. The per-registration warning already fired, but the
+        // summary makes "background automation is off" visible in one line.
+        const stranded = this.intervalAdapter?.getRegistrations()
+          .filter((r) => r.schedule.type === 'cron')
+          .map((r) => r.name) ?? [];
+        if (stranded.length > 0) {
+          ctx.logger.warn(
+            `JobServicePlugin: ${stranded.length} cron job(s) will NOT run on IntervalJobAdapter: ${stranded.join(', ')}`,
+          );
         }
         return;
       }
@@ -138,6 +149,30 @@ export class JobServicePlugin implements Plugin {
         ctx.logger.info('JobServicePlugin: upgraded to DbJobAdapter (sys_job + sys_job_run persistence)');
       } catch (err) {
         ctx.logger.warn('JobServicePlugin: replaceService failed; staying on IntervalJobAdapter', err as any);
+        return;
+      }
+
+      // Migrate every registration made against the placeholder.
+      // Business plugins `start()` before this hook runs, so their schedules
+      // all landed on the IntervalJobAdapter: its cron entries never fired at
+      // all, and its interval timers would keep running on the orphaned
+      // placeholder (invisible to sys_job) after the swap. Stop the placeholder
+      // FIRST — a brief gap beats a double-fire — then re-schedule everything
+      // on the DbJobAdapter.
+      const pending = this.intervalAdapter?.getRegistrations() ?? [];
+      if (this.intervalAdapter) {
+        await this.intervalAdapter.destroy();
+        this.intervalAdapter = undefined;
+      }
+      for (const r of pending) {
+        try {
+          await this.dbAdapter.schedule(r.name, r.schedule, r.handler, r.options);
+        } catch (err) {
+          ctx.logger.warn(`JobServicePlugin: failed to migrate job "${r.name}" to DbJobAdapter`, err as any);
+        }
+      }
+      if (pending.length > 0) {
+        ctx.logger.info(`JobServicePlugin: migrated ${pending.length} early job registration(s) to DbJobAdapter`);
       }
 
       // Retention is owned by the platform LifecycleService (ADR-0057):

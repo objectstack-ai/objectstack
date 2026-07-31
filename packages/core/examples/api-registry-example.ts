@@ -24,6 +24,12 @@ async function example1_BasicApiRegistration() {
   const customerPlugin: Plugin = {
     name: 'customer-plugin',
     version: '1.0.0',
+    // init() resolves `api-registry` synchronously with no fallback, so the
+    // ordering requirement is DECLARED rather than left to the `kernel.use()`
+    // order above (ADR-0116). Registration order is not a contract — the
+    // kernel orders from this graph.
+    dependencies: ['com.objectstack.core.api-registry'],
+    requiresServices: ['api-registry'],
     init: async (ctx) => {
       const registry = ctx.getService<ApiRegistry>('api-registry');
 
@@ -163,6 +169,8 @@ async function example2_MultiPluginDiscovery() {
   // Data Plugin - REST APIs
   const dataPlugin: Plugin = {
     name: 'data-plugin',
+    dependencies: ['com.objectstack.core.api-registry'],
+    requiresServices: ['api-registry'],
     init: async (ctx) => {
       const registry = ctx.getService<ApiRegistry>('api-registry');
 
@@ -212,6 +220,8 @@ async function example2_MultiPluginDiscovery() {
   // Analytics Plugin - Beta API
   const analyticsPlugin: Plugin = {
     name: 'analytics-plugin',
+    dependencies: ['com.objectstack.core.api-registry'],
+    requiresServices: ['api-registry'],
     init: async (ctx) => {
       const registry = ctx.getService<ApiRegistry>('api-registry');
 
@@ -282,6 +292,8 @@ async function example3_ConflictResolution() {
   // Core Plugin - High priority
   const corePlugin: Plugin = {
     name: 'core-plugin',
+    dependencies: ['com.objectstack.core.api-registry'],
+    requiresServices: ['api-registry'],
     init: async (ctx) => {
       const registry = ctx.getService<ApiRegistry>('api-registry');
 
@@ -310,6 +322,8 @@ async function example3_ConflictResolution() {
   // Custom Plugin - Medium priority
   const customPlugin: Plugin = {
     name: 'custom-plugin',
+    dependencies: ['com.objectstack.core.api-registry'],
+    requiresServices: ['api-registry'],
     init: async (ctx) => {
       const registry = ctx.getService<ApiRegistry>('api-registry');
 
@@ -361,6 +375,8 @@ async function example4_CustomProtocol() {
 
   const websocketPlugin: Plugin = {
     name: 'websocket-plugin',
+    dependencies: ['com.objectstack.core.api-registry'],
+    requiresServices: ['api-registry'],
     init: async (ctx) => {
       const registry = ctx.getService<ApiRegistry>('api-registry');
 
@@ -431,6 +447,8 @@ async function example5_DynamicSchemas() {
 
   const dynamicPlugin: Plugin = {
     name: 'dynamic-plugin',
+    dependencies: ['com.objectstack.core.api-registry'],
+    requiresServices: ['api-registry'],
     init: async (ctx) => {
       const registry = ctx.getService<ApiRegistry>('api-registry');
 

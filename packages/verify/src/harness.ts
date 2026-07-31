@@ -29,6 +29,7 @@ import { SecurityPlugin } from '@objectstack/plugin-security';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { SettingsServicePlugin, LocalCryptoProvider } from '@objectstack/service-settings';
 import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
+import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 
 /** A Hono app exposes `.request(path, init)` returning a standard `Response`. */
 interface InjectableApp {
@@ -171,6 +172,12 @@ export async function bootStack(
 
   // The app under test (objects, datasets, cubes, flows, seed data).
   await kernel.use(new AppPlugin(config));
+
+  // Platform infrastructure `os serve` auto-injects into every served kernel:
+  // the `sys_migration` flag ledger (#4243) and the `sys_secret` cipher store
+  // (#4270) — the latter is what the LocalCryptoProvider wiring below writes
+  // into, and the engine fails CLOSED on secret-field writes without it.
+  await kernel.use(new PlatformObjectsPlugin());
 
   // Service plugins `objectstack dev` auto-loads for an app of this shape.
   await kernel.use(new SettingsServicePlugin());

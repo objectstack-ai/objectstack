@@ -202,6 +202,31 @@ describe('external-datasource envelope (#3843) — error bodies', () => {
         { params: { name: 'ext', remote: 'customers' } },
       ),
     },
+    {
+      // #4249: before it, the two introspection routes had no `catch`, so this
+      // throw surfaced as the adapter's non-envelope 500 — while the same
+      // service operation through `service-datasource/admin-routes.ts` answered
+      // 400. Both paths now refuse with the same registered code.
+      name: 'an introspection the service refuses',
+      status: 400,
+      code: 'EXTERNAL_DATASOURCE_ERROR',
+      run: () => drive(
+        mount({ listRemoteTables: async () => { throw new Error('no such schema'); } }),
+        'GET',
+        `${EXT}/tables`,
+      ),
+    },
+    {
+      name: 'a draft generation the service refuses',
+      status: 400,
+      code: 'EXTERNAL_DATASOURCE_ERROR',
+      run: () => drive(
+        mount({ generateObjectDraft: async () => { throw new Error('no such table'); } }),
+        'POST',
+        `${EXT}/tables/:remote/draft`,
+        { params: { name: 'ext', remote: 'customers' } },
+      ),
+    },
   ];
 
   for (const c of CASES) {

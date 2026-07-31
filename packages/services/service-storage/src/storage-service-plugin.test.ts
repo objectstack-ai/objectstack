@@ -370,3 +370,7 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
     await expect(ctx._flushReady()).resolves.toBeUndefined();
   });
 });
+
+// Fresh-datastore attestation (#3438, ADR-0104) moved to PlatformObjectsPlugin
+// with the sys_migration registration it belongs to (#4243) — its tests live in
+// @objectstack/platform-objects (src/plugin.test.ts).

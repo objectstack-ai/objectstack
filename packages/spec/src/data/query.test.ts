@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   QuerySchema,
+  FieldNodeSchema,
   AggregationFunction,
   JoinType,
   WindowFunction,
@@ -108,6 +109,48 @@ describe('QuerySchema - Basic', () => {
     };
 
     expect(() => QuerySchema.parse(query)).not.toThrow();
+  });
+});
+
+/**
+ * [#4196] `FieldNode`'s nested-select object form was declared-but-inert — no
+ * producer, and no consumer that read `.fields`/`.alias` (ADR-0078's silently
+ * inert declaration; ADR-0049 enforce-or-remove). It is gone, and the rejection
+ * carries the prescription rather than zod's "expected string, received object":
+ * the parse error is the channel an upgrading consumer actually hits.
+ */
+describe('FieldNode — the nested-select object form is REMOVED (#4196)', () => {
+  it('accepts a field name, and a dotted path through a relationship', () => {
+    expect(FieldNodeSchema.parse('name')).toBe('name');
+    expect(FieldNodeSchema.parse('owner.name')).toBe('owner.name');
+    expect(() => QuerySchema.parse({
+      object: 'task', fields: ['title', 'owner.name'],
+    })).not.toThrow();
+  });
+
+  it('rejects the object form with the removal prescription, not a type mismatch', () => {
+    expect(() => FieldNodeSchema.parse({ field: 'owner', fields: ['name'] }))
+      .toThrow(/nested-select object form.*removed in @objectstack\/spec 18.*expand/s);
+    // …and through the query it is reached from, since that is where an author
+    // writes it.
+    expect(() => QuerySchema.parse({
+      object: 'task', fields: [{ field: 'owner', fields: ['name'] }],
+    })).toThrow(/nested-select object form.*expand/s);
+  });
+
+  it("leaves a non-object mistake with zod's own message", () => {
+    // The prescription is for the shape that USED to be legal. A number was
+    // never a FieldNode, so telling its author it was "removed" would misinform.
+    expect(() => FieldNodeSchema.parse(42)).toThrow(/expected string/i);
+    expect(() => FieldNodeSchema.parse(42)).not.toThrow(/nested-select/);
+  });
+
+  it('the replacement is `expand`, and it still parses', () => {
+    expect(() => QuerySchema.parse({
+      object: 'task',
+      fields: ['title'],
+      expand: { owner: { object: 'user', fields: ['name'] } },
+    } satisfies QueryAST)).not.toThrow();
   });
 });
 
@@ -1660,17 +1703,20 @@ describe('QuerySchema - Edge Cases and Null Handling', () => {
     expect(() => QuerySchema.parse(query)).not.toThrow();
   });
 
-  it('should handle optional alias in field nodes', () => {
-    const query: QueryAST = {
+  // [#4196] This case used to assert the opposite — that `{ field, fields,
+  // alias }` entries parse. They did, and then nothing honoured them: the pin
+  // proved the DECLARATION, which is exactly how a declared-but-inert shape
+  // survives a green suite. The `alias` half was the emptiest of all; no
+  // projection anywhere was ever named by it.
+  it('refuses relationship field nodes, with or without an alias', () => {
+    expect(() => QuerySchema.parse({
       object: 'account',
-      fields: [
-        'name',
-        { field: 'owner', fields: ['name', 'email'] },
-        { field: 'manager', fields: ['name'], alias: 'mgr' },
-      ],
-    };
-
-    expect(() => QuerySchema.parse(query)).not.toThrow();
+      fields: ['name', { field: 'owner', fields: ['name', 'email'] }],
+    })).toThrow(/nested-select object form.*removed/s);
+    expect(() => QuerySchema.parse({
+      object: 'account',
+      fields: ['name', { field: 'manager', fields: ['name'], alias: 'mgr' }],
+    })).toThrow(/`alias` has no replacement here/);
   });
 
   it('should handle aggregation without field for COUNT', () => {
@@ -1874,20 +1920,16 @@ describe('QuerySchema - Type Coercion Edge Cases', () => {
     expect(result.orderBy?.[0].order).toBe('asc');
   });
 
-  it('should handle mixed field types', () => {
-    const query: QueryAST = {
+  // [#4196] There are no longer two field types to mix — a select list is field
+  // names. The mixed list is refused at the entry that is not one, and the
+  // issue `path` points at it so the caller knows which entry to rewrite.
+  it('refuses a select list that mixes names with object entries, naming the entry', () => {
+    const result = QuerySchema.safeParse({
       object: 'account',
-      fields: [
-        'simple_field',
-        {
-          field: 'related_field',
-          fields: ['nested_field'],
-          alias: 'rel',
-        },
-      ],
-    };
-
-    expect(() => QuerySchema.parse(query)).not.toThrow();
+      fields: ['simple_field', { field: 'related_field', fields: ['nested_field'], alias: 'rel' }],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0].path).toEqual(['fields', 1]);
   });
 
   it('should handle deeply nested filters', () => {

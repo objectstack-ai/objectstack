@@ -33,5 +33,9 @@
         "swagger",
         "integration",
         "api"
-    ]
+    ],
+  "files": [
+    "dist",
+    "README.md"
+  ]
 }

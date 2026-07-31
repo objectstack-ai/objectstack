@@ -45,12 +45,20 @@ function makeMemoryDriver() {
       if ('$in' in c) return Array.isArray(c.$in) && c.$in.some((x) => (cell ?? null) === (x ?? null));
       if ('$eq' in c) return (cell ?? null) === ((c.$eq as unknown) ?? null);
       if ('$ne' in c) return (cell ?? null) !== ((c.$ne as unknown) ?? null);
+      // `$search` folds to `{ $or: [{ field: { $contains: term } }] }`, so the
+      // driver must understand `$contains` or a search predicate is a no-op and
+      // an "it filtered" assertion passes for the wrong reason.
+      if ('$contains' in c) return String(cell ?? '').includes(String(c.$contains ?? ''));
     }
     return (cell ?? null) === ((cond as unknown) ?? null);
   };
   const matches = (row: Record<string, unknown>, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     for (const [k, v] of Object.entries(where)) {
+      // Logical nodes — the shape `$search` and a composed `filter` produce.
+      // Skipping them (as this driver used to) silently returns every row.
+      if (k === '$or') { if (!(Array.isArray(v) && v.some((sub) => matches(row, sub)))) return false; continue; }
+      if (k === '$and') { if (!(Array.isArray(v) && v.every((sub) => matches(row, sub)))) return false; continue; }
       if (k.startsWith('$')) continue;
       if (!matchOne(row[k], v)) return false;
     }
@@ -569,5 +577,85 @@ describe('export route — FLS column projection via getReadableFields (#3547)',
     const ws = wb.worksheets[0];
     expect((ws.getRow(1).values as any[]).slice(1)).toEqual(['ID', '完成']);
     expect(ws.rowCount).toBe(1); // header only
+  });
+});
+
+/**
+ * `search` — the half of a list this route could not mirror.
+ *
+ * The route accepted `filter` and `orderby` but had no way to carry the term a
+ * user had typed into the list's search box, and `ExportDownloadRequest` had no
+ * field for one. So "export" after a search downloaded the UNSEARCHED superset:
+ * more rows than the screen showed, in a file that looks authoritative, with
+ * nothing anywhere saying so. The route comment claimed the opposite — that the
+ * export "matches what the user sees".
+ *
+ * Same family as a dropped filter (objectstack#3948, #4181): a plausible answer
+ * that is quietly broader than the one asked for.
+ */
+describe('export route — search', () => {
+  let route: any;
+
+  beforeEach(async () => {
+    ({ route } = await boot());
+  });
+
+  const csvRows = async (query: Record<string, unknown>) => {
+    const { res, chunks } = makeRes();
+    await route.handler({ params: { object: 'task' }, query } as any, res);
+    return parseCsv(chunks.join('')).slice(1); // drop header
+  };
+
+  it('narrows the exported rows to the search term', async () => {
+    const rows = await csvRows({ format: 'csv', search: '代码' });
+    expect(rows.map((r) => r[1])).toEqual(['写代码']);
+  });
+
+  it('exports everything when no term is given (unchanged behaviour)', async () => {
+    expect((await csvRows({ format: 'csv' })).length).toBe(2);
+  });
+
+  it('composes with `filter` — both halves apply, neither replaces the other', async () => {
+    // Chosen so each half ALONE gives a different non-empty answer, and only
+    // "both applied" gives none. A test where the two agree would pass just as
+    // well with `search` dropped entirely.
+    const onlyFilter = await csvRows({ format: 'csv', filter: JSON.stringify(['done', '=', true]) });
+    expect(onlyFilter.map((r) => r[1])).toEqual(['写代码']);
+    const onlySearch = await csvRows({ format: 'csv', search: '文档' });
+    expect(onlySearch.map((r) => r[1])).toEqual(['写文档']);
+
+    // Disjoint, so the intersection is empty — which it can only be if BOTH
+    // reached the engine. Dropping either one yields a row.
+    const both = await csvRows({
+      format: 'csv',
+      filter: JSON.stringify(['done', '=', true]),
+      search: '文档',
+    });
+    expect(both.length).toBe(0);
+  });
+
+  it('an empty or whitespace term is ignored, not applied as a blank predicate', async () => {
+    expect((await csvRows({ format: 'csv', search: '' })).length).toBe(2);
+    expect((await csvRows({ format: 'csv', search: '   ' })).length).toBe(2);
+  });
+
+  it('honours a `searchFields` override that excludes the matching column', async () => {
+    // TASK's auto-default searchable set is { title, priority } (text + select).
+    // `高` is the label of priority=high, so by default it finds 写代码 …
+    expect((await csvRows({ format: 'csv', search: '高' })).map((r) => r[1])).toEqual(['写代码']);
+    // … and restricting the scan to `title` finds nothing, which is only true if
+    // the override actually reached the engine (ADR-0061).
+    expect((await csvRows({ format: 'csv', search: '高', searchFields: 'title' })).length).toBe(0);
+  });
+
+  it('applies to xlsx too, not just the csv path', async () => {
+    const { res, getBuffer } = makeBinRes();
+    await route.handler(
+      { params: { object: 'task' }, query: { format: 'xlsx', search: '代码' } } as any,
+      res,
+    );
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(getBuffer() as any);
+    expect(wb.worksheets[0].rowCount).toBe(2); // header + one match
   });
 });

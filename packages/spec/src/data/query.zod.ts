@@ -181,6 +181,41 @@ export const JoinType = z.enum(['inner', 'left', 'right', 'full']);
  */
 export const JoinStrategy = z.enum(['auto', 'database', 'hash', 'loop']);
 
+/** Non-recursive half of {@link JoinNodeSchema} — every key except `subquery`. */
+const JoinNodeBaseSchema = lazySchema(() => z.object({
+  type: JoinType.describe('Join type'),
+  strategy: JoinStrategy.optional().describe('Execution strategy hint'),
+  object: z.string().describe('Object/table to join'),
+  alias: z.string().optional().describe('Table alias'),
+  on: FilterConditionSchema.describe('Join condition'),
+}));
+
+/**
+ * A single join — the TYPE half of {@link JoinNodeSchema}.
+ *
+ * `subquery` is what makes the schema recursive (through {@link QuerySchema}),
+ * so it is declared here rather than inferred: `z.lazy()` needs an annotation,
+ * and the `z.ZodType<any>` this carried before #4171 made the exported
+ * `JoinNode` — and `QueryAST['joins']` with it — resolve to `any`.
+ */
+export type JoinNode = z.infer<typeof JoinNodeBaseSchema> & {
+  /** Join against a derived dataset instead of a plain object/table. */
+  subquery?: QueryAST;
+};
+
+/**
+ * The authoring shape of a join — the INPUT half of {@link JoinNodeSchema}
+ * (#4195), the same relationship {@link QueryInput} has to {@link QueryAST}.
+ *
+ * Kept as its own type rather than reusing `JoinNode` because the recursive
+ * knot differs: a nested `subquery` is authored, so it is a `QueryInput`, not
+ * the parsed `QueryAST`.
+ */
+export type JoinNodeInput = z.input<typeof JoinNodeBaseSchema> & {
+  /** Join against a derived dataset instead of a plain object/table. */
+  subquery?: QueryInput;
+};
+
 /**
  * Join Node
  * Represents table joins for combining data from multiple objects.
@@ -259,13 +294,8 @@ export const JoinStrategy = z.enum(['auto', 'database', 'hash', 'loop']);
  *   ]
  * }
  */
-export const JoinNodeSchema: z.ZodType<any> = z.lazy(() => 
-  z.object({
-    type: JoinType.describe('Join type'),
-    strategy: JoinStrategy.optional().describe('Execution strategy hint'),
-    object: z.string().describe('Object/table to join'),
-    alias: z.string().optional().describe('Table alias'),
-    on: FilterConditionSchema.describe('Join condition'),
+export const JoinNodeSchema: z.ZodType<JoinNode, JoinNodeInput> = z.lazy(() =>
+  JoinNodeBaseSchema.extend({
     subquery: z.lazy(() => QuerySchema).optional().describe('Subquery instead of object'),
   })
 );
@@ -419,19 +449,56 @@ export const WindowFunctionNodeSchema = lazySchema(() => z.object({
 }));
 
 /**
- * Field Selection Node
- * Represents "Select" attributes, including joins.
+ * One entry of a select list: a field name.
+ *
+ * The whole vocabulary is a column (`'name'`) or a dotted path the engine
+ * resolves through a relationship field (`'owner.name'`). Related *records* are
+ * selected with {@link QueryAST.expand}, not from inside this list.
+ *
+ * The TYPE half of {@link FieldNodeSchema} — it used to be that schema's
+ * recursion annotation, back when the union carried a second
+ * `{ field, fields?, alias? }` member (see the removal note on the schema).
  */
-export const FieldNodeSchema: z.ZodType<any> = z.lazy(() => 
-  z.union([
-    z.string(), // Primitive field: "name"
-    z.object({
-      field: z.string(), // Relationship field: "owner"
-      fields: z.array(FieldNodeSchema).optional(), // Nested select: ["name", "email"]
-      alias: z.string().optional()
-    })
-  ])
-);
+export type FieldNode = string;
+
+/**
+ * The prescription for the removed nested-select object form.
+ *
+ * The rejection is where an author actually meets a retirement (`retired-key.ts`
+ * makes the same argument for keys), so the message carries the FROM → TO
+ * mapping rather than zod's "expected string, received object".
+ */
+const FIELD_NODE_OBJECT_FORM_REMOVED =
+  'A `fields[]` entry is a field name (string). The nested-select object form '
+  + '`{ field, fields, alias }` was removed in @objectstack/spec 18 (#4196, ADR-0049) — nothing '
+  + 'ever produced it and nothing ever read `.fields`/`.alias`: every consumer on this path '
+  + 'treats the list as `string[]`, so the object form was dropped by the SQL and memory drivers, '
+  + 'projected as a column literally named "[object Object]" by MongoDB, and refused as an unknown '
+  + 'field by the REST ingress. Select related records with `expand` — '
+  + "`expand: { owner: { object: 'user', fields: ['name'] } }` — or name a single related column "
+  + "with a dotted path (`fields: ['owner.name']`). `alias` has no replacement here; an aliased "
+  + 'projection is an `aggregations` or `windowFunctions` entry, which carry their own `alias`.';
+
+/**
+ * Field Selection Node
+ * Represents "Select" attributes — one field name per entry.
+ *
+ * The `{ field, fields?, alias? }` member this union used to carry was REMOVED
+ * (#4196): it was declared-but-inert, an ADR-0078 silently-inert declaration
+ * that ADR-0049 requires be enforced or removed. `expand` already expresses
+ * nested selection, and Prime Directive #12 wants one spelling per capability,
+ * so the second one goes rather than being lowered into the first.
+ */
+export const FieldNodeSchema = z.string({
+  // Only the shape that USED to be legal gets the retirement prescription —
+  // telling the author of `fields: [42]` that their entry "was removed" would
+  // misinform. Everything else keeps zod's own message.
+  error: (issue) =>
+    issue.code === 'invalid_type'
+      && typeof issue.input === 'object' && issue.input !== null && !Array.isArray(issue.input)
+      ? FIELD_NODE_OBJECT_FORM_REMOVED
+      : undefined,
+});
 
 /**
  * Full-Text Search Configuration
@@ -516,7 +583,7 @@ const BaseQuerySchema = z.object({
   object: z.string().describe('Object name (e.g. account)'),
   
   /** Select Clause */
-  fields: z.array(FieldNodeSchema).optional().describe('Fields to retrieve'),
+  fields: z.array(FieldNodeSchema).optional().describe('Fields to retrieve — field names, optionally dotted to reach through a relationship (`owner.name`). Related *records* are selected with `expand`, not from inside this list.'),
   
   /** Where Clause (Filtering) */
   where: FilterConditionSchema.optional().describe('Filtering criteria (WHERE)'),
@@ -583,7 +650,7 @@ export type QueryInput = z.input<typeof BaseQuerySchema> & {
   expand?: Record<string, QueryInput>;
 };
 
-export const QuerySchema: z.ZodType<QueryAST> = lazySchema(() => BaseQuerySchema.extend({
+export const QuerySchema: z.ZodType<QueryAST, QueryInput> = lazySchema(() => BaseQuerySchema.extend({
   expand: z.lazy(() => z.record(z.string(), QuerySchema)).optional().describe(
     'Recursive relation loading map. Keys are lookup/master_detail field names; '
     + 'values are nested QueryAST objects that control select (`fields`) and filter '
@@ -598,6 +665,9 @@ export type SortNode = z.infer<typeof SortNodeSchema>;
 export type AggregationNode = z.infer<typeof AggregationNodeSchema>;
 export type GroupByNode = z.infer<typeof GroupByNodeSchema>;
 export type DateGranularityValue = z.infer<typeof DateGranularity>;
-export type JoinNode = z.infer<typeof JoinNodeSchema>;
+// `JoinNode` is declared next to its schema — it IS that schema's annotation, so
+// it cannot be inferred back out of it (#4171). `FieldNode` sits there too, but
+// for a different reason since #4196: it is no longer recursive, it is just the
+// name the docs and the engine give to "one entry of a select list".
 export type WindowFunctionNode = z.infer<typeof WindowFunctionNodeSchema>;
 export type WindowSpec = z.infer<typeof WindowSpecSchema>;

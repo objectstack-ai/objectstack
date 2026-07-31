@@ -10,6 +10,7 @@ import {
   ObjectStackDefinitionSchema,
   normalizeStackInput,
   lintUnknownAuthoringKeys,
+  lintUnknownStackKeys,
   formatUnknownAuthoringKey,
   type ConversionNotice,
 } from '@objectstack/spec';
@@ -97,8 +98,10 @@ export default class Validate extends Command {
       // key the author actually wrote. Computed here rather than down in the
       // warnings section so the `--json` path reports it too — the
       // "computed, then discarded" shape this file already had to fix once.
-      const unknownKeyWarnings = lintUnknownAuthoringKeys(normalized as Record<string, unknown>)
-        .map(formatUnknownAuthoringKey);
+      const unknownKeyWarnings = [
+        ...lintUnknownStackKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
+        ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>),
+      ].map(formatUnknownAuthoringKey);
       const result = ObjectStackDefinitionSchema.safeParse(normalized);
 
       if (!result.success) {

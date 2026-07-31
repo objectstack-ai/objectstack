@@ -119,6 +119,34 @@ Three source kinds:
 | `file`   | A folder in `IStorageService`                       | Onboarded PDFs, uploads         |
 | `http`   | A list of remote URLs                               | External docs, RSS, sitemaps    |
 
+`kind` is the discriminator, and each kind carries its own keys — a key from one
+kind is rejected on another:
+
+```typescript
+// object — content comes from the named fields of each matching record
+source: {
+  kind: 'object',
+  object: 'kb_article',
+  contentFields: ['title', 'body'],       // at least one, required
+  metadataFields: ['category', 'author'], // optional, carried onto the document
+  where: { status: 'published' },         // optional ObjectQL filter
+}
+
+// file — every object under a storage prefix
+source: {
+  kind: 'file',
+  prefix: 'knowledge/handbook/',
+  mimeTypes: ['application/pdf', 'text/markdown'], // optional; omit to take all
+}
+
+// http — an explicit URL list (each must be a valid URL)
+source: {
+  kind: 'http',
+  urls: ['https://docs.example.com/guide', 'https://docs.example.com/faq'],
+  userAgent: 'ObjectStack-KnowledgeBot/1.0', // optional
+}
+```
+
 Every source binds to a named **adapter id** (e.g. `'ragflow'`,
 `'memory'`). The adapter id is resolved at runtime by the plugin that
 registers itself with that name. Adapter config (endpoint, dataset id,

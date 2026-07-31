@@ -4,11 +4,13 @@
  * `client.ai.agents.list()` against both shapes of `GET /api/v1/ai/agents` (#4053).
  *
  * This route has two producers — the framework dispatcher's degraded fallback when
- * no AI service is registered, and cloud's `service-ai` — and it is mid-migration
- * onto the declared envelope. The framework side converted first; cloud's has not
- * yet, so both shapes are live in the fleet and the SDK has to read either.
+ * no AI service is registered, and cloud's `service-ai`. Both answer in the declared
+ * envelope now: the framework side converted first (#4124) and cloud followed on its
+ * own schedule (cloud#929). The unenveloped shape is still read here because an SDK
+ * outlives the server it is pointed at — a current client talking to a deployment
+ * from before the conversion is ordinary, not hypothetical.
  *
- * That is only true because the conversion RELOCATES the declared payload under
+ * That independence was only possible because the conversion RELOCATES the payload under
  * `data` (`data: { agents }`) rather than flattening it to the bare array
  * (`data: [...]`). The distinction is the whole reason this file exists:
  *
@@ -46,14 +48,14 @@ const ASK = { name: 'ask', label: 'Ask', role: 'assistant' };
 const BUILD = { name: 'build', label: 'Build', role: 'assistant' };
 
 describe('client.ai.agents.list — both producers', () => {
-    it('reads the UNENVELOPED body (cloud service-ai, pre-#4053)', async () => {
+    it('reads the UNENVELOPED body — a pre-#4053 server this client still has to talk to', async () => {
         const { client, fetchMock } = clientAnswering({ agents: [ASK, BUILD] });
         const agents = await client.ai.agents.list();
         expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/ai/agents');
         expect(agents.map((a: any) => a.name)).toEqual(['ask', 'build']);
     });
 
-    it('reads the ENVELOPED body with `data: { agents }` (the framework fallback, #4053)', async () => {
+    it('reads the ENVELOPED body with `data: { agents }` — what both producers serve (#4053)', async () => {
         const { client } = clientAnswering({ success: true, data: { agents: [ASK, BUILD] } });
         const agents = await client.ai.agents.list();
         expect(agents.map((a: any) => a.name)).toEqual(['ask', 'build']);

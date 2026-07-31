@@ -5,8 +5,8 @@
  * Run **every** generated-artifact gate and report **all** stale artifacts in one
  * pass.
  *
- * CI runs these gates as separate sequential steps across two jobs, so the first
- * stale artifact masks the rest: you fix it, push, and discover the next one on
+ * CI runs these gates as separate sequential steps, so the first stale artifact
+ * masks the rest: you fix it, push, and discover the next one on
  * the following run. That happened twice on #4040 (`check:docs`, then
  * `check:api-surface`) and twice again on #4161 (`check:spec-changes`, then
  * `check:upgrade-guide`) — four pushes spent learning something one local run
@@ -22,6 +22,7 @@
  * Usage:
  *   pnpm --filter @objectstack/spec check:generated          # report every stale artifact
  *   pnpm --filter @objectstack/spec check:generated --fix    # + regenerate exactly those
+ *   pnpm --filter @objectstack/spec check:generated --reconcile-only   # ledger audit only, no gates (CI)
  */
 
 import { execSync } from 'node:child_process';
@@ -62,6 +63,28 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   { check: 'check:empty-state', why: 'audits empty-state coverage — no artifact' },
   { check: 'check:react-conformance', why: 'audits react blocks against their contract — no artifact' },
   { check: 'check:skill-examples', why: 'validates skill examples parse — no artifact' },
+  // Landed in #4177 while this ledger landed in #4183 — neither PR could see the
+  // other, so `main` carried an unclassified script and this reconciliation was
+  // failing on `main` itself. The doc it checks against is hand-written, so there
+  // is no generator to name.
+  { check: 'check:variant-docs', why: 'audits that each schema variant appears in its hand-written doc — no artifact' },
+  // The #4177 story again, one day after #4203 closed it: #4232 added this script
+  // and nothing in CI runs this reconciliation, so `main` went red for every local
+  // wrapper run a second time. Caught while wiring `--reconcile-only` into
+  // lint.yml's unfiltered job — the fix for exactly this class. The ledger it
+  // audits is a hand-maintained doc (docs/audits/), so there is no generator.
+  {
+    check: 'check:strictness-ledger',
+    why: 'audits the hand-written strictness ledger against the code it describes — no artifact',
+  },
+  // The odd one out: it audits the source's TYPES, but reads them from the BUILT
+  // `dist/*.d.ts` — the surface a consumer's import actually resolves to, which
+  // is the only place the defect is visible (#4171). So the `readsDist` caveat
+  // above applies to it even though there is nothing to regenerate.
+  {
+    check: 'check:exported-any',
+    why: 'audits the built .d.ts for exported types/schemas that resolve to `any` — no artifact (needs a fresh `pnpm build`)',
+  },
 ];
 
 /**
@@ -125,8 +148,32 @@ function run(script: string): { ok: boolean; output: string } {
 }
 
 const fix = process.argv.includes('--fix');
+// CI mode (#4203): reconcile and stop — no gates. The reconciliation above only
+// ever ran where this aggregate ran, which was locally: CI runs the gates as
+// individual steps, so an unclassified `check:`/`gen:` script kept every CI gate
+// green while this wrapper exited red on `main` before running a single gate.
+// Twice in three days — #4177 (fixed only by colliding with #4194) and #4232
+// (caught wiring this flag in). It could not go in ci.yml's `check-generated`
+// job: that job was gated on a `generated` paths filter that never watched
+// packages/spec/package.json, the one file every offending PR must touch, so
+// both offenders skipped it entirely. #4291 deleted that job and its filter and
+// moved every gate to lint.yml's unfiltered, required "TypeScript Type Check"
+// job, which runs this mode too. Reads package.json and the arrays above; <1s.
+const reconcileOnly = process.argv.includes('--reconcile-only');
 const scripts = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).scripts ?? {};
 reconcileLedger(scripts);
+
+if (reconcileOnly) {
+  const checks = Object.keys(scripts).filter((n) => n.startsWith('check:')).length;
+  const gens = Object.keys(scripts).filter((n) => n.startsWith('gen:')).length;
+  console.log(
+    `✓ check:generated ledger reconciles with package.json: ${checks} check: + ${gens} gen: scripts, ` +
+      `all classified (${GATED.length} gated, ${NO_GENERATOR.length} source audits, ` +
+      `${UNGATED_GENERATORS.length} ungated generators, 1 aggregate).\n` +
+      `  --reconcile-only: no gates were run — this verifies coverage, not artifacts.`,
+  );
+  process.exit(0);
+}
 
 console.log(`Checking ${GATED.length} generated artifacts (every gate runs — the first failure does not stop the rest).\n`);
 

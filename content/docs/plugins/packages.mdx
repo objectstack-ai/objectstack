@@ -5,7 +5,7 @@ description: Complete guide to all ObjectStack packages, services, drivers, plug
 
 # Package Overview
 
-ObjectStack is organized into **71 package manifests** across multiple categories. This guide provides an overview of the framework packages, services, drivers, plugins, and adapters in the [framework repository](https://github.com/objectstack-ai/objectstack/tree/main/packages).
+ObjectStack is organized into **72 package manifests** across multiple categories. This guide provides an overview of the framework packages, services, drivers, plugins, and adapters in the [framework repository](https://github.com/objectstack-ai/objectstack/tree/main/packages).
 
 ### Package categories at a glance
 
@@ -198,9 +198,9 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 ### @objectstack/service-analytics
 
-**Analytics Service** — Multi-driver analytics with NativeSQL, ObjectQL, InMemory strategies.
+**Analytics Service** — Multi-driver analytics with built-in NativeSQL and ObjectQL strategies (the lowest-priority `InMemoryStrategy` is not built in — it ships in `@objectstack/driver-memory`).
 
-- **Features**: Aggregations, time series, funnels, dashboards
+- **Features**: Aggregations (measures/dimensions), time dimensions with granularity, dashboard/report widget queries
 - **When to use**: Business intelligence, reporting, metrics dashboards
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/services/service-analytics/README.md)
 
@@ -214,10 +214,10 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 ### @objectstack/service-cache
 
-**Cache Service** — In-memory and Redis caching.
+**Cache Service** — In-memory caching behind the `ICacheService` contract.
 
-- **Adapters**: Memory (dev), Redis (production)
-- **Features**: TTL, namespaces, pattern matching, statistics
+- **Adapters**: Memory (the only working adapter). `RedisCacheAdapter` is a **skeleton** — every method throws `not yet implemented`, and `CacheServicePlugin({ adapter: 'redis' })` refuses to start. For a real distributed cache, register your own `ICacheService` via `ctx.registerService('cache', impl)`.
+- **Features**: `get` / `set` / `delete` / `has` / `clear` / `stats`, per-entry TTL, `maxSize` eviction, lookup & write metrics
 - **When to use**: Performance optimization, reduce database load
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/services/service-cache/README.md)
 
@@ -253,18 +253,19 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 ### @objectstack/service-queue
 
-**Queue Service** — Job queues with in-memory and BullMQ adapters.
+**Queue Service** — Job queues with an in-memory adapter and a durable, database-backed adapter (`sys_job_queue`). No BullMQ/Redis adapter is shipped.
 
-- **Features**: Priority queues, retry, rate limiting, worker pools, job events
+- **Features**: Priority, delayed / scheduled delivery, `maxAttempts` + fixed/exponential backoff, dead-letter queue and replay, idempotency keys; multi-node claim via a lease on the `db` adapter
 - **When to use**: Async processing, email sending, report generation, webhooks
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/services/service-queue/README.md)
 
 ### @objectstack/service-realtime
 
-**Realtime Service** — WebSocket pub/sub for live updates.
+**Realtime Service** — in-process pub/sub implementing `IRealtimeService`, backed by an in-memory adapter.
 
-- **Features**: Channels, presence, broadcasting, typing indicators, cursor tracking
-- **When to use**: Real-time dashboards, collaborative editing, live notifications
+- **Features**: `publish` / `subscribe` / `unsubscribe`, channel routing, per-subscription filtering by object name and event type, a `maxSubscriptions` cap; registers the `sys_presence` object
+- **Not included**: there is **no WebSocket/SSE endpoint and no client transport** — `IRealtimeService.handleUpgrade` is deliberately unimplemented platform-wide until the identity-admission seam exists. The adapter is process-local (single-instance only).
+- **When to use**: Trusted, server-internal subscribers (webhook auto-enqueuer, knowledge sync)
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/services/service-realtime/README.md)
 
 ### @objectstack/service-storage
@@ -299,8 +300,8 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 **Authentication Plugin** — Better-auth integration with ObjectQL.
 
-- **Features**: Email/password, OAuth providers, session management, RBAC
-- **When to use**: User authentication and authorization
+- **Features**: Email/password, OAuth providers, session management, bearer-token auth, password reset and email verification (authorization itself lives in `plugin-security`)
+- **When to use**: User authentication and identity
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/plugins/plugin-auth/README.md)
 
 ### @objectstack/plugin-security
@@ -354,7 +355,7 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 **Approvals Plugin** — Contributes the `approval` flow node (ADR-0019): an approval runs on the one automation engine as a durable-pause node, backed by `sys_approval_request` / `sys_approval_action`.
 
-- **Features**: Approver resolution (user/org_membership_level/position/team/department/manager/field/queue), `first_response` / `unanimous`, record lock, status mirror, per-node SLA escalation, audit trail
+- **Features**: Approver resolution (manager/position/department/team/field/expression/org_membership_level/user), `first_response` / `unanimous` / `quorum` / `per_group`, record lock, status mirror, per-node SLA escalation, audit trail
 - **When to use**: Any flow that needs human sign-off (expense, quote, contract, …) — add an `approval` node and branch on `approve` / `reject`
 
 ### @objectstack/plugin-sharing
@@ -368,7 +369,7 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 **Email Plugin** — Outbound email channel and templates.
 
-- **Features**: Provider adapters, MJML templates, delivery tracking
+- **Features**: Provider transports (Postmark, Resend), a minimal mustache-style `{{placeholder}}` template renderer, delivery tracking on `sys_email`
 - **When to use**: Transactional and workflow-driven email
 
 ### @objectstack/plugin-webhooks
@@ -440,9 +441,9 @@ npx create-objectstack my-app
 
 ### @objectstack/types
 
-**Shared Type Utilities** — Common TypeScript types and utilities.
+**Shared Type Utilities** — Dependency-light runtime contracts that break circular imports between packages.
 
-- **Exports**: Type helpers, utility types, branded types
+- **Exports**: `IKernel`, `RuntimePlugin`, `RuntimeContext`, plus env-reading (`readEnvWithDeprecation`), degraded-boot, error-leak, and module-not-found helpers
 - **When to use**: Imported automatically by other packages
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/types/README.md)
 
@@ -460,13 +461,16 @@ The snippets below illustrate which **runtime** packages you typically reach for
 ### For New Projects (edge / AI-native)
 
 ```typescript
-// Host bootstrap (pseudocode — exact shape depends on adapter)
-import { ObjectKernel } from '@objectstack/core';
+// Host bootstrap (exact shape depends on adapter)
+import { ObjectKernel, DriverPlugin } from '@objectstack/runtime';
+import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 // Open edition: AI is exposed via @objectstack/mcp (BYO-AI), not an in-process plugin.
 
 const kernel = new ObjectKernel();
-await kernel.use(new SqliteWasmDriver({ filename: ':memory:' }));
+await kernel.use(new ObjectQLPlugin());
+// A driver is not a plugin — wrap it in `DriverPlugin` before `kernel.use()`.
+await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' })));
 // Point your own AI (Claude/Cursor/local model) at objects, queries & actions over MCP.
 await kernel.bootstrap();
 ```
@@ -474,28 +478,29 @@ await kernel.bootstrap();
 ### For Traditional Web Apps
 
 ```typescript
-import { createDriverPlugin } from '@objectstack/driver-sql';
-import { createAuthPlugin } from '@objectstack/plugin-auth';
-import { createServiceQueuePlugin } from '@objectstack/service-queue';
+import { DriverPlugin } from '@objectstack/runtime';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { AuthPlugin } from '@objectstack/plugin-auth';
+import { QueueServicePlugin } from '@objectstack/service-queue';
 
-await kernel.use(createDriverPlugin({ client: 'pg', /* … */ }));
-await kernel.use(createAuthPlugin({ /* … */ }));
-await kernel.use(createServiceQueuePlugin({ /* … */ }));
+await kernel.use(new DriverPlugin(new SqlDriver({ client: 'pg', connection: { /* … */ } })));
+await kernel.use(new AuthPlugin({ /* … */ }));
+await kernel.use(new QueueServicePlugin({ adapter: 'auto' }));
 ```
 
 ### For Enterprise Applications
 
 ```typescript
-import { createSecurityPlugin } from '@objectstack/plugin-security';
-import { createAuditPlugin } from '@objectstack/plugin-audit';
-import { createServiceAnalyticsPlugin } from '@objectstack/service-analytics';
+import { SecurityPlugin } from '@objectstack/plugin-security';
+import { AuditPlugin } from '@objectstack/plugin-audit';
+import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 
-await kernel.use(createSecurityPlugin({ /* … */ }));
-await kernel.use(createAuditPlugin({ /* … */ }));
-await kernel.use(createServiceAnalyticsPlugin({ /* … */ }));
+await kernel.use(new SecurityPlugin({ /* … */ }));
+await kernel.use(new AuditPlugin());
+await kernel.use(new AnalyticsServicePlugin({ /* … */ }));
 ```
 
-> The exact factory names follow each package's `README.md` — they all return a plugin object compatible with `kernel.use()`.
+> The official plugin and service packages above export plugin **classes** you instantiate (`new XPlugin(options)`) — check each package's `README.md` for its option shape. Some infrastructure packages ship a `create*Plugin` factory instead (`createRestApiPlugin`, `createDispatcherPlugin`, `createPlatformObjectsPlugin`, …). Either way the result implements the `Plugin` interface `kernel.use()` accepts.
 
 ---
 

@@ -18,6 +18,7 @@ vi.mock('./registry', () => {
   const instance: any = {
     getObject: vi.fn((name) => mockObjects.get(name)),
     resolveObject: vi.fn((name) => mockObjects.get(name)),
+    getAllObjects: vi.fn(() => [...mockObjects.values()]),
     registerObject: vi.fn((obj, packageId, namespace, ownership, priority) => {
       const fqn = namespace ? `${namespace}__${obj.name}` : obj.name;
       mockObjects.set(fqn, { ...obj, name: fqn });
@@ -2273,5 +2274,141 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
 
     const flagReads = vi.mocked(driver.find).mock.calls.filter((c) => c[0] === 'sys_migration');
     expect(flagReads).toHaveLength(2);
+  });
+
+  // ── Was this datastore created from empty? (#3438, ADR-0104) ──────
+  // The one input to fresh-datastore attestation. Permission is granted on
+  // this answer, so every uncertainty must resolve to `false`.
+  describe('wasDatastoreCreatedFromEmpty', () => {
+    const withStats = (d: IDataDriver, stats: { created: number; existing: number } | null) => {
+      if (stats) (d as any).getSchemaSyncStats = () => stats;
+      else delete (d as any).getSchemaSyncStats;
+    };
+
+    it('is true when the driver created tables and found none', () => {
+      withStats(driver, { created: 12, existing: 0 });
+      expect(engine.wasDatastoreCreatedFromEmpty()).toBe(true);
+    });
+
+    it('is false when even one table was already there', () => {
+      withStats(driver, { created: 11, existing: 1 });
+      expect(engine.wasDatastoreCreatedFromEmpty()).toBe(false);
+    });
+
+    it('is false when nothing was created (sync skipped or deferred)', () => {
+      withStats(driver, { created: 0, existing: 0 });
+      expect(engine.wasDatastoreCreatedFromEmpty()).toBe(false);
+    });
+
+    it('is false when no driver can account for its schema sync', () => {
+      withStats(driver, null);
+      expect(engine.wasDatastoreCreatedFromEmpty()).toBe(false);
+    });
+
+    it('is false when a second datasource was not created by this boot', () => {
+      withStats(driver, { created: 12, existing: 0 });
+      const other = {
+        name: 'other',
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+        capabilities: {} as any,
+      } as unknown as IDataDriver;
+      withStats(other, { created: 0, existing: 5 });
+      engine.registerDriver(other);
+
+      expect(engine.wasDatastoreCreatedFromEmpty()).toBe(false);
+    });
+  });
+
+  /**
+   * ADR-0104 / #3438. Both gates fail toward leniency, which is right and
+   * silent — so the LAX posture is the one that has to announce itself, or the
+   * deployment never learns a command would end it. Scoped to what this
+   * deployment's own metadata declares, so it is never noise.
+   */
+  describe('announceOpenMigrationGates', () => {
+    const registerObjects = (objects: Record<string, any>) => {
+      vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) => objects[name]);
+      vi.mocked((SchemaRegistry as any).getAllObjects).mockImplementation(() => Object.values(objects));
+    };
+    const SYS_MIGRATION = { name: 'sys_migration', fields: { id: { type: 'text' } } };
+    const lines = (info: any) => info.mock.calls.map((c: any[]) => String(c[0])).join('\n');
+
+    it('names the command that closes an open value-shape gate', async () => {
+      registerObjects({
+        place: { name: 'place', fields: { spot: { type: 'location' } } },
+        sys_migration: SYS_MIGRATION,
+      });
+      vi.mocked(driver.find).mockResolvedValue([]); // no flag row → gate open
+      const info = vi.spyOn((engine as any).logger, 'info');
+
+      await engine.announceOpenMigrationGates();
+
+      expect(lines(info)).toMatch(/os migrate value-shapes/);
+    });
+
+    it('names the file migration for an app that stores media', async () => {
+      registerObjects({
+        note: { name: 'note', fields: { doc: { type: 'file' } } },
+        sys_migration: SYS_MIGRATION,
+      });
+      vi.mocked(driver.find).mockResolvedValue([]);
+      const info = vi.spyOn((engine as any).logger, 'info');
+
+      await engine.announceOpenMigrationGates();
+
+      const said = lines(info);
+      expect(said).toMatch(/os migrate files-to-references/);
+      expect(said).not.toMatch(/os migrate value-shapes/);
+    });
+
+    it('says nothing about a gate this deployment has closed', async () => {
+      registerObjects({
+        note: { name: 'note', fields: { doc: { type: 'file' } } },
+        sys_migration: SYS_MIGRATION,
+      });
+      vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+      const info = vi.spyOn((engine as any).logger, 'info');
+
+      await engine.announceOpenMigrationGates();
+
+      expect(lines(info)).not.toMatch(/os migrate files-to-references/);
+    });
+
+    it('stays silent — and costs no query — for an app declaring neither class', async () => {
+      registerObjects({
+        tag: { name: 'tag', fields: { label: { type: 'text' } } },
+        sys_migration: SYS_MIGRATION,
+      });
+      const info = vi.spyOn((engine as any).logger, 'info');
+
+      await engine.announceOpenMigrationGates();
+
+      expect(lines(info)).not.toMatch(/os migrate/);
+      expect(driver.find).not.toHaveBeenCalled();
+    });
+
+    it('announces once per process, not once per caller', async () => {
+      registerObjects({
+        place: { name: 'place', fields: { spot: { type: 'location' } } },
+        sys_migration: SYS_MIGRATION,
+      });
+      vi.mocked(driver.find).mockResolvedValue([]);
+      const info = vi.spyOn((engine as any).logger, 'info');
+
+      await engine.announceOpenMigrationGates();
+      const first = info.mock.calls.length;
+      await engine.announceOpenMigrationGates();
+
+      expect(info.mock.calls.length).toBe(first);
+    });
+
+    it('never throws into a boot when the registry cannot be read', async () => {
+      vi.mocked((SchemaRegistry as any).getAllObjects).mockImplementation(() => {
+        throw new Error('registry exploded');
+      });
+
+      await expect(engine.announceOpenMigrationGates()).resolves.toBeUndefined();
+    });
   });
 });

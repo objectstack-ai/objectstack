@@ -1,0 +1,105 @@
+---
+title: Io Node Config
+description: Io Node Config protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+@module automation/io-node-config
+
+Config contracts for the flat IO builtins — `notify` and `http` (#4045).
+
+## Provenance — written from the executors, not from the forms
+
+Each schema here was derived by reading what the executor actually does with
+
+`node.config` (`service-automation/builtin/notify-node.ts`, `http-nodes.ts`),
+
+**not** by transcribing the hand-written `configSchema` literal on the node's
+
+descriptor. That independence is the point: the two artifacts are reconciled
+
+bidirectionally by `io-node-form-zod-ledger.test.ts` in `service-automation`,
+
+and a Zod copied from the form would make that reconciliation a tautology —
+
+it would pass by construction and prove nothing (#4045).
+
+## What these schemas are (and are not) wired to
+
+Like `LoopConfigSchema` / `ParallelConfigSchema` / `TryCatchConfigSchema`,
+
+these are **contract exports**: no engine path `parse()`s a node config with
+
+them today, so registering a flow behaves exactly as before. Wiring the
+
+executors to parse — which would finally give node configs the type /
+
+`required` / unknown-key enforcement the descriptor `configSchema` never
+
+provided — is deliberately deferred until the #4059 undeclared-key warning
+
+has measured a release's worth of real metadata (#4045 step 3b).
+
+`connector_action` has no schema here on purpose: its config contract is
+
+empty. The executor reads only the declared `FlowNodeSchema.connectorConfig`
+
+sibling block — see the descriptor note in
+
+`service-automation/builtin/connector-nodes.ts`.
+
+<Callout type="info">
+**Source:** `packages/spec/src/automation/io-node-config.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { HttpConfig, NotifyConfig } from '@objectstack/spec/automation';
+import type { HttpConfig, NotifyConfig } from '@objectstack/spec/automation';
+
+// Validate data
+const result = HttpConfig.parse(data);
+```
+
+---
+
+## HttpConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | Target URL |
+| **method** | `string` | optional | HTTP method (default GET; POST when durable) |
+| **headers** | `Record<string, string>` | optional | Request headers |
+| **body** | `any` | optional | Request body (JSON-serialised) |
+| **durable** | `boolean` | optional | Fire-and-forget via the durable outbox (retry/dead-letter) instead of inline request/response |
+| **timeoutMs** | `number` | optional | Per-request timeout (ms) |
+| **signingSecret** | `string` | optional | HMAC-SHA256 secret → X-Objectstack-Signature |
+
+
+---
+
+## NotifyConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **recipients** | `string \| string[]` | ✅ | Recipient user id(s) / audience selector(s); `{token}` templates resolve per run |
+| **title** | `string` | ✅ | Notification title |
+| **message** | `string` | optional | Notification body |
+| **channels** | `string \| string[]` | optional | Channels to fan out to (default: inbox) |
+| **topic** | `string` | optional | Event topic (default: "notify") |
+| **severity** | `string` | optional | info \| warning \| critical |
+| **sourceObject** | `string` | optional | Object name of the record the notification links to (writes sys_notification.source_object). Requires sourceId. |
+| **sourceId** | `string` | optional | Record id the notification links to (writes sys_notification.source_id). Requires sourceObject. |
+| **actorId** | `string` | optional | User id that caused the event (writes sys_notification.actor_id) |
+| **actionUrl** | `string` | optional | Explicit click-through URL; overrides the link synthesized from sourceObject/sourceId |
+| **payload** | `Record<string, any>` | optional | Extra template inputs merged into the notification payload |
+
+
+---
+

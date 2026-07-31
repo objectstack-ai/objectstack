@@ -595,6 +595,82 @@ describe('FlowSchema - errorHandling', () => {
     expect(result.errorHandling?.maxRetries).toBe(0);
   });
 
+  /**
+   * #4247 — `maxRetries` had two defaults: `.default(0)` here and
+   * `errorHandling.maxRetries ?? 3` in the engine's `retryExecution`. Because
+   * `??` only fires on `undefined`, an unstated count meant 0 retries for a
+   * parsed flow and 3 for a hand-built one — the retry count depended on the
+   * route into the engine, not on what the author wrote.
+   *
+   * The engine's copy is gone; this block is the only source. The count that
+   * was ambiguous is also the one that was inert — `strategy: 'retry'` with 0
+   * attempts runs the flow once and stops, i.e. `strategy: 'fail'` under
+   * another name — so it is refused rather than defaulted to some number
+   * nobody wrote. A retry re-runs the WHOLE flow, side effects included; that
+   * is not a count to guess on the author's behalf.
+   */
+  describe('#4247 — one default, and no zero-attempt "retry"', () => {
+    const retryFlow = (errorHandling: unknown) => FlowSchema.safeParse({
+      name: 'retry_flow',
+      label: 'Retry Flow',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'end' }],
+      errorHandling,
+    });
+
+    it("REJECTS strategy: 'retry' with no maxRetries — the count is stated, never guessed", () => {
+      const result = retryFlow({ strategy: 'retry' });
+
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'errorHandling.maxRetries');
+      expect(issue, 'the refusal should point at maxRetries').toBeDefined();
+      // The message carries the prescription, not just the complaint.
+      expect(issue!.message).toContain('maxRetries: 3');
+      expect(issue!.message).toContain("strategy: 'fail'");
+    });
+
+    it("REJECTS strategy: 'retry' with an explicit maxRetries: 0 — same no-op, spelled out", () => {
+      const result = retryFlow({ strategy: 'retry', maxRetries: 0 });
+
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.some((i) => i.path.join('.') === 'errorHandling.maxRetries')).toBe(true);
+    });
+
+    it("accepts the smallest honest retry — strategy: 'retry' with maxRetries: 1", () => {
+      const result = retryFlow({ strategy: 'retry', maxRetries: 1 });
+
+      expect(result.success).toBe(true);
+      expect(result.data!.errorHandling?.maxRetries).toBe(1);
+    });
+
+    it("keeps maxRetries: 0 legal under 'fail' and 'continue' — they never read it", () => {
+      for (const strategy of ['fail', 'continue'] as const) {
+        const result = retryFlow({ strategy, maxRetries: 0, retryDelayMs: 0, backoffMultiplier: 1 });
+        expect(result.success, `${strategy} should accept a spelled-out block`).toBe(true);
+      }
+    });
+
+    it('parses every retry knob to a concrete value — the engine reads them with no fallback', () => {
+      const result = retryFlow({ strategy: 'retry', maxRetries: 2 });
+
+      // `retryExecution` destructures these five directly. Each must survive
+      // the parse as a number/boolean, or the engine would be back to
+      // re-inventing a default for whichever one went missing.
+      expect(result.data!.errorHandling).toMatchObject({
+        strategy: 'retry',
+        maxRetries: 2,
+        retryDelayMs: 1000,
+        backoffMultiplier: 1,
+        maxRetryDelayMs: 30000,
+        jitter: false,
+      });
+    });
+  });
+
   it('REJECTS the retired errorHandling.fallbackNodeId — faults route via fault edges (#3896)', () => {
     expect(() => FlowSchema.parse({
       name: 'fallback_flow',
@@ -657,7 +733,9 @@ describe('FlowSchema - errorHandling', () => {
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [{ id: 'e1', source: 'start', target: 'end' }],
-      errorHandling: { strategy: 'retry' },
+      // `maxRetries` is stated because #4247 refuses a zero-attempt 'retry';
+      // the backoff knobs under test still default.
+      errorHandling: { strategy: 'retry', maxRetries: 3 },
     });
     expect(result.success).toBe(true);
     if (result.success) {

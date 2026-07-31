@@ -1,0 +1,194 @@
+---
+title: Builtin Node Config
+description: Builtin Node Config protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+@module automation/builtin-node-config
+
+Config contracts for the remaining flat builtins — the CRUD quartet
+
+(`get_record` / `create_record` / `update_record` / `delete_record`),
+
+`screen`, and `map` (#4045). Sibling of `io-node-config.zod.ts`
+
+(notify / http) and `control-flow.zod.ts` (loop / parallel / try_catch).
+
+## Provenance — written from the executors, not from the forms
+
+Each schema was derived by reading what the executor actually does with
+
+`node.config` (`service-automation/builtin/crud-nodes.ts`,
+
+`screen-nodes.ts`, `map-node.ts`), **not** by transcribing the hand-written
+
+`configSchema` literal on the node's descriptor. The two artifacts are
+
+reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` in
+
+`service-automation`; a Zod copied from the form would make that
+
+reconciliation a tautology (#4045).
+
+Writing these against the executors is what surfaced the drift the
+
+reconciliation exists to catch — keys the executors read that no form
+
+offered anywhere (`get_record.fields`, `screen.recordId`, the screen
+
+field-item keys `options`/`defaultValue`/`placeholder`, `map.indexVariable`,
+
+`map.input`), and the undeclared `map.flow` alias, which graduated into the
+
+ADR-0087 D2 conversion layer like `notify.source` before it.
+
+## What these schemas are (and are not) wired to
+
+Contract exports only — no engine path `parse()`s a node config with them
+
+today, so registering a flow behaves exactly as before. Wiring the executors
+
+to parse is deliberately deferred until the #4059 undeclared-key warning has
+
+measured a release's worth of real metadata (#4045 step 3b).
+
+Deliberately absent:
+
+- `assignment` — its config cannot be described by a fixed key set: with no
+
+`assignments` wrapper the TOP-LEVEL config keys ARE the author's variable
+
+names (logic-nodes.ts). The ledger test pins that exemption with its
+
+reason instead of pretending a shape.
+
+- `decision` / `script` / `subflow` / `wait` / `connector_action` — the
+
+deliberately-schemaless class (config-schemas.test.ts); their contracts
+
+live elsewhere (edges, sibling blocks, conditional forms).
+
+<Callout type="info">
+**Source:** `packages/spec/src/automation/builtin-node-config.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { CreateRecordConfig, DeleteRecordConfig, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
+import type { CreateRecordConfig, DeleteRecordConfig, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
+
+// Validate data
+const result = CreateRecordConfig.parse(data);
+```
+
+---
+
+## CreateRecordConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | ✅ | Object to insert into |
+| **fields** | `Record<string, any>` | optional | Field values to write on the new record |
+| **outputVariable** | `string` | optional | Flow variable bound to the created record |
+
+
+---
+
+## DeleteRecordConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | ✅ | Object to delete from |
+| **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to delete |
+
+
+---
+
+## GetRecordConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | ✅ | Object to query |
+| **filter** | `Record<string, any>` | optional | Field/value pairs to match (operator values like `{"$ne": null}` are preserved) |
+| **fields** | `string[]` | optional | Field projection — only these fields are read (default: all) |
+| **limit** | `number` | optional | Max records to return; >1 switches to a multi-record query |
+| **outputVariable** | `string` | optional | Flow variable the result is bound to |
+
+
+---
+
+## MapConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **collection** | `string \| any[]` | ✅ | Template/variable resolving to the array to process (an inline array is accepted) |
+| **flowName** | `string` | ✅ | Subflow run for each item — it may pause (e.g. an approval) |
+| **iteratorVariable** | `string` | ✅ | Variable holding the current item |
+| **indexVariable** | `string` | optional | Optional variable holding the current index |
+| **itemObject** | `string` | optional | When items are records, the object they belong to (exposes each item as the child's record) |
+| **input** | `Record<string, any>` | optional | Params passed to each item's subflow (interpolated per item) |
+| **outputVariable** | `string` | optional | Each item's subflow output, collected in order |
+
+
+---
+
+## ScreenConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string` | optional | Heading shown above the screen |
+| **description** | `string` | optional | Body text shown under the heading |
+| **fields** | `{ name: string; label?: string; type?: string; required?: boolean; … }[]` | optional | Input fields collected on this screen |
+| **waitForInput** | `boolean` | optional | Pause to show the screen even with no fields; false forces a server pass-through |
+| **objectName** | `string` | optional | Render this object's full create/edit form instead of a flat field list |
+| **idVariable** | `string` | optional | Object form only: variable bound to the saved record's id |
+| **mode** | `Enum<'create' \| 'edit'>` | optional | Object form only: create or edit |
+| **recordId** | `string` | optional | Object form only: id of the record to edit (required for mode: 'edit' to be useful) |
+| **defaults** | `Record<string, any>` | optional | Object form only: prefilled values |
+
+
+---
+
+## ScreenFieldConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Field name (the flow variable the value binds to) |
+| **label** | `string` | optional | Display label |
+| **type** | `string` | optional | Input type |
+| **required** | `boolean` | optional | Whether a value is required to submit |
+| **options** | `{ value: any; label: string }[]` | optional | Choices for a select-style field |
+| **defaultValue** | `any` | optional | Prefilled value (interpolates `{token}` templates) |
+| **placeholder** | `string` | optional | Input placeholder text |
+| **visibleWhen** | `string` | optional | CEL predicate controlling visibility, evaluated client-side |
+
+
+---
+
+## UpdateRecordConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | ✅ | Object to update |
+| **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to update |
+| **fields** | `Record<string, any>` | optional | Field values to write |
+
+
+---
+

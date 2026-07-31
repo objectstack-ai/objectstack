@@ -231,6 +231,7 @@ export const ShowcaseTranslationBundle = {
           map: { label: '工作地点地图' },
           chart: { label: '工时按状态分布' },
           legacy_row_actions: { label: '旧式行操作' },
+          bulk_actions: { label: '批量操作' },
         },
       },
       showcase_account: {

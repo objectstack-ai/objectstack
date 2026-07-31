@@ -62,7 +62,10 @@ export default {
     type: 'autolaunched',
     active: false,                  // 16: removed (status is the lifecycle)
     template: true,                 // 16: removed (no reader)
-    errorHandling: { strategy: 'retry', fallbackNodeId: 'n9' },  // 16: fault edges own this
+    // 16: fallbackNodeId removed (fault edges own this). maxRetries is stated
+    // because #4247 refuses a zero-attempt 'retry' — the count is the one v17
+    // flow change the chain surfaces as a semantic TODO instead of rewriting.
+    errorHandling: { strategy: 'retry', maxRetries: 2, fallbackNodeId: 'n9' },
     nodes: [
       { id: 'n1', type: 'start', label: 'Start', outputSchema: { ok: { type: 'boolean' } } },  // 16: removed
       { id: 'n2', type: 'delete_record', label: 'Purge', config: { objectName: 'e2e_ticket', filter: { done: true } } },  // canonical since protocol 11 — must pass through untouched
@@ -229,6 +232,76 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
       try { rmSync(dir2, { recursive: true, force: true }); } catch { /* ignore */ }
     }
   }, 120_000);
+
+  /**
+   * ADR-0104 / #3438. The metadata half of a 16→17 upgrade is only half of it:
+   * two DATA migrations gate enforcement per deployment, and a gate nobody is
+   * told about is served by nobody. The advice is scoped to the field classes
+   * the author actually declares, so it is never noise.
+   */
+  describe('per-deployment data migrations (#3438)', () => {
+    const withFields = (fields: string) => `
+      export default {
+        name: 'dm_probe', label: 'DM Probe',
+        objects: [{ name: 'dm_thing', label: 'Thing', fields: { ${fields} } }],
+      };
+    `;
+
+    async function runJson(fields: string, args: string[] = ['--from', '16', '--json']) {
+      const d = mkdtempSync(join(tmpdir(), 'os-migrate-meta-dm-'));
+      try {
+        writeFileSync(join(d, 'objectstack.config.ts'), withFields(fields));
+        return JSON.parse(await runMeta(args, d));
+      } finally {
+        try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
+    }
+
+    it('names the file migration when the metadata declares a media field', async () => {
+      const res = await runJson(`cover: { type: 'image', label: 'Cover' }`);
+      expect(res.dataMigrations.map((m: any) => m.id)).toEqual(['adr-0104-file-references']);
+    }, 120_000);
+
+    it('names the value-shape scan when the metadata declares a covered field', async () => {
+      const res = await runJson(`spot: { type: 'location', label: 'Spot' }`);
+      expect(res.dataMigrations.map((m: any) => m.id)).toEqual(['adr-0104-value-shapes']);
+    }, 120_000);
+
+    it('names both when both classes are declared', async () => {
+      const res = await runJson(
+        `cover: { type: 'image', label: 'Cover' }, spot: { type: 'location', label: 'Spot' }`,
+      );
+      expect(res.dataMigrations.map((m: any) => m.id).sort()).toEqual([
+        'adr-0104-file-references',
+        'adr-0104-value-shapes',
+      ]);
+    }, 120_000);
+
+    it('stays silent for metadata that declares neither class', async () => {
+      const res = await runJson(`title: { type: 'text', label: 'Title' }`);
+      expect(res.dataMigrations).toEqual([]);
+    }, 120_000);
+
+    it('says nothing on a chain that does not cross into 17', async () => {
+      const res = await runJson(`cover: { type: 'image', label: 'Cover' }`, ['--from', '17', '--json']);
+      expect(res.dataMigrations).toEqual([]);
+    }, 120_000);
+
+    it('ends the human-readable upgrade with the advice, not just the JSON', async () => {
+      // Where an operator actually reads it. The advice names the command and
+      // says the run is dry by default, so nothing here reads as "do this and
+      // something irreversible happens".
+      const d = mkdtempSync(join(tmpdir(), 'os-migrate-meta-dm-h-'));
+      try {
+        writeFileSync(join(d, 'objectstack.config.ts'), withFields(`cover: { type: 'image', label: 'Cover' }`));
+        const stdout = await runMeta(['--from', '16'], d);
+        expect(stdout).toMatch(/os migrate files-to-references/);
+        expect(stdout).toMatch(/dry-run by default/);
+      } finally {
+        try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
+    }, 120_000);
+  });
 
   it('refuses a --from below the support floor with the structured error', async () => {
     let failed = false;

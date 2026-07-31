@@ -163,7 +163,7 @@ export const ODataQuerySchema = lazySchema(() => z.object({
   $expand: z.union([
     z.string(),           // "orders"
     z.array(z.string()),  // ["orders", "customer"]
-  ]).optional().describe('Navigation properties to expand (lookup/master_detail fields)'),
+  ]).optional().describe('Navigation properties to expand (reference fields: lookup/master_detail/user/tree)'),
 
   /**
    * $count - Include total count

@@ -12,10 +12,11 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
+  VALUE_SHAPES_MIGRATION_ID,
   isDataMigrationFlagVerified,
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from '@objectstack/spec/kernel';
@@ -68,7 +69,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError } from './validation/record-validator.js';
+import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 
@@ -264,16 +265,6 @@ export type EngineMiddleware = (
 ) => Promise<void>;
 
 /**
- * Host Context provided to plugins (Internal ObjectQL Plugin System)
- */
-export interface ObjectQLHostContext {
-  ql: ObjectQL;
-  logger: Logger;
-  // Extensible map for host-specific globals (like HTTP Router, etc.)
-  [key: string]: any;
-}
-
-/**
  * Derive the registry key for a metadata item.
  *
  * Most metadata items expose a top-level `name` (or `id`). The `View`
@@ -392,9 +383,6 @@ export class ObjectQL implements IDataEngine {
   // `engine.registerFunction(...)`.
   private functions = new Map<string, FunctionEntry>();
 
-  // Host provided context additions (e.g. Server router)
-  private hostContext: Record<string, any> = {};
-
   // Realtime service for event publishing
   private realtimeService?: IRealtimeService;
 
@@ -423,7 +411,6 @@ export class ObjectQL implements IDataEngine {
   private _registry: SchemaRegistry = new SchemaRegistry();
 
   constructor(hostContext: Record<string, any> = {}) {
-    this.hostContext = hostContext;
     // Use provided logger or create a new one
     this.logger = hostContext.logger || createLogger({ level: 'info', format: 'pretty' });
     // Pick up production hardening switches from env so deployers can
@@ -460,42 +447,6 @@ export class ObjectQL implements IDataEngine {
    */
   get registry(): SchemaRegistry {
     return this._registry;
-  }
-
-  /**
-   * Load and Register a Plugin
-   */
-  async use(manifestPart: any, runtimePart?: any) {
-    this.logger.debug('Loading plugin', { 
-      hasManifest: !!manifestPart, 
-      hasRuntime: !!runtimePart 
-    });
-
-    // 1. Validate / Register Manifest
-    if (manifestPart) {
-      this.registerApp(manifestPart);
-    }
-
-    // 2. Execute Runtime
-    if (runtimePart) {
-       const pluginDef = (runtimePart as any).default || runtimePart;
-       if (pluginDef.onEnable) {
-          this.logger.debug('Executing plugin runtime onEnable');
-          
-          const context: ObjectQLHostContext = {
-            ql: this,
-            logger: this.logger,
-            // Expose the driver registry helper explicitly if needed
-            drivers: {
-                register: (driver: IDataDriver) => this.registerDriver(driver)
-            },
-            ...this.hostContext
-          };
-          
-          await pluginDef.onEnable(context);
-          this.logger.debug('Plugin runtime onEnable completed');
-       }
-    }
   }
 
   /**
@@ -2198,52 +2149,125 @@ export class ObjectQL implements IDataEngine {
   }
 
   /**
+   * Does this object declare a reference or structured-JSON field that a write
+   * would actually check? Same per-schema cache and same dormancy rule as
+   * {@link objectHasMediaField}: an object holding none can hold no violation
+   * of them, so it must not pay a query to learn that.
+   *
+   * The membership test is `isScannableValueShapeField` — the validator's own
+   * — and not raw type membership, because the registry INJECTS covered-type
+   * fields into every object it registers: `organization_id` and `owner_id`
+   * (both `system`), plus `created_by` / `updated_by` (both in `SKIP_FIELDS`),
+   * are all `lookup`s. `validateRecord` skips every one of them before it ever
+   * reaches the value-shape check, so counting them made this answer `true` for
+   * literally every object — the dormancy rule above never fired, and this
+   * cache memoized a constant. Same predicate as the scanner for the same
+   * reason the scanner imports it: three readings of "a covered field" drifting
+   * by one clause is how a gate ends up governing fields nothing enforces.
+   */
+  private objectHasCoveredValueField(objectSchema: any): boolean {
+    if (!objectSchema?.fields) return false;
+    const cached = ObjectQL.coveredValueFieldPresence.get(objectSchema);
+    if (cached !== undefined) return cached;
+    const present = Object.entries(objectSchema.fields).some(
+      ([name, def]: [string, any]) => isScannableValueShapeField(name, def),
+    );
+    ObjectQL.coveredValueFieldPresence.set(objectSchema, present);
+    return present;
+  }
+  private static readonly coveredValueFieldPresence = new WeakMap<object, boolean>();
+
+  /** The reference / structured-JSON value-shape verdict for a write. */
+  private async valueShapeStrictFor(objectSchema: any): Promise<boolean> {
+    if (!this.objectHasCoveredValueField(objectSchema)) return false;
+    return this.isValueShapesMigrationVerified();
+  }
+
+  /**
    * Has this deployment completed AND verified the ADR-0104 file-as-reference
    * migration (#3617)? Read once per process from the `sys_migration` flag.
    *
    * Every way of not knowing answers `false` — no storage service (so no
    * `sys_migration` object registered), no row, an unreadable table, a
-   * malformed row. That is the same posture the flag's other consumer takes:
-   * enforcement derives from evidence, and absent evidence is not permission.
-   * Here "no" means media value shapes keep warning instead of rejecting, so
-   * a deployment that cannot be asked keeps writing.
+   * malformed row. Enforcement derives from evidence, and absent evidence is
+   * not permission. Here "no" means media value shapes keep warning instead
+   * of rejecting, so a deployment that cannot be asked keeps writing.
+   *
+   * Public because the flag's other in-process consumer reads it through this
+   * same memoized seam: the storage service's release path (#3459 PR-5b) asks
+   * it whether a released field file may be tombstoned, duck-typed as an
+   * optional method so a fake or an older engine reads as "not verified".
+   * One read, one invalidation (`invalidateDataMigrationFlags`), no way for
+   * the two consumers to see different answers.
    *
    * Costs nothing on a kernel without the storage objects: the registry lookup
    * short-circuits before any query.
    */
-  private async isFileReferencesMigrationVerified(): Promise<boolean> {
+  async isFileReferencesMigrationVerified(): Promise<boolean> {
     if (!this.fileReferencesMigrationVerified) {
-      this.fileReferencesMigrationVerified = (async () => {
-        if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return false;
-        try {
-          const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
-            where: { id: FILE_REFERENCES_MIGRATION_ID },
-            limit: 1,
-            context: { isSystem: true } as ExecutionContextInput,
-          });
-          const row: any = rows?.[0];
-          if (!row || row.id !== FILE_REFERENCES_MIGRATION_ID) return false;
-          const verified = isDataMigrationFlagVerified({
-            id: FILE_REFERENCES_MIGRATION_ID,
-            last_run_at: String(row.last_run_at ?? ''),
-            verified_at: row.verified_at == null ? null : String(row.verified_at),
-            // A non-numeric count must read as "not zero", not as 0 — a bad
-            // coercion lands on NaN, which fails the === 0 test.
-            blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
-          });
-          if (verified) {
-            this.logger.info(
-              '[value-shape] this deployment has verified the file-as-reference migration — ' +
-                'media value shapes are enforced (ADR-0104 D1 / #3617)',
-            );
-          }
-          return verified;
-        } catch {
-          return false; // unreadable evidence → stay lenient
-        }
-      })();
+      this.fileReferencesMigrationVerified = this.readMigrationFlagVerified(
+        FILE_REFERENCES_MIGRATION_ID,
+        '[value-shape] this deployment has verified the file-as-reference migration — ' +
+          'media value shapes are enforced and released field files may be collected ' +
+          '(ADR-0104 / #3617)',
+      );
     }
     return this.fileReferencesMigrationVerified;
+  }
+
+  /**
+   * Has this deployment completed AND verified the ADR-0104 non-media
+   * value-shape scan (`os migrate value-shapes`, #3438)? Same memoized seam and
+   * same fail-lenient posture as the file flag above — and a SEPARATE flag,
+   * because it attests a different fact. The file migration says file values
+   * were converted and reconciled; it says nothing about whether a `lookup` id
+   * or a `location` payload is well formed, so it may not vouch for these
+   * classes.
+   */
+  async isValueShapesMigrationVerified(): Promise<boolean> {
+    if (!this.valueShapesMigrationVerified) {
+      this.valueShapesMigrationVerified = this.readMigrationFlagVerified(
+        VALUE_SHAPES_MIGRATION_ID,
+        '[value-shape] this deployment has verified the value-shape scan — reference and ' +
+          'structured-JSON value shapes are enforced (ADR-0104 / #3438)',
+      );
+    }
+    return this.valueShapesMigrationVerified;
+  }
+
+  /**
+   * Read one deployment migration flag and answer whether it authorises its
+   * consumers. Shared by both flags so the "every way of not knowing answers
+   * false" rule is written once: no `sys_migration` object registered, no row,
+   * an unreadable table, a malformed row — all `false`. Enforcement derives
+   * from evidence, and absent evidence is not permission.
+   *
+   * Costs nothing on a kernel without the platform objects: the registry
+   * lookup short-circuits before any query.
+   */
+  private async readMigrationFlagVerified(migrationId: string, verifiedLog: string): Promise<boolean> {
+    if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return false;
+    try {
+      const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
+        where: { id: migrationId },
+        limit: 1,
+        context: { isSystem: true } as ExecutionContextInput,
+      });
+      const row: any = rows?.[0];
+      if (!row || row.id !== migrationId) return false;
+      const verified = isDataMigrationFlagVerified({
+        id: migrationId,
+        last_run_at: String(row.last_run_at ?? ''),
+        verified_at: row.verified_at == null ? null : String(row.verified_at),
+        // A non-numeric count must read as "not zero", not as 0 — a bad
+        // coercion lands on NaN, which fails the === 0 test.
+        blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
+      });
+      if (verified) this.logger.info(verifiedLog);
+      return verified;
+    } catch {
+      return false; // unreadable evidence → stay lenient
+    }
   }
 
   /**
@@ -2253,6 +2277,101 @@ export class ObjectQL implements IDataEngine {
    */
   invalidateDataMigrationFlags(): void {
     this.fileReferencesMigrationVerified = null;
+    this.valueShapesMigrationVerified = null;
+    this.migrationGatesAnnounced = false;
+  }
+
+  /**
+   * Say, once at boot, which value-shape gates are still open here and what
+   * closes them (ADR-0104's 2026-07-30 addendum, #3438).
+   *
+   * Both gates fail toward leniency: a deployment that never runs its
+   * migration keeps warning instead of rejecting, and keeps every released
+   * file forever. That default is deliberate — but silent, and a gate nobody
+   * is told about is served by nobody. The LAX posture is the one worth
+   * announcing, so this logs only when a gate is open *and* this deployment's
+   * own metadata says the gate is about something it stores; the verified case
+   * already logs from the flag read.
+   *
+   * A gate whose posture an environment switch has already settled says
+   * nothing either, because the flag this line reports on is not what decides
+   * that deployment's posture: under `OS_DATA_VALUE_SHAPE_STRICT_ENABLED`
+   * enforcement is already on, so "checked but NOT enforced here" is simply
+   * false, and under either opt-out the operator chose leniency deliberately,
+   * so naming a migration that would not change what they get is noise. Each
+   * gate consults its own pair, since the opt-outs are per-class. Cheapest
+   * test first: a kernel with nothing to say never reaches the flag query.
+   *
+   * Costs one flag read per applicable gate (both memoized, and both already
+   * paid by the first write to such an object), and nothing at all for an app
+   * that declares neither class of field.
+   */
+  async announceOpenMigrationGates(): Promise<void> {
+    if (this.migrationGatesAnnounced) return;
+    this.migrationGatesAnnounced = true;
+    try {
+      const mediaByEnv = mediaPostureSetByEnv();
+      const coveredByEnv = valueShapePostureSetByEnv();
+      if (mediaByEnv && coveredByEnv) return;
+
+      let media = false;
+      let covered = false;
+      for (const obj of this._registry.getAllObjects() as any[]) {
+        if (!media && !mediaByEnv && this.objectHasMediaField(obj)) media = true;
+        if (!covered && !coveredByEnv && this.objectHasCoveredValueField(obj)) covered = true;
+        if ((media || mediaByEnv) && (covered || coveredByEnv)) break;
+      }
+
+      if (media && !(await this.isFileReferencesMigrationVerified())) {
+        this.logger.info(
+          '[value-shape] media values are checked but NOT enforced here, and released files are ' +
+            'never collected — this deployment has not verified its file migration. Run ' +
+            '`os migrate files-to-references` (dry run) to see what it would do, then `--apply` ' +
+            'to close the gate (ADR-0104 / #3617).',
+        );
+      }
+      if (covered && !(await this.isValueShapesMigrationVerified())) {
+        this.logger.info(
+          '[value-shape] reference and structured-JSON values are checked but NOT enforced here — ' +
+            'this deployment has not verified its value-shape scan. Run `os migrate value-shapes` ' +
+            '(dry run) to see what it would report, then `--apply` to close the gate ' +
+            '(ADR-0104 / #3438).',
+        );
+      }
+    } catch {
+      // An advisory must never be the reason a boot fails.
+    }
+  }
+  private migrationGatesAnnounced = false;
+
+  /**
+   * Did this process CREATE the datastore it is talking to, from empty?
+   *
+   * True only when every driver that can account for its schema sync created
+   * tables and found none already there. That conjunction is the whole point:
+   * one pre-existing table anywhere means something ran here before us, so
+   * this store's history is not ours to vouch for. A driver that cannot
+   * report (`getSchemaSyncStats` absent, deferred DDL, sync skipped) makes the
+   * answer no rather than maybe — the consumers of this fact grant
+   * permissions, so "cannot say" must read as "no".
+   *
+   * The one caller is the fresh-datastore attestation (#3438, ADR-0104's
+   * 2026-07-30 addendum), which records that a store born empty needs no data
+   * migration. Ask it only during boot: once the process starts serving, the
+   * counts describe a moment that has passed.
+   */
+  wasDatastoreCreatedFromEmpty(): boolean {
+    let created = 0;
+    let existing = 0;
+    let reporting = 0;
+    for (const driver of this.drivers.values()) {
+      const stats = (driver as any).getSchemaSyncStats?.();
+      if (!stats) continue;
+      reporting += 1;
+      created += Number(stats.created) || 0;
+      existing += Number(stats.existing) || 0;
+    }
+    return reporting > 0 && existing === 0 && created > 0;
   }
 
   async destroy() {
@@ -2293,6 +2412,7 @@ export class ObjectQL implements IDataEngine {
    * {@link invalidateDataMigrationFlags} instead of waiting for a restart.
    */
   private fileReferencesMigrationVerified: Promise<boolean> | null = null;
+  private valueShapesMigrationVerified: Promise<boolean> | null = null;
 
   /** Lazily-built index: child object name → roll-up summary descriptors on
    *  parent objects that aggregate it. Invalidated when packages register. */
@@ -2448,11 +2568,23 @@ export class ObjectQL implements IDataEngine {
     for (const [fieldName, nestedAST] of Object.entries(expand)) {
       const fieldDef = objectSchema.fields[fieldName];
 
-      // Skip if field not found or not a relationship type
+      // Skip if field not found or not a relationship type.
+      //
+      // `user` is a lookup specialized to sys_user and `tree` is a hierarchical
+      // self-reference — both carry the same `reference` + id storage, so both
+      // expand through this exact path (single or multiple).
+      //
+      // [#4226] The membership test is `REFERENCE_VALUE_TYPES` — the spec's own
+      // list of types whose value "points at another record … the related record
+      // object in expanded form" — rather than a hand-copied `!==` chain. The
+      // chain had drifted: it omitted `tree`, so a `$expand` of a hierarchy
+      // field returned the raw parent id and rendered as a bare placeholder,
+      // while `field-value.zod.ts` and objectui's `EXPANDABLE_FIELD_TYPES` both
+      // declared it expandable. Reading the shared set is what stops the
+      // protocol's expand gate (which validates against the same set) from ever
+      // admitting a field this loop then silently skips.
       if (!fieldDef || !fieldDef.reference) continue;
-      // `user` is a lookup specialized to sys_user — it carries the same `reference`
-      // and id storage, so it expands through this exact path (single or multiple).
-      if (fieldDef.type !== 'lookup' && fieldDef.type !== 'master_detail' && fieldDef.type !== 'user') continue;
+      if (!REFERENCE_VALUE_TYPES.has(fieldDef.type)) continue;
 
       const referenceObject = fieldDef.reference;
 
@@ -2776,7 +2908,7 @@ export class ObjectQL implements IDataEngine {
       delete (ast as any).searchFields;
       delete (ast as any).$searchFields;
     }
-    const _findFormula = planFormulaProjection(_findSchema, ast.fields as string[] | undefined);
+    const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
 
     // Drop any requested field that doesn't exist on the schema. Without
@@ -2794,10 +2926,10 @@ export class ObjectQL implements IDataEngine {
       known.add('id');
       known.add('created_at');
       known.add('updated_at');
-      const filtered = (ast.fields as string[]).filter(f => {
+      const filtered = ast.fields.filter(f => {
         // Keep relationship paths like `owner.name` — the engine will
         // resolve those via populate; only validate top-level segment.
-        const head = String(f).split('.')[0];
+        const head = f.split('.')[0];
         return known.has(head);
       });
       // Guard against an empty projection — fall back to `*` so the
@@ -2879,7 +3011,7 @@ export class ObjectQL implements IDataEngine {
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
     const _findOneSchema = this._registry.getObject(objectName);
-    const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields as string[] | undefined);
+    const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
 
     // Drop unknown fields — see equivalent block in `find()` for rationale.
@@ -2890,7 +3022,7 @@ export class ObjectQL implements IDataEngine {
       known.add('id');
       known.add('created_at');
       known.add('updated_at');
-      const filtered = (ast.fields as string[]).filter(f => known.has(String(f).split('.')[0]));
+      const filtered = ast.fields.filter(f => known.has(f.split('.')[0]));
       ast.fields = filtered.length > 0 ? filtered : undefined;
     }
 
@@ -3064,6 +3196,7 @@ export class ObjectQL implements IDataEngine {
         // Resolved once for the whole batch; dormant unless the object declares
         // a media field, and memoized after the first object that does.
         const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(schemaForValidation);
+        const valueShapeStrict = await this.valueShapeStrictFor(schemaForValidation);
         // Locale + translation hooks for the rejection messages (#3957) —
         // resolved once for the batch, identical for every row.
         const msgCtx = this.validationMessageContext(object, opCtx.context);
@@ -3071,7 +3204,7 @@ export class ObjectQL implements IDataEngine {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
-            validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, messages: msgCtx });
+            validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx });
           } catch (e) {
             if (!partialMode) throw e;
@@ -3353,11 +3486,12 @@ export class ObjectQL implements IDataEngine {
            let priorRecord: Record<string, unknown> | null = null;
            const updateSchema = this._registry.getObject(object);
            const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(updateSchema);
+           const valueShapeStrict = await this.valueShapeStrictFor(updateSchema);
            const updateMsgCtx = this.validationMessageContext(object, opCtx.context);
            if (hookContext.input.id) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, messages: updateMsgCtx });
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx });
                if (needsPriorRecord(updateSchema as any) || (this.hooks.get('afterUpdate')?.length ?? 0) > 0) {
                    const priorAst: QueryAST = { object, where: { id: hookContext.input.id }, limit: 1 };
                    priorRecord = await driver.findOne(object, priorAst, hookContext.input.options as any);
@@ -3383,7 +3517,7 @@ export class ObjectQL implements IDataEngine {
            } else if (options?.multi && driver.updateMany) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, messages: updateMsgCtx });
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx });
                // [#2982] Consume the middleware-composed AST seeded above, so
                // the injected row-scoping (RLS write filter, sharing's
                // editable-rows filter) actually binds the driver operation. Fail

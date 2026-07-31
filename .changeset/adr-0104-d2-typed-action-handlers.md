@@ -25,12 +25,13 @@ read an untyped bag. D2 makes the declaration enforced and typed.
   required presence, per-type value shape, and unknown keys (the dispatcher's
   own `recordId` / `objectName` are allowlisted).
 
-**Warn-first rollout (ADR-0104 R3).** A violation is **logged and passes** by
-default — params that were silently wrong before keep working while the drift
-becomes visible. Set `OS_ACTION_PARAMS_STRICT_ENABLED=1` to reject with a
-`400 VALIDATION` (REST) / an error (MCP). Actions that declare no `params` are
-untouched (nothing to validate against). The flip to strict-by-default rides a
-later minor once telemetry is quiet.
+**Enforced by default.** A violation is rejected with a `400 VALIDATION_FAILED`
+(REST) / an error (MCP) before the handler runs. Actions that declare no
+`params` are untouched — there is nothing to validate against. This landed
+warn-first behind an `OS_ACTION_PARAMS_STRICT_ENABLED` opt-in during the 17.0
+RC line; that variable does **not** exist in 17.0 — see the companion entry
+"action params are enforced by default, and the opt-in is gone" for the
+reasoning and the `OS_ALLOW_LAX_ACTION_PARAMS` escape hatch.
 
 Not included: file/image params becoming `sys_file` references — that depends
 on file-as-reference (ADR-0104 D3). Per-name static typing of `ctx.params` from

@@ -40,6 +40,11 @@ export interface IMetadataService {
   getObject(name: string): Promise<unknown | undefined>;
   listObjects(): Promise<unknown[]>;
 
+  // Loader reads (optional)
+  load?<T>(type: string, name: string, options?): Promise<T | null>;
+  loadDiagnosed?<T>(type: string, name: string, options?):
+    Promise<{ data: T | null; degraded: boolean; errors: string[] }>;
+
   // Convenience accessors for UI metadata (optional)
   getView?(name: string): Promise<unknown | undefined>;
   listViews?(object?: string): Promise<unknown[]>;
@@ -111,6 +116,27 @@ const has = await metadataService.exists('object', 'task');
 <Callout type="info">
 `get` / `getObject` resolve to `undefined` (not `null`) when an item does not exist.
 </Callout>
+
+### load / loadDiagnosed
+
+Both read one item through the registered loaders. The difference is what a
+missing answer means.
+
+`load` returns `null` for **both** "no loader has this item" and "every loader
+failed" — a loader that throws is warn-logged and skipped, so the two collapse
+into the same value. `loadDiagnosed` returns the same data plus `degraded` and
+`errors`, which is what tells them apart (ADR-0110 D3).
+
+Reach for `loadDiagnosed` whenever the difference could change a decision.
+Treating a degraded read as an absence is how a store being down turns into an
+authorization answer.
+
+```typescript
+const { data, degraded, errors } = await metadataService.loadDiagnosed?.('action', name) ?? {};
+if (degraded) {
+  // The store is unreachable — do NOT conclude the action does not exist.
+}
+```
 
 ### register / unregister
 

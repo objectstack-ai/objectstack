@@ -227,12 +227,49 @@ describe('HttpDispatcher extracted domains (PR-2)', () => {
             dismissAudienceBindingSuggestion: vi.fn(),
         };
         // Direct delegate call for the same reason as the notifications case.
+        //
+        // [#4127 batch 3] This asserted `status: 'open'` — not one of the three
+        // values `AudienceBindingSuggestionFilter` declares. The test pinned the
+        // unvalidated pass-through as EXPECTED, so it proved the delegate
+        // carried a filter through and nothing about that filter being a status.
+        // Same shape as the `auth.handler` mock in batch 1: coverage in
+        // appearance, a wrong contract in substance. Now a real status.
         const context: any = { executionContext: { userId: 'admin-1' } };
-        const result = await makeDispatcher({ security }).handleSecurity('/suggested-bindings', 'GET', undefined, { status: 'open' }, context);
+        const result = await makeDispatcher({ security }).handleSecurity('/suggested-bindings', 'GET', undefined, { status: 'pending' }, context);
         expect(result.response?.status).toBe(200);
         expect(security.listAudienceBindingSuggestions).toHaveBeenCalledWith(
             expect.objectContaining({ userId: 'admin-1' }),
-            expect.objectContaining({ status: 'open' }),
+            expect.objectContaining({ status: 'pending' }),
+        );
+    });
+
+    it('/security rejects a status filter that is not a declared status, without calling the service', async () => {
+        const security = {
+            listAudienceBindingSuggestions: vi.fn().mockResolvedValue([{ id: 's1' }]),
+            confirmAudienceBindingSuggestion: vi.fn(),
+            dismissAudienceBindingSuggestion: vi.fn(),
+        };
+        const context: any = { executionContext: { userId: 'admin-1' } };
+        const result = await makeDispatcher({ security }).handleSecurity('/suggested-bindings', 'GET', undefined, { status: 'open' }, context);
+        // Previously this reached the service and became `where.status = 'open'`,
+        // which matched no row — an empty list that reads as "no suggestions"
+        // rather than "that is not a status".
+        expect(result.response?.status).toBe(400);
+        expect(security.listAudienceBindingSuggestions).not.toHaveBeenCalled();
+    });
+
+    it('/security omits the status filter entirely when the query has none', async () => {
+        const security = {
+            listAudienceBindingSuggestions: vi.fn().mockResolvedValue([]),
+            confirmAudienceBindingSuggestion: vi.fn(),
+            dismissAudienceBindingSuggestion: vi.fn(),
+        };
+        const context: any = { executionContext: { userId: 'admin-1' } };
+        const result = await makeDispatcher({ security }).handleSecurity('/suggested-bindings', 'GET', undefined, {}, context);
+        expect(result.response?.status).toBe(200);
+        expect(security.listAudienceBindingSuggestions).toHaveBeenCalledWith(
+            expect.objectContaining({ userId: 'admin-1' }),
+            expect.objectContaining({ status: undefined }),
         );
     });
 
@@ -314,14 +351,18 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
         expect(download).not.toHaveBeenCalled();
     });
 
-    it('/ui/view/:object serves the protocol getUiView result; 503 without a protocol service', async () => {
+    it('/ui/view/:object serves the protocol getUiView result; 501 without a protocol service', async () => {
         const getUiView = vi.fn().mockResolvedValue({ view: 'list-def' });
         const ok = await makeDispatcher({ protocol: { getUiView } }).dispatch('GET', '/ui/view/account/list', undefined, {}, {} as any);
         expect(ok.response?.status).toBe(200);
         expect(getUiView).toHaveBeenCalledWith({ object: 'account', type: 'list' });
 
+        // [#4093 follow-up] Was 503. The route is mounted and the
+        // implementation is absent — 501. 503 claimed the condition was
+        // temporary; an uninstalled MetadataPlugin does not install itself.
         const missing = await makeDispatcher().dispatch('GET', '/ui/view/account', undefined, {}, {} as any);
-        expect(missing.response?.status).toBe(503);
+        expect(missing.response?.status).toBe(501);
+        expect(missing.response?.body?.error?.message ?? '').toContain('MetadataPlugin');
     });
 });
 
@@ -657,17 +698,21 @@ describe('HttpDispatcher extracted domains (PR-7: auth/ai)', () => {
         // #4053: in the declared envelope now, with `AiAgentsResponseSchema`'s
         // `{ agents }` RELOCATED under `data` rather than flattened to the bare
         // array. `unwrapResponse` returns `data`, so `client.ai.agents.list()`
-        // reads `.agents` off it and keeps working against cloud's still-
-        // unenveloped `service-ai` too — which is what lets the two surfaces
-        // convert independently instead of in lockstep.
+        // reads `.agents` off it — which is what let this surface convert on its
+        // own and cloud's `service-ai`, the route's other producer, follow
+        // independently instead of in lockstep. Both answer this now (cloud#929).
         expect(envelopeViolations(result.response?.body), JSON.stringify(result.response?.body)).toEqual([]);
         expect(result.response?.body?.data?.agents).toEqual([]);
         expect(result.response?.body?.agents).toBeUndefined();
     });
 
-    it('/ai routes 404 (service missing) for non-agents paths', async () => {
+    // [#4093 follow-up] Was 404. `/ai/*` is mounted unconditionally, so a
+    // request with no AI service reached a handler that had nothing to
+    // delegate to — 501. (`GET /ai/agents` keeps its deliberate empty-list
+    // 200, asserted separately: the console polls it on every navigation.)
+    it('/ai routes 501 (service missing) for non-agents paths', async () => {
         const result = await makeDispatcher().dispatch('POST', '/ai/chat', { q: 'hi' }, {}, {} as any);
-        expect(result.response?.status).toBe(404);
+        expect(result.response?.status).toBe(501);
     });
 
     it('/ai dispatches to a matching cached kernel route with params + user threading', async () => {

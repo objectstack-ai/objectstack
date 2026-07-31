@@ -39,7 +39,12 @@ export type KernelManager = any;
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type EnvironmentDriverRegistry = any;
-import { createOriginMatcher, hasWildcardPattern } from '@objectstack/plugin-hono-server';
+import {
+  createOriginMatcher,
+  hasWildcardPattern,
+  DEFAULT_CORS_ALLOW_HEADERS,
+  DEFAULT_CORS_EXPOSE_HEADERS,
+} from '@objectstack/plugin-hono-server';
 
 export interface ObjectStackHonoCorsOptions {
   /** Enable or disable CORS. Defaults to true. */
@@ -172,30 +177,24 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
         origin = configuredOrigin;
       }
 
-      // Always include `set-auth-token` in exposed headers so that the
-      // better-auth `bearer()` plugin (registered by plugin-auth) can
-      // deliver rotated session tokens to cross-origin clients. Without
-      // this, browsers strip the header from every response, the client
-      // never sees the new token, and cross-origin sessions silently
-      // break even when preflight and the actual request both succeed.
+      // Both CORS defaults are imported from `@objectstack/plugin-hono-server`,
+      // which this package already depends on (#3786). The three Hono-based CORS
+      // sites used to carry their own copies under "keep in sync" comments — this
+      // one included, right down to a duplicate of the rationale below.
       //
-      // This mirrors `plugin-hono-server`'s CORS wiring — all three
-      // Hono-based CORS sites must stay in lockstep on this default.
-      // `x-objectstack-dropped-fields` (#3455) lets a cross-origin browser read
-      // the single-write drop header (#3431); the body `droppedFields` channel is
-      // the primary, cross-origin-safe surface, so this is a convenience mirror.
-      const defaultExposeHeaders = ['set-auth-token', 'x-objectstack-dropped-fields'];
+      // `set-auth-token` is the load-bearing one to understand: without it in the
+      // exposed set, browsers strip the header from every response, the client
+      // never sees its rotated session token, and cross-origin sessions silently
+      // break even though preflight and the request both succeed.
       const exposeHeaders = Array.from(new Set([
-        ...defaultExposeHeaders,
+        ...DEFAULT_CORS_EXPOSE_HEADERS,
         ...(corsOpts.exposeHeaders ?? []),
       ]));
 
       app.use('*', cors({
         origin: origin as any,
         allowMethods: corsOpts.methods || ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'],
-        // Keep in sync with plugin-hono-server's defaultAllowHeaders — `If-Match`
-        // carries the OCC token on cross-origin record PATCHes (objectui#2572).
-        allowHeaders: corsOpts.allowHeaders || ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Tenant-ID', 'X-Environment-Id', 'If-Match'],
+        allowHeaders: corsOpts.allowHeaders || [...DEFAULT_CORS_ALLOW_HEADERS],
         exposeHeaders,
         credentials,
         maxAge,

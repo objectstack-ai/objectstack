@@ -69,30 +69,6 @@ const result = AggregationFunction.parse(data);
 
 ---
 
-## FieldNode
-
-### Union Options
-
-This schema accepts one of the following structures:
-
-#### Option 1
-
-Type: `string`
-
----
-
-#### Option 2
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ |  |
-| **fields** | `[FieldNode](#fieldnode)[]` | optional |  |
-| **alias** | `string` | optional |  |
-
----
-
 
 ---
 
@@ -152,7 +128,7 @@ Type: `string`
 | **object** | `string` | ✅ | Object/table to join |
 | **alias** | `string` | optional | Table alias |
 | **on** | `any` | ✅ | Join condition |
-| **subquery** | `{ object: string; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; where?: any; search?: object; … }` | optional | Subquery instead of object |
+| **subquery** | `{ object: string; fields?: string[]; where?: any; search?: object; … }` | optional | Subquery instead of object |
 
 
 ---
@@ -188,7 +164,7 @@ Type: `string`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name (e.g. account) |
-| **fields** | `string \| { field: string; fields?: object[]; alias?: string }[]` | optional | Fields to retrieve |
+| **fields** | `string[]` | optional | Fields to retrieve — field names, optionally dotted to reach through a relationship (`owner.name`). Related *records* are selected with `expand`, not from inside this list. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
 | **search** | `{ query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional | Full-text search configuration ($search parameter) |
 | **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |

@@ -187,7 +187,7 @@ Four orthogonal levers shape how `MetadataManager` and `MetadataPlugin` behave a
 | :--- | :--- | :--- |
 | `eager` (default) | Local dev, traditional servers | Scans filesystem (or hydrates from `artifactSource`) at boot. |
 | `lazy` | Cold-start sensitive runtimes, on-demand workloads | Skips the FS prime; reads flow through registered loaders (incl. DatabaseLoader cache). Honors `artifactSource` when set. |
-| `artifact-only` | Edge / serverless / read-only production | Refuses to touch the filesystem. Requires `artifactSource` (`mode: 'local-file'` or `'artifact-api'`). |
+| `artifact-only` | Edge / serverless / read-only production | Refuses to touch the filesystem. Requires `artifactSource` (`mode: 'local-file'`; `path` may be an `http(s)` URL). |
 
 ```typescript
 new MetadataPlugin({
@@ -195,6 +195,37 @@ new MetadataPlugin({
   artifactSource: { mode: 'local-file', path: './dist/objectstack.json' },
 });
 ```
+
+#### Artifact source
+
+`artifactSource: { mode: 'local-file', path, fetchTimeoutMs? }` is the single
+artifact source, honored by every bootstrap mode above. `path` is a filesystem
+path or an `http(s)` URL fetched verbatim — the control plane's public
+artifact route (`/pub/v1/environments/:id/artifact[?commit=<id>]`) serves
+exactly such URLs, so a sealed runtime can boot straight off a published
+revision:
+
+```typescript
+new MetadataPlugin({
+  config: { bootstrap: 'artifact-only' },
+  artifactSource: {
+    mode: 'local-file',
+    path: 'https://cloud.example.com/pub/v1/environments/env_42/artifact?commit=cmt_1a2b',
+  },
+});
+```
+
+Only non-URL paths get the artifact-file HMR watcher (`artifactWatch`); remote
+reads honor `fetchTimeoutMs` (and `OS_ARTIFACT_FETCH_TIMEOUT_MS`, default
+60 s). Outside `artifact-only`, an absent local file is "nothing compiled
+yet", not a fault.
+
+A second `artifact-api` mode (a Bearer-authenticated control-plane pull) was
+removed while resolving #4246: it had no consumers — the cloud runtime uses
+its own `ArtifactApiClient`, and package distribution into a running OSS
+instance goes through `@objectstack/cloud-connection` (`os package install`).
+A still-configured `artifact-api` source fails loudly at `start()` rather
+than silently falling back to the filesystem scan.
 
 ### 2. Persistence Write Gates
 

@@ -31,7 +31,7 @@
 | **Bootstrap modes**              | `MetadataPluginConfig.bootstrap` = `eager` \| `lazy` \| `artifact-only` — supports edge / serverless / read-only deployments. |
 | **Persistence write gates**      | `MetadataManagerConfig.persistence.{ writable, overlayWritable }` — runtime freeze for sealed kernels. |
 | **Single-source schema discipline** | Canonical `MetadataManagerConfigSchema` / `MetadataFallbackStrategySchema` live in `kernel/metadata-loader.zod.ts` and are re-exported from `system/metadata-persistence.zod.ts`. |
-| **`artifact-api` runtime source**   | `MetadataPlugin` can boot from a remote control-plane artifact (`artifactSource: { mode: 'artifact-api', url, projectId, commitId? }`). Wired across `eager` / `lazy` / `artifact-only` bootstrap modes. Configurable timeout via `fetchTimeoutMs` or `OS_ARTIFACT_FETCH_TIMEOUT_MS` (default 60 s). |
+| **Remote artifact boot**   | `MetadataPlugin` boots from a compiled artifact via `artifactSource: { mode: 'local-file', path }`, where `path` may be an `http(s)` URL — e.g. the control plane's public `/pub/v1/environments/:id/artifact[?commit=…]` route. Wired across `eager` / `lazy` / `artifact-only` bootstrap modes. Configurable timeout via `fetchTimeoutMs` or `OS_ARTIFACT_FETCH_TIMEOUT_MS` (default 60 s). A dedicated `artifact-api` mode (Bearer-authenticated control-plane pull) was removed in #4246 — zero consumers in any repo; the cloud runtime uses its own `ArtifactApiClient`. |
 
 ### 🟡 Partially Implemented
 
@@ -193,9 +193,11 @@ artifact persistence (`artifacts/${projectId}/${commitId}.json`).
 
 - [x] Object-storage abstraction available via `StorageServicePlugin`
 - [x] Cloud `artifact-api` reads/writes through `IStorageService`
-- [x] `MetadataPlugin` consumes published artifacts via the
-      `artifactSource: { mode: 'artifact-api' }` source — no direct S3
-      coupling needed in the metadata layer.
+- [x] `MetadataPlugin` consumes published artifacts via
+      `artifactSource: { mode: 'local-file', path: '<artifact URL>' }` — no
+      direct S3 coupling needed in the metadata layer. (The dedicated
+      `artifact-api` mode was removed in #4246 — zero consumers; the cloud
+      runtime pulls artifacts through its own `ArtifactApiClient` instead.)
 - See [Publish, Versioning & Preview](../../content/docs/deployment/publish-and-preview.mdx).
 
 ---

@@ -229,10 +229,12 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 ### Touched `packages/spec`? Regenerate its artifacts BEFORE pushing
 
 `packages/spec` has **eight** checked-in generated artifacts, each with its own CI gate.
-They live in two different jobs (`TypeScript Type Check` in `lint.yml`, `Check Generated
-Artifacts` in `ci.yml`), and each job runs its gates **sequentially** — so the first
-stale artifact masks every one behind it, and you get one red build per artifact instead
-of one for all of them. Match the change to the gate and regenerate up front:
+All of them live in one job — `TypeScript Type Check` in `lint.yml`, which is required and
+has no paths filter, so no gate can go dormant on the PR that breaks it (#4291 retired the
+filtered `Check Generated Artifacts` job for exactly that reason). That job runs its gates
+**sequentially**, so the first stale artifact masks every one behind it, and you get one
+red build per artifact instead of one for all of them. Match the change to the gate and
+regenerate up front:
 
 | You changed | Gate that fails | Regenerate with `pnpm --filter @objectstack/spec …` |
 |:---|:---|:---|
@@ -265,7 +267,10 @@ The script carries its own ledger of gate → generator and **reconciles it agai
 `package.json` on every run**, in both directions. A new `check:`/`gen:` script that
 nobody classified fails the run rather than quietly dropping out of coverage — the
 failure mode a hardcoded list here would have had. (It caught its own `package.json`
-entry on the very first run.)
+entry on the very first run.) CI runs the same reconciliation on every PR
+(`--reconcile-only`, in lint.yml's required typecheck job), so an unclassified script
+fails its own PR instead of landing on `main` and turning this wrapper red for
+everyone else — which happened twice before the CI step existed (#4203, #4232).
 
 ⚠️ **`check:api-surface` reads the built `dist/*.d.ts`, not `src/`.** A stale `dist`
 makes it report exports as **removed** — "N breaking (removed/narrowed)" — when nothing
@@ -274,10 +279,20 @@ believe it, and before you file a bug about `main` being red. (Two phantom "brea
 removals" this way while writing this section; `check:generated` now prints this caveat
 inline when that gate is the one failing.)
 
-`check:liveness`, `check:empty-state`, `check:skill-examples` and
-`check:react-conformance` are pure checks with no generator — a failure there is a real
-finding to fix, not an artifact to regenerate. `check:generated` names them as
-deliberately not run, so its "all up to date" never reads as "everything passed".
+`check:liveness`, `check:empty-state`, `check:skill-examples`,
+`check:react-conformance` and `check:exported-any` are pure checks with no generator — a
+failure there is a real finding to fix, not an artifact to regenerate. `check:generated`
+names them as deliberately not run, so its "all up to date" never reads as "everything
+passed".
+
+`check:exported-any` is the one of those that also reads the built `dist/*.d.ts`, so the
+stale-`dist` caveat above applies to it too. It asks the other half of the
+`api-surface.json` question: that snapshot records an export *exists*, never what it
+*resolves to*, which is how five exported symbols sat at `any` for a whole major with
+every gate green (#4171). A recursive Zod schema needs an annotation to break its
+circular inference, and `z.ZodType<any>` compiles, validates correctly, and silently
+throws the type away — annotate with the type instead (`QueryAST` in
+`src/data/query.zod.ts` is the pattern).
 
 Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
 their output is current; the script reports that each run rather than staying silent
@@ -336,13 +351,16 @@ export const FieldSchema = z.object({
 export type Field = z.infer<typeof FieldSchema>;
 ```
 
-**Plugin:**
+**Plugin** (the kernel contract is `init`/`start`/`destroy` —
+`packages/core/src/types.ts`; the old `onInstall`/`onEnable`/`onDisable`
+example described hooks nothing ever called, retired in #4212):
 ```ts
-export default {
-  async onInstall(ctx: PluginContext) { /* migrations */ },
-  async onEnable(ctx: PluginContext)  { /* register routes/services */ },
-  async onDisable(ctx: PluginContext) { /* cleanup */ },
-};
+export class MyPlugin implements Plugin {
+  name = 'plugin.my-feature';
+  async init(ctx: PluginContext)  { /* register services, schemas, routes */ }
+  async start(ctx: PluginContext) { /* begin work that needs every service up */ }
+  async destroy()                 { /* cleanup */ }
+}
 ```
 
 ---

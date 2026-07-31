@@ -391,6 +391,20 @@ const step17: MigrationStep = {
     'parses the CONVERTED flow — so a source carrying only `config: { duration }` ' +
     'is stamped with `eventType: \'timer\'`, the exact default the executor applied ' +
     'to that shape. Behaviour-preserving in both directions.\n\n' +
+    '`connector_action` gets the same lift for the opposite reason (#4045). Its ' +
+    'contract also lives in a declared sibling block (`connectorConfig`), and the ' +
+    'executor never read `config` at all — but the node\'s descriptor published a ' +
+    '`configSchema` declaring `connectorId`/`actionId`/`input` as `config` keys, and ' +
+    'the Studio inspector derives its form from a published schema, so schema-driven ' +
+    'authoring wrote the trio to the wrong place and produced nodes that refused to ' +
+    'dispatch. The conversion lifts the trio onto the declared block (declared keys ' +
+    'win; a lift that cannot complete the required connectorId+actionId pair leaves ' +
+    'the node untouched rather than turning a step-time refusal into a load ' +
+    'failure), and the descriptor stops publishing the mis-rooted schema.\n\n' +
+    'The reconciliation that found those also found `map`, whose executor read a ' +
+    'bare `cfg.flowName ?? cfg.flow` for an undeclared `flow` spelling no schema ' +
+    'ever described (#4045). A pure rename, graduated the same way, so the ' +
+    'executor reads only the canonical `flowName`.\n\n' +
     'And it removes the RLS-policy key `priority` (#3896 security audit): promised ' +
     '"conflict resolution" that cannot exist, because applicable policies OR-combine ' +
     '(most permissive wins) — there is never a conflict to order, and nothing ever ' +
@@ -442,7 +456,21 @@ const step17: MigrationStep = {
     'scoped retrieval — absorbs the former topics→sources rename), and ' +
     "`skill.triggerPhrases` (phrases were never matched; routing is " +
     'triggerConditions + the agent allowlist). All pure lossless deletes, each ' +
-    'tombstoned at its schema with the prescription.',
+    'tombstoned at its schema with the prescription.\n\n' +
+    'One flow key changes WITHOUT a lossless target: `errorHandling.maxRetries` ' +
+    '(#4247). It carried two defaults — `.default(0)` in FlowSchema and ' +
+    "`maxRetries ?? 3` in the engine's retryExecution — and because `??` fires " +
+    'only on `undefined`, an unstated count meant 0 retries for a flow parsed by ' +
+    'the schema and 3 for a definition handed to the engine directly: the retry ' +
+    "count was a function of the route in, not of the authored flow. The engine's " +
+    'copy is deleted (it reads the parsed block, no fallback), which makes an ' +
+    "unstated count unambiguously 0 — and `strategy: 'retry'` that retries zero " +
+    "times is `strategy: 'fail'` under another name, the declared-not-delivered " +
+    'shape ADR-0049 exists to close. The schema therefore requires `maxRetries` ' +
+    "at least 1 under `'retry'`, in both spellings (omitted, and an explicit 0). " +
+    'This is the one v17 flow change the chain cannot apply for you: choosing the ' +
+    'count is a judgment about re-running the WHOLE flow with its side effects, ' +
+    'so it is a semantic TODO rather than a rewrite.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -451,6 +479,8 @@ const step17: MigrationStep = {
     'flow-node-crud-object-alias',
     'flow-node-notify-config-aliases',
     'flow-node-wait-event-config-lift',
+    'flow-node-connector-config-lift',
+    'flow-node-map-flow-alias',
     'flow-node-script-config-aliases',
     'permission-rls-priority-removed',
     'tool-inert-authoring-keys-removed',
@@ -464,6 +494,26 @@ const step17: MigrationStep = {
     'skill-trigger-phrases-removed',
   ],
   semantic: [
+    {
+      id: 'flow-retry-max-retries-required',
+      surface: "flow.errorHandling.maxRetries (under strategy: 'retry')",
+      replacement: 'an explicit count >= 1 (e.g. maxRetries: 3), or strategy: \'fail\'',
+      reason:
+        'maxRetries had two defaults — FlowSchema `.default(0)` and the engine\'s ' +
+        '`maxRetries ?? 3` — so an unstated count retried 0 times through the schema and 3 ' +
+        'times through a hand-built definition (#4247). With the engine\'s copy removed the ' +
+        'unstated count is unambiguously 0, and retrying zero times is exactly ' +
+        "`strategy: 'fail'`, so the schema now refuses the combination instead of it silently " +
+        'doing nothing. There is no lossless rewrite: 0 preserves the behaviour a parsed flow ' +
+        'got but contradicts what its author wrote, and any positive count is a NEW decision ' +
+        'about re-running the whole flow with its side effects. That choice is the author\'s.',
+      acceptanceCriteria:
+        "Every flow declaring `errorHandling.strategy: 'retry'` also declares " +
+        '`maxRetries` >= 1, and each count was chosen knowing a retry replays the flow FROM ' +
+        'THE START (records re-created, callouts re-fired); flows that never actually wanted ' +
+        "retries say `strategy: 'fail'`. No flow fails to register with the maxRetries " +
+        'prescription.',
+    },
     {
       id: 'analytics-query-request-envelope-retired',
       surface: 'api.analyticsQueryRequest.query',
@@ -530,7 +580,15 @@ const step18: MigrationStep = {
     + 'lying about a data-safety guarantee. No dry-run exists today; the schema tombstones the '
     + 'key with the prescription. It is HTTP-only (never stored in stack metadata), so the '
     + 'change is one semantic TODO for API callers rather than a stack conversion.\n\n'
-    + 'The third of the same kind is `wait`\'s timeout pair (#4158). `waitEventConfig.onTimeout` '
+    + 'It also narrows `QueryAST.fields` to field names (#4196): the `FieldNode` union carried a '
+    + 'second `{ field, fields, alias }` nested-select member that nothing produced and nothing '
+    + 'consumed — every reader on the path treats the list as `string[]`, so the object form was '
+    + 'dropped by the SQL and memory drivers, projected as a column named "[object Object]" by '
+    + 'MongoDB, and refused by the REST ingress as an unknown field of that name. `expand` is the '
+    + 'one spelling for nested selection (ADR-0049 enforce-or-remove; Prime Directive #12: one '
+    + 'capability, one contract). Like the two above it is a request shape, never stored, so the '
+    + 'chain has no source to rewrite.\n\n'
+    + 'The fourth of the same kind is `wait`\'s timeout pair (#4158). `waitEventConfig.onTimeout` '
     + 'had ZERO readers — no path ever inspected it, so neither `fail` nor `continue` ever '
     + 'happened, while its `.default(\'fail\')` stamped a decision nothing made onto every wait '
     + 'node. `waitEventConfig.timeoutMs` said "maximum wait time before timeout" and its only '
@@ -547,6 +605,26 @@ const step18: MigrationStep = {
     + 'timeout.',
   conversionIds: ['stack-api-require-auth-removed', 'flow-node-wait-timeout-keys-removed'],
   semantic: [
+    {
+      id: 'query-field-node-object-form-retired',
+      surface: 'data.query.fields',
+      replacement: "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted path for a single related column (`fields: ['owner.name']`)",
+      reason:
+        'The `FieldNode` union declared a nested-select object form `{ field, fields, alias }` that '
+        + 'was inert end to end: no producer emitted it, and no consumer read `.fields` or `.alias` '
+        + '— objectql\'s formula projection and known-field filters, driver-sql\'s `select()` and '
+        + 'driver-memory\'s projection all treat the list as `string[]`, driver-mongodb keyed its '
+        + 'projection with the entry itself, and the REST ingress stringified it. Nested selection '
+        + 'is `expand`, which the engine resolves via batch `$in` queries. This is a REQUEST '
+        + 'surface — `QueryAST` is never stored in stack metadata (no view, dataset or report '
+        + 'authors one), so there is no source for the chain to rewrite: the schema narrows to '
+        + '`z.string()` and callers move their own select lists. ADR-0049 / ADR-0078, #4196.',
+      acceptanceCriteria:
+        'No caller puts an object in `fields[]`; related records are read through `expand` and '
+        + 'single related columns through dotted paths. A `fields` entry that is not a string '
+        + 'fails to parse with the removal prescription, and the list/query/export routes answer '
+        + '400 INVALID_FIELD naming the retired form instead of the field `"[object Object]"`.',
+    },
     {
       id: 'batch-options-validate-only-retired',
       surface: 'api.batchOptions.validateOnly',

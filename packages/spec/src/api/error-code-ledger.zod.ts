@@ -58,6 +58,7 @@ export const ERROR_CODE_LEDGER = {
     'ERR_DATASOURCE_UNAVAILABLE',
     'EXPLAIN_FAILED',
     'EXPORT_NOT_PERMITTED',
+    'EXTERNAL_DATASOURCE_ERROR',     // introspection/connection-test refusal from the external-datasource service
     'EXTERNAL_IMPORT_ERROR',         // federated import refused (read-only store, missing remote table)
     'FORBIDDEN',
     'FORM_NOT_FOUND',
@@ -288,6 +289,7 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/service-datasource': [
     'DATASOURCE_ADMIN_ERROR',      // lifecycle/validation refusal from the datasource-admin service
+    'EXTERNAL_DATASOURCE_ERROR',   // introspection/connection-test refusal from the external-datasource service
   ],
   '@objectstack/plugin-audit': [
     'FEEDS_DISABLED',

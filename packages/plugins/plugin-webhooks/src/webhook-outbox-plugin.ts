@@ -62,6 +62,16 @@ export class WebhookOutboxPlugin implements Plugin {
     version = '2.0.0';
     type = 'standard' as const;
     dependencies = ['com.objectstack.service.messaging'];
+    /**
+     * `init()` registers this plugin's schema through `manifest` with no
+     * fallback. Until #4187 that was safe only TRANSITIVELY — messaging happens
+     * to depend on ObjectQL, which provides `manifest` — so the guarantee would
+     * have evaporated silently the day messaging stopped depending on the
+     * engine, and the failure would have surfaced as an unrelated plugin's
+     * init crash. Declaring the requirement directly makes the kernel check it
+     * regardless of what messaging depends on.
+     */
+    requiresServices = ['manifest'];
 
     private autoEnqueuer: AutoEnqueuer | undefined;
     /** Engine the provenance hook was bound to, so `dispose()` can unbind it. */

@@ -99,7 +99,7 @@ const result = Flow.parse(data);
 | **type** | `string` | ✅ | Action type — a built-in FlowNodeAction id or a plugin-registered node type. Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum. |
 | **label** | `string` | ✅ | Node label |
 | **config** | `Record<string, any>` | optional | Node configuration |
-| **connectorConfig** | `{ connectorId: string; actionId: string; input: Record<string, any> }` | optional |  |
+| **connectorConfig** | `{ connectorId: string; actionId: string; input?: Record<string, any> }` | optional |  |
 | **position** | `{ x: number; y: number }` | optional |  |
 | **timeoutMs** | `integer` | optional | Maximum execution time for this node in milliseconds |
 | **inputSchema** | `Record<string, { type: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; required: boolean; description?: string }>` | optional | Input parameter schema for this node |

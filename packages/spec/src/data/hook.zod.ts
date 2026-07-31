@@ -8,7 +8,117 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  * Defines the interception points in the ObjectQL execution pipeline.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { HookBodySchema } from './hook-body.zod';
+
+/*
+ * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
+ *
+ * {@link HookSchema} (the AUTHORING shape) and its `retryPolicy` block are
+ * `.strict()`. `hook` is a registered metadata type — it sits in
+ * BUILTIN_METADATA_TYPE_SCHEMAS, so the same shape backs `defineStack({ hooks })`
+ * parsing, the `/api/v1/meta/types/hook` endpoint, and the Studio form. A key it
+ * silently dropped was invisible on every one of those surfaces.
+ *
+ * {@link HookContextSchema} is deliberately NOT strict, and must not become so.
+ * It is the RUNTIME shape the engine hands to a handler — nobody authors it.
+ * Strictness there would invert the contract: adding a field to the context
+ * (as `provenance` was in #3712) would turn an engine-internal enrichment into
+ * a breaking change for anyone parsing a context they were handed. Same
+ * reasoning as `RLSUserContextSchema` / `FlowVersionHistorySchema`.
+ *
+ * Two near-miss key names, both now aliased because they are genuinely easy to
+ * cross:
+ *   - hook-level `timeout` vs body-level `timeoutMs` (see hook-body.zod.ts)
+ *   - hook `retryPolicy.backoffMs` vs datasource `retryPolicy.baseDelayMs`
+ */
+
+/*
+ * ── An empty target is not "no target" ──────────────────────────────────────
+ *
+ * `object` had no emptiness constraint, so `''`, `[]` and `['']` all parsed.
+ * The binder (`normalizeObjects` in `packages/objectql/src/hook-binder.ts`)
+ * then mapped the first two to `['*']` — and `'*'` is the match-everything
+ * sentinel in the engine's dispatch (`targets.includes('*')`). An author who
+ * left the target blank therefore got a hook registered on EVERY object in the
+ * tenant, on every event listed, with no diagnostic anywhere.
+ *
+ * That is the #4001 failure mode pointed the wrong way: the usual silent strip
+ * narrows what was written, this one WIDENS it — blank intent became the
+ * broadest possible blast radius. `['']` failed the other way, registering on
+ * an object named `''` that nothing matches — a hook that can never fire
+ * (ADR-0078 "no silently inert metadata").
+ *
+ * Both are refused here, and the binder no longer escalates: a target it cannot
+ * make sense of is skipped and recorded, never widened. A wildcard hook remains
+ * entirely legitimate — it just has to be SPELLED `'*'`, so that it is a choice
+ * a reviewer can see in the diff rather than a default someone fell into.
+ */
+const hookTargetError =
+  'A hook `object` target must name at least one object. An empty target is not '
+  + '"no target": until #4001 `\'\'` and `[]` were widened to the wildcard `\'*\'`, '
+  + 'registering the hook on EVERY object, and `[\'\']` registered it on an object '
+  + 'name nothing matches, so it could never fire. Name the object(s) — '
+  + "`object: 'account'` or `object: ['account', 'contact']` — or, if firing on "
+  + "every object really is the intent, write the wildcard explicitly: `object: '*'`.";
+
+/** Keys {@link HookSchema} declares (drift-guarded by hook.test.ts). */
+const HOOK_KEYS = [
+  'name', 'label', 'object', 'events', 'handler', 'body', 'priority',
+  'async', 'condition', 'description', 'retryPolicy', 'timeout', 'onError',
+] as const;
+
+/** Keys the hook `retryPolicy` block declares (drift-guarded by hook.test.ts). */
+const HOOK_RETRY_POLICY_KEYS = ['maxRetries', 'backoffMs'] as const;
+
+const hookUnknownKeyError = strictUnknownKeyError({
+  surface: 'this hook',
+  knownKeys: HOOK_KEYS,
+  aliases: {
+    hookname: 'name',
+    objectname: 'object',
+    objects: 'object',
+    event: 'events',
+    fn: 'handler',
+    callback: 'handler',
+    order: 'priority',
+    sequence: 'priority',
+    background: 'async',
+    isasync: 'async',
+    when: 'condition',
+    predicate: 'condition',
+    retry: 'retryPolicy',
+    timeoutms: 'timeout',
+    errorpolicy: 'onError',
+    onfailure: 'onError',
+  },
+  guidance: {
+    enabled:
+      '`enabled` is not a hook key — a hook has no on/off switch. Gate it with `condition` '
+      + '(the hook is skipped when the predicate is false), or remove the hook.',
+    active:
+      '`active` is not a hook key — a hook has no on/off switch. Gate it with `condition`, '
+      + 'or remove the hook.',
+  },
+  history: 'Until #4001 these were dropped silently — the hook still registered and ran.',
+});
+
+const hookRetryPolicyUnknownKeyError = strictUnknownKeyError({
+  surface: "this hook's retryPolicy",
+  knownKeys: HOOK_RETRY_POLICY_KEYS,
+  aliases: {
+    retries: 'maxRetries',
+    attempts: 'maxRetries',
+    basedelayms: 'backoffMs',
+    backoff: 'backoffMs',
+    delayms: 'backoffMs',
+  },
+  history:
+    'Until #4001 these were dropped silently — the hook retried on the defaults rather '
+    + 'than the policy that was written. Note a datasource retryPolicy spells its delay '
+    + '`baseDelayMs`; a hook spells it `backoffMs`.',
+});
+
 export const HookEvent = z.enum([
   // Read — one event per read, regardless of shape. `beforeFind`/`afterFind`
   // fire for BOTH `find` and `findOne` (the event attaches to record
@@ -61,8 +171,19 @@ export const HookSchema = lazySchema(() => z.object({
    * - Single object: "account"
    * - List of objects: ["account", "contact"]
    * - Wildcard: "*" (All objects)
+   *
+   * Must name at least one object. An empty target (`''`, `[]`, `['']`) is
+   * refused rather than widened to the wildcard — see the note above
+   * {@link HOOK_KEYS}.
    */
-  object: z.union([z.string(), z.array(z.string())]).describe('Target object(s)'),
+  object: z.union([z.string(), z.array(z.string())])
+    .refine(
+      (v) => (Array.isArray(v)
+        ? v.length > 0 && v.every((name) => name.trim().length > 0)
+        : v.trim().length > 0),
+      { error: hookTargetError },
+    )
+    .describe('Target object(s)'),
 
   /**
    * Events to subscribe to
@@ -141,7 +262,7 @@ export const HookSchema = lazySchema(() => z.object({
   retryPolicy: z.object({
     maxRetries: z.number().default(3).describe('Maximum retry attempts on failure'),
     backoffMs: z.number().default(1000).describe('Backoff delay between retries in milliseconds'),
-  }).optional().describe('Retry policy for failed hook executions'),
+  }, { error: hookRetryPolicyUnknownKeyError }).strict().optional().describe('Retry policy for failed hook executions'),
 
   /**
    * Execution Timeout
@@ -155,7 +276,7 @@ export const HookSchema = lazySchema(() => z.object({
    * - log: Log error and continue
    */
   onError: z.enum(['abort', 'log']).default('abort').describe('Error handling strategy'),
-}));
+}, { error: hookUnknownKeyError }).strict());
 
 /**
  * Hook Runtime Context
@@ -307,3 +428,24 @@ export type Hook = z.input<typeof HookSchema>;
 export type ResolvedHook = z.output<typeof HookSchema>;
 export type HookEventType = z.infer<typeof HookEvent>;
 export type HookContext = z.infer<typeof HookContextSchema>;
+
+/**
+ * Type-safe factory for a lifecycle hook. Validates at authoring time via
+ * `.parse()` and accepts input-shape config (optional defaults, CEL shorthand
+ * for `condition`) — preferred over a bare `: Hook` literal (#4269).
+ *
+ * A bare literal gets TS excess-property checking only: constraint-level rules
+ * (snake_case `name`, enum values) and the #4207 alias/guidance errors surface
+ * no earlier than bind time — and never for the convention-scan path
+ * (`src/objects/<name>.hook.ts`), whose artifact also stays in input shape.
+ * The factory closes both gaps: bad config hard-fails at import, and the
+ * returned {@link ResolvedHook} has defaults materialized, so scan-path output
+ * matches what `defineStack({ hooks })` binding produces.
+ *
+ * Deliberately a pure parse — no advisory logic here. Handler-deprecation
+ * warnings stay in the binder (`bindHooksToEngine`'s `warnLegacyHandler`
+ * option), one place only.
+ */
+export function defineHook(config: Hook): ResolvedHook {
+  return HookSchema.parse(config);
+}

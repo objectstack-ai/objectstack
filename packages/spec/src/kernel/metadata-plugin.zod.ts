@@ -499,7 +499,8 @@ export const MetadataPluginConfigSchema = lazySchema(() => z.object({
    *   is queried per request.
    *
    * - `artifact-only` — Load exclusively from the artifact source configured
-   *   on the plugin (`artifactSource: { mode: 'local-file' | 'artifact-api' }`).
+   *   on the plugin (`artifactSource: { mode: 'local-file' }`; the `path` may
+   *   be a filesystem path or an `http(s)` artifact URL).
    *   The filesystem is not scanned, and the database loader is not consulted
    *   during bootstrap. Required for Edge / serverless / immutable-image
    *   deployments where the running process must not perform write-back or

@@ -77,6 +77,109 @@ describe('bindHooksToEngine', () => {
     expect(result.errors[0]?.reason).toMatch(/unknown function/);
   });
 
+  // #4001: `normalizeObjects` used to widen a blank target to `['*']`, the
+  // engine's match-everything sentinel — so a hook whose target was empty
+  // registered on EVERY object, on every event it listed, silently. The binder
+  // takes unparsed `Hook` input, so this guard has to hold here independently
+  // of the `HookSchema` refinement.
+  describe('an empty object target is skipped, never widened to the wildcard', () => {
+    it.each([
+      ['empty string', ''],
+      ['empty array', [] as string[]],
+      ['array of blanks', ['', '  '] as string[]],
+      ['undefined', undefined],
+    ])('skips a hook targeting %s', async (_label, object) => {
+      const engine = makeEngine();
+      const calls: string[] = [];
+      const hook = {
+        name: 'blank_target', object, events: ['beforeInsert'], priority: 100,
+        handler: () => { calls.push('ran'); },
+      } as unknown as Hook;
+
+      const result = bindHooksToEngine(engine, [hook], { packageId: 'p' });
+
+      expect(result.registered).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(result.errors[0]?.reason).toMatch(/names no object/);
+
+      // The point of the guard: it must not have become a wildcard.
+      await engine.triggerHooks('beforeInsert', makeCtx({ object: 'anything' }));
+      expect(calls).toEqual([]);
+    });
+
+    it('drops only the blank members of an otherwise valid list', async () => {
+      const engine = makeEngine();
+      const calls: string[] = [];
+      const hook = {
+        name: 'mixed_target', object: ['account', ''], events: ['beforeInsert'], priority: 100,
+        handler: (ctx: HookContext) => { calls.push(ctx.object); },
+      } as unknown as Hook;
+
+      const result = bindHooksToEngine(engine, [hook], { packageId: 'p' });
+      expect(result.registered).toBe(1);
+
+      await engine.triggerHooks('beforeInsert', makeCtx({ object: 'account' }));
+      await engine.triggerHooks('beforeInsert', makeCtx({ object: 'lead' }));
+      expect(calls).toEqual(['account']);
+    });
+
+    it('still binds an explicitly spelled wildcard', async () => {
+      const engine = makeEngine();
+      const calls: string[] = [];
+      const hook: Hook = {
+        name: 'explicit_wildcard', object: '*', events: ['beforeInsert'], priority: 100,
+        handler: (ctx) => { calls.push(ctx.object); },
+      };
+
+      const result = bindHooksToEngine(engine, [hook], { packageId: 'p' });
+      expect(result.registered).toBe(1);
+
+      await engine.triggerHooks('beforeInsert', makeCtx({ object: 'account' }));
+      await engine.triggerHooks('beforeInsert', makeCtx({ object: 'lead' }));
+      expect(calls).toEqual(['account', 'lead']);
+    });
+
+    it('is fatal under strict', () => {
+      const engine = makeEngine();
+      const hook = {
+        name: 'blank_strict', object: [], events: ['beforeInsert'], priority: 100,
+        handler: () => {},
+      } as unknown as Hook;
+
+      expect(() => bindHooksToEngine(engine, [hook], { packageId: 'p', strict: true }))
+        .toThrow(/names no object/);
+    });
+  });
+
+  // `strict` is documented as "fail fast on misconfiguration", but the per-hook
+  // try/catch swallowed the throw its own strict branch raised — the failure was
+  // recorded twice (once by the skip path, once by the caught throw) and binding
+  // carried on. A runtime that opted into fail-fast never got it.
+  describe('strict really is fatal (the catch no longer swallows its own throw)', () => {
+    it('throws on an unresolvable handler ref instead of recording it twice', () => {
+      const engine = makeEngine();
+      const hook: Hook = {
+        name: 'unresolvable', object: 'account', events: ['beforeInsert'], priority: 100,
+        handler: 'no_such_fn',
+      };
+
+      expect(() => bindHooksToEngine(engine, [hook], { strict: true }))
+        .toThrow(/unknown function 'no_such_fn'/);
+    });
+
+    it('still records-and-continues when strict is off', () => {
+      const engine = makeEngine();
+      const hook: Hook = {
+        name: 'unresolvable', object: 'account', events: ['beforeInsert'], priority: 100,
+        handler: 'no_such_fn',
+      };
+
+      const result = bindHooksToEngine(engine, [hook], {});
+      expect(result.skipped).toBe(1);
+      expect(result.errors).toHaveLength(1);
+    });
+  });
+
   it('replaces existing hooks under the same packageId on re-bind', async () => {
     const engine = makeEngine();
     const calls: string[] = [];

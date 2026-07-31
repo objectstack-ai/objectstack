@@ -33,5 +33,9 @@
     "search",
     "pinyin",
     "i18n"
+  ],
+  "files": [
+    "dist",
+    "README.md"
   ]
 }

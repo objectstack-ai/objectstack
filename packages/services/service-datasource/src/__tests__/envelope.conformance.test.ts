@@ -173,15 +173,27 @@ describe('datasource-admin envelope (#3843) — error bodies', () => {
       run: () => drive(mount(undefined), '/api/v1/datasources'),
     },
     {
+      // The same 503, from the three routes served by the OTHER service (#4225).
+      // Which service is named is asserted in `admin-routes.test.ts`; what this
+      // row adds is that the branch emits the declared envelope, like its twin.
+      name: 'the external-datasource service is not wired',
+      status: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      run: () => drive(mount(undefined), '/api/v1/datasources/ext/remote-tables'),
+    },
+    {
       name: 'a lifecycle failure carries the service message',
       status: 400,
       code: 'DATASOURCE_ADMIN_ERROR',
       run: () => drive(mount({ createDatasource: async () => { throw new Error('duplicate name'); } }), '/api/v1/datasources', { method: 'POST', body: JSON.stringify({ name: 'pg' }) }),
     },
     {
+      // On an external-datasource route, so the refusal carries THAT service's
+      // registered code (#4249) — even though this one is raised by the route
+      // itself before the service is called.
       name: 'a missing required body field',
       status: 400,
-      code: 'DATASOURCE_ADMIN_ERROR',
+      code: 'EXTERNAL_DATASOURCE_ERROR',
       run: () => drive(mount({ generateObjectDraft: async () => ({}) }), '/api/v1/datasources/ext/object-draft', { method: 'POST', body: '{}' }),
     },
     {
@@ -191,10 +203,19 @@ describe('datasource-admin envelope (#3843) — error bodies', () => {
       run: () => drive(mount({ getDatasource: async () => undefined }), '/api/v1/datasources/nope'),
     },
     {
+      // #4249: raised by the external-datasource introspector, so the code says
+      // so. Until then this row pinned `DATASOURCE_ADMIN_ERROR` — the same
+      // mis-attribution #4225 fixed in the 503 `message`, machine-readable here.
       name: 'a remote-table introspection failure',
       status: 400,
-      code: 'DATASOURCE_ADMIN_ERROR',
+      code: 'EXTERNAL_DATASOURCE_ERROR',
       run: () => drive(mount({ listRemoteTables: async () => { throw new Error('no such schema'); } }), '/api/v1/datasources/ext/remote-tables'),
+    },
+    {
+      name: 'a saved-datasource connection test failure',
+      status: 400,
+      code: 'EXTERNAL_DATASOURCE_ERROR',
+      run: () => drive(mount({ testConnection: async () => { throw new Error('connection refused'); } }), '/api/v1/datasources/ext/test', { method: 'POST', body: '{}' }),
     },
     {
       name: 'a removal failure',

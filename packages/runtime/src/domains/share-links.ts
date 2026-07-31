@@ -35,6 +35,8 @@
  * value whichever one served the request.
  */
 
+import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
+
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -56,7 +58,15 @@ export async function handleShareLinksRequest(
     query: any,
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
-    const svc: any = await deps.resolveService('shareLinks', context.environmentId);
+    // [#4127 batch 3] `plugin-sharing` registers `ShareLinkService`, which
+    // declares `implements IShareLinkService`; the four methods called below
+    // were all already on that contract. Only the ledger entry was missing.
+    // The registry key comes from the contract that DEFINES it (#3786). This was
+    // a second hand-written `'shareLinks'`, copied from a constant whose own
+    // doc-comment says "keep in sync with the SharingPlugin registration" — and a
+    // drifted copy here resolves nothing, so every share link 501s with "Sharing
+    // is not configured for this environment" on an environment where it is.
+    const svc = await deps.resolveService(SHARE_LINK_SERVICE, context.environmentId);
     if (!svc) {
         return { handled: true, response: deps.error('Sharing is not configured for this environment', 501) };
     }
@@ -82,7 +92,12 @@ export async function handleShareLinksRequest(
     // request's RESOLVED (per-env) kernel first: `resolveService('objectql',
     // env)` can hand back a different (host/scoped) engine that lacks the
     // per-env rows.
-    const getEngine = async (): Promise<any> => {
+    // [#4127 batch 4] The `Promise<any>` return annotation was a THIRD way the
+    // slot type got erased, after `const x: any =` and `as any` in batches 2-3.
+    // Both arms resolve the same `objectql` slot and both are typed now; the
+    // wrapper's own annotation flattened them back to `any` on the way out.
+    // Inferred instead, so `engine.find` below is checked against IDataEngine.
+    const getEngine = async () => {
         try {
             const e = await deps.getRequestKernelService('objectql');
             if (e) return e;

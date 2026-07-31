@@ -128,6 +128,7 @@ import { DriverPlugin } from '@objectstack/runtime';
 import { InMemoryDriver } from '@objectstack/driver-memory';
 import { AuthPlugin } from '@objectstack/plugin-auth';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
+import { createRestApiPlugin } from '@objectstack/rest';
 
 const kernel = new ObjectKernel();
 
@@ -140,6 +141,13 @@ await kernel.use(new DriverPlugin(new InMemoryDriver(), 'memory'));
 await kernel.use(new HonoServerPlugin({
   port: 3000,
 }));
+
+// Data API — serves /api/v1/data/:object with full CRUD behind the gate
+// stack. Without it this minimal stack has no data routes: the HTTP server
+// plugin is a transport adapter and its legacy built-in data surface is
+// deprecated and off by default (#4073). The authenticated fetch further
+// down this page reads /api/v1/data/task through this plugin.
+await kernel.use(createRestApiPlugin());
 
 // Authentication plugin
 await kernel.use(new AuthPlugin({

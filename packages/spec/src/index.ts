@@ -82,6 +82,7 @@ export { defineSkill } from './ai/skill.zod';
 // *value* import: a broken import hard-errors instead of silently degrading to
 // `any` (the #2023 failure mode). Input-shape config + runtime `.parse()`.
 export { defineDatasource } from './data/datasource.zod';
+export { defineHook } from './data/hook.zod';
 export { defineConnector } from './integration/connector.zod';
 export { defineSharingRule } from './security/sharing.zod';
 export { definePosition, EVERYONE_POSITION, GUEST_POSITION, AUDIENCE_ANCHOR_POSITIONS } from './identity/position.zod';
@@ -98,6 +99,7 @@ export { defineObjectExtension } from './data/object.zod';
 // tables and finding shape stay in data/ (frontend-safe).
 export {
   lintUnknownAuthoringKeys,
+  lintUnknownStackKeys,
   listLintableAuthoringCollections,
 } from './kernel/metadata-authoring-lint';
 export type { LintableAuthoringCollection } from './kernel/metadata-authoring-lint';
@@ -105,6 +107,8 @@ export {
   formatUnknownAuthoringKey,
   FIELD_KEY_GUIDANCE,
   OBJECT_KEY_GUIDANCE,
+  STACK_KEY_GUIDANCE,
+  STACK_RUNTIME_MEMBERS,
 } from './data/authoring-key-lint';
 export type {
   UnknownAuthoringKeyFinding,

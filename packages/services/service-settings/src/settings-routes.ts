@@ -13,7 +13,11 @@
  * `SettingsService`.
  */
 
-import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
+import type { IHttpServer, IHttpRequest, RouteHandler } from '@objectstack/spec/contracts';
+// The declared envelope is written in ONE place for the whole platform (#3973).
+// Its `extra` is `ApiError`'s own optional fields, so the undeclared siblings
+// #4224 retired from this module cannot come back through it either.
+import { sendOk, sendError } from '@objectstack/types';
 import { SettingsService } from './settings-service.js';
 import {
   SettingsForbiddenError,
@@ -46,36 +50,6 @@ export interface SettingsRoutesOptions {
 // wire a verified `contextFromRequest` (the plugin does).
 const defaultContext = (_req: IHttpRequest): SettingsContext => ({ enforced: true });
 
-/**
- * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
- * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
- * `{ success: false, error: { code, message } }`.
- *
- * This module was already half-right before #3843: `error` was correctly a
- * nested `{ code, message }` object, but no body carried the `success` flag the
- * envelope declares — so `BaseResponseSchema.safeParse` failed on every
- * response, success and error alike, and a caller keying on `success` (as
- * `ObjectStackClient.unwrapResponse` does) could not tell these routes' bodies
- * apart from an already-unwrapped payload.
- */
-function sendError(res: IHttpResponse, status: number, code: string, message: string, extra?: Record<string, unknown>) {
-  res.status(status).json({ success: false, error: { code, message, ...extra } });
-}
-
-/**
- * Emit a success body in the DECLARED envelope — `{ success: true, data }`.
- *
- * The three success bodies keep their payload keys, one level deeper:
- * `{ manifests }` → `{ success: true, data: { manifests } }`. The
- * `GET /:namespace` payload is `SettingsNamespacePayloadSchema`
- * (`{ manifest, values }`) and moves under `data` whole, so that schema still
- * describes exactly what the route returns — now as the envelope's `data`
- * rather than as the entire body.
- */
-function sendOk(res: IHttpResponse, data: unknown, status = 200) {
-  res.status(status).json({ success: true, data });
-}
-
 export function registerSettingsRoutes(
   http: IHttpServer,
   service: SettingsService,
@@ -91,7 +65,7 @@ export function registerSettingsRoutes(
       sendOk(res, { manifests });
     } catch (err: any) {
       if (err instanceof SettingsForbiddenError) {
-        sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { namespace: err.namespace });
+        sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
       } else {
         sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to list manifests');
       }
@@ -106,7 +80,7 @@ export function registerSettingsRoutes(
       sendOk(res, payload);
     } catch (err: any) {
       if (err instanceof SettingsForbiddenError) {
-        sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { namespace: err.namespace });
+        sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
       } else if (err instanceof UnknownNamespaceError) {
         sendError(res, 404, 'UNKNOWN_NAMESPACE', err.message);
       } else {
@@ -144,21 +118,28 @@ export function registerSettingsRoutes(
       sendOk(res, { values: result });
     } catch (err: any) {
       if (err instanceof SettingsForbiddenError) {
-        sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { namespace: err.namespace });
+        sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
       } else if (err instanceof SettingsLockedError) {
         sendError(res, 409, 'SETTINGS_LOCKED', err.message, {
-          namespace: err.namespace,
-          key: err.key,
-          reason: err.reason,
+          details: { namespace: err.namespace, key: err.key, reason: err.reason },
         });
       } else if (err instanceof UnknownNamespaceError) {
         sendError(res, 404, 'UNKNOWN_NAMESPACE', err.message);
       } else if (err instanceof UnknownKeyError) {
-        sendError(res, 400, 'UNKNOWN_KEY', err.message, { namespace: err.namespace, key: err.key });
+        sendError(res, 400, 'UNKNOWN_KEY', err.message, {
+          details: { namespace: err.namespace, key: err.key },
+        });
       } else if (err instanceof SettingsValidationError) {
+        // `details.fields` is `FieldError[]` (ADR-0114) — the same array shape
+        // the record validators and the dispatcher's validation exit carry, so
+        // the console's field-error extractor reads this one with no per-surface
+        // special case. It is `details.fields` rather than a top-level
+        // `error.fields` because `fields` is declared on
+        // `EnhancedApiErrorSchema`, not on the base `ApiErrorSchema` these
+        // routes emit; `validation-failure.ts` puts the array in the same place
+        // for the same reason.
         sendError(res, 400, 'SETTINGS_VALIDATION', err.message, {
-          namespace: err.namespace,
-          fields: err.fields,
+          details: { namespace: err.namespace, fields: err.fields },
         });
       } else {
         sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to write namespace');
@@ -190,7 +171,7 @@ export function registerSettingsRoutes(
       }
     } catch (err: any) {
       if (err instanceof SettingsForbiddenError) {
-        sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { namespace: err.namespace });
+        sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
       } else if (err instanceof UnknownNamespaceError) {
         sendError(res, 404, 'UNKNOWN_NAMESPACE', err.message);
       } else {

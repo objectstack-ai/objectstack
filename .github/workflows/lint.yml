@@ -99,6 +99,16 @@ jobs:
       - name: Single authz resolver guard
         run: pnpm check:authz-resolver
 
+      # #4093 follow-up. Discovery tells a consumer an absent capability is
+      # absent AND what to install. The first half has been carefully honest
+      # since #2462/#4000; the second was invented from the slot name, so ten
+      # of fifteen entries named packages that do not exist — a dead end handed
+      # to whoever is trying to fix their stack. Asserts every package named in
+      # CORE_SERVICE_PROVIDER is a real workspace package, and that no core
+      # slot is missing an entry.
+      - name: Service-provider remedy guard
+        run: pnpm check:service-providers
+
       # #3843 response-envelope guard. The route ledgers audit which routes EXIST;
       # nothing audited what comes back, so six route modules emitted bodies
       # outside BaseResponseSchema while carrying green `sdk` rows. Counts the
@@ -155,6 +165,22 @@ jobs:
       # truth, and this holds every workflow to it.
       - name: Node-version drift guard
         run: pnpm check:node-version
+
+      # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
+      # whole package directory, and 20 of the 49 publishable packages declared
+      # none — so consumers installed TypeScript sources, unit tests and build
+      # tooling, with dist/ landing on top of them rather than instead of them
+      # (@objectstack/plugin-webhooks: 21 files, three of them unit tests). The
+      # other 29 did declare it, so this was a hand-copied line with no gate —
+      # the #3786 shape, where whoever forgets it gets no signal at all. Also
+      # checks the whitelist is SUFFICIENT (covers every entry point, so
+      # tightening one cannot ship a package that fails to resolve) and MINIMAL
+      # (admits no test or build script), which keeps #4206's "`<pkg>/scripts/**`
+      # is never runtime code" assumption continuously verified instead of
+      # hand-checked. Runs its own --self-test first: the pattern semantics can
+      # be wrong while every package is right.
+      - name: Published-files whitelist guard
+        run: pnpm check:published-files
 
   typecheck:
     name: TypeScript Type Check
@@ -213,6 +239,64 @@ jobs:
       - name: Type check (@objectstack/spec)
         run: pnpm --filter @objectstack/spec exec tsc --noEmit
 
+      # Meta-gate (#4203): the `check:generated` aggregate reconciles its
+      # GATED/NO_GENERATOR ledger against packages/spec/package.json on every run,
+      # in both directions, so a `check:`/`gen:` script nobody classified fails
+      # instead of quietly dropping out of coverage. But the reconciliation only
+      # ran where the aggregate ran — locally. CI runs the gates as individual
+      # steps, so a PR adding an unclassified script kept every CI gate green
+      # while the wrapper AGENTS.md prescribes exited red on `main`, running zero
+      # gates. Twice in three days: #4177 (`check:variant-docs`, fixed only when
+      # #4194 collided with the same wall) and #4232 (`check:strictness-ledger`,
+      # caught while wiring this step). It could not live in ci.yml's
+      # `check-generated` job — that job was gated on a `generated` paths filter
+      # that never watched packages/spec/package.json, the one file every
+      # offending PR must touch. That job is gone now (see the four gates below);
+      # this job is unfiltered and required, so the meta-gate cannot go dormant.
+      # Reads package.json only; no build, sub-second.
+      - name: "Check every check:/gen: script is classified in the check:generated ledger"
+        run: pnpm --filter @objectstack/spec check:generated --reconcile-only
+
+      # The last four artifact gates, moved here from ci.yml's `check-generated`
+      # job when that job and its `generated` paths filter were deleted (#4291).
+      #
+      # The filter was a hand-maintained duplicate of each gate's input set, and
+      # nothing reconciled the two. It drifted three times on record, each found
+      # by accident and written up in a comment rather than gated: #2584 moved a
+      # generated page and the filter kept watching the old path, so hand-edits
+      # went unchecked for months; #3855 listed specific spec paths but no schema
+      # dirs, so `check:authorable-surface` went dormant on exactly the PRs that
+      # remove an authorable key; and `json-schema.manifest.json` — the #2978
+      # ratchet that is the ONLY durable record of every emitted schema, since
+      # json-schema/ is gitignored — was never watched at all, so a PR retiring a
+      # key from it skipped its own verifier. Six gates had already escaped to
+      # this job one at a time, each with a comment saying the filter had failed
+      # it; these four finish the migration and retire the duplicate ledger.
+      #
+      # Affordable because the work was already being done here: `check:docs`
+      # below runs `gen:schema` — the same scripts/build-schemas.ts that backs
+      # `check:authorable-surface` — and that whole step measures 4s in CI. All
+      # four read source via tsx and need no build, so they run before the
+      # workspace build, as the gates below already do.
+      - name: Check skill docs are generated from SKILL.md frontmatter
+        run: pnpm --filter @objectstack/spec check:skill-docs
+
+      - name: Check spec-changes.json is regenerated with the ADR-0087 registries
+        run: pnpm --filter @objectstack/spec check:spec-changes
+
+      - name: Check the protocol upgrade guide is regenerated with the ADR-0087 registries
+        run: pnpm --filter @objectstack/spec check:upgrade-guide
+
+      # The authorable KEY surface — what a metadata author may write, which for
+      # this platform is the third-party API. `api-surface.json` records exported
+      # names and `api-surface-signatures.json` hashes factory types as TypeScript
+      # PRINTS them (a reference, never structurally expanded), so neither sees a
+      # key added to or removed from a schema. #3883 removed three authorable keys
+      # with every witness green; #3733 did it by accident. ADR-0059 §5 deferred
+      # this gate until a narrowing actually slipped both — it has.
+      - name: Check the authorable key surface is recorded and nothing vanished
+        run: pnpm --filter @objectstack/spec check:authorable-surface
+
       # Generated-docs gate: content/docs/references/** is generated from the spec
       # by `gen:schema && gen:docs` and committed. Nothing regenerated it in CI, so
       # it drifted silently — #3076 added RowCrudActionOverride to the spec and the
@@ -235,10 +319,12 @@ jobs:
       # drift is served straight to consumers' agents — 6 of 113 schema pointers named
       # files the spec had already deleted or renamed.
       #
-      # Not in ci.yml's `check-generated` job for the reason above: its `generated`
-      # filter lists specific spec paths (migrations/, conversions/, protocol-version)
-      # but no schema dirs, so a PR touching src/data/** or src/ui/** — exactly what
-      # drives these two artifacts — never triggers it. It is not required, either.
+      # These moved here early, when ci.yml still had a filter-gated
+      # `check-generated` job: its `generated` filter listed specific spec paths
+      # (migrations/, conversions/, protocol-version) but no schema dirs, so a PR
+      # touching src/data/** or src/ui/** — exactly what drives these two
+      # artifacts — never triggered it, and it was not required either. That job
+      # and its filter are gone (#4291); every artifact gate now lives here.
       #
       # Both read packages/spec/src via tsx and need no build (verified with every
       # workspace dist/ removed), so they run before the workspace build. check:skill-refs
@@ -283,6 +369,19 @@ jobs:
       # step above (reads the built dist).
       - name: Check @objectstack/spec public API surface
         run: pnpm --filter @objectstack/spec run check:api-surface
+
+      # Same surface, the other axis: api-surface.json records that an export
+      # EXISTS, never what it resolves to — so four exported types sat at `any`
+      # across a whole major with every gate green (#4171). #4115 tells consumers
+      # to replace a local declaration with the spec import, which for those four
+      # traded a precise type for one that constrains nothing, silently: `any` is
+      # mutually assignable with everything, so the check that would catch the
+      # swap reports "identical, safe to re-export". Reads the built dist a
+      # consumer's import actually resolves to, so it runs after the build step
+      # with the other consumer gates. Self-tests first — a scan whose green
+      # result is "nothing found" has to prove it can still find something.
+      - name: Check no exported spec type resolves to `any`
+        run: pnpm --filter @objectstack/spec run check:exported-any
 
       # Anti-drift for the skill EXAMPLES, not just the skill reference indexes
       # (#3094). The TypeScript in skills/ is the first thing an AI copies when

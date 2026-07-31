@@ -26,6 +26,22 @@ function mount(svc: unknown) {
   return server.getRawApp();
 }
 
+/**
+ * Mount with a service PER NAME, unlike `mount` above, which answers the same
+ * object for every lookup.
+ *
+ * That difference is the point: this module dispatches to two services, and a
+ * context that cannot tell them apart cannot show which one a route resolved.
+ * It is what let #4225 sit here — the 503 named `datasource-admin` on all nine
+ * routes, three of which resolve `external-datasource`, and no test could see it.
+ */
+function mountServices(services: Record<string, unknown>) {
+  const server = new HonoHttpServer(0);
+  const ctx = { getService: vi.fn((name: string) => services[name]) } as any;
+  registerDatasourceAdminRoutes(server, ctx, '/api/v1');
+  return server.getRawApp();
+}
+
 describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
   it('GET /api/v1/datasources returns the service listing', async () => {
     const listDatasources = vi.fn().mockResolvedValue([
@@ -136,10 +152,19 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     expect(await res.json()).toEqual({ success: true, data: { datasource: { name: 'pg', origin: 'runtime' } } });
   });
 
-  it('degrades to 503 when the datasource-admin service is not wired', async () => {
-    const app = mount(undefined);
+  it('degrades to 503 when the service registry THROWS, not just when it answers undefined', async () => {
+    // The other arm of the resolver's try/catch. `getService` throwing on an
+    // unregistered name is the shape a real `PluginContext` has; every mock in
+    // this file returns `undefined` instead, so nothing else drives this branch.
+    const server = new HonoHttpServer(0);
+    const ctx = {
+      getService: vi.fn(() => {
+        throw new Error('service "datasource-admin" is not registered');
+      }),
+    } as any;
+    registerDatasourceAdminRoutes(server, ctx, '/api/v1');
 
-    const res = await app.fetch(json('/api/v1/datasources'));
+    const res = await server.getRawApp().fetch(json('/api/v1/datasources'));
 
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({
@@ -150,6 +175,113 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
       },
     });
   });
+
+  /**
+   * #4225 — the 503 names the service the route ACTUALLY resolves.
+   *
+   * Every route below is listed with the service it dispatches to, so the table
+   * is the module's service map as well as its test: a new route that resolves
+   * one service and reports the other has to disagree with a row here.
+   */
+  const UNAVAILABLE: Array<{ route: string; service: string; run: (app: any) => Promise<Response> }> = [
+    { route: 'GET /datasources', service: 'datasource-admin', run: (a) => a.fetch(json('/api/v1/datasources')) },
+    { route: 'GET /datasources/:name', service: 'datasource-admin', run: (a) => a.fetch(json('/api/v1/datasources/pg')) },
+    { route: 'POST /datasources/test', service: 'datasource-admin', run: (a) => a.fetch(json('/api/v1/datasources/test', { method: 'POST', body: '{}' })) },
+    { route: 'POST /datasources', service: 'datasource-admin', run: (a) => a.fetch(json('/api/v1/datasources', { method: 'POST', body: '{}' })) },
+    { route: 'PATCH /datasources/:name', service: 'datasource-admin', run: (a) => a.fetch(json('/api/v1/datasources/pg', { method: 'PATCH', body: '{}' })) },
+    { route: 'DELETE /datasources/:name', service: 'datasource-admin', run: (a) => a.fetch(json('/api/v1/datasources/pg', { method: 'DELETE' })) },
+    { route: 'GET /datasources/:name/remote-tables', service: 'external-datasource', run: (a) => a.fetch(json('/api/v1/datasources/ext/remote-tables')) },
+    { route: 'POST /datasources/:name/test', service: 'external-datasource', run: (a) => a.fetch(json('/api/v1/datasources/ext/test', { method: 'POST', body: '{}' })) },
+    { route: 'POST /datasources/:name/object-draft', service: 'external-datasource', run: (a) => a.fetch(json('/api/v1/datasources/ext/object-draft', { method: 'POST', body: JSON.stringify({ table: 'customers' }) })) },
+  ];
+
+  for (const c of UNAVAILABLE) {
+    it(`${c.route} degrades to 503 naming ${c.service} (#4225)`, async () => {
+      const res = await c.run(mountServices({}));
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({
+        success: false,
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: `The ${c.service} service is not available.`,
+        },
+      });
+    });
+  }
+
+  it('a wired datasource-admin does not answer for an unwired external-datasource (#4225)', async () => {
+    // The operator's actual situation: lifecycle works, federation does not. The
+    // old message sent them to read the logs of the service that was running.
+    const app = mountServices({
+      'datasource-admin': {
+        listDatasources: async () => [{ name: 'ext', origin: 'runtime' }],
+        getDatasource: async () => ({ name: 'ext', driver: 'sqlite' }),
+        testConnection: async () => ({ ok: true }),
+      },
+      // 'external-datasource' deliberately absent.
+    });
+
+    expect((await app.fetch(json('/api/v1/datasources'))).status).toBe(200);
+
+    const remote = await app.fetch(json('/api/v1/datasources/ext/remote-tables'));
+    expect(remote.status).toBe(503);
+    expect(((await remote.json()) as any).error.message).toBe(
+      'The external-datasource service is not available.',
+    );
+
+    // `POST /:name/test` resolves `external-datasource` even though its unsaved-draft
+    // sibling `POST /test` resolves `datasource-admin` — the wired admin service
+    // above has a `testConnection`, and it must not answer for this route.
+    const saved = await app.fetch(json('/api/v1/datasources/ext/test', { method: 'POST', body: '{}' }));
+    expect(saved.status).toBe(503);
+    expect(((await saved.json()) as any).error.message).toBe(
+      'The external-datasource service is not available.',
+    );
+  });
+
+  /**
+   * #4249 — the 400 `error.code` names the service that refused, the way the
+   * 503 `message` above names the one that was missing (#4225). Same defect one
+   * field over: `badRequest` hard-coded `DATASOURCE_ADMIN_ERROR`, so the three
+   * external-datasource routes reported their refusals as datasource-admin's —
+   * and where #4225 misled a human reading prose, this misrouted a client
+   * switching on `error.code`.
+   *
+   * One row per route with a refusal path. The `code` column is a deliberate
+   * PIN, not derived from the route's service, so a wrong entry in the module's
+   * `SERVICE_ERROR_CODE` map has to disagree with a literal here. Each mount
+   * wires ONLY the service the route should resolve — a route dispatching to
+   * the other one answers 503, failing the row before the code is even read.
+   */
+  const REFUSALS: Array<{
+    route: string;
+    service: string;
+    code: string;
+    svc: Record<string, unknown>;
+    run: (app: any) => Promise<Response>;
+  }> = [
+    { route: 'GET /datasources/:name', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { getDatasource: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources/pg')) },
+    { route: 'POST /datasources/test', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { testConnection: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources/test', { method: 'POST', body: '{}' })) },
+    { route: 'POST /datasources', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { createDatasource: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources', { method: 'POST', body: '{}' })) },
+    { route: 'PATCH /datasources/:name', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { updateDatasource: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources/pg', { method: 'PATCH', body: '{}' })) },
+    { route: 'DELETE /datasources/:name', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { removeDatasource: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources/pg', { method: 'DELETE' })) },
+    { route: 'GET /datasources/:name/remote-tables', service: 'external-datasource', code: 'EXTERNAL_DATASOURCE_ERROR', svc: { listRemoteTables: async () => { throw new Error('no such schema'); } }, run: (a) => a.fetch(json('/api/v1/datasources/ext/remote-tables')) },
+    { route: 'POST /datasources/:name/test', service: 'external-datasource', code: 'EXTERNAL_DATASOURCE_ERROR', svc: { testConnection: async () => { throw new Error('connection refused'); } }, run: (a) => a.fetch(json('/api/v1/datasources/ext/test', { method: 'POST', body: '{}' })) },
+    { route: 'POST /datasources/:name/object-draft', service: 'external-datasource', code: 'EXTERNAL_DATASOURCE_ERROR', svc: { generateObjectDraft: async () => { throw new Error('no such table'); } }, run: (a) => a.fetch(json('/api/v1/datasources/ext/object-draft', { method: 'POST', body: JSON.stringify({ table: 'customers' }) })) },
+  ];
+
+  for (const c of REFUSALS) {
+    it(`${c.route} refuses as 400 ${c.code} (#4249)`, async () => {
+      const res = await c.run(mountServices({ [c.service]: c.svc }));
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe(c.code);
+      // The service's own message still reads at `error.message`, as before.
+      expect(typeof body.error.message).toBe('string');
+      expect(body.error.message.length).toBeGreaterThan(0);
+    });
+  }
 
   it('surfaces lifecycle errors as 400 with the service message', async () => {
     const createDatasource = vi.fn().mockRejectedValue(new Error('duplicate name'));

@@ -216,6 +216,47 @@ need no changes, other than gaining enforcement of the `requiredPermissions`
 they already declared. Callers that hard-coded a `target` in an action URL
 switch to the action's `name`.
 
+### An action's declared params are enforced at dispatch (ADR-0104 D2, #3438)
+
+An action's `params[]` (`required`, `options`, `multiple`, `reference`) was a
+complete contract that informed **only the client dialog**. The server passed
+`reqBody.params` to the handler unvalidated on both the REST and MCP paths, so
+a wrong bag could return a success envelope while the handler quietly ignored
+it — the #3405 shape, one layer out. It is now checked before the handler runs;
+a violation is `400 VALIDATION_FAILED` (REST) or a thrown error (MCP).
+
+| Violation | Example |
+|---|---|
+| missing `required` param | declared `p_text` absent from the bag |
+| value outside `options` | `p_priority: 'NOT_AN_OPTION'` |
+| `multiple` shape | a bare string where an array is declared |
+| `reference` shape | a non-id where `reference: 'sys_user'` is declared |
+| undeclared key | `bogus: 123` |
+
+```diff
+- OS_ACTION_PARAMS_STRICT_ENABLED=1   # removed — enforcement is the default
++ OS_ALLOW_LAX_ACTION_PARAMS=1        # escape hatch: warn and pass, as before
+```
+
+**Only already-wrong calls break**, and each rejection names the offending param
+and the declared list, so the fix is one edit at the call site. Actions
+declaring no `params` are untouched — there is nothing to validate against —
+and the dispatcher's own `recordId` / `objectName` are allowlisted, so keys
+dispatch merges in are never unknown-key errors. If an integration you cannot
+reach in time is affected, `OS_ALLOW_LAX_ACTION_PARAMS=1` restores the old
+pass-through in one restart; the violation still logs once per action, so the
+drift stays visible rather than becoming invisible again.
+
+The RC line carried this warn-first behind an `OS_ACTION_PARAMS_STRICT_ENABLED`
+opt-in. **That variable does not exist in 17.0.** The window was closed on
+purpose rather than deferred to 18.0: what a violation strands is a *caller*,
+not data — no stored row becomes unwritable, the party who sees the error is
+the party who can fix it, and the hatch makes it reversible. Deferring would
+have charged every deployment a second upgrade ceremony to postpone a break
+that costs one edited call. The value-shape half of the same ADR went the other
+way for the opposite reason: it rejects on the basis of data already at rest,
+so it stays gated per deployment (see *Files become platform records* below).
+
 ### A flow run with no trigger user may not touch data (#3760)
 
 An effective `runAs: 'user'` run that resolved **no trigger user** used to
@@ -358,6 +399,38 @@ schema to the two highest-risk authorable surfaces, per the triage in
   schema carries `additionalProperties: false` into the Studio form and
   `registerFlow()` config validation, so a mis-keyed approval `config` is
   rejected at registration too.
+- **Hooks** — `HookSchema`, its `retryPolicy`, and both hook-body branches
+  (`expression` and `js`). A body was the worst place to lose a key quietly: a
+  misspelt `capabilities` stripped to the empty default and the sandbox then
+  threw at *invocation* time, on whichever code path first touched `ctx.api` —
+  far from the typo. A misspelt `timeoutMs`/`memoryMb` silently downgraded the
+  body to the enclosing hook's looser limits. Two near-miss spellings now carry
+  aliases because they are genuinely easy to cross: hook-level `timeout` vs
+  body-level `timeoutMs`, and hook `retryPolicy.backoffMs` vs datasource
+  `retryPolicy.baseDelayMs`. `HookContextSchema` — the runtime shape the engine
+  hands your handler — stays tolerant and always will.
+- **Datasources** — `DatasourceSchema` with its `pool` / `healthCheck` / `ssl` /
+  `retryPolicy` blocks, the ADR-0015 `external` federation settings and their
+  `validation` policy, `DatasourceCapabilities`, and `DriverDefinitionSchema`.
+  `config` and `readReplicas` stay **open** records: their shape is per-driver
+  and the driver's own `configSchema` validates them. That openness is why the
+  top level had to close — a connection key written one level too high (`host`
+  next to `driver` instead of inside `config`) was stripped, and the datasource
+  then connected on driver defaults rather than failing. Those keys now
+  prescribe the move into `config`; a top-level `password` is instead pointed at
+  `external.credentialsRef`, because relocating an inlined secret is not the fix.
+  A dropped key in `capabilities` was quieter still: an unregistered capability
+  reads as `false`, so the engine stopped pushing that work down to the driver
+  and recomputed it in memory.
+
+One clarification, since these flips are easy to over-read: making a schema
+strict does **not** change its published JSON Schema. `build-schemas.ts`
+converts with `io: 'output'`, and in output mode zod emits
+`additionalProperties: false` for a `.strip()` object too — the post-parse shape
+genuinely has no extra keys. So the JSON Schema was already advertising
+`additionalProperties: false` while the zod parse quietly accepted and discarded
+unknown keys. These flips align the parse with the contract that was already
+published; they do not widen it.
 
 Every rejection is written to be self-fixing: it names the offending key and,
 where recognisable, the canonical spelling (`steps` → `nodes`, edge
@@ -830,6 +903,8 @@ import or the authored key.
 | view: list `responsive`/`performance`, form `defaultSort`/`aria` | no renderer read any of them; list `aria`/`data` **and form `data`** stay live — `defineForm` writes `data: { provider: 'schema', schemaId }` onto every metadata form (#3896 close-out) |
 | `dashboard.aria` / `.performance` / widget `performance` (+ `PerformanceConfigSchema`) | no renderer applied them; virtual scrolling is the live top-level `virtualScroll` (#3896 close-out) |
 | `agent.knowledge` (+ `AIKnowledgeSchema`) | declaring sources/indexes never scoped retrieval — `search_knowledge` takes `sourceIds` from the LLM's tool-call arguments (#3896 close-out) |
+| `PluginLifecycleSchema` (`onInstall`/`onEnable`/`onDisable`/`onUninstall`/`onUpgrade`) + `UpgradeContextSchema` + the `ObjectStackPlugin` interface family (`@objectstack/spec/system`) | a plugin lifecycle the kernel never implemented — the real contract is `init`/`start`/`destroy`; code written against the hooks silently never ran (#4212) |
+| The typed-event cluster (`kernel` plugin-lifecycle-events.zod — ten payload schemas (`PluginRegisteredEvent`, `HookTriggeredEvent`, `KernelReadyEvent`, …), the 21-name `PluginLifecycleEventType` enum, `ITypedEventEmitter`) | a typed-event system that was never built: zero consumers, and the enum was wrong in both directions — 17 names nothing fires, 10 real events missing. `IPluginLifecycleEvents` is now the registry of the 14 events with a real emitter, and the new `LifecycleEventName` union soft-types `PluginContext.hook`/`trigger` (#4212 follow-up, #4241) |
 | `skill.triggerPhrases` | phrases were never matched; activation is `triggerConditions` + the agent's `skills[]` allowlist (#3896 close-out) |
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
@@ -856,6 +931,29 @@ from `@objectstack/spec` directly.
 - **`sys_view_definition`'s all-six `apiMethods` whitelist is dropped** (#3026).
 - **`os migrate plan` shows index drift** — index DDL is no longer applied
   silently at boot (#3728).
+- **A flow's `errorHandling.strategy: 'retry'` must state `maxRetries` (>= 1)**
+  (#4247). `maxRetries` had two defaults — `.default(0)` in `FlowSchema` and
+  `?? 3` in the engine's `retryExecution` — so an unstated count retried 0 times
+  for a flow that had been through the schema and 3 times for a definition
+  handed to the engine directly. The engine's copy is gone (it reads the parsed
+  block with no fallback), and the case that was ambiguous is rejected rather
+  than guessed: retrying zero times is `strategy: 'fail'` under another name,
+  and a retry re-runs the *whole* flow, so the count is the author's to state.
+  Fix: write `{ strategy: 'retry', maxRetries: 3 }`, or `strategy: 'fail'` if no
+  retry was intended. `maxRetries: 0` stays legal under `'fail'` / `'continue'`,
+  which never read it.
+- **`ObjectQLEngine.use()` and `ObjectQLHostContext` are removed** (#4212
+  follow-up, #4242). The engine's own plugin loader — register a manifest
+  part, then dispatch the runtime part's `onEnable` over an
+  `ObjectQLHostContext` — had zero callers repo-wide, and its `onEnable` was
+  the engine-level twin of the #4212 disease: a lifecycle entry point that
+  reads as a contract and never runs. Fix: `engine.use(manifest)` →
+  `engine.registerApp(manifest)`; `engine.use(_, { onEnable })` → a kernel
+  plugin (`kernel.use({ name, init(ctx) { … } })`, engine via
+  `ctx.getService('objectql')`, drivers via `engine.registerDriver()`).
+  `new ObjectQL({ logger })` and `ObjectQLPlugin`'s `hostContext` option keep
+  working, and the *app-bundle* `onEnable` module export (dispatched by
+  AppPlugin at boot) is a different, real contract — unchanged.
 
 ## New capabilities in 17.0.0
 
@@ -893,10 +991,10 @@ For media fields specifically:
   toward an explicit `url` field, so "managed file" and "external link" stop
   being the same declaration).
 
-**Value-shape checking is warn-first.** A not-yet-backfilled row still writes and
-the author gets a warning naming the field. Hard rejection arrives only when a
-deployment opts into `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` — which it should do
-*after* running the backfill and confirming reconciliation:
+**Value-shape checking follows your own migration, not the version number.** A
+not-yet-backfilled row still writes, and the author gets a warning naming the
+field. Media fields start *rejecting* malformed values only once **this
+deployment** has run the migration and passed its self-check:
 
 ```bash
 os migrate files-to-references           # dry run: reports, writes nothing
@@ -906,9 +1004,68 @@ os migrate files-to-references --apply   # converts, verifies, records the flag
 The run backfills legacy file-field values (inline metadata blobs, own-resolver
 URLs, `data:` URIs) into owned `sys_file` references and reconciles the ownership
 ledger against what records actually hold. The **deployment-level flag it
-records** — never the platform version — is what may later authorise
-irreversible behaviour, and media value shapes enforce only once *this*
-deployment has verified its own migration.
+records** — never the platform version — is what authorises both strict media
+value shapes and irreversible file collection. Upgrading changes neither;
+running the migration does.
+
+**The non-media classes have their own gate** (#3438) — references (`lookup`,
+`master_detail`, `user`, `tree`) and structured JSON (`location`, `address`,
+`composite`, `repeater`, `record`, `vector`):
+
+```bash
+os migrate value-shapes           # scan: reports, writes nothing
+os migrate value-shapes --apply   # scan, then record the flag if clean
+```
+
+A separate flag because it attests a separate fact: the file migration says file
+values were converted and their ownership reconciled, which tells you nothing
+about whether a `lookup` id or a `location` payload is well formed. This one
+converts nothing — a malformed `location` is application data only its author
+can correct — so it reports the object, field, type, count, sample record ids
+and parse issue, and you re-run until it is clean. `OS_ALLOW_LAX_VALUE_SHAPES=1`
+re-opens leniency while diagnosing.
+
+**You are told about both, rather than having to find this page.** `os migrate
+meta` — the command a 16→17 upgrade already runs — ends by naming the two data
+migrations and the gate each records, including on a run that rewrote nothing,
+since canonical metadata says nothing about stored values. A deployment that
+boots holding covered fields with no verified gate row logs one line naming the
+command that ends warn mode. Neither reads as "done": until a gate is recorded,
+the classes it covers keep warning.
+
+That boot line is scoped to the deployments it can actually help. It counts only
+fields a write would check — not the `lookup`s the registry injects into every
+object — and says nothing once an environment switch has already settled the
+posture, since `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` enforces both classes
+outright and either `OS_ALLOW_LAX_*` opt-out is a deliberate choice the scan
+would not change.
+
+**A database created by 17 attests both flags at creation** (#3438), so a new
+deployment enforces from its first boot instead of waiting for someone to run a
+migration that, for an empty store, does nothing. The platform attests only a
+store it watched itself create — every table made by that boot, none found
+already there; an upgraded or restored database attests nothing and produces its
+evidence by running the command.
+
+**Released-file collection is live behind that same flag** (#3459). On a
+verified deployment, a field file whose one owning record lets go — the field
+cleared, or the record deleted — is tombstoned into the declared 30-day grace
+window; re-referencing the id inside the window revives it, and past it the
+platform sweep re-verifies at delete time that nothing holds the file (join
+rows, ownership columns, and a fresh read of the flag itself) before
+reclaiming the row and its bytes. A deployment that never migrates keeps every
+released file forever: upgrading is not consent — passing your own
+migration's self-check is.
+
+Two knobs sit either side of that flag on the value-shape half.
+`OS_ALLOW_LAX_MEDIA_VALUES=1` returns a verified deployment to warnings, for an
+operator who hits an unforeseen rejection and needs writes flowing while they
+diagnose. `OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1` goes the other way and opts
+*every* value class into strict immediately — including the reference
+(`lookup`/`user`/…) and structured-JSON (`location`/`address`/…) types, whose
+own per-deployment gate is still being built (#3438). Those stay warn-only by
+default until it lands, because unlike media they have no migration standing
+behind them yet.
 
 ### Approvals: dynamic approver routing (#3447)
 
@@ -1195,9 +1352,21 @@ objectui commits on top of the pin 16.1.0 shipped.
 - **Auth:** plan for the better-auth 1.7 account-identity backfill — check the
   boot log for federated accounts whose IdP is no longer registered, and stamp or
   remove those rows.
+- **Actions:** check any programmatic caller that posts `params` — a bag the
+  server used to accept silently now 400s if it misses a `required` param,
+  breaks `options`/`multiple`/`reference`, or carries an undeclared key. The
+  error names the param and the declared list. `OS_ALLOW_LAX_ACTION_PARAMS=1`
+  buys time for an integration you cannot reach today.
 - **Files:** run `os migrate files-to-references` (dry run first, then
-  `--apply`), reconcile, and only then set
-  `OS_DATA_VALUE_SHAPE_STRICT_ENABLED`.
+  `--apply`) and reconcile — passing its self-check is what turns on strict
+  media value shapes *and* released-file collection for this deployment, so
+  read the report before you `--apply`. Do **not** reach for
+  `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` to get there: it opts every value class
+  in at once, regardless of which migrations this deployment has actually run.
+- **Reference and structured-JSON values:** run `os migrate value-shapes` and
+  fix what it reports before `--apply`. It converts nothing — the values it
+  names are application data — and a scan that was truncated or could not read
+  an object fails the gate even at zero violations.
 - **Datasources:** verify every declared datasource connects in every
   environment — a bound datasource that cannot connect now fails the boot
   instead of failing every later query.

@@ -158,12 +158,12 @@ Column footer summary configuration
 | **span** | `Enum<'auto' \| 'full'>` | optional | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': whole row at any column count. Prefer this over the absolute `colSpan`. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
-| **fields** | `[FormField](#formfield)[]` | optional | Sub-fields for composite/repeater/record types |
 | **keyField** | `{ field?: string; label?: string; placeholder?: string; helpText?: string; … }` | optional | Key column config for record-typed fields |
 | **dependsOn** | `string` | optional | Parent field name for cascading |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). e.g. P`record.priority == 'urgent'` |
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
 | **disclosure** | `Enum<'inline' \| 'popover'>` | optional | Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure). |
+| **fields** | `[FormField](#formfield)[]` | optional | Sub-fields for composite/repeater/record types |
 
 
 ---

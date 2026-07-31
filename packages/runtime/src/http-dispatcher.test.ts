@@ -855,10 +855,16 @@ describe('HttpDispatcher', () => {
                 expect(service.listInbox).not.toHaveBeenCalled();
             });
 
-            it('is unhandled (→ 404) when no notification service is registered', async () => {
+            // [#4093 follow-up] Was `handled: false` (→ the dispatcher's
+            // ROUTE_NOT_FOUND 404). `/notifications` is mounted, so that 404's
+            // hint — "No handler matched this request" — was false, and it
+            // pointed at a discovery page that correctly omits the route.
+            it('answers 501 when no notification service is registered', async () => {
                 const d = new HttpDispatcher(notifKernel(null));
                 const result = await d.handleNotification('', 'GET', undefined, {}, ctx('u1'));
-                expect(result.handled).toBe(false);
+                expect(result.handled).toBe(true);
+                expect(result.response?.status).toBe(501);
+                expect(result.response?.body?.error?.message ?? '').toContain('service-messaging');
             });
         });
 
@@ -1101,12 +1107,17 @@ describe('HttpDispatcher', () => {
                 expect(result.response?.body?.data?.flows).toEqual(['f1']);
             });
 
-            it('should return unhandled when automation service not registered', async () => {
+            // [#4093 follow-up] Was `handled: false` → 404; now 501 with the
+            // remedy, because the route is mounted and only the implementation
+            // is missing.
+            it('answers 501 when the automation service is not registered', async () => {
                 (kernel as any).getService = vi.fn().mockResolvedValue(null);
                 (kernel as any).services = new Map();
 
                 const result = await dispatcher.handleAutomation('', 'GET', {}, { request: {} });
-                expect(result.handled).toBe(false);
+                expect(result.handled).toBe(true);
+                expect(result.response?.status).toBe(501);
+                expect(result.response?.body?.error?.message ?? '').toContain('service-automation');
             });
         });
 
@@ -2290,6 +2301,61 @@ describe('HttpDispatcher', () => {
             expect(info.features.i18n).toBe(false);
         });
 
+        // [#4093 follow-up] Discovery's remedy line must name a package that can
+        // actually be installed. It used to be templated from the slot name
+        // (`Install a ${slot} plugin to enable`), which named nothing real for
+        // `ai` / `search` / `workflow` and got it wrong wherever the package is
+        // not called after its slot. Both builders now read one table.
+        describe('unavailable slots name a real remedy (#4093 follow-up)', () => {
+            beforeEach(() => {
+                (kernel as any).getService = vi.fn().mockResolvedValue(null);
+                (kernel as any).services = new Map();
+            });
+
+            it('names the actual package, including where the name differs from the slot', async () => {
+                const info = await dispatcher.getDiscoveryInfo('/api/v1');
+                // service-messaging fills `notification` — the case a
+                // name-derived guess can never get right.
+                expect(info.services.notification.message).toBe('Install @objectstack/service-messaging to enable');
+                expect(info.services.auth.message).toBe('Install @objectstack/plugin-auth to enable');
+                expect(info.services['file-storage'].message).toBe('Install @objectstack/service-storage to enable');
+            });
+
+            it('says nothing ships rather than naming a package that does not exist', async () => {
+                const info = await dispatcher.getDiscoveryInfo('/api/v1');
+                for (const slot of ['ai', 'search', 'workflow'] as const) {
+                    expect(info.services[slot].message, `services.${slot}.message`).not.toMatch(/Install/);
+                    expect(info.services[slot].message, `services.${slot}.message`).toContain(slot);
+                }
+            });
+
+            it('never emits the old slot-name-derived template', async () => {
+                const info = await dispatcher.getDiscoveryInfo('/api/v1');
+                for (const [slot, entry] of Object.entries(info.services as Record<string, any>)) {
+                    if (typeof entry?.message !== 'string') continue;
+                    expect(entry.message, `services.${slot}.message`).not.toMatch(/Install a .+ plugin to enable/);
+                }
+            });
+
+            it('gives the same remedy as the metadata-protocol builder', async () => {
+                const { ObjectStackProtocolImplementation } = await import('@objectstack/metadata-protocol');
+                const fromProtocol = (await new ObjectStackProtocolImplementation(
+                    mockObjectQL as any,
+                    () => new Map<string, any>(),
+                ).getDiscovery()).services;
+                const fromDispatcher = (await dispatcher.getDiscoveryInfo('/api/v1')).services as Record<string, any>;
+
+                // Every slot both builders report must carry the same remedy —
+                // two hosts telling a consumer to install different things is
+                // the drift #4089/#4130 closed for `metadata` and `data`.
+                for (const slot of Object.keys(fromProtocol)) {
+                    const mine = fromDispatcher[slot];
+                    if (!mine || mine.enabled !== false) continue;
+                    expect(mine.message, `services.${slot}.message parity`).toBe((fromProtocol as any)[slot].message);
+                }
+            });
+        });
+
         it('should detect i18n via getServiceAsync (async factory) in discovery', async () => {
             const mockI18nService = {
                 getLocales: vi.fn().mockReturnValue(['en', 'fr']),
@@ -2630,9 +2696,13 @@ describe('HttpDispatcher', () => {
             });
             serveOnly('automation', stub);
 
+            // [#4093 follow-up] The answer is 501 now, not `handled: false`.
+            // What this test pins is unchanged and is the part that matters:
+            // the stub is NEVER CALLED, so nothing can read "flow executed"
+            // off a flow that never ran.
             for (const [path, method] of [['', 'GET'], ['', 'POST'], ['trigger/x', 'POST'], ['x/trigger', 'POST']] as const) {
                 const result = await dispatcher.handleAutomation(path, method, { name: 'x' }, { request: {} });
-                expect(result.handled, `${method} /automation/${path}`).toBe(false);
+                expect(result.response?.status, `${method} /automation/${path}`).toBe(501);
             }
             expect(stub.execute).not.toHaveBeenCalled();
             expect(stub.trigger).not.toHaveBeenCalled();
@@ -2690,7 +2760,7 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handleNotification('', 'GET', undefined, {}, {
                 request: {}, executionContext: { userId: 'usr_1' },
             } as any);
-            expect(result.handled).toBe(false);
+            expect(result.response?.status).toBe(501);
             expect(stub.listInbox).not.toHaveBeenCalled();
         });
 
@@ -2698,13 +2768,13 @@ describe('HttpDispatcher', () => {
         // reads as a fault AND loses the empty-list courtesy the console's
         // per-navigation `GET /ai/agents` poll depends on. Treating it as an
         // empty slot restores both.
-        it('/ai — a stub slot 404s per route and keeps the /ai/agents empty list', async () => {
+        it('/ai — a stub slot 501s per route and keeps the /ai/agents empty list', async () => {
             const stub = stubbed({ chat: vi.fn(), listModels: vi.fn() });
             serveOnly('ai', stub);
 
             const chat = await dispatcher.handleAI('/ai/chat', 'POST', { messages: [] }, {}, { request: {} });
             expect(chat.handled).toBe(true);
-            expect(chat.response?.status).toBe(404);
+            expect(chat.response?.status).toBe(501);
             expect(stub.chat).not.toHaveBeenCalled();
 
             const agents = await dispatcher.handleAI('/ai/agents', 'GET', undefined, {}, { request: {} });
@@ -2715,7 +2785,8 @@ describe('HttpDispatcher', () => {
             // it just travels under `data` now. `AiAgentsResponseSchema`'s
             // `{ agents }` is RELOCATED, not flattened to the bare array, so
             // `client.ai.agents.list()` still reads `.agents` off what
-            // `unwrapResponse` returns.
+            // `unwrapResponse` returns. Cloud's `service-ai` — the route's other
+            // producer — answers the same shape (cloud#929).
             expect(agents.response?.body).toEqual({ success: true, data: { agents: [] }, meta: undefined });
             expect(agents.response?.body?.agents).toBeUndefined();
         });
@@ -2825,8 +2896,8 @@ describe('HttpDispatcher', () => {
 
         it('a ui-slot occupant buys no route: the old dev-boot shape stays un-advertised and un-served', async () => {
             // What plugin-dev used to register: a shapeless placeholder in the
-            // `ui` slot, no protocol anywhere. /ui could only 503 — discovery
-            // must say so instead of advertising it.
+            // `ui` slot, no protocol anywhere. /ui could only refuse —
+            // discovery must say so instead of advertising it.
             const placeholder = { _serviceName: 'ui', __serviceInfo: { status: 'stub', handlerReady: false, message: 'Dev placeholder' } };
             serveMap({ ui: placeholder });
 
@@ -2836,10 +2907,10 @@ describe('HttpDispatcher', () => {
 
             const served = await dispatcher.handleUi('/view/account', {}, { request: {} });
             expect(served.handled).toBe(true);
-            expect(served.response?.status).toBe(503);
+            expect(served.response?.status).toBe(501);
         });
 
-        it('a wrong-shaped protocol (no getUiView) is not advertised — mirrors the domain 503', async () => {
+        it('a wrong-shaped protocol (no getUiView) is not advertised — mirrors the domain 501', async () => {
             serveMap({ protocol: { saveMetaItem: vi.fn() } });
 
             const info = await dispatcher.getDiscoveryInfo('/api/v1');

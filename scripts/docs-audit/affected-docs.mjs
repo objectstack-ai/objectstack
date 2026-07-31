@@ -7,23 +7,29 @@
 //   node scripts/docs-audit/affected-docs.mjs [sinceRef]   # docs affected by changes since <sinceRef> (default origin/main)
 //   node scripts/docs-audit/affected-docs.mjs --all         # every hand-written doc (full audit)
 //   node scripts/docs-audit/affected-docs.mjs --json [...]   # emit JSON {docs, changedPackages, ...} instead of a path list
-//   node scripts/docs-audit/affected-docs.mjs --self-test    # check the test-file matcher (no repo state needed)
+//   node scripts/docs-audit/affected-docs.mjs --self-test    # pin the change classifiers + package-root derivation (no repo state needed)
 //
 // Scope: hand-written docs only = content/docs/**/*.mdx MINUS content/docs/references/**
 // (references are generated from packages/spec and handled by a separate regenerate pass).
 //
 // Heuristic: a doc is "affected" by a changed package P if the doc text mentions P's
-// npm name (`@objectstack/<x>`) or its repo path (`packages/<x>`). Over-inclusion is
-// intentionally preferred over misses; the periodic FULL audit is the backstop for
-// docs that describe a package without naming it.
+// npm name (`@objectstack/<x>`) or its repo path (the package's directory, e.g.
+// `packages/services/service-automation`). Over-inclusion is intentionally preferred
+// over misses; the periodic FULL audit is the backstop for docs that describe a
+// package without naming it.
 //
-// One exclusion, though: a change to a TEST file cannot make an implementation-accuracy
-// doc stale, because tests do not define behaviour — they observe it. Counting them made
-// every tests-only PR light up its packages' whole doc set (three in a row on #4064 /
-// #4078 / one before), which is a class of finding that is always false. A reader who
-// learns the comment is usually noise stops reading it, and then it fails to do its job
-// on the PR where it is right. So test files are dropped before deriving the changed
-// package roots; everything else stays deliberately over-inclusive.
+// Two exclusions, though — change classes that cannot make an implementation-accuracy
+// doc stale, dropped before the changed package roots are derived (everything else
+// stays deliberately over-inclusive):
+//   - TEST files: tests do not define behaviour — they observe it. Counting them made
+//     every tests-only PR light up its packages' whole doc set (three in a row on
+//     #4064 / #4078 / one before), a class of finding that is always false. A reader
+//     who learns the comment is usually noise stops reading it, and then it fails to
+//     do its job on the PR where it is right.
+//   - TOOLING scripts (`<packageRoot>/scripts/**`): build/verification tooling, not
+//     the runtime behaviour docs describe (#4183 flagged 106 docs for a diff whose
+//     only code change was a new check script). `package.json` itself stays counted —
+//     exports/deps changes ARE implementation.
 
 import { execSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
@@ -90,12 +96,78 @@ function isTestFile(path) {
 }
 
 /**
- * Check the test-file matcher against known-good and known-bad paths, so the
- * exclusion cannot silently widen into dropping real implementation changes — the
- * one way this optimisation could turn into a miss.
+ * The package root that owns a changed path: the DEEPEST ancestor directory with a
+ * package.json. Derived from the filesystem, not from a hand-kept list of container
+ * directories — the old regex special-cased `packages/plugins/*` only, so the other
+ * six containers (services/, connectors/, apps/, qa/, triggers/, adapters/) collapsed
+ * to the container dir, which has no package.json, so `name` stayed null and the
+ * npm-name matching arm never fired for those 30 nested packages (#4162 — a doc that
+ * says `@objectstack/service-automation` but never the path was a guaranteed miss).
+ * A hardcoded list would fail the same way again on container dir number eight
+ * (#3786's pattern), so: filesystem.
+ *
+ * A path with no package.json anywhere up it (a deleted package) falls back to the
+ * top-level `packages/<x>` segment: the npm name is unresolvable either way, and the
+ * coarse path token still substring-matches every doc that mentions the deleted
+ * package's path.
+ *
+ * `hasPackageJson` is injectable so `--self-test` can pin this with no repo state.
+ */
+function packageRootOf(file, hasPackageJson = dirHasPackageJson) {
+  const segs = file.split('/');
+  if (segs[0] !== 'packages' || segs.length < 3) return null; // not a file inside a package
+  for (let depth = segs.length - 1; depth >= 2; depth--) {
+    const dir = segs.slice(0, depth).join('/');
+    if (hasPackageJson(dir)) return dir;
+  }
+  return segs.slice(0, 2).join('/');
+}
+
+function dirHasPackageJson(dir) {
+  return existsSync(join(repoRoot, dir, 'package.json'));
+}
+
+/**
+ * A tooling script — `<packageRoot>/scripts/**` holds build/verification tooling
+ * (generators, check scripts, i18n-extract configs), not the runtime behaviour docs
+ * describe, so changing one cannot make an implementation-accuracy doc stale. Same
+ * reasoning as the test-file exclusion, same measured symptom (#4183: a new check
+ * script plus its package.json registration, zero `src/` changes, 106 docs flagged).
+ * Deliberately narrow:
+ *   - only `scripts/` directly under the package root — `src/scripts/**` is runtime
+ *     code and stays counted;
+ *   - `package.json` is NOT excluded: exports/main/deps changes are implementation;
+ *   - generator output that docs do consume lands in `content/docs/references/**`,
+ *     which this tool already scopes out.
+ * Publication check (the one way this could hide runtime code): no package's `files`
+ * allowlist ships `scripts/`; three plugins ship it only incidentally (no `files`
+ * field at all) and it holds a lone `i18n-extract.config.ts` — tooling, not runtime.
+ */
+function isToolingScript(file, hasPackageJson = dirHasPackageJson) {
+  const root = packageRootOf(file, hasPackageJson);
+  return root !== null && file.startsWith(`${root}/scripts/`);
+}
+
+/**
+ * Pin the change classifiers and the package-root derivation against known-good and
+ * known-bad paths. The two ways this tool turns into a miss: an exclusion silently
+ * widens into dropping real implementation changes, or the root derivation collapses
+ * a nested package into its container again (#4162 — the guard's own guard had a
+ * hole: the original self-test pinned only `isTestFile`). Needs no repo state: the
+ * filesystem lookup is injected as a fake tree.
  */
 function selfTest() {
-  const cases = [
+  let failed = 0;
+  let total = 0;
+  const check = (fn, label, path, want, got) => {
+    total++;
+    if (got !== want) {
+      console.error(`  ✗ self-test "${label}": ${path} → expected ${fn}=${JSON.stringify(want)}, got ${JSON.stringify(got)}`);
+      failed++;
+    }
+  };
+
+  const testFileCases = [
     // [path, isTest, label]
     ['packages/services/service-automation/src/builtin/config-schemas.test.ts', true, 'plain .test.ts'],
     ['packages/rest/src/package-envelope.conformance.test.ts', true, 'compound .conformance.test.ts'],
@@ -113,28 +185,76 @@ function selfTest() {
     ['packages/spec/src/latest.ts', false, 'no false positive on a bare name'],
     ['packages/foo/src/tests-helper.ts', false, 'tests-helper is not __tests__'],
   ];
-  let failed = 0;
-  for (const [path, want, label] of cases) {
-    const got = isTestFile(path);
-    if (got !== want) {
-      console.error(`  ✗ self-test "${label}": ${path} → expected isTestFile=${want}, got ${got}`);
-      failed++;
-    }
+  for (const [path, want, label] of testFileCases) check('isTestFile', label, path, want, isTestFile(path));
+
+  // Package-root derivation, against a fake tree so the self-test stays hermetic.
+  // One package.json per shape the repo has: a direct child package plus a nested
+  // package per container class. The containers themselves have NO package.json.
+  const fakeTree = new Set([
+    'packages/spec',
+    'packages/services/service-automation',
+    'packages/plugins/plugin-audit',
+    'packages/connectors/connector-slack',
+  ]);
+  const inFakeTree = (dir) => fakeTree.has(dir);
+  const liveRootCases = [
+    // [path, expected package root, label]
+    ['packages/spec/src/latest.ts', 'packages/spec', 'direct child package'],
+    ['packages/spec/package.json', 'packages/spec', 'the package.json itself'],
+    ['packages/services/service-automation/src/engine.ts', 'packages/services/service-automation', 'nested under services/ — NOT the container'],
+    ['packages/plugins/plugin-audit/src/index.ts', 'packages/plugins/plugin-audit', 'nested under plugins/ (formerly the only special case)'],
+    ['packages/connectors/connector-slack/src/client.ts', 'packages/connectors/connector-slack', 'nested under connectors/'],
+  ];
+  for (const [path, want, label] of liveRootCases) check('packageRootOf', label, path, want, packageRootOf(path, inFakeTree));
+
+  // The invariant behind the whole fix: a container directory (a parent of nested
+  // packages, itself without a package.json) must never come out as a package root
+  // for a file that lives inside one of its packages.
+  const containers = new Set(
+    [...fakeTree].map((d) => d.split('/').slice(0, -1).join('/')).filter((d) => d !== 'packages'),
+  );
+  for (const [path] of liveRootCases) {
+    check('containerIsRoot', 'a container dir is never a live package\'s root', path, false, containers.has(packageRootOf(path, inFakeTree)));
   }
+
+  // Deliberate fallbacks, pinned so they don't silently change: a path whose
+  // package.json is gone (deleted package) degrades to the coarse top-level token —
+  // over-inclusive substring matching still catches docs naming the deleted path.
+  const fallbackRootCases = [
+    ['packages/gone/src/x.ts', 'packages/gone', 'deleted top-level package falls back to packages/<x>'],
+    ['packages/services/service-gone/src/x.ts', 'packages/services', 'deleted nested package falls back to the coarse container token'],
+    ['packages/README.md', null, 'a file directly under packages/ belongs to no package'],
+  ];
+  for (const [path, want, label] of fallbackRootCases) check('packageRootOf', label, path, want, packageRootOf(path, inFakeTree));
+
+  // Tooling-script exclusion: `<packageRoot>/scripts/**` is build tooling; the
+  // package.json next to it and anything under `src/` are implementation.
+  const scriptCases = [
+    // [path, isToolingScript, label]
+    ['packages/spec/scripts/check-generated.ts', true, 'package check script (#4183)'],
+    ['packages/plugins/plugin-audit/scripts/i18n-extract.config.ts', true, 'nested package tooling config'],
+    ['packages/spec/package.json', false, 'package.json IS implementation (exports/deps)'],
+    ['packages/spec/src/scripts/runner.ts', false, 'src/scripts/** is runtime code'],
+    ['packages/services/service-automation/src/engine.ts', false, 'implementation'],
+  ];
+  for (const [path, want, label] of scriptCases) check('isToolingScript', label, path, want, isToolingScript(path, inFakeTree));
+
   if (failed) {
     console.error(`\n✗ affected-docs self-test failed (${failed} case(s)).`);
     process.exit(1);
   }
-  console.log(`✓ affected-docs self-test: ${cases.length} cases pass.`);
+  console.log(`✓ affected-docs self-test: ${total} cases pass.`);
 }
 
 
-// collect package roots: packages/<x> and packages/plugins/<x>
+// collect package roots from the implementation changes
+const testFilesSkipped = changedFiles.filter((f) => isTestFile(f)).length;
+const scriptFilesSkipped = changedFiles.filter((f) => !isTestFile(f) && isToolingScript(f)).length;
+const implementationChanges = changedFiles.filter((f) => !isTestFile(f) && !isToolingScript(f));
 const pkgRoots = new Set();
-const implementationChanges = changedFiles.filter((f) => !isTestFile(f));
 for (const f of implementationChanges) {
-  let m = f.match(/^(packages\/plugins\/[^/]+)\//) || f.match(/^(packages\/[^/]+)\//);
-  if (m) pkgRoots.add(m[1]);
+  const root = packageRootOf(f);
+  if (root) pkgRoots.add(root);
 }
 
 // resolve each root to its npm name + keep the path token
@@ -162,10 +282,10 @@ for (const doc of handwritten) {
 
 // Report what was excluded rather than dropping it silently — a tool that quietly
 // narrows its own scope reads as "nothing to see here" when it means "I did not look".
-const testFilesSkipped = changedFiles.length - implementationChanges.length;
-const skipNote = testFilesSkipped > 0
-  ? ` (${testFilesSkipped} test file(s) excluded — tests cannot make an implementation doc stale)`
-  : '';
+const skipNotes = [];
+if (testFilesSkipped > 0) skipNotes.push(`${testFilesSkipped} test file(s) excluded — tests cannot make an implementation doc stale`);
+if (scriptFilesSkipped > 0) skipNotes.push(`${scriptFilesSkipped} tooling script(s) excluded — a package's scripts/ dir is build tooling, not documented behaviour`);
+const skipNote = skipNotes.length ? ` (${skipNotes.join('; ')})` : '';
 
 emit(
   affected.map((a) => a.doc),
@@ -173,11 +293,12 @@ emit(
   `${affected.length} docs affected by ${changedPackages.length} changed package(s) since ${sinceRef}${skipNote}`,
   affected,
   testFilesSkipped,
+  scriptFilesSkipped,
 );
 
-function emit(docList, changedPackages, summary, detail, testFilesSkipped = 0) {
+function emit(docList, changedPackages, summary, detail, testFilesSkipped = 0, scriptFilesSkipped = 0) {
   if (asJson) {
-    process.stdout.write(JSON.stringify({ summary, sinceRef: all ? null : sinceRef, changedPackages, docs: docList, detail: detail || null, testFilesSkipped }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ summary, sinceRef: all ? null : sinceRef, changedPackages, docs: docList, detail: detail || null, testFilesSkipped, scriptFilesSkipped }, null, 2) + '\n');
   } else {
     process.stderr.write(`# ${summary}\n`);
     process.stdout.write(docList.join('\n') + (docList.length ? '\n' : ''));

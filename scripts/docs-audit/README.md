@@ -22,24 +22,46 @@ node scripts/docs-audit/affected-docs.mjs --json origin/main
 # every hand-written doc (full audit scope)
 node scripts/docs-audit/affected-docs.mjs --all
 
-# check the test-file matcher (needs no repo state; CI runs this before the mapping)
+# pin the change classifiers + package-root derivation (needs no repo state; CI runs this before the mapping)
 node scripts/docs-audit/affected-docs.mjs --self-test
 ```
 
 Heuristic: a doc is *affected* by a changed package `P` if it mentions `P`'s npm
-name (`@objectstack/<x>`) or repo path (`packages/<x>`). Over-inclusion is preferred
-over misses; the periodic **full** audit (part 4) is the backstop for docs that
-describe a package without naming it.
+name (`@objectstack/<x>`) or repo path (`P`'s directory, e.g.
+`packages/services/service-automation`). Over-inclusion is preferred over misses; the
+periodic **full** audit (part 4) is the backstop for docs that describe a package
+without naming it.
 
-**One exclusion:** changes to **test files** are dropped before the changed-package
-roots are derived. A test observes behaviour rather than defining it, so it cannot make
-an implementation-accuracy doc stale — yet counting them made every tests-only PR light
-up its packages' whole doc set, a class of finding that is always false. That is the one
-place over-inclusion actively hurt: a comment a reader learns to skip stops working on
-the PR where it is right. The count of excluded files is reported in the summary and as
-`testFilesSkipped` in `--json`, so the narrowing is never silent, and `--self-test`
-pins the matcher against paths that must and must not match (`commands/test.ts` is
-implementation; `foo.conformance.test.ts` is not).
+**How a changed file maps to its package:** the package root is the **deepest ancestor
+directory with a `package.json`**, resolved from the filesystem — never a hand-kept
+list of container directories. (The mapper once special-cased only
+`packages/plugins/*`; the 30 packages nested under the other six containers collapsed
+into `packages/services` et al., whose missing `package.json` disabled the npm-name
+matching arm entirely, so a doc naming `@objectstack/service-automation` but not the
+repo path was a guaranteed miss — #4162.) A deleted package falls back to the coarse
+`packages/<x>` token, which still substring-matches any doc naming the deleted path.
+
+**Two exclusions:** change classes that cannot make an implementation-accuracy doc
+stale are dropped before the changed-package roots are derived:
+
+1. **Test files** (`*.test.*` / `*.spec.*` at any depth, plus `__tests__` /
+   `__mocks__` / `__fixtures__`): a test observes behaviour rather than defining it —
+   yet counting them made every tests-only PR light up its packages' whole doc set, a
+   class of finding that is always false. That is the one place over-inclusion actively
+   hurt: a comment a reader learns to skip stops working on the PR where it is right.
+2. **Package tooling scripts** (`<packageRoot>/scripts/**`): build/verification
+   tooling, not the runtime behaviour docs describe (#4183 flagged 106 docs for a diff
+   whose only code change was a new check script). Narrow on purpose: `src/scripts/**`
+   is runtime code and stays counted, and so does `package.json` — exports/deps
+   changes ARE implementation. No package publishes runtime code from `scripts/`
+   (checked against every `files` allowlist; three plugins ship a lone
+   `i18n-extract.config.ts` only for lack of a `files` field).
+
+The excluded counts are reported in the summary line and as `testFilesSkipped` /
+`scriptFilesSkipped` in `--json`, so the narrowing is never silent. `--self-test` pins
+the classifiers *and* the package-root derivation against paths that must and must not
+match (`commands/test.ts` is implementation; `foo.conformance.test.ts` is not; a
+container directory must never come out as a package root).
 
 **And one deliberate non-exclusion:** `packages/*/CHANGELOG.md` stays counted, even though
 release notes define behaviour no more than a test does. Extending the exclusion there

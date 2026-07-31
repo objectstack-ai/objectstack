@@ -396,9 +396,9 @@ Implement business logic at data operation lifecycle points:
 
 <!-- os:check -->
 ```typescript
-import { Hook, HookContext } from '@objectstack/spec/data';
+import { defineHook, HookContext } from '@objectstack/spec/data';
 
-const accountHook: Hook = {
+export default defineHook({
   name: 'account_defaults',
   object: 'account',
   events: ['beforeInsert'],
@@ -408,9 +408,7 @@ const accountHook: Hook = {
     }
     ctx.input.created_at = new Date().toISOString();
   },
-};
-
-export default accountHook;
+});
 ```
 
 The `handler` above is the inline (in-process) form. The **preferred**,
@@ -433,7 +431,7 @@ Mirror these CRM-style patterns when designing enterprise metadata objects:
 | Capability gating | `src/objects/*.object.ts` | Use `enable` flags (`trackHistory`, `apiMethods`, `files`, `feeds`, `activities`) per object |
 | Index + validation pairing | `src/objects/*.object.ts` | Keep `indexes[]` aligned to common filters and enforce invariants with `validations[]` |
 | Relationship constraints | `src/objects/*.object.ts` | Use `lookup` + `lookupFilters` (`[{ field, operator, value }]`) for constrained child selection |
-| Lifecycle automation | `src/objects/*.hook.ts` | Use a lifecycle **hook** (a `Hook` object registered via `defineStack({ hooks })`) or a top-level `record_change` flow for field updates triggered by record changes. There is **no** object-level `workflows[]` field — authoring one is a build error (#1535). |
+| Lifecycle automation | `src/objects/*.hook.ts` | Use a lifecycle **hook** (authored with `defineHook()`, registered via `defineStack({ hooks })` or the `*.hook.ts` convention scan) or a top-level `record_change` flow for field updates triggered by record changes. There is **no** object-level `workflows[]` field — authoring one is a build error (#1535). |
 | State transitions | `src/objects/*.object.ts` | Prefer explicit `state_machine` validation rules (one per state field) — there is **no** separate `stateMachines` map |
 
 For metadata authoring, keep expressions in CEL (`P\`...\``, `F\`...\``,

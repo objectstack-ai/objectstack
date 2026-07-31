@@ -166,8 +166,25 @@ export function bindHooksToEngine(
         });
       }
 
-      const wrapped = wrapDeclarativeHook(hook, resolved, { logger, metrics: opts.metrics });
       const objects = normalizeObjects(hook.object);
+      if (objects.length === 0) {
+        result.skipped += 1;
+        const reason =
+          'hook target names no object — an empty `object` is refused rather than widened to '
+          + "the wildcard '*' (#4001). Name the object(s), or write `object: '*'` if firing on "
+          + 'every object is the intent.';
+        result.errors.push({ hook: hook.name, reason });
+        if (opts.strict) {
+          throw new Error(`[hook-binder] strict: cannot bind hook '${hook.name}': ${reason}`);
+        }
+        logger.warn('[hook-binder] skipping hook with an empty object target', {
+          hook: hook.name,
+          object: hook.object,
+        });
+        continue;
+      }
+
+      const wrapped = wrapDeclarativeHook(hook, resolved, { logger, metrics: opts.metrics });
       const events = Array.isArray(hook.events) ? hook.events : [];
 
       for (const event of events) {
@@ -185,6 +202,12 @@ export function bindHooksToEngine(
         }
       }
     } catch (err: any) {
+      // `strict` is documented as "fail fast on misconfiguration", but this
+      // catch swallowed the throw the strict branches raise — including its
+      // own — so the option only ever recorded the failure twice and carried
+      // on. A production runtime that opted into fail-fast never got it.
+      // Under strict, every bind failure is fatal, as advertised.
+      if (opts.strict) throw err;
       result.errors.push({ hook: hook.name, reason: err?.message ?? String(err) });
       logger.error('[hook-binder] failed to bind hook', {
         hook: hook.name,
@@ -204,10 +227,23 @@ export function bindHooksToEngine(
   return result;
 }
 
+/**
+ * Resolve a hook's declared target to the object names it registers on.
+ *
+ * Returns `[]` when the target names nothing. This used to fall back to
+ * `['*']`, which is the engine's match-everything sentinel — so a hook whose
+ * target was blank (`''`, `[]`, or a list of blanks) silently registered on
+ * EVERY object, on every event it listed. Blank intent became the broadest
+ * possible blast radius with no diagnostic (#4001).
+ *
+ * `HookSchema` now refuses those shapes at parse time, but this binder accepts
+ * unparsed `Hook` input, so the guard has to hold here too. An empty result is
+ * skipped and recorded by the caller rather than widened: a wildcard hook is
+ * legitimate, it just has to be spelled `'*'` so a reviewer can see it.
+ */
 function normalizeObjects(target: Hook['object']): string[] {
-  if (Array.isArray(target)) return target.length > 0 ? target : ['*'];
-  if (typeof target === 'string' && target.length > 0) return [target];
-  return ['*'];
+  const names = Array.isArray(target) ? target : [target];
+  return names.filter((name): name is string => typeof name === 'string' && name.trim().length > 0);
 }
 
 function resolveHandler(

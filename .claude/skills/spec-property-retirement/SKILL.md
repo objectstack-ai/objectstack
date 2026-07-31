@@ -107,13 +107,20 @@ that shape. Therefore:
 | `retiredKey()` tombstone | **YES** (`z.never()` is a property) | **STAYS** — `status: "dead"`, a `verifiedAt`, and a `note` saying REMOVED + why the entry remains |
 | strict removal | no | **DELETED**, along with any CLI advisory-lint expectation |
 
-Get this backwards and: deleting a tombstoned key's entry reports it
-**UNCLASSIFIED and fails CI** (14 at once, in the #3896 sweep — the mistake this
-section exists to prevent). The other direction is worse in the long run: the
-gate never walks entries looking for absent schema keys, so a **leftover entry
-after a strict removal rots invisibly** — report `aria`/`performance` sat stale
-for a release before a human deleted them as hygiene. One direction fails
-loudly; the other never fails at all.
+Both directions now fail CI, so getting it backwards is loud either way:
+
+- deleting a **tombstoned** key's row reports it **UNCLASSIFIED** (14 at once in
+  the #3896 sweep — the mistake this section exists to prevent);
+- leaving a **strict-removed** key's row reports it as an **ORPHAN** row.
+
+The orphan leg is new (`scripts/liveness/orphans.mts`). Until it landed, this
+direction never failed at all — the gate walked the schema and looked rows up, so
+a row whose key had left the shape was simply never asked about, and rotted in
+place. That is how the report `aria`/`performance` rows outlived their keys by a
+full release, deleted by hand only because someone happened to read the file. If
+you hit the orphan error and the property really is still authorable, the fix is
+the **walk**, not the row: a property the walk cannot see is a property the
+ratchet cannot govern.
 
 Note template for a tombstone entry (verbatim house style, e.g.
 `liveness/action.json`):

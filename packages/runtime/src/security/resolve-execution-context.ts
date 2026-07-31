@@ -20,6 +20,7 @@
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectstack/spec/ai';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 
@@ -28,9 +29,21 @@ import {
   resolveLocalizationContext,
 } from '@objectstack/core';
 
+/**
+ * [#4127 batch 4] The lookup facade, typed by slot like the ones on
+ * `DomainHandlerDeps` and `ActionExecutionDeps`. This was the THIRD copy still
+ * returning `any`, and the one that mattered most: both of its `'auth'` callers
+ * read members — `verifyMcpAccessToken`, `api`, `getApi` — that nothing
+ * declared, on the path that decides who a request is.
+ */
+interface KernelServiceLookup {
+  <K extends keyof ServiceSlotContracts>(name: K): Promise<ServiceSlotContract<K> | undefined>;
+  (name: string): Promise<any> | any;
+}
+
 interface ResolveOptions {
   /** Function returning a service from the active kernel (or undefined). */
-  getService: (name: string) => Promise<any> | any;
+  getService: KernelServiceLookup;
   /** Function returning the data engine (ObjectQL) for the active scope. */
   getQl: () => Promise<any> | any;
   /** The raw incoming HTTP request (Fetch Request, Node IncomingMessage, …). */
@@ -102,7 +115,12 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     if (jwtBearer) {
       oauthBearerPresented = true;
       try {
-        const authService: any = await opts.getService('auth');
+        // [#4127 FINDING, batch 5]
+        // `verifyMcpAccessToken` is implemented (auth-manager.ts) and undeclared.
+        // This file's own `opts.getService: (name: string) => Promise<any> | any`
+        // is a second, smaller instance of the same problem — a lookup facade
+        // that returns `any` — and typing it is part of that batch too.
+        const authService = await opts.getService('auth');
         const verified = await authService?.verifyMcpAccessToken?.(jwtBearer);
         if (verified?.userId && Array.isArray(verified.scopes)) {
           oauthPrincipal = verified;
@@ -118,7 +136,10 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // both, and degrades to anonymous when auth isn't wired up.
   const getSession = async (h: any) => {
     try {
-      const authService: any = await opts.getService('auth');
+      // [#4127 FINDING, batch 5]
+      // Reaches BOTH undeclared shapes in two lines — `.api` and the `getApi()`
+      // fallback — which is the clearest statement of the gap in the codebase.
+      const authService = await opts.getService('auth');
       let api: any = authService?.api;
       if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
       return await api?.getSession?.({ headers: h });

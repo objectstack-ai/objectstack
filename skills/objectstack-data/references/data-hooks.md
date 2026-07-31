@@ -78,13 +78,18 @@ ObjectStack provides **8 lifecycle events** organized by operation type:
 
 ## Hook Definition Schema
 
-Every hook must conform to the `HookSchema`:
+Every hook must conform to the `HookSchema`. Author it with `defineHook()` —
+preferred over a bare `: Hook` literal (the same rule as `defineDatasource`):
+it validates when the module is imported, so constraint-level mistakes a bare
+annotation can't catch — a non-`snake_case` `name`, a misspelled key routed
+through a spread — fail while you author instead of at deploy, and the export
+carries defaults already materialized (#4269).
 
 ```typescript
 import { P } from '@objectstack/spec';
-import { Hook, HookContext } from '@objectstack/spec/data';
+import { defineHook, HookContext } from '@objectstack/spec/data';
 
-const myHook: Hook = {
+const myHook = defineHook({
   // Required: Unique identifier (snake_case)
   name: 'my_validation_hook',
 
@@ -122,7 +127,7 @@ const myHook: Hook = {
     maxRetries: 3,
     backoffMs: 1000,
   },
-};
+});
 ```
 
 ### Key Properties Explained
@@ -420,9 +425,9 @@ is **not** in the partial patch) and flip that position to `filled`:
 
 <!-- os:check -->
 ```typescript
-import type { Hook } from '@objectstack/spec/data';
+import { defineHook } from '@objectstack/spec/data';
 
-const fillPositionOnHire: Hook = {
+const fillPositionOnHire = defineHook({
   name: 'fill_position_on_hire',
   object: 'candidate',
   events: ['afterUpdate'],
@@ -441,7 +446,7 @@ const fillPositionOnHire: Hook = {
     capabilities: ['api.read', 'api.write', 'log'],
   },
   onError: 'log',
-};
+});
 
 export default fillPositionOnHire;
 ```
@@ -675,7 +680,7 @@ handler: async (ctx: HookContext) => {
 ### 1. Setting Default Values
 
 ```typescript
-const setAccountDefaults: Hook = {
+const setAccountDefaults = defineHook({
   name: 'account_defaults',
   object: 'account',
   events: ['beforeInsert'],
@@ -693,13 +698,13 @@ const setAccountDefaults: Hook = {
       ctx.input.owner_id = ctx.session.userId;
     }
   },
-};
+});
 ```
 
 ### 2. Data Validation
 
 ```typescript
-const validateAccount: Hook = {
+const validateAccount = defineHook({
   name: 'account_validation',
   object: 'account',
   events: ['beforeInsert', 'beforeUpdate'],
@@ -719,13 +724,13 @@ const validateAccount: Hook = {
       throw new Error('Annual revenue cannot be negative');
     }
   },
-};
+});
 ```
 
 ### 3. Preventing Deletion
 
 ```typescript
-const protectStrategicAccounts: Hook = {
+const protectStrategicAccounts = defineHook({
   name: 'protect_strategic_accounts',
   object: 'account',
   events: ['beforeDelete'],
@@ -747,13 +752,13 @@ const protectStrategicAccounts: Hook = {
       throw new Error(`Cannot delete account with ${oppCount} active opportunities`);
     }
   },
-};
+});
 ```
 
 ### 4. Data Enrichment
 
 ```typescript
-const enrichLeadScore: Hook = {
+const enrichLeadScore = defineHook({
   name: 'lead_scoring',
   object: 'lead',
   events: ['beforeInsert', 'beforeUpdate'],
@@ -782,13 +787,13 @@ const enrichLeadScore: Hook = {
 
     ctx.input.score = score;
   },
-};
+});
 ```
 
 ### 5. Triggering Workflows
 
 ```typescript
-const notifyOnStatusChange: Hook = {
+const notifyOnStatusChange = defineHook({
   name: 'notify_status_change',
   object: 'opportunity',
   events: ['afterUpdate'],
@@ -810,13 +815,13 @@ const notifyOnStatusChange: Hook = {
       // });
     }
   },
-};
+});
 ```
 
 ### 6. Creating Related Records
 
 ```typescript
-const createAuditTrail: Hook = {
+const createAuditTrail = defineHook({
   name: 'audit_trail',
   object: ['account', 'contact', 'opportunity'],
   events: ['afterInsert', 'afterUpdate', 'afterDelete'],
@@ -836,13 +841,13 @@ const createAuditTrail: Hook = {
       } : undefined,
     });
   },
-};
+});
 ```
 
 ### 7. External API Integration
 
 ```typescript
-const syncToExternalCRM: Hook = {
+const syncToExternalCRM = defineHook({
   name: 'sync_external_crm',
   object: 'account',
   events: ['afterInsert', 'afterUpdate'],
@@ -867,13 +872,13 @@ const syncToExternalCRM: Hook = {
       console.error('Failed to sync to external CRM', error);
     }
   },
-};
+});
 ```
 
 ### 8. Multi-Object Logic
 
 ```typescript
-const cascadeAccountUpdate: Hook = {
+const cascadeAccountUpdate = defineHook({
   name: 'cascade_account_updates',
   object: 'account',
   events: ['afterUpdate'],
@@ -887,13 +892,13 @@ const cascadeAccountUpdate: Hook = {
       );
     }
   },
-};
+});
 ```
 
 ### 9. Conditional Execution
 
 ```typescript
-const highValueAccountAlert: Hook = {
+const highValueAccountAlert = defineHook({
   name: 'high_value_alert',
   object: 'account',
   events: ['afterInsert'],
@@ -904,7 +909,7 @@ const highValueAccountAlert: Hook = {
     console.log(`🚨 High-value account created: ${ctx.result.name}`);
     // Send alert to sales leadership
   },
-};
+});
 ```
 
 ### 10. Data Masking (Read Operations)
@@ -916,7 +921,7 @@ const highValueAccountAlert: Hook = {
 > subscription covers both `find` and `findOne`.
 
 ```typescript
-const maskSensitiveData: Hook = {
+const maskSensitiveData = defineHook({
   name: 'mask_pii',
   object: ['contact', 'lead'],
   events: ['afterFind'],   // fires for findOne too — no separate afterFindOne
@@ -942,7 +947,7 @@ const maskSensitiveData: Hook = {
       }
     }
   },
-};
+});
 ```
 
 ---
@@ -1013,16 +1018,16 @@ export const onEnable = async (ctx: { ql: ObjectQL }) => {
 
 ```typescript
 // src/objects/account.hook.ts
-import { Hook, HookContext } from '@objectstack/spec/data';
+import { defineHook, HookContext } from '@objectstack/spec/data';
 
-const accountHook: Hook = {
+const accountHook = defineHook({
   name: 'account_logic',
   object: 'account',
   events: ['beforeInsert', 'beforeUpdate'],
   handler: async (ctx: HookContext) => {
     // Validation logic
   },
-};
+});
 
 export default accountHook;
 
@@ -1250,7 +1255,7 @@ const validators = [
   validateWebsite,
 ];
 
-const composedHook: Hook = {
+const composedHook = defineHook({
   name: 'validation_suite',
   object: 'account',
   events: ['beforeInsert', 'beforeUpdate'],
@@ -1259,13 +1264,13 @@ const composedHook: Hook = {
       await validator(ctx);
     }
   },
-};
+});
 ```
 
 ### Conditional Hook Execution
 
 ```typescript
-const conditionalHook: Hook = {
+const conditionalHook = defineHook({
   name: 'enterprise_only',
   object: 'account',
   events: ['afterInsert'],
@@ -1277,7 +1282,7 @@ const conditionalHook: Hook = {
 
     // Enterprise-specific logic
   },
-};
+});
 ```
 
 ---
