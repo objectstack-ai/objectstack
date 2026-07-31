@@ -20,8 +20,10 @@
  */
 
 import { CoreServiceName } from '@objectstack/spec/system';
+import { MarkNotificationsReadRequestSchema } from '@objectstack/spec/api';
 import type { INotificationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
+import { validationFailure, fieldsFromZodIssues } from '../validation-failure.js';
 import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -112,8 +114,23 @@ export async function handleNotificationRequest(
     // POST /notifications/read — mark specific notifications read.
     if (subPath === 'read' && m === 'POST') {
         if (typeof inbox.markRead !== 'function') return capabilityUnavailable(deps, 'notification');
-        const ids: string[] = Array.isArray(body?.ids) ? body.ids.map((x: unknown) => String(x)) : [];
-        const result = await inbox.markRead(userId, ids);
+        // [#3899] Validate against the declared contract
+        // (`MarkNotificationsReadRequestSchema`, catalog `requestSchema`).
+        // The old read was `Array.isArray(body?.ids) ? … : []`, so
+        // `{"notificationIds": [...]}` or `{"ids": "n1"}` silently became
+        // `markRead(userId, [])` — a success envelope, `readCount: 0`, and an
+        // unread badge that never cleared. The wrong key is now a 400 naming
+        // the field, thrown in the shape both dispatcher error exits map
+        // (#3918); the analytics entry gate is the precedent (#3878).
+        const parsed = MarkNotificationsReadRequestSchema.safeParse(body ?? {});
+        if (!parsed.success) {
+            const fields = fieldsFromZodIssues(parsed.error.issues);
+            throw validationFailure(
+                `Invalid mark-read body — expected { ids: string[] }: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`,
+                fields,
+            );
+        }
+        const result = await inbox.markRead(userId, parsed.data.ids);
         return { handled: true, response: deps.success(result) };
     }
 
