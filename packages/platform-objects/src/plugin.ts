@@ -4,7 +4,7 @@ import { SetupAppTranslations } from './apps/translations/index.js';
 import { MetadataFormsTranslations } from './metadata-translations/index.js';
 import { SysMigration } from './system/sys-migration.object.js';
 import { SysSecret } from './system/sys-secret.object.js';
-import { attestFreshDatastore } from './system/migration-flag.js';
+import { attestFreshDatastore, type MigrationFlagEngine } from './system/migration-flag.js';
 import type { II18nService } from '@objectstack/spec/contracts';
 
 /**
@@ -14,7 +14,7 @@ import type { II18nService } from '@objectstack/spec/contracts';
  * accessors, and the probe at the call site is what runs when the slot holds an
  * engine without them. Declared narrow and named instead of erased to `any`.
  */
-interface FreshDatastoreEngine {
+interface FreshDatastoreEngine extends MigrationFlagEngine {
   wasDatastoreCreatedFromEmpty?(): boolean;
   invalidateDataMigrationFlags?(): void;
 }
