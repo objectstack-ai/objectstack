@@ -16,6 +16,16 @@
 // (EX_TEMPFAIL: the sanctioned response is a rerun -- every #4250 occurrence
 // passed on rerun of the same commit).
 //
+// Silence is deliberately the ONLY signal, because it catches both observed
+// shapes without having to tell them apart. #4331 hit Temporal Conformance in
+// the second shape: every package printed `Done`, turbo printed its summary,
+// and then the process never exited -- a leaked handle rather than a hung
+// test. No output is no output, so the same watchdog fires; the quoted last
+// line is what tells a reader which shape they got (a mid-test line vs. the
+// run's own summary). Note the exit path is `child.on('exit')`, not 'close':
+// the guard must not itself block waiting on stdio pipes a leaked grandchild
+// is still holding open.
+//
 //   node scripts/run-with-stall-guard.mjs --log <file> [--stall-minutes N] -- <command...>
 //
 // It also owns the log tee: combined stdout+stderr is forwarded to this
@@ -118,14 +128,18 @@ ${'═'.repeat(72)}
    frozen since : ${new Date(lastOutputAt).toISOString()}
    last line    : ${lastLine}
 
-   This is the #4250 failure mode -- the suite is STOPPED, not slow. A
-   healthy run prints continuously; only a hang goes silent this long.
-   Killing the test process group and failing the step now, instead of
-   sitting in_progress until the job timeout.
+   The run is STOPPED, not slow -- a healthy one prints continuously and
+   only a hang goes silent this long. Killing the test process group and
+   failing the step now, instead of sitting in_progress until the job
+   timeout.
 
-   Triage: every #4250 stall so far passed on a plain rerun of the same
-   commit -- rerun this job before suspecting the diff. If it stalls twice
-   at the same test file, add that occurrence to #4250.
+   Read the last line above to place it: a mid-test line means the suite
+   hung partway (#4250); the run's own completion summary means every
+   package finished and the process then failed to exit (#4331).
+
+   Triage: every stall so far passed on a plain rerun of the same commit --
+   rerun this job before suspecting the diff. If it stalls twice at the same
+   point, add that occurrence to #4250 (mid-suite) or #4331 (post-Done).
 ${'═'.repeat(72)}
 `;
   process.stdout.write(banner);
