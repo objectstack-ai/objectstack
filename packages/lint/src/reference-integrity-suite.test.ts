@@ -28,6 +28,7 @@ describe('reference-integrity suite — membership', () => {
       'validateAiAgentAuthoring',
       'validateHookBodyWrites',
       'validateActionBodyWrites',
+      'validateFlowNodeWrites',
     ]);
   });
 
@@ -168,6 +169,15 @@ describe('reference-integrity suite — every member actually runs', () => {
             type: 'get_record',
             config: { objectName: 'crm_lead', filter: { name: '{record.budget}' } },
           },
+          // validateFlowNodeWrites: the node's structural write map names a
+          // field crm_lead does not declare — the third surface in the #4271
+          // family, and the only one whose finding is a certainty rather than
+          // an extraction (so it gates).
+          {
+            id: 'stamp',
+            type: 'update_record',
+            config: { objectName: 'crm_lead', fields: { lead_score: 100 } },
+          },
         ],
       },
     ],
@@ -193,6 +203,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     // The one member that emits a second rule id — see the suite's comment on
     // why it rides along instead of becoming its own entry.
     expect(rules).toContain('action-record-write-discarded');
+    expect(rules).toContain('flow-node-write-unknown-field');
   });
 
   it('carries a gating flow-template finding through the suite (#3810)', () => {
@@ -214,9 +225,9 @@ describe('reference-integrity suite — every member actually runs', () => {
       expect(typeof f.message).toBe('string');
       expect(typeof f.hint).toBe('string');
     }
-    // Object references run first, action-body writes last.
+    // Object references run first, flow-node writes last.
     expect(findings[0].rule).toBe('object-reference-unknown');
-    expect(findings[findings.length - 1].rule).toBe('action-body-write-unknown-field');
+    expect(findings[findings.length - 1].rule).toBe('flow-node-write-unknown-field');
   });
 
   it('returns nothing for an empty stack', () => {

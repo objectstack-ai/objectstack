@@ -35,7 +35,11 @@ function makeDeps(over: Partial<ApproverOrgScopeDeps> & { members?: Array<{ user
   const members = over.members ?? [];
   const engine = {
     find: vi.fn(async (object: string, opts: any) => {
-      const f = opts?.filter ?? {};
+      // Reads the CANONICAL key, like the engine's own post-fold AST. This
+      // double used to read `opts.filter`, which is why it kept passing while
+      // production spoke the deprecated spelling: both sides shared one
+      // dialect, so nothing forced the migration (#4346).
+      const f = opts?.where ?? {};
       if (object === 'sys_organization') {
         const rows = Object.values(ORGS).filter((o) =>
           (f.id === undefined || o.id === f.id) && (f.slug === undefined || o.slug === f.slug));
@@ -151,7 +155,7 @@ describe('resolveApproverDirectoryOrg — the guards', () => {
     const deps = makeDeps();
     (deps.engine.find as any) = vi.fn(async (object: string, opts: any) => {
       if (object !== 'sys_organization') return [];
-      const id = opts?.filter?.id;
+      const id = opts?.where?.id;
       // a → b → a
       if (id === 'a') return [{ id: 'a', slug: 'a', parent_organization_id: 'b' }];
       if (id === 'b') return [{ id: 'b', slug: 'b', parent_organization_id: 'a' }];

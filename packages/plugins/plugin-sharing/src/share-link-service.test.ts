@@ -89,6 +89,33 @@ describe('ShareLinkService', () => {
     expect(engine._tables.sys_share_link).toHaveLength(1);
   });
 
+  // [#4346 follow-up] `listLinks` asked for "the 200 most recent links" with a
+  // `sort` key. The ENGINE folds only `where`/`filter` and `limit`/`top`
+  // (`RPC_QUERY_ALIAS_SLOTS`); `sort`→`orderBy` is folded at the RPC/wire layer,
+  // which a direct `engine.find()` never crosses. So `sort` rode onto the AST
+  // untouched, every driver's `Array.isArray(query.orderBy)` guard declined to
+  // emit an ORDER BY, and the "most recent 200" was an ARBITRARY 200 — with a
+  // perfectly ordinary-looking result over it (the #4226 failure mode, one
+  // layer below the normalizer #4226 fixed).
+  //
+  // Asserted on the OPTION BAG rather than on row order, because the failure is
+  // that the key never becomes `orderBy` — a fake engine that sorts by either
+  // spelling would pass while the real one drops it.
+  it('listLinks asks the engine for its ordering under the canonical key', async () => {
+    const seen: any[] = [];
+    const recording = {
+      ...engine,
+      async find(object: string, options?: any) { seen.push(options); return engine.find(object, options); },
+    };
+    const svc = new ShareLinkService({ engine: recording as any });
+    await svc.listLinks({}, { isSystem: true });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].orderBy, 'a `sort` key here is silently dropped by every driver')
+      .toEqual([{ field: 'created_at', order: 'desc' }]);
+    expect('sort' in seen[0], 'the deprecated spelling must not ride along').toBe(false);
+  });
+
   it('rejects objects that did not opt in', async () => {
     await expect(
       service.createLink(

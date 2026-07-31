@@ -1053,7 +1053,7 @@ export class ApprovalService implements IApprovalService {
     let rows: any[] = [];
     try {
       rows = await this.engine.find('sys_team_member', {
-        filter: { team_id: teamId },
+        where: { team_id: teamId },
         fields: ['user_id'],
         limit: 10000,
         context: SYSTEM_CTX,
@@ -1096,7 +1096,7 @@ export class ApprovalService implements IApprovalService {
     // Seed sanity check: skip if dept doesn't exist or is inactive within tenant.
     try {
       const seed = await this.engine.find('sys_business_unit', {
-        filter: this.businessUnitOrgScope({ id: businessUnitId }, organizationId),
+        where: this.businessUnitOrgScope({ id: businessUnitId }, organizationId),
         fields: ['id', 'active'],
         limit: 1,
         context: SYSTEM_CTX,
@@ -1125,7 +1125,7 @@ export class ApprovalService implements IApprovalService {
     let rows: any[] = [];
     try {
       rows = await this.engine.find('sys_business_unit_member', {
-        filter: { business_unit_id: { $in: Array.from(seen) } },
+        where: { business_unit_id: { $in: Array.from(seen) } },
         fields: ['user_id'],
         limit: 10000,
         context: SYSTEM_CTX,
@@ -1184,7 +1184,7 @@ export class ApprovalService implements IApprovalService {
   private async lookupManager(userId: string): Promise<string | null> {
     try {
       const rows = await this.engine.find('sys_user', {
-        filter: { id: userId }, fields: ['id', 'manager_id'], limit: 1, context: SYSTEM_CTX,
+        where: { id: userId }, fields: ['id', 'manager_id'], limit: 1, context: SYSTEM_CTX,
       } as any);
       const row: any = Array.isArray(rows) ? rows[0] : null;
       return row?.manager_id ? String(row.manager_id) : null;
@@ -1240,7 +1240,7 @@ export class ApprovalService implements IApprovalService {
     let rows: any[] = [];
     try {
       rows = await this.engine.find('sys_approval_delegation', {
-        filter: { delegator_id: delegatorId },
+        where: { delegator_id: delegatorId },
         fields: ['id', 'delegator_id', 'delegate_id', 'valid_from', 'valid_until', 'reason', 'organization_id'],
         limit: 50,
         context: SYSTEM_CTX,

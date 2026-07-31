@@ -64,6 +64,28 @@ export interface IDataDriver {
   /**
    * Find multiple records matching the structured query.
    * MUST return `id` as string. MUST NOT return implementation details like `_id`.
+   *
+   * **Paged reads MUST be deterministic.** When `orderBy` is non-empty and
+   * `limit`/`offset` are used to walk the result set, the driver MUST produce a
+   * total order — reading page after page visits every matching row exactly
+   * once. A sort key the caller supplied usually does not identify a row
+   * (`orderBy: status`), and no backend promises that rows with equal keys keep
+   * the same relative arrangement between two queries: on MongoDB, `sort` +
+   * `skip`/`limit` on a non-unique key may return one document twice and never
+   * return another. Drivers close this by appending a unique tie-breaker column
+   * of their own to the ORDER BY — which column, and whether the table has one
+   * at all, is the driver's knowledge, which is why the obligation sits here
+   * and not in the query engine.
+   *
+   * The failure this rules out is invisible in any single response: every page
+   * is full, every row is real and belongs, and the duplicate sits several
+   * screens away from the omission. Checked by the shared
+   * `PAGINATION_CASES` fixture (`data/pagination-conformance.ts`) — a driver
+   * ships with those cases running against it.
+   *
+   * Deliberately NOT covered: a paged read with no `orderBy` at all. That is
+   * non-deterministic on every backend by definition; imposing an order on
+   * callers who asked for none is a separate decision (objectstack#4363).
    */
   find(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown>[]>;
 

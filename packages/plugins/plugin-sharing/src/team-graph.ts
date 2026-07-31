@@ -54,7 +54,7 @@ export class TeamGraphService implements ITeamGraphService {
     let rows: any[] = [];
     try {
       rows = await this.engine.find('sys_team_member', {
-        filter: { team_id: teamId },
+        where: { team_id: teamId },
         fields: ['user_id'],
         limit: 10000,
         context: SYSTEM_CTX,
@@ -97,7 +97,7 @@ export class TeamGraphService implements ITeamGraphService {
     let row: any = null;
     try {
       const rows = await this.engine.find('sys_user', {
-        filter: { id: userId },
+        where: { id: userId },
         fields: ['id', 'manager_id'],
         limit: 1,
         context: SYSTEM_CTX,

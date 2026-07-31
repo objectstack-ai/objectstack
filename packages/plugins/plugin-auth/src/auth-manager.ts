@@ -3481,7 +3481,7 @@ export class AuthManager {
         // Gained a local password → env-native. Only write if currently
         // managed (avoids a no-op history row on every local signup).
         const u = await engine.findOne('sys_user', {
-          filter: { id: userId }, fields: ['id', 'source'], context: SYSTEM_CTX,
+          where: { id: userId }, fields: ['id', 'source'], context: SYSTEM_CTX,
         } as any);
         if (u && u.source === 'idp_provisioned') {
           await engine.update('sys_user', { id: userId, source: 'env_native' }, { context: SYSTEM_CTX } as any);
@@ -3491,7 +3491,7 @@ export class AuthManager {
 
       // Federated link → managed, unless a local credential already exists.
       const credentialCount = await engine.count('sys_account', {
-        filter: { user_id: userId, provider_id: 'credential' },
+        where: { user_id: userId, provider_id: 'credential' },
         context: SYSTEM_CTX,
       } as any);
       if (typeof credentialCount === 'number' && credentialCount > 0) return;
