@@ -20,6 +20,7 @@ import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoute
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
+import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed } from '@objectstack/spec/kernel';
@@ -1541,6 +1542,47 @@ export class ObjectStackProtocolImplementation implements
      */
     private authoringGates = new Map<string, MetadataAuthoringGate>();
 
+    /**
+     * Once-per-process dedupe for stored-row conversion notices
+     * (`conversionId|type|name`). `getMetaItems`/`getMetaItem` re-read
+     * sys_metadata on every call, so without this a single legacy row would
+     * warn on every list request instead of once.
+     */
+    private storedConversionWarned = new Set<string>();
+
+    /**
+     * Canonicalize a stored `sys_metadata` body on rehydration (#3903;
+     * ADR-0087 addendum "stored metadata replays the chain").
+     *
+     * Every seam that turns a row's `metadata` JSON into an in-memory item
+     * funnels through here, so a row written under a past protocol is read
+     * in today's canonical shape — parity with what the authored load path
+     * has always done, extended by the full-chain replay data at rest needs
+     * (a stored row has no author for a tombstone to teach).
+     *
+     * `flow` is deliberately skipped: flow-node conversions carry an
+     * open-namespace conflict guard that needs the automation engine's live
+     * executor registry (`reservedNodeTypes`), which this layer does not
+     * have. Flows canonicalize at `AutomationEngine.registerFlow` — the
+     * execution seam — with the same full-chain policy.
+     */
+    private convertStoredItem(type: string, data: unknown): unknown {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (singular === 'flow') return data;
+        return applyConversionsToStoredItem(singular, data, {
+            onNotice: (n) => {
+                const name = (data as { name?: unknown } | null | undefined)?.name;
+                const key = `${n.conversionId}|${singular}|${String(name ?? '')}`;
+                if (this.storedConversionWarned.has(key)) return;
+                this.storedConversionWarned.add(key);
+                console.warn(
+                    `[Protocol] stored ${singular}/${String(name ?? '<unnamed>')} carries a pre-protocol shape; ` +
+                    `${n.message} The row itself is unchanged — re-save it (Studio edit → save) to persist the canonical shape.`,
+                );
+            },
+        });
+    }
+
     constructor(
         engine: IDataEngine,
         getServicesRegistry?: () => Map<string, any>,
@@ -2295,14 +2337,19 @@ export class ObjectStackProtocolImplementation implements
             const records = Array.from(mergedMap.values());
             if (records && records.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
-                // Parse each overlay body once and surface its persisted
+                // Parse each overlay body once — replaying the stored-row
+                // conversion chain (#3903) so every consumer of this list sees
+                // the canonical protocol shape — and surface its persisted
                 // software-package binding so the sidebar package filter and
                 // provenance classification see overlay rows the way they see
                 // registry items.
                 const overlays = records.map((record) => {
-                    const data = typeof record.metadata === 'string'
-                        ? JSON.parse(record.metadata)
-                        : record.metadata;
+                    const data = this.convertStoredItem(
+                        String(record.type ?? request.type),
+                        typeof record.metadata === 'string'
+                            ? JSON.parse(record.metadata)
+                            : record.metadata,
+                    ) as any;
                     const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
                     if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                         (data as any)._packageId = recPkg;
@@ -2386,7 +2433,10 @@ export class ObjectStackProtocolImplementation implements
                     // previews only its own package's entry, so two packages'
                     // same-name drafts stay distinct. Draft rows win over active.
                     const drafts = draftRecords.map((record) => {
-                        const data = typeof record.metadata === 'string' ? JSON.parse(record.metadata) : record.metadata;
+                        const data = this.convertStoredItem(
+                            String(record.type ?? request.type),
+                            typeof record.metadata === 'string' ? JSON.parse(record.metadata) : record.metadata,
+                        ) as any;
                         const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
                         if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                             (data as any)._packageId = recPkg;
@@ -2555,9 +2605,12 @@ export class ObjectStackProtocolImplementation implements
                 };
                 const draftRec = (orgId ? await findDraft(orgId) : undefined) ?? await findDraft(null);
                 if (draftRec) {
-                    const draftItem = typeof draftRec.metadata === 'string'
-                        ? JSON.parse(draftRec.metadata)
-                        : draftRec.metadata;
+                    const draftItem = this.convertStoredItem(
+                        String(draftRec.type ?? request.type),
+                        typeof draftRec.metadata === 'string'
+                            ? JSON.parse(draftRec.metadata)
+                            : draftRec.metadata,
+                    ) as any;
                     if (draftItem && typeof draftItem === 'object') {
                         const recPkg = (draftRec as { package_id?: string | null }).package_id ?? undefined;
                         if (recPkg && (draftItem as any)._packageId === undefined) (draftItem as any)._packageId = recPkg;
@@ -2612,9 +2665,12 @@ export class ObjectStackProtocolImplementation implements
             const record = (orgId ? await findOverlay(orgId) : undefined)
                 ?? await findOverlay(null);
             if (record) {
-                item = typeof record.metadata === 'string'
-                    ? JSON.parse(record.metadata)
-                    : record.metadata;
+                item = this.convertStoredItem(
+                    String(record.type ?? request.type),
+                    typeof record.metadata === 'string'
+                        ? JSON.parse(record.metadata)
+                        : record.metadata,
+                );
                 // Surface the persisted software-package binding (parity with
                 // the list path in getMetaItems) so provenance/UI can read it.
                 const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
@@ -2890,14 +2946,20 @@ export class ObjectStackProtocolImplementation implements
             if (orgId) {
                 const rec = await findOverlay(orgId);
                 if (rec) {
-                    overlay = typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata;
+                    overlay = this.convertStoredItem(
+                        String(rec.type ?? request.type),
+                        typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata,
+                    );
                     overlayScope = 'org';
                 }
             }
             if (overlay === null) {
                 const rec = await findOverlay(null);
                 if (rec) {
-                    overlay = typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata;
+                    overlay = this.convertStoredItem(
+                        String(rec.type ?? request.type),
+                        typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata,
+                    );
                     overlayScope = 'env';
                 }
             }
@@ -6669,7 +6731,14 @@ export class ObjectStackProtocolImplementation implements
             const newName = renameName(row.name);
             let item: any;
             try {
-                item = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {});
+                // Canonicalize the source row before re-saving (#3903): the copy
+                // is a NEW write and must pass today's schema gate, so a legacy
+                // shape the chain owns is lifted rather than failing the copy —
+                // duplication never mints new rows in a pre-protocol dialect.
+                item = this.convertStoredItem(
+                    String(row.type),
+                    typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {}),
+                );
             } catch {
                 failed.push({ type: row.type, name: row.name, error: 'unparseable metadata' });
                 continue;
@@ -7456,10 +7525,29 @@ export class ObjectStackProtocolImplementation implements
      * Per ADR-0005, project-kernel mode ALSO hydrates from sys_metadata —
      * customization overlay rows must survive restart. Scope filter
      * (`environment_id = this.environmentId ?? null`) keeps tenants isolated.
+     *
+     * #3903 — two contract duties run per row, and their split is deliberate:
+     *
+     *  1. **Convert** ({@link convertStoredItem}): the full ADR-0087 chain
+     *     replays, so a row written under a past protocol registers in the
+     *     canonical shape. Chain-owned history therefore stops presenting as
+     *     "invalid metadata" at all.
+     *  2. **Diagnose, never drop**: what still fails the type's current spec
+     *     schema *after* conversion is a genuine contract violation — counted
+     *     in `invalid`, warned with a stable `[metadata_spec_invalid]` marker,
+     *     and STILL registered. Boot-time refusal would unhook the metadata
+     *     from every serving surface (an object row backs live tables; an
+     *     unregistered item cannot even be listed, opened, or fixed in
+     *     Studio), turning an upgrade into a data outage. The enforcing gates
+     *     live where an author is present to act: `saveMetaItem` rejects new
+     *     writes (422), and the read surfaces badge the row via
+     *     `_diagnostics`. This is that same read-side verdict, surfaced once
+     *     at boot where operators look.
      */
-    async loadMetaFromDb(): Promise<{ loaded: number; errors: number }> {
+    async loadMetaFromDb(): Promise<{ loaded: number; errors: number; invalid: number }> {
         let loaded = 0;
         let errors = 0;
+        let invalid = 0;
         try {
             // ADR-0005 (revised 2026-05): hydrate only env-wide rows
             // (organization_id IS NULL). Per-org overlays are loaded on
@@ -7472,11 +7560,26 @@ export class ObjectStackProtocolImplementation implements
             const records = await this.engine.find('sys_metadata', { where });
             for (const record of records) {
                 try {
-                    const data = typeof record.metadata === 'string'
-                        ? JSON.parse(record.metadata)
-                        : record.metadata;
+                    const data = this.convertStoredItem(
+                        String(record.type),
+                        typeof record.metadata === 'string'
+                            ? JSON.parse(record.metadata)
+                            : record.metadata,
+                    );
                     // Normalize DB type to singular (DB may store legacy plural forms)
                     const normalizedType = PLURAL_TO_SINGULAR[record.type] ?? record.type;
+                    const verdict = computeMetadataDiagnostics(normalizedType, data);
+                    if (verdict && !verdict.valid) {
+                        invalid++;
+                        const first = verdict.errors?.[0];
+                        console.warn(
+                            `[Protocol] [metadata_spec_invalid] stored ${normalizedType}/${record.name} fails the ` +
+                            `current spec schema even after conversion` +
+                            (first ? ` (${first.path || '<root>'}: ${first.message})` : '') +
+                            `. Registered anyway so it stays serveable and fixable — correct it in Studio ` +
+                            `(the read carries the full _diagnostics), or delete the sys_metadata row.`,
+                        );
+                    }
                     if (normalizedType === 'object') {
                         this.engine.registry.registerObject(data as any, record.packageId || 'sys_metadata');
                     } else {
@@ -7505,7 +7608,7 @@ export class ObjectStackProtocolImplementation implements
                 console.warn(`[Protocol] DB hydration skipped: ${e.message}`);
             }
         }
-        return { loaded, errors };
+        return { loaded, errors, invalid };
     }
 
     // ==========================================
