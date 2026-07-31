@@ -12,6 +12,8 @@ import {
   MigrationFloorError,
 } from '@objectstack/spec';
 import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
+import { FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, STRUCTURED_JSON_TYPES } from '@objectstack/spec/data';
+import { FILE_REFERENCES_MIGRATION_ID, VALUE_SHAPES_MIGRATION_ID } from '@objectstack/spec/system';
 import { loadConfig } from '../../utils/config.js';
 import {
   printHeader,
@@ -23,6 +25,86 @@ import {
   createTimer,
   emitJson,
 } from '../../utils/format.js';
+
+/** The protocol major that introduced the per-deployment value-shape gates. */
+const VALUE_SHAPE_GATE_MAJOR = 17;
+
+interface PendingDataMigration {
+  /** `sys_migration` row id the run records. */
+  id: string;
+  command: string;
+  /** What staying un-run costs, in this deployment's terms. */
+  unlocks: string;
+}
+
+/**
+ * The DATA migrations a metadata chain crossing into {@link VALUE_SHAPE_GATE_MAJOR}
+ * leaves for the operator (ADR-0104's 2026-07-30 addendum, #3438).
+ *
+ * Metadata migration and data migration are different jobs with different
+ * subjects: this command rewrites an author's source, while these two rewrite
+ * (or vouch for) a deployment's rows, one deployment at a time. Nothing here
+ * can run them, and — with no database in reach — nothing here can say whether
+ * they have run; the booting server reports that. What this can do is make
+ * sure the upgrade never *ends* without naming them, because a gate nobody is
+ * told about is served by nobody.
+ *
+ * Listed only when the author's own metadata declares the field classes each
+ * gate is about, so the advice is never noise.
+ */
+function pendingDataMigrations(stack: any, fromMajor: number, toMajor: number): PendingDataMigration[] {
+  if (!(fromMajor < VALUE_SHAPE_GATE_MAJOR && toMajor >= VALUE_SHAPE_GATE_MAJOR)) return [];
+
+  let media = false;
+  let covered = false;
+  for (const obj of (Array.isArray(stack?.objects) ? stack.objects : []) as any[]) {
+    for (const def of Object.values(obj?.fields ?? {}) as any[]) {
+      if (!def?.type) continue;
+      if (FILE_REFERENCE_TYPES.has(def.type)) media = true;
+      else if (REFERENCE_VALUE_TYPES.has(def.type) || STRUCTURED_JSON_TYPES.has(def.type)) covered = true;
+    }
+    if (media && covered) break;
+  }
+
+  const pending: PendingDataMigration[] = [];
+  if (media) {
+    pending.push({
+      id: FILE_REFERENCES_MIGRATION_ID,
+      command: 'os migrate files-to-references',
+      unlocks:
+        'converts legacy file values to sys_file references, then enforces media value shapes ' +
+        'and lets released files be collected. Until it passes here, media values only warn and ' +
+        'released files are kept forever.',
+    });
+  }
+  if (covered) {
+    pending.push({
+      id: VALUE_SHAPES_MIGRATION_ID,
+      command: 'os migrate value-shapes',
+      unlocks:
+        'scans stored reference and structured-JSON values against their field contracts. ' +
+        'Until it passes here, a malformed value only warns.',
+    });
+  }
+  return pending;
+}
+
+/** Print the data-migration advice — the last thing a crossing upgrade sees. */
+function printPendingDataMigrations(pending: PendingDataMigration[]): void {
+  if (pending.length === 0) return;
+  console.log(chalk.bold('  Then, against each deployment\'s database:'));
+  for (const m of pending) {
+    console.log(`    ${chalk.cyan('→')} ${chalk.white(m.command)}`);
+    console.log(chalk.dim(`        ${m.unlocks}`));
+  }
+  console.log(
+    chalk.dim(
+      '    Both are dry-run by default and report what they would do; `--apply` is the only ' +
+        'writing mode. Not running them is safe — enforcement simply stays off here.',
+    ),
+  );
+  console.log('');
+}
 
 /**
  * `os migrate meta --from N` — replay the ADR-0087 D3 migration chain.
@@ -94,6 +176,7 @@ export default class MigrateMeta extends Command {
       // diff" the consumer agent reviews (ADR-0087 D3/D5).
       const parsed = ObjectStackDefinitionSchema.safeParse(result.stack);
       const specChanges = composeSpecChanges(flags.from, toMajor);
+      const dataMigrations = pendingDataMigrations(result.stack, result.fromMajor, result.toMajor);
 
       if (flags.json) {
         await emitJson({
@@ -112,6 +195,9 @@ export default class MigrateMeta extends Command {
                 : undefined,
               specChanges,
               schemaValid: parsed.success,
+              // Per-deployment data migrations this chain leaves to the
+              // operator — the metadata is only half of a crossing upgrade.
+              dataMigrations,
               duration: timer.elapsed(),
             });
         if (flags.out) writeFileSync(resolve(flags.out), JSON.stringify(result.stack, null, 2));
@@ -124,6 +210,10 @@ export default class MigrateMeta extends Command {
 
       if (result.applied.length === 0 && result.todos.length === 0) {
         printSuccess('Nothing to migrate — the metadata is already canonical for this range.');
+        // Still advertise: metadata needing no rewrite says nothing about
+        // whether this deployment's DATA has been migrated.
+        console.log('');
+        printPendingDataMigrations(dataMigrations);
         return;
       }
 
@@ -161,6 +251,8 @@ export default class MigrateMeta extends Command {
         writeFileSync(resolve(flags.out), JSON.stringify(result.stack, null, 2));
         printInfo(`Wrote migrated stack snapshot → ${chalk.white(resolve(flags.out))}`);
       }
+
+      printPendingDataMigrations(dataMigrations);
 
       if (parsed.success) {
         printSuccess(`Migrated stack is schema-valid ${chalk.dim(`(${timer.display()})`)}`);

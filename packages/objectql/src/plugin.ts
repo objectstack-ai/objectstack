@@ -359,6 +359,16 @@ export class ObjectQLPlugin implements Plugin {
             // No settings service — governance stays at declared defaults.
         }
     });
+    // ADR-0104 / #3438: name the value-shape gates still open on THIS
+    // deployment, and the command that closes each. Deliberately on
+    // `kernel:bootstrapped` rather than `kernel:ready`: the answer depends on
+    // the storage service's OWN ready handler, which registers `sys_migration`
+    // and may attest a store it just created. Racing it inside `kernel:ready`
+    // would tell a brand-new deployment its gates are open moments after they
+    // were closed.
+    ctx.hook('kernel:bootstrapped', async () => {
+        await this.ql?.announceOpenMigrationGates();
+    });
     ctx.hook('metadata:reloaded', async (payload?: unknown) => {
         await this.resyncAuthoredHooks(ctx);
         await this.resyncAuthoredActions(ctx);
