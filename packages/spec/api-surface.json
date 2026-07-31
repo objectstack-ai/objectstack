@@ -192,6 +192,7 @@
     "AggregationStage (type)",
     "AggregationStageSchema (const)",
     "AnalyticsQuery (type)",
+    "AnalyticsQueryInput (type)",
     "AnalyticsQuerySchema (const)",
     "ApiMethod (type)",
     "ApiMethodsMode (type)",
