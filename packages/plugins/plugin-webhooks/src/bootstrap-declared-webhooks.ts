@@ -123,7 +123,7 @@ export async function bootstrapDeclaredWebhooks(
 
     try {
       const existing = await engine.find(subscriptionsObject, {
-        filter: { name: wh.name },
+        where: { name: wh.name },
         limit: 1,
         context: SYSTEM_CTX,
       } as any);

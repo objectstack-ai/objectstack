@@ -307,7 +307,7 @@ export class ReportService implements IReportService {
   /** Raw metadata read of a saved report by id (no authz — callers gate). */
   private async loadReportRow(reportId: string): Promise<any | null> {
     const rows = await this.engine.find('sys_saved_report', {
-      filter: { id: reportId }, limit: 1, context: SYSTEM_CTX,
+      where: { id: reportId }, limit: 1, context: SYSTEM_CTX,
     });
     return Array.isArray(rows) && rows[0] ? rows[0] : null;
   }
@@ -374,7 +374,7 @@ export class ReportService implements IReportService {
       f.owner_id = context.userId;
     }
     const rows = await this.engine.find('sys_saved_report', {
-      filter: f, limit: 500, orderBy: [{ field: 'updated_at', order: 'desc' }], context: SYSTEM_CTX,
+      where: f, limit: 500, orderBy: [{ field: 'updated_at', order: 'desc' }], context: SYSTEM_CTX,
     });
     return Array.isArray(rows) ? rows.map(rowFromSaved) : [];
   }
@@ -397,7 +397,7 @@ export class ReportService implements IReportService {
     }
     // Cascade — drop attached schedules first.
     const schedules = await this.engine.find('sys_report_schedule', {
-      filter: { report_id: reportId }, limit: 500, context: SYSTEM_CTX,
+      where: { report_id: reportId }, limit: 500, context: SYSTEM_CTX,
     });
     for (const s of (schedules ?? [])) {
       await this.engine.delete('sys_report_schedule', { where: { id: (s as any).id }, context: SYSTEM_CTX });
@@ -437,7 +437,7 @@ export class ReportService implements IReportService {
     const q = report.query ?? {};
     const limit = Math.min(q.limit ?? DEFAULT_LIMIT, this.maxRows);
     const rows = await this.engine.find(report.object_name, {
-      filter: q.filter,
+      where: q.filter,
       fields: q.fields,
       orderBy: q.orderBy,
       limit,
@@ -544,7 +544,7 @@ export class ReportService implements IReportService {
     const f: any = {};
     if (filter?.reportId) f.report_id = filter.reportId;
     const rows = await this.engine.find('sys_report_schedule', {
-      filter: f, limit: 500, orderBy: [{ field: 'next_run_at', order: 'asc' }], context: SYSTEM_CTX,
+      where: f, limit: 500, orderBy: [{ field: 'next_run_at', order: 'asc' }], context: SYSTEM_CTX,
     });
     return Array.isArray(rows) ? rows.map(rowFromSchedule) : [];
   }
@@ -554,7 +554,7 @@ export class ReportService implements IReportService {
   async dispatchDue(now?: Date): Promise<{ fired: number; failed: number; skipped: number }> {
     const ts = (now ?? this.clock.now()).toISOString();
     const due = await this.engine.find('sys_report_schedule', {
-      filter: { active: true },
+      where: { active: true },
       limit: 200,
       context: SYSTEM_CTX,
     });

@@ -62,7 +62,7 @@ async function findOrg(
 ): Promise<any | null> {
   try {
     const rows = await engine.find('sys_organization', {
-      filter: where,
+      where,
       fields: ['id', 'slug', 'parent_organization_id'],
       limit: 1,
       context: SYSTEM_CTX,
@@ -230,7 +230,7 @@ export async function filterApproversWhoCanRead(
   let members: any[] = [];
   try {
     members = await deps.engine.find('sys_member', {
-      filter: { organization_id: requestOrg, user_id: { $in: userIds } },
+      where: { organization_id: requestOrg, user_id: { $in: userIds } },
       fields: ['user_id'],
       limit: 10000,
       context: SYSTEM_CTX,
