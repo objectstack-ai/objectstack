@@ -1102,11 +1102,25 @@ export class SchemaRegistry {
     // so both load paths produce identical lock state.
     applyProtection(item as any, { packageId });
 
-    // Validation Hook
+    // Spec-conformance DIAGNOSTIC — deliberately not a gate (#3903).
+    //
+    // Registration proceeds on failure because refusing here would unhook the
+    // item from every serving surface: an object row backs live tables, and an
+    // unregistered item cannot even be listed, opened, or fixed in Studio —
+    // enforcement at this seam turns bad metadata into a data outage. The
+    // contract is enforced where an author is present to act: the write path
+    // (`saveMetaItem` → 422 with structured issues) rejects new off-spec
+    // bodies, the read path badges rows via `_diagnostics`, and every stored
+    // row is canonicalized by the ADR-0087 conversion chain BEFORE it reaches
+    // this method — so what fails here is a genuine, current-contract
+    // violation, not chain-owned history.
     try {
       this.validate(type, item);
     } catch (e: any) {
-      console.error(`[Registry] Validation failed for ${type} ${baseName}: ${e.message}`);
+      console.error(
+        `[Registry] [metadata_spec_invalid] ${type}/${baseName} fails the current spec schema: ${e.message} — ` +
+        `registered anyway (serving availability); fix it at the source or via Studio (reads carry _diagnostics).`,
+      );
     }
 
     // Use composite key (packageId:name) when packageId is provided

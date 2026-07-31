@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveMultiOrgEnabled } from '@objectstack/types';
+import { resolveAllowDevPlugin, resolveMultiOrgEnabled } from '@objectstack/types';
 
 /**
  * Dev Plugin Options
@@ -82,8 +82,20 @@ export interface DevPluginOptions {
 /**
  * Escape hatch for {@link assertNotProduction} — deliberately ungrouped and
  * scary-looking per the `OS_ALLOW_{X}` convention (AGENTS.md Prime Directive #9).
+ * Parsed by `resolveAllowDevPlugin()` so it shares the family's truthy
+ * vocabulary (`1`/`true`/`on`/`yes`) rather than its own strict `=== '1'`.
  */
 const ALLOW_IN_PRODUCTION_ENV = 'OS_ALLOW_DEV_PLUGIN' as const;
+
+/**
+ * The default dev auth secret.
+ *
+ * Named rather than inlined at its one use site because the production-override
+ * branding has to be able to say whether the operator is still running on it
+ * (#3900): a constant shipped inside a public npm package is not a secret, and
+ * anyone holding it can mint a session this stack will accept.
+ */
+const DEV_AUTH_SECRET = 'objectstack-dev-secret-DO-NOT-USE-IN-PRODUCTION!!';
 
 /**
  * [ADR-0115 D6] Refuse to initialize under `NODE_ENV=production`.
@@ -95,10 +107,21 @@ const ALLOW_IN_PRODUCTION_ENV = 'OS_ALLOW_DEV_PLUGIN' as const;
  * The escape hatch covers the deliberate cases (a staging box mimicking prod,
  * a smoke test that pins `NODE_ENV`), and says at the call site that someone
  * chose this.
+ *
+ * The throw is not swallowed on any real boot path: `kernel.use()` only
+ * registers, `initPluginWithTimeout` does not catch, and `bootstrap()` rethrows
+ * — so `os serve`'s outer handler prints the message and exits 1. (That is why
+ * this can stay a `throw` where `OS_ALLOW_DEGRADED_TENANCY` needed
+ * `process.exit(1)`: that guard sits inside serve's broad AuthPlugin `catch`,
+ * this one does not.)
+ *
+ * @returns `true` when the guard WOULD have refused and the escape hatch
+ *   overrode it. Callers MUST brand that state rather than merely proceed —
+ *   see {@link productionOverrideWarnings}.
  */
-function assertNotProduction(): void {
-  if (process.env.NODE_ENV !== 'production') return;
-  if (process.env[ALLOW_IN_PRODUCTION_ENV] === '1') return;
+function assertNotProduction(): boolean {
+  if (process.env.NODE_ENV !== 'production') return false;
+  if (resolveAllowDevPlugin()) return true;
   throw new Error(
     '@objectstack/plugin-dev refuses to initialize with NODE_ENV=production. '
     + 'It assembles a development stack around a well-known default auth secret and a seeded '
@@ -106,6 +129,45 @@ function assertNotProduction(): void {
     + `deployment's plugin list, or set ${ALLOW_IN_PRODUCTION_ENV}=1 if you deliberately want `
     + 'the dev assembly under a production NODE_ENV.',
   );
+}
+
+/**
+ * Boot-log branding for an overridden production guard (#3900).
+ *
+ * An escape hatch that returns silently re-creates, one level up, the exact
+ * failure the guard exists to prevent: the process runs the development
+ * assembly while every log line and banner reads like an ordinary production
+ * start, so the one fact an operator needs is the one fact nothing says.
+ * `OS_ALLOW_DEGRADED_TENANCY` (`cli/src/commands/serve.ts`) sets the shape this
+ * follows — boot when explicitly told to, then brand the degraded state
+ * everywhere an operator looks.
+ *
+ * Only hazards that are actually live get named. The dev-admin seed is
+ * deliberately NOT among them: `plugin-auth`'s `maybeSeedDevAdmin` is
+ * hard-gated to `NODE_ENV === 'development'`, so it cannot fire on this path,
+ * and warning about it would spend the operator's attention on a non-event.
+ */
+function productionOverrideWarnings(
+  opts: { defaultSecret: boolean; driverEnabled: boolean },
+): string[] {
+  const lines = [
+    `  ⚠ DEV ASSEMBLY UNDER NODE_ENV=production (${ALLOW_IN_PRODUCTION_ENV} is set) — the boot `
+    + 'guard was explicitly overridden. This process is running the DEVELOPMENT assembly, which '
+    + 'is not hardened for production traffic (ADR-0115 D6).',
+  ];
+  if (opts.defaultSecret) {
+    lines.push(
+      '    • Auth secret is the default published inside @objectstack/plugin-dev. It is public, so '
+      + 'anyone can mint a session this stack accepts. Pass `authSecret` explicitly.',
+    );
+  }
+  if (opts.driverEnabled) {
+    lines.push(
+      '    • Data goes to the in-memory driver with persistence disabled — every record is lost '
+      + 'when this process exits.',
+    );
+  }
+  return lines;
 }
 
 /**
@@ -169,8 +231,13 @@ function assertNotProduction(): void {
  *
  * `init()` refuses to run when `NODE_ENV === 'production'`: the assembly is
  * built around a well-known default auth secret and a seeded dev admin.
- * Escape hatch for the rare deliberate case:
- * `OS_ALLOW_DEV_PLUGIN=1`.
+ * Escape hatch for the rare deliberate case: `OS_ALLOW_DEV_PLUGIN=1`.
+ *
+ * Taking the escape hatch is never silent (#3900). The boot log names the
+ * live hazards — a published default auth secret, an in-memory driver with
+ * persistence off — and the ready banner repeats the brand, so a process
+ * running the dev assembly under a production `NODE_ENV` cannot look like an
+ * ordinary production start.
  */
 export class DevPlugin implements Plugin {
   name = 'com.objectstack.plugin.dev';
@@ -183,11 +250,18 @@ export class DevPlugin implements Plugin {
 
   private childPlugins: Plugin[] = [];
 
+  /**
+   * Set when {@link assertNotProduction} was overridden by
+   * `OS_ALLOW_DEV_PLUGIN`. Carried from `init()` to `start()` so the ready
+   * banner carries the same brand as the boot log (#3900).
+   */
+  private productionOverride = false;
+
   constructor(options: DevPluginOptions = {}) {
     this.options = {
       port: 3000,
       seedAdminUser: true,
-      authSecret: 'objectstack-dev-secret-DO-NOT-USE-IN-PRODUCTION!!',
+      authSecret: DEV_AUTH_SECRET,
       verbose: true,
       ...options,
       authBaseUrl: options.authBaseUrl ?? `http://localhost:${options.port ?? 3000}`,
@@ -202,11 +276,23 @@ export class DevPlugin implements Plugin {
    * if a package isn't installed the service is silently skipped.
    */
   async init(ctx: PluginContext): Promise<void> {
-    assertNotProduction();
-
-    ctx.logger.info('🚀 DevPlugin initializing — assembling the development stack');
+    this.productionOverride = assertNotProduction();
 
     const enabled = (name: string) => this.options.services?.[name] !== false;
+
+    // Brand the override BEFORE any assembly work, so the warning survives an
+    // assembly step that later throws — a boot that died under an overridden
+    // guard is exactly when the operator most needs to know the guard was off.
+    if (this.productionOverride) {
+      for (const line of productionOverrideWarnings({
+        defaultSecret: this.options.authSecret === DEV_AUTH_SECRET,
+        driverEnabled: enabled('driver'),
+      })) {
+        ctx.logger.warn(line);
+      }
+    }
+
+    ctx.logger.info('🚀 DevPlugin initializing — assembling the development stack');
 
     // 1. ObjectQL Engine (data layer + metadata service)
     if (enabled('objectql')) {
@@ -504,6 +590,15 @@ export class DevPlugin implements Plugin {
     ctx.logger.info('─────────────────────────────────────────');
     ctx.logger.info('🟢 ObjectStack Dev Server ready');
     ctx.logger.info(`   http://localhost:${this.options.port}`);
+    // The banner is the one surface an operator reliably reads, so the
+    // overridden guard is branded here too and not only in the init log it
+    // scrolled past ten seconds ago (#3900).
+    if (this.productionOverride) {
+      ctx.logger.warn(
+        `   ⚠ DEV ASSEMBLY under NODE_ENV=production (${ALLOW_IN_PRODUCTION_ENV} is set) — `
+        + 'this is NOT a production stack',
+      );
+    }
     ctx.logger.info('');
     ctx.logger.info('   API:       /api/v1/data/:object');
     ctx.logger.info('   Metadata:  /api/v1/meta/:type/:name');

@@ -3,6 +3,7 @@
 import { ObjectQL } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
+import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
@@ -17,7 +18,7 @@ export type { Plugin, PluginContext };
  * `@objectstack/spec`, since it is a server-side bootstrap concern only.
  */
 interface ProtocolWithDbRestore {
-  loadMetaFromDb(): Promise<{ loaded: number; errors: number }>;
+  loadMetaFromDb(): Promise<{ loaded: number; errors: number; invalid?: number }>;
 }
 
 /** Type guard — checks whether the service exposes `loadMetaFromDb`. */
@@ -1056,10 +1057,13 @@ export class ObjectQLPlugin implements Plugin {
 
     // Phase 2: DB hydration (loads into SchemaRegistry)
     try {
-      const { loaded, errors } = await protocol.loadMetaFromDb();
+      const { loaded, errors, invalid = 0 } = await protocol.loadMetaFromDb();
 
       if (loaded > 0 || errors > 0) {
-        ctx.logger.info('Metadata restored from database to SchemaRegistry', { loaded, errors });
+        // `invalid` (#3903): rows registered despite failing the current spec
+        // schema AFTER the stored conversion chain — each already warned with
+        // `[metadata_spec_invalid]` and carries `_diagnostics` on read.
+        ctx.logger.info('Metadata restored from database to SchemaRegistry', { loaded, errors, invalid });
       } else {
         ctx.logger.debug('No persisted metadata found in database');
       }
@@ -1245,6 +1249,35 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
+   * Once-per-process dedupe for stored-row conversion notices — resyncs are
+   * event-driven, so a legacy row would otherwise re-warn on every publish.
+   */
+  private storedConversionWarned = new Set<string>();
+
+  /**
+   * Canonicalize a `sys_metadata` body read directly by this plugin (#3903).
+   *
+   * The authored-hook/-action re-syncs read the table themselves (they must —
+   * env-scoped kernels surface these rows nowhere else), which makes them
+   * stored-metadata rehydration seams: the full ADR-0087 chain replays here,
+   * exactly like `protocol.loadMetaFromDb` / `getMetaItems`, so the engine's
+   * runner and dispatch only ever see canonical shapes (e.g. a pre-17 action
+   * row's `execute` reads as `target`).
+   */
+  private convertStoredRow(ctx: PluginContext, type: string, data: any): any {
+    return applyConversionsToStoredItem(type, data, {
+      onNotice: (n) => {
+        const key = `${n.conversionId}|${type}|${String(data?.name ?? '')}`;
+        if (this.storedConversionWarned.has(key)) return;
+        this.storedConversionWarned.add(key);
+        ctx.logger.warn(
+          `[ObjectQLPlugin] stored ${type}/${String(data?.name ?? '<unnamed>')} carries a pre-protocol shape; ${n.message}`,
+        );
+      },
+    });
+  }
+
+  /**
    * Read the ACTIVE runtime-authored hook rows from `sys_metadata`.
    *
    * Reads the table directly (like `protocol.getMetaItems` does) instead of
@@ -1278,7 +1311,11 @@ export class ObjectQLPlugin implements Plugin {
       const hooks: any[] = [];
       for (const row of rows) {
         try {
-          const data = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+          const data = this.convertStoredRow(
+            ctx,
+            'hook',
+            typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata,
+          );
           if (!data || typeof data !== 'object' || typeof data.name !== 'string') continue;
           // Surface the persisted package binding (parity with getMetaItems)
           // so provenance-aware consumers of the bound hook can read it.
@@ -1448,9 +1485,13 @@ export class ObjectQLPlugin implements Plugin {
    */
   private async readAuthoredActionRows(ctx: PluginContext): Promise<any[] | null> {
     if (!this.ql) return null;
-    const parseRow = (row: any): any | undefined => {
+    const parseRow = (row: any, type: string): any | undefined => {
       try {
-        const data = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+        const data = this.convertStoredRow(
+          ctx,
+          type,
+          typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata,
+        );
         if (!data || typeof data !== 'object') return undefined;
         const recPkg = row.package_id ?? undefined;
         if (recPkg && data._packageId === undefined) data._packageId = recPkg;
@@ -1470,16 +1511,18 @@ export class ObjectQLPlugin implements Plugin {
       }
       const actions: any[] = [];
       for (const row of rows) {
-        const data = parseRow(row);
+        const data = parseRow(row, 'action');
         if (data && typeof data.name === 'string') actions.push(data);
       }
 
       // Embedded shape: authored object rows may carry their own actions.
+      // Converting the OBJECT row canonicalizes the embedded actions too —
+      // the chain's action walker covers `objects[].actions[]`.
       const objectRows: any[] = (await this.ql.find('sys_metadata', {
         where: { type: 'object', state: 'active' },
       })) ?? [];
       for (const row of objectRows) {
-        const obj = parseRow(row);
+        const obj = parseRow(row, 'object');
         if (!obj || typeof obj.name !== 'string' || !Array.isArray(obj.actions)) continue;
         for (const action of obj.actions) {
           if (!action || typeof action !== 'object' || typeof action.name !== 'string') continue;

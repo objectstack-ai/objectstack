@@ -557,15 +557,20 @@ describe('HttpFindQueryParamsSchema', () => {
     }
   });
 
-  it('should accept sort, orderBy, expand, search, distinct, count', () => {
+  it('should accept sort, orderBy, expand, search, count', () => {
     const result = HttpFindQueryParamsSchema.safeParse({
       sort: 'name asc,created_at desc',
       expand: 'owner,account',
       search: 'John',
-      distinct: true,
       count: true,
     });
     expect(result.success).toBe(true);
+  });
+
+  it('rejects ?distinct — the querystring spelling of the removed query.distinct (#4286)', () => {
+    const result = HttpFindQueryParamsSchema.safeParse({ distinct: true });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toMatch(/query\.distinct.*removed/s);
   });
 
   it('should accept empty object (all params optional)', () => {

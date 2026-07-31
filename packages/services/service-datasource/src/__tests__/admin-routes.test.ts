@@ -260,6 +260,9 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     svc: Record<string, unknown>;
     run: (app: any) => Promise<Response>;
   }> = [
+    // The list row is #4264: the one route that had no refusal path at all —
+    // its throw surfaced as the adapter's non-envelope 500, not any code here.
+    { route: 'GET /datasources', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { listDatasources: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources')) },
     { route: 'GET /datasources/:name', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { getDatasource: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources/pg')) },
     { route: 'POST /datasources/test', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { testConnection: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources/test', { method: 'POST', body: '{}' })) },
     { route: 'POST /datasources', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { createDatasource: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources', { method: 'POST', body: '{}' })) },

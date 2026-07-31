@@ -381,3 +381,43 @@ does both halves:
 - **Backfilled history joins the registry, not the loader:** the protocol-11
   `compactLayout`→`highlightFields` rename (retired at authoring in 11.9.1,
   pre-dating this ADR) is also preserved as a retired step-11 conversion.
+
+## Addendum (2026-07-31) — stored metadata replays the chain (#3903)
+
+Everything above serves **authored source**: `normalizeStackInput` converts at
+`defineStack`/`validate`/`lint`, tombstones teach the author, `migrate meta`
+rewrites files. Metadata **at rest** — `sys_metadata` rows written by Studio or
+the runtime authoring APIs — was reached by none of it: rows were rehydrated
+unparsed and unconverted, so the authored and stored contracts silently
+diverged (#3903). This addendum extends the contract to data at rest:
+
+- **Every stored-row rehydration seam replays the FULL chain, retired entries
+  included** — `applyConversionsToStoredItem` in `spec/conversions/stored.ts`
+  is the one primitive, called by `loadMetaFromDb`, `getMetaItems` (active and
+  draft), `getMetaItem`, `getMetaItemLayered`, `duplicatePackage`, the
+  DatabaseLoader's live-row reads, and objectql's authored-action/-hook table
+  reads. Rationale: **retirement is an authoring-surface event.** The window
+  exists so a live author is taught the canonical spelling; a row at rest has
+  no author to teach, and refusing its historical shape would only break data
+  that once worked. D3 keeps every conversion forever precisely so any past
+  major replays forward — a stored row is the perpetual "consumer arriving
+  late", and the read path is its chain.
+- **Flows canonicalize at their own seam.** `AutomationEngine.registerFlow`
+  (the rehydration seam PD #12 names) now also replays retired entries; the
+  generic metadata seams deliberately skip `type: 'flow'` because flow-node
+  conversions carry the ADR-0078 open-namespace conflict guard, which needs
+  the engine's live executor registry (`reservedNodeTypes`).
+- **The version layer stays verbatim.** `sys_metadata_history` reads and
+  `SysMetadataRepository` bodies are NOT converted — history is a record of
+  what was written, and converting would break the checksum↔body pairing.
+  Conversion happens where rows become *served metadata*, not where versions
+  are stored.
+- **Writes stay gated; reads diagnose, never drop.** `saveMetaItem` keeps
+  rejecting off-spec bodies (422, tombstones included) — new rows are always
+  canonical, so the stored pass is a strictly shrinking concern. On the read
+  side, what still fails the current schema *after* conversion is a genuine
+  contract violation: `loadMetaFromDb` counts it (`invalid`), warns with a
+  stable `[metadata_spec_invalid]` marker, and registers it anyway — refusal
+  at boot would unhook live tables and make the row unfixable in Studio
+  (availability over purity for data at rest; the same verdict reaches Studio
+  as `_diagnostics` on every read).

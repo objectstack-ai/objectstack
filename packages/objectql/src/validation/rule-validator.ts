@@ -437,19 +437,15 @@ interface ConditionalFieldOption {
 interface ConditionalFieldDef {
   /** Author-declared display label, used to name the field in messages (#3957). */
   label?: string;
+  // The ONLY predicate slot. The retired `conditionalRequired` alias (#3754 /
+  // #3855) is no longer read here: every path that hands this validator a
+  // STORED field definition now replays the ADR-0087 conversion chain at
+  // rehydration (#3903 — `applyConversionsToStoredItem`, retired entries
+  // included), so a pre-17 row arrives with the alias already lowered into
+  // `requiredWhen`. Authored metadata never carried it (FieldSchema
+  // tombstones the key). A caller handing raw, unconverted legacy input is
+  // off-contract — PD #12: no consumer-side dialect fallback returns here.
   requiredWhen?: string | Expression;
-  // Retired authorable key. #3754 lowered it into `requiredWhen` and dropped it,
-  // so PARSED metadata never carried it; #3855 removed it from the spec outright,
-  // so it can no longer be AUTHORED at all — `FieldSchema` rejects it.
-  //
-  // The alias-reading fallback below stays deliberately, and its job has changed:
-  // this validator is also handed RAW, unparsed field definitions, which includes
-  // metadata STORED under protocol <= 16. Dropping the read here would silently
-  // stop enforcing those rules on existing deployments — a runtime regression the
-  // spec change does not otherwise cause. It retires when that stored metadata is
-  // migrated (`os migrate meta`), not when the spec key went away.
-  // Canonical first, always — never `conditionalRequired ?? requiredWhen`.
-  conditionalRequired?: string | Expression;
   readonlyWhen?: string | Expression;
   /** Static, unconditional read-only flag (`field.readonly`). #2948. */
   readonly?: boolean;
@@ -487,7 +483,7 @@ function isMissing(v: unknown): boolean {
 function fieldsNeedPrior(fields: Record<string, ConditionalFieldDef> | undefined): boolean {
   if (!fields) return false;
   return Object.values(fields).some(
-    (f) => f && (f.requiredWhen || f.conditionalRequired || f.readonlyWhen || fieldHasOptionVisibility(f)),
+    (f) => f && (f.requiredWhen || f.readonlyWhen || fieldHasOptionVisibility(f)),
   );
 }
 
@@ -603,10 +599,10 @@ export function evaluateValidationRules(
   const errors: FieldValidationError[] = [];
 
   // Field-level conditional rules (B2): a field whose `requiredWhen`
-  // (or its `conditionalRequired` alias) predicate is TRUE over the merged
-  // record must have a value — enforced server-side so the rule can't be
-  // bypassed. (`readonlyWhen` is handled by stripReadonlyWhenFields on the
-  // write path, not here.) A broken predicate is fail-open (logged, skipped).
+  // predicate is TRUE over the merged record must have a value — enforced
+  // server-side so the rule can't be bypassed. (`readonlyWhen` is handled by
+  // stripReadonlyWhenFields on the write path, not here.) A broken predicate
+  // is fail-open (logged, skipped).
   //
   // ADR-0113 non-regression: reject iff the MERGED state violates AND the
   // PRE state complied. A write may not take the record from compliant to
@@ -618,7 +614,7 @@ export function evaluateValidationRules(
   // conditional contract on a deployed object safe (#3929's objection).
   if (hasFieldRules && fields) {
     for (const [name, def] of Object.entries(fields)) {
-      const pred = def?.requiredWhen ?? def?.conditionalRequired;
+      const pred = def?.requiredWhen;
       if (!pred) continue;
       const res = ExpressionEngine.evaluate<boolean>(toExpression(pred), { record: merged, previous });
       if (!res.ok) {

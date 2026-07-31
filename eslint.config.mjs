@@ -18,6 +18,13 @@ import tsParser from '@typescript-eslint/parser';
 // import guard), and the flag ignores them so the guard runs clean. The only
 // active rule (no-restricted-imports) should never need a local opt-out — it
 // prevents a ~1.2GB RSS regression.
+//
+// Lint ONLY from the root. Per-package `lint` scripts (`eslint src`) were
+// removed in #4276: a standalone run resolves this same config but honors the
+// inline directives `--no-inline-config` exists to ignore, so it fails on
+// rules this config never registers ("Definition for rule … was not found").
+// Don't add such a script back — scope a local run from the root instead:
+// `pnpm exec eslint --no-inline-config packages/verify/src`.
 
 const SUBPATH_NAMES = [
   'Data', 'UI', 'System', 'AI', 'API', 'Automation',

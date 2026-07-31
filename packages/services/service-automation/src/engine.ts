@@ -1408,6 +1408,16 @@ export class AutomationEngine implements IAutomationService {
         // live executor registry: an open-namespace node-type rename over a type
         // a custom executor owns becomes a loud, refused conflict — never a
         // silent clobber of the third party's node.
+        //
+        // `includeRetired` (#3903): this seam rehydrates DATA AT REST — flows
+        // stored in `sys_metadata` outlive any load window, and a row written
+        // under protocol N has no author for a tombstone to teach. When a flow
+        // conversion graduates to `retiredFromLoadPath` (retiring at N+1), the
+        // stored flows that still carry the old shape must keep canonicalizing
+        // here or the retirement would silently change their behavior — the
+        // exact hazard this seam exists to prevent. Authored sources keep
+        // window semantics at their own seam (`normalizeStackInput` applies
+        // live-window entries only; the schema tombstones the retired shape).
         const reservedNodeTypes = new Set<string>([
             ...FLOW_STRUCTURAL_NODE_TYPES,
             ...this.nodeExecutors.keys(),
@@ -1415,6 +1425,7 @@ export class AutomationEngine implements IAutomationService {
         ]);
         const converted = applyConversionsToFlow(definition, {
             reservedNodeTypes,
+            includeRetired: true,
             onNotice: (n) => this.logger.warn(`[flow '${name}'] ${n.code}: ${n.message}`),
             onConflict: (c) => this.logger.warn(`[flow '${name}'] ${c.code}: ${c.message}`),
         });

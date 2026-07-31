@@ -6,6 +6,7 @@ import {
   collectConfiguredLocales,
   readEnvWithDeprecation,
   resolveAllowDegradedTenancy,
+  resolveAllowDevPlugin,
   resolveSearchPinyinEnabled,
   resolveSandboxTimeoutMs,
   isMcpServerEnabled,
@@ -132,6 +133,33 @@ describe('resolveAllowDegradedTenancy (ADR-0093 D5)', () => {
     for (const v of ['0', 'false', 'off', 'no', '', 'maybe']) {
       process.env.OS_ALLOW_DEGRADED_TENANCY = v;
       expect(resolveAllowDegradedTenancy()).toBe(false);
+    }
+  });
+});
+
+describe('resolveAllowDevPlugin (ADR-0115 D6, #3900)', () => {
+  const original = process.env.OS_ALLOW_DEV_PLUGIN;
+  afterEach(() => {
+    if (original === undefined) delete process.env.OS_ALLOW_DEV_PLUGIN;
+    else process.env.OS_ALLOW_DEV_PLUGIN = original;
+  });
+
+  it('defaults OFF (unset → the production guard refuses)', () => {
+    delete process.env.OS_ALLOW_DEV_PLUGIN;
+    expect(resolveAllowDevPlugin()).toBe(false);
+  });
+
+  it('accepts the same truthy vocabulary as every other OS_ALLOW_* hatch', () => {
+    for (const v of ['1', 'true', 'TRUE', 'on', 'Yes', ' 1 ']) {
+      process.env.OS_ALLOW_DEV_PLUGIN = v;
+      expect(resolveAllowDevPlugin()).toBe(true);
+    }
+  });
+
+  it('treats anything else as off', () => {
+    for (const v of ['0', 'false', 'off', 'no', '', 'maybe']) {
+      process.env.OS_ALLOW_DEV_PLUGIN = v;
+      expect(resolveAllowDevPlugin()).toBe(false);
     }
   });
 });

@@ -83,7 +83,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     await kernel.use(new MessagingServicePlugin({ reliableDelivery: false }));
     await kernel.use(fakeAuthPlugin());
     // port 0 → OS-assigned free port; resolved via getPort() after listening.
-    await kernel.use(new HonoServerPlugin({ port: 0, registerStandardEndpoints: true }));
+    await kernel.use(new HonoServerPlugin({ port: 0 }));
     await kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false, requireAuth: false }));
 
     await kernel.bootstrap();
