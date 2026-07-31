@@ -3554,6 +3554,8 @@
     "AIToolCall (type)",
     "AIToolDefinition (interface)",
     "AIToolResult (type)",
+    "APPROVAL_ACTION_KINDS (const)",
+    "APPROVAL_STATUSES (const)",
     "AdapterContext (interface)",
     "AdapterSearchOptions (interface)",
     "AnalyticsQuery (interface)",
