@@ -52,17 +52,32 @@ export interface HonoPluginOptions {
      * raw `POST/GET /api/v1/data/:object` (create + read only) and
      * `GET /api/v1/discovery` / `/.well-known/objectstack`.
      *
-     * Every one of these is DUPLICATE supply. `@objectstack/rest` serves full
-     * `/data` CRUD and, registering first, is what actually answers; the
-     * dispatcher and REST own discovery and this surface cedes it to them when
-     * either is present (#4018). The flag exists for a bare host that mounts
-     * neither.
+     * @deprecated On its way out (#4073) — opt in only during the deprecation
+     * window; the surface (and this flag) will be deleted after a release of
+     * observation, leaving this plugin a pure transport adapter (ADR-0076 D11).
+     *
+     * Every path it mounts is DUPLICATE supply, and lesser supply at that:
+     * C+R only, a subset of the gates, and a discovery payload that predates
+     * `DiscoverySchema`. `@objectstack/rest` serves full `/data` CRUD behind
+     * the whole gate stack, REST/the dispatcher own discovery (this surface
+     * cedes it to them when either is present, #4018), and a composed host
+     * answers byte-identically with this flag on or off (#4260). It exists
+     * only for a bare host that mounts neither — and the tax has been real:
+     * every platform invariant needed re-implementing here after the fact
+     * (#2567, #3298, #4018).
+     *
+     * The default is now `false`. A bare host that relied on it should mount
+     * `createRestApiPlugin` (`@objectstack/rest`) — it needs the same
+     * `objectql` this surface already required, and returns full CRUD plus
+     * the gates — or pass `true` explicitly until the deletion lands. A boot
+     * with no data/discovery provider at all logs a pointer instead of
+     * silently 404ing.
      *
      * It does NOT gate the current-user endpoints (`/auth/me/permissions`,
      * `/auth/me/localization`, `/me/apps`) — this plugin is their only provider
      * anywhere, so they register unconditionally (#4073).
      *
-     * @default true
+     * @default false
      */
     registerStandardEndpoints?: boolean;
     /**
@@ -263,7 +278,9 @@ export class HonoServerPlugin implements Plugin {
     constructor(options: HonoPluginOptions = {}) {
         this.options = {
             port: 3000,
-            registerStandardEndpoints: true,
+            // OFF by default (#4073): the convenience surface is deprecated
+            // duplicate supply. See the option's JSDoc for the migration path.
+            registerStandardEndpoints: false,
             useApiRegistry: true,
             spaFallback: false,
             ...options
@@ -619,6 +636,31 @@ export class HonoServerPlugin implements Plugin {
         if (this.options.registerStandardEndpoints) {
             ctx.hook('kernel:ready', async () => {
                 this.registerDiscoveryAndCrudEndpoints(ctx);
+            });
+        } else {
+            // The default is OFF (#4073). For a composed host that is a no-op —
+            // REST/the dispatcher answer these routes byte-identically either
+            // way (#4260). The one composition it changes is a BARE host that
+            // mounts none of the three: it used to inherit the convenience
+            // surface implicitly and now gets 404s. Say so once at boot, with
+            // the remedy — the same honesty rule as #4018's discovery cede:
+            // absence must be loud, not something to diagnose from a silent
+            // 404. Checked on kernel:ready so every `kernel.use()` has landed,
+            // and quiet whenever a real API owner is mounted so transport-only
+            // compositions are not nagged.
+            ctx.hook('kernel:ready', async () => {
+                const kernel = ctx.getKernel() as { hasPlugin?(name: string): boolean } | undefined;
+                const hasPlugin = (name: string) =>
+                    typeof kernel?.hasPlugin === 'function' && kernel.hasPlugin(name);
+                if (!hasPlugin(REST_API_PLUGIN) && !hasPlugin(RUNTIME_DISPATCHER_PLUGIN)) {
+                    ctx.logger.warn(
+                        'No data/discovery API is mounted on this server: `registerStandardEndpoints` '
+                        + 'defaults to false (#4073; the convenience surface is deprecated). Mount '
+                        + '`createRestApiPlugin` from @objectstack/rest (full CRUD + gates) or the '
+                        + 'runtime dispatcher — or pass `registerStandardEndpoints: true` to keep the '
+                        + 'legacy surface during the deprecation window.',
+                    );
+                }
             });
         }
 

@@ -20,7 +20,13 @@ function bootStandardEndpoints(opts: {
     restConfig?: { api?: { requireAuth?: boolean } };
     services: Record<string, unknown>;
 }) {
-    const plugin = new HonoServerPlugin({ port: 0, restConfig: opts.restConfig as any });
+    // Explicit opt-in: the raw surface whose #2567 gate is under test defaults
+    // OFF now (#4073).
+    const plugin = new HonoServerPlugin({
+        port: 0,
+        registerStandardEndpoints: true,
+        restConfig: opts.restConfig as any,
+    });
     const ctx: any = {
         logger: { info() {}, debug() {}, warn() {}, error() {} },
         getKernel: () => ({ getService: (n: string) => opts.services[n] }),

@@ -25,7 +25,8 @@ const RUNTIME_DISPATCHER_PLUGIN = 'com.objectstack.runtime.dispatcher';
  * which is how this surface decides whether a real discovery owner is present.
  */
 function bootStandardEndpoints(installedPlugins: string[] = []) {
-    const plugin = new HonoServerPlugin({ port: 0 });
+    // Explicit opt-in: the legacy surface under test defaults OFF now (#4073).
+    const plugin = new HonoServerPlugin({ port: 0, registerStandardEndpoints: true });
     const ctx: any = {
         logger: { info() {}, debug() {}, warn() {}, error() {} },
         getKernel: () => ({
