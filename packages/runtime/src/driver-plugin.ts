@@ -16,6 +16,15 @@ import { Plugin, PluginContext } from '@objectstack/core';
  * const driverPlugin = new DriverPlugin(memoryDriver, 'memory');
  * kernel.use(driverPlugin);
  */
+/**
+ * ⚠️ Both options are INERT. They configured start()'s datasource
+ * registration, which probed `metadata.addDatasource` — a method no metadata
+ * service implements — so the guarded block never ran on any boot and was
+ * removed when typing the lookup surfaced it (#4251). The one live caller
+ * that passes them (`serve.ts`, `datasourceName: 'telemetry'`) has never
+ * gotten the registration it asks for. Kept only for source compatibility;
+ * revive-or-remove is tracked in #4320.
+ */
 export interface DriverPluginOptions {
     /**
      * If set, registers a named datasource so packages declaring
@@ -36,12 +45,13 @@ export class DriverPlugin implements Plugin {
     version = '1.0.0';
 
     private driver: any;
-    private options: DriverPluginOptions;
 
-    constructor(driver: any, driverNameOrOptions?: string | DriverPluginOptions, options?: DriverPluginOptions) {
+    // Options are accepted (source compatibility for existing callers) but no
+    // longer stored — nothing reads them since the dead datasource block left
+    // start(); see the DriverPluginOptions doc.
+    constructor(driver: any, driverNameOrOptions?: string | DriverPluginOptions, _options?: DriverPluginOptions) {
         this.driver = driver;
         const driverName = typeof driverNameOrOptions === 'string' ? driverNameOrOptions : undefined;
-        this.options = (typeof driverNameOrOptions === 'object' ? driverNameOrOptions : options) ?? {};
         this.name = `com.objectstack.driver.${driverName || driver.name || 'unknown'}`;
     }
 
@@ -55,33 +65,15 @@ export class DriverPlugin implements Plugin {
         });
     }
 
+    // start() used to hold a named/default datasource registration block,
+    // gated on `metadata.addDatasource` — a method no metadata service
+    // implements, here or anywhere in the repo — so the guard's early return
+    // made every line behind it (and the options above) unreachable on every
+    // boot. Typing the lookup (#4251) surfaced that; the dead block is gone
+    // rather than typed against a phantom shape. Datasource declaration and
+    // visibility live in ADR-0062's DatasourceConnectionService +
+    // `registerInMemory('datasource', …)` path — see DefaultDatasourcePlugin.
     start = async (ctx: PluginContext) => {
-        try {
-            const metadata = ctx.getService<any>('metadata');
-            if (!metadata?.addDatasource) return;
-
-            // Register a named datasource for this driver (e.g. 'cloud').
-            if (this.options.datasourceName) {
-                await metadata.addDatasource({
-                    name: this.options.datasourceName,
-                    driver: this.driver.name,
-                });
-                ctx.logger.info(`[DriverPlugin] Registered named datasource '${this.options.datasourceName}'`, { driver: this.driver.name });
-            }
-
-            // Auto-register as 'default' datasource unless explicitly disabled.
-            if (this.options.registerAsDefault !== false) {
-                const datasources = metadata.getDatasources ? metadata.getDatasources() : [];
-                const hasDefault = datasources.some((ds: any) => ds.name === 'default');
-                if (!hasDefault) {
-                    ctx.logger.info(`[DriverPlugin] No 'default' datasource found — registering '${this.driver.name}' as default.`);
-                    await metadata.addDatasource({ name: 'default', driver: this.driver.name });
-                }
-            }
-        } catch (e) {
-            ctx.logger.debug('[DriverPlugin] Failed to configure datasource (metadata service missing?)', { error: e });
-        }
-
         ctx.logger.debug('Driver plugin started', { driverName: this.driver.name || 'unknown' });
     }
 }
