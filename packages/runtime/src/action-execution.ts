@@ -186,16 +186,50 @@ export async function callData(deps: ActionExecutionDeps,
     }
 
     if (action === 'query' || action === 'find') {
+        // Build query: use explicit params.query if provided, otherwise extract
+        // query fields from params. Shared by both paths below — the fallback
+        // must serve the SAME request the protocol path would have served.
+        const query = params.query || (() => {
+            const { object, ...rest } = params;
+            return rest;
+        })();
         if (protocol && typeof protocol.findData === 'function') {
-            // Build query: use explicit params.query if provided, otherwise extract query fields from params
-            const query = params.query || (() => {
-                const { object, ...rest } = params;
-                return rest;
-            })();
             return await protocol.findData({ object: params.object, query, context: executionContext });
         }
         if (ql) {
-            let all = await ql.find(params.object, qlOpts);
+            // [#4386] This fallback used to pass only `{ context }` — the
+            // caller's entire query (where/orderBy/limit/…) was dropped and the
+            // FULL table came back as an ordinary-looking `{ records, total }`.
+            // Serve the canonical QueryAST keys both possible recipients
+            // actually execute (`ql` here is the engine, or on the MCP
+            // multi-env path a RAW driver reading a QueryAST — same canonical
+            // keys by design). Anything else — wire spellings (`sort`,
+            // `select`, …) that need the protocol layer's fold/lowering, or
+            // capabilities a raw driver would silently drop (`search`,
+            // `expand`) — is refused loudly rather than part-served: a
+            // fallback that cannot reproduce the query's semantics must not
+            // pretend to (route-ownership rule 3).
+            const FALLBACK_QUERY_KEYS = ['where', 'fields', 'orderBy', 'limit', 'offset'];
+            const bag: any = {};
+            const unservable: string[] = [];
+            for (const [k, v] of Object.entries((query ?? {}) as Record<string, unknown>)) {
+                if (v == null) continue;
+                // `context` is SERVER-derived on this path, same as findData's
+                // unconditional `delete options.context` — a caller-supplied
+                // one is dropped, never an error and never honoured.
+                if (k === 'context') continue;
+                if (FALLBACK_QUERY_KEYS.includes(k)) bag[k] = v;
+                else unservable.push(k);
+            }
+            if (unservable.length > 0) {
+                throw {
+                    statusCode: 501,
+                    message: `Data query fallback cannot serve ${unservable.map((k) => `'${k}'`).join(', ')}: ` +
+                        'the protocol service (metadata-protocol plugin) is not registered, and without its ' +
+                        `normalization this path serves only canonical QueryAST keys (${FALLBACK_QUERY_KEYS.join(', ')}).`,
+                };
+            }
+            let all = await ql.find(params.object, findOpts(bag));
             if (!Array.isArray(all) && all && (all as any).value) all = (all as any).value;
             if (!all) all = [];
             return { object: params.object, records: all, total: all.length };
