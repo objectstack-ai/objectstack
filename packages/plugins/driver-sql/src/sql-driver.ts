@@ -1351,7 +1351,7 @@ export class SqlDriver implements IDataDriver {
 
     // SELECT
     if (Array.isArray(query.fields) && query.fields.length > 0) {
-      builder.select((query.fields as string[]).map((f: string) => this.mapSortField(f)));
+      builder.select(query.fields.map((f) => this.mapSortField(f)));
     } else {
       builder.select('*');
     }

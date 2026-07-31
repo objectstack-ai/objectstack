@@ -2833,7 +2833,7 @@ export class ObjectQL implements IDataEngine {
       delete (ast as any).searchFields;
       delete (ast as any).$searchFields;
     }
-    const _findFormula = planFormulaProjection(_findSchema, ast.fields as string[] | undefined);
+    const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
 
     // Drop any requested field that doesn't exist on the schema. Without
@@ -2851,10 +2851,10 @@ export class ObjectQL implements IDataEngine {
       known.add('id');
       known.add('created_at');
       known.add('updated_at');
-      const filtered = (ast.fields as string[]).filter(f => {
+      const filtered = ast.fields.filter(f => {
         // Keep relationship paths like `owner.name` — the engine will
         // resolve those via populate; only validate top-level segment.
-        const head = String(f).split('.')[0];
+        const head = f.split('.')[0];
         return known.has(head);
       });
       // Guard against an empty projection — fall back to `*` so the
@@ -2936,7 +2936,7 @@ export class ObjectQL implements IDataEngine {
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
     const _findOneSchema = this._registry.getObject(objectName);
-    const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields as string[] | undefined);
+    const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
 
     // Drop unknown fields — see equivalent block in `find()` for rationale.
@@ -2947,7 +2947,7 @@ export class ObjectQL implements IDataEngine {
       known.add('id');
       known.add('created_at');
       known.add('updated_at');
-      const filtered = (ast.fields as string[]).filter(f => known.has(String(f).split('.')[0]));
+      const filtered = ast.fields.filter(f => known.has(f.split('.')[0]));
       ast.fields = filtered.length > 0 ? filtered : undefined;
     }
 
