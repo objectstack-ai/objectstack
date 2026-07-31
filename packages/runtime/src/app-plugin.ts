@@ -1300,6 +1300,9 @@ export class AppPlugin implements Plugin {
         // the two ad-hoc markers this branch knew about (`_fallback` / `_dev`).
         // `_fallback` was recognized by nothing else — which is exactly how the
         // kernel fallbacks carrying it ended up reported as fully `available`.
+        // Both ad-hoc markers are gone now (#4082 moved their producers onto
+        // the descriptor; #4319 retired the last `_dev` reader), so this is the
+        // only spelling left to read.
         if (readServiceSelfInfo(i18nService)) {
             ctx.logger.info(
                 `[i18n] Loaded ${loadedLocales} locale(s) into in-memory i18n fallback for "${appId}". ` +

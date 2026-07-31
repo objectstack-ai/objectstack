@@ -2980,7 +2980,6 @@
     "RouteHealthReportSchema (const)",
     "RouterConfig (type)",
     "RouterConfigSchema (const)",
-    "SERVICE_DEV_MARKER_KEY (const)",
     "SERVICE_SELF_INFO_KEY (const)",
     "SaveMetaItemRequest (type)",
     "SaveMetaItemRequestSchema (const)",

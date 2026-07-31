@@ -86,13 +86,6 @@ export const ServiceInfoSchema = lazySchema(() => z.object({
 export const SERVICE_SELF_INFO_KEY = '__serviceInfo' as const;
 
 /**
- * Legacy dev-stub marker used by plugin-dev's in-memory fakes.
- * Recognized by {@link readServiceSelfInfo} as shorthand for
- * `{ status: 'stub', handlerReady: false }`.
- */
-export const SERVICE_DEV_MARKER_KEY = '_dev' as const;
-
-/**
  * Shape of the {@link SERVICE_SELF_INFO_KEY} marker a service carries to
  * describe its own honesty level. Only non-`available` self-reports exist:
  * a service that is fully real simply carries no marker.
@@ -121,10 +114,20 @@ export type ServiceSelfInfo = z.infer<typeof ServiceSelfInfoSchema>;
  * instance (ADR-0076 D12). Returns `undefined` for services that carry no
  * marker — i.e. services claiming to be fully real.
  *
- * Recognizes:
- * - `svc[SERVICE_SELF_INFO_KEY]` — the standard `{ status, handlerReady?, message? }` descriptor.
- * - `svc[SERVICE_DEV_MARKER_KEY] === true` — plugin-dev's legacy `_dev: true`
- *   flag, normalized to `{ status: 'stub', handlerReady: false }`.
+ * Reads exactly one marker: `svc[SERVICE_SELF_INFO_KEY]`, the
+ * `{ status, handlerReady?, message? }` descriptor.
+ *
+ * There were once three. `_fallback: true` (the kernel's in-memory fallbacks)
+ * was recognized by nothing, so discovery reported those as fully `available`
+ * — the honesty gap D12 exists to close; `_dev: true` (plugin-dev's stub
+ * table) was normalized here to `{ status: 'stub', handlerReady: false }`.
+ * Both were retired by moving their producers onto this descriptor rather than
+ * by teaching this function more dialects (#4082, ADR-0115): one marker that
+ * says WHICH kind of unreal a service is beats N markers that only say "unreal"
+ * — `degraded` (really serves, reduced capability) and `stub` (fabricates) are
+ * the distinction every consumer actually gates on, and a boolean cannot carry
+ * it. A service still carrying a retired marker reads as unmarked here, i.e.
+ * as fully real — migrate it (see the CHANGELOG entry for the mapping).
  */
 export function readServiceSelfInfo(svc: unknown): ServiceSelfInfo | undefined {
   if (!svc || typeof svc !== 'object') return undefined;
@@ -136,13 +139,6 @@ export function readServiceSelfInfo(svc: unknown): ServiceSelfInfo | undefined {
         ? self.handlerReady
         : self.status === 'degraded',
       ...(typeof self.message === 'string' ? { message: self.message } : {}),
-    };
-  }
-  if ((svc as Record<string, unknown>)[SERVICE_DEV_MARKER_KEY] === true) {
-    return {
-      status: 'stub',
-      handlerReady: false,
-      message: 'Development stub (plugin-dev) — not a production implementation',
     };
   }
   return undefined;

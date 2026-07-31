@@ -95,9 +95,9 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
 
   // ── Honest capabilities (ADR-0076 D12, #2462) ─────────────────────────────
 
-  it('should report a _dev-marked service as a stub, never available', async () => {
+  it('should report a stub-marked service as a stub, never available', async () => {
     const mockServices = new Map<string, any>();
-    mockServices.set('ai', { _dev: true });
+    mockServices.set('ai', { __serviceInfo: { status: 'stub', message: 'Development stub — not a production implementation' } });
 
     protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
     const discovery = await protocol.getDiscovery();
@@ -280,7 +280,7 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
   // `unavailable` would.
   it('should not advertise the analytics route for a self-declared stub', async () => {
     const mockServices = new Map<string, any>();
-    mockServices.set('analytics', { _dev: true, query: async () => ({ rows: [], fields: [] }) });
+    mockServices.set('analytics', { __serviceInfo: { status: 'stub' }, query: async () => ({ rows: [], fields: [] }) });
 
     protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
     const discovery = await protocol.getDiscovery();
