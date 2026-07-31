@@ -20,7 +20,10 @@ export const TaskReminderFlow: Flow = {
     { id: 'start', type: 'start', label: 'Start (Daily 8 AM)', config: { schedule: '0 8 * * *', objectName: 'todo_task' } },
     {
       id: 'get_upcoming_tasks', type: 'get_record', label: 'Get Tasks Due Tomorrow',
-      config: { objectName: 'todo_task', filter: { due_date: '{tomorrow}', is_completed: false }, outputVariable: 'tasksToRemind', getAll: true },
+      // `limit > 1` is the declared way to make this a LIST read (`find`, not
+      // `findOne`) — the undeclared `getAll` that sat here was never read, so
+      // this sweep silently fetched a single task (#4277 rejects the key now).
+      config: { objectName: 'todo_task', filter: { due_date: '{tomorrow}', is_completed: false }, outputVariable: 'tasksToRemind', limit: 200 },
     },
     {
       id: 'loop_tasks', type: 'loop', label: 'Loop Through Tasks',
@@ -67,10 +70,11 @@ export const OverdueEscalationFlow: Flow = {
     { id: 'start', type: 'start', label: 'Start (Daily 9 AM)', config: { schedule: '0 9 * * *', objectName: 'todo_task' } },
     {
       id: 'get_overdue_tasks', type: 'get_record', label: 'Get Severely Overdue Tasks',
+      // `limit > 1` = LIST read; the undeclared `getAll` was never read (#4277).
       config: {
         objectName: 'todo_task',
         filter: { due_date: { $lt: '{3_days_ago}' }, is_completed: false, is_overdue: true },
-        outputVariable: 'overdueTasks', getAll: true,
+        outputVariable: 'overdueTasks', limit: 200,
       },
     },
     {
@@ -178,11 +182,31 @@ export const QuickAddTaskFlow: Flow = {
     {
       id: 'screen_1', type: 'screen', label: 'Task Details',
       config: {
+        // Select options are `{ value, label }` pairs (the screen contract's
+        // shape — bare strings fail the executor's config parse, #4277).
         fields: [
           { name: 'subject', label: 'Task Subject', type: 'text', required: true },
-          { name: 'priority', label: 'Priority', type: 'select', options: ['low', 'normal', 'high', 'urgent'], defaultValue: 'normal' },
+          {
+            name: 'priority', label: 'Priority', type: 'select', defaultValue: 'normal',
+            options: [
+              { value: 'low', label: 'Low' },
+              { value: 'normal', label: 'Normal' },
+              { value: 'high', label: 'High' },
+              { value: 'urgent', label: 'Urgent' },
+            ],
+          },
           { name: 'dueDate', label: 'Due Date', type: 'date', required: false },
-          { name: 'category', label: 'Category', type: 'select', options: ['personal', 'work', 'shopping', 'health', 'finance', 'other'] },
+          {
+            name: 'category', label: 'Category', type: 'select',
+            options: [
+              { value: 'personal', label: 'Personal' },
+              { value: 'work', label: 'Work' },
+              { value: 'shopping', label: 'Shopping' },
+              { value: 'health', label: 'Health' },
+              { value: 'finance', label: 'Finance' },
+              { value: 'other', label: 'Other' },
+            ],
+          },
         ],
       },
     },
@@ -196,13 +220,14 @@ export const QuickAddTaskFlow: Flow = {
     },
     {
       id: 'success_screen', type: 'screen', label: 'Success',
+      // The screen contract has no `message`/`buttons` keys — nothing ever
+      // read them, so this "success screen" was an invisible pass-through
+      // (#4277 rejects the keys now). `description` + `waitForInput: true`
+      // is the declared way to pause on a message-only confirmation screen.
       config: {
-        message: 'Task "{subject}" created successfully!',
-        buttons: [
-          { label: 'Create Another', action: 'restart' },
-          { label: 'View Task', action: 'navigate', target: '/task/{newTaskId.id}' },
-          { label: 'Done', action: 'finish' },
-        ],
+        title: 'Task Created',
+        description: 'Task "{subject}" created successfully!',
+        waitForInput: true,
       },
     },
     { id: 'end', type: 'end', label: 'End' },

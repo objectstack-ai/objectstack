@@ -1,15 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
-import type { FlowRegionParsed } from '@objectstack/spec/automation';
+import { defineActionDescriptor, ParallelConfigSchema } from '@objectstack/spec/automation';
+import type { ParallelConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine, StepLogEntry } from '../engine.js';
-
-/** One branch of a parallel block — a region plus an optional label. */
-interface ParallelBranch extends FlowRegionParsed {
-  name?: string;
-}
+import { parseNodeConfig } from './parse-config.js';
 
 /**
  * `parallel` built-in node — a **structured parallel block** with an
@@ -65,15 +61,12 @@ export function registerParallelNode(engine: AutomationEngine, ctx: PluginContex
       },
     }),
     async execute(node, variables, context) {
-      const cfg = (node.config ?? {}) as Record<string, unknown>;
-      const branches = cfg.branches as ParallelBranch[] | undefined;
-
-      if (!Array.isArray(branches) || branches.length < 2) {
-        return {
-          success: false,
-          error: `parallel '${node.id}': config.branches must declare at least 2 branch regions`,
-        };
-      }
+      // The contract owns the shape guard: `branches` is required, each branch
+      // a region, and `.min(2)` refuses the degenerate single-branch block the
+      // hand-written check here used to catch.
+      const parsed = parseNodeConfig<ParallelConfigParsed>('parallel', node.id, ParallelConfigSchema, node.config);
+      if (!parsed.ok) return parsed.refusal;
+      const branches = parsed.config.branches;
 
       let branchSteps: StepLogEntry[][];
       try {

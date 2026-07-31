@@ -1,11 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor, LOOP_MAX_ITERATIONS_CEILING } from '@objectstack/spec/automation';
-import type { FlowRegionParsed } from '@objectstack/spec/automation';
+import { defineActionDescriptor, LOOP_MAX_ITERATIONS_CEILING, LoopConfigSchema } from '@objectstack/spec/automation';
+import type { LoopConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine, StepLogEntry } from '../engine.js';
 import { interpolate } from './template.js';
+import { parseNodeConfig } from './parse-config.js';
 
 /**
  * `loop` built-in node — a **structured iteration container** (ADR-0031).
@@ -59,12 +60,15 @@ export function registerLoopNode(engine: AutomationEngine, ctx: PluginContext): 
       },
     }),
     async execute(node, variables, context) {
-      const cfg = (node.config ?? {}) as Record<string, unknown>;
-      const body = cfg.body as FlowRegionParsed | undefined;
+      const raw = (node.config ?? {}) as Record<string, unknown>;
 
       // ── Legacy flat-graph loop (no body) — preserve prior stub behavior. ──
-      if (body == null) {
-        const collectionName = typeof cfg.collection === 'string' ? cfg.collection : undefined;
+      // Deliberately NOT parsed: this shape predates the ADR-0031 construct the
+      // contract describes (`collection` is required there, but a legacy marker
+      // loop legally carries none), and the constructs are additive — the
+      // contract governs only the structured form it defines (#4277).
+      if (raw.body == null) {
+        const collectionName = typeof raw.collection === 'string' ? raw.collection : undefined;
         if (collectionName) {
           const legacy = variables.get(collectionName);
           if (Array.isArray(legacy)) {
@@ -76,20 +80,20 @@ export function registerLoopNode(engine: AutomationEngine, ctx: PluginContext): 
       }
 
       // ── Structured loop container. ──
-      const iteratorVariable = typeof cfg.iteratorVariable === 'string' && cfg.iteratorVariable
-        ? cfg.iteratorVariable
-        : 'item';
-      const indexVariable = typeof cfg.indexVariable === 'string' && cfg.indexVariable
-        ? cfg.indexVariable
-        : undefined;
+      const parsed = parseNodeConfig<LoopConfigParsed>('loop', node.id, LoopConfigSchema, raw);
+      if (!parsed.ok) return parsed.refusal;
+      const cfg = parsed.config;
+      const body = cfg.body!;
+      const iteratorVariable = cfg.iteratorVariable;
+      const indexVariable = cfg.indexVariable || undefined;
 
       // Resolve the collection: a `{token}` template, a bare variable name, or
-      // (defensively) an already-resolved array.
+      // an inline array (the contract is the union, same as `map`).
       const rawCollection = cfg.collection;
       let collection: unknown;
       if (Array.isArray(rawCollection)) {
         collection = rawCollection;
-      } else if (typeof rawCollection === 'string') {
+      } else {
         collection = interpolate(rawCollection, variables, context ?? ({} as AutomationContext));
         if ((collection == null) && variables.has(rawCollection)) {
           collection = variables.get(rawCollection);
@@ -104,7 +108,7 @@ export function registerLoopNode(engine: AutomationEngine, ctx: PluginContext): 
       }
 
       // Hard iteration guard.
-      const requested = typeof cfg.maxIterations === 'number' ? cfg.maxIterations : LOOP_MAX_ITERATIONS_CEILING;
+      const requested = cfg.maxIterations ?? LOOP_MAX_ITERATIONS_CEILING;
       const maxIterations = Math.min(requested, LOOP_MAX_ITERATIONS_CEILING);
       if (collection.length > maxIterations) {
         return {

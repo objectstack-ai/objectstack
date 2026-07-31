@@ -1,11 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { defineActionDescriptor, MapConfigSchema } from '@objectstack/spec/automation';
+import type { MapConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
 import { interpolate } from './template.js';
+import { parseNodeConfig } from './parse-config.js';
 
 /** Hard cap on map fan-out — turns a runaway collection into a clean error. */
 const MAX_MAP_ITEMS = 10_000;
@@ -75,23 +77,26 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       },
     }),
     async execute(node, variables, context) {
-      const cfg = (node.config ?? {}) as Record<string, unknown>;
       // The undeclared `flow` alias this used to accept via a bare `??` has
       // graduated into the ADR-0087 D2 conversion layer as
       // 'flow-node-map-flow-alias' (#4045), rewritten at load — including the
-      // `registerFlow` rehydration seam — so only the canonical key is read
-      // here (PD #12: no consumer-side fallbacks).
-      const flowName = typeof cfg.flowName === 'string' ? cfg.flowName : undefined;
+      // `registerFlow` rehydration seam — so the parse sees only the canonical
+      // key (PD #12: no consumer-side fallbacks). Parsed BEFORE interpolation;
+      // `collection` legally arrives as a template string OR an inline array
+      // (the contract is the union).
+      const parsed = parseNodeConfig<MapConfigParsed>('map', node.id, MapConfigSchema, node.config);
+      if (!parsed.ok) return parsed.refusal;
+      const cfg = parsed.config;
+      const flowName = cfg.flowName;
       if (!flowName) {
         return refuseNode(`map '${node.id}': config.flowName (the per-item subflow) is required`);
       }
 
-      const iteratorVariable =
-        typeof cfg.iteratorVariable === 'string' && cfg.iteratorVariable ? cfg.iteratorVariable : 'item';
-      const indexVariable =
-        typeof cfg.indexVariable === 'string' && cfg.indexVariable ? cfg.indexVariable : undefined;
-      const outVar =
-        typeof cfg.outputVariable === 'string' && cfg.outputVariable ? cfg.outputVariable : undefined;
+      // `|| 'item'` beyond the contract default: an authored EMPTY string still
+      // falls back (the default only fires on absence).
+      const iteratorVariable = cfg.iteratorVariable || 'item';
+      const indexVariable = cfg.indexVariable || undefined;
+      const outVar = cfg.outputVariable || undefined;
 
       // Resolve the collection (template / bare var / already-an-array).
       const rawCollection = cfg.collection;
@@ -134,7 +139,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
         variables.set(iteratorVariable, item);
         if (indexVariable) variables.set(indexVariable, idx);
 
-        const rawInput = (cfg.input && typeof cfg.input === 'object' ? cfg.input : {}) as Record<string, unknown>;
+        const rawInput = cfg.input ?? {};
         const params = interpolate(rawInput, variables, context ?? ({} as AutomationContext)) as Record<string, unknown>;
 
         // When the mapped item IS a record (has an id), expose it as the
@@ -142,7 +147,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
         // targets that item — the natural "approve each row" shape. Otherwise
         // the item is just data, passed via `params`.
         const itemIsRecord = item != null && typeof item === 'object' && typeof (item as any).id === 'string';
-        const itemObject = typeof cfg.itemObject === 'string' ? cfg.itemObject : (context as any)?.object;
+        const itemObject = cfg.itemObject ?? (context as any)?.object;
 
         const childContext = {
           ...(context ?? {}),
