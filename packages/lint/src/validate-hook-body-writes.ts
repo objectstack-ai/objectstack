@@ -288,6 +288,39 @@ export function indexObjectFields(stack: AnyRec): Map<string, Set<string>> {
   return out;
 }
 
+/**
+ * The declared field names of `objectName` — but ONLY when they are a sound
+ * basis for judging "this name resolves to nothing". Otherwise `undefined`.
+ *
+ * Two different unknowns collapse to one answer on purpose, because every
+ * caller in this family owes them the same silence:
+ *
+ *   • the object is not in this stack — another package declares it, and a
+ *     field map we cannot see cannot be judged;
+ *   • the object is here but declares NO fields at all — an external object or
+ *     a datasource-introspected schema whose columns are resolved at runtime.
+ *     Its field map is not empty, it is *unknown*, and an empty Set answers
+ *     `has(anything) === false`, which reads as "no such field" for EVERY write
+ *     to it. That is a false-positive generator, and a false positive kills an
+ *     advisory lint (#4383).
+ *
+ * The distinction is unused today — no rule in the family wants to act on one
+ * and not the other — so collapsing it here is what stops the guard from being
+ * hand-copied per call site and forgotten at one of them, which is exactly how
+ * it went missing from the hook and action rules while
+ * `validate-searchable-fields` (skip #2) and `validate-flow-node-writes` both
+ * had it. A future caller that genuinely needs to tell them apart should read
+ * the index directly and say why.
+ */
+export function judgeableFieldsOf(
+  index: ReadonlyMap<string, Set<string>>,
+  objectName: string,
+): Set<string> | undefined {
+  const declared = index.get(objectName);
+  if (!declared || declared.size === 0) return undefined;
+  return declared;
+}
+
 /** One statically-extracted field write found in an L2 body. */
 export interface ExtractedHookBodyWrite {
   /** Which {@link HOOK_BODY_WRITE_PATTERNS} entry matched. */
@@ -548,12 +581,18 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
     const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;
 
     // The hook's own target set, for `ctx.input` writes. A wildcard target has
-    // no single object to check against; an unknown (cross-package) target
-    // cannot be judged — either way `ctx.input` writes are skipped, not guessed.
+    // no single object to check against; a target whose fields cannot be judged
+    // ({@link judgeableFieldsOf} — cross-package, or declaring no fields at all)
+    // gives nothing to resolve against — either way `ctx.input` writes are
+    // skipped, not guessed.
     const targets = (Array.isArray(hook.object) ? hook.object : [hook.object]).filter(
       (o): o is string => typeof o === 'string' && o.trim() !== '',
     );
-    const targetSets = targets.map((t) => objectFields!.get(t));
+    const targetSets = targets.map((t) => judgeableFieldsOf(objectFields!, t));
+    // ALL targets must be judgeable, not just one: the finding below fires only
+    // when a field is missing from EVERY target, and an unjudgeable target is
+    // one the field might well exist on. One opaque target therefore makes the
+    // whole "missing everywhere" claim unsound, not merely narrower (#4383).
     const inputJudgeable =
       targets.length > 0 && !targets.includes('*') && targetSets.every((s) => s !== undefined);
 
@@ -592,8 +631,8 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
         });
       } else {
         // ctx.api write → the named object.
-        const known = objectFields!.get(w.object);
-        if (!known) continue; // object declared by another package — cannot judge
+        const known = judgeableFieldsOf(objectFields!, w.object);
+        if (!known) continue; // cross-package, or no declared fields — cannot judge
         if (IMPLICIT_FIELDS.has(w.field) || known.has(w.field)) continue;
 
         reported.add(dedupeKey);

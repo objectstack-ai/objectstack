@@ -77,6 +77,7 @@ import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 import {
   extractHookBodyWriteSet,
   indexObjectFields,
+  judgeableFieldsOf,
   IMPLICIT_FIELDS,
   HOOK_BODY_WRITE_PATTERNS,
   type BodyWritePatternExclusion,
@@ -319,8 +320,8 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
       const dedupeKey = `${w.object}\u0000${w.field}`;
       if (reported.has(dedupeKey)) continue;
 
-      const known = objectFields.get(w.object);
-      if (!known) continue; // object declared by another package — cannot judge
+      const known = judgeableFieldsOf(objectFields, w.object);
+      if (!known) continue; // cross-package, or no declared fields — cannot judge
       if (IMPLICIT_FIELDS.has(w.field) || known.has(w.field)) continue;
 
       reported.add(dedupeKey);

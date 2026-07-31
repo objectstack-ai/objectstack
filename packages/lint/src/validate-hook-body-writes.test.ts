@@ -183,6 +183,52 @@ describe('validateHookBodyWrites — ctx.input writes', () => {
     );
     expect(findings).toEqual([]);
   });
+
+  // #4383 — an object that declares NO fields is an external object or a
+  // datasource-introspected schema whose columns are resolved at runtime. Its
+  // field map is not empty, it is UNKNOWN; treating the empty Set as an answer
+  // reported every write to such an object as a missing field.
+  it('a target declaring no fields at all is unjudgeable — silent, not "no such field"', () => {
+    const stack = {
+      objects: [{ name: 'legacy_deal', label: 'Legacy Deal', external: true }],
+      hooks: [
+        {
+          name: 'h',
+          object: 'legacy_deal',
+          events: ['beforeInsert'],
+          body: { language: 'js', source: "ctx.input.stage = 'won';" },
+        },
+      ],
+    };
+    expect(validateHookBodyWrites(stack)).toEqual([]);
+  });
+
+  it('one fields-less target makes a multi-target everywhere-miss unsound — silent', () => {
+    // The finding fires only when a field is missing from EVERY target, and the
+    // opaque target is one it might well exist on. Judging the rest would state
+    // "missing everywhere" on evidence that does not cover everywhere.
+    const stack = {
+      objects: [dealObject, { name: 'legacy_deal', external: true }],
+      hooks: [
+        {
+          name: 'h',
+          object: ['crm_deal', 'legacy_deal'],
+          events: ['beforeInsert'],
+          body: { language: 'js', source: "ctx.input.nowhere_field = 'x';" },
+        },
+      ],
+    };
+    expect(validateHookBodyWrites(stack)).toEqual([]);
+  });
+
+  it('still warns when every target is judgeable', () => {
+    // The guard above must not swallow the real finding: same shape, but both
+    // targets declare fields.
+    const findings = validateHookBodyWrites(
+      stackWith("ctx.input.nowhere_field = 'x';", { object: ['crm_deal', 'crm_contact'] }),
+    );
+    expect(findings).toHaveLength(1);
+  });
 });
 
 describe('validateHookBodyWrites — ctx.api writes', () => {
@@ -218,6 +264,22 @@ describe('validateHookBodyWrites — ctx.api writes', () => {
       ),
     );
     expect(findings).toEqual([]);
+  });
+
+  // #4383 — same unjudgeable class as a cross-package object, on the ctx.api side.
+  it('stays silent on an object that declares no fields', () => {
+    const stack = {
+      objects: [dealObject, { name: 'legacy_deal', external: true }],
+      hooks: [
+        {
+          name: 'h',
+          object: 'crm_deal',
+          events: ['afterInsert'],
+          body: { language: 'js', source: "await ctx.api.object('legacy_deal').update({ stage: 'won' });" },
+        },
+      ],
+    };
+    expect(validateHookBodyWrites(stack)).toEqual([]);
   });
 });
 
