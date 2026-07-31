@@ -832,6 +832,32 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             expect(engine.find.mock.calls[1][1].where).toEqual({ owner_id: 'usr_1' });
         });
 
+        it('every OTHER vacuous filter shape means "absent" too — the two deliberate carve-outs nothing pinned', async () => {
+            // Both of these are decisions the code states in a comment and no
+            // test held. They sit one line away from a rejection, so a future
+            // tightening of the surrounding guard would silently turn "no
+            // filter" into a 400 for callers who send an empty one:
+            //
+            //   []     — #4121 rejects an array `isFilterAST` refuses, but
+            //            deliberately exempts the EMPTY array ("it means no
+            //            filter, and every path already treats it that way").
+            //   '   '  — #4181 rejects an unparseable filter STRING via
+            //            JSON.parse, but blanks it first with `.trim()`, so a
+            //            whitespace-only filter is absent rather than invalid.
+            //            Only `''` was covered; `'   '` never exercised trim().
+            const { protocol, engine } = makeProtocol();
+            for (const filter of [[], '   ']) {
+                await protocol.findData({
+                    object: 'showcase_task',
+                    query: { filter, owner_id: 'usr_1' },
+                });
+            }
+            for (const call of engine.find.mock.calls) {
+                expect(call[1].where).toEqual({ owner_id: 'usr_1' });
+            }
+            expect(engine.find).toHaveBeenCalledTimes(2);
+        });
+
         it('count() sees the merged where — pagination totals cannot disagree with records (#4164)', async () => {
             const { protocol, engine } = makeProtocol();
             await protocol.findData({

@@ -265,7 +265,10 @@ The script carries its own ledger of gate → generator and **reconciles it agai
 `package.json` on every run**, in both directions. A new `check:`/`gen:` script that
 nobody classified fails the run rather than quietly dropping out of coverage — the
 failure mode a hardcoded list here would have had. (It caught its own `package.json`
-entry on the very first run.)
+entry on the very first run.) CI runs the same reconciliation on every PR
+(`--reconcile-only`, in lint.yml's required typecheck job), so an unclassified script
+fails its own PR instead of landing on `main` and turning this wrapper red for
+everyone else — which happened twice before the CI step existed (#4203, #4232).
 
 ⚠️ **`check:api-surface` reads the built `dist/*.d.ts`, not `src/`.** A stale `dist`
 makes it report exports as **removed** — "N breaking (removed/narrowed)" — when nothing

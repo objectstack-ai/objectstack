@@ -114,7 +114,9 @@
         },
         "maxRetries": {
           "status": "live",
-          "evidence": "packages/services/service-automation/src/engine.ts"
+          "verifiedAt": "2026-07-31",
+          "evidence": "packages/services/service-automation/src/engine.ts",
+          "note": "LIVE, and now single-sourced (#4247). It was live under TWO defaults — `.default(0)` here, `maxRetries ?? 3` in retryExecution — so the count depended on whether the flow had been through FlowSchema. The engine's fallback is deleted (it destructures the parsed block), and the schema refuses `strategy: 'retry'` with maxRetries < 1, since a zero-attempt retry is `strategy: 'fail'` under another name."
         },
         "retryDelayMs": {
           "status": "live",

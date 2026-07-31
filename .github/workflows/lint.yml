@@ -223,6 +223,23 @@ jobs:
       - name: Type check (@objectstack/spec)
         run: pnpm --filter @objectstack/spec exec tsc --noEmit
 
+      # Meta-gate (#4203): the `check:generated` aggregate reconciles its
+      # GATED/NO_GENERATOR ledger against packages/spec/package.json on every run,
+      # in both directions, so a `check:`/`gen:` script nobody classified fails
+      # instead of quietly dropping out of coverage. But the reconciliation only
+      # ran where the aggregate ran — locally. CI runs the gates as individual
+      # steps, so a PR adding an unclassified script kept every CI gate green
+      # while the wrapper AGENTS.md prescribes exited red on `main`, running zero
+      # gates. Twice in three days: #4177 (`check:variant-docs`, fixed only when
+      # #4194 collided with the same wall) and #4232 (`check:strictness-ledger`,
+      # caught while wiring this step). Not in ci.yml's `check-generated` job:
+      # its `generated` paths filter does not watch packages/spec/package.json —
+      # the one file every offending PR must touch — so both offenders skipped
+      # that job entirely. This job is unfiltered and required, so the meta-gate
+      # cannot go dormant. Reads package.json only; no build, sub-second.
+      - name: "Check every check:/gen: script is classified in the check:generated ledger"
+        run: pnpm --filter @objectstack/spec check:generated --reconcile-only
+
       # Generated-docs gate: content/docs/references/** is generated from the spec
       # by `gen:schema && gen:docs` and committed. Nothing regenerated it in CI, so
       # it drifted silently — #3076 added RowCrudActionOverride to the spec and the

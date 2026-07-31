@@ -14,6 +14,40 @@ A hook targets one or more `object`s and subscribes to one or more lifecycle
 `beforeInsert`, `beforeUpdate`, `afterUpdate`, `afterDelete` (read-side events
 such as `beforeFind`/`afterFind` are also available).
 
+## Hooks vs flows
+
+Hooks and [flows](/docs/automation/flows) overlap on record-triggered logic —
+a flow's `record_change` trigger fires on the same lifecycle events — so pick
+the layer before writing either. The working rule: **a flow is the default
+surface for application logic; a hook is the backstop** for what a node graph
+cannot express.
+
+| You need… | Reach for |
+| :--- | :--- |
+| Side effects after a save — create records, notify, call HTTP, request approval | **Flow** (`record_change`) |
+| Anything that pauses: approvals, screens, timers, signals | **Flow** — a hook runs inline and cannot pause |
+| Scheduled or date-relative sweeps ("30 days before `end_date`") | **Flow** (`schedule` / `timeRelative`) |
+| Mutating the pending record in the same write, before it is saved | **Before hook** |
+| An invariant enforced on every write path, across objects, no matter who writes | **Hook** — the backstop duty itself |
+| Read-side interception (`beforeFind` / `afterFind`) | **Hook** — flows have no read events |
+
+Two structural reasons to prefer the flow when either could work:
+
+- **A flow's writes are validatable metadata; a hook body is opaque code.** An
+  `update_record` node's `fields` is structural config that `os validate`
+  checks — readonly targets, template dialects, declared expression slots. A
+  hook body's write set is **not** statically checked (see
+  [Hook & Action Bodies](/docs/automation/hook-bodies#not-statically-checked-the-write-set)):
+  a misspelled field name runs green and writes nothing.
+- **A flow reviews as data.** The node graph diffs field-by-field and renders
+  in the Console designer with per-node run history; a hook body reviews as
+  code only.
+
+Logic that genuinely needs code still doesn't have to be a hook: a flow
+`script` node calling a function registered via `defineStack({ functions })`
+keeps the orchestration in checked metadata and the code in one named,
+testable unit.
+
 ## Before Hook
 
 Mutate the incoming record before it is saved. The engine exposes the pending

@@ -1490,12 +1490,15 @@ export default class Serve extends Command {
         }
       }
 
-      // 5c. Auto-register PlatformObjectsPlugin so platform-default
+      // 5c. Auto-register PlatformObjectsPlugin. It carries platform
+      // infrastructure every served kernel needs: the `sys_migration`
+      // data-migration flag ledger + fresh-datastore attestation (#4243 —
+      // without it the engine's deployment gates read "no ledger" and fall
+      // back to the lax legacy posture), and the platform-default
       // translation bundles (Setup App + metadata-type configuration
-      // forms shipped by @objectstack/platform-objects) are contributed
-      // into the kernel's i18n service. Without this, Setup nav labels
-      // and metadata-admin form labels fall back to English literals
-      // even when Accept-Language requests another locale.
+      // forms). Without the latter, Setup nav labels and metadata-admin
+      // form labels fall back to English literals even when
+      // Accept-Language requests another locale.
       const hasPlatformObjectsPlugin = plugins.some(
         (p: any) => p?.name === 'com.objectstack.platform-objects'
           || p?.constructor?.name === 'PlatformObjectsPlugin'
