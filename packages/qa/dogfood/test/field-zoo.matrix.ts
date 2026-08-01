@@ -23,12 +23,20 @@ export type Check =
  *
  * The three relational entries below name a target object but cannot name a
  * ROW: nothing exists until the suite creates one. The HTTP suite creates a row
- * in each target and substitutes its real id (`REFERENCE_TARGETS`), so nothing
- * in this table needs to be a real id — but the placeholder must never reach a
- * write, which is why substitution is keyed on identity rather than on a magic
- * string a future edit could typo.
+ * in each target and substitutes its real id — keyed on the field appearing in
+ * {@link REFERENCE_TARGETS}, which is the authoritative list, so this value is
+ * documentation rather than a control signal and can never leak to the wire.
+ *
+ * It is a STRING, deliberately. This table has two consumers: the HTTP suite,
+ * which substitutes, and `field-zoo-value-shape.test.ts`, which parses every
+ * `write` vector against the spec's `valueSchemaFor(type, 'stored')` WITHOUT
+ * booting a stack and therefore never substitutes. A `Symbol` placeholder
+ * satisfied the first and broke the second (`expected string, received
+ * symbol`) — and because the two live in different FILES, and dogfood shards by
+ * file, that surfaced as "shard 2 fixed, shard 1 regressed". A reference's
+ * stored form is an id string, so the placeholder is one.
  */
-export const REFERENCE_PLACEHOLDER = Symbol('reference-id-resolved-at-runtime');
+export const REFERENCE_PLACEHOLDER = 'zoo_reference_id_resolved_at_runtime';
 
 /**
  * Reference field → the object whose row supplies its id, and the minimal body

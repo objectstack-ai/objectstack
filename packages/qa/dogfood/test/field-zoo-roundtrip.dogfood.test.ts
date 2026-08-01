@@ -21,7 +21,7 @@ import showcaseStack from '@objectstack/example-showcase';
 import { SECRET_MASK } from '@objectstack/objectql';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 
-import { MATRIX, REFERENCE_PLACEHOLDER, REFERENCE_TARGETS } from './field-zoo.matrix';
+import { MATRIX, REFERENCE_TARGETS } from './field-zoo.matrix';
 describe('dogfood: field-type capability matrix round-trips over HTTP (#2004)', () => {
   let stack: VerifyStack;
   let record: Record<string, unknown>;
@@ -60,8 +60,7 @@ describe('dogfood: field-type capability matrix round-trips over HTTP (#2004)', 
     const body: Record<string, unknown> = { name: 'zoo-roundtrip' };
     for (const c of MATRIX) {
       if (!('write' in c.check) || c.check.write === undefined) continue;
-      body[c.field] =
-        c.check.write === REFERENCE_PLACEHOLDER ? referenceIds[c.field] : c.check.write;
+      body[c.field] = c.field in referenceIds ? referenceIds[c.field] : c.check.write;
     }
 
     const created = await stack.apiAs(token, 'POST', '/data/showcase_field_zoo', body);
@@ -90,7 +89,7 @@ describe('dogfood: field-type capability matrix round-trips over HTTP (#2004)', 
       switch (c.check.kind) {
         case 'equal':
           expect(actual).toEqual(
-            c.check.write === REFERENCE_PLACEHOLDER ? referenceIds[c.field] : c.check.write,
+            c.field in referenceIds ? referenceIds[c.field] : c.check.write,
           );
           break;
         case 'setEqual': {
