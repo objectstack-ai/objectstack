@@ -6,14 +6,28 @@ import { ApproverBindingsFlow } from './approver-bindings.flow';
 
 /**
  * Task Completed → Notify — an autolaunched, record-triggered flow that fires
- * when a task transitions to Done and emails the project owner.
+ * when a task transitions to Done, composes a one-line summary in a registered
+ * function, and notifies the assignee.
+ *
+ * It also carries the two node types #4343 sorted out from each other:
+ *
+ *  - **`script`** calls a registered function (`defineStack({ functions })`) and
+ *    binds its RETURN value to a flow variable. That is the whole of what the
+ *    node does now — the `actionType` side effects it used to offer were
+ *    logger-backed stubs that delivered nothing.
+ *  - **`notify`** is the real delivery mechanism: it hands the messaging service
+ *    the notification (the in-app inbox by default, email once
+ *    `@objectstack/plugin-email` is installed).
  */
 export const TaskCompletedFlow = defineFlow({
   name: 'showcase_task_completed',
   label: 'Notify on Task Completed',
-  description: 'Emails the project owner when a task is marked Done.',
+  description: 'Summarizes a completed task in a registered function, then notifies its assignee.',
   type: 'autolaunched',
   status: 'active',
+  variables: [
+    { name: 'summary', type: 'string', isInput: false, isOutput: false },
+  ],
   nodes: [
     {
       id: 'start',
@@ -26,23 +40,38 @@ export const TaskCompletedFlow = defineFlow({
       },
     },
     {
-      id: 'notify',
+      id: 'summarize',
       type: 'script',
-      label: 'Send Completion Email',
+      label: 'Compose Summary',
       config: {
-        actionType: 'email',
-        inputs: {
-          to: '{record.project.owner}',
-          subject: '✅ Task done: {record.title}',
-          template: 'showcase_task_done_email',
-        },
+        // Registered in `defineStack({ functions })` — see objectstack.config.ts.
+        // A flow function is PURE: it takes `inputs`, RETURNS a value, and a
+        // later declarative node uses or persists it (#4396).
+        function: 'summarizeCompletedTask',
+        inputs: { title: '{record.title}', priority: '{record.priority}' },
+        outputVariable: 'summary',
+      },
+    },
+    {
+      id: 'notify',
+      type: 'notify',
+      label: 'Notify the assignee',
+      config: {
+        // A field ON the record: the flow record carries `project` as a scalar
+        // id, so `{record.project.owner}` would resolve to an empty string.
+        recipients: '{record.assignee}',
+        title: '✅ Task done: {record.title}',
+        message: '{summary}',
+        sourceObject: 'showcase_task',
+        sourceId: '{record.id}',
       },
     },
     { id: 'end', type: 'end', label: 'End' },
   ],
   edges: [
-    { id: 'e1', source: 'start', target: 'notify' },
-    { id: 'e2', source: 'notify', target: 'end' },
+    { id: 'e1', source: 'start', target: 'summarize' },
+    { id: 'e2', source: 'summarize', target: 'notify' },
+    { id: 'e3', source: 'notify', target: 'end' },
   ],
 });
 
@@ -819,15 +848,13 @@ export const BatchRemindersFlow = defineFlow({
           nodes: [
             {
               id: 'send_reminder',
-              type: 'script',
+              type: 'notify',
               label: 'Send Reminder',
               config: {
-                actionType: 'email',
-                inputs: {
-                  to: '{task.owner.email}',
-                  subject: 'Reminder ({taskIndex}): {task.title}',
-                  template: 'showcase_task_reminder_email',
-                },
+                recipients: '{task.owner}',
+                title: 'Reminder ({taskIndex}): {task.title}',
+                sourceObject: 'showcase_task',
+                sourceId: '{task.id}',
               },
             },
           ],
@@ -876,30 +903,37 @@ export const FanOutNotifyFlow = defineFlow({
       config: {
         branches: [
           {
-            name: 'Email the owner',
+            name: 'Notify the owner',
             nodes: [
               {
-                id: 'email_owner',
-                type: 'script',
-                label: 'Email Owner',
+                id: 'notify_owner',
+                type: 'notify',
+                label: 'Notify Owner',
                 config: {
-                  actionType: 'email',
-                  inputs: { to: '{record.project.owner}', subject: '✅ Done: {record.title}' },
+                  recipients: '{record.assignee}',
+                  title: '✅ Done: {record.title}',
+                  sourceObject: 'showcase_task',
+                  sourceId: '{record.id}',
                 },
               },
             ],
             edges: [],
           },
           {
+            // Slack is a CONNECTOR, not a notify channel (#4343): post through
+            // an incoming webhook, or a `connector_action` with the Slack
+            // connector. The retired `script` + `actionType: 'slack'` shape
+            // logged a line and delivered nothing.
             name: 'Post to Slack',
             nodes: [
               {
                 id: 'slack_post',
-                type: 'script',
+                type: 'http',
                 label: 'Slack Notify',
                 config: {
-                  actionType: 'slack',
-                  inputs: { channel: '#tasks', text: 'Task done: {record.title}' },
+                  url: 'https://hooks.slack.com/services/T000/B000/XXXX',
+                  method: 'POST',
+                  body: { channel: '#tasks', text: 'Task done: {record.title}' },
                 },
               },
             ],
@@ -1123,12 +1157,12 @@ export const ProjectEscalationFlow = defineFlow({
         branches: [
           {
             name: 'Owner',
-            nodes: [{ id: 'alert_owner', type: 'script', label: 'Alert Owner', config: { actionType: 'email', inputs: { to: '{record.owner}', subject: '🔴 Critical: {record.name}' } } }],
+            nodes: [{ id: 'alert_owner', type: 'notify', label: 'Alert Owner', config: { recipients: '{record.owner}', title: '🔴 Critical: {record.name}', severity: 'critical', sourceObject: 'showcase_project', sourceId: '{record.id}' } }],
             edges: [],
           },
           {
             name: 'Exec',
-            nodes: [{ id: 'alert_exec', type: 'script', label: 'Alert Exec', config: { actionType: 'email', inputs: { to: 'exec@example.com', subject: '🔴 Critical project: {record.name}' } } }],
+            nodes: [{ id: 'alert_exec', type: 'notify', label: 'Alert Exec', config: { recipients: 'exec@example.com', title: '🔴 Critical project: {record.name}', severity: 'critical', sourceObject: 'showcase_project', sourceId: '{record.id}' } }],
             edges: [],
           },
         ],

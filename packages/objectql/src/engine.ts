@@ -76,7 +76,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
+import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import { applyHaving } from './having-filter.js';
@@ -585,6 +585,19 @@ interface SummaryDescriptor {
 // on every build, so the seven consumer-local surface declarations the contract
 // replaced can never silently drift from the engine again. IObjectQLEngine
 // extends IDataEngine, so the old claim rides along.
+/**
+ * [#4441] "The caller did not name a record here."
+ *
+ * `null` / `undefined` / `''` mean NO LINK — exactly what
+ * `deleteBehavior: 'set_null'` writes — and an empty array is the multi-value
+ * spelling of the same thing. None of them is an id to resolve.
+ */
+function isEmptyReferenceValue(v: unknown): boolean {
+  if (v === null || v === undefined || v === '') return true;
+  if (Array.isArray(v)) return v.length === 0 || v.every((e) => e === null || e === undefined || e === '');
+  return false;
+}
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -1947,6 +1960,153 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#4441] Referential integrity on the WRITE path: a `lookup` (or any
+   * reference-typed field) may not be given an id that exists in no row of the
+   * object it declares.
+   *
+   * The field metadata is unambiguous — `{"type":"lookup","required":true,
+   * "reference":"sys_permission_set"}` — and the DELETE side already reasons
+   * about the edge (`deleteBehavior: 'set_null'`). Only the insert side never
+   * checked, so `POST /data/sys_position_permission_set
+   * {"permission_set_id":"ps_does_not_exist_at_all"}` created the row.
+   *
+   * On the RBAC link tables that is a security-surface record that resolves to
+   * nothing: an administrator auditing permissions sees a binding whose target
+   * cannot be inspected, and the audience-anchor gate has to resolve that very
+   * set to evaluate the grant — so a dangling row is an unevaluable gate input,
+   * not merely an untidy one.
+   *
+   * ## Scope, deliberately narrow
+   *
+   * - **Caller-supplied keys only.** Server stamps (`owner_id`,
+   *   `organization_id`, `created_by`/`updated_by`) are lookups too; they are
+   *   written by hooks and middleware, not by the request, and re-validating
+   *   them here would turn a platform stamp into a caller-facing rejection.
+   * - **Non-system writes only**, like every other write-path guard in this
+   *   engine (`stripReadonlyFields`, `stripReadonlyForInsert`). Seed replay,
+   *   package install and boot-time provisioning legitimately write rows in an
+   *   order that resolves only once the batch completes; failing them closed
+   *   would turn an ordering detail into a boot failure. This leaves a real
+   *   residual — an `isSystem` caller can still write a dangling reference —
+   *   which is recorded on the issue rather than silently accepted.
+   * - **Empty values are not references.** `null` / `undefined` / `''` mean
+   *   "no link", which is what `deleteBehavior: 'set_null'` produces.
+   * - **Already-expanded objects are skipped.** A read round-trip can hand back
+   *   `{id, name, …}` in the slot; that is not an id write.
+   *
+   * ## Why the probe is unscoped
+   *
+   * Existence is a fact about the database, not about the caller's visibility —
+   * the same distinction the #4435 existence probe turns on. A scoped probe
+   * would refuse a link to a permission set the caller cannot READ, which is
+   * ordinary in an RLS-scoped deployment and would make the platform's own
+   * admin flows fail. Whether the caller may create the binding at all is the
+   * RBAC/RLS layer's decision, made where it already is.
+   *
+   * Fails OPEN when the target cannot be checked (unregistered object, no
+   * driver, a probe that throws): an integrity check that cannot run must not
+   * invent a rejection, and the alternative — refusing every write to an object
+   * whose target lives on an unreachable datasource — converts a connectivity
+   * problem into data loss.
+   */
+  private async assertReferencesResolve(
+    schema: any,
+    data: Record<string, unknown> | null | undefined,
+    supplied: Record<string, unknown> | null | undefined,
+    context: any,
+    msgCtx?: { locale?: string; translate?: any; objectName?: string },
+  ): Promise<void> {
+    if (context?.isSystem) return;
+    const fields = schema?.fields;
+    if (!fields || !data) return;
+
+    const failures: any[] = [];
+    for (const name of Object.keys(fields)) {
+      // A `readonly` field is never the caller's to answer for — BY
+      // CONSTRUCTION, not by exemption.
+      //
+      // `stripReadonlyFields` removes a non-system caller's value from a
+      // readonly field before the write, and the create ingress does the same
+      // (`stripReadonlyForInsert`, #3043). So any value still sitting in one at
+      // this point was written by the PLATFORM, which puts it outside this
+      // check's own stated scope ("the reference the caller named").
+      //
+      // Found by the dogfood gate rather than by reasoning: `sys_metadata_history.
+      // recorded_by` is `Field.lookup('sys_user', { readonly: true })` that the
+      // metadata repository fills with `actor ?? 'system'` — a SENTINEL STRING,
+      // not a user id, on a write that does not carry `isSystem`. Checking it
+      // rejected ordinary metadata authoring (package create / publish / clone).
+      // The sentinel-in-a-lookup is a real modelling wart and is filed
+      // separately; it is not this change's to fix, and rejecting the
+      // platform's own write is not the way to report it.
+      //
+      // This does NOT weaken #4441: the fields the issue names —
+      // `sys_position_permission_set.permission_set_id` and
+      // `showcase_task.project` — are ordinary author-facing lookups with no
+      // `readonly`, and both stay enforced (pinned in the unit suite).
+      if (fields[name]?.readonly === true) continue;
+      // Only a value the CALLER actually supplied is theirs to answer for.
+      //
+      // Key presence is not enough: a form serializes an unpicked control as
+      // an explicit `null`, and `applyFieldDefaults` then fills it from
+      // `defaultValue` — including the `current_user` token (#2706). The key is
+      // in the payload, but the ID that lands is the PLATFORM's, so validating
+      // it would report a server-derived value as the caller's bad reference
+      // (and reject a perfectly ordinary insert against a driver that has no
+      // `sys_user` row for the acting principal).
+      //
+      // So the value read for the check comes from the post-normalization
+      // `data` (multi-value strings are already split by then), while WHETHER
+      // to check is decided by the caller's own raw value being non-empty.
+      if (!supplied || isEmptyReferenceValue((supplied as Record<string, unknown>)[name])) continue;
+      if (!(name in data)) continue;
+      const def = fields[name];
+      const target = referenceTargetOf(def);
+      if (!target) continue;
+      const raw = (data as Record<string, unknown>)[name];
+      const values = Array.isArray(raw) ? raw : [raw];
+      for (const v of values) {
+        if (v === null || v === undefined || v === '') continue;
+        if (typeof v === 'object') continue;
+        const resolved = await this.referenceExists(target, v);
+        if (resolved === false) {
+          failures.push(buildFieldError(
+            {
+              field: name,
+              code: 'reference_not_found',
+              def,
+              value: String(v),
+              constraint: { target },
+            },
+            msgCtx as any,
+          ));
+        }
+      }
+    }
+    if (failures.length > 0) throw new ValidationError(failures);
+  }
+
+  /**
+   * Does `id` name a row in `target`? `false` only when the probe RAN and found
+   * nothing; `null` when it could not run at all (see the fail-open note on
+   * {@link assertReferencesResolve}).
+   */
+  private async referenceExists(target: string, id: unknown): Promise<boolean | null> {
+    try {
+      const resolved = this.resolveObjectName(target);
+      if (!this._registry.getObject(resolved)) return null;
+      const row = await this.findOne(resolved, {
+        where: { id },
+        fields: ['id'],
+        context: { isSystem: true },
+      } as any);
+      return !!row;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Register the crypto provider that backs `secret`-typed fields.
    *
    * When set, the engine encrypts secret fields on write (storing ciphertext in
@@ -2205,13 +2365,45 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     // 2. Check datasourceMapping rules
+    //
+    // A rule that MATCHES is a routing decision, not a hint (#4462). It used to
+    // fall through to steps 3-5 whenever the named datasource had no live
+    // driver, which put an object's rows in the DEFAULT store while every
+    // signal said otherwise: boot succeeded, `/ready` answered 200, the
+    // datasource name appeared nowhere in the log, and the write returned 201.
+    // An operator who routes an object to Postgres and gets the URL wrong finds
+    // out by going to look in Postgres and finding it empty.
+    //
+    // `default` is the one name that legitimately resolves onward: the default
+    // driver keeps its NATURAL name (#3826), so `drivers.has('default')` is
+    // false by construction and step 5 is how routing to it works.
     const mappedDatasource = this.resolveDatasourceFromMapping(objectName, object);
-    if (mappedDatasource && this.drivers.has(mappedDatasource)) {
-      this.logger.debug('Resolved datasource from mapping', {
-        object: objectName,
-        datasource: mappedDatasource
-      });
-      return this.drivers.get(mappedDatasource)!;
+    if (mappedDatasource && mappedDatasource !== 'default') {
+      if (this.drivers.has(mappedDatasource)) {
+        this.logger.debug('Resolved datasource from mapping', {
+          object: objectName,
+          datasource: mappedDatasource
+        });
+        return this.drivers.get(mappedDatasource)!;
+      }
+      // Same three-way diagnosis as an explicit `object.datasource` binding —
+      // the two are the same promise made in two places, so they owe the reader
+      // the same answer.
+      const unavailable = this.unavailableDatasources.get(mappedDatasource);
+      if (unavailable) {
+        throw new DatasourceUnavailableError(
+          mappedDatasource,
+          objectName,
+          unavailable.kind,
+          unavailable.publicDetail,
+        );
+      }
+      throw new Error(
+        `[ObjectQL] Datasource '${mappedDatasource}' mapped for object '${objectName}' is not registered. ` +
+        `A datasourceMapping rule routes this object to it, so falling back to the default store would ` +
+        `write the object's data to a different database than the one it declares. Fix the datasource ` +
+        `configuration, or remove the mapping rule.`,
+      );
     }
 
     // 3. Lifecycle-class separation (ADR-0057 §3.6): high-frequency
@@ -2253,6 +2445,26 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     throw new Error(`[ObjectQL] No driver available for object '${objectName}'`);
+  }
+
+  /**
+   * Which datasource do the mapping rules route `objectName` to, if any?
+   *
+   * The PUBLIC face of {@link resolveDatasourceFromMapping}, added for the boot
+   * path (#4462): the datasource-connection service must connect the
+   * datasources a mapping actually routes objects to, and it must learn which
+   * those are from the same resolver the query path uses. A second
+   * implementation of "does this rule match?" living in the connection service
+   * would drift by one clause and produce the worst of both postures — a
+   * datasource connected that routing does not use, or routed to and never
+   * connected, which is the defect itself.
+   *
+   * Returns `null` when no rule matches, and the datasource name (including
+   * `'default'`) when one does. Rule matching only — an explicit
+   * `object.datasource` binding outranks this and is not consulted here.
+   */
+  resolveMappedDatasource(objectName: string): string | null {
+    return this.resolveDatasourceFromMapping(objectName, this._registry.getObject(objectName));
   }
 
   /**
@@ -3695,12 +3907,25 @@ export class ObjectQL implements IObjectQLEngine {
         // Locale + translation hooks for the rejection messages (#3957) —
         // resolved once for the batch, identical for every row.
         const msgCtx = this.validationMessageContext(object, opCtx.context);
+        // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
+        // resolved any `defaultValue` / `current_user` token and before the
+        // beforeInsert hooks stamped `owner_id` / `organization_id` /
+        // `created_by`. The reference check consults it to decide WHAT THE
+        // CALLER ACTUALLY SENT, so neither a platform stamp nor a backfilled
+        // default is ever reported as the caller's bad reference.
+        const suppliedPerRow: Array<Record<string, unknown>> =
+          (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
+            (row) => (row ?? {}) as Record<string, unknown>,
+          );
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
             validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx });
+            await this.assertReferencesResolve(
+              schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
+            );
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
@@ -4015,6 +4240,11 @@ export class ObjectQL implements IObjectQLEngine {
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
+               // [#4441] A repoint is as capable of dangling as an initial link.
+               await this.assertReferencesResolve(
+                 updateSchema, hookContext.input.data as Record<string, unknown>,
+                 opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+               );
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
@@ -4093,6 +4323,13 @@ export class ObjectQL implements IObjectQLEngine {
                } else {
                    evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
                }
+               // [#4441] The bulk call site too — a guard wired into single-id
+               // writes only is still a hole one call site over (AGENTS.md
+               // PD #10's own worked example, #3106).
+               await this.assertReferencesResolve(
+                 updateSchema, hookContext.input.data as Record<string, unknown>,
+                 opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+               );
                result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else {
                throw new Error('Update requires an ID or options.multi=true');

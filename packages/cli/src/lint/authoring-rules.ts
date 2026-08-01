@@ -89,6 +89,7 @@ import {
   validateApprovalApprovers,
   validateRecordTitle,
   validateSemanticRoles,
+  validateFormLayout,
   validateSeedReplaySafety,
   validateSeedStateMachine,
   validateVisibilityPredicates,
@@ -385,6 +386,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-semantic-roles.ts',
     run: (stack) => validateSemanticRoles(stack),
+  },
+  // #2578 / #4449 — a form section's field reference that resolves to nothing
+  // (silently not rendered) and an absolute `colSpan` under a per-surface
+  // derived column count. Advisory: the renderer skips the unknown field and
+  // clamps the span, so nothing is broken — but each is almost certainly an
+  // authoring mistake, and until #4449 this rule ran on no command at all.
+  // Pure structured-metadata walk (no lazy dependency), so wiring it to all
+  // three costs nothing measurable.
+  {
+    name: 'validateFormLayout',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-form-layout.ts',
+    run: (stack) => validateFormLayout(stack),
   },
   // ADR-0078 Phase 3 (Tier-A `action-locations`) — an action that declares no
   // `locations` and that no view places by name renders on no surface at all.

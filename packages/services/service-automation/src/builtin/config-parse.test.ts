@@ -19,6 +19,11 @@
  *    resolved to its value's real type;
  *  - the deliberate exemption: a legacy flat-graph `loop` (no `config.body`)
  *    predates the ADR-0031 construct and is not parsed.
+ *
+ * #4343 added the two schemaless nodes whose contracts could carry the same
+ * seam: `subflow` (flat all along — it just had a hand-written guard) and
+ * `script`, once retiring its non-functional dispatch branches left it flat.
+ * `decision` stays out: its one key is optional, so a parse would check nothing.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -203,5 +208,88 @@ describe('execute-time config parse (#4277)', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('map');
     expect(result.error).toContain('config.collection');
+  });
+
+  // ── the two schemaless nodes that joined the seam in #4343 ──────────────
+  //
+  // `script` could not be parsed while its legal key set depended on
+  // `actionType`; converging it to a function call (retiring the branches that
+  // never delivered anything) is what made a flat parse fit. `subflow` was
+  // always flat — it just carried a hand-written guard instead of the contract.
+
+  it('script refuses a node that names no callable', async () => {
+    const engine = engineWith();
+    engine.registerFlow('f', flowWith('script', {}));
+
+    const result = await engine.execute('f');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('does not satisfy the script contract');
+    expect(result.error).toContain('config.function');
+  });
+
+  it('script refuses a retired email stub — it used to log a line and report success', async () => {
+    const engine = engineWith();
+    // `registerFlow` strips the retired keys on rehydration (#3903), so what
+    // reaches the parse is a node with nothing to run. Before #4343 this was a
+    // green step that delivered no mail.
+    engine.registerFlow('f', flowWith('script', {
+      actionType: 'email', template: 'task_done', recipients: ['{record.owner}'],
+    }));
+
+    const result = await engine.execute('f');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('does not satisfy the script contract');
+  });
+
+  it('a script parse refusal is a guard — a fault edge does NOT route it', async () => {
+    const engine = engineWith();
+    engine.registerFlow('f', flowWith(
+      'script',
+      { actionType: 'slack', template: 't' },
+      {
+        nodes: [{ id: 'recover', type: 'assignment', label: 'R', config: { recovered: true } }],
+        edges: [{ id: 'e3', source: 'n1', target: 'recover', type: 'fault' }],
+      },
+    ));
+
+    const result = await engine.execute('f');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('does not satisfy the script contract');
+  });
+
+  it('an unresolvable function name stays ROUTABLE — the registry is the host, not the metadata', async () => {
+    const engine = engineWith();
+    engine.registerFlow('f', flowWith(
+      'script',
+      { function: 'never_registered' },
+      {
+        nodes: [{ id: 'recover', type: 'assignment', label: 'R', config: { recovered: true } }],
+        edges: [{ id: 'e3', source: 'n1', target: 'recover', type: 'fault' }],
+      },
+    ));
+
+    // The negative half of the contract (#3863): the same flow succeeds on a
+    // host that registers the name, so the author must be able to handle it.
+    const result = await engine.execute('f');
+    expect(result.success).toBe(true);
+  });
+
+  it('subflow refuses a missing flowName through the contract, not a hand-written check', async () => {
+    const engine = engineWith();
+    engine.registerFlow('f', flowWith('subflow', {}));
+
+    const result = await engine.execute('f');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('does not satisfy the subflow contract');
+    expect(result.error).toContain('config.flowName');
+  });
+
+  it('subflow refuses an empty flowName — declared is not the same as named', async () => {
+    const engine = engineWith();
+    engine.registerFlow('f', flowWith('subflow', { flowName: '' }));
+
+    const result = await engine.execute('f');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('config.flowName');
   });
 });

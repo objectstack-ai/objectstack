@@ -541,7 +541,28 @@ const step17: MigrationStep = {
     + 'sources written in between carry replica blocks that were genuinely checked — precise '
     + 'hosts, correct port types, typos rejected. Precision applied to an inert slot reads as '
     + 'evidence the slot is live, which is why ADR-0049 asks for a consumer rather than for '
-    + 'rigor. Retired from the load path with the rest of the keys that misdescribed themselves.',
+    + 'rigor. Retired from the load path with the rest of the keys that misdescribed themselves.\n\n'
+    + 'The `script` flow node converges on its one real path (#4343). It had four ways to name '
+    + 'what it ran and only one of them ran anything: `config.actionType: \'email\' | \'slack\'` '
+    + 'were logger-backed stubs that wrote a line, reported success and delivered nothing under '
+    + 'any configuration — with `config.template` / `.recipients` / `.variables` feeding a '
+    + 'message no channel ever sent; inline `config.script` was recognized and never executed '
+    + '(the built-in runtime has no server-side JS sandbox), so the node warned and no-op\'d; and '
+    + 'every other `actionType` value was shorthand for a registered-function name, a second '
+    + 'spelling of `config.function`. All five keys are retired and `function` becomes required, '
+    + 'which is also what finally made the contract PARSEABLE: while the legal key set depended '
+    + 'on `actionType`, a flat parse would either reject valid shapes or wave everything through, '
+    + 'so `script` (with `subflow`) now runs through the same execute-time contract parse #4277 '
+    + 'gave the flat builtins. A shorthand `actionType` CONVERTS into `function` — that is what '
+    + 'it meant — unless `function` is already set, in which case it was dead metadata the '
+    + 'executor never reached. The other four are dropped outright: nothing read them, so there '
+    + 'is no value to preserve, and rebuilding the intent is an authoring decision the tombstones '
+    + 'prescribe per branch (a `notify` node for mail — it delivers through the messaging '
+    + 'service, the in-app inbox by default and real email once `@objectstack/plugin-email` is '
+    + 'installed; a `connector_action` with the Slack connector, or an `http` node posting to a '
+    + 'webhook, for Slack; a registered function for an inline body). Retired from the load path '
+    + 'for the same reason as the rest: absorbing `actionType: \'email\'` silently would let an '
+    + 'author keep believing the flow sends mail.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -567,6 +588,7 @@ const step17: MigrationStep = {
     'stack-api-require-auth-removed',
     'flow-node-wait-timeout-keys-removed',
     'datasource-read-replicas-removed',
+    'flow-node-script-branch-keys-removed',
   ],
   semantic: [
     {

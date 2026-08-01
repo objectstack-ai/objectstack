@@ -374,6 +374,49 @@ export class AppPlugin implements Plugin {
         ctx.logger.debug('[AppPlugin] Installed hook-metrics Server-Timing feed');
     }
 
+    /**
+     * Datasource name → the objects a `datasourceMapping` rule routes to it
+     * (#4462), asked of the ENGINE rather than re-derived here.
+     *
+     * The gate this feeds (`isDatasourceAddressed` (d)) and the routing that
+     * makes it correct (`ObjectQLEngine.getDriver` step 2) must agree exactly
+     * about which rules match which objects. A second matcher living in this
+     * plugin — or in the connection service — would drift by one clause and
+     * produce either a datasource connected that routing never uses, or one
+     * routed to and never connected, which is the defect itself.
+     *
+     * Objects with an EXPLICIT `object.datasource` binding are excluded: that
+     * binding outranks mapping in `getDriver`, so counting them here would let
+     * a mapping rule they never obey force a fail-fast on their behalf.
+     * `default` is excluded for the same reason `getDriver` lets it through —
+     * the host's default driver is registered under its natural name and needs
+     * no per-app connect.
+     */
+    private resolveMappedObjects(
+        ql: IObjectQLEngine,
+        objects: Array<{ name?: string; datasource?: string }>,
+    ): Record<string, string[]> {
+        const resolve = (ql as unknown as {
+            resolveMappedDatasource?: (objectName: string) => string | null;
+        }).resolveMappedDatasource;
+        if (typeof resolve !== 'function') return {};
+        const out: Record<string, string[]> = {};
+        for (const obj of objects) {
+            const name = obj?.name;
+            if (typeof name !== 'string' || !name) continue;
+            if (obj.datasource && obj.datasource !== 'default') continue;
+            let mapped: string | null = null;
+            try {
+                mapped = resolve.call(ql, name);
+            } catch {
+                continue; // a resolver that throws must not brick boot
+            }
+            if (!mapped || mapped === 'default') continue;
+            (out[mapped] ??= []).push(name);
+        }
+        return out;
+    }
+
     start = async (ctx: PluginContext) => {
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping start', {
@@ -480,10 +523,10 @@ export class AppPlugin implements Plugin {
         // + register a live driver via the shared `'datasource-connection'`
         // service (when present — wired by the datasource-admin plugin). The
         // service applies the D2 gate (connect only when `external`, an object
-        // explicitly binds via `object.datasource`, or `autoConnect:true`) and
-        // the host connect policy, so managed+unrouted datasources stay
-        // metadata-only (e.g. app-crm's `:memory:` datasources — byte-for-byte
-        // unchanged). Idempotent vs. a legacy `onEnable` driver registration.
+        // explicitly binds via `object.datasource`, a `datasourceMapping` rule
+        // routes objects to it, or `autoConnect:true`) and the host connect
+        // policy, so a managed datasource nothing routes to stays metadata-only.
+        // Idempotent vs. a legacy `onEnable` driver registration.
         //
         // Runs in `start()` (before the `kernel:ready` external-validation gate)
         // so the kernel's init-all-then-start-all ordering guarantees the
@@ -506,6 +549,7 @@ export class AppPlugin implements Plugin {
                           connectDeclared?: (input: {
                               datasources: any[];
                               objects?: Array<{ name?: string; datasource?: string }>;
+                              mappedObjects?: Record<string, string[]>;
                           }) => Promise<Array<{ name: string; status: string }>>;
                       }
                     | undefined;
@@ -516,7 +560,11 @@ export class AppPlugin implements Plugin {
                 }
                 if (typeof connection?.connectDeclared === 'function') {
                     const objects = Array.isArray(this.bundle.objects) ? this.bundle.objects : [];
-                    const results = await connection.connectDeclared({ datasources: dsList, objects });
+                    const results = await connection.connectDeclared({
+                        datasources: dsList,
+                        objects,
+                        mappedObjects: this.resolveMappedObjects(ql, objects),
+                    });
                     const connected = results.filter((r) => r.status === 'connected');
                     if (connected.length > 0) {
                         ctx.logger.info('Auto-connected declared datasources', {

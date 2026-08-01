@@ -69,6 +69,24 @@ describe('FlowFunctionEntrySchema', () => {
   it('rejects a declaration whose handler is not callable', () => {
     expect(FlowFunctionEntrySchema.safeParse({ handler: 'scoreLead' }).success).toBe(false);
   });
+
+  // #4343 — what `objectstack build` produces. The CLI lowers every inline
+  // callable to a serialisable ref BEFORE the stack is parsed, so a built
+  // manifest holds `{ scoreLead: 'scoreLead' }`. Rejecting that made
+  // `defineStack({ functions })` — a documented, first-class mechanism —
+  // unbuildable, which #4343 turned from latent into blocking by making
+  // `config.function` the only thing a `script` node can run.
+  it('accepts a lowered handler ref, the form a built artifact carries', () => {
+    expect(FlowFunctionEntrySchema.safeParse('scoreLead').success).toBe(true);
+    // Empty is not a name.
+    expect(FlowFunctionEntrySchema.safeParse('').success).toBe(false);
+  });
+
+  it('drops a lowered ref when normalizing — it names a function without carrying one', () => {
+    // The callable for that name comes from the sidecar ESM module the build
+    // emits; binding the string would register a name pointing at nothing.
+    expect(normalizeFlowFunctionEntry('scoreLead')).toBeUndefined();
+  });
 });
 
 describe('defineStack({ functions }) — the authoring surface (#4396)', () => {

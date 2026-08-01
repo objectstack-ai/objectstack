@@ -280,6 +280,24 @@ const AUDIT_FIELD_DEFS = {
   },
 } satisfies Record<AuditProvenanceField, Record<string, unknown>>;
 
+/**
+ * [#4447] The subset of {@link AUDIT_FIELD_DEFS} that is NOT authorable — the
+ * keys that decide who may write an audit column.
+ *
+ * Only `readonly` / `system` travel: everything else an author writes —
+ * `label`, `description`, `hidden`, `group`, and even `type` for an
+ * external object mapping a differently-typed remote column — stays theirs.
+ */
+const AUDIT_FIELD_GOVERNANCE: Record<AuditProvenanceField, Record<string, unknown>> =
+  Object.fromEntries(
+    // ONLY the keys that decide WHO MAY WRITE the column. `type` and
+    // `reference` are deliberately NOT forced: an external/federated object
+    // legitimately maps its audit column to a differently-typed remote column,
+    // and #4447 is about writability, not storage shape. Narrower is the point
+    // — this overrides an author, so it takes only what the defect requires.
+    AUDIT_PROVENANCE_FIELDS.map((name) => [name, { readonly: true, system: true }]),
+  ) as unknown as Record<AuditProvenanceField, Record<string, unknown>>;
+
 export function applySystemFields(
   schema: ServiceObject,
   opts: { multiTenant: boolean }
@@ -344,6 +362,9 @@ export function applySystemFields(
     !schema.name.startsWith('sys_');
 
   const additions: Record<string, any> = {};
+  // Platform-owned field settings that must WIN over a declared field, rather
+  // than lose to it like `additions` does (#4447).
+  const overrides: Record<string, any> = {};
 
   if (wantTenant && !schema.fields?.organization_id) {
     additions.organization_id = {
@@ -362,7 +383,36 @@ export function applySystemFields(
 
   if (wantAudit) {
     for (const name of AUDIT_PROVENANCE_FIELDS) {
-      if (!schema.fields?.[name]) additions[name] = AUDIT_FIELD_DEFS[name];
+      const declared = (schema.fields as Record<string, any> | undefined)?.[name];
+      if (!declared) {
+        additions[name] = AUDIT_FIELD_DEFS[name];
+        continue;
+      }
+      // [#4447] The audit family's GOVERNANCE is platform-owned, so a declared
+      // `created_at` cannot make the audit anchor client-writable.
+      //
+      // The injection above is skipped when the object already carries the
+      // field, and the merge below lets `schema.fields` win — correct for an
+      // authored business field, wrong for this family. It is how `created_at`
+      // became writable on an ordinary PATCH: the showcase artifact ships a
+      // materialized `created_at` carrying only FieldSchema DEFAULTS
+      // (`readonly: false`), which shadowed `AUDIT_FIELD_DEFS.created_at`
+      // (`readonly: true`), so the engine's `stripReadonlyFields` had nothing
+      // to key off and the forged value was written straight through — with no
+      // `droppedFields` either, because from the platform's point of view
+      // nothing was dropped.
+      //
+      // Its two siblings only LOOKED protected: the audit hook force-advances
+      // `updated_at`/`updated_by` on every update, so a forged value is
+      // overwritten rather than refused. `created_at` is insert-only, so
+      // nothing overwrote it — one field out of the trio genuinely unguarded.
+      //
+      // Presentation stays the author's (label, description, hidden, group,
+      // ordering …); only the keys that decide WHO MAY WRITE IT are forced.
+      // That leaves the deliberate back-dating path intact: `preserveAudit`
+      // (#3479/#3493) and `isSystem` writes still reinstate the original
+      // timeline, because they are checked downstream of `readonly`, not by it.
+      overrides[name] = { ...declared, ...AUDIT_FIELD_GOVERNANCE[name] };
     }
   }
 
@@ -385,11 +435,13 @@ export function applySystemFields(
     };
   }
 
-  if (Object.keys(additions).length === 0) return schema;
+  if (Object.keys(additions).length === 0 && Object.keys(overrides).length === 0) return schema;
 
   return {
     ...schema,
-    fields: { ...additions, ...(schema.fields ?? {}) },
+    // `additions` LOSE to an author's field (a declared `owner_id` is theirs);
+    // `overrides` WIN over it (the audit family's governance is not authorable).
+    fields: { ...additions, ...(schema.fields ?? {}), ...overrides },
   };
 }
 

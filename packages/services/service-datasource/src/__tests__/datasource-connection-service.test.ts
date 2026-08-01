@@ -117,15 +117,38 @@ describe('isDatasourceAddressed (ADR-0062 D2 gate)', () => {
     expect(isDatasourceAddressed({ name: 'x', schemaMode: 'managed', autoConnect: true }, { objects: [] })).toBe(true);
   });
 
-  it('does NOT connect a managed datasource that is only mapped / unrouted (app-crm byte-for-byte unchanged)', () => {
-    // app-crm: crm_primary is managed + referenced by datasourceMapping only,
-    // crm_analytics is managed + unrouted. Neither has an object binding.
-    expect(isDatasourceAddressed({ name: 'crm_primary', schemaMode: 'managed' }, { objects: [] })).toBe(false);
+  it('connects when a datasourceMapping rule routes objects to it (d) — #4462', () => {
+    // The gate D2 originally excluded, to keep a mapped-but-unconnected
+    // datasource falling through to `default`. That fall-through is exactly how
+    // an object's rows ended up in a database nobody declared, so routing no
+    // longer performs it — and once a mapped object has no fallback, connecting
+    // its datasource at boot is the same call gate (b) already makes.
+    expect(
+      isDatasourceAddressed(
+        { name: 'broken', schemaMode: 'managed' },
+        { objects: [], mappedObjects: { broken: ['rc1_audit'] } },
+      ),
+    ).toBe(true);
+  });
+
+  it('does NOT connect a managed datasource nothing routes to', () => {
+    // No object binding, no mapping rule that matches anything.
     expect(isDatasourceAddressed({ name: 'crm_analytics', schemaMode: 'managed' }, { objects: [] })).toBe(false);
     // An object bound to a DIFFERENT datasource must not flip the gate.
     expect(
       isDatasourceAddressed({ name: 'crm_primary', schemaMode: 'managed' }, { objects: [{ name: 'acct', datasource: 'default' }] }),
     ).toBe(false);
+    // Nor may a mapping that routes objects SOMEWHERE ELSE, or one that
+    // matches no object at all (an empty list is not a route).
+    expect(
+      isDatasourceAddressed(
+        { name: 'crm_primary', schemaMode: 'managed' },
+        { objects: [], mappedObjects: { other_ds: ['task'], crm_primary: [] } },
+      ),
+    ).toBe(false);
+    // A host that supplies no mapping information at all keeps the pre-#4462
+    // behavior rather than guessing.
+    expect(isDatasourceAddressed({ name: 'crm_primary', schemaMode: 'managed' }, {})).toBe(false);
   });
 });
 
@@ -486,6 +509,38 @@ describe('DatasourceConnectionService.connectDeclared', () => {
       expect(err.message).toContain("datasource 'billing'"); // not stopped at the first
       expect(err.message).toContain('visit');
       expect(err.message).toContain('invoice');
+    } finally {
+      if (saved === undefined) delete process.env[ENV];
+      else process.env[ENV] = saved;
+    }
+  });
+
+  // #4462 — the boot half of the pair. Before this, an object mapped to an
+  // unreachable datasource produced NO connect attempt at all: the D2 gate left
+  // it metadata-only, so the name never appeared in the log, `/ready` stayed
+  // 200, and the write went to the default store with a 201.
+  it('a mapping-routed datasource is attempted at boot, and its failure is fatal', async () => {
+    const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
+    const saved = process.env[ENV];
+    delete process.env[ENV];
+    try {
+      const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      const err = await service
+        .connectDeclared({
+          datasources: [{ name: 'broken', driver: 'sqlite', schemaMode: 'managed', config: {} }],
+          objects: [{ name: 'rc1_audit' }], // no explicit binding — routed by the rule
+          mappedObjects: { broken: ['rc1_audit'] },
+        })
+        .then(
+          () => { throw new Error('connectDeclared() resolved but should have thrown'); },
+          (e: unknown) => e as Error,
+        );
+      expect(err.message).toMatch(/^datasource 'broken': connect failed/);
+      expect(err.message).toContain('datasourceMapping rule');
+      expect(err.message).toContain('rc1_audit');
+      // The sentence an operator has to be able to act on: their data is NOT
+      // quietly going somewhere else.
+      expect(err.message).toContain('DIFFERENT database');
     } finally {
       if (saved === undefined) delete process.env[ENV];
       else process.env[ENV] = saved;

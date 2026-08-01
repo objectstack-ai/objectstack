@@ -139,7 +139,10 @@ const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; 
         name: 'subflow without flowName',
         why: 'a required config key',
         node: { type: 'subflow', config: {} },
-        expect: 'flowName is required',
+        // #4343 moved this from a hand-written `refuseNode` to the contract
+        // parse, like the CRUD entries above. Same classification, same node —
+        // only the message is now derived from `SubflowConfigSchema`.
+        expect: 'does not satisfy the subflow contract',
     },
     {
         name: 'map without flowName',

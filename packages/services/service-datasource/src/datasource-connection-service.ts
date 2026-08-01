@@ -210,32 +210,50 @@ export function availabilityOf(status: ConnectStatus): DatasourceAvailability {
  * Returns true when:
  *  - (a) it is external (`schemaMode !== 'managed'`), OR
  *  - (b) some object **explicitly** binds to it (`object.datasource === name`), OR
- *  - (c) it sets `autoConnect: true`.
+ *  - (c) it sets `autoConnect: true`, OR
+ *  - (d) a `datasourceMapping` rule ROUTES at least one registered object to it.
  *
- * Deliberately NOT triggered by a `datasourceMapping` rule alone. A managed
- * datasource that is only *mapped* (namespace/package/default) but has no live
- * driver historically falls through to the `default` driver at query time
- * (`engine.getDriver` step 4) — e.g. `examples/app-crm`'s `crm_primary`
- * (`:memory:`, mapped + default-fallback, no `onEnable`). Connecting it would
- * divert those objects to a fresh, empty connection and silently change app
- * behavior. So mapping-only routing to a *managed* datasource is treated as
- * decorative, keeping existing apps byte-for-byte unchanged (D2's load-bearing
- * backward-compat guarantee). External datasources and explicit
- * `object.datasource` bindings never resolved to `default` (they throw when
- * unregistered), so auto-connecting them is a strict improvement, not a change.
+ * ## (d), and why D2's phase-1 note no longer holds (#4462)
  *
- * That same "no fallback" property is why gate (b) is also a **fail-fast**
- * trigger when the connect fails (framework#3758) — see
- * {@link DatasourceConnectionService.handleFailure}. Gate (c) is not: nothing
- * declares a dependency on an `autoConnect` datasource.
+ * D2 originally excluded (d) to keep `examples/app-crm` byte-for-byte
+ * unchanged: its `crm_primary` was mapped but had no driver, so
+ * `engine.getDriver` fell through to `default` and the app worked. Connecting
+ * it would have diverted those objects to a fresh, empty connection — a
+ * behavior change. So a mapping-only managed datasource was declared
+ * "decorative".
+ *
+ * What that traded away was not visible from inside the boot path. An operator
+ * who maps an object to an unreachable Postgres gets: a clean boot, `/ready`
+ * 200, the datasource name in zero log lines, a `201` on the write, and their
+ * rows in the DEFAULT store. They find out by going to look in the database
+ * they declared and finding it empty. "Decorative" is not what a mapping rule
+ * reads as; it reads as routing.
+ *
+ * The fix is the pair, and each half is what makes the other correct: routing
+ * no longer falls through when a mapped datasource has no driver, so a mapped
+ * object now has NO FALLBACK — which is exactly the property that made (b)
+ * safe to auto-connect and fatal to fail. (d) inherits both.
+ *
+ * `ctx.mappedObjects` is supplied by the boot path from the ENGINE's own
+ * resolver, never re-derived here — see `ObjectQLEngine.resolveMappedDatasource`.
+ * A host that cannot supply it (no engine yet, no mapping configured) passes
+ * nothing and (d) simply never fires, which is the pre-#4462 behavior.
+ *
+ * Gate (c) is not a fail-fast trigger: nothing declares a dependency on an
+ * `autoConnect` datasource.
  */
 export function isDatasourceAddressed(
   ds: Pick<ConnectableDatasource, 'name' | 'schemaMode' | 'autoConnect'>,
-  ctx: { objects?: readonly DatasourceBoundObject[] },
+  ctx: {
+    objects?: readonly DatasourceBoundObject[];
+    /** Datasource name → the objects a `datasourceMapping` rule routes to it. */
+    mappedObjects?: Readonly<Record<string, readonly string[]>>;
+  },
 ): boolean {
   if (ds.schemaMode && ds.schemaMode !== 'managed') return true; // (a)
   if (ds.autoConnect === true) return true; // (c)
   if (ctx.objects?.some((o) => o?.datasource === ds.name)) return true; // (b)
+  if ((ctx.mappedObjects?.[ds.name]?.length ?? 0) > 0) return true; // (d)
   return false;
 }
 
@@ -287,20 +305,33 @@ export class DatasourceConnectionService {
   async connectDeclared(input: {
     datasources: readonly ConnectableDatasource[];
     objects?: readonly DatasourceBoundObject[];
+    /**
+     * Datasource name → the objects a `datasourceMapping` rule routes to it
+     * (#4462), resolved by the caller from the ENGINE's own rule matcher so
+     * this service never re-implements "does this rule match?". Absent ⇒ gate
+     * (d) never fires, which is the pre-#4462 behavior.
+     */
+    mappedObjects?: Readonly<Record<string, readonly string[]>>;
   }): Promise<ConnectResult[]> {
     const objects = input.objects ?? [];
+    const mappedObjects = input.mappedObjects ?? {};
     const results: ConnectResult[] = [];
     const fatal: Error[] = [];
     for (const ds of input.datasources) {
       if (!ds?.name) continue;
       if (ds.active === false) continue;
-      if (!isDatasourceAddressed(ds, { objects })) continue; // D2 gate
+      if (!isDatasourceAddressed(ds, { objects, mappedObjects })) continue; // D2 gate
       const bound = objects
         .filter((o) => o?.datasource === ds.name && typeof o?.name === 'string')
         .map((o) => o.name as string);
+      const mapped = mappedObjects[ds.name] ?? [];
       try {
         results.push(
-          await this.connect(ds, { objects: bound, context: { origin: ds.origin ?? 'code', trigger: 'declared-auto' } }),
+          await this.connect(ds, {
+            objects: bound,
+            mappedObjects: mapped,
+            context: { origin: ds.origin ?? 'code', trigger: 'declared-auto' },
+          }),
         );
       } catch (err) {
         fatal.push(err instanceof Error ? err : new Error(String(err)));
@@ -337,6 +368,12 @@ export class DatasourceConnectionService {
     record: ConnectableDatasource,
     opts: {
       objects?: readonly string[];
+      /**
+       * Objects a `datasourceMapping` rule routes here (#4462). Like
+       * `objects`, these have no fallback since routing stopped falling
+       * through — so a boot-time failure with any of them is fatal.
+       */
+      mappedObjects?: readonly string[];
       context?: DatasourceConnectContext;
       /**
        * Register the built driver as the engine's DEFAULT driver, under the
@@ -395,7 +432,7 @@ export class DatasourceConnectionService {
 
   private async attemptConnect(
     record: ConnectableDatasource,
-    opts: { objects?: readonly string[]; context?: DatasourceConnectContext; asDefault?: boolean } = {},
+    opts: { objects?: readonly string[]; mappedObjects?: readonly string[]; context?: DatasourceConnectContext; asDefault?: boolean } = {},
   ): Promise<ConnectResult> {
     const name = record.name;
     const engine = this.cfg.engine();
@@ -442,6 +479,7 @@ export class DatasourceConnectionService {
         `no driver factory supports driver '${record.driver}'`,
         opts.context,
         opts.objects,
+        opts.mappedObjects,
       );
     }
 
@@ -469,7 +507,7 @@ export class DatasourceConnectionService {
       try {
         secret = await resolver(credentialsRef);
       } catch (err) {
-        return this.handleFailure(record, 'failed-credentials', `resolving credential '${credentialsRef}' threw: ${errMsg(err)}`, opts.context, opts.objects);
+        return this.handleFailure(record, 'failed-credentials', `resolving credential '${credentialsRef}' threw: ${errMsg(err)}`, opts.context, opts.objects, opts.mappedObjects);
       }
       if (secret == null || secret === '') {
         return this.handleFailure(
@@ -521,7 +559,7 @@ export class DatasourceConnectionService {
       this.logger?.info?.(`datasource '${name}': connected (driver=${record.driver}, schemaMode=${record.schemaMode ?? 'managed'})`);
       return { name, status: 'connected', ...(handle.ownership ? { ownership: handle.ownership } : {}) };
     } catch (err) {
-      return this.handleFailure(record, 'failed-degraded', errMsg(err), opts.context, opts.objects);
+      return this.handleFailure(record, 'failed-degraded', errMsg(err), opts.context, opts.objects, opts.mappedObjects);
     }
   }
 
@@ -593,7 +631,12 @@ export class DatasourceConnectionService {
    *  - **(c)** the host marked it {@link ConnectableDatasource.bootCritical} —
    *    the standalone `default` (#3826): everything WITHOUT a binding routes to
    *    it, so "no fallback" holds by construction, mirroring the engine-level
-   *    guard (#3741) this connect path replaces.
+   *    guard (#3741) this connect path replaces; or
+   *  - **(d)** a `datasourceMapping` rule routes objects to it (#4462). Same
+   *    argument as (b), reached one clause later: since routing stopped falling
+   *    through on a mapped-but-unconnected datasource, those objects have no
+   *    fallback either. Before that, this case was not merely non-fatal — it was
+   *    SILENT, and the objects' rows went to the default store.
    *
    * Anything else degrades with a warning: `autoConnect:true` means "connect it
    * if you can" with nothing declaring a dependency on it, and runtime-admin
@@ -616,6 +659,7 @@ export class DatasourceConnectionService {
     reason: string,
     context?: DatasourceConnectContext,
     boundObjects: readonly string[] = [],
+    mappedObjects: readonly string[] = [],
   ): ConnectResult {
     const isExternal = record.schemaMode && record.schemaMode !== 'managed';
     const msg = `datasource '${record.name}': connect failed — ${reason}`;
@@ -629,6 +673,13 @@ export class DatasourceConnectionService {
         causes.push(
           `${boundObjects.length} object(s) bind to it explicitly (${formatObjectList(boundObjects)}) ` +
           `and have no fallback datasource — every read/write of them would fail`,
+        );
+      }
+      if (mappedObjects.length > 0) {
+        causes.push(
+          `${mappedObjects.length} object(s) are routed to it by a datasourceMapping rule ` +
+          `(${formatObjectList(mappedObjects)}) and have no fallback datasource — their reads/writes ` +
+          `would otherwise land in a DIFFERENT database than the one they declare`,
         );
       }
       if (record.bootCritical === true) {

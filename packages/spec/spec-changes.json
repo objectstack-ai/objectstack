@@ -211,6 +211,12 @@
         "to": "datasource key 'readReplicas' removed (#4468 — no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
         "conversionId": "datasource-read-replicas-removed",
         "toMajor": 17
+      },
+      {
+        "surface": "flow.node.script.config.actionType / flow.node.script.config.template / flow.node.script.config.recipients / flow.node.script.config.variables / flow.node.script.config.script",
+        "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
+        "conversionId": "flow-node-script-branch-keys-removed",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -699,6 +705,12 @@
           "surface": "datasource.readReplicas",
           "to": "datasource key 'readReplicas' removed (#4468 — no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
           "conversionId": "datasource-read-replicas-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "flow.node.script.config.actionType / flow.node.script.config.template / flow.node.script.config.recipients / flow.node.script.config.variables / flow.node.script.config.script",
+          "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
+          "conversionId": "flow-node-script-branch-keys-removed",
           "toMajor": 17
         }
       ],

@@ -193,6 +193,33 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     ok({ type: 'lookup' }, 'acc_1', 'expanded'); // unresolvable ids stay ids
   });
 
+  it('#4455: a SERIALIZED embedded record is not an id, in either form', () => {
+    // The shape the ADR-0104 D1 scan's own header names — "a `lookup` holding
+    // an expanded record object" — as it actually reaches a SQL deployment: as
+    // JSON text in a TEXT column. `z.string().min(1)` accepted it, so the scan
+    // reported clean on the one case it exists to find.
+    for (const type of ['lookup', 'master_detail', 'user', 'tree']) {
+      bad({ type }, '{"id":"acc_1","name":"embedded"}');
+      bad({ type }, '  {"id":"acc_1"}'); // padded — same value, still not an id
+      bad({ type }, '[{"id":"acc_1"}]'); // the multi-value flavour
+      // …and the expanded read form must not launder it either: `$expand`
+      // produces an OBJECT, never its serialization.
+      bad({ type }, '{"id":"acc_1","name":"embedded"}', 'expanded');
+    }
+    bad({ type: 'lookup', multiple: true }, ['acc_1', '{"id":"acc_2"}']);
+
+    // Narrow on purpose: the rejection is "this is an embedded record", not an
+    // id alphabet. A reference id is whatever the target object's key holds —
+    // including an external key an ADR-0015 federated datasource supplies — so
+    // every one of these stays valid.
+    ok({ type: 'lookup' }, 'acc_synthetic_0001');
+    ok({ type: 'lookup' }, '0e2f4c1a-9b7d-4e3f-8a1b-2c3d4e5f6a7b');
+    ok({ type: 'lookup' }, 'CB0-2026-0001');
+    ok({ type: 'lookup' }, 'SFDC:001xx000003DGb2AAG'); // external key, punctuated
+    ok({ type: 'lookup' }, 'ops/eu-west/tenant-7'); // and pathy
+    ok({ type: 'user' }, 'usr_system');
+  });
+
   it('D3 wave 2: the STORED media form is an opaque sys_file id', () => {
     ok({ type: 'file' }, 'file_01HXYZ');
     ok({ type: 'file' }, '0e2f4c1a-9b7d-4e3f-8a1b-2c3d4e5f6a7b');

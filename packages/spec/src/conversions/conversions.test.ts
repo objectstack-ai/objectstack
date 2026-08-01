@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { FlowSchema } from '../automation/flow.zod.js';
+import { ScriptConfigSchema } from '../automation/schemaless-node-config.zod.js';
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
 import { applyConversions, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
@@ -286,6 +287,114 @@ describe('conversion layer (ADR-0087 D2)', () => {
         const flow = (wecFlow({ eventType: 'timer', timerDuration: 'PT1M', ...bad }).flows as any[])[0];
         expect(() => FlowSchema.parse(flow), `${Object.keys(bad)[0]} must be rejected`).toThrow(/4158/);
       }
+    });
+  });
+
+  describe('flow-node-script-branch-keys-removed (#4343)', () => {
+    /** One `script` node in a flow shaped the way the conversion walks it. */
+    const scriptFlow = (config: Record<string, unknown>) => ({
+      flows: [
+        {
+          name: 'task_lifecycle',
+          label: 'Task lifecycle',
+          type: 'autolaunched',
+          edges: [],
+          nodes: [
+            { id: 'n1', type: 'start', label: 'Start' },
+            { id: 's', type: 'script', label: 'Script', config },
+          ],
+        },
+      ],
+    });
+    const cfgOf = (stack: Record<string, unknown>) => (stack.flows as any[])[0].nodes[1].config;
+    // Retired from the load path (the keys misdescribed themselves), so the
+    // default `applyConversions` skips it — only `os migrate meta` replays it.
+    const convert = (stack: Record<string, unknown>) => collectConversionNotices(stack, { includeRetired: true });
+
+    it('moves a shorthand `actionType` into `function` — that is what it named', () => {
+      const { stack, notices } = convert(scriptFlow({ actionType: 'score_lead', outputVariable: 'score' }));
+      expect(cfgOf(stack)).toEqual({ function: 'score_lead', outputVariable: 'score' });
+      expect(notices).toHaveLength(1);
+      expect(notices[0]!.to).toBe('config.function');
+    });
+
+    it('drops a shorthand `actionType` instead of moving it when `function` already won', () => {
+      const { stack, notices } = convert(scriptFlow({ actionType: 'stale_name', function: 'score_lead' }));
+      expect(cfgOf(stack)).toEqual({ function: 'score_lead' });
+      expect(notices).toHaveLength(1);
+    });
+
+    it('drops the built-in ids and the bare marker — neither was ever a function name', () => {
+      for (const actionType of ['email', 'slack', 'invoke_function']) {
+        const { stack, notices } = convert(scriptFlow({ actionType, function: 'score_lead' }));
+        expect(cfgOf(stack), actionType).toEqual({ function: 'score_lead' });
+        expect(notices, actionType).toHaveLength(1);
+        expect(notices[0]!.to, actionType).toMatch(/removed/);
+      }
+    });
+
+    it('drops the stub payload keys — nothing ever read them, so there is nothing to preserve', () => {
+      const { stack, notices } = convert(scriptFlow({
+        actionType: 'email',
+        template: 'task_done',
+        recipients: ['{record.owner}'],
+        variables: { taskName: '{record.name}' },
+      }));
+      expect(cfgOf(stack)).toEqual({});
+      expect(notices).toHaveLength(4);
+    });
+
+    it('drops an inline `script` body the runtime never executed', () => {
+      const { stack, notices } = convert(scriptFlow({ script: 'return { ok: true };' }));
+      expect(cfgOf(stack)).toEqual({});
+      expect(notices).toHaveLength(1);
+    });
+
+    it('leaves an already-converged node untouched', () => {
+      const { stack, notices } = convert(scriptFlow({ function: 'score_lead', inputs: { id: '{record.id}' } }));
+      expect(cfgOf(stack)).toEqual({ function: 'score_lead', inputs: { id: '{record.id}' } });
+      expect(notices).toHaveLength(0);
+    });
+
+    it('leaves a non-script node carrying the same key names alone', () => {
+      // Unlike the wait retirement, these tombstones live on the script config
+      // contract — no other node type is parsed against it, so a `template` key
+      // elsewhere is that node's own business.
+      const stack0 = {
+        flows: [{
+          name: 'f',
+          nodes: [{ id: 'n', type: 'notify', config: { template: 'x', recipients: ['a'] } }],
+        }],
+      };
+      const { stack, notices } = convert(stack0);
+      expect(stack).toEqual(stack0);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('tombstones every retired key so a source that skipped conversion is rejected, not stripped', () => {
+      // NOTE the channel: unlike `waitEventConfig`, a node's `config` is
+      // `z.record(z.unknown())` on `FlowNodeSchema`, so `FlowSchema.parse` does
+      // NOT reach these tombstones — they answer whoever AUTHORS the key (`tsc`
+      // types it `never`; this parse raises the prescription). A stored flow is
+      // reached by the other half: `registerFlow` replays this conversion even
+      // though it is retired (#3903), and the execute-time parse then refuses
+      // what is left over for naming no callable.
+      for (const bad of [
+        { actionType: 'email' },
+        { template: 't' },
+        { recipients: ['a'] },
+        { variables: { x: 1 } },
+        { script: 'return 1;' },
+      ]) {
+        const key = Object.keys(bad)[0]!;
+        expect(
+          () => ScriptConfigSchema.parse({ function: 'score_lead', ...bad }),
+          `${key} must be rejected`,
+        ).toThrow(/4343/);
+      }
+      // The flow-level parse is deliberately blind here — pinned so the note
+      // above stays true if `FlowNodeSchema.config` is ever tightened.
+      expect(() => FlowSchema.parse((scriptFlow({ actionType: 'email' }).flows as any[])[0])).not.toThrow();
     });
   });
 

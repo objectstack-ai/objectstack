@@ -79,6 +79,43 @@ import type {
 const TYPE_TO_FORM: Readonly<Record<string, FormView>> = METADATA_FORM_REGISTRY;
 
 /**
+ * The ONE canonical spelling of a metadata type at the `/meta` read/write/delete
+ * boundary (#4432).
+ *
+ * Prime Directive #3 already fixes the answer — metadata type names are
+ * SINGULAR (`'action'`, `'view'`), REST paths are plural (`/meta/actions`) — and
+ * #3985 taught the per-type gates to accept both spellings. What it did not do
+ * is fold them, so the two spellings addressed two different namespaces and the
+ * layers below disagreed about which one an item lived in:
+ *
+ *  - the `SysMetadataRepository` write/delete path already folded to singular,
+ *    while the authorization tier above it (`isOverlayAllowed`,
+ *    `isArtifactBacked`) and the registry heal below it
+ *    (`restoreArtifactRegistryView`) read the caller's spelling;
+ *  - `getMetaItems` registered overlay rows back into the SchemaRegistry under
+ *    the caller's spelling. One plural-spelled read minted a plural registry
+ *    entry, `listItems('actions')` stopped being empty, and the singular
+ *    fallback that had been supplying the code-authored items never ran again —
+ *    so one overlay row shadowed an entire code-authored listing, and survived
+ *    the DELETE that was supposed to lift it.
+ *
+ * Folding at the boundary (rather than adding another spelling-tolerant lookup
+ * one layer down) is Prime Directive #12 applied to a type key: one contract,
+ * not N dialects. Reads of data AT REST still try the other spelling as a
+ * fallback — rows written under a plural `type` before this fix are real, and
+ * nothing rewrites them on upgrade.
+ */
+function canonicalMetaType(type: string): string {
+    return PLURAL_TO_SINGULAR[type] ?? type;
+}
+
+/** {@link canonicalMetaType} applied to a `{ type }` request, without mutating the caller's object. */
+function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T {
+    const type = canonicalMetaType(request.type);
+    return type === request.type ? request : { ...request, type };
+}
+
+/**
  * [#3770] One-shot flag for the "engine has no schema registry" warning emitted
  * by {@link ObjectStackProtocolImplementation.assertObjectRegistered}. The
  * condition is a property of how the host constructed the engine, so it is
@@ -2521,6 +2558,15 @@ export class ObjectStackProtocolImplementation implements
     }
 
     async getMetaItems(request: { type: string; packageId?: string; organizationId?: string; previewDrafts?: boolean }) {
+        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This one
+        // is load-bearing twice over: the SchemaRegistry indexes code-authored
+        // items under the SINGULAR type, and the overlay-hydration branch below
+        // registers overlay rows back into it under `request.type`. Called with
+        // the plural spelling, that branch minted a PLURAL registry entry — and
+        // once `listItems('actions')` was non-empty, the singular fallback that
+        // had been supplying the 11 code-authored actions stopped running. One
+        // overlay row shadowed the entire code-authored listing.
+        request = canonicalizeMetaRequestType(request);
         const { packageId } = request;
         let items: unknown[] = [];
 
@@ -2820,6 +2866,8 @@ export class ObjectStackProtocolImplementation implements
     }
 
     async getMetaItem(request: { type: string, name: string, packageId?: string, organizationId?: string, state?: 'active' | 'draft', previewDrafts?: boolean }) {
+        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
+        request = canonicalizeMetaRequestType(request);
         let item: unknown;
         const orgId = request.organizationId;
         // Studio's editor opens a draft buffer with `state: 'draft'`;
@@ -3137,6 +3185,10 @@ export class ObjectStackProtocolImplementation implements
     }> {
         const orgId = request.organizationId;
 
+        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The
+        // three-layer diagnostic must answer for ONE namespace, or `code` and
+        // `overlay` can be read from two.
+        request = canonicalizeMetaRequestType(request);
         // ── code layer: MetadataService.get + registry, BYPASSING overlay ──
         let code: unknown | null = null;
         try {
@@ -5146,6 +5198,10 @@ export class ObjectStackProtocolImplementation implements
     // ==========================================
 
     async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse> {
+        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The ETag
+        // and the cache entry are keyed by type, so two spellings would cache
+        // the same item twice and invalidate only one of them.
+        request = canonicalizeMetaRequestType(request);
         try {
             // Delegate to getMetaItem so the customization-overlay read order
             // (sys_metadata → registry → MetadataService) is honoured here too
@@ -6067,6 +6123,8 @@ export class ObjectStackProtocolImplementation implements
         if (!request.item) {
             throw new Error('Item data is required');
         }
+        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
+        request = canonicalizeMetaRequestType(request);
         // What the history row, the audit row and the watch event record as the
         // origin of this write. Defaults to this method — the ordinary Studio /
         // REST / SDK save. The only caller that overrides it is
@@ -8483,6 +8541,12 @@ export class ObjectStackProtocolImplementation implements
         /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
         projectionApplied?: MutationProjectionOutcome;
     }> {
+        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. Without it
+        // the authorization tier (`isOverlayAllowed` / `isArtifactBacked`) and
+        // the registry heal (`restoreArtifactRegistryView`) read the caller's
+        // spelling while the repository deletes under the singular — so a
+        // DELETE could remove the row and leave the shadow it was meant to lift.
+        request = canonicalizeMetaRequestType(request);
         // Two-tier authorization for delete (mirrors saveMetaItem).
         //  • Artifact-backed item → delete becomes a tombstone overlay,
         //    requires `allowOrgOverride`.

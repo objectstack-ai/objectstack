@@ -128,7 +128,10 @@ describe('subflow node executor', () => {
     engine.registerFlow('parent_flow', parentFlow({ input: {} }));
     const result = await engine.execute('parent_flow');
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/flowName is required/i);
+    // #4343 — the hand-written guard became the contract parse; same guard
+    // classification, message now derived from `SubflowConfigSchema`.
+    expect(result.error).toMatch(/does not satisfy the subflow contract/i);
+    expect(result.error).toMatch(/config\.flowName/);
   });
 
   it('fails with a clear error when the child flow is not registered', async () => {

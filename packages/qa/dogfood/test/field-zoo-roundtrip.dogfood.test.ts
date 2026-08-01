@@ -21,20 +21,46 @@ import showcaseStack from '@objectstack/example-showcase';
 import { SECRET_MASK } from '@objectstack/objectql';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 
-import { MATRIX } from './field-zoo.matrix';
+import { MATRIX, REFERENCE_TARGETS } from './field-zoo.matrix';
 describe('dogfood: field-type capability matrix round-trips over HTTP (#2004)', () => {
   let stack: VerifyStack;
   let record: Record<string, unknown>;
+  /** Resolved reference ids, keyed by field — the assertions compare to these. */
+  const referenceIds: Record<string, string> = {};
 
   beforeAll(async () => {
     stack = await bootStack(showcaseStack);
     const token = await stack.signIn();
 
+    // [#4441] Create a REAL row in each reference target first.
+    //
+    // The three relational entries used to write synthetic ids
+    // (`acc_synthetic_0001`, …) under a comment reading "FK enforcement is off
+    // in this harness". That comment described a HOLE, and #4441 closed it: a
+    // lookup / master_detail / tree pointing at a row that does not exist is
+    // now refused, so the fixture was relying on the very defect the platform
+    // now prevents. What this file actually proves — an id string round-trips
+    // as the same id string — is unchanged by using a real id, and the matrix
+    // stops depending on a bug.
+    for (const target of REFERENCE_TARGETS) {
+      const res = await stack.apiAs(token, 'POST', `/data/${target.object}`, target.body(referenceIds));
+      expect(
+        res.status,
+        `could not seed ${target.object} for ${target.field}: ${res.status} ${await res.clone().text()}`,
+      ).toBeLessThan(300);
+      const json = (await res.json()) as { id?: string; record?: { id?: string } };
+      const id = json.id ?? json.record?.id;
+      expect(id, `no id returned seeding ${target.object}`).toBeTruthy();
+      referenceIds[target.field] = id as string;
+    }
+
     // Build the create body from every entry that carries a `write` value
     // (+ required name). `present`/`computed` server-owned fields are skipped.
+    // A reference placeholder resolves to the id seeded above.
     const body: Record<string, unknown> = { name: 'zoo-roundtrip' };
     for (const c of MATRIX) {
-      if ('write' in c.check && c.check.write !== undefined) body[c.field] = c.check.write;
+      if (!('write' in c.check) || c.check.write === undefined) continue;
+      body[c.field] = c.field in referenceIds ? referenceIds[c.field] : c.check.write;
     }
 
     const created = await stack.apiAs(token, 'POST', '/data/showcase_field_zoo', body);
@@ -62,7 +88,9 @@ describe('dogfood: field-type capability matrix round-trips over HTTP (#2004)', 
       const actual = record[c.field];
       switch (c.check.kind) {
         case 'equal':
-          expect(actual).toEqual(c.check.write);
+          expect(actual).toEqual(
+            c.field in referenceIds ? referenceIds[c.field] : c.check.write,
+          );
           break;
         case 'setEqual': {
           // Array-typed fields: persisted as a JSON array; order is not
