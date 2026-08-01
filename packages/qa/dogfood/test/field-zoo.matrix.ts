@@ -18,6 +18,57 @@ export type Check =
   | { kind: 'masked'; write: unknown } // secret: POSTed plaintext must read back as SECRET_MASK
   | { kind: 'computed'; expected: unknown }; // derived, asserted not written
 
+/**
+ * Stand-in for a reference id the suite only knows at runtime.
+ *
+ * The three relational entries below name a target object but cannot name a
+ * ROW: nothing exists until the suite creates one. The HTTP suite creates a row
+ * in each target and substitutes its real id (`REFERENCE_TARGETS`), so nothing
+ * in this table needs to be a real id — but the placeholder must never reach a
+ * write, which is why substitution is keyed on identity rather than on a magic
+ * string a future edit could typo.
+ */
+export const REFERENCE_PLACEHOLDER = Symbol('reference-id-resolved-at-runtime');
+
+/**
+ * Reference field → the object whose row supplies its id, and the minimal body
+ * that creates one. Consumed by the HTTP round-trip suite; the value-shape
+ * contract test ignores these entries (it never writes).
+ *
+ * ORDERED, and `body` is a factory, because the targets reference each other:
+ * `showcase_project` declares a REQUIRED lookup to `showcase_account`, so the
+ * account has to exist first and the project has to be given its real id. That
+ * dependency is itself a small proof of #4441 — seeding these in the wrong
+ * order now fails loudly instead of writing a project that points at nothing.
+ */
+export const REFERENCE_TARGETS: ReadonlyArray<{
+  field: string;
+  object: string;
+  body: (seeded: Readonly<Record<string, string>>) => Record<string, unknown>;
+}> = [
+  {
+    field: 'f_lookup',
+    object: 'showcase_account',
+    body: () => ({ name: 'zoo-ref-account', status: 'active' }),
+  },
+  {
+    field: 'f_master_detail',
+    object: 'showcase_project',
+    body: (seeded) => ({
+      name: 'zoo-ref-project',
+      // `planned` is the state machine's declared initial state — anything else
+      // is refused with `invalid_initial_state`.
+      status: 'planned',
+      account: seeded.f_lookup,
+    }),
+  },
+  {
+    field: 'f_tree',
+    object: 'showcase_category',
+    body: () => ({ name: 'zoo-ref-category' }),
+  },
+];
+
 export interface FieldCase {
   field: string;
   type: string;
@@ -88,12 +139,20 @@ export const MATRIX: FieldCase[] = [
   { field: 'f_file', type: 'file', check: { kind: 'equal', write: 'file_zoo_doc' } },
   { field: 'f_avatar', type: 'avatar', check: { kind: 'equal', write: 'file_zoo_avatar' } },
   // relational — store a reference id as a string and read it back verbatim.
-  // FK enforcement is off in this harness, so this asserts value fidelity
-  // (id string → id string), not referential integrity / $expand (covered
-  // elsewhere). The point here is the stored type doesn't drift.
-  { field: 'f_lookup', type: 'lookup', check: { kind: 'equal', write: 'acc_synthetic_0001' } },
-  { field: 'f_master_detail', type: 'master_detail', check: { kind: 'equal', write: 'proj_synthetic_0001' } },
-  { field: 'f_tree', type: 'tree', check: { kind: 'equal', write: 'cat_synthetic_0001' } },
+  // This asserts value fidelity (id string → id string), not `$expand`, which
+  // is covered elsewhere. The point here is that the stored type doesn't drift.
+  //
+  // The `write` values below are PLACEHOLDERS: the suite creates a real row in
+  // each target object and substitutes its id before the create, then asserts
+  // against that same id (see REFERENCE_TARGETS in the spec file). They used to
+  // be synthetic ids (`acc_synthetic_0001`, …) under a comment reading "FK
+  // enforcement is off in this harness" — which described a HOLE that #4441
+  // closed: a lookup pointing at a row that does not exist is now refused.
+  // Round-tripping a REAL id proves the same fidelity and stops the matrix
+  // depending on a defect.
+  { field: 'f_lookup', type: 'lookup', check: { kind: 'equal', write: REFERENCE_PLACEHOLDER } },
+  { field: 'f_master_detail', type: 'master_detail', check: { kind: 'equal', write: REFERENCE_PLACEHOLDER } },
+  { field: 'f_tree', type: 'tree', check: { kind: 'equal', write: REFERENCE_PLACEHOLDER } },
   // security — both credential types mask on read (plaintext never echoes back
   // over HTTP). `secret` is encrypted at rest; `password` on a generic object is
   // plaintext at rest but masked to SECRET_MASK on read (ADR-0100 / #2036 — the
