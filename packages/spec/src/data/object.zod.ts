@@ -12,6 +12,7 @@ import { ObjectListViewSchema } from '../ui/view.zod';
 import { ExpressionInputSchema, TemplateExpressionInputSchema, type Expression, type ExpressionInput } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
@@ -707,9 +708,60 @@ export const RowCrudActionOverrideSchema = z.object({
 export type RowCrudActionOverride = z.infer<typeof RowCrudActionOverrideSchema>;
 export type RowCrudActionOverrideInput = z.input<typeof RowCrudActionOverrideSchema>;
 
+/**
+ * Unknown-key error for {@link ObjectSchemaBase}, built on FIRST USE.
+ *
+ * Deferred because the pieces it needs — `UNKNOWN_KEY_GUIDANCE` and the shape's
+ * own key list — are declared *below* this schema, and `ObjectSchemaBase` is a
+ * plain `z.object` evaluated at module load. An error map only runs at parse
+ * time, so resolving them then sidesteps the temporal dead zone without moving
+ * several hundred lines around. `knownKeys` reads the shape rather than a
+ * transcription, for the reason `strictObject` exists.
+ */
+let objectUnknownKeyErrorImpl: z.core.$ZodErrorMap | undefined;
+const objectUnknownKeyError: z.core.$ZodErrorMap = (issue) =>
+  (objectUnknownKeyErrorImpl ??= strictUnknownKeyError({
+    surface: 'this object',
+    knownKeys: Object.keys(ObjectSchemaBase.shape),
+    // The same semantic renames the WARNING layer already knew
+    // (`OBJECT_KEY_GUIDANCE`). Graduating a surface from warn to reject must
+    // not cost the author a prescription: `capabilities` → `enable` is a
+    // different word for the same intent, so edit distance cannot reach it and
+    // only an explicit entry can.
+    aliases: { capabilities: 'enable', features: 'enable' },
+    guidance: UNKNOWN_KEY_GUIDANCE,
+    history:
+      'Until #4001 closed this shape these were dropped silently on the PARSE path — '
+      + '`ObjectSchema.create()` has rejected them since #1535, but `defineStack({ objects })`, '
+      + '`/api/v1/meta/types/object` and the Studio form all go through `parse()`, which did not.',
+  }))(issue);
+
+/*
+ * ── Unknown-key strictness (#4001 registered-types line) ────────────────────
+ *
+ * `.strict()` HERE, not only in `create()`. #1535 built the unknown-key guard
+ * as a hand-rolled check inside the `create()` factory, on the reasoning that
+ * "authored `*.object.ts` modules call `create()`". They do — but they are not
+ * the only producer, and they are not the path most instances travel:
+ * `defineStack({ objects })`, `/api/v1/meta/types/object` and the Studio form
+ * all reach this schema through `parse()` / `safeParse()`, which stripped
+ * unknown keys in silence for the whole time #1535 was considered fixed. The
+ * founding example of #4001 — object-level `workflows: [...]` believed to wire
+ * up automation, silently discarded — was still reproducible on `parse()`.
+ *
+ * `create()` is unaffected: its own check runs BEFORE parsing and throws a
+ * richer located Error, so its message still wins where it applies.
+ *
+ * Safe on the read path for the same reason the other closed registered types
+ * are: the ADR-0010 envelope is declared below, and `stripReadDecorations`
+ * removes `_diagnostics` / `_draft` before any strict re-parse (cloud#971).
+ * Verified empirically rather than assumed — every `ObjectSchema.create()` call
+ * across `platform-objects` and the three example apps uses only declared
+ * top-level keys.
+ */
 const ObjectSchemaBase = z.object({
-  /** 
-   * Identity & Metadata 
+  /**
+   * Identity & Metadata
    */
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Machine unique key (snake_case). Immutable.'),
   label: z.string().optional().describe('Human readable singular label (e.g. "Account")'),
@@ -1215,7 +1267,7 @@ const ObjectSchemaBase = z.object({
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
-});
+}, { error: objectUnknownKeyError }).strict();
 
 /**
  * Converts a snake_case name to a human-readable Title Case label.
@@ -1265,6 +1317,13 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
   // names what replaced the key and the version/decision that removed it.
   // Tombstones age out too: drop an entry ~two majors after the removal
   // (by then it's archaeology, not an upgrade; see CHANGELOG.md for history).
+  namespace:
+    '`namespace` was retired in ADR-0006 D4 — the object `name` IS the canonical id ' +
+    'everywhere (API, ObjectQL, REST, SDK, DB table), so there is no separate namespace ' +
+    'to declare. Embed the module prefix in the name instead: `namespace: "sys", ' +
+    'name: "user"` becomes `name: "sys_user"`. Until #4001 closed this shape on the ' +
+    'parse path it was stripped in silence, so an object declaring one shipped under ' +
+    'the unprefixed name its author did not intend.',
   compactLayout:
     '`compactLayout` was renamed to `highlightFields` in @objectstack/spec 11.7.0 ' +
     '(ADR-0085 semantic roles) and the alias was retired in 11.9.1 (#2536). ' +

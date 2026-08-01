@@ -20,6 +20,7 @@ import {
 } from './metadata-authoring-lint';
 import { STACK_KEY_GUIDANCE, STACK_RUNTIME_MEMBERS } from '../data/authoring-key-lint';
 import { PLURAL_TO_SINGULAR } from '../shared/metadata-collection.zod';
+import { ObjectSchema } from '../data/object.zod';
 import { ObjectStackDefinitionSchema } from '../stack.zod';
 import { getMetadataTypeSchema } from './metadata-type-schemas';
 
@@ -36,12 +37,15 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // from "lint warns" to "parse rejects", which is the campaign succeeding, not
     // coverage rotting. Lower it only after confirming the shrink against the
     // list below; that confirmation is the whole point of pinning a number here.
-    // 15 → 13 when `seed` + `doc` graduated (#4001 registered-types batch).
-    expect(lintables.length).toBeGreaterThanOrEqual(13);
+    // 15 → 13 when `seed` + `doc` graduated (#4001 registered-types batch);
+    // 13 → 12 when `object` closed on the parse path. Note what did NOT shrink
+    // with it: `object`'s 71 NESTED strip sites still report, because the walk
+    // no longer gates a whole collection on its root's posture.
+    expect(lintables.length).toBeGreaterThanOrEqual(12);
     // `view` matters doubly: it is a UNION (container | ViewItem | overlay), so
     // its presence pins the union half of the posture logic — a regression that
     // silently dropped unions would shrink coverage without failing the count.
-    for (const expected of ['object', 'page', 'agent', 'dashboard', 'action', 'report', 'view']) {
+    for (const expected of ['page', 'agent', 'dashboard', 'action', 'report', 'view']) {
       expect(lintableTypes, `expected '${expected}' to be lint-covered`).toContain(expected);
     }
   });
@@ -61,6 +65,10 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // helper-built `.strict()` exactly like a hand-wired one.
     for (const strict of [
       'flow', 'permission', 'position', 'tool', 'app', 'hook', 'datasource', 'seed', 'doc',
+      // `object` graduated by closing its PARSE path — #1535 had only ever
+      // guarded `create()`. Its nested strip sites still report; only the root
+      // moved from warn to reject.
+      'object',
     ]) {
       expect(lintableTypes, `'${strict}' is .strict(); the lint must not double-report`).not.toContain(strict);
     }
@@ -117,13 +125,21 @@ describe('the #4148 behaviours survive the generalization', () => {
     expect(finding.suggestion).toBeUndefined();
   });
 
-  it('reports the renamed object key with its rename', () => {
-    const [finding] = lintUnknownAuthoringKeys(stackWith({ capabilities: { trackHistory: true } }, {}));
-    expect(finding).toMatchObject({
-      path: 'objects.crm_case.capabilities',
-      surface: 'object',
-      suggestion: 'enable',
+  it('no longer WARNS on a renamed object key — the parse rejects it now', () => {
+    // `object` closed on the parse path (#4001), so a top-level unknown key is a
+    // hard error rather than a warning, and warning too would double-report.
+    // The rename itself did not get quieter, it got louder: the same suggestion
+    // now arrives as a rejection.
+    expect(lintUnknownAuthoringKeys(stackWith({ capabilities: { trackHistory: true } }, {})))
+      .toEqual([]);
+
+    const parsed = ObjectSchema.safeParse({
+      name: 'crm_case', label: 'Case', fields: {}, capabilities: { trackHistory: true },
     });
+    expect(parsed.success).toBe(false);
+    const message = parsed.success ? '' : parsed.error.issues[0].message;
+    expect(message).toContain('`capabilities`');
+    expect(message).toContain('`enable`');
   });
 
   it('reports across collections in one walk, with per-type surfaces', () => {

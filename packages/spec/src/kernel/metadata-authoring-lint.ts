@@ -330,7 +330,16 @@ export function lintUnknownAuthoringKeys(rawStack: unknown): UnknownAuthoringKey
     const schema = getMetadataTypeSchema(type);
     if (!schema) continue;
     const posture = keyPosture(schema);
-    if (!posture || posture.mode !== 'strip' || posture.keys.size === 0) continue;
+    // NOT gated on the ROOT being `strip`. A strict root reports nothing at its
+    // own level — the parse rejects unknown keys there, so warning as well
+    // would double-report — but the shapes BELOW it are a separate question,
+    // and most are still strip. Gating the whole collection on the root's
+    // posture meant that closing a root silently switched off the warnings for
+    // everything under it: when `object` went strict on the parse path, its 71
+    // nested strip-mode sites stopped reporting in the same change, with
+    // nothing anywhere to say so. Posture is a per-node property; this loop
+    // now treats it as one.
+    if (!posture || posture.keys.size === 0) continue;
 
     const guidance = GUIDANCE_BY_SURFACE[type] ?? EMPTY_GUIDANCE;
     for (let i = 0; i < items.length; i++) {
@@ -338,7 +347,9 @@ export function lintUnknownAuthoringKeys(rawStack: unknown): UnknownAuthoringKey
       if (!isPlainRecord(item)) continue;
       const name = typeof item.name === 'string' && item.name ? item.name : String(i);
       const basePath = `${collection}.${name}`;
-      lintAuthoredRecordKeys(item, posture.keys, guidance, type, basePath, out);
+      if (posture.mode === 'strip') {
+        lintAuthoredRecordKeys(item, posture.keys, guidance, type, basePath, out);
+      }
       descend(schema, item, basePath, '', type, guidance, out, 0);
     }
   }

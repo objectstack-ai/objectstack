@@ -997,16 +997,20 @@ describe('ObjectSchema name-as-identity', () => {
     }
   });
 
-  it('strips legacy `namespace` keys from input (deprecated, dropped in D4)', () => {
+  it('REJECTS legacy `namespace` with the prefix-embedding fix (ADR-0006 D4)', () => {
+    // Until #4001 closed this shape on the parse path, this key was stripped in
+    // silence — so an object written as `{ namespace: 'sys', name: 'user' }`
+    // shipped as plain `user`, under a name its author never intended. The test
+    // that stood here asserted that strip as correct behaviour.
     const result = ObjectSchema.safeParse({
       namespace: 'sys',
       name: 'user',
       fields: {},
     } as Record<string, unknown>);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect((result.data as Record<string, unknown>).namespace).toBeUndefined();
-    }
+    expect(result.success).toBe(false);
+    const message = result.success ? '' : result.error.issues[0].message;
+    expect(message).toContain('`namespace`');
+    expect(message).toContain('name: "sys_user"');
   });
 
   it('accepts prefix-embedded names without any tableName field', () => {
@@ -1087,13 +1091,15 @@ describe('ObjectSchema semantic roles (ADR-0085)', () => {
     // The transition mirror is gone: output carries the canonical key only.
     expect((direct as Record<string, unknown>).compactLayout).toBeUndefined();
 
-    // Lenient parse: the retired key is STRIPPED, not aliased — an old-key
-    // author gets no highlightFields rather than silently working.
-    const legacy = ObjectSchema.parse({
+    // The parse path REJECTS the retired key and carries the rename (#4001).
+    // It used to strip it, so an old-key author got no highlightFields and no
+    // diagnostic — the outcome this test previously pinned as correct.
+    const legacy = ObjectSchema.safeParse({
       name: 'account', fields: {}, compactLayout: ['name', 'industry'],
     });
-    expect(legacy.highlightFields).toBeUndefined();
-    expect((legacy as Record<string, unknown>).compactLayout).toBeUndefined();
+    expect(legacy.success).toBe(false);
+    expect(legacy.success ? '' : legacy.error.issues[0].message)
+      .toContain('`compactLayout` was renamed to `highlightFields`');
 
     // Authoring path: create() REJECTS the retired key like any unknown key.
     expect(() =>
@@ -1117,14 +1123,13 @@ describe('ObjectSchema semantic roles (ADR-0085)', () => {
     ).toThrow(/detail/);
   });
 
-  it('strips the removed detail block on safeParse (no key on output)', () => {
+  it('REJECTS the removed detail block, carrying the ADR-0085 re-home map', () => {
     const result = ObjectSchema.safeParse({
       name: 'product', fields: {}, detail: { renderViaSchema: false },
     });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect((result.data as Record<string, unknown>).detail).toBeUndefined();
-    }
+    expect(result.success).toBe(false);
+    expect(result.success ? '' : result.error.issues[0].message)
+      .toContain('`detail` UI-hints block was removed by ADR-0085');
   });
 });
 
