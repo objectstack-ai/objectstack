@@ -228,14 +228,16 @@ describe('decision branch routing (#4414)', () => {
         expect(visited).toEqual(['proceed']);
     });
 
-    it('fails loudly on a brace-in-CEL decision predicate rather than deciding `false`', async () => {
-        engine.registerFlow('guard', guardFlow({
+    it('refuses a brace-in-CEL decision predicate rather than deciding `false`', () => {
+        // #4414 made this loud (it used to string-compare and decide `false`
+        // forever); #4439 put the slot on the expression ledger, so the refusal
+        // now lands at REGISTRATION and never reaches a run. See the
+        // registration block at the bottom of this file for the located
+        // diagnostic.
+        expect(() => engine.registerFlow('guard', guardFlow({
             proceedIsDefault: true,
             conditions: [{ label: 'Yes', expression: "{lead.status} == 'converted'" }],
-        }));
-        const result = await run({ status: 'converted' });
-        expect(result.success).toBe(false);
-        expect(String(result.error)).toMatch(/template braces|bare CEL/);
+        }))).toThrow(/template braces|bare CEL/);
     });
 
     it("lets the `default` sentinel claim the `isDefault` edge when no condition matched", async () => {
@@ -247,6 +249,121 @@ describe('decision branch routing (#4414)', () => {
         // No declared condition matched → branch 'default' → the BPMN default
         // edge claims it, without the author also labelling that edge 'default'.
         expect(visited).toEqual(['proceed']);
+        expect(warnings).toHaveLength(0);
+    });
+});
+
+/**
+ * #4439 — the decision's branch predicate is now on the expression ledger, so
+ * a brace-in-CEL predicate is a REGISTRATION error rather than a run-time one.
+ *
+ * #4414 made the failure loud; this makes it early. Before both, the raw string
+ * went to the legacy `{var}` template path, `{lead.status}` never resolved, and
+ * the branch was decided by string comparison — silently, forever.
+ */
+describe('decision branch predicate is validated at registration (#4439)', () => {
+    let engine: AutomationEngine;
+
+    beforeEach(() => {
+        engine = new AutomationEngine(createTestLogger());
+        registerLogicNodes(engine, createCtx());
+    });
+
+    const flowWith = (expression: string) => ({
+        name: 'guard',
+        label: 'Guard',
+        type: 'autolaunched' as const,
+        nodes: [
+            { id: 'start', type: 'start' as const, label: 'Start' },
+            { id: 'check', type: 'decision' as const, label: 'Check', config: { conditions: [{ label: 'Yes', expression }] } },
+            { id: 'end', type: 'end' as const, label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'check' },
+            { id: 'e2', source: 'check', target: 'end', label: 'Yes' },
+        ],
+    });
+
+    it('rejects a brace-in-CEL branch predicate, naming the slot', () => {
+        const register = () => engine.registerFlow('guard', flowWith("{lead.status} == 'converted'"));
+        expect(register).toThrow(/\{lead\.status\} == 'converted'/);
+        expect(register).toThrow(/template braces|bare CEL/);
+        // The diagnostic must locate it — a flow may carry several branches.
+        expect(register).toThrow(/conditions\[0\]\.expression/);
+    });
+
+    it('accepts the bare-CEL spelling', () => {
+        expect(() => engine.registerFlow('guard', flowWith("lead.status == 'converted'"))).not.toThrow();
+    });
+});
+
+/**
+ * The shape objectui's flow designer actually emits, pinned.
+ *
+ * `FlowEdgeInspector.applyBranch()` copies a decision branch onto the edge it
+ * wires: a guarded branch becomes `{ condition, label }`, and the `true`/empty
+ * branch becomes `{ isDefault: true, label }`. So Studio has been writing
+ * `isDefault` since long before anything read it (#4414) — every Studio
+ * "default/else" edge ran unconditionally, in parallel with whichever branch
+ * matched. These flows are the ones enforcement changes, and they must now take
+ * exactly one path.
+ *
+ * It is also the double declaration the authoring guide tells hand-writers to
+ * avoid — node `conditions[]` AND per-edge `condition`s. It is correct here
+ * only because the designer keeps the two in sync by construction, which is
+ * exactly why it is worth pinning rather than assuming.
+ */
+describe('objectui-authored decision shape (FlowEdgeInspector.applyBranch)', () => {
+    let engine: AutomationEngine;
+    let visited: string[];
+
+    beforeEach(() => {
+        warnings.length = 0;
+        visited = [];
+        engine = new AutomationEngine(createTestLogger());
+        registerLogicNodes(engine, createCtx());
+        engine.registerNodeExecutor({
+            type: 'mark',
+            async execute(node) { visited.push(node.id); return { success: true }; },
+        });
+        engine.registerFlow('studio', {
+            name: 'studio',
+            label: 'Studio-authored',
+            type: 'autolaunched',
+            variables: [{ name: 'order_amount', type: 'number', isInput: true }],
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'check', type: 'decision', label: 'Check Amount',
+                    config: {
+                        conditions: [
+                            { label: 'High Value', expression: 'order_amount > 10000' },
+                            { label: 'Standard', expression: 'true' },
+                        ],
+                    },
+                },
+                { id: 'escalate', type: 'mark', label: 'Escalate' },
+                { id: 'auto', type: 'mark', label: 'Auto approve' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'check' },
+                // The guarded branch: expression + label copied onto the edge.
+                { id: 'e2', source: 'check', target: 'escalate', label: 'High Value', condition: 'order_amount > 10000', isDefault: false },
+                // The `true` branch: written as the BPMN default edge, no condition.
+                { id: 'e3', source: 'check', target: 'auto', label: 'Standard', isDefault: true },
+            ],
+        });
+    });
+
+    it('takes only the guarded branch when it matches', async () => {
+        await engine.execute('studio', { params: { order_amount: 20000 } } as any);
+        expect(visited).toEqual(['escalate']);
+        expect(warnings).toHaveLength(0);
+    });
+
+    it('takes only the default branch when it does not', async () => {
+        await engine.execute('studio', { params: { order_amount: 5000 } } as any);
+        expect(visited).toEqual(['auto']);
         expect(warnings).toHaveLength(0);
     });
 });

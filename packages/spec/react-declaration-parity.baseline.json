@@ -1,0 +1,17 @@
+{
+  "_comment": "Accepted spec↔registry DECLARATION-PARITY baseline (react blocks). Per block: the registry-only input set (the registry config declares it, the spec does not) and whether the block is missing. Regenerate with: MANIFEST=… check:react-declaration-parity --baseline <this> --update. The ratchet flags only NEW registry-only inputs or newly-missing blocks. It compares two declarations and inspects no renderer, so a prop both sides declare and nothing reads records as agreement here (#4413/#4472).",
+  "blocks": {
+    "ObjectForm": {
+      "registryOnly": [],
+      "missing": false
+    },
+    "ListView": {
+      "registryOnly": [],
+      "missing": false
+    },
+    "ObjectChart": {
+      "registryOnly": [],
+      "missing": false
+    }
+  }
+}

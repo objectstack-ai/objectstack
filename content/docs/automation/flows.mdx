@@ -31,7 +31,8 @@ const approvalFlow = {
       type: 'decision',
       label: 'Check Amount',
       config: {
-        // decision expressions are bare CEL, like every other condition — no braces
+        // decision expressions are bare CEL, like every other condition — no
+        // braces; see Expressions in flows
         conditions: [
           { label: 'High Value', expression: 'order_amount > 10000' },
           { label: 'Standard', expression: 'order_amount <= 10000' },
@@ -168,6 +169,7 @@ or missing-`required` violation (#4277). A node type that publishes no
   type: 'decision',
   label: 'Check Status',
   config: {
+    // Bare CEL — the labels must match this node's out-edge labels exactly.
     conditions: [
       { label: 'Approved', expression: "status == 'approved'" },
       { label: 'Rejected', expression: "status == 'rejected'" },
@@ -782,9 +784,16 @@ sibling), `flow-default-edge-with-condition` and `flow-multiple-default-edges`.
 
 <Callout type="warn">
 A decision node that declares **no** `conditions` reports no branch at all — it
-is a plain gateway and its out-edges do the routing. Do not declare both:
-`config.conditions` *and* per-edge `condition`s on the same node means the node
-picks a branch, and then that branch's edge re-decides.
+is a plain gateway and its out-edges do the routing.
+
+Declaring **both** — `config.conditions` *and* per-edge `condition`s — is
+redundant but not wrong: the node picks a branch, and then that branch's edge
+re-decides with the same predicate. The Studio flow designer emits exactly this
+(it copies each branch's expression and label onto the edge it wires), and it
+routes correctly because the two are kept in sync by construction. Hand-written
+metadata has no such guarantee, which is the whole of #4414: when the two
+disagree, the node's branch wins the narrowing and the edge's predicate decides
+what actually runs. If you are writing the flow by hand, pick one.
 </Callout>
 
 ### Fault edges — handling a failed node
@@ -979,7 +988,7 @@ condition is CEL; braces are for values.**
 |:---|:---|:---|:---|
 | Start-node `condition` | **CEL** (bare, no braces) | `record.amount > 500` | `record.*`, `previous.*`, bare field names, `vars.*` |
 | Edge `condition` | **CEL** (bare, no braces) | `record.status == 'open'` | same as above |
-| Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | same as above |
+| Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, and `vars.*` |
 | Field values in `create_record` / `update_record` | **Interpolation** (braces required) | `'Follow up on {record.name}'`, `'{TODAY() + 7}'` | `{var}`, `{var.path}`, `{$User.Id}`, `{$User.Email}`, `{NOW()}`, `{TODAY()}`, `{TODAY() + 90}` (whole days) |
 
 <Callout type="warn">
@@ -1001,11 +1010,19 @@ a field access on an object variable is not one. Both reported `success`. They
 are bare CEL now, so the spellings in the table above are the correct ones and
 `lead_record.status == 'converted'` resolves the field.
 
-The `{var}` form still works where it always did — `{amount} > 100`,
-`{status} == 'active'` — but the two ways it used to answer `false` without
-saying so are now **loud errors** naming the reference: a `{…}` hole that
-matches no flow variable, and a substituted value that is neither a boolean, a
-number, nor part of a comparison (#4336).
+The `{var}` form still works where a condition is a plain authored string — a
+start node's `config.condition`: `{amount} > 100`, `{status} == 'active'`. The
+two ways it used to answer `false` without saying so are now **loud errors**
+naming the reference: a `{…}` hole that matches no flow variable, and a
+substituted value that is neither a boolean, a number, nor part of a comparison
+(#4336).
+
+**A decision's `conditions[].expression` is the exception — it is always CEL.**
+The slot is declared bare CEL and is on the expression ledger as a predicate
+(#4439), so a braced spelling there is not the `{var}` dialect but a build
+failure: `os build` and `registerFlow` reject it, naming
+`config.conditions[N].expression`. That is deliberate — the alternative is a
+build that refuses what run time would happily execute.
 </Callout>
 
 CEL conditions that fail to evaluate raise an error and stop the run — they

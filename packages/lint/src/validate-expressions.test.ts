@@ -578,6 +578,43 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues).toHaveLength(0);
     });
 
+    /**
+     * #4439 — `decision.conditions[].expression` reaches the ledger through the
+     * SCHEMALESS channel (`decision` publishes no descriptor `configSchema`, so
+     * the marker rides `.meta({ xExpression })` on the Zod contract). Until then
+     * the ratchet could only see descriptor-declared slots, so this predicate —
+     * documented bare CEL, evaluated as bare CEL since #4414 — was checked by
+     * nobody and a `{…}` spelling passed `objectstack validate`.
+     */
+    const decisionFlow = (expression: string) => ({
+      objects,
+      flows: [{
+        name: 'convert_lead',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
+          { id: 'check', type: 'decision', config: { conditions: [{ label: 'Yes', expression }] } },
+        ],
+        edges: [],
+      }],
+    });
+
+    it('flags a `{var}` template dialect in a decision branch expression (#4439)', () => {
+      // The exact predicate app-crm shipped (#4414).
+      const issues = validateStackExpressions(decisionFlow("{lead_record.status} == 'converted'"));
+      const found = issues.filter(i => i.where.includes('conditions[0].expression'));
+      expect(found).toHaveLength(1);
+      expect(found[0].severity).toBe('error');
+      expect(found[0].where).toContain("flow 'convert_lead'");
+      expect(found[0].where).toContain("node 'check'");
+      expect(found[0].where).toContain('decision branch expression');
+      expect(found[0].source).toBe("{lead_record.status} == 'converted'");
+    });
+
+    it('passes the corrected bare-CEL decision predicate (#4439)', () => {
+      const issues = validateStackExpressions(decisionFlow("lead_record.status == 'converted'"));
+      expect(issues.filter(i => i.where.includes('conditions'))).toHaveLength(0);
+    });
+
     it('leaves a correct single-brace loop collection alone', () => {
       // `loop.collection` is the single-brace `{var}` flow-interpolation dialect,
       // where braces are CORRECT. It is recorded in the ledger as `flow-template`

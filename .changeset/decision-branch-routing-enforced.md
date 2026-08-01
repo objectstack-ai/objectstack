@@ -74,6 +74,21 @@ sibling — the actual hole), `flow-default-edge-with-condition` and
 Both of the first two fire on the pre-fix `convert-lead.flow.ts` and are silent
 after it.
 
+## Effect on flows that already exist
+
+Enforcing `isDefault` changes how a **stored** flow behaves, and the flows it
+changes are mostly Studio's own. `objectui`'s flow edge inspector has always
+written `isDefault: true` when you bind an out-edge to a decision's default/else
+branch — into a key with zero readers, so that edge ran unconditionally, in
+parallel with whichever branch actually matched. Those flows now take exactly
+one branch. That is the fix, but it is a behaviour change on existing data
+rather than only on newly authored metadata, so it is worth knowing before
+upgrading: a flow that quietly ran two paths will now run one.
+
+Nothing changes for an edge that never carried the marker — `isDefault` defaults
+to `false`, and an ordinary unconditional out-edge still fans out in parallel
+exactly as before.
+
 ## The example app
 
 `crm_convert_lead_wizard`'s guard is now a plain exclusive gateway: the
