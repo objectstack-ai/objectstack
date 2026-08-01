@@ -731,7 +731,61 @@ Edges connect nodes and define the execution path:
 | `type` | `enum` | optional | `'default'` (success), `'fault'` (error), `'conditional'` (expression-guarded), or `'back'` (declared back-edge, ADR-0044); defaults to `'default'` |
 | `condition` | `string` | optional | Boolean CEL predicate for branching (a bare string is stored as `{ dialect: 'cel', source }`) |
 | `label` | `string` | optional | Label displayed on the connector — cosmetic only. It does **not** select a path except on a branching node (`decision` / `approval`), which picks its out-edge by label. |
-| `isDefault` | `boolean` | optional | BPMN default-flow marker (interop). Accepted by the schema, but **the engine does not read it** — traversal selects by `condition` and by `label`. On a `decision` node, the fallback is the out-edge labelled `default`: when no `conditions[]` entry matches, the node emits `branchLabel: 'default'` |
+| `isDefault` | `boolean` | optional | BPMN default flow — the **"otherwise" branch**. Traversed only when no sibling `condition` on the same source node matched; never part of the unconditional parallel fan-out. Mutually exclusive with `condition`, at most one per node |
+
+### Branching — pick one mechanism per node
+
+A node has exactly two ways to split its path, and mixing them is what makes a
+guard stop guarding (#4414).
+
+**Branch on the edges** (BPMN exclusive gateway — the default choice):
+
+```typescript
+{ id: 'check', type: 'decision', label: 'Already converted?' },   // no config
+// …
+edges: [
+  { id: 'e_yes', source: 'check', target: 'abort',   condition: "lead.status == 'converted'", label: 'Yes' },
+  { id: 'e_no',  source: 'check', target: 'proceed', isDefault: true,                         label: 'No'  },
+]
+```
+
+`e_no` runs **only** when `e_yes`'s condition was false. Drop `isDefault` and
+`e_no` becomes an ordinary unconditional out-edge that runs on **every** pass —
+in parallel with `abort` — so an already-converted lead sees the abort screen
+*and* walks into the wizard behind it. Writing the negation of every sibling
+condition by hand is the only other correct spelling; `isDefault` is the one
+that stays correct when a third branch is added.
+
+**Branch on the node** (Salesforce-style decision outcomes): the node declares
+`config.conditions[]` and traversal restricts itself to the out-edge whose
+`label` matches the first matching entry.
+
+```typescript
+{ id: 'check', type: 'decision', config: { conditions: [
+    { label: 'Yes', expression: "lead.status == 'converted'" },
+] } },
+edges: [
+  { id: 'e_yes', source: 'check', target: 'abort',   label: 'Yes' },
+  { id: 'e_no',  source: 'check', target: 'proceed', isDefault: true },
+]
+```
+
+The labels must match **exactly**. When no declared condition matches, the node
+reports the branch `default`, claimed by an out-edge labelled `'default'` or by
+the `isDefault` edge. A branch label that no out-edge carries cannot route: the
+engine logs a warning and falls back to considering every out-edge. That
+fallback used to be silent, and a decision declaring `'Yes — already converted'`
+against an out-edge labelled `'Yes'` is how #4414 shipped. `os validate` reports
+the shape as `flow-branch-label-unmatched` at build time, along with
+`flow-decision-unconditional-branch` (a guarded decision with an unconditional
+sibling), `flow-default-edge-with-condition` and `flow-multiple-default-edges`.
+
+<Callout type="warn">
+A decision node that declares **no** `conditions` reports no branch at all — it
+is a plain gateway and its out-edges do the routing. Do not declare both:
+`config.conditions` *and* per-edge `condition`s on the same node means the node
+picks a branch, and then that branch's edge re-decides.
+</Callout>
 
 ### Fault edges — handling a failed node
 

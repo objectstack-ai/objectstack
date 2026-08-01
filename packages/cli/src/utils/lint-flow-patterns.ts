@@ -78,6 +78,11 @@ export const FLOW_APPROVAL_REVISE_DISABLED = 'flow-approval-revise-disabled';
  */
 export const FLOW_RUNAS_UNSCOPED = 'flow-runas-unscoped';
 export const FLOW_ERROR_LABEL_NOT_FAULT = 'flow-error-label-not-fault';
+/** #4414 — the four ways a decision's declared branching fails to route. */
+export const FLOW_BRANCH_LABEL_UNMATCHED = 'flow-branch-label-unmatched';
+export const FLOW_DECISION_UNCONDITIONAL_BRANCH = 'flow-decision-unconditional-branch';
+export const FLOW_DEFAULT_EDGE_WITH_CONDITION = 'flow-default-edge-with-condition';
+export const FLOW_MULTIPLE_DEFAULT_EDGES = 'flow-multiple-default-edges';
 
 /** Node types that perform a data operation — the ones `flow.runAs` governs (#1888). */
 const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
@@ -288,6 +293,147 @@ function scanErrorLabelledEdges(
         `must be fixed in the metadata, not handled. (#3863)`,
       rule: FLOW_ERROR_LABEL_NOT_FAULT,
     });
+  }
+}
+
+/**
+ * #4414 — a decision node that DECLARES a branch it cannot route.
+ *
+ * A decision has three declared ways to pick a branch, and until #4414 only one
+ * of them worked. They now compose (`branchLabel` narrows the edge set →
+ * `condition` gates → `isDefault` catches the rest), but composing them still
+ * leaves four authorable shapes where what the author wrote does not route what
+ * they meant. All four are silent at run time — the flow completes green, having
+ * taken the wrong path — so they are caught here, at authoring time:
+ *
+ *  (1) `flow-branch-label-unmatched` — the decision's `conditions[].label` names
+ *      a branch no out-edge carries. Traversal cannot honour a label nothing
+ *      claims, so it falls back to considering EVERY out-edge. This is the
+ *      shipped defect: app-crm's convert-lead guard computed `'No — proceed'`
+ *      against out-edges labelled `'Yes'` / `'No'`, matched nothing, and ran
+ *      both branches.
+ *  (2) `flow-decision-unconditional-branch` — an out-edge of a decision that has
+ *      no `condition`, no `isDefault`, and no label the decision can select. It
+ *      is traversed on EVERY pass, in parallel with whichever branch did match,
+ *      so the guard next to it does not guard.
+ *  (3) `flow-default-edge-with-condition` — `isDefault` means "when nothing else
+ *      matched"; a condition on the same edge contradicts it (BPMN forbids a
+ *      conditional default flow). The condition wins and the marker is inert.
+ *  (4) `flow-multiple-default-edges` — two fallbacks out of one node. Both are
+ *      traversed when nothing matched, which is a parallel fan-out, not the
+ *      exclusive "otherwise" the marker promises.
+ *
+ * Advisory, not build-failing: each shape is a wrong ROUTE, not a guaranteed
+ * runtime failure, and the engine now also warns when it hits (1) live.
+ */
+function scanBranchRouting(
+  flowName: string,
+  nodes: AnyRec[],
+  edges: AnyRec[],
+  findings: FlowLintFinding[],
+): void {
+  const outEdgesBySource = new Map<string, AnyRec[]>();
+  for (const e of edges) {
+    if (e.type === 'fault') continue; // error routing, not branch selection
+    const src = typeof e.source === 'string' ? e.source : '';
+    if (!src) continue;
+    if (!outEdgesBySource.has(src)) outEdgesBySource.set(src, []);
+    outEdgesBySource.get(src)!.push(e);
+  }
+
+  // (3) + (4) apply to every node's out-edges, not just decisions — `isDefault`
+  //     is meaningful wherever conditional siblings exist.
+  for (const [src, outs] of outEdgesBySource) {
+    for (const e of outs) {
+      if (e.isDefault === true && e.condition) {
+        findings.push({
+          where: `flow '${flowName}' · edge '${src}' → '${String(e.target)}'`,
+          message:
+            `edge sets \`isDefault: true\` AND a \`condition\` — contradictory. \`isDefault\` means ` +
+            `"take this edge when NO sibling condition matched"; a condition makes it an ordinary ` +
+            `guarded branch. The condition wins and the default marker routes nothing.`,
+          hint:
+            `Drop one: keep \`condition\` for a guarded branch, or drop it and keep \`isDefault: true\` ` +
+            `for the "otherwise" path. (#4414)`,
+          rule: FLOW_DEFAULT_EDGE_WITH_CONDITION,
+        });
+      }
+    }
+    const defaults = outs.filter((e) => e.isDefault === true && !e.condition);
+    if (defaults.length > 1) {
+      findings.push({
+        where: `flow '${flowName}' · node '${src}'`,
+        message:
+          `${defaults.length} out-edges are marked \`isDefault: true\` (${defaults
+            .map((e) => `'${String(e.target)}'`)
+            .join(', ')}) — a node has at most ONE default path. All of them are traversed together ` +
+          `when no condition matches, which is a parallel fan-out, not an "otherwise".`,
+        hint:
+          `Keep \`isDefault: true\` on the single fallback edge and give the others a \`condition\` ` +
+          `(or leave them unconditional if the fan-out really is intended). (#4414)`,
+        rule: FLOW_MULTIPLE_DEFAULT_EDGES,
+      });
+    }
+  }
+
+  // (1) + (2) are about a DECISION's own declared branching.
+  for (const node of nodes) {
+    if (node.type !== 'decision') continue;
+    const nid = typeof node.id === 'string' ? node.id : '';
+    if (!nid) continue;
+    const outs = outEdgesBySource.get(nid) ?? [];
+    if (outs.length === 0) continue;
+
+    const cfg = (node.config ?? {}) as AnyRec;
+    const declaredLabels = new Set(
+      (Array.isArray(cfg.conditions) ? (cfg.conditions as AnyRec[]) : [])
+        .map((c) => (typeof c?.label === 'string' ? c.label.trim().toLowerCase() : ''))
+        .filter(Boolean),
+    );
+    const edgeLabels = new Set(outs.map(edgeLabelOf).filter(Boolean));
+
+    // (1) a declared branch label nothing claims. `default` is the engine's own
+    //     sentinel for "no declared condition matched" and is additionally
+    //     claimed by the BPMN default edge, so it is never counted as unclaimed.
+    const unclaimed = [...declaredLabels].filter((l) => !edgeLabels.has(l));
+    if (unclaimed.length > 0) {
+      findings.push({
+        where: `flow '${flowName}' · decision '${nid}'`,
+        message:
+          `declares branch label(s) ${unclaimed.map((l) => `'${l}'`).join(', ')} that no out-edge ` +
+          `carries — out-edge labels are [${[...edgeLabels].map((l) => `'${l}'`).join(', ') || 'none'}]. ` +
+          `Traversal cannot honour a label nothing claims, so it falls back to considering EVERY ` +
+          `out-edge and the branch the decision computed is ignored.`,
+        hint:
+          `Make an out-edge's \`label\` match the declared branch exactly, or drop \`config.conditions\` ` +
+          `and branch on the edges instead (\`condition\` per branch + \`isDefault: true\` on the ` +
+          `fallback) — one mechanism per decision, never both. (#4414)`,
+        rule: FLOW_BRANCH_LABEL_UNMATCHED,
+      });
+    }
+
+    // (2) an out-edge nothing can gate: no condition, not the default, and not
+    //     selectable by a label the decision declares.
+    const gated = outs.filter((e) => e.condition || e.isDefault === true);
+    if (gated.length === 0) continue; // no branching declared at all — nothing to undercut
+    const ungated = outs.filter(
+      (e) => !e.condition && e.isDefault !== true && !declaredLabels.has(edgeLabelOf(e)),
+    );
+    if (ungated.length > 0) {
+      findings.push({
+        where: `flow '${flowName}' · decision '${nid}'`,
+        message:
+          `has guarded out-edge(s) alongside unconditional one(s) ` +
+          `(${ungated.map((e) => `'${String(e.target)}'`).join(', ')}) — an unconditional out-edge is ` +
+          `traversed on EVERY pass, in parallel with whichever guarded branch matched, so the ` +
+          `decision does not actually exclude it. A \`label\` alone does not select a path unless the ` +
+          `decision declares a matching \`conditions[].label\`.`,
+        hint:
+          `Mark the fallback \`isDefault: true\` so it is taken only when no sibling condition matched ` +
+          `(BPMN default flow), or give it its own \`condition\`. (#4414)`,
+        rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
+      });
+    }
   }
 }
 
@@ -503,6 +649,11 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
     //     unconditional out-edge: the handler runs on every SUCCESS, in parallel
     //     with the real path, and never on a failure.
     scanErrorLabelledEdges(flowName, nodes, edges, findings);
+
+    // (e) #4414 — a decision that declares a branch it cannot route: an
+    //     unclaimable branch label, an unconditional sibling that runs anyway,
+    //     or a self-contradictory / duplicated `isDefault` marker.
+    scanBranchRouting(flowName, nodes, edges, findings);
   }
   return findings;
 }
