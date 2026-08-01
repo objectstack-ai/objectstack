@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { strictObject } from '../shared/strict-object';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { DateGranularity } from '../data/query.zod';
 import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
@@ -45,10 +46,27 @@ export const WidgetColorVariantSchema = lazySchema(() => z.enum([
 export const WidgetActionTypeSchema = lazySchema(() => ActionType.describe('Widget action type'));
 
 /**
+ * Shared history for this file (#4001).
+ *
+ * `DashboardWidgetSchema` has been strict since the ADR-0021 cutover, and its
+ * error map says why in its own words: undeclared keys "were dropped silently
+ * before strict validation, shipping inert metadata". Everything AROUND the
+ * widget — the header, the filter bar, the dashboard itself — kept the posture
+ * the widget was rescued from.
+ */
+const DASHBOARD_HISTORY =
+  'Until #4001 closed this shape these were dropped silently — the dashboard still rendered, '
+  + 'without whatever the key was meant to configure.';
+
+/**
  * Dashboard Header Action Schema
  * An action button displayed in the dashboard header area.
  */
-export const DashboardHeaderActionSchema = lazySchema(() => z.object({
+export const DashboardHeaderActionSchema = lazySchema(() => strictObject({
+  surface: 'this dashboard header action',
+  history: DASHBOARD_HISTORY,
+  aliases: { title: 'label', text: 'label', name: 'label', url: 'actionUrl', href: 'actionUrl', link: 'actionUrl', target: 'actionUrl', type: 'actionType', kind: 'actionType' },
+}, {
   /** Action label */
   label: I18nLabelSchema.describe('Action button label'),
 
@@ -66,7 +84,16 @@ export const DashboardHeaderActionSchema = lazySchema(() => z.object({
  * Dashboard Header Schema
  * Structured header configuration for the dashboard.
  */
-export const DashboardHeaderSchema = lazySchema(() => z.object({
+export const DashboardHeaderSchema = lazySchema(() => strictObject({
+  surface: 'this dashboard header',
+  history: DASHBOARD_HISTORY,
+  aliases: { title: 'showTitle', description: 'showDescription', buttons: 'actions', links: 'actions' },
+  guidance: {
+    // The header shows the DASHBOARD's own label/description — it does not
+    // carry copy of its own, which is the mistake `title:`/`subtitle:` here is.
+    subtitle: 'the header renders the dashboard\'s own `label`/`description` — there is no separate header copy; toggle them with `showTitle`/`showDescription`',
+  },
+}, {
   /** Whether to show the dashboard title in the header */
   showTitle: z.boolean().default(true).describe('Show dashboard title in header'),
 
@@ -339,7 +366,11 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
  * Dynamic options binding for global filters.
  * Allows dropdown options to be fetched from an object at runtime.
  */
-export const GlobalFilterOptionsFromSchema = lazySchema(() => z.object({
+export const GlobalFilterOptionsFromSchema = lazySchema(() => strictObject({
+  surface: 'this dynamic filter option source',
+  history: DASHBOARD_HISTORY,
+  aliases: { objectName: 'object', from: 'object', source: 'object', value: 'valueField', label: 'labelField', text: 'labelField', where: 'filter', criteria: 'filter' },
+}, {
   /** Source object name to fetch options from */
   object: z.string().describe('Source object name'),
 
@@ -357,7 +388,16 @@ export const GlobalFilterOptionsFromSchema = lazySchema(() => z.object({
  * Global Filter Schema
  * Defines a single global filter control for the dashboard filter bar.
  */
-export const GlobalFilterSchema = lazySchema(() => z.object({
+export const GlobalFilterSchema = lazySchema(() => strictObject({
+  surface: 'this global filter',
+  history: DASHBOARD_HISTORY,
+  aliases: { key: 'name', variable: 'name', fieldName: 'field', title: 'label', inputType: 'type', control: 'type', choices: 'options', values: 'options', source: 'optionsFrom', dataSource: 'optionsFrom', optionsSource: 'optionsFrom', default: 'defaultValue', widgets: 'targetWidgets', appliesTo: 'targetWidgets' },
+  guidance: {
+    // The binding runs the other way: a widget opts in/out via `filterBindings`.
+    // `targetWidgets` exists, but only for `scope: 'widget'`.
+    filterBindings: 'a widget declares its own binding — `filterBindings` lives on the WIDGET and maps this filter\'s `name` to one of that widget\'s fields (or `false` to opt out)',
+  },
+}, {
   /**
    * Stable filter name (framework#2501) — the dashboard-variable key under
    * which the filter's value is published (readable in widget expressions as
@@ -377,7 +417,11 @@ export const GlobalFilterSchema = lazySchema(() => z.object({
   type: z.enum(['text', 'select', 'date', 'number', 'lookup']).optional().describe('Filter input type'),
 
   /** Static options for select/lookup filters */
-  options: z.array(z.object({
+  options: z.array(strictObject({
+    surface: 'this filter option',
+    history: DASHBOARD_HISTORY,
+    aliases: { key: 'value', id: 'value', text: 'label', title: 'label', name: 'label' },
+  }, {
     value: z.union([z.string(), z.number(), z.boolean()]).describe('Option value'),
     label: I18nLabelSchema,
   })).optional().describe('Static filter options'),
@@ -424,7 +468,25 @@ export const GlobalFilterSchema = lazySchema(() => z.object({
  *   ]
  * }
  */
-export const DashboardSchema = lazySchema(() => z.object({
+export const DashboardSchema = lazySchema(() => strictObject({
+  surface: 'this dashboard',
+  history: DASHBOARD_HISTORY,
+  aliases: {
+    title: 'label', displayName: 'label',
+    charts: 'widgets', components: 'widgets', cards: 'widgets', tiles: 'widgets',
+    filters: 'globalFilters', globalFilter: 'globalFilters',
+    grid: 'columns', columnCount: 'columns',
+    spacing: 'gap',
+    refresh: 'refreshInterval', autoRefresh: 'refreshInterval', pollInterval: 'refreshInterval',
+    dateFilter: 'dateRange', timeRange: 'dateRange',
+  },
+  guidance: {
+    // Widget layout is per-widget; a dashboard-level `layout` reads like a
+    // template selector, which does not exist here.
+    layout: 'a dashboard has no layout template — each widget carries its own `layout: { x, y, w, h }`, and a widget with none is auto-flowed into the grid',
+    theme: 'dashboards do not carry a theme — presentation-only widget settings go under that widget\'s `options`',
+  },
+}, {
   /** Machine name */
   name: SnakeCaseIdentifierSchema.describe('Dashboard unique name'),
   
@@ -450,7 +512,11 @@ export const DashboardSchema = lazySchema(() => z.object({
   refreshInterval: z.number().optional().describe('Auto-refresh interval in seconds'),
 
   /** Dashboard Date Range (Global time filter) */
-  dateRange: z.object({
+  dateRange: strictObject({
+    surface: 'this dashboard date range',
+    history: DASHBOARD_HISTORY,
+    aliases: { dateField: 'field', fieldName: 'field', preset: 'defaultRange', range: 'defaultRange', default: 'defaultRange', allowCustom: 'allowCustomRange', custom: 'allowCustomRange' },
+  }, {
     field: z.string().optional().describe('Default date field name for time-based filtering'),
     defaultRange: z.enum(['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'this_quarter', 'last_quarter', 'this_year', 'last_year', 'last_7_days', 'last_30_days', 'last_90_days', 'custom']).default('this_month').describe('Default date range preset'),
     allowCustomRange: z.boolean().default(true).describe('Allow users to pick a custom date range'),

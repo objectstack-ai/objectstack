@@ -54,11 +54,17 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // `page.regions[0].zzz` all `safeParse` to failure — and the check is worth
     // repeating on the next one, because a broken walk and a successful
     // graduation shrink this count identically.
-    expect(lintables.length).toBeGreaterThanOrEqual(3);
+    // 3 → 2 when `dashboard` closed; `dashboard.zzz` was confirmed rejected by
+    // the parse first, same as the batch before it.
+    expect(lintables.length).toBeGreaterThanOrEqual(2);
     // `view` matters doubly: it is a UNION (container | ViewItem | overlay), so
     // its presence pins the union half of the posture logic — a regression that
     // silently dropped unions would shrink coverage without failing the count.
-    for (const expected of ['dashboard', 'action', 'view']) {
+    // When `view` and `action` close, this whole layer has nothing left to warn
+    // about at a ROOT, which is the campaign finishing rather than the lint
+    // breaking — at that point assert the empty set deliberately, do not delete
+    // the test.
+    for (const expected of ['action', 'view']) {
       expect(lintableTypes, `expected '${expected}' to be lint-covered`).toContain(expected);
     }
   });
@@ -163,20 +169,26 @@ describe('the #4148 behaviours survive the generalization', () => {
   });
 
   it('reports across collections in one walk, with per-type surfaces', () => {
-    // `page`/`agent` (batch 6a) and `field` (batch 6b) used to appear here too;
-    // each closed, so the parse rejects and the lint correctly stays quiet —
-    // the hand-off this whole layer was built to make. Two collections still
-    // participate, so this keeps proving per-type surfacing rather than
+    // `page`/`agent` (6a), `field` (6b) and `dashboard` (6c) used to appear
+    // here; each closed, so the parse rejects and the lint correctly stays
+    // quiet — the hand-off this whole layer was built to make. Two collections
+    // still participate so this keeps proving per-type surfacing rather than
     // degenerating into a single-collection test: `object` reports a NESTED
-    // strip site under a CLOSED root (the #4522 behaviour), and `dashboard`
-    // reports at its root.
+    // strip site under a CLOSED root (the #4522 behaviour), and `view` — the
+    // last open root, and the union case — reports at its own.
     const findings = lintUnknownAuthoringKeys({
       objects: [{ name: 'a', label: 'A', actions: [{ name: 'act', zzz: 1 }] }],
-      dashboards: [{ name: 'd', label: 'D', zzz: 1 }],
+      views: [{ name: 'v', object: 'a', zzz: 1 }],
     });
-    expect(findings.map((f) => `${f.surface}:${f.path}`).sort()).toEqual([
-      'dashboard:dashboards.d.zzz',
+    // Deduped deliberately: `view` is a union (container | ViewItem | overlay)
+    // and the walk emits one finding per strip-mode variant the key lands in,
+    // so a single authored key reports twice. That is noise an author would
+    // see, but it is the union walk's behaviour and not this test's subject —
+    // and it becomes moot when `view` closes. Left recorded rather than papered
+    // over by picking a non-union collection.
+    expect([...new Set(findings.map((f) => `${f.surface}:${f.path}`))].sort()).toEqual([
       'object:objects.a.actions.0.zzz',
+      'view:views.v.zzz',
     ]);
   });
 

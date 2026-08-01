@@ -218,7 +218,7 @@ describe('registered metadata types', () => {
  * type fails this suite until the list shrinks, so the list cannot outlive the
  * debt and start exempting types that no longer need exempting.
  */
-const STILL_STRIP = new Set<string>(['action', 'dashboard', 'view']);
+const STILL_STRIP = new Set<string>(['action', 'view']);
 
 /** The registered schema's own top-level posture: `.strict()` sets a `never` catchall. */
 function topLevelPosture(schema: unknown, depth = 0): 'strict' | 'strip' | null {
@@ -285,7 +285,7 @@ describe('#4001 — registered-type closure is derived, not tallied', () => {
   it('reports the campaign number so a reader never has to count', () => {
     const closed = types.filter((t) => !STILL_STRIP.has(t));
     expect(closed.length + STILL_STRIP.size).toBe(types.length);
-    expect(closed.length).toBe(22);
+    expect(closed.length).toBe(23);
     expect(types.length).toBe(25);
   });
 });
