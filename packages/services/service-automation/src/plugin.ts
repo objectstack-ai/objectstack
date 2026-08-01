@@ -11,6 +11,7 @@ import type {
     ConnectorProviderContext,
 } from '@objectstack/spec/integration';
 import { isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { AutomationEngine } from './engine.js';
 import type { RunSummaryLogLevel } from './engine.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
@@ -1177,6 +1178,24 @@ export class AutomationServicePlugin implements Plugin {
      * source this re-sync read before this fix — it is actually populated in a
      * real running server (`metadata.list('flow')` returns 0 there, so the old
      * re-sync bound nothing).
+     *
+     * Every doc is handed back with the READ path's own annotations removed
+     * (cloud#971). A served document is not a valid `FlowSchema` input: the
+     * protocol decorates each item with `_diagnostics` (and `_draft` on a
+     * preview read), and since #4001 `FlowSchema` REJECTS unrecognized keys
+     * instead of dropping them — so `registerFlow` threw
+     * `unrecognized_keys: ["_diagnostics"]` for EVERY flow on every cold boot.
+     * The bind was entirely dead; only the record-change plugin's separate
+     * binding path kept record automations firing, and a flow whose only
+     * binding path is this one would have silently stopped triggering.
+     *
+     * Stripped here — at the read seam — rather than leniently in
+     * `registerFlow`: the payload is malformed because WE decorated it, so the
+     * producer's annotation is the producer's to remove. Widening the schema
+     * would make our own read shape a second, permanent contract. Note the
+     * strip removes only the read decorations, never the ADR-0010 protection
+     * envelope (`_lock`, `_packageId`, …) — `FLOW_KEYS` allowlists those, and
+     * dropping them would strip a packaged flow's provenance on every rebind.
      */
     private async readFlowDefsFromProtocol(
         ctx: PluginContext,
@@ -1202,11 +1221,12 @@ export class AutomationServicePlugin implements Plugin {
         // getMetaItems hands back a bare array or an `{ items: [...] }` envelope,
         // and each entry is either the flow doc or an `{ item: <flow> }` wrapper.
         const list = Array.isArray(raw) ? raw : (((raw as { items?: unknown[] })?.items) ?? []);
-        return list.map((entry) =>
-            (entry && typeof entry === 'object' && 'item' in entry
+        return list.map((entry) => {
+            const doc = entry && typeof entry === 'object' && 'item' in entry
                 ? (entry as { item: unknown }).item
-                : entry) as { name?: string },
-        );
+                : entry;
+            return stripReadDecorations(doc) as { name?: string };
+        });
     }
 
     /**

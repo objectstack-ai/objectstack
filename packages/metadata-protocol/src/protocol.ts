@@ -40,6 +40,7 @@ import {
     type MetadataProvenance,
 } from '@objectstack/spec/kernel';
 import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { z } from 'zod';
 import {
     computeMetadataDiagnostics,
@@ -364,48 +365,22 @@ function describeMalformedFilter(filter: unknown[]): string {
 }
 
 /**
- * Keys the READ path stamps onto a served metadata document, which therefore
- * must never survive back into a persisted body (#4326).
+ * The keys THIS file stamps onto every served document (`_diagnostics` via
+ * `decorateMetadataItem`, `_draft` via the draft-preview overlay) — and the
+ * strip that keeps them out of a persisted body (#4326) or a strict re-parse
+ * (cloud#971).
  *
- * Both are recomputed on every read, so persisting them stores a stale copy of
- * something the reader already replaces:
- *   - `_diagnostics` — the spec-validation verdict `decorateMetadataItem`
- *     spreads onto every `getMetaItem`/`getMetaItems` result. A second producer
- *     stamps the same key: view-container expansion records a name-collision
- *     rename warning (`stampRenameWarning`, spec/ui/view.zod.ts). Both are
- *     derived from the document, so neither belongs inside it;
- *   - `_draft` — the preview badge added by draft reads. Draft-ness lives in
- *     the row's `state` column and the `mode` parameter, never in the body.
+ * The list itself lives in `@objectstack/spec` because this module PRODUCES the
+ * decoration while consumers in other layers (`service-automation`'s cold-boot
+ * flow bind, …) have to REMOVE it: one shared definition is what stops the two
+ * sides from drifting. See `spec/kernel/metadata-read-decorations.ts` for the
+ * full rationale and for why the ADR-0010 protection envelope (`_lock`,
+ * `_packageId`, …) is deliberately not stripped despite the shared spelling.
  *
- * Deliberately NOT stripped, though they share the underscore spelling: the
- * ADR-0010 protection envelope (`_lock`, `_lockReason`, `_provenance`) and
- * `_packageId`. Those are envelope state the write path legitimately carries
- * and merges (see `mergeArtifactProtection`) — not read-time decoration.
+ * Re-exported here so `@objectstack/metadata-protocol`'s public surface is
+ * unchanged.
  */
-const READ_ONLY_DECORATIONS = ['_diagnostics', '_draft'] as const;
-
-/**
- * Remove {@link READ_ONLY_DECORATIONS} from an about-to-persist body.
- *
- * A **silent** strip, unlike the layered-envelope rejection in `saveMetaItem`:
- * that envelope is a wrong document the caller must fix, whereas these keys are
- * our own decoration riding along on a document that is otherwise exactly what
- * the author edited. Rejecting the standard GET → edit → PUT round-trip would
- * be hostile; stripping restores the invariant that a round-trip persists the
- * body byte-identical.
- *
- * Returns the SAME reference when there is nothing to strip, so the common path
- * allocates nothing (the discipline {@link graftNormalizedOperators} follows).
- * Non-object inputs pass through — the caller's own validation owns those.
- */
-export function stripReadDecorations(item: unknown): unknown {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
-    const dict = item as Record<string, unknown>;
-    if (!READ_ONLY_DECORATIONS.some((k) => k in dict)) return item;
-    const next = { ...dict };
-    for (const k of READ_ONLY_DECORATIONS) delete next[k];
-    return next;
-}
+export { stripReadDecorations };
 
 /**
  * Guarantee a `view` body carries a top-level `name`.

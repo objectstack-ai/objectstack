@@ -27,6 +27,10 @@ export * from './platform-capabilities';
 export * from './metadata-loader.zod';
 export * from './metadata-plugin.zod';
 export * from './metadata-protection.zod';
+// The read path's OWN annotations (`_diagnostics`, `_draft`) — the underscore
+// keys that, unlike the protection envelope above, must never survive back into
+// a persisted body or a strict re-parse (#4326, cloud#971).
+export * from './metadata-read-decorations';
 export * from './metadata-type-schemas';
 // Pre-parse unknown-key walker over EVERY metadata collection (#3786). Lives
 // here, not in data/, because covering every type means importing every schema.

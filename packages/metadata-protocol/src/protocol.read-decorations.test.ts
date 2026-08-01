@@ -14,8 +14,16 @@
  * shadows the stale one — which is exactly why this needs a pin: the invariant
  * being protected is "a GET → PUT round-trip persists a byte-identical body",
  * and only the stored bytes can show it.
+ *
+ * cloud#971 then showed the SECOND consumer of the same invariant, where it is
+ * not cosmetic at all: since #4001 closed the metadata schemas, a served
+ * document handed back to its own schema THROWS on our annotation. The last
+ * describe block pins that — and, more importantly, pins the general rule, so a
+ * future third decoration key fails here instead of in a production boot log.
  */
 import { describe, expect, it } from 'vitest';
+import { FlowSchema } from '@objectstack/spec/automation';
+import { METADATA_READ_DECORATIONS } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation, stripReadDecorations } from './index.js';
 
 interface Row {
@@ -212,5 +220,97 @@ describe('saveMetaItem — the Studio round-trip persists a byte-identical body 
 
         const after = Array.from(rows.values()).find((r) => r.name === 'crm_lead')!.checksum;
         expect(after).toBe(before);
+    });
+});
+
+/** A minimal but complete record-change flow — what the automation service binds. */
+const flowBody = (name: string) => ({
+    name,
+    label: 'Pause project when hours are logged',
+    type: 'record_change',
+    status: 'active',
+    nodes: [
+        {
+            id: 'start',
+            type: 'start',
+            label: 'Start',
+            config: { objectName: 'task', triggerType: 'record-after-update' },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+});
+
+/**
+ * cloud#971 — the read path's annotations must not break a strict re-parse.
+ *
+ * This is the same invariant as the round-trip block above, seen from the other
+ * side. `saveMetaItem` already strips on the WRITE path; the cold-boot flow bind
+ * (`service-automation`: `getMetaItems('flow')` → `registerFlow` →
+ * `FlowSchema.parse`) re-parses instead of persisting, and since #4001 closed
+ * `FlowSchema` that parse THREW `unrecognized_keys: ["_diagnostics"]` for every
+ * flow on every boot — an entire binding path dead behind a WARN, masked only
+ * because the record-change plugin binds record flows a second way.
+ *
+ * These run against the REAL `getMetaItems`, so they fail if the read path ever
+ * grows a decoration that consumers don't know to remove.
+ */
+describe('a served document survives its own (closed) schema — cloud#971', () => {
+    /** Serve `flowBody(name)` back through the real read path. */
+    async function serveFlow(name: string): Promise<Record<string, unknown>> {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await protocol.saveMetaItem({ type: 'flow', name, item: flowBody(name) });
+        const res: any = await protocol.getMetaItems({ type: 'flow' });
+        const items: any[] = Array.isArray(res) ? res : (res?.items ?? []);
+        const served = items.find((i) => i?.name === name);
+        expect(served, `getMetaItems('flow') served ${name}`).toBeDefined();
+        return served as Record<string, unknown>;
+    }
+
+    it('the raw served flow does NOT parse — the strip is load-bearing', async () => {
+        const served = await serveFlow('task_hours_pause_project');
+        expect(served._diagnostics).toBeDefined(); // precondition — the read decorates
+
+        const raw = FlowSchema.safeParse(served);
+        expect(raw.success, 'a decorated flow must still be rejected by the closed schema').toBe(false);
+        // Exactly the production symptom, so a reader of this test can match it
+        // against the WARN in the issue.
+        expect(raw.error!.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+    });
+
+    it('stripping the read decorations makes it parse — the cold-boot bind path', async () => {
+        const served = await serveFlow('task_hours_pause_project');
+        const parsed = FlowSchema.safeParse(stripReadDecorations(served));
+        expect(
+            parsed.success,
+            `flow must bind after the strip; issues: ${JSON.stringify(parsed.error?.issues)}`,
+        ).toBe(true);
+    });
+
+    it('every key the read ADDS is either a known decoration or allowed by the schema', async () => {
+        // The drift guard. `stripReadDecorations` only removes what
+        // METADATA_READ_DECORATIONS lists, so a NEW annotation stamped by the
+        // read path would sail past it and start throwing in `registerFlow`
+        // again. Diff the served document against the authored one and hold
+        // every added key to one of the two escapes.
+        const name = 'task_hours_pause_project';
+        const served = await serveFlow(name);
+        const authoredKeys = new Set(Object.keys(flowBody(name)));
+        const added = Object.keys(served).filter((k) => !authoredKeys.has(k));
+
+        const unaccounted = added.filter((k) => {
+            if ((METADATA_READ_DECORATIONS as readonly string[]).includes(k)) return false;
+            // Not a decoration ⇒ it must be envelope state the closed schema
+            // allowlists (the ADR-0010 `_lock`/`_packageId` family).
+            return !FlowSchema.safeParse({ ...stripReadDecorations(served) as object, [k]: served[k] }).success;
+        });
+
+        expect(
+            unaccounted,
+            'the read path stamped a key that is neither stripped (add it to '
+            + 'METADATA_READ_DECORATIONS in @objectstack/spec) nor accepted by the closed schema — '
+            + 'every strict re-parse of a served flow, including the cold-boot bind, now throws',
+        ).toEqual([]);
     });
 });

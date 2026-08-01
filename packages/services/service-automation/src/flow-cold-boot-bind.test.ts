@@ -79,6 +79,22 @@ function fakeProtocolService(flows: unknown[]) {
 }
 
 /**
+ * Decorate a flow the way the REAL read path does: `decorateMetadataItem`
+ * spreads `_diagnostics` onto every served item, a preview read badges `_draft`,
+ * and an overlay row carries its `_packageId`. cloud#971 — the first two are
+ * read-time annotations the closed `FlowSchema` (#4001) rejects; the third is
+ * ADR-0010 envelope state `FLOW_KEYS` allowlists and the bind must PRESERVE.
+ */
+function asServedByProtocol<T extends object>(flow: T) {
+    return {
+        ...flow,
+        _packageId: 'app.pm7k',
+        _diagnostics: { valid: true, warnings: [] },
+        _draft: true,
+    };
+}
+
+/**
  * Boot with a protocol service that HAS the flow but NO objectql registry, so
  * the boot pull is empty — exactly the inline-app-flow cold-boot scenario. The
  * recording record-change trigger is registered during init (before
@@ -127,6 +143,75 @@ describe('record-triggered flow binds on cold boot (kernel:ready sync)', () => {
         const kernel = await bootKernel([], rec);
         await flush();
         expect(rec.has('notify_on_done')).toBe(false);
+        await kernel.shutdown();
+    });
+});
+
+/**
+ * cloud#971 — the bind must survive the read path's OWN annotations.
+ *
+ * The fake above served naked flow bodies; the real `getMetaItems` decorates
+ * every item (`_diagnostics`, plus `_draft` on a preview read). Once #4001
+ * closed `FlowSchema` — unrecognized keys throw instead of being dropped —
+ * `registerFlow` rejected EVERY flow on EVERY cold boot with
+ * `unrecognized_keys: ["_diagnostics"]`. Nothing looked broken because the
+ * record-change plugin binds record flows by a second path; a flow whose only
+ * binding path is this one would simply have stopped firing, silently.
+ *
+ * So the naked-payload tests above could not have caught it. These serve what
+ * the protocol actually serves.
+ */
+describe('cold-boot bind survives the read path annotations (cloud#971)', () => {
+    it('binds a flow served WITH _diagnostics/_draft decorations', async () => {
+        const rec = recordingRecordChangeTrigger();
+        const kernel = await bootKernel(
+            [asServedByProtocol(recordTriggeredFlow('task_hours_pause_project', 'task'))],
+            rec,
+        );
+        await flush();
+
+        expect(
+            rec.has('task_hours_pause_project'),
+            'a decorated flow must still bind — pre-fix this threw unrecognized_keys and only WARNed',
+        ).toBe(true);
+
+        const engine = kernel.getService<AutomationEngine>('automation');
+        expect(await engine.getFlow('task_hours_pause_project')).not.toBeNull();
+
+        await kernel.shutdown();
+    });
+
+    it('keeps the ADR-0010 protection envelope — the strip is not a blanket "_" purge', async () => {
+        // `_packageId` shares the underscore spelling but is envelope state
+        // `FLOW_KEYS` allowlists. Dropping it would erase a packaged flow's
+        // provenance on every rebind, so the strip must be exactly the read
+        // decorations and nothing more.
+        const rec = recordingRecordChangeTrigger();
+        const kernel = await bootKernel(
+            [asServedByProtocol(recordTriggeredFlow('task_hours_pause_project', 'task'))],
+            rec,
+        );
+        await flush();
+
+        const engine = kernel.getService<AutomationEngine>('automation');
+        const parsed = await engine.getFlow('task_hours_pause_project');
+        expect((parsed as unknown as { _packageId?: string })?._packageId).toBe('app.pm7k');
+        expect(parsed).not.toHaveProperty('_diagnostics');
+        expect(parsed).not.toHaveProperty('_draft');
+
+        await kernel.shutdown();
+    });
+
+    it('binds a decorated flow served in the `{ item: … }` wrapper shape', async () => {
+        // The other envelope `getMetaItems` can hand back — the strip has to
+        // happen AFTER the unwrap, not before it.
+        const rec = recordingRecordChangeTrigger();
+        const kernel = await bootKernel(
+            [{ item: asServedByProtocol(recordTriggeredFlow('task_hours_pause_project', 'task')) }],
+            rec,
+        );
+        await flush();
+        expect(rec.has('task_hours_pause_project')).toBe(true);
         await kernel.shutdown();
     });
 });
