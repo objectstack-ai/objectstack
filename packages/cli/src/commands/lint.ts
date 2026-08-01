@@ -8,9 +8,8 @@ import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { computeI18nCoverage, type CoverageIssue } from '../utils/i18n-coverage.js';
 import { lintDataModel } from '../lint/data-model-rules.js';
-import { validateWidgetBindings } from '@objectstack/lint';
-import { validateRecordTitle, validateSemanticRoles, validateCapabilityReferences, validateSecurityPosture, validateOrgAxisRedLines, validateApprovalApprovers, validateSeedReplaySafety, validateSeedStateMachine } from '@objectstack/lint';
-import { validateReferenceIntegrity } from '@objectstack/lint';
+import { runAuthoringRules } from '../lint/authoring-rules.js';
+import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
@@ -135,7 +134,17 @@ function getViewLabel(view: any, viewPath: string): { label?: string; path: stri
 
 // ─── Lint Engine ────────────────────────────────────────────────────
 
-export function lintConfig(config: any): LintIssue[] {
+export interface LintConfigOptions {
+  /**
+   * ADR-0080 SDUI component manifest, when the project ships one. Present, the
+   * JSX gate does full component/prop validation; absent, it stays parse-level.
+   * The `os lint` command resolves it; `scoreMetadata` deliberately does not —
+   * the scorer is a pure function of a stack and must not read the filesystem.
+   */
+  sduiManifest?: unknown;
+}
+
+export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue[] {
   const issues: LintIssue[] = [];
 
   const push = (issue: LintIssue | null) => {
@@ -346,166 +355,34 @@ export function lintConfig(config: any): LintIssue[] {
   // objectstack-data/-ui skills. These double as the eval rubric (see score.ts).
   issues.push(...lintDataModel(objects));
 
-  // ── Dashboard widget bindings (ADR-0021, issues #1719/#1721) ──
-  // Reference integrity (errors): widget `dataset`/`dimensions`/`values` and
-  // chartConfig axis/series fields must resolve against the declared
-  // datasets. Advisory shapes (warnings): e.g. a table/pivot widget whose
-  // binding resolves to count-only measures with no dimensions — almost
-  // always a record listing that belongs in an object-bound ListView
-  // (ADR-0017), not an analytics dataset.
-  for (const w of validateWidgetBindings(config)) {
+  // ── The author-time rule registry (#4409) ──
+  // Everything above this line is `os lint`'s OWN rubric: naming, labels,
+  // structure, data-model conventions. Its `error` severity is a lint verdict,
+  // not a publish gate — `os build` has never rejected a camelCase object name.
+  //
+  // Everything below comes from the table the three authoring commands share.
+  // `os lint` used to hand-wire its own subset of it, and the subsets disagreed:
+  // it ran `validateApprovalApprovers` (which gates) that neither other command
+  // ran, and missed six gating rules that both of them ran — so it returned
+  // clean for stacks `os build` rejects AND rejected stacks `os build` ships.
+  // A pre-flight that disagrees with the gate in both directions is worse than
+  // no pre-flight: the only rational responses are to re-verify everything or
+  // to stop trusting it.
+  //
+  // The registry is `os lint`'s single call site into that set. Adding a rule
+  // there reaches this command with no edit here. Do NOT import a rule directly.
+  //
+  // `os lint` does not Zod-parse (a schema error is `os validate`'s verdict to
+  // give), so the registry runs both stack tiers against the normalized input —
+  // which is what this command already did for the reference-integrity suite
+  // and the security linter.
+  for (const f of runAuthoringRules('lint', { normalized: config, sduiManifest: opts.sduiManifest })) {
     issues.push({
-      severity: w.severity,
-      rule: w.rule,
-      message: `${w.where}: ${w.message}`,
-      path: w.path,
-      fix: w.hint,
-    });
-  }
-
-  // ── Record-title contract (ADR-0079) ──
-  // titleFormat is retired (render-only template the server can't return or
-  // query) in favour of nameField; and an object with no resolvable title
-  // (no nameField/displayNameField and nothing derivable) ships records with
-  // no meaningful name. Both are advisory warnings — the auto-provision
-  // transform and the `Record #<id>` floor keep a green build from ever
-  // shipping a fully title-less object (the ADR-0078 "not cloud-only" parity
-  // with cloud graph-lint).
-  for (const t of validateRecordTitle(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Semantic-role pointers (ADR-0085) ──
-  // stageField / highlightFields / Field.group are pointers into the object's
-  // field map; a dangling pointer is Zod-valid but silently inert at render
-  // time (the ADR-0078 completeness gate). All advisory — every consumer
-  // degrades gracefully.
-  for (const t of validateSemanticRoles(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Capability references (ADR-0066 ⑨) ──
-  // requiredPermissions naming a capability that is registered nowhere
-  // (no built-in, no permission set grants it, no sys_capability seed) is
-  // almost certainly a typo. Advisory — the reference fails closed at runtime,
-  // and the capability may legitimately be provided by another installed package.
-  for (const t of validateCapabilityReferences(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Security posture (ADR-0090 D7) ──
-  // The security-domain publish linter: unset/alias OWD, external dial wider
-  // than internal, wildcard VAMA, high-privilege everyone-suggested sets, the
-  // reserved word "role", and private-object read grants with no depth. Runs
-  // on the NORMALIZED (pre-zod) input here, so alias values that the schema
-  // gate would reject in `os compile` get a located fix-it instead of a Zod
-  // enum error. `error` findings gate `os compile`; `info` maps to suggestion.
-  for (const t of validateSecurityPosture(config)) {
-    issues.push({
-      severity: t.severity === 'info' ? 'suggestion' : t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Organization-axis red lines (ADR-0105 D6) ──
-  // The org tree (`parent_organization_id`) is a REPORTING dimension. An RLS
-  // policy or sharing rule that walks it builds a second permission hierarchy —
-  // the dual-hierarchy mistake ADR-0057 D5 retired — and cannot widen Layer 0
-  // anyway, so it grants nothing it appears to. Business-unit grants on
-  // platform-global objects are the other half: no org column to scope against
-  // means the grant spans every organization.
-  for (const t of validateOrgAxisRedLines(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Approval-node approvers (ADR-0090 D3 fallout) ──
-  // `{ type: 'role' }` resolves against the better-auth org-membership tier
-  // (owner/admin/member), NOT positions — a position name authored there
-  // silently routes the approval to nobody. Advisory: the fix-it points at
-  // `{ type: 'position' }` (sys_user_position).
-  for (const t of validateApprovalApprovers(config)) {
-    issues.push({
-      severity: t.severity === 'info' ? 'suggestion' : t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Seed replay safety (framework#3434) ──
-  // Seeds are replayed on every boot / re-publish, so a `mode: 'insert'` dataset
-  // duplicates its table on every restart (the loader's insert path has no
-  // existing-row check). Advisory: the fix-it points at `ignore`/`upsert` + an
-  // `externalId` (single field, or a composite list for a join table).
-  for (const t of validateSeedReplaySafety(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Seed value vs state machine (framework#3433 follow-up) ──
-  // #3433 exempts seed writes from the `state_machine` rule, so a seeded status
-  // the FSM does not declare is no longer rejected at write time. Re-add that
-  // safety net at author time: a value outside the machine's declared states is
-  // almost certainly a typo. Advisory — the exemption itself is legitimate.
-  for (const t of validateSeedStateMachine(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Reference integrity (issue #3583) ──
-  // One suite, one call site: object-name references `defineStack` does not
-  // cover, name-bound action surfaces, page-component field bindings, chart
-  // axes outside dashboards, navigation vs. granted access, and translation
-  // keys pointing at metadata that no longer exists. Every member resolves a
-  // NAME against what the stack declares — the class the HotCRM audit found
-  // shipping, where each instance parses, validates, and fails silently.
-  // Adding a rule to `REFERENCE_INTEGRITY_RULES` reaches this path with no
-  // edit here (assessment §5 D5 — the wiring drift this ends).
-  for (const t of validateReferenceIntegrity(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
+      severity: f.severity === 'info' ? 'suggestion' : f.severity,
+      rule: f.rule,
+      message: `${f.where}: ${f.message}`,
+      path: f.path,
+      fix: f.hint,
     });
   }
 
@@ -577,7 +454,7 @@ export default class Lint extends Command {
       }
 
       const normalized = normalizeStackInput(config as Record<string, unknown>);
-      const issues = lintConfig(normalized);
+      const issues = lintConfig(normalized, { sduiManifest: resolveSduiManifest() });
 
       // ── Package docs (ADR-0046) ── collected src/docs/*.md + inline docs:
       // flatness, namespace-prefixed names, MDX/image ban, link resolution.
