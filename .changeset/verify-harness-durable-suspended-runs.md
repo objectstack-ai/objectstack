@@ -39,4 +39,4 @@ whole existing dogfood suite passes on it unchanged (38 files, 239 tests). Note
 `databaseFile` does not yet deliver a true cold boot: a second `bootStack` over
 the same file reads a database whose tables exist but whose rows are gone —
 ordinary records do not survive it either, so it is a harness/driver persistence
-gap rather than anything to do with suspended runs, and it is filed separately.
+gap rather than anything to do with suspended runs, and it is filed as #4518.

@@ -32,7 +32,7 @@
 // but whose ROWS are gone, so it fails for a reason with nothing to do with
 // suspended runs. Ordinary records do not survive it either, which is what
 // identifies it as a harness/driver persistence gap rather than a defect in the
-// suspended-run store. Filed separately; when it is fixed, the natural next test
+// suspended-run store. Filed as #4518; when it is fixed, the natural next test
 // here is the one this file was originally written around.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
