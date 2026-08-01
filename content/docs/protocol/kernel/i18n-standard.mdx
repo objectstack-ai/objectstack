@@ -208,8 +208,10 @@ const zh: TranslationData = {
   `o.` (with `app`, `nav`, `dashboard`, `_globalOptions`, `_meta`) was once
   documented here for runtime-authored translations. No resolver ever read it,
   so translations authored in that shape saved successfully and rendered
-  nothing. It was removed in #3778; the metadata door now rejects those keys
-  with a message naming the group to use instead. Author everything —
+  nothing. It was removed in #3778, which rejected those ten keys at the
+  metadata door; #4001 closed both shapes entirely, so **any** undeclared key
+  is now rejected in a runtime item and in a file-authored bundle alike, with
+  the retired ones still naming the group to use instead. Author everything —
   files and runtime items alike — under `objects.`.
 </Callout>
 
@@ -850,7 +852,9 @@ stack's metadata, so there is no set of legal names to resolve against.
 **Design intent — not yet implemented.** `i18n.translationService` is **not** a
 recognized key on `TranslationConfigSchema`
 (`packages/spec/src/system/translation.zod.ts`), and no auto-translate provider
-integration ships today. The snippet below describes planned behaviour.
+integration ships today. The snippet below describes planned behaviour — since
+#4001 the config shape is closed, so copying it into a real `defineStack` is a
+build-time rejection rather than a key silently dropped on the floor.
 </Callout>
 
 ObjectStack integrates with professional translation services:

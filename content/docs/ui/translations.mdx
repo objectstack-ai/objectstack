@@ -166,10 +166,18 @@ Two things to know:
 
 - `locale` is required. An item whose locale can't be resolved is skipped, and
   a silent skip is the hardest kind of missing translation to diagnose.
-- Only the groups on this page are accepted. Keys from the retired `o.<object>`
-  shape (`o`, `app`, `nav`, `dashboard`, `_globalOptions`, `_meta`, …) are
-  rejected at save time with a message naming the group to use instead — they
-  used to save cleanly and then render nothing (#3778).
+- Only the groups on this page are accepted, and since #4001 that is literally
+  true: a key none of them declares is rejected, in a runtime item **and** in a
+  file-authored bundle. Keys from the retired `o.<object>` shape (`o`, `app`,
+  `nav`, `dashboard`, `_globalOptions`, `_meta`, …) carry a message naming the
+  group to use instead — they used to save cleanly and then render nothing
+  (#3778). Everything else gets the nearest declared key suggested.
+
+  Before that, only those ten keys were checked and only on the runtime door,
+  so a misspelled group in a bundle file was dropped in silence. On this
+  surface that is the worst possible outcome: **a translation that resolves to
+  nothing looks exactly like a translation nobody has written yet** — no wrong
+  string appears, just the source language, indefinitely.
 
 ## Draft with the CLI, gate in CI
 
