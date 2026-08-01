@@ -452,8 +452,9 @@ stopping at the first, so one pass shows the whole hole.
 - Missing `manifest.namespace` (required for multi-app hosting)
 - No objects defined
 - No apps or plugins defined
-- Every advisory the rule registry raised (dangling semantic-role pointers,
-  replay-unsafe seeds, ambiguous flow status, deprecated visibility aliases, …)
+- Every advisory the rule registry raised (dangling `stageField` /
+  `highlightFields` pointers, replay-unsafe seeds, ambiguous flow status,
+  deprecated visibility aliases, …)
 
 <Callout type="tip">
 `os validate`, `os build` and `os lint` share one rule registry, so a config that
