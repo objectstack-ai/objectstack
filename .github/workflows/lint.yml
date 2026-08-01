@@ -7,6 +7,10 @@ on:
   pull_request:
     branches:
       - main
+  # Merge queue (see ci.yml for the full note): required checks must report on
+  # queue builds or the queue stalls. This workflow has no PR-only steps, so
+  # the trigger alone is enough.
+  merge_group:
 
 # Same policy as ci.yml: superseded runs on the same PR/branch waste runners
 # and delay feedback; cancel them. Push runs to main group by commit ref, so an

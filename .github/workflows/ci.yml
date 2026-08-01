@@ -7,6 +7,13 @@ on:
   pull_request:
     branches:
       - main
+  # Merge queue: the queue builds each PR as speculatively merged onto the
+  # current main and only lands it if this workflow is green on that result —
+  # the race-free version of the "pull main and re-verify before merging"
+  # discipline (AGENTS.md multi-agent §7/§10). Every workflow that produces a
+  # branch-protection-required check MUST carry this trigger, or queue builds
+  # wait forever on a check that never reports.
+  merge_group:
 
 # Superseded runs on the same PR/branch waste runners and delay feedback;
 # cancel them. Push runs to main group by commit ref as well, so an in-flight
@@ -23,15 +30,21 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      docs: ${{ steps.changes.outputs.docs }}
-      core: ${{ steps.changes.outputs.core }}
-      console: ${{ steps.changes.outputs.console }}
+      # On merge_group, everything counts as changed: dorny/paths-filter has no
+      # merge_group support, and the queue build is the last validation before
+      # main — the one place a skipped job can never be the right answer. A
+      # skipped step's output is the empty string (falsy), so `|| 'true'`
+      # supplies the merge-group value without touching PR/push behavior.
+      docs: ${{ steps.changes.outputs.docs || 'true' }}
+      core: ${{ steps.changes.outputs.core || 'true' }}
+      console: ${{ steps.changes.outputs.console || 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - uses: dorny/paths-filter@v4
         id: changes
+        if: github.event_name != 'merge_group'
         with:
           filters: |
             docs:
@@ -168,9 +181,11 @@ jobs:
       # workflow (coverage-nightly.yml) — instrumentation added minutes to
       # every main push for a trend artifact that is consulted occasionally at
       # best. Dogfood is excluded for the same reason as the PR step: the
-      # Dogfood job runs it.
+      # Dogfood job runs it. Merge-queue builds take this full-run path too:
+      # the queue result IS the next main, so it gets main's validation, not
+      # the PR's affected-only subset.
       - name: Run all tests (push)
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'merge_group'
         env:
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
         run: |
