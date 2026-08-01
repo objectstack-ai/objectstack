@@ -202,6 +202,7 @@ function makeMemoryDriver() {
 describe('#4226 — sort / select / expand on the list path (real ObjectQL engine)', () => {
     let engine: ObjectQL;
     let protocol: ObjectStackProtocolImplementation;
+    let stores: Map<string, Map<string, Record<string, unknown>>>;
 
     /** The issue's transcript order: five rows inserted `C A E B D`. */
     const INSERTION_ORDER = ['C', 'A', 'E', 'B', 'D'];
@@ -210,7 +211,9 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const { driver, stores } = makeMemoryDriver();
+        const made = makeMemoryDriver();
+        const driver = made.driver;
+        stores = made.stores;
         engine.registerDriver(driver, true);
         await engine.init();
         engine.registry.registerObject(projectObject as any, 'test-package');
@@ -597,6 +600,54 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         } as any, 'test-package');
         await expect(protocol.findData({ object: 'showcase_broken', query: { expand: 'orphan' } }))
             .rejects.toThrow(/declares no target object/);
+    });
+
+    it('a `user` field carries its target IN THE TYPE — bare `{type:"user"}` expands (cloud#983)', async () => {
+        // `field.zod` defines `user` as "a lookup specialized to the `sys_user`
+        // system object … target fixed to the `sys_user` system object", and
+        // `Field.user()` takes no target argument — it writes
+        // `reference: 'sys_user'` itself. So a field authored WITHOUT
+        // `reference` (hand-written JSON, an AI author, a Studio form) is fully
+        // specified, and the gate above must not read it as the previous test's
+        // targetless lookup.
+        //
+        // Live capture: an AI-built app modelled 负责人 as `{ type: 'user' }`,
+        // objectui's default list expanded that column (its
+        // `EXPANDABLE_FIELD_TYPES` keys on the TYPE, deliberately ignoring the
+        // target), and the very first screen of the new app rendered
+        // "该视图的查询被拒绝" over a `400 … declares no target object`.
+        engine.registry.registerObject({
+            name: 'sys_user',
+            label: 'User',
+            fields: {
+                id: { name: 'id', label: 'ID', type: 'text', primaryKey: true },
+                name: { name: 'name', label: 'Name', type: 'text' },
+            },
+        } as any, 'test-package');
+        engine.registry.registerObject({
+            name: 'showcase_equipment',
+            label: 'Equipment',
+            fields: {
+                id: { name: 'id', label: 'ID', type: 'text', primaryKey: true },
+                name: { name: 'name', label: 'Name', type: 'text' },
+                // No `reference` — exactly as captured.
+                responsible_person: { name: 'responsible_person', label: '负责人', type: 'user' },
+            },
+        } as any, 'test-package');
+        stores.set('sys_user', new Map([['usr_1', { id: 'usr_1', name: 'Ada' }]]));
+        stores.set('showcase_equipment', new Map([
+            ['e1', { id: 'e1', name: 'Lathe', responsible_person: 'usr_1' }],
+        ]));
+
+        // Admitted — and, the half a gate-only fix would miss, actually
+        // EXPANDED. Letting the request through while the engine still skipped
+        // the field would answer 200 with a raw user id in the cell, which is
+        // the "client renders raw ids where names belong" failure this whole
+        // axis exists to close.
+        const r: any = await protocol.findData({
+            object: 'showcase_equipment', query: { populate: 'responsible_person' },
+        });
+        expect(r.records[0].responsible_person).toMatchObject({ id: 'usr_1', name: 'Ada' });
     });
 
     // ─────────────────────────────────────────────────────────────
