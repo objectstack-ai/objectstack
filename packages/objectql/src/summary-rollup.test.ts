@@ -283,3 +283,113 @@ describe('roll-up summary index — a roll-up registered at RUNTIME still comput
     expect(parent.completed_task_count).toBe(1);
   });
 });
+
+// Sibling cases to the one above (#4427). That one pins the headline path: an
+// object registered after the index was built. These pin three neighbours the
+// same revision counter is responsible for, none of which it exercises —
+// re-registering an EXISTING object, unregistering one, and the guarantee that
+// the child's own insert was already correct (rather than a later write
+// quietly repairing it, which is what made the original bug so slippery).
+describe('roll-up summary index — neighbours of the runtime-registration path', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+  });
+
+  /** A write against an unrelated object, so the index is built and cached
+   *  BEFORE the objects under test are registered. */
+  const warmSummaryIndex = async () => {
+    engine.registry.registerObject({ name: 'unrelated', fields: { name: { type: 'text' } } } as any);
+    await engine.insert('unrelated', { name: 'warms the index' });
+  };
+
+  const project = (id: string) => storeFor('project').get(id);
+
+  it('does not need a second write to the child to catch up', async () => {
+    await warmSummaryIndex();
+    engine.registry.registerObject({
+      name: 'project',
+      fields: {
+        name: { type: 'text' },
+        estimated_total_hours: { type: 'summary', summaryOperations: { object: 'task', field: 'hours', function: 'sum' } },
+      },
+    } as any, 'sys_metadata');
+    engine.registry.registerObject({
+      name: 'task',
+      fields: { hours: { type: 'number' }, project: { type: 'master_detail', reference: 'project' } },
+    } as any, 'sys_metadata');
+
+    const p = await engine.insert('project', { name: '新品发布' });
+    const t = await engine.insert('task', { project: p.id, hours: 4 });
+    const afterInsert = { ...project(p.id) };
+
+    // The pre-fix workaround was a no-op PATCH on the child, which recomputed
+    // against a by-then-rebuilt index. The insert alone must already be right,
+    // so touching the child must not CHANGE anything.
+    await engine.update('task', { id: t.id, hours: 4 });
+
+    expect(afterInsert.estimated_total_hours).toBe(4);
+    expect(project(p.id).estimated_total_hours).toBe(afterInsert.estimated_total_hours);
+  });
+
+  it('picks up a summary field added to an ALREADY-registered parent', async () => {
+    // Incremental authoring: the object is already live, then `update_metadata`
+    // re-registers it carrying a new roll-up field. Re-registration replaces an
+    // existing contributor rather than adding a new object.
+    engine.registry.registerObject({ name: 'project', fields: { name: { type: 'text' } } } as any, 'sys_metadata');
+    engine.registry.registerObject({
+      name: 'task',
+      fields: { hours: { type: 'number' }, project: { type: 'master_detail', reference: 'project' } },
+    } as any, 'sys_metadata');
+
+    const p = await engine.insert('project', { name: '迁移' });
+    await engine.insert('task', { project: p.id, hours: 3 }); // index built here, no summaries yet
+
+    engine.registry.registerObject({
+      name: 'project',
+      fields: {
+        name: { type: 'text' },
+        estimated_total_hours: { type: 'summary', summaryOperations: { object: 'task', field: 'hours', function: 'sum' } },
+      },
+    } as any, 'sys_metadata');
+
+    await engine.insert('task', { project: p.id, hours: 5 });
+    expect(project(p.id).estimated_total_hours).toBe(8);
+  });
+
+  it('stops recomputing a roll-up whose parent was unregistered', async () => {
+    await warmSummaryIndex();
+    engine.registry.registerObject({
+      name: 'project',
+      fields: {
+        name: { type: 'text' },
+        estimated_total_hours: { type: 'summary', summaryOperations: { object: 'task', field: 'hours', function: 'sum' } },
+      },
+    } as any, 'sys_metadata');
+    engine.registry.registerObject({
+      name: 'task',
+      fields: { hours: { type: 'number' }, project: { type: 'master_detail', reference: 'project' } },
+    } as any, 'sys_metadata');
+
+    const p = await engine.insert('project', { name: '待卸载' });
+    await engine.insert('task', { project: p.id, hours: 2 });
+    expect(project(p.id).estimated_total_hours).toBe(2);
+
+    // Uninstalling the package must drop its descriptors too — the mirror of
+    // the bug: a stale index would keep writing to a parent that is gone.
+    engine.registry.unregisterObjectsByPackage('sys_metadata', true);
+    engine.registry.registerObject({
+      name: 'task',
+      fields: { hours: { type: 'number' }, project: { type: 'lookup', reference: 'project' } },
+    } as any, 'other_package');
+
+    await expect(engine.insert('task', { project: p.id, hours: 100 })).resolves.toBeTruthy();
+    expect(project(p.id).estimated_total_hours).toBe(2); // untouched
+  });
+});
