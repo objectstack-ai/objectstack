@@ -783,9 +783,16 @@ sibling), `flow-default-edge-with-condition` and `flow-multiple-default-edges`.
 
 <Callout type="warn">
 A decision node that declares **no** `conditions` reports no branch at all — it
-is a plain gateway and its out-edges do the routing. Do not declare both:
-`config.conditions` *and* per-edge `condition`s on the same node means the node
-picks a branch, and then that branch's edge re-decides.
+is a plain gateway and its out-edges do the routing.
+
+Declaring **both** — `config.conditions` *and* per-edge `condition`s — is
+redundant but not wrong: the node picks a branch, and then that branch's edge
+re-decides with the same predicate. The Studio flow designer emits exactly this
+(it copies each branch's expression and label onto the edge it wires), and it
+routes correctly because the two are kept in sync by construction. Hand-written
+metadata has no such guarantee, which is the whole of #4414: when the two
+disagree, the node's branch wins the narrowing and the edge's predicate decides
+what actually runs. If you are writing the flow by hand, pick one.
 </Callout>
 
 ### Fault edges — handling a failed node

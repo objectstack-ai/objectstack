@@ -296,3 +296,74 @@ describe('decision branch predicate is validated at registration (#4439)', () =>
         expect(() => engine.registerFlow('guard', flowWith("lead.status == 'converted'"))).not.toThrow();
     });
 });
+
+/**
+ * The shape objectui's flow designer actually emits, pinned.
+ *
+ * `FlowEdgeInspector.applyBranch()` copies a decision branch onto the edge it
+ * wires: a guarded branch becomes `{ condition, label }`, and the `true`/empty
+ * branch becomes `{ isDefault: true, label }`. So Studio has been writing
+ * `isDefault` since long before anything read it (#4414) — every Studio
+ * "default/else" edge ran unconditionally, in parallel with whichever branch
+ * matched. These flows are the ones enforcement changes, and they must now take
+ * exactly one path.
+ *
+ * It is also the double declaration the authoring guide tells hand-writers to
+ * avoid — node `conditions[]` AND per-edge `condition`s. It is correct here
+ * only because the designer keeps the two in sync by construction, which is
+ * exactly why it is worth pinning rather than assuming.
+ */
+describe('objectui-authored decision shape (FlowEdgeInspector.applyBranch)', () => {
+    let engine: AutomationEngine;
+    let visited: string[];
+
+    beforeEach(() => {
+        warnings.length = 0;
+        visited = [];
+        engine = new AutomationEngine(createTestLogger());
+        registerLogicNodes(engine, createCtx());
+        engine.registerNodeExecutor({
+            type: 'mark',
+            async execute(node) { visited.push(node.id); return { success: true }; },
+        });
+        engine.registerFlow('studio', {
+            name: 'studio',
+            label: 'Studio-authored',
+            type: 'autolaunched',
+            variables: [{ name: 'order_amount', type: 'number', isInput: true }],
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'check', type: 'decision', label: 'Check Amount',
+                    config: {
+                        conditions: [
+                            { label: 'High Value', expression: 'order_amount > 10000' },
+                            { label: 'Standard', expression: 'true' },
+                        ],
+                    },
+                },
+                { id: 'escalate', type: 'mark', label: 'Escalate' },
+                { id: 'auto', type: 'mark', label: 'Auto approve' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'check' },
+                // The guarded branch: expression + label copied onto the edge.
+                { id: 'e2', source: 'check', target: 'escalate', label: 'High Value', condition: 'order_amount > 10000', isDefault: false },
+                // The `true` branch: written as the BPMN default edge, no condition.
+                { id: 'e3', source: 'check', target: 'auto', label: 'Standard', isDefault: true },
+            ],
+        });
+    });
+
+    it('takes only the guarded branch when it matches', async () => {
+        await engine.execute('studio', { params: { order_amount: 20000 } } as any);
+        expect(visited).toEqual(['escalate']);
+        expect(warnings).toHaveLength(0);
+    });
+
+    it('takes only the default branch when it does not', async () => {
+        await engine.execute('studio', { params: { order_amount: 5000 } } as any);
+        expect(visited).toEqual(['auto']);
+        expect(warnings).toHaveLength(0);
+    });
+});
