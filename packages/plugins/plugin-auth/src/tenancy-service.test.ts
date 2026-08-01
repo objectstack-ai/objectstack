@@ -129,6 +129,36 @@ describe('createTenancyService', () => {
       expect(engine.find).not.toHaveBeenCalled(); // short-circuits before any query
     });
 
+    // cloud#957 — the case that reached production. A deployment that ASKED for
+    // a wall and did not get one must not fall back to "the only org I can
+    // see": the cloud control plane runs `isolated` while mounting its own
+    // scoping plugin instead of the enterprise package, so this resolver was
+    // handing the reconciler a target org and every fresh self-serve signup
+    // landed as a `member` of a stranger's organization.
+    it('degraded (walled requested, isolation inactive) still never guesses', async () => {
+      const engine = makeEngine([{ id: 'org_only' }]);
+      const t = createTenancyService({
+        requested: 'isolated',
+        probeIsolation: () => false, // enterprise package absent → degraded
+        getEngine: () => engine,
+      });
+      expect(t.degraded).toBe(true);
+      expect(t.posture).toBe('single'); // behaves single-org-like…
+      expect(await t.defaultOrgId()).toBeNull(); // …but still refuses to guess
+      expect(engine.find).not.toHaveBeenCalled();
+    });
+
+    it('degraded does not guess the slug=default org either', async () => {
+      const engine = makeEngine([{ id: 'org_default', slug: 'default' }, { id: 'org_b' }]);
+      const t = createTenancyService({
+        requested: 'group',
+        probeIsolation: () => false,
+        getEngine: () => engine,
+      });
+      expect(t.degraded).toBe(true);
+      expect(await t.defaultOrgId()).toBeNull();
+    });
+
     it('single mode prefers the slug=default bootstrap org', async () => {
       const engine = makeEngine([{ id: 'org_x' }, { id: 'org_default', slug: 'default' }]);
       const t = createTenancyService({

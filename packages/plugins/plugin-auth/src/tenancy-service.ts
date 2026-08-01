@@ -77,10 +77,22 @@ export interface TenancyService {
   readonly degraded: boolean;
   /**
    * The default organization id to bind new users to when no wall is enforced
-   * (ADR-0093 D3). Returns `null` under any walled posture — the framework
-   * never guesses a target org there; invite / add-member / SSO JIT own
-   * membership. Also `null` before an org exists (e.g. before the default-org
-   * bootstrap runs). Positive resolutions are memoized (the id is stable).
+   * (ADR-0093 D3). Returns `null` whenever a walled posture was REQUESTED — the
+   * framework never guesses a target org there; invite / add-member / SSO JIT
+   * own membership. Also `null` before an org exists (e.g. before the
+   * default-org bootstrap runs). Positive resolutions are memoized (the id is
+   * stable).
+   *
+   * Keyed on {@link requestedPosture}, not on {@link posture}: a DEGRADED
+   * deployment asked for a wall and did not get one, and the safe reading of
+   * that is "I don't know which org this user belongs to", not "everyone
+   * belongs to the only org I can see". Guessing there is the failure ADR-0093
+   * D6 already refuses for the backfill — "a wrong org in a tenant-isolated
+   * deployment is a data-exposure bug, not a convenience" — and it reached
+   * production once (cloud#957): a control plane running `isolated` without the
+   * enterprise package bound every fresh self-serve signup into whichever
+   * organization happened to be the only one, handing them its environments.
+   * Degrading the WALL is survivable; degrading into cross-tenant writes is not.
    */
   defaultOrgId(): Promise<string | null>;
 }
@@ -213,8 +225,10 @@ export function createTenancyService(deps: TenancyServiceDeps): TenancyService {
       return postureEnforcesWall(requestedPosture) && !isolationActive();
     },
     async defaultOrgId(): Promise<string | null> {
-      // Any walled posture: the framework never guesses a target org.
-      if (isolationActive()) return null;
+      // Any walled posture REQUEST — enforced or degraded — means the framework
+      // never guesses a target org. See the interface doc for why the degraded
+      // case fails closed rather than falling back to "the only org I can see".
+      if (postureEnforcesWall(requestedPosture)) return null;
       if (cachedDefaultOrgId) return cachedDefaultOrgId;
       const resolved = await resolveDefaultOrgId(deps.getEngine?.());
       // Memoize only a positive resolution — a null (org not bootstrapped yet)
