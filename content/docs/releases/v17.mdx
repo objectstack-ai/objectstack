@@ -1672,7 +1672,12 @@ platform capabilities an administrator gains, then the Console delta.
   source at every read seam (including `registerFlow` rehydration) — a stored
   action with the removed `execute` dispatches via `target` again; boot
   hydration validates each row post-conversion and diagnoses invalid ones
-  with `[metadata_spec_invalid]` instead of shrugging.
+  with `[metadata_spec_invalid]` instead of shrugging. **The rows themselves
+  can now be brought forward too (#4327):** `os migrate meta --stored`
+  replays the chain over `sys_metadata` and rewrites what still carries a
+  pre-protocol shape, through the normal write path. Optional — the read path
+  is the guarantee either way — but it is what makes the conversion pass a
+  no-op on your data instead of a permanent shim.
 - **Studio's metadata forms tell the truth (#3786).** Four of seventeen forms
   had drifted from their schemas, so controls saved nothing: the Object →
   Capabilities toggles bound a key the schema does not declare (all seven
@@ -1977,6 +1982,12 @@ covers are folded into the list below rather than left to the changelog.)
   fix what it reports before `--apply`. It converts nothing — the values it
   names are application data — and a scan that was truncated or could not read
   an object fails the gate even at zero violations.
+- **Stored metadata (optional):** run `os migrate meta --stored` to see which
+  `sys_metadata` rows still carry a pre-17 shape, and `--apply` to rewrite
+  them. Unlike the two above this opens no gate and nothing depends on it —
+  those rows already read canonically, forever. It stops them re-converting on
+  every load, keeps diffs and exports clean going forward, and gives you an
+  exit code to assert on: nothing left to do exits `0`.
 - **Datasources:** verify every declared datasource connects in every
   environment — a bound datasource that cannot connect now fails the boot
   instead of failing every later query.
