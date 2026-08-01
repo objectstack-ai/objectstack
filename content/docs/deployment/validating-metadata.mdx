@@ -318,51 +318,67 @@ Skipped, to keep false positives at zero: the same set as §8 — non-static
 values, `{...spread}` usages, relationship paths, system fields, and objects
 another package defines.
 
-## The one gate, two entry points
+## The one gate, three entry points
 
-`os validate` and `os build` (alias of `os compile`) run the **same** validator:
+`os validate`, `os build` (alias of `os compile`) and `os lint` run the **same**
+author-time rules, from one table — `AUTHORING_RULES` in
+`packages/cli/src/lint/authoring-rules.ts`:
 
-| | `os validate` | `os build` |
-|---|---|---|
-| Protocol schema (Zod) | ✓ | ✓ |
-| CEL / predicate validation | ✓ | ✓ |
-| Widget-binding integrity | ✓ | ✓ |
-| Dashboard action/route references (ADR-0049) | ✓ | ✓ |
-| Object & action name references (#3583) | ✓ | ✓ |
-| Page-component field bindings (#3583) | ✓ | ✓ |
-| React page block field bindings — §10 (#4340) | ✓ | ✓ |
-| Chart bindings outside dashboards (#3583) | ✓ | ✓ |
-| Navigation vs. granted access (ADR-0090 D6) | ✓ | ✓ |
-| Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ |
-| Autonumber `{field}` interpolation | ✓ | ✓ |
-| View references — form targets, view-key collisions (#2554) | ✓ | ✓ |
-| Flow authoring anti-patterns (#1874) | ✓ | ✓ |
-| Liveness author-warnings | ✓ | ✓ |
-| Undeclared authoring keys — every metadata collection (#3786) and the stack's own top-level keys (#4167) | ✓ | ✓ |
-| Emits `dist/objectstack.json` | — | ✓ |
+| | `os validate` | `os build` | `os lint` |
+|---|---|---|---|
+| Protocol schema (Zod) | ✓ | ✓ | — |
+| CEL / predicate validation (ADR-0032) | ✓ | ✓ | ✓ |
+| List-view navigation modes (ADR-0053) | ✓ | ✓ | ✓ |
+| View container shape | ✓ | ✓ | ✓ |
+| Widget-binding integrity (ADR-0021) | ✓ | ✓ | ✓ |
+| Dashboard action/route references (ADR-0049) | ✓ | ✓ | ✓ |
+| Filter placeholder resolvability (#3574) | ✓ | ✓ | ✓ |
+| Object & action name references (#3583) | ✓ | ✓ | ✓ |
+| Page-component field bindings (#3583) | ✓ | ✓ | ✓ |
+| React page block field bindings — §10 (#4340) | ✓ | ✓ | ✓ |
+| Chart bindings outside dashboards (#3583) | ✓ | ✓ | ✓ |
+| Navigation vs. granted access (ADR-0090 D6) | ✓ | ✓ | ✓ |
+| SDUI scoped styling (ADR-0065) | ✓ | ✓ | ✓ |
+| JSX / React page source parses (ADR-0080/0081) | ✓ | ✓ | ✓ |
+| Approval-node approvers (ADR-0090 D3) | ✓ | ✓ | ✓ |
+| Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ |
+| Organization-axis red lines (ADR-0105 D6) | ✓ | ✓ | ✓ |
+| Autonumber `{field}` interpolation | ✓ | ✓ | ✓ |
+| View references — form targets, view-key collisions (#2554) | ✓ | ✓ | ✓ |
+| Flow authoring anti-patterns (#1874) | ✓ | ✓ | ✓ |
+| Advisory: flow trigger wiring, record titles, semantic field pointers (ADR-0085), seed replay/state safety, capability references, liveness, visibility aliases | ✓ | ✓ | ✓ |
+| Package docs — flatness, prefixes, links (ADR-0046) | ✓ | ✓ | ✓ |
+| Undeclared authoring keys — every metadata collection (#3786) and the stack's own top-level keys (#4167) | ✓ | ✓ | — |
+| Naming, labels, data-model conventions, i18n coverage | — | — | ✓ |
+| Emits `dist/objectstack.json` | — | ✓ | — |
 
-So `os validate` is the fast inner-loop check (no artifact); `os build` is what
-you run when you need the deployable artifact. A config that passes `os validate`
-will not fail `os build` on schema/predicate/binding grounds — a test in the CLI
-asserts that every gate `os build` runs is also run by `os validate`, so the two
-cannot drift apart again (#3782). Both entry points
-also check SDUI styling (ADR-0065), and `os validate` additionally runs a set of
-view- and page-SHAPE checks — list-view navigation modes (ADR-0053), view
-container shape, and whether a JSX/React page source parses at all
-(ADR-0080/0081) — that catch UI metadata which would otherwise be silently
-dropped.
+So `os validate` is the fast inner-loop check (no artifact), `os build` is what
+you run when you need the deployable artifact, and `os lint` adds its own style
+rubric on top. **Any rule that can fail a build runs on all three**, so a green
+`os lint` means the build's gates are green too, and a stack cannot be published
+through the one command that happens to skip a check.
 
-The field bindings INSIDE a react page source are a different matter: they are
-reference-integrity, so they run wherever the suite runs. `os lint` gets them
-too — it shares the same `REFERENCE_INTEGRITY_RULES` list, which is why the
-table's reference rows are the ones a cheap pre-flight can rely on. That was not
-always true: the react-page prop gate was hand-wired into `os validate` alone
-until #4340's follow-up, so `os lint` and `os build` accepted a page whose every
-field binding was stale — the same divergence #4394 closed for readonly flow
-writes. A CLI test now asserts no command reaches for a suite member directly
-(#4384).
+Two rows are deliberately not universal, and both are one-directional (neither
+lets a stack through a gate another command enforces): the Zod parse and the
+undeclared-key diff need the pre-parse tier and the schema, which only the two
+commands that parse actually have; and `os lint`'s own rubric — snake_case
+names, missing labels, data-model conventions — is a lint verdict, not a publish
+gate. `os build` has never rejected a camelCase object name.
 
-A clean run walks each gate and reports timing:
+That invariant is enforced, not merely documented. Each rule declares its command
+coverage as data, and a CLI test fails if a rule that can emit `error` runs on
+fewer than all three, if a narrowed rule carries no written reason, or if any
+command reaches for a rule directly instead of going through the registry.
+
+The enforcement exists because the contract drifted four separate times, and the
+last audit (#4409) found 23 of 26 rules running on some strict subset of the
+three — nine of them able to fail a build. The worst direction was the least
+obvious: **`os build` was the weakest of the three gates**, so it emitted an
+artifact for stacks the other two refuse. A flow whose expression approver did
+not parse built and published green; only `os lint` stopped it, and CI usually
+runs the other two.
+
+A clean run walks the registry and reports timing:
 
 ```
 ◆ Validate
@@ -371,19 +387,9 @@ A clean run walks each gate and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Validating expressions (ADR-0032)...
-  → Checking list-view navigation modes (ADR-0053)...
-  → Checking view container shape...
-  → Checking dashboard widget bindings (ADR-0021)...
-  → Checking dashboard action references (ADR-0049)...
-  → Checking SDUI styling (ADR-0065)...
-  → Checking JSX-source pages (ADR-0080)...
-  → Checking React-source pages (ADR-0081)...
-  → Checking source-page styling (ADR-0065)...
-  → Checking capability references (ADR-0066)...
-  → Checking flow trigger wiring...
-  → Running authoring lints (#3782)...
-  → Checking security posture (ADR-0090 D7)...
+  → Running author-time rules (26)...
+  → Checking capability providers (#3366)...
+  → Checking package docs (ADR-0046)...
 
   ✓ Validation passed (64ms)
 
@@ -397,9 +403,11 @@ see [the gate in action](/docs/getting-started/build-with-claude-code#4-the-gate
 for the bare-reference example verbatim.
 
 <Callout type="info">
-`os lint` is a **separate** pass — style and convention checks (snake_case
-naming, required labels, namespace prefixes, data-model patterns). Run it too,
-but it does not replace `os validate`, and `os validate` does not replace it.
+`os lint` runs every gate above **plus** its own style rubric (snake_case
+naming, required labels, namespace prefixes, data-model patterns, translation
+coverage). It does not replace `os validate` — it never parses against the Zod
+schema, so a schema error is `os validate`'s verdict to give — but a rule that
+can fail the build fails `os lint` too.
 </Callout>
 
 ## The workflow

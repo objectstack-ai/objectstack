@@ -121,7 +121,7 @@ const result = DecisionCondition.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **label** | `string` | ✅ | Branch label; the winning branch resumes down the out-edge with this label ('true' expression = default/else path) |
+| **label** | `string` | ✅ | Branch label; the winning branch resumes down the out-edge with this label (no match → the out-edge marked isDefault, or one labelled 'default') |
 | **expression** | `string` | ✅ | Bare CEL predicate deciding this branch |
 
 

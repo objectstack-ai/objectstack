@@ -114,7 +114,8 @@ export const FlowVariableSchema = lazySchema(() => z.object({
  *   label: "Is High Value?",
  *   config: {
  *     conditions: [
- *       { label: "Yes", expression: "{amount} > 10000" },
+ *       // Bare CEL, like every other condition — no `{…}` braces (#4336).
+ *       { label: "Yes", expression: "amount > 10000" },
  *       { label: "No", expression: "true" } // default
  *     ]
  *   },
@@ -315,11 +316,25 @@ export const FlowEdgeSchema = lazySchema(() => z.object({
 
   /**
    * Default Sequence Flow marker (BPMN Default Flow semantics).
-   * When true, this edge is taken when no sibling conditional edges match.
-   * Only meaningful on outgoing edges of decision/gateway nodes.
+   *
+   * When true, this edge is traversed only when NO sibling conditional edge of
+   * the same source node matched — the "otherwise" branch. A default edge is
+   * therefore not part of the unconditional parallel fan-out; when a conditional
+   * sibling wins, this edge's target records a `skipped` step instead.
+   *
+   * Enforced by `AutomationEngine.traverseNext` since #4414. It had promised
+   * exactly this since it was declared and had **zero readers** for as long: an
+   * author who marked the fallback edge got an ordinary unconditional edge that
+   * ran on every pass, alongside whichever branch actually matched. Combining it
+   * with `condition` on the same edge is self-contradictory (BPMN forbids a
+   * conditional default flow) and is flagged by the `os build` / `os validate`
+   * flow linter, as is a second default edge out of the same node.
    */
   isDefault: z.boolean().default(false)
-    .describe('Marks this edge as the default path when no other conditions match'),
+    .describe(
+      'BPMN default flow: traverse this edge only when no sibling conditional edge of the same '
+      + 'source node matched. Mutually exclusive with `condition`; at most one per source node.',
+    ),
 }, { error: flowEdgeUnknownKeyError }).strict());
 
 /**

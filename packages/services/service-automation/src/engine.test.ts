@@ -1905,10 +1905,15 @@ describe('AutomationEngine - Safe Expression Evaluation', () => {
 
     it('should not execute malicious code', () => {
         const vars = new Map<string, unknown>();
-        // These should all return false safely
-        expect(engine.evaluateCondition('process.exit(1)', vars)).toBe(false);
-        expect(engine.evaluateCondition('require("fs").readFileSync("/etc/passwd")', vars)).toBe(false);
-        expect(engine.evaluateCondition('(() => { while(true) {} })()', vars)).toBe(false);
+        // None of these is a host-language program to this engine — there is no
+        // `new Function`, no `eval`, no `require` on either path. They REFUSE
+        // rather than return `false` since #4336: a brace-free condition is CEL,
+        // and CEL has no `process`, no `require`, and no arrow-function syntax,
+        // so each one is a fault the run reports. The safety property is
+        // unchanged (nothing executes) and the diagnosis is no longer silent.
+        expect(() => engine.evaluateCondition('process.exit(1)', vars)).toThrow(/exit/);
+        expect(() => engine.evaluateCondition('require("fs").readFileSync("/etc/passwd")', vars)).toThrow(/require/);
+        expect(() => engine.evaluateCondition('(() => { while(true) {} })()', vars)).toThrow(/source:/);
     });
 
     it('should handle string comparisons', () => {
@@ -1917,6 +1922,106 @@ describe('AutomationEngine - Safe Expression Evaluation', () => {
 
         expect(engine.evaluateCondition('{status} == active', vars)).toBe(true);
         expect(engine.evaluateCondition('{status} != inactive', vars)).toBe(true);
+        // #4336 — a QUOTED literal on the right compares as its contents. This is
+        // the spelling the flow docs show for a decision node, and it used to
+        // compare `active` against `'active'` (quotes included) and be false for
+        // every value of `status`.
+        expect(engine.evaluateCondition("{status} == 'active'", vars)).toBe(true);
+        expect(engine.evaluateCondition('{status} == "active"', vars)).toBe(true);
+        expect(engine.evaluateCondition("{status} == 'closed'", vars)).toBe(false);
+        expect(engine.evaluateCondition("{status} != 'closed'", vars)).toBe(true);
+    });
+});
+
+// ─── #4336: a bare-string condition is CEL, not a string compare ─────
+//
+// The reported defect: `evaluateCondition` branched on whether an `Expression`
+// envelope was present, so a condition authored as a plain string never reached
+// the CEL engine and both sides were compared as TEXT. Every case below is one
+// of the two failure directions from the issue (a gate that never opens, a
+// branch pinned open) or one of the two silent `false`s found afterwards.
+describe('AutomationEngine - bare-string conditions evaluate as CEL (#4336)', () => {
+    let engine: AutomationEngine;
+    beforeEach(() => { engine = new AutomationEngine(createTestLogger()); });
+
+    it('opens a null-check gate that used to be pinned shut', () => {
+        // `'existingTask' === 'null'` → false, forever. The flow selected its
+        // records, took no branch, and recorded `success`.
+        expect(engine.evaluateCondition('existingTask == null', new Map([['existingTask', null]]))).toBe(true);
+        expect(engine.evaluateCondition('existingTask == null', new Map([['existingTask', { id: 'a' }]]))).toBe(false);
+    });
+
+    it('gates a numeric comparison that used to be pinned open', () => {
+        // `'record.rating' >= '4'` → `'r' > '4'` → true for every record.
+        const low = new Map<string, unknown>([['record', { rating: 2 }]]);
+        const high = new Map<string, unknown>([['record', { rating: 5 }]]);
+        expect(engine.evaluateCondition('record.rating >= 4', high)).toBe(true);
+        expect(engine.evaluateCondition('record.rating >= 4', low)).toBe(false);
+    });
+
+    it('evaluates a bare truthy gate instead of answering false', () => {
+        // No comparison operator at all: the template path fell through to
+        // `Number('record.isActive')` → NaN → `false`.
+        expect(engine.evaluateCondition('record.isActive', new Map<string, unknown>([['record', { isActive: true }]]))).toBe(true);
+        expect(engine.evaluateCondition('record.isActive', new Map<string, unknown>([['record', { isActive: false }]]))).toBe(false);
+    });
+
+    it('resolves field access on an object variable — the get_record output shape', () => {
+        // `get_record`'s `outputVariable` stores the WHOLE record under one name,
+        // which is why the `{lead_record.status}` spelling can never resolve.
+        const vars = new Map<string, unknown>([['lead_record', { status: 'converted' }]]);
+        expect(engine.evaluateCondition("lead_record.status == 'converted'", vars)).toBe(true);
+        expect(engine.evaluateCondition("lead_record.status == 'new'", vars)).toBe(false);
+    });
+
+    it('refuses a brace-wrapped reference that resolves to nothing, naming it', () => {
+        const vars = new Map<string, unknown>([['lead_record', { status: 'converted' }]]);
+        // Silently false today even though the status IS 'converted'.
+        expect(() => engine.evaluateCondition("{lead_record.status} == 'converted'", vars))
+            .toThrow(/`\{lead_record\.status\}` did not resolve/);
+        expect(() => engine.evaluateCondition("{lead_record.status} == 'converted'", vars))
+            .toThrow(/Drop the braces/);
+        // Same for a brace-wrapped truthy gate.
+        expect(() => engine.evaluateCondition('{record.isActive}', new Map<string, unknown>([['record', { isActive: true }]])))
+            .toThrow(/did not resolve/);
+    });
+
+    it('refuses a template-dialect condition it cannot turn into a predicate', () => {
+        // `{status}` substitutes to `open` — not a boolean, not a number, and no
+        // operator to compare it with. That used to be `false`.
+        expect(() => engine.evaluateCondition('{status}', new Map([['status', 'open']])))
+            .toThrow(/is not a predicate/);
+        // A boolean or numeric value still reads as a gate.
+        expect(engine.evaluateCondition('{flag}', new Map([['flag', true]]))).toBe(true);
+        expect(engine.evaluateCondition('{flag}', new Map([['flag', false]]))).toBe(false);
+        expect(engine.evaluateCondition('{count}', new Map([['count', 3]]))).toBe(true);
+        expect(engine.evaluateCondition('{count}', new Map([['count', 0]]))).toBe(false);
+    });
+
+    it('does not mistake braces inside a string literal for a template hole', () => {
+        // `'{pending}'` is text the predicate compares AGAINST, not a reference to
+        // substitute. The dialect sniff reads the source outside string literals,
+        // so this stays CEL and compares the field.
+        expect(engine.evaluateCondition("record.label == '{pending}'",
+            new Map<string, unknown>([['record', { label: '{pending}' }]]))).toBe(true);
+        expect(engine.evaluateCondition("record.label == '{pending}'",
+            new Map<string, unknown>([['record', { label: 'pending' }]]))).toBe(false);
+    });
+
+    it('keeps braces inside an explicit CEL envelope a hard error', () => {
+        // The dialect sniff applies only where no dialect was stated. `dialect:
+        // 'cel'` is the author saying "this is CEL", where `{…}` is a map literal
+        // and the #1491 brace-trap.
+        expect(() => engine.evaluateCondition({ dialect: 'cel', source: '{record.rating} >= 4' },
+            new Map<string, unknown>([['record', { rating: 5 }]]))).toThrow(/source:/);
+    });
+
+    it('treats an absent or empty condition as no branch, not as a fault', () => {
+        // A `decision` entry with no `expression` is the one caller that does not
+        // pre-check; an unauthored branch must not open, and must not throw either.
+        expect(engine.evaluateCondition('', new Map())).toBe(false);
+        expect(engine.evaluateCondition('   ', new Map())).toBe(false);
+        expect(engine.evaluateCondition(undefined as unknown as string, new Map())).toBe(false);
     });
 });
 

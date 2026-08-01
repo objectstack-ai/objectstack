@@ -134,7 +134,10 @@ Batch operations support the following options:
 - `atomic`: If true, rollback entire batch on any failure (default: true).
 - `returnRecords`: If true, return full record data in response (default: false).
 - `continueOnError`: If true (and atomic=false), continue processing remaining records after errors.
-- `validateOnly`: If true, validate records without persisting changes (dry-run mode).
+
+> `validateOnly` was retired in #4052 — it was never implemented and batch surfaces persisted
+> regardless, so there is no batch dry-run today. Drop the key; see
+> `docs/protocol-upgrade-guide.md` (`batch-options-validate-only-retired`).
 
 ### Error Handling
 The client provides standardized error handling with machine-readable error codes:
