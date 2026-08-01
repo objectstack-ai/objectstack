@@ -27,10 +27,10 @@ import {
     type DroppedFieldsEvent, type QueryAST,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
-import { applyConversionsToStoredItem } from '@objectstack/spec';
+import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
-import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import {
     extractProtection,
     evaluateLockForWrite,
@@ -49,6 +49,11 @@ import {
     decorateMetadataItems,
     type MetadataDiagnostics,
 } from './metadata-diagnostics.js';
+import type {
+    StoredMigrationNotice,
+    StoredMigrationReport,
+    StoredMigrationRow,
+} from './stored-migration.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -1707,19 +1712,45 @@ export class ObjectStackProtocolImplementation implements
      */
     private convertStoredItem(type: string, data: unknown): unknown {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        if (singular === 'flow') return data;
-        return applyConversionsToStoredItem(singular, data, {
+        return this.convertStoredItemDetailed(type, data, (n) => {
+            const name = (data as { name?: unknown } | null | undefined)?.name;
+            const key = `${n.conversionId}|${singular}|${String(name ?? '')}`;
+            if (this.storedConversionWarned.has(key)) return;
+            this.storedConversionWarned.add(key);
+            console.warn(
+                `[Protocol] stored ${singular}/${String(name ?? '<unnamed>')} carries a pre-protocol shape; ` +
+                `${n.message} The row itself is unchanged — re-save it (Studio edit → save, or run ` +
+                `"os migrate meta --stored --apply") to persist the canonical shape.`,
+            );
+        }).item;
+    }
+
+    /**
+     * {@link convertStoredItem} with the chain's notices handed back instead of
+     * only logged — what {@link migrateStoredMetadata} reports per row (#4327).
+     *
+     * The notices ARE the change signal: a conversion emits exactly one per
+     * rewrite it performs (ADR-0087 D2 "loud"), so an empty list means the row
+     * is already canonical and there is nothing to persist. Comparing bodies
+     * instead would be weaker — the pass is copy-on-write, so an untouched
+     * branch is shared and a re-serialized identical body can still differ in
+     * key order.
+     */
+    private convertStoredItemDetailed(
+        type: string,
+        data: unknown,
+        onNotice?: (notice: ConversionNotice) => void,
+    ): { item: unknown; notices: ConversionNotice[] } {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (singular === 'flow') return { item: data, notices: [] };
+        const notices: ConversionNotice[] = [];
+        const item = applyConversionsToStoredItem(singular, data, {
             onNotice: (n) => {
-                const name = (data as { name?: unknown } | null | undefined)?.name;
-                const key = `${n.conversionId}|${singular}|${String(name ?? '')}`;
-                if (this.storedConversionWarned.has(key)) return;
-                this.storedConversionWarned.add(key);
-                console.warn(
-                    `[Protocol] stored ${singular}/${String(name ?? '<unnamed>')} carries a pre-protocol shape; ` +
-                    `${n.message} The row itself is unchanged — re-save it (Studio edit → save) to persist the canonical shape.`,
-                );
+                notices.push(n);
+                onNotice?.(n);
             },
         });
+        return { item, notices };
     }
 
     constructor(
@@ -5858,10 +5889,19 @@ export class ObjectStackProtocolImplementation implements
         return true;
     }
 
-    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null }) {
+    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string }) {
         if (!request.item) {
             throw new Error('Item data is required');
         }
+        // What the history row, the audit row and the watch event record as the
+        // origin of this write. Defaults to this method — the ordinary Studio /
+        // REST / SDK save. The only caller that overrides it is
+        // {@link migrateStoredMetadata} (`'migrate-stored'`), so an operator
+        // reading a diff can tell a canonicalization pass from an author's edit
+        // (#4327). NOT request-derived: the REST layer builds this request field
+        // by field and never forwards a client-supplied `source`, so provenance
+        // stays something the server states, not something a caller claims.
+        const writeSource = request.source ?? 'protocol.saveMetaItem';
         // Drop OUR OWN read decorations before anything reads the body (#4326).
         // The write path persists verbatim by design (ADR-0005 §Validation), so
         // the standard Studio round-trip — GET (decorated) → edit → PUT the whole
@@ -5924,7 +5964,7 @@ export class ObjectStackProtocolImplementation implements
                 ...(request.organizationId ? { organizationId: request.organizationId } : {}),
                 operation: 'save',
                 ...(request.actor ? { actor: request.actor } : {}),
-                source: 'protocol.saveMetaItem',
+                source: writeSource,
             });
             if (lockErr) throw lockErr;
         }
@@ -6182,7 +6222,7 @@ export class ObjectStackProtocolImplementation implements
                 const result = await repo.put(ref, request.item, {
                     parentVersion,
                     actor: request.actor ?? 'system',
-                    source: 'protocol.saveMetaItem',
+                    source: writeSource,
                     intent,
                     state: mode === 'draft' ? 'draft' : 'active',
                     ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
@@ -6205,7 +6245,7 @@ export class ObjectStackProtocolImplementation implements
                     outcome: 'allowed',
                     code: 'ok',
                     ...(request.actor ? { actor: request.actor } : {}),
-                    source: 'protocol.saveMetaItem',
+                    source: writeSource,
                     note: mode === 'draft' ? 'draft' : 'active',
                 });
                 // [ADR-0094] Awaited projection BEFORE the fire-and-forget
@@ -6342,6 +6382,205 @@ export class ObjectStackProtocolImplementation implements
             (err as any).status = 500;
             throw err;
         }
+    }
+
+    /**
+     * `os migrate meta --stored` — canonicalize `sys_metadata` rows in place so
+     * the read-path conversion chain has a finish line (#4327).
+     *
+     * #4317 made every stored-row rehydration seam replay the full ADR-0087
+     * chain, so a row written under any past protocol *reads* canonical forever
+     * ({@link convertStoredItem}). The rows themselves stayed legacy: the chain
+     * re-lowers them on every load and each one emits a conversion notice per
+     * process. This pass ends that for a deployment that runs it — same chain,
+     * same policy, result written back — while the read path stays the
+     * guarantee for every deployment that does not (#3855: operator-run
+     * migrations cannot be relied upon, so nothing here is load-bearing).
+     *
+     * ## What it walks
+     *
+     * `active` and `draft` rows, every org (the env-wide `organization_id IS
+     * NULL` bucket included). `archived` / `deprecated` rows are deliberately
+     * not read: they are not served metadata, and rewriting them would edit a
+     * record of what *was*. `sys_metadata_history` is untouched for the same
+     * reason the addendum gives — converting a version body would break the
+     * checksum↔body pairing.
+     *
+     * ## How it writes
+     *
+     * Through {@link saveMetaItem}, not the repository directly, so a rewritten
+     * row gets everything an author's save gets: the schema gate, a
+     * `sys_metadata_history` row, a fresh checksum, the mutation projectors and
+     * the watch event Studio's HMR consumes. Three deliberate arguments:
+     *
+     * - `parentVersion: row.checksum` — a true optimistic lock. A concurrent
+     *   writer that moved the row between our read and our write gets a 409,
+     *   reported as `failed`, never a clobber.
+     * - `force: true` — the destructive-change diff compares the *stored*
+     *   body (which `getMetaItem` already serves converted) against the body we
+     *   are about to write (the same conversion). It is empty by construction,
+     *   and there is no author here for a confirmation prompt to reach.
+     * - `source: 'migrate-stored'` — so a history diff distinguishes a
+     *   canonicalization pass from an edit someone made.
+     *
+     * ## What it declines to touch, and says so
+     *
+     * - **`flow` rows.** Flow-node conversions carry ADR-0078's open-namespace
+     *   conflict guard, which needs the automation engine's live executor
+     *   registry; this layer does not have it, so flows canonicalize at
+     *   `AutomationEngine.registerFlow` and are reported `skipped` here.
+     * - **Types with no repository write path** (neither `allowOrgOverride` nor
+     *   `allowRuntimeCreate`). `saveMetaItem` routes those down the legacy
+     *   raw-engine branch, which records no history and forces `state:
+     *   'active'` — a historyless rewrite that could also promote a draft is
+     *   not what this pass promises, so it declines instead.
+     * - **Rows that still fail the current schema after conversion.**
+     *   `saveMetaItem` rejects them (422) and that rejection is correct: the
+     *   body is a genuine contract violation, not chain-owned history. They
+     *   surface as `failed` with the validation message, keep reading through
+     *   the chain, and stay fixable in Studio.
+     */
+    async migrateStoredMetadata(request: {
+        /** Write. Omitted / false = preview: reports what it would do, writes nothing. */
+        apply?: boolean;
+        /** Restrict to these metadata types (singular or plural spelling). */
+        types?: string[];
+        /** Recorded as the writer on the history + audit rows. */
+        actor?: string;
+    } = {}): Promise<StoredMigrationReport> {
+        const apply = request.apply === true;
+        const typeFilter = request.types && request.types.length > 0
+            ? new Set(request.types.map((t) => PLURAL_TO_SINGULAR[t] ?? t))
+            : null;
+
+        const report: StoredMigrationReport = {
+            apply,
+            protocol: PROTOCOL_VERSION,
+            scanned: 0,
+            canonical: 0,
+            pending: 0,
+            rewritten: 0,
+            skipped: 0,
+            failed: 0,
+            rows: [],
+        };
+
+        // Two scoped queries rather than one unfiltered scan: `state` is an
+        // equality column and these are the only two states that are SERVED
+        // metadata. Archived bodies are never even read.
+        const rows: any[] = [];
+        for (const state of ['active', 'draft'] as const) {
+            rows.push(...await this.engine.find('sys_metadata', { where: { state } }));
+        }
+
+        for (const row of rows) {
+            const rawType = String(row.type ?? '');
+            const singular = PLURAL_TO_SINGULAR[rawType] ?? rawType;
+            if (typeFilter && !typeFilter.has(singular)) continue;
+            report.scanned++;
+
+            const state: 'active' | 'draft' = row.state === 'draft' ? 'draft' : 'active';
+            const organizationId: string | null = row.organization_id ?? null;
+            const packageId: string | null = row.package_id ?? null;
+            const base = {
+                id: String(row.id ?? ''),
+                type: singular,
+                name: String(row.name ?? ''),
+                organizationId,
+                packageId,
+                state,
+                notices: [] as StoredMigrationNotice[],
+            };
+            // An already-canonical row is counted, never itemised: on a healthy
+            // deployment that is every row, and a report listing all of them
+            // would bury the handful that actually need something.
+            const record = (entry: StoredMigrationRow): void => {
+                if (entry.outcome === 'canonical') {
+                    report.canonical++;
+                    return;
+                }
+                report[entry.outcome]++;
+                report.rows.push(entry);
+            };
+
+            let body: unknown;
+            try {
+                body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+            } catch (e: any) {
+                record({
+                    ...base,
+                    outcome: 'failed',
+                    reason: `the stored body is not valid JSON (${e?.message ?? String(e)})`,
+                });
+                continue;
+            }
+
+            if (singular === 'flow') {
+                record({
+                    ...base,
+                    outcome: 'skipped',
+                    reason: 'flows canonicalize at AutomationEngine.registerFlow — the node-type '
+                        + 'conflict guard needs the live executor registry this layer does not have',
+                });
+                continue;
+            }
+
+            const overlayAllowed = ObjectStackProtocolImplementation.isOverlayAllowed(singular);
+            const runtimeCreateAllowed = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singular);
+            if (!overlayAllowed && !runtimeCreateAllowed) {
+                record({
+                    ...base,
+                    outcome: 'skipped',
+                    reason: `type '${singular}' has no repository write path (allowOrgOverride and `
+                        + 'allowRuntimeCreate are both false), so a rewrite would record no history',
+                });
+                continue;
+            }
+
+            const { item, notices } = this.convertStoredItemDetailed(singular, body);
+            if (notices.length === 0) {
+                record({ ...base, outcome: 'canonical' });
+                continue;
+            }
+            const flattened: StoredMigrationNotice[] = notices.map((n) => ({
+                conversionId: n.conversionId,
+                surface: n.surface,
+                from: n.from,
+                to: n.to,
+                path: n.path,
+                message: n.message,
+            }));
+
+            if (!apply) {
+                record({ ...base, notices: flattened, outcome: 'pending' });
+                continue;
+            }
+
+            try {
+                await this.saveMetaItem({
+                    type: singular,
+                    name: base.name,
+                    item,
+                    mode: state === 'draft' ? 'draft' : 'publish',
+                    parentVersion: row.checksum ?? null,
+                    packageId,
+                    force: true,
+                    source: 'migrate-stored',
+                    actor: request.actor ?? 'migrate-stored',
+                    ...(organizationId ? { organizationId } : {}),
+                });
+                record({ ...base, notices: flattened, outcome: 'rewritten' });
+            } catch (e: any) {
+                record({
+                    ...base,
+                    notices: flattened,
+                    outcome: 'failed',
+                    reason: e?.message ?? String(e),
+                });
+            }
+        }
+
+        return report;
     }
 
     /**

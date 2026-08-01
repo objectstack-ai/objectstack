@@ -737,7 +737,17 @@ export const ListViewSchema = lazySchema(() => z.object({
   /** Row & Bulk Actions */
   rowActions: z.array(z.string()).optional().describe('Actions available for individual row items'),
   bulkActions: z.array(z.string()).optional().describe('Actions available when multiple rows are selected'),
-  bulkActionDefs: z.array(z.record(z.string(), z.any())).optional().describe('Rich bulk action definitions (schema-driven, executed via BulkActionDialog)'),
+  bulkActionDefs: z.array(z.record(z.string(), z.any())).optional().describe(
+    'Rich bulk action definitions (schema-driven, executed via BulkActionDialog). '
+    + "A `custom` def dispatches once per selected record by default; set `execution: 'aggregate'` "
+    + '(objectui#3139) to dispatch the named object action ONCE for the whole selection — the renderer '
+    + 'injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call '
+    + 'can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are '
+    + 'all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is '
+    + 'replaced by re-running the action. `batchSize` does not apply in aggregate mode; set `maxRecords` on '
+    + 'defs whose server work is expensive. Toolbar url/api actions can also interpolate the current '
+    + 'selection via `${ctx.selection.ids}` / `${ctx.selection.count}`.',
+  ),
 
   /** Performance */
   virtualScroll: z.boolean().optional().describe('Enable virtual scrolling for large datasets'),

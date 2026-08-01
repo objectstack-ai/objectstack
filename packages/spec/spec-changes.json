@@ -205,6 +205,12 @@
         "to": "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) and 'onTimeout' (removed — zero readers, so no timeout ever fired) (#4158)",
         "conversionId": "flow-node-wait-timeout-keys-removed",
         "toMajor": 17
+      },
+      {
+        "surface": "datasource.readReplicas",
+        "to": "datasource key 'readReplicas' removed (#4468 — no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
+        "conversionId": "datasource-read-replicas-removed",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -680,6 +686,12 @@
           "surface": "flow.node.waitEventConfig",
           "to": "waitEventConfig keys 'timeoutMs' (→ 'timerDuration', stringified — its only reader used it as the duration) and 'onTimeout' (removed — zero readers, so no timeout ever fired) (#4158)",
           "conversionId": "flow-node-wait-timeout-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "datasource.readReplicas",
+          "to": "datasource key 'readReplicas' removed (#4468 — no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
+          "conversionId": "datasource-read-replicas-removed",
           "toMajor": 17
         }
       ],

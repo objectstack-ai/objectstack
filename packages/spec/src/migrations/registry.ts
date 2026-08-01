@@ -528,7 +528,20 @@ const step17: MigrationStep = {
     + 'with `timerDuration` already set it is dropped, having been dead metadata. Like the other '
     + 'keys retired for MISDESCRIBING themselves rather than for being renamed, both leave the '
     + 'load path: absorbing them silently would let an author keep believing they configured a '
-    + 'timeout.',
+    + 'timeout.\n\n'
+    + 'Closing the same audit on the data side, `datasource.readReplicas` is removed (#4468). '
+    + 'It described replica connections nothing ever opened: `ConnectableDatasource` and '
+    + '`DatasourceConnectionSpec` carry no replicas field, the driver factory never reads the '
+    + 'key, and no query path distinguishes a read from a write — read/write splitting does not '
+    + 'exist in the platform, so every statement always went to the primary. A lossless delete '
+    + 'with no target to move to; front replicas behind one endpoint (pgpool, ProxySQL, an RDS '
+    + 'reader endpoint) and point `config` at it. Notable as the case that shows how a key gets '
+    + 'MORE convincing as it stays dead: #4410, closing the datasource-config gap, taught the '
+    + 'schema to validate each replica entry against the declared driver\'s config contract, so '
+    + 'sources written in between carry replica blocks that were genuinely checked — precise '
+    + 'hosts, correct port types, typos rejected. Precision applied to an inert slot reads as '
+    + 'evidence the slot is live, which is why ADR-0049 asks for a consumer rather than for '
+    + 'rigor. Retired from the load path with the rest of the keys that misdescribed themselves.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -553,6 +566,7 @@ const step17: MigrationStep = {
     'skill-trigger-phrases-removed',
     'stack-api-require-auth-removed',
     'flow-node-wait-timeout-keys-removed',
+    'datasource-read-replicas-removed',
   ],
   semantic: [
     {

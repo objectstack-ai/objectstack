@@ -2228,6 +2228,63 @@ const flowNodeWaitTimeoutKeysRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * `datasource.readReplicas` — replica connections nothing ever opened (#4468).
+ *
+ * A lossless delete, and an unusually clear one: read/write splitting does not
+ * exist anywhere in the platform. `ConnectableDatasource` and
+ * `DatasourceConnectionSpec` carry no replicas field, the driver factory never
+ * reads the key, and no query path distinguishes a read from a write — so every
+ * statement always went to the primary regardless of what was declared here.
+ *
+ * Retired from the load path like every other key retired for *lying* rather
+ * than for being renamed. The distinction the registry draws (see
+ * `flow-node-wait-timeout-keys-removed`): a merely renamed key keeps a load
+ * window, because punishing an author for a spelling nobody warned them about
+ * is pointless. A key that misdescribed itself does not — silently absorbing it
+ * would let the author keep believing they had configured replica reads.
+ *
+ * Worth recording *why* this needed a conversion at all rather than passing
+ * unnoticed: #4410 had just taught the schema to validate each entry against the
+ * declared driver's config contract. Sources written between #4410 and here
+ * carry replica blocks that were *checked* — precise host names, correct port
+ * types, no typos — which is exactly the shape an author trusts most. The
+ * notice is what tells them the well-formed thing they wrote was never wired to
+ * anything.
+ */
+const datasourceReadReplicasRemoved: MetadataConversion = {
+  id: 'datasource-read-replicas-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'datasource.readReplicas',
+  summary: "datasource key 'readReplicas' removed (#4468 — no driver opened a replica connection and no query path splits reads from writes; front replicas behind one endpoint and point `config` at it)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'datasources', (ds, path) => stripKeys(ds, ['readReplicas'], emit, path));
+  },
+  fixture: {
+    before: {
+      datasources: [{
+        name: 'warehouse',
+        driver: 'postgres',
+        config: { host: 'primary.internal', port: 5432, database: 'analytics' },
+        readReplicas: [
+          { host: 'replica-a.internal', port: 5432, database: 'analytics' },
+          { host: 'replica-b.internal', port: 5432, database: 'analytics' },
+        ],
+      }],
+    },
+    // One notice per datasource, not per replica: the key is what was removed.
+    after: {
+      datasources: [{
+        name: 'warehouse',
+        driver: 'postgres',
+        config: { host: 'primary.internal', port: 5432, database: 'analytics' },
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -2257,6 +2314,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     skillTriggerPhrasesRemoved,
     stackApiRequireAuthRemoved,
     flowNodeWaitTimeoutKeysRemoved,
+    datasourceReadReplicasRemoved,
   ],
 };
 

@@ -315,13 +315,18 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // spreading the body) keeps that unforgeable even if a caller invents
         // extra keys.
         //
-        // Two REFUSAL codes come back from the engine and are answered as such
+        // REFUSAL codes come back from the engine and are answered as such
         // rather than a 200 carrying `success: false` (which reads as "your
         // resume ran and the flow failed"):
-        //   forbidden      → 403, the suspension is service-owned (#3801)
-        //   invalid_signal → 400, the signal wrote the engine's `$` variable
-        //                    namespace (#3853 follow-up)
-        // Both are enforced in the ENGINE, at the one place a signal reaches the
+        //   PERMISSION_DENIED  → 403, the suspension is service-owned (#3801)
+        //   INVALID_SIGNAL     → 400, the signal wrote the engine's `$` variable
+        //                        namespace (#3853 follow-up)
+        //   RUN_NOT_FOUND      → 404, no such suspension — unresumable for good
+        //   STORE_UNAVAILABLE  → 503, the durable store is unreadable, so
+        //                        existence is unknown; the same call is expected
+        //                        to work once it recovers (#4420)
+        //   RESUME_IN_PROGRESS → 409, a concurrent resume already has this run
+        // All are enforced in the ENGINE, at the one place a signal reaches the
         // variable map — deliberately not re-implemented here. Guarding a field
         // at a time in the transport is what let `output` reopen the hole
         // `inputs` had just closed; every transport now inherits one rule.
@@ -339,6 +344,15 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 }
                 if (result?.success === false && result.code === 'INVALID_SIGNAL') {
                     return { handled: true, response: deps.error(result.error ?? 'Invalid resume signal', 400) };
+                }
+                if (result?.success === false && result.code === 'RUN_NOT_FOUND') {
+                    return { handled: true, response: deps.error(result.error ?? 'No such suspended run', 404) };
+                }
+                if (result?.success === false && result.code === 'STORE_UNAVAILABLE') {
+                    return { handled: true, response: deps.error(result.error ?? 'Suspended-run store unavailable', 503) };
+                }
+                if (result?.success === false && result.code === 'RESUME_IN_PROGRESS') {
+                    return { handled: true, response: deps.error(result.error ?? 'Run is already being resumed', 409) };
                 }
                 return { handled: true, response: deps.success(result) };
             }

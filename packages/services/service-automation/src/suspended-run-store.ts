@@ -211,6 +211,17 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
     }
   }
 
+  /**
+   * Read the backing table once so a misconfiguration surfaces at BOOT rather
+   * than as a per-suspend write failure nobody reads. Throws the driver error
+   * verbatim — `no such table: sys_automation_run` means the object was never
+   * registered (or its schema never synced), which is #4420: a durable store
+   * that silently persists nothing and zombifies every pause on restart.
+   */
+  async probe(): Promise<void> {
+    await this.engine.find(TABLE, { where: {}, limit: 1, context: SYSTEM_CTX });
+  }
+
   async load(runId: string): Promise<SuspendedRun | null> {
     const rows = await this.engine.find(TABLE, {
       where: { id: runId }, limit: 1, context: SYSTEM_CTX,

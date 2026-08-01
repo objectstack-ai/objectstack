@@ -164,6 +164,157 @@ describe('ObjectStoreSuspendedRunStore', () => {
     });
 });
 
+/** A flow that parks at `pause_node`, over an optional store. */
+function pausableEngine(store?: any, logger = createTestLogger()) {
+    const e = new AutomationEngine(logger, store);
+    e.registerNodeExecutor({
+        type: 'pause_node',
+        async execute() { return { success: true, suspend: true, correlation: 'areq_1' }; },
+    });
+    e.registerFlow('approval_flow', {
+        name: 'approval_flow', label: 'Approval Flow', type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'pause', type: 'pause_node', label: 'Approval' },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'pause' },
+            { id: 'e2', source: 'pause', target: 'end' },
+        ],
+    } as never);
+    return e;
+}
+
+/**
+ * Resume failure classification (#4420).
+ *
+ * A caller that persists its own decision BEFORE resuming — approvals does,
+ * necessarily — cannot act on a bare `success: false`. "This run is gone for
+ * good" and "the store is down, try again" need opposite remedies, and a
+ * duplicate resume is not a failure at all. All three used to read the same,
+ * and the approvals bridge answered every one of them with HTTP 200.
+ */
+describe('resume failure codes', () => {
+    it('reports RUN_NOT_FOUND for a run that does not exist', async () => {
+        const result = await pausableEngine().resume('run_never_existed');
+        expect(result.success).toBe(false);
+        expect(result.code).toBe('RUN_NOT_FOUND');
+    });
+
+    it('reports STORE_UNAVAILABLE — not RUN_NOT_FOUND — when the store cannot be read', async () => {
+        const table = createFakeEngine();
+        const paused = await pausableEngine(new ObjectStoreSuspendedRunStore(table, createTestLogger()))
+            .execute('approval_flow');
+
+        // A second process: nothing cached, and the table is unreachable. The
+        // run is perfectly alive — reading this as "gone" is what lets a caller
+        // strand it permanently over a transient outage.
+        const broken = createFakeEngine();
+        broken.find = async () => { throw new Error('connection refused'); };
+        const result = await pausableEngine(new ObjectStoreSuspendedRunStore(broken, createTestLogger()))
+            .resume(paused.runId!);
+
+        expect(result.success).toBe(false);
+        expect(result.code).toBe('STORE_UNAVAILABLE');
+        expect(result.error).toMatch(/retry once the store is available/);
+        // The suspension is not consumed, so the legitimate resume still lands.
+        expect(table.rows.get(paused.runId!)?.status).toBe('paused');
+    });
+
+    it('reports RESUME_IN_PROGRESS for a concurrent duplicate resume', async () => {
+        const e = pausableEngine();
+        let release: () => void = () => {};
+        const gate = new Promise<void>((r) => { release = r; });
+        e.registerNodeExecutor({
+            type: 'slow_node',
+            async execute() { await gate; return { success: true }; },
+        });
+        e.registerFlow('slow_flow', {
+            name: 'slow_flow', label: 'Slow Flow', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'pause', type: 'pause_node', label: 'Approval' },
+                { id: 'slow', type: 'slow_node', label: 'Slow' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'pause' },
+                { id: 'e2', source: 'pause', target: 'slow' },
+                { id: 'e3', source: 'slow', target: 'end' },
+            ],
+        } as never);
+        const paused = await e.execute('slow_flow');
+
+        const first = e.resume(paused.runId!);
+        const duplicate = await e.resume(paused.runId!);
+        expect(duplicate.success).toBe(false);
+        expect(duplicate.code).toBe('RESUME_IN_PROGRESS');
+
+        release();
+        expect((await first).success).toBe(true);
+    });
+
+    it('logs a failed durable write at ERROR — a pause kept only in memory is data loss in waiting', async () => {
+        const lines: { level: string; msg: string }[] = [];
+        const logger: any = {
+            info: (m: any) => lines.push({ level: 'info', msg: String(m) }),
+            warn: (m: any) => lines.push({ level: 'warn', msg: String(m) }),
+            error: (m: any) => lines.push({ level: 'error', msg: String(m) }),
+            debug: () => {},
+            child() { return logger; },
+        };
+        const broken = createFakeEngine();
+        broken.insert = async () => { throw new Error('no such table: sys_automation_run'); };
+        const paused = await pausableEngine(new ObjectStoreSuspendedRunStore(broken, logger), logger)
+            .execute('approval_flow');
+
+        expect(paused.status).toBe('paused'); // the run still pauses…
+        const errs = lines.filter(l => l.level === 'error').map(l => l.msg).join('\n');
+        expect(errs).toMatch(/no such table: sys_automation_run/);
+        expect(errs).toMatch(/NOT be resumable after a restart/);
+    });
+});
+
+/**
+ * `hasSuspendedRun` — the read approvals pre-flights a decision with, so a
+ * decision is never recorded against a run that can no longer advance.
+ */
+describe('hasSuspendedRun', () => {
+    it('sees a run suspended in this process', async () => {
+        const e = pausableEngine();
+        const paused = await e.execute('approval_flow');
+        expect(await e.hasSuspendedRun(paused.runId!)).toBe(true);
+        expect(await e.hasSuspendedRun('run_other')).toBe(false);
+    });
+
+    it('sees a run suspended by a PREVIOUS process, off the durable store', async () => {
+        const table = createFakeEngine();
+        const paused = await pausableEngine(new ObjectStoreSuspendedRunStore(table, createTestLogger()))
+            .execute('approval_flow');
+
+        // The case `getRun` cannot answer: no execution-log entry exists in
+        // this process, yet the run is alive and resumable.
+        const cold = pausableEngine(new ObjectStoreSuspendedRunStore(table, createTestLogger()));
+        expect(await cold.hasSuspendedRun(paused.runId!)).toBe(true);
+        expect(await cold.getRun(paused.runId!)).toBeNull();
+    });
+
+    it('throws rather than answering false when the store is unreadable', async () => {
+        const broken = createFakeEngine();
+        broken.find = async () => { throw new Error('connection refused'); };
+        const e = pausableEngine(new ObjectStoreSuspendedRunStore(broken, createTestLogger()));
+
+        // "Unknown" must not collapse into "gone" — a caller that treats an
+        // outage as a dead run rejects every decision in the tenant.
+        await expect(e.hasSuspendedRun('run_x')).rejects.toThrow(/connection refused/);
+    });
+
+    it('answers false with no store and nothing in memory', async () => {
+        expect(await pausableEngine().hasSuspendedRun('run_x')).toBe(false);
+    });
+});
+
 const terminalRecord = (n: number, overrides: Partial<RunRecord> = {}): RunRecord => ({
     runId: `r${n}`,
     flowName: 'busy_flow',

@@ -1,5 +1,5 @@
 {
-  "description": "Ratchet of every AUTHORABLE key in the spec — what a metadata author may write, which for this platform IS the third-party API. Auto-updated on additions (commit the change). A key that disappears without a tombstone fails gen:schema, because these schemas are not .strict() and Zod would silently strip it. \"[RETIRED]\" marks a tombstoned key that still rejects with an upgrade prescription. See #3855, ADR-0059 §5.",
+  "description": "Ratchet of every AUTHORABLE key in the spec \u2014 what a metadata author may write, which for this platform IS the third-party API. Auto-updated on additions (commit the change). A key that disappears without a tombstone fails gen:schema, because these schemas are not .strict() and Zod would silently strip it. \"[RETIRED]\" marks a tombstoned key that still rejects with an upgrade prescription. See #3855, ADR-0059 \u00a75.",
   "keys": [
     "ai/AIModelConfig:maxTokens",
     "ai/AIModelConfig:model",
@@ -3313,7 +3313,6 @@
     "data/Datasource:name",
     "data/Datasource:origin",
     "data/Datasource:pool",
-    "data/Datasource:readReplicas",
     "data/Datasource:retryPolicy",
     "data/Datasource:schemaMode",
     "data/Datasource:ssl",

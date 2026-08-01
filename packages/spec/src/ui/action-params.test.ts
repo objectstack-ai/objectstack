@@ -65,6 +65,19 @@ describe('validateActionParams (ADR-0104 D2)', () => {
     expect(ACTION_PARAM_BUILTIN_KEYS).toContain('objectName');
   });
 
+  it('allows the aggregate-dispatch key _selectedIds on a param-declaring action (objectui#3139)', () => {
+    // The renderer's aggregate bulk dispatch injects `_selectedIds` next to
+    // the user-collected params; strict mode must not 400 the whole call for
+    // a key the author can never declare.
+    const resolved: ResolvedActionParam[] = [{ name: 'format', type: 'text' }];
+    const issues = validateActionParams(resolved, {
+      format: 'png',
+      _selectedIds: ['dev_1', 'dev_2'],
+    });
+    expect(issues).toEqual([]);
+    expect(ACTION_PARAM_BUILTIN_KEYS).toContain('_selectedIds');
+  });
+
   it('leaves the value shape OPEN when the resolved type is unknown (field-backed param whose field is gone)', () => {
     const resolved: ResolvedActionParam[] = [{ name: 'freeform' /* no type */ }];
     expect(validateActionParams(resolved, { freeform: { anything: [1, 2, 3] } })).toEqual([]);
