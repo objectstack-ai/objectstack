@@ -468,7 +468,7 @@ POST /api/v1/automation/{flow}/runs/{runId}/resume
 | Pausing node | Suspends until… | Resumed by |
 | :--- | :--- | :--- |
 | `approval` | a human decision | the approvals service (`POST /api/v1/approvals/requests/:id/approve\|reject`) — resumes down the matching `approve` / `reject` edge. **Decide through the approvals API**; the resume route above **refuses** an approval pause outright (see below). |
-| `screen` | a user submits the form | the UI runner posting the collected `inputs`; a `paused` response carrying the next `screen` chains multi-step wizards under one stable `runId` |
+| `screen` | a user submits the form | the UI runner posting the collected `inputs` — **validated server-side against the screen's declared `fields`** (see below); a `paused` response carrying the next `screen` chains multi-step wizards under one stable `runId` |
 | `wait` (timer) | an ISO-8601 duration elapses | **automatically** — a one-shot job resumes the run; after a cold boot the engine re-arms pending timers from the durable store (overdue timers resume immediately) |
 | `wait` (signal) | a named external event | any caller invoking `resume(runId)` |
 
@@ -512,6 +512,48 @@ which for a map-parked run is the map node itself, i.e. the very same reserved
 key. A reserved name answers **400**, nothing is applied (not even legitimate
 keys sent alongside it), and the run stays parked. Ordinary author variables are
 unaffected, `$` mid-name (`price$`) included.
+
+### A `screen` resume is checked against the declared fields
+
+A screen node's `config.fields` is a **contract**, not just a rendering hint:
+the author declares which keys are collected, which are `required`, and — via
+`visibleWhen` — when a field is even asked for. `resume` enforces all of it
+server-side, so skipping the dialog and posting to the route directly is not a
+way around what the author declared:
+
+```
+POST /api/v1/automation/{flow}/runs/{runId}/resume
+{ "inputs": { "kind": "escalate" } }
+
+400  Invalid screen input: Screen field "escalation_reason" is required
+     — declared fields: 'kind', 'escalation_reason'
+```
+
+Two conditions are refused, both reported at once and both with
+`code: 'INVALID_SCREEN_INPUT'`:
+
+- a **`required` field the caller was actually asked for** is missing (an empty
+  or blank string counts as missing);
+- a key the screen **never declared** was sent.
+
+`visibleWhen` is evaluated against the **submitted values** first, so a hidden
+field's `required` never fires — enforcing it would dead-end the run at a field
+the user was never shown. A predicate that cannot be evaluated is treated as
+hidden (and logged), because the client is the authority on what was rendered.
+
+Like the `$`-namespace rule above, the refusal happens **before** the suspension
+is consumed: nothing is applied, the run stays parked, and the corrected
+submission still lands.
+
+Three shapes declare no contract and so keep the pass-through — the same way an
+action with no `params` is untouched:
+
+- an **object-form** screen (`config.objectName`), whose flat `fields` list is
+  empty by construction; the client persists the record through the normal write
+  path, which enforces that object's own `required` fields;
+- a **message-only** screen (`waitForInput: true` with no fields);
+- `signal.output`, which is the node-*output* namespace of the approval-style
+  resume envelope rather than the screen's collected-values channel.
 
 Registering a pausing node of your own? Declare `resumeAuthority: 'service'` on
 its descriptor when the decision to continue belongs to your service rather
