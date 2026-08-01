@@ -7,6 +7,8 @@ import { z } from 'zod';
  * Defines how the engine handles existing records when a seed is applied.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const SeedMode = z.enum([
   'insert',    // Try to insert, fail on duplicate
   'update',    // Only update found records, ignore new
@@ -28,7 +30,26 @@ export const SeedMode = z.enum([
  * its rows load when the draft is published. Named `Seed` (not `Dataset`) so
  * the `dataset` name stays reserved for the ADR-0021 analytics semantic layer.
  */
-export const SeedSchema = lazySchema(() => z.object({
+export const SeedSchema = lazySchema(() => strictObject({
+  surface: 'this seed',
+  history:
+    'Until #4001 these were dropped silently — the seed still applied, on the defaults '
+    + '(`mode: upsert`, `externalId: name`) rather than what was written.',
+  aliases: {
+    objectname: 'object',
+    target: 'object',
+    data: 'records',
+    rows: 'records',
+    values: 'records',
+    key: 'externalId',
+    externalkey: 'externalId',
+    naturalkey: 'externalId',
+    strategy: 'mode',
+    conflict: 'mode',
+    environment: 'env',
+    environments: 'env',
+  },
+}, {
   /**
    * Target Object
    * The machine name of the object to populate.
@@ -73,6 +94,16 @@ export const SeedSchema = lazySchema(() => z.object({
    * Array of raw JSON objects matching the Object Schema.
    */
   records: z.array(z.record(z.string(), z.unknown())).describe('Data records'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  // `seed` is a registered metadata type, so `MetadataPlugin`'s artifact loader
+  // stamps `_packageId` / `_provenance` on it like every sibling, and
+  // `getMetaItemLayered` → `saveMetaItem` round-trips a body carrying them.
+  // Undeclared, those were stripped on every parse — the same inverse drift
+  // that made `permission` 422 on the ADR-0094 overlay path when it went strict
+  // (#4001 findings log, entry 2). Declared here so closing the shape cannot
+  // repeat it.
+  ...MetadataProtectionFields,
 }));
 
 /** Parsed/output type — all defaults are applied (env, mode, externalId always present) */

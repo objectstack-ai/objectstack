@@ -108,8 +108,31 @@ export interface BootOptions {
    * nodes. Without this the dispatcher's automation routes resolve no `automation`
    * service and flow execution is unreachable. Opt-in (like `multiTenant`) so the
    * default boot stays lean for apps that don't exercise flows. Default `false`.
+   *
+   * Boots the plugin's OWN default (`suspendedRunStore: 'auto'` — persist to
+   * `sys_automation_run` when an ObjectQL engine is present), so this layer
+   * exercises the same assembly a real deployment gets. It used to hardcode
+   * `'memory'`, which made the durable path **structurally unreachable** from
+   * every dogfood/e2e fixture (#4470): engine-side persistence was unit-tested
+   * against a fake table and the approval chain was e2e-tested wholly in
+   * memory, while the ASSEMBLY between them — is the object registered, is the
+   * table created, is the store actually attached — was covered by nothing.
+   * #4420 grew in exactly that gap.
+   *
+   * Pass `{ suspendedRunStore: 'memory' }` to opt a fixture back out.
    */
-  automation?: boolean;
+  automation?: boolean | { suspendedRunStore?: 'auto' | 'memory' };
+  /**
+   * Back the in-process SQLite database with a FILE instead of `:memory:`.
+   *
+   * The default in-memory database dies with the kernel, which makes one
+   * question unaskable in this harness: does state written by one process
+   * survive into the next? Point two sequential `bootStack` calls at the same
+   * path and the second is a genuine COLD BOOT over the first's data — the
+   * restart a durable suspended run has to survive (ADR-0019). Callers own the
+   * file's lifetime (create it under a temp dir, delete it after).
+   */
+  databaseFile?: string;
   /**
    * Extra plugins to register between the app/service pairs and the
    * SecurityPlugin — the slot where `objectstack dev` auto-loads optional
@@ -163,7 +186,12 @@ export async function bootStack(
   // §Risk mitigation the ADR promised), not the legacy pre-built DriverPlugin
   // escape hatch.
   await kernel.use(new ObjectQLPlugin());
-  await kernel.use(new DefaultDatasourcePlugin({ driver: 'sqlite-wasm', config: { filename: ':memory:' } }));
+  await kernel.use(new DefaultDatasourcePlugin({
+    driver: 'sqlite-wasm',
+    // `opts.databaseFile` makes the database outlive the kernel, so a second
+    // boot over the same path is a real cold start (see BootOptions.databaseFile).
+    config: { filename: opts.databaseFile ?? ':memory:' },
+  }));
 
   // HTTP server (registers the `http-server` IHttpServer service the REST +
   // dispatcher plugins mount their routes onto). Port 0 = ephemeral; we never
@@ -248,11 +276,21 @@ export async function bootStack(
 
   // Automation service — opt-in. Registered before bootstrap so its start()
   // phase pulls the app's flows from the ObjectQL registry (populated by
-  // AppPlugin.init) and registers them. `memory` suspended-run store keeps the
-  // harness free of any manifest/persistence dependency for flow execution.
+  // AppPlugin.init) and registers them.
+  //
+  // #4470: this used to pin `suspendedRunStore: 'memory'`, which meant no
+  // dogfood/e2e fixture could reach the DB-backed suspended-run store even in
+  // principle — the ASSEMBLY (object registered? table created? store actually
+  // attached?) was the one layer neither the engine unit tests nor the
+  // approval e2e covered, and #4420 grew there. It now boots the plugin's own
+  // `'auto'` default, the same wiring `objectstack dev`/`serve` get, and a
+  // fixture that wants the old behaviour asks for it explicitly.
   if (opts.automation) {
     const { AutomationServicePlugin } = await import('@objectstack/service-automation');
-    await kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory' }));
+    const automationOpts = typeof opts.automation === 'object' ? opts.automation : {};
+    await kernel.use(new AutomationServicePlugin({
+      ...(automationOpts.suspendedRunStore ? { suspendedRunStore: automationOpts.suspendedRunStore } : {}),
+    }));
   }
 
   // Caller-supplied optional service pairs (see BootOptions.extraPlugins).

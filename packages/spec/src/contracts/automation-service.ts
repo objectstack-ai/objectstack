@@ -205,11 +205,20 @@ export interface AutomationResult {
      *    running; this duplicate was refused so side effects cannot run twice.
      *    A transport maps it to **409**. The other resume is doing the work,
      *    so callers should treat it as benign.
+     *  - `'INVALID_SCREEN_INPUT'` — the run is parked on a `screen` node and
+     *    the submitted bag violates that screen's declared field contract: a
+     *    `required` field the caller WAS asked for is missing, or a key the
+     *    screen never declared was sent (#4477). A transport maps it to
+     *    **400**. Distinct from `'INVALID_SIGNAL'`, which is about the
+     *    engine's own `$` variable namespace rather than the author's field
+     *    declarations. `visibleWhen` is evaluated against the submitted values
+     *    first, so a HIDDEN field's `required` never fires — enforcing it would
+     *    dead-end the run at a field the user was never shown (#3528).
      *
      * All of these refuse before consuming the suspension: the run stays parked
      * and the legitimate continuation still lands.
      */
-    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS';
+    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS' | 'INVALID_SCREEN_INPUT';
     /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be

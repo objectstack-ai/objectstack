@@ -25,7 +25,7 @@ export const SysApprovalAction = ObjectSchema.create({
   displayNameField: 'id',
   nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{action} · {step_name}',
-  highlightFields: ['request_id', 'step_name', 'action', 'actor_id', 'created_at'],
+  highlightFields: ['request_id', 'step_name', 'action', 'actor_id', 'via_override', 'created_at'],
 
   // ADR-0104 D3 wave 2. `attachments` is a media field, so the files it holds
   // are OWNED by this row — and the storage service would otherwise authorize
@@ -42,7 +42,7 @@ export const SysApprovalAction = ObjectSchema.create({
       name: 'recent',
       label: 'Recent',
       data: { provider: 'object', object: 'sys_approval_action' },
-      columns: ['created_at', 'request_id', 'step_name', 'action', 'actor_id', 'comment'],
+      columns: ['created_at', 'request_id', 'step_name', 'action', 'actor_id', 'via_override', 'comment'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
       emptyState: { title: 'No approval actions yet', message: 'Actions are logged automatically when approvals progress.' },
@@ -62,7 +62,7 @@ export const SysApprovalAction = ObjectSchema.create({
       name: 'all_actions',
       label: 'All',
       data: { provider: 'object', object: 'sys_approval_action' },
-      columns: ['created_at', 'request_id', 'step_name', 'action', 'actor_id', 'comment'],
+      columns: ['created_at', 'request_id', 'step_name', 'action', 'actor_id', 'via_override', 'comment'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 100 },
     },
@@ -118,6 +118,32 @@ export const SysApprovalAction = ObjectSchema.create({
     }),
 
     comment: Field.textarea({ label: 'Comment', required: false, group: 'Action' }),
+
+    // #4466 — the one bit of "who really decided this" that was still dropped.
+    // A privileged admin may act on a request whose staffed approver slate they
+    // hold no slot in (the #3424 override path); before this column, that
+    // decision was byte-for-byte identical to the designated approver's own
+    // approval. A reader of the timeline saw `approve` by the admin and could
+    // not tell whether the admin WAS an approver or OVERRODE the ones who were,
+    // and the bypassed approver's later `409 INVALID_STATE` was the only trace
+    // — existing only if they happened to try.
+    //
+    // The platform KNOWS at decision time: it took the `isOverrideActor` branch
+    // to admit the call at all. This is dropped information, not unavailable
+    // information.
+    //
+    // Set on exactly the decisions that were admitted BY that branch — an admin
+    // who is also a genuine slot holder is approving normally and is recorded
+    // as such. Nullable and additive: rows written before this column exists
+    // carry `null`, which reads as "not recorded", never as "not an override".
+    via_override: Field.boolean({
+      label: 'Via Admin Override',
+      required: false,
+      group: 'Action',
+      description:
+        'True when the actor was admitted to this action only by the privileged-override path (#3424) — '
+        + 'they held no slot in the request’s pending-approver slate.',
+    }),
 
     // Structured hand-off parties for `action: 'reassign'` (#4365). Before
     // these existed the pair lived only inside a default free-text comment

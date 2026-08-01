@@ -27,11 +27,11 @@ must explicitly `.strip()` back, because `.extend()` inherits `.strict()`.
 
 ## Standard wiring
 
-`strictUnknownKeyError` in `shared/suggestions.zod.ts` (generalized from the
-#3746 hand-rolled map) is the one factory every strict authoring schema wires:
+`strictObject` in `shared/strict-object.ts` is the one call a strict authoring
+schema needs:
 
 ```ts
-z.object({ ... }, { error: strictUnknownKeyError({ surface, knownKeys, aliases, guidance, history }) }).strict()
+lazySchema(() => strictObject({ surface, history, aliases?, guidance? }, { ...shape }))
 ```
 
 - `aliases` — semantic near-misses edit distance cannot reach (`visibleWhen` →
@@ -40,8 +40,24 @@ z.object({ ... }, { error: strictUnknownKeyError({ surface, knownKeys, aliases, 
   rejection carries the upgrade — AGENTS.md Post-Task Checklist #3) and
   wrong-layer pointers (`apiOperations` is response-side; `objectName` belongs
   on the start node).
-- Key lists live beside the schema and are **drift-guarded by tests** (an
-  "accepts every declared key" probe), because the schema body is lazy.
+- **Both are optional.** A schema with neither still names the surface, echoes
+  the offending key, and suggests the closest declared one. Curation is an
+  upgrade, not a precondition — and treating it as a precondition is part of
+  why this ratchet moved as slowly as it did.
+
+**No key list, and no drift probe.** Earlier steps hand-transcribed a
+`const X_KEYS = [...] as const` beside each schema and pinned it with an
+"accepts every declared key" test, because the schema body is lazy. That was 34
+key arrays and 16 probe files with most of the surface still ahead — and it was
+never necessary: `knownKeys` feeds only the edit-distance fallback, and the
+shape object is right there at the call site. `strictObject` reads the keys from
+`shape`, so the two copies become one and the probe has nothing left to catch.
+`extraKeys` covers the one case the shape cannot see: a base `.extend()`ed
+elsewhere.
+
+`strictUnknownKeyError` stays exported for the schemas that cannot use the
+helper — notably `z.lazy()` discriminated unions, whose variants each need
+their own key set.
 
 Every ratchet step ships only with the empirical zero-breakage pass: full
 `@objectstack/spec` suite + `tsc`, downstream consumer suites, and
@@ -128,6 +144,34 @@ dropped at parse, and nothing failed.
    `password` / `authSource` / `options` were **wired**, having been declared
    and dropped on the floor. Enforcing a contract and honouring it are the same
    task from two directions.
+8. **Three more registered types could not represent their own ADR-0010
+   protection envelope** — `seed`, `doc` and `validation`, found by applying the
+   registered-type lens above. Exactly the gap that made `permission` return a
+   hard 422 on the ADR-0094 overlay path (entry 2) and that `position` carried
+   until step 2: `MetadataPlugin`'s artifact loader stamps `_packageId` /
+   `_provenance` on **every** registered type, and `getMetaItemLayered` →
+   `saveMetaItem` round-trips a body carrying them, so an undeclared envelope was
+   stripped on every parse. Declared on `seed` and `doc` as part of closing them;
+   `validation` still carries it (its union shape defers the conversion).
+
+   Worth noting how it kept recurring: this was the **fourth** occurrence of one
+   defect, found four times by four different routes, because nothing checked
+   the invariant directly. So it is checked now —
+   `kernel/metadata-type-schemas.test.ts` asserts it over the whole registry.
+
+   **It found two more on its first run.** `hook` and `datasource` had both gone
+   `.strict()` in the #4001 data step *without* declaring the envelope, so both
+   were in the worst class — rejecting their own loader's output, a live hard 422
+   on the ADR-0094 overlay path, sitting on `main`. Three prior hand-searches for
+   exactly this defect had walked past them. That is the argument for writing the
+   check in one line: **finding the same defect repeatedly by hand is evidence
+   the check is missing, not evidence the search worked.**
+
+   The check separates the two severities, because they are not the same bug:
+   *rejecting* the envelope is live breakage and is asserted unconditionally with
+   no exemption list; *stripping* it silently loses protection metadata on
+   round-trip and is tracked with a debt list (`field` only) — and each entry
+   there becomes a rejection the day its schema is closed.
 
 This is the empirical argument for the ratchet: the inference "no metadata in
 the repo carries unknown keys" was **false three times over**, and only the
@@ -151,7 +195,7 @@ block) when `position` joined the ratchet.
 
 ## File-level triage — the five authorable directories
 
-Site counts are `z.object(` occurrences per file (2026-07-30, this branch).
+Site counts are object sites — `z.object(` or `strictObject(` — per file (2026-07-30, this branch).
 Classification is per the rule above; **(p)** marks a provisional call made
 from the file's exports/JSDoc rather than a full read — verify before
 tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
@@ -278,6 +322,20 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
    downstream risk is the lowest on the board); it is simply unstarted. If the
    step-1 question comes back "nothing is reporting", start here instead.
 
+Done in the registered-types batch: `strictObject` (`shared/strict-object.ts`)
+replaced the four-part wiring recipe, and `seed` + `doc` became the first two
+conversions built on it — chosen by the registered-type lens above rather than
+by directory, so both are provably parsed as well as provably authored. Both
+also had to declare the ADR-0010 envelope, and the invariant test written in the
+same pass found `hook` and `datasource` rejecting it outright on `main`
+(findings log, entry 8). The ledger's site-counting method grew `strictObject(`
+in the same change, because the gate failed on the first conversion when it did
+not.
+
+Deferred from that batch: `validation` — a `z.lazy()` discriminated union whose
+variants `.extend()` a shared base, so each variant needs its own key set rather
+than one `strictObject` call. It still carries the envelope gap.
+
 Done in step 2: `security/rls.zod.ts` + `security/sharing.zod.ts` strict;
 `PositionSchema` strict with the protection envelope declared (closing the
 known sibling gap below).
@@ -356,10 +414,15 @@ the app step's `ACCOUNT_APP.defaultOpen` came from exactly this class of check.
 Liveness Check workflow) holds the two claims here that are mechanically
 checkable, so this map cannot go stale in silence again:
 
-- **Site counts.** The method is stated above — `z.object(` occurrences per file
-  — so every number in the triage tables is verifiable. A count that no longer
-  matches means schemas were added or removed under a `Class` verdict nobody
-  re-examined. Touching a file forces you back through this ledger.
+- **Site counts.** The method is stated above — `z.object(` or `strictObject(`
+  occurrences per file — so every number in the triage tables is verifiable. A
+  count that no longer matches means schemas were added or removed under a
+  `Class` verdict nobody re-examined. Touching a file forces you back through
+  this ledger. `strictObject(` had to join the count the moment the helper
+  existed: counting only `z.object(` would have made every conversion look like
+  surface *disappearing*, so "this directory got solved" and "this directory got
+  deleted" would produce the same number. The gate caught that itself on the
+  first conversion.
 - **Coverage.** Every `*.zod.ts` in a triaged directory that HAS sites must have
   a row. A new one is undeclared surface. The walk is **recursive**; nested files
   are declared by their path relative to the section directory

@@ -185,6 +185,12 @@ export class ApprovalsServicePlugin implements Plugin {
           const results = await Promise.allSettled([
             svc.runEscalations(),
             svc.releaseDeadRunRequests(),
+            // #4469 — the other half of the dead-run picture, and the one no
+            // sweeper could see: a request already TERMINAL whose run is gone.
+            // Read-only by design (it reports; it never rewrites a decision
+            // that really happened), so it rides the same clock purely to make
+            // the finding surface without an operator knowing to go looking.
+            svc.inspectStrandedRequests(),
           ]);
           for (const r of results) {
             if (r.status === 'rejected') {

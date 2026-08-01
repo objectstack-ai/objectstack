@@ -9,6 +9,7 @@ import { z } from 'zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { validateDriverConfig } from './driver/config-registry.zod';
 
 /*
@@ -611,6 +612,15 @@ export const DatasourceSchema = lazySchema(() => z.object({
    */
   origin: z.enum(['code', 'runtime']).default('code')
     .describe('Datasource provenance (server-managed, read-only)'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  // MISSING until the registered-type invariant test was written: `datasource`
+  // closed strict in the #4001 data step without declaring it, so the
+  // `_packageId` / `_provenance` that `MetadataPlugin` stamps on every
+  // registered type were REJECTED here. Same live defect as `hook`, and the
+  // same one `permission` hit as a 422 on the ADR-0094 overlay path before
+  // Tier-A declared them (#4001 findings log, entries 2/8).
+  ...MetadataProtectionFields,
 }, { error: datasourceUnknownKeyError }).strict().superRefine((ds, ctx) => {
   // The `config` gate (#4410). `config` is parsed against the contract for the
   // declared driver and every issue is re-pathed under the slot it came from —

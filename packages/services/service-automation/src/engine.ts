@@ -9,8 +9,14 @@ import type {
     FlowFunctionEffect,
     FlowRunSummary,
 } from '@objectstack/spec/automation';
-import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, ScreenSpec } from '@objectstack/spec/contracts';
+import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, ScreenSpec, ScreenFieldSpec } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
+import {
+    validateScreenInputs,
+    screenDeclaresInputContract,
+    declaredScreenFieldNames,
+    type ScreenFieldVisibility,
+} from './screen-input-contract.js';
 import type { Logger } from '@objectstack/spec/contracts';
 import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, normalizeControlFlowRegions, collectFlowGraphs, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
 import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
@@ -2742,6 +2748,17 @@ export class AutomationEngine implements IAutomationService {
                 }
             }
 
+            // The SCREEN contract (#4477). A run parked on a `screen` node
+            // declared exactly which keys it collects and which are required;
+            // until this ran, `resume` folded any bag at all straight into the
+            // variables, so a caller that skipped the dialog bypassed every
+            // `required` the author wrote. Checked here — beside the engine's
+            // other resume refusals and BEFORE the suspension is consumed — so
+            // a rejected bag leaves the pause live and the legitimate
+            // submission still lands.
+            const screenRefusal = this.refuseInvalidScreenInput(run, runId, signal);
+            if (screenRefusal) return screenRefusal;
+
             // Restore the variable context and fold the signal in — the ONE
             // place a resume signal reaches the variable map. Runs BEFORE the
             // suspension is consumed, so a rejected signal changes nothing:
@@ -2896,6 +2913,89 @@ export class AutomationEngine implements IAutomationService {
         } finally {
             this.resuming.delete(runId);
         }
+    }
+
+    /**
+     * Enforce a suspended `screen` node's declared field contract against the
+     * submitted bag, returning a refusal or `null` to allow (#4477).
+     *
+     * The render half of `screen` always worked — the trigger response and
+     * `GET …/runs/:runId/screen` carry `required` and `visibleWhen` intact, so
+     * a renderer had everything it needed. There was no validation half:
+     * `resume` accepted `{}` on a screen with an unconditional `required`
+     * field, accepted a visible conditional field's value being absent, and
+     * accepted keys the screen never declared — every one of them completing
+     * the run. A client that skipped the dialog and posted here directly was
+     * unconstrained by anything the flow author wrote.
+     *
+     * Scope, and the reasons for each edge:
+     *
+     *  - **Only `signal.variables`.** That is the screen's collected-values
+     *    channel (the executor surfaces `fields`, the runner posts `inputs`).
+     *    `signal.output` is the node-OUTPUT namespace, lands under
+     *    `${nodeId}.${key}`, and belongs to the approval-style resume envelope
+     *    — a different contract, not this one's to police.
+     *  - **Only a screen that declares fields** — see
+     *    {@link screenDeclaresInputContract}. An object-form screen and a
+     *    message-only screen declare no keys, so they constrain none (the same
+     *    pass-through `enforceActionParams` gives a param-less action).
+     *  - **Never an engine-built signal.** The subflow output mapping and the
+     *    `map` item handoff are the engine's own continuations; they carry
+     *    author-named output variables, not a screen submission.
+     *
+     * `visibleWhen` is evaluated against the SUBMITTED values first (layered
+     * over the run's variables, so a predicate may reference a prior node),
+     * because a hidden field's `required` must not fire — that is #3528's
+     * dead-end reproduced server-side. An unevaluable predicate is reported and
+     * treated as hidden: the client decides what the user saw, and a broken
+     * predicate is not evidence a field was shown.
+     */
+    private refuseInvalidScreenInput(
+        run: SuspendedRun,
+        runId: string,
+        signal: ResumeSignal | undefined,
+    ): AutomationResult | null {
+        if (!signal) return null;
+        if ((signal as Record<symbol, unknown>)[ENGINE_BUILT_SIGNAL] === true) return null;
+        if (!screenDeclaresInputContract(run.screen)) return null;
+        const fields = run.screen!.fields;
+
+        const bag = (signal.variables ?? {}) as Record<string, unknown>;
+        // Submitted values win over the snapshot: the predicate is about what
+        // the user is filling in NOW, and the run's variables only supply the
+        // wider context a `visibleWhen` may legitimately reference.
+        const scope = new Map<string, unknown>(Object.entries(run.variables));
+        for (const [k, v] of Object.entries(bag)) scope.set(k, v);
+
+        const visibility = (field: ScreenFieldSpec): ScreenFieldVisibility => {
+            try {
+                return this.evaluateCondition(String(field.visibleWhen), scope);
+            } catch (err) {
+                this.logger.warn(
+                    `[automation] run '${runId}': screen field '${field.name}' has a visibleWhen that could not be ` +
+                        `evaluated (\`${field.visibleWhen}\`: ${(err as Error)?.message}) — its \`required\` is not ` +
+                        `enforced for this submission`,
+                );
+                return undefined;
+            }
+        };
+
+        const issues = validateScreenInputs(fields, bag, visibility);
+        if (!issues.length) return null;
+
+        const declared = declaredScreenFieldNames(fields);
+        const summary = issues.map((i) => i.message).join('; ');
+        this.logger.warn(
+            `[automation] refused resume of run '${runId}': screen '${run.nodeId}' input violates its declared ` +
+                `field contract — ${summary}`,
+        );
+        return {
+            success: false,
+            code: 'INVALID_SCREEN_INPUT',
+            error:
+                `Invalid screen input: ${summary} — declared fields: ` +
+                `${declared.map((n) => `'${n}'`).join(', ') || '(none)'}`,
+        };
     }
 
     /**

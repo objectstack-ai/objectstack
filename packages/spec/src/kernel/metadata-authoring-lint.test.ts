@@ -31,7 +31,13 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // #4148 covered object+field: 2 surfaces. The point of this walker is the
     // rest. If the derivation regresses to a handful, the "evidence base" for
     // the #4001 strict tiers quietly becomes a sample again.
-    expect(lintables.length).toBeGreaterThanOrEqual(14);
+    //
+    // This floor RATCHETS DOWN as #4001 advances — every graduation moves a type
+    // from "lint warns" to "parse rejects", which is the campaign succeeding, not
+    // coverage rotting. Lower it only after confirming the shrink against the
+    // list below; that confirmation is the whole point of pinning a number here.
+    // 15 → 13 when `seed` + `doc` graduated (#4001 registered-types batch).
+    expect(lintables.length).toBeGreaterThanOrEqual(13);
     // `view` matters doubly: it is a UNION (container | ViewItem | overlay), so
     // its presence pins the union half of the posture logic — a regression that
     // silently dropped unions would shrink coverage without failing the count.
@@ -50,7 +56,12 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // count fell 16 → 14 and the pin above failed until both were confirmed
     // graduations and moved into this list. `hook` also had to leave the
     // pinned-coverage list above, where it had been an expected lint target.
-    for (const strict of ['flow', 'permission', 'position', 'tool', 'app', 'hook', 'datasource']) {
+    // It did it a third time for `seed` + `doc`, the first two conversions built
+    // on `strictObject` — which also proved the posture derivation reads a
+    // helper-built `.strict()` exactly like a hand-wired one.
+    for (const strict of [
+      'flow', 'permission', 'position', 'tool', 'app', 'hook', 'datasource', 'seed', 'doc',
+    ]) {
       expect(lintableTypes, `'${strict}' is .strict(); the lint must not double-report`).not.toContain(strict);
     }
   });
