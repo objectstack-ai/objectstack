@@ -809,9 +809,21 @@ counting as done:
 
 | Not rewritten | Why |
 | :--- | :--- |
-| `flow` rows | Flow-node conversions carry a conflict guard that needs the automation engine's live executor registry; flows canonicalize at their own seam when the engine loads them |
 | Types with no repository write path (`agent`) | Their write path records no history and would force a draft live — a half-write is worse than leaving the row to the read path |
 | Rows that still fail the current schema after conversion | That is a genuine contract violation, not chain-owned history. The write path's rejection is correct; fix the row in Studio |
+| A flow whose rename the conflict guard refused | The old node-type token is a live name something else owns here. Rewriting would clobber that owner, so the row fails loudly naming the token — never a silent skip |
+
+**Flows are covered, and cost one extra plugin.** Flow-node conversions carry an
+open-namespace conflict guard that has to consult the *live* executor registry
+to tell a rename from a clobber, so this run boots the automation engine — in an
+inert mode that installs the node registry and then arms nothing: no flow
+registered, no record trigger or scheduled job bound, no connector
+materialized, no suspended run resumed. A migration process must not become a
+second server. What gets written back for a flow is the conversion result plus
+the `condition` envelopes the schema derives, and deliberately **not** the
+schema's defaults (`version`, `runAs`, per-edge `type`) — persisting a default
+the author never wrote would pin that row to today's value while untouched rows
+follow tomorrow's, which is the drift this command exists to remove.
 
 <Callout type="warn">
 `--apply` is the only writing mode, and it rewrites **metadata** — each affected

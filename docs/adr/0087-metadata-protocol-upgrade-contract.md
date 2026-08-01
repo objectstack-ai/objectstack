@@ -450,10 +450,40 @@ writing mode.
   never rewritten. Canonicalizing a past version's body would break the
   checksum↔body pairing this contract depends on — the migration is a new
   commit, not a rewrite of history.
-- **What the pass does not cover, it names.** Flows (their seam is
-  `AutomationEngine.registerFlow`, which holds the executor registry the
-  conflict guard needs) and types with no repository write path are reported as
-  `skipped` with the reason, never counted as done. Giving flows the same finish
-  line needs a canonicalization entry point on the automation engine — tracked
-  as #4454, and worth doing precisely because the graduated flow-node
-  conversions are where the most stored dialect lives.
+- **What the pass does not cover, it names.** Types with no repository write
+  path are reported as `skipped` with the reason, never counted as done.
+
+## Addendum (2026-08-01b) — flows reach the finish line too (#4454)
+
+The pass above initially skipped `flow` rows, which was the largest hole in it:
+the graduated flow-node conversions are where the most stored dialect lives.
+Closing it needed three decisions.
+
+- **One canonicalization policy, two shapes.**
+  `AutomationEngine.canonicalizeStoredFlow` is now the single implementation and
+  `registerFlow` calls it, so the load seam and the migration cannot disagree
+  about what canonical means. It returns `parsed` (for execution — schema
+  defaults materialized) and `storable` (for persistence).
+- **`storable` excludes schema defaults, and this is load-bearing.** Measured,
+  not assumed: driving a pre-17 flow through parse + the region pass *removes*
+  nothing (`FlowSchema` is strict since #4001 — an unknown key throws rather
+  than being dropped, so the `graftNormalizedOperators` precedent does not
+  transfer) and *adds* only defaults: `version`, `runAs`, per-edge `type` /
+  `isDefault`. Persisting a default the author never wrote would pin every
+  migrated row to today's value while untouched rows follow tomorrow's — two
+  populations with different behaviour, which is the drift this pass exists to
+  remove. So the write-back is conversions plus the schema's `condition`
+  envelopes, and nothing else.
+- **The engine is borrowed, not started.** `AutomationServicePlugin` gains
+  `armRuntime: false`: built-in nodes installed and `automation:ready` fired
+  (the registry must be COMPLETE, or the conflict guard reads a live custom node
+  type as unowned and rewrites over it), then a hard stop before anything is
+  armed — no flow registered, no trigger or schedule bound, no connector
+  materialized, no suspended run resumed. `registerFlow` arms triggers as a side
+  effect, so skipping only the boot pull would not have been enough; the
+  `kernel:ready` and `metadata:reloaded` re-syncs are skipped for the same
+  reason. A migration process must not become a second server.
+
+A refused rename — the guard firing because the old token is a live name owned
+by something else — fails that row loudly with the token and its owner. Never a
+silent skip, never a clobber; that is the whole reason the guard exists.

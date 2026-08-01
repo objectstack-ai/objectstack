@@ -24,11 +24,27 @@ import { resolveStorageCapabilityArg } from '../commands/serve.js';
  *    where the server would.
  */
 export async function buildDataMigrationPlugins(
-  opts: { storage?: boolean } = {},
+  opts: { storage?: boolean; automation?: boolean } = {},
 ): Promise<unknown[]> {
   const plugins: unknown[] = [];
   const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
   plugins.push(new PlatformObjectsPlugin());
+  if (opts.automation === true) {
+    // `os migrate meta --stored` needs the automation ENGINE, never the
+    // automation RUNTIME (#4454). Flow-node conversions carry ADR-0078's
+    // open-namespace conflict guard, which consults the live executor registry
+    // to tell a rename from a clobber — and only this plugin has that registry.
+    //
+    // `armRuntime: false` is what makes taking it safe: the engine and the full
+    // node registry come up (built-ins plus whatever `automation:ready`
+    // contributes, because a PARTIAL registry would make the guard rewrite over
+    // a live custom node type instead of refusing), and then nothing is armed —
+    // no flow registered, no record trigger or scheduled job bound, no
+    // declarative connector materialized, no suspended run resumed. A migration
+    // process must not become a second server.
+    const { AutomationServicePlugin } = await import('@objectstack/service-automation');
+    plugins.push(new AutomationServicePlugin({ armRuntime: false, suspendedRunStore: 'memory' }));
+  }
   if (opts.storage === true) {
     try {
       const { SettingsServicePlugin } = await import('@objectstack/service-settings');
