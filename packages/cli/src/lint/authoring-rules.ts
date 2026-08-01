@@ -419,8 +419,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     run: (stack) => validateVisibilityPredicates(stack),
   },
   // #1874 — flow authoring anti-patterns. Advisory by default; a finding marked
-  // `error` gates (#3760 promoted `flow-runas-unscoped`, which flags metadata
-  // the runtime now REFUSES to execute).
+  // `error` gates. Three do today: `flow-runas-unscoped` (#3760 — metadata the
+  // runtime REFUSES to execute), plus `flow-branch-label-unmatched` and
+  // `flow-default-edge-with-condition` (#4414 — a declaration that is inert, so
+  // the route silently differs from what the author wrote). The bar for
+  // promoting one is stated at the top of `lint-flow-patterns.ts`.
   {
     name: 'lintFlowPatterns',
     tier: 'gating',
