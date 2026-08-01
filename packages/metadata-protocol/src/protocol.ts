@@ -315,6 +315,34 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
 }
 
 /**
+ * [#4435] The 404 a single-record operation answers when the id names no row.
+ *
+ * Extracted so the READ and the two WRITE paths cannot disagree about it. They
+ * did: `getData` answered `404 RECORD_NOT_FOUND` while `updateData` returned
+ * `200 { record: null }` and `deleteData` returned `200 { success: true }` for
+ * any string in the path — so a typo'd id, an already-deleted row and a real
+ * deletion were indistinguishable, and a client PATCHing a concurrently deleted
+ * record was told its write had landed.
+ *
+ * That is the same silent-no-op shape the v17 train removed everywhere else
+ * this window (#4240/#4303/#4315 refuse missing fields, #4169 refuses unknown
+ * params, #4190 stopped dropping filters) — a write that touched zero rows
+ * reporting 200 is that shape one level up, on the verb where it costs the
+ * most.
+ */
+function recordNotFoundError(object: string, id: string | number): Error {
+    const err = new Error(`Record ${id} not found in ${object}`) as Error & {
+        code?: string;
+        status?: number;
+        object?: string;
+    };
+    err.code = 'RECORD_NOT_FOUND';
+    err.status = 404;
+    err.object = object;
+    return err;
+}
+
+/**
  * A 400 for a `$filter` ARRAY that looks like a filter AST but is not one.
  *
  * The message has to be *actionable from the request*, which is the whole point
@@ -4602,15 +4630,7 @@ export class ObjectStackProtocolImplementation implements
                 record: result
             };
         }
-        const err = new Error(`Record ${request.id} not found in ${request.object}`) as Error & {
-            code?: string;
-            status?: number;
-            object?: string;
-        };
-        err.code = 'RECORD_NOT_FOUND';
-        err.status = 404;
-        err.object = request.object;
-        throw err;
+        throw recordNotFoundError(request.object, request.id);
     }
 
     async createData(request: { object: string, data: any, context?: any }) {
@@ -4679,13 +4699,7 @@ export class ObjectStackProtocolImplementation implements
             request.object,
             { where: { id: request.id }, ...(ctxOpt as any) } as any,
         );
-        if (!source) {
-            const err: any = new Error(`Record ${request.id} not found in ${request.object}`);
-            err.code = 'RECORD_NOT_FOUND';
-            err.status = 404;
-            err.object = request.object;
-            throw err;
-        }
+        if (!source) throw recordNotFoundError(request.object, request.id);
 
         // Copy the source, then strip the columns the engine owns so the insert
         // path re-derives them rather than carrying the source's values over.
@@ -4726,6 +4740,20 @@ export class ObjectStackProtocolImplementation implements
     async updateData(request: { object: string, id: string, data: any, expectedVersion?: string, context?: any }) {
         this.assertObjectRegistered(request.object); // [#3770]
         await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
+        // [#4435] A PATCH of an id that names no row answered `200 { record:
+        // null }` — the caller had to null-check a SUCCESS payload to discover
+        // its write never landed, which is exactly what a client that PATCHes a
+        // concurrently deleted record does not do. `getData` has always answered
+        // 404 for the same id; the two verbs now agree.
+        //
+        // Checked BEFORE the write rather than by inspecting what comes back:
+        // the engine's update returns the post-write READBACK, which is also
+        // `null` when the row still exists but the write moved it out of the
+        // caller's row scope (reassigning `owner_id` away from yourself under an
+        // owner-scoped RLS policy). Reading that as "not found" would answer 404
+        // to a write that succeeded. Existence is the question, so ask it
+        // directly — the same `findOne` + context `getData` asks.
+        await this.assertRecordExists(request.object, request.id, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
         // [#3407/#3431] Capture the engine's LEGAL write strips (static `readonly`
@@ -4750,12 +4778,41 @@ export class ObjectStackProtocolImplementation implements
         await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
-        await this.engine.delete(request.object, opts);
+        const deleted = await this.engine.delete(request.object, opts);
+        // [#4435] `success: true` used to be a LITERAL — the response said the
+        // same thing for a real deletion, an already-deleted row and a typo'd
+        // id, so nothing on the wire could tell them apart. The driver contract
+        // (`IDataDriver.delete` — "True if deleted, false if not found") already
+        // carries the answer; it was simply discarded here. Now it decides:
+        // `false` is a 404, matching `getData` on the same id, and `success` on
+        // the 200 finally means what it says.
+        //
+        // Read as `=== false` on purpose. That is the contract's own value for
+        // "no row matched"; anything else — a driver returning the deleted row,
+        // an `undefined` from an off-contract implementation — is not a
+        // POSITIVE not-found signal, and inventing a 404 out of it would break
+        // deletes against third-party drivers rather than report honestly.
+        if (deleted === false) throw recordNotFoundError(request.object, request.id);
         return {
             object: request.object,
             id: request.id,
             success: true
         };
+    }
+
+    /**
+     * [#4435] Throw `404 RECORD_NOT_FOUND` when `id` names no row VISIBLE to
+     * this caller — the same question, asked the same way, that `getData`
+     * answers with. Threading `context` is what makes "visible to this caller"
+     * true: a row the caller's RLS scope excludes is not-found for them on the
+     * read path, and a write path that disagreed would answer 200 for a record
+     * the very next GET reports as 404.
+     */
+    private async assertRecordExists(object: string, id: string, context: any): Promise<void> {
+        const findOpts: any = { where: { id } };
+        if (context !== undefined) findOpts.context = context;
+        const existing = await this.engine.findOne(object, findOpts);
+        if (!existing) throw recordNotFoundError(object, id);
     }
 
     /**
@@ -5359,7 +5416,16 @@ export class ObjectStackProtocolImplementation implements
 
         for (const id of ids) {
             try {
-                await this.engine.delete(object, { where: { id }, ...ctxOpt } as any);
+                // [#4435] Per-row honesty on the bulk path. This discarded the
+                // driver's return and pushed `success: true` unconditionally, so
+                // `{"ids":["nonexistent_1"]}` answered `succeeded: 1` — a batch
+                // of typo'd ids reported every one of them deleted. A caller
+                // reconciling "which of my 200 ids were real" got a list that
+                // agreed with whatever it sent. Same `=== false` reading as the
+                // single-record path: the contract's positive not-found value,
+                // never an inference from a falsy return.
+                const deleted = await this.engine.delete(object, { where: { id }, ...ctxOpt } as any);
+                if (deleted === false) throw recordNotFoundError(object, id);
                 results.push({ id: String(id), success: true });
                 succeeded++;
             } catch (err: any) {

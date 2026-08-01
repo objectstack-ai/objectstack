@@ -32,7 +32,11 @@ describe('updateData — forwards engine write strips as droppedFields (#3431)',
         options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
         return { id: 'rec-1', title: data.title };
       }),
-      findOne: vi.fn(async () => null),
+      // The row EXISTS — `updateData`'s #4435 existence probe reads this, and a
+      // PATCH of an id that names no row is now a 404 rather than a 200 with a
+      // null record. These fixtures are about the strip channel, not about
+      // missing records, so they describe an engine that has the row.
+      findOne: vi.fn(async () => ({ id: 'rec-1' })),
     };
     const p = new ObjectStackProtocolImplementation(engine as any);
     const res: any = await p.updateData({
@@ -56,7 +60,7 @@ describe('updateData — forwards engine write strips as droppedFields (#3431)',
         options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
         return { id: 'rec-1' };
       }),
-      findOne: vi.fn(async () => null),
+      findOne: vi.fn(async () => ({ id: 'rec-1' })),
     };
     const p = new ObjectStackProtocolImplementation(engine as any);
     const res: any = await p.updateData({ object: 'approval_case', id: 'rec-1', data: {} });
@@ -70,7 +74,7 @@ describe('updateData — forwards engine write strips as droppedFields (#3431)',
     const engine = {
       registry: { getObject: () => SCHEMA },
       update: vi.fn(async (_o: string, data: any) => ({ id: 'rec-1', ...data })),
-      findOne: vi.fn(async () => null),
+      findOne: vi.fn(async () => ({ id: 'rec-1' })),
     };
     const p = new ObjectStackProtocolImplementation(engine as any);
     const res: any = await p.updateData({ object: 'approval_case', id: 'rec-1', data: { title: 'B' } });
