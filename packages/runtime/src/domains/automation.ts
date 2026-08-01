@@ -321,6 +321,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         //   PERMISSION_DENIED  → 403, the suspension is service-owned (#3801)
         //   INVALID_SIGNAL     → 400, the signal wrote the engine's `$` variable
         //                        namespace (#3853 follow-up)
+        //   INVALID_SCREEN_INPUT → 400, the bag violates the suspended screen's
+        //                        declared field contract — a required field the
+        //                        caller was asked for is missing, or an
+        //                        undeclared key was sent (#4477)
         //   RUN_NOT_FOUND      → 404, no such suspension — unresumable for good
         //   STORE_UNAVAILABLE  → 503, the durable store is unreadable, so
         //                        existence is unknown; the same call is expected
@@ -344,6 +348,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 }
                 if (result?.success === false && result.code === 'INVALID_SIGNAL') {
                     return { handled: true, response: deps.error(result.error ?? 'Invalid resume signal', 400) };
+                }
+                if (result?.success === false && result.code === 'INVALID_SCREEN_INPUT') {
+                    return { handled: true, response: deps.error(result.error ?? 'Invalid screen input', 400) };
                 }
                 if (result?.success === false && result.code === 'RUN_NOT_FOUND') {
                     return { handled: true, response: deps.error(result.error ?? 'No such suspended run', 404) };
