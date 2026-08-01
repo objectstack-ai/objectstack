@@ -96,6 +96,8 @@ export const ERROR_CODE_LEDGER = {
     'REPORT_SAVE_FAILED',
     'REPORT_SCHEDULE_FAILED',
     'REQUEST_NOT_FOUND',
+    'RESUME_FAILED',              // decision recorded but its flow run could not be resumed
+    'RESUME_TARGET_LOST',         // the flow run behind the request no longer exists
     'RULE_DEFINE_FAILED',
     'RULE_DELETE_FAILED',
     'RULE_EVALUATE_FAILED',
@@ -282,6 +284,9 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_SIGNAL',             // resume signal writes engine-internal variables
     'NODE_FAILURE',
     'NO_EXECUTOR',
+    'RESUME_IN_PROGRESS',         // duplicate resume refused while the first is running
+    'RUN_NOT_FOUND',              // no suspension for this run id — unresumable for good
+    'STORE_UNAVAILABLE',          // durable suspended-run store unreadable — existence unknown
   ],
   '@objectstack/service-analytics': [
     'CUBE_NOT_FOUND',

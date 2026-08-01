@@ -189,11 +189,26 @@ export interface AutomationResult {
      *    flow engine reserves for itself (a `$…` name, or one carrying a `.$`
      *    segment: `$runId`, `<nodeId>.$mapItemDone`, …). A transport maps it to
      *    **400**.
+     *  - `'RUN_NOT_FOUND'` — no suspension exists for the run id, in the hot
+     *    cache or the durable store. The run is unresumable *for good*: it
+     *    already resumed, was cancelled, or paused in a process whose state was
+     *    never persisted (#4420). A transport maps it to **404**. Callers that
+     *    persist a decision before resuming (approvals) must treat this as a
+     *    hard failure, not a no-op.
+     *  - `'STORE_UNAVAILABLE'` — the durable store could not be read, so
+     *    whether a suspension exists is UNKNOWN. Distinct from
+     *    `'RUN_NOT_FOUND'` on purpose: a transient store outage must not be
+     *    mistaken for a dead run. A transport maps it to **503**; the same
+     *    resume is expected to succeed once the store recovers.
+     *  - `'RESUME_IN_PROGRESS'` — a concurrent resume of this run is already
+     *    running; this duplicate was refused so side effects cannot run twice.
+     *    A transport maps it to **409**. The other resume is doing the work,
+     *    so callers should treat it as benign.
      *
-     * Both refuse before consuming the suspension: the run stays parked and the
-     * legitimate continuation still lands.
+     * All of these refuse before consuming the suspension: the run stays parked
+     * and the legitimate continuation still lands.
      */
-    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL';
+    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS';
     /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be
