@@ -642,6 +642,7 @@
     "parseDateMacroParam (function)",
     "parseFilterAST (function)",
     "provisionPrimary (function)",
+    "referenceTargetOf (function)",
     "referencedFields (function)",
     "renderAutonumber (function)",
     "resolveCrudAffordances (function)",

@@ -13,8 +13,8 @@ import { defineFlow } from '@objectstack/spec';
  * children, atomically), and resumes the run with the new record's id bound to
  * `config.idVariable`.
  *
- *   start → get_lead → decision (already converted?)
- *     → screen_already_converted (abort path)
+ *   start → get_lead → decision (already converted?) — exclusive, exactly one:
+ *     → screen_already_converted (abort path, when status == 'converted')
  *     → screen_account       (Step 1 — full Customer form → account_id)
  *     → screen_opportunity   (Step 2 — full Opportunity form WITH product
  *                             line-items grid, prefilled account → opportunity_id)
@@ -67,16 +67,19 @@ export const ConvertLeadScreenFlow = defineFlow({
     },
 
     // ── 3. Guard: already converted? ──────────────────────────────────────
+    // A plain exclusive gateway: the branching lives on the OUT-EDGES (`e3a`'s
+    // CEL condition, `e3b`'s `isDefault`) — ONE mechanism, not two.
+    //
+    // It used to ALSO declare `config.conditions` with its own labels, and that
+    // guard did not guard (#4414). Those labels (`'Yes — already converted'` /
+    // `'No — proceed'`) matched no out-edge label (`'Yes'` / `'No'`), so the
+    // branch the node computed was dropped and every out-edge was considered
+    // instead — and `e3b` was unconditional, so an already-converted lead got
+    // the abort screen AND walked straight into the wizard behind it.
     {
       id: 'check_converted',
       type: 'decision',
       label: 'Already Converted?',
-      config: {
-        conditions: [
-          { label: 'Yes — already converted', expression: "{lead_record.status} == 'converted'" },
-          { label: 'No — proceed',             expression: 'true' },
-        ],
-      },
     },
 
     // ── 3a. Already-converted abort screen ────────────────────────────────
@@ -155,9 +158,13 @@ export const ConvertLeadScreenFlow = defineFlow({
   edges: [
     { id: 'e1',  source: 'start',                    target: 'get_lead',                 type: 'default' },
     { id: 'e2',  source: 'get_lead',                 target: 'check_converted',          type: 'default' },
-    // guard branches
+    // Guard branches — mutually exclusive. `e3a` carries the CEL predicate;
+    // `e3b` is the BPMN default flow (`isDefault`), traversed ONLY when no
+    // conditional sibling matched. Without that marker `e3b` is an ordinary
+    // unconditional out-edge and runs on every pass, wizard and abort screen
+    // together (#4414).
     { id: 'e3a', source: 'check_converted',          target: 'screen_already_converted', type: 'default', condition: "lead_record.status == 'converted'", label: 'Yes' },
-    { id: 'e3b', source: 'check_converted',          target: 'screen_account',           type: 'default', label: 'No' },
+    { id: 'e3b', source: 'check_converted',          target: 'screen_account',           type: 'default', isDefault: true, label: 'No' },
     { id: 'e3c', source: 'screen_already_converted', target: 'end',                      type: 'default' },
     // main path — full Customer form → full Opportunity form → link
     { id: 'e4',  source: 'screen_account',           target: 'screen_opportunity',       type: 'default' },
