@@ -42,6 +42,19 @@ import { ExpressionEngine, validateExpression, nearestName } from '@objectstack/
 const UNRESOLVED_CEL_REFERENCE = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/;
 
 /**
+ * The branch a `decision` node reports when it DECLARED `config.conditions` and
+ * none of them matched — "fall through to the declared fallback".
+ *
+ * Two spellings claim it in {@link AutomationEngine.traverseNext}: an out-edge
+ * literally `label`led `'default'` (the historical, documented spelling) and an
+ * out-edge marked `isDefault: true` (the BPMN default flow, canonical since
+ * #4414). A decision that declares NO conditions reports no branch at all — it
+ * has nothing to fall through *from*, and inventing a label for it is what made
+ * every decision node in the repo emit an unclaimable `'default'`.
+ */
+export const DEFAULT_BRANCH_LABEL = 'default';
+
+/**
  * The slice of a descriptor's JSON-Schema `configSchema` that the undeclared-key
  * walk reads (#4045). Structural only — no validation semantics.
  */
@@ -3599,10 +3612,37 @@ export class AutomationEngine implements IAutomationService {
      * {@link executeNode} so {@link resume} can re-enter traversal from a
      * suspended node without re-running the node body.
      *
-     * @param branchLabel - When set (e.g. from a resume signal), restrict
-     *   traversal to out-edges whose `label` matches — this is how an Approval
-     *   node's `approve`/`reject` decision selects its downstream branch. When
-     *   no edge carries the label, traversal falls back to the normal edge set.
+     * Three declared mechanisms select a branch here, and #4414 found two of
+     * them doing nothing. They now compose as ONE model, applied in this order:
+     *
+     *  1. **`branchLabel`** (from a `decision`/`approval` executor or a resume
+     *     signal) narrows the edge set to out-edges carrying that `label`.
+     *     {@link DEFAULT_BRANCH_LABEL} is the engine's own sentinel for "the
+     *     node's declared conditions all failed" and is additionally claimed by
+     *     the BPMN default edge. A label NO edge claims is a metadata error —
+     *     traversal still falls back to the full edge set (a run mid-flight must
+     *     not die on it) but it is now **logged**, not silent: the decision had
+     *     computed a branch and nothing routed it, which is how app-crm's
+     *     convert-lead guard ran its abort screen AND its wizard.
+     *  2. **`edge.condition`** — evaluated per edge; a closed gate records a
+     *     `skipped` step (#4354).
+     *  3. **`edge.isDefault`** — BPMN default flow. Traversed **only** when no
+     *     conditional sibling in the selected set matched. Before #4414 this key
+     *     had zero readers: it parsed, it was documented as "the default path
+     *     when no other conditions match", and it routed nothing — an author who
+     *     reached for it got an ordinary unconditional edge that ran on every
+     *     pass, in parallel with the branch that *did* match.
+     *
+     * A default edge is therefore NOT part of the unconditional parallel fan-out
+     * — that distinction is the whole point of the marker. An edge that carries
+     * both a `condition` and `isDefault` is self-contradictory (BPMN forbids it);
+     * the `condition` wins here, and the flow linter flags the shape at authoring
+     * time (`flow-default-edge-with-condition`) so it is caught before it runs —
+     * Prime Directive #12.
+     *
+     * @param branchLabel - When set, restrict traversal to out-edges whose
+     *   `label` matches — this is how an Approval node's `approve`/`reject`
+     *   decision selects its downstream branch.
      */
     private async traverseNext(
         node: FlowNodeParsed,
@@ -3612,31 +3652,61 @@ export class AutomationEngine implements IAutomationService {
         steps: StepLogEntry[],
         branchLabel?: string,
     ): Promise<void> {
-        // Find next nodes — separate conditional and unconditional edges
-        let outEdges = flow.edges.filter(
+        // Find next nodes — separate conditional, default and unconditional edges
+        const allOutEdges = flow.edges.filter(
             e => e.source === node.id && e.type !== 'fault',
         );
+        let outEdges = allOutEdges;
 
-        // Branch selection (resume): prefer edges tagged with the decision label.
+        // Branch selection: prefer edges tagged with the decision label.
         if (branchLabel) {
-            const labeled = outEdges.filter(e => e.label === branchLabel);
-            if (labeled.length > 0) outEdges = labeled;
+            let claimed = outEdges.filter(e => e.label === branchLabel);
+            // The `default` sentinel is also claimed by the BPMN default edge, so
+            // "none of my conditions matched" routes to the declared fallback
+            // without the author having to ALSO label that edge 'default'.
+            if (claimed.length === 0 && branchLabel === DEFAULT_BRANCH_LABEL) {
+                claimed = outEdges.filter(e => e.isDefault);
+            }
+            if (claimed.length > 0) {
+                outEdges = claimed;
+            } else {
+                // #4414 — do not fall back silently. The node computed a branch
+                // and no out-edge claims it, so every out-edge is about to be
+                // considered: the guard the author wrote is not guarding.
+                const declared = allOutEdges
+                    .map(e => (e.label ? `'${e.label}'` : `(unlabelled ${e.id})`))
+                    .join(', ');
+                this.logger.warn(
+                    // `flow.name` is absent on the synthetic view `runRegion` builds.
+                    `Flow '${flow.name ?? '(region)'}' node '${node.id}' (${node.type}) selected branch ` +
+                    `'${branchLabel}', but no out-edge carries that label — out-edge labels are ` +
+                    `[${declared || 'none'}]. The branch selection is IGNORED and every out-edge is ` +
+                    `evaluated instead, so unconditional siblings run regardless of the decision. ` +
+                    `Make an out-edge's \`label\` match the branch, or mark the fallback edge ` +
+                    `\`isDefault: true\`. (#4414)`,
+                );
+            }
         }
 
         const conditionalEdges: FlowEdgeParsed[] = [];
+        const defaultEdges: FlowEdgeParsed[] = [];
         const unconditionalEdges: FlowEdgeParsed[] = [];
         for (const edge of outEdges) {
             if (edge.condition) {
                 conditionalEdges.push(edge);
+            } else if (edge.isDefault) {
+                defaultEdges.push(edge);
             } else {
                 unconditionalEdges.push(edge);
             }
         }
 
         // Conditional edges: evaluate sequentially (mutually exclusive)
+        let anyConditionMet = false;
         for (const edge of conditionalEdges) {
             const nextNode = flow.nodes.find(n => n.id === edge.target);
             if (this.evaluateCondition(edge.condition!, variables)) {
+                anyConditionMet = true;
                 if (nextNode) {
                     await this.executeNode(nextNode, flow, variables, context, steps);
                 }
@@ -3652,6 +3722,38 @@ export class AutomationEngine implements IAutomationService {
                 // The step is `skipped`, never a run: the re-entrancy guard,
                 // per-node `runs` counts and node status all exclude it, so
                 // recording a non-event stays a non-event to execution.
+                const at = new Date().toISOString();
+                steps.push({
+                    nodeId: nextNode.id,
+                    nodeType: nextNode.type,
+                    ...(nextNode.label ? { nodeLabel: nextNode.label } : {}),
+                    status: 'skipped',
+                    startedAt: at,
+                    completedAt: at,
+                    durationMs: 0,
+                    skippedBy: {
+                        nodeId: node.id,
+                        ...(edge.id ? { edgeId: edge.id } : {}),
+                        ...(edge.label ? { label: edge.label } : {}),
+                    },
+                });
+            }
+        }
+
+        // Default edges (BPMN default flow, #4414): the fallback, taken only
+        // when NO conditional sibling matched. `isDefault` is what makes this an
+        // "otherwise" rather than a second unconditional path — without it the
+        // author's only spelling of "otherwise" was to hand-write the negation
+        // of every sibling condition, and forgetting to do that ran both
+        // branches. A default edge passed over because a real branch won records
+        // the same `skipped` trace a closed gate does (#4354).
+        for (const edge of defaultEdges) {
+            const nextNode = flow.nodes.find(n => n.id === edge.target);
+            if (!anyConditionMet) {
+                if (nextNode) {
+                    await this.executeNode(nextNode, flow, variables, context, steps);
+                }
+            } else if (nextNode) {
                 const at = new Date().toISOString();
                 steps.push({
                     nodeId: nextNode.id,
