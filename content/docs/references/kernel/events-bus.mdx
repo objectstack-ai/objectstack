@@ -1,0 +1,64 @@
+---
+title: Events Bus
+description: Events Bus protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Event Bus Configuration Schema
+
+Complete configuration for the event bus system
+
+@example
+
+\{
+
+"persistence": \{ "enabled": true, "retention": 365 \},
+
+"queue": \{ "concurrency": 20 \},
+
+"eventSourcing": \{ "enabled": true \},
+
+"webhooks": [],
+
+"messageQueue": \{ "provider": "kafka", "topic": "events" \},
+
+"realtime": \{ "enabled": true, "protocol": "websocket" \}
+
+\}
+
+<Callout type="info">
+**Source:** `packages/spec/src/kernel/events/bus.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { EventBusConfig } from '@objectstack/spec/kernel';
+import type { EventBusConfig } from '@objectstack/spec/kernel';
+
+// Validate data
+const result = EventBusConfig.parse(data);
+```
+
+---
+
+## EventBusConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **persistence** | `{ enabled: boolean; retention: integer; filter?: any; storage: Enum<'database' \| 'file' \| 's3' \| 'custom'> }` | optional | Event persistence configuration |
+| **queue** | `{ name: string; concurrency: integer; retryPolicy?: object; deadLetterQueue?: string; … }` | optional | Event queue configuration |
+| **eventSourcing** | `{ enabled: boolean; snapshotInterval: integer; snapshotRetention: integer; retention: integer; … }` | optional | Event sourcing configuration |
+| **replay** | `{ enabled: boolean }` | optional | Event replay configuration |
+| **webhooks** | `{ id?: string; eventPattern: string; url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH'>; … }[]` | optional | Webhook configurations |
+| **messageQueue** | `{ provider: Enum<'kafka' \| 'rabbitmq' \| 'aws-sqs' \| 'redis-pubsub' \| 'google-pubsub' \| 'azure-service-bus'>; topic: string; eventPattern: string; partitionKey?: string; … }` | optional | Message queue integration |
+| **realtime** | `{ enabled: boolean; protocol: Enum<'websocket' \| 'sse' \| 'long-polling'>; eventPattern: string; userFilter: boolean; … }` | optional | Real-time notification configuration |
+| **eventTypes** | `{ name: string; version: string; schema?: any; description?: string; … }[]` | optional | Event type definitions |
+| **handlers** | `{ id?: string; eventName: string; handler: any; priority: integer; … }[]` | optional | Global event handlers |
+
+
+---
+

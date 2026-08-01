@@ -21,6 +21,7 @@
  *  - Removal is refused while objects are still bound to the datasource.
  */
 
+import { validateDriverConfig } from '@objectstack/spec/data';
 import type {
   IDatasourceAdminService,
   DatasourceDraft,
@@ -207,6 +208,15 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     if (!input?.driver) {
       return { ok: false, error: 'A driver is required to test a connection.' };
     }
+    // Checked BEFORE the probe: a misspelled key makes the driver fall back to
+    // its own defaults, so the probe would open a connection to localhost and
+    // report a green "Connection successful" for a datasource that points
+    // somewhere else entirely — the wizard's version of #4410's core bug.
+    try {
+      this.assertValidConfig(input.driver, input.config);
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
     const queryTimeoutMs = (input.external as { queryTimeoutMs?: number } | undefined)?.queryTimeoutMs;
     try {
       return await this.config.probe({
@@ -224,6 +234,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
   async createDatasource(input: DatasourceDraft, secret?: SecretInput): Promise<DatasourceSummary> {
     this.assertValidName(input?.name);
     if (!input.driver) throw new Error('A driver is required to create a datasource.');
+    this.assertValidConfig(input.driver, input.config);
 
     const existing = await this.config.getDatasourceRecord(input.name);
     if (existing) {
@@ -278,6 +289,16 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       merged.external = { ...patch.external, credentialsRef: existing.external?.credentialsRef };
     }
 
+    // Judged on the MERGED record, but only when this write actually touches
+    // the pairing: a new `config`, or a new `driver` that reinterprets the
+    // stored one. An edit that renames a datasource or flips `active` must not
+    // be blocked by a config it is not touching — a record written before
+    // #4410 would otherwise become uneditable, including the `active: false`
+    // that takes a misconfigured datasource out of service.
+    if (patch.config !== undefined || patch.driver !== undefined) {
+      this.assertValidConfig(merged.driver, merged.config);
+    }
+
     if (secret) {
       const prevRef = existing.external?.credentialsRef;
       const credentialsRef = await this.config.writeSecret(secret, { name });
@@ -310,6 +331,28 @@ export class DatasourceAdminService implements IDatasourceAdminService {
   }
 
   // --- internals -----------------------------------------------------------
+
+  /**
+   * Reject a `config` that does not satisfy its driver's contract (#4410).
+   *
+   * The wizard is the OTHER authoring surface for a datasource, and it does not
+   * reach `DatasourceSchema`: `createDatasource` writes through
+   * `metadata.register`, whose validation is a structural `name`/`label` check,
+   * not a zod parse. So a `config` typed into the Setup form was accepted here
+   * even after the spec gate landed — the same silent acceptance, one door
+   * along. Both doors now consult the same registry.
+   *
+   * A driver the platform ships no contract for passes untouched, matching the
+   * spec gate's boundary rather than inventing a stricter one for the UI.
+   */
+  private assertValidConfig(driver: string, config: unknown): void {
+    const result = validateDriverConfig(driver, config);
+    if (!result.known || result.issues.length === 0) return;
+    const detail = result.issues
+      .map((issue) => (issue.path.length ? `config.${issue.path.join('.')}: ${issue.message}` : issue.message))
+      .join('\n');
+    throw new Error(`Invalid configuration for driver '${driver}'.\n${detail}`);
+  }
 
   private assertValidName(name: string | undefined): void {
     if (!name || !NAME_RE.test(name)) {

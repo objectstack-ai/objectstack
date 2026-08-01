@@ -9,28 +9,34 @@ import { z } from 'zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { validateDriverConfig } from './driver/config-registry.zod';
 
 /*
- * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
+ * ── Unknown-key strictness (#4001 data step, closed out by #4410) ───────────
  *
  * Every AUTHORING shape in this module is `.strict()`. `datasource` is a
  * registered metadata type (BUILTIN_METADATA_TYPE_SCHEMAS), so one shape backs
  * `defineDatasource()`, `defineStack({ datasources })`, the
  * `/api/v1/meta/datasource` endpoint, and the Setup → Datasources form.
  *
- * TWO ESCAPE HATCHES STAY OPEN, and must:
- *   - `config` is per-driver by construction (a sqlite `filename` and a
- *     postgres `host`/`port` share no shape), so it stays `z.record`.
- *     NOTHING VALIDATES INSIDE IT TODAY — see {@link belongsInConfig}, which
- *     used to claim otherwise. Tracked as #4410.
- *   - `readReplicas` carries the same per-driver config objects.
+ * `config` and `readReplicas` stay `z.record` HERE, because they are per-driver
+ * by construction: a sqlite `filename` and a postgres `host`/`port` share no
+ * shape. What they are no longer is unchecked. Since #4410 the refinement on
+ * {@link DatasourceSchema} parses both against the contract for the declared
+ * driver (`data/driver/config-registry.zod.ts`), so the openness at this level
+ * is a shape this level cannot express — not the absence of one.
  *
- * That openness is exactly why the TOP level had to close. Before this, a
+ * That openness is exactly why the TOP level had to close first. Before #4001, a
  * connection key written one level too high — `host` next to `driver` instead
  * of inside `config` — was stripped in silence, and the datasource then
  * connected on driver defaults (localhost, default port) rather than failing.
  * A misplaced `password` is the same bug wearing a worse hat, which is why it
  * is prescribed toward `external.credentialsRef` rather than merely relocated.
+ *
+ * A driver the platform ships no contract for (a plugin's
+ * `com.vendor.snowflake`) keeps an unvalidated `config`. That is the honest
+ * boundary, not a leftover hole — see the registry's own note on why inventing
+ * a verdict against a shape we do not have would be worse than the silence.
  */
 
 /** Keys {@link DriverDefinitionSchema} declares (drift-guarded by datasource.test.ts). */
@@ -67,28 +73,31 @@ const DATASOURCE_RETRY_POLICY_KEYS = ['maxRetries', 'baseDelayMs', 'maxDelayMs',
 /**
  * A connection detail written one level too high — it belongs inside `config`.
  *
- * This prescription stops at *where to put it* and deliberately does NOT promise
- * that the move gets validated. It used to: the sentence read "the driver's own
- * configSchema validates it there", and that was false twice over —
- * {@link DriverDefinitionSchema}'s `configSchema` is a `z.record` that both
- * bundled driver specs set to `{}`, and nothing in this repo reads it (#4410).
+ * This prescription makes a validation claim again, and #4410 is what made the
+ * claim true. Between #4001 and #4410 it did not: the sentence read "the
+ * driver's own configSchema validates it there", which was false twice over —
+ * {@link DriverDefinitionSchema}'s `configSchema` was a `z.record` both bundled
+ * driver specs set to `{}`, and nothing read it. That made this the worst line
+ * in the module: it took an author who had made a *recoverable* mistake at a
+ * place that catches it, and pointed them — with the platform's authority — at a
+ * slot where the same mistake was silent again. `config: { hostname: … }` was
+ * stripped in silence and the datasource connected on localhost, which is
+ * #4001's original bug verbatim, one level down. A wrong instruction is worse
+ * than none, and worst of all for an AI author, whose only check on "did that
+ * work?" is whether the parse complained.
  *
- * Which made this the worst line in the module: it took an author who had made a
- * recoverable mistake at a place that now catches it, and pointed them — with the
- * platform's authority — at a slot where the same mistake is silent again.
- * `config: { hostname: … }` is stripped in silence and the datasource connects on
- * localhost, which is #4001's original bug verbatim, one level down. A wrong
- * instruction is worse than none, and worst of all for an AI author, whose only
- * check on "did that work?" is whether the parse complained.
- *
- * Naming the per-driver schema is the honest form: it is the shape to write
- * against, and a reader can check themselves against it even while nothing
- * enforces it. Restore a validation claim here only when #4410 makes one true.
+ * Note the SECOND thing #4410 had to fix for this line to be safe: the target
+ * must be the key the driver contract actually declares. Prescribing
+ * `config: { user: … }` when the postgres contract spells it `username` would
+ * have swapped a one-step correction for a two-step one — reject at the top,
+ * reject again inside — so `canonical` names the landing key, not the one the
+ * author happened to type.
  */
-const belongsInConfig = (key: string) =>
+const belongsInConfig = (key: string, canonical: string = key) =>
   `\`${key}\` is a driver connection detail — it belongs inside \`config\`, not at the top `
-  + `level. Move it to \`config: { ${key}: … }\`, matching your driver's config shape `
-  + `(\`PostgresConfigSchema\` / \`MongoConfigSchema\` / \`MemoryConfigSchema\` in \`data/driver/\`).`;
+  + `level. Move it to \`config: { ${canonical}: … }\`, which is parsed against your driver's `
+  + `config contract (\`PostgresConfigSchema\` / \`MysqlConfigSchema\` / \`SqliteConfigSchema\` / `
+  + `\`MongoConfigSchema\` / \`MemoryConfigSchema\`, exported from \`@objectstack/spec/data\`).`;
 
 const driverDefinitionUnknownKeyError = strictUnknownKeyError({
   surface: 'this driver definition',
@@ -166,11 +175,11 @@ const datasourceUnknownKeyError = strictUnknownKeyError({
     host: belongsInConfig('host'),
     port: belongsInConfig('port'),
     database: belongsInConfig('database'),
-    user: belongsInConfig('user'),
+    user: belongsInConfig('user', 'username'),
     username: belongsInConfig('username'),
     filename: belongsInConfig('filename'),
     url: belongsInConfig('url'),
-    connectionString: belongsInConfig('connectionString'),
+    connectionString: belongsInConfig('connectionString', 'url'),
     password:
       '`password` must never be inlined on a datasource. Interpolate it from the environment '
       + 'inside `config`, or for an external datasource reference the secrets store via '
@@ -300,17 +309,30 @@ export const DriverDefinitionSchema = lazySchema(() => z.object({
   
   /**
    * Configuration Schema (JSON Schema)
-   * Describes the structure of the `config` object needed for this driver.
-   * Used by the UI to generate the connection form.
+   *
+   * The structure of the `config` object this driver needs — rendered by the
+   * Studio connection form (`GET /api/v1/datasources/drivers`) and, for the
+   * built-in drivers, the JSON-Schema projection of the very zod schema
+   * `DatasourceSchema` parses `config` against. Form and gate therefore describe
+   * one shape by construction.
+   *
+   * Both bundled driver specs used to set this to `{}`, one of them with a
+   * comment promising it would be "populated at runtime" by code that did not
+   * exist; nothing read the field either (#4410). Fill it from a real schema —
+   * an empty object here means the connection form has nothing to render and
+   * says so, which is the loud version of the same absence.
    */
   configSchema: z.record(z.string(), z.unknown()).describe('JSON Schema for connection configuration'),
-  
+
   /**
    * Default Capabilities
    * What this driver supports out-of-the-box.
    */
   capabilities: z.lazy(() => DatasourceCapabilities).optional(),
 }, { error: driverDefinitionUnknownKeyError }).strict());
+
+/** A driver definition — {@link DriverDefinitionSchema}'s parsed shape. */
+export type DriverDefinition = z.infer<typeof DriverDefinitionSchema>;
 
 /**
  * Datasource Capabilities Schema
@@ -415,6 +437,30 @@ export const ExternalDatasourceSettingsSchema = z.object({
   .describe('External datasource federation settings (schemaMode != "managed")');
 
 export type ExternalDatasourceSettings = z.infer<typeof ExternalDatasourceSettingsSchema>;
+
+/**
+ * Replay a driver-config parse onto the datasource's own issue list (#4410).
+ *
+ * A no-op for a driver the platform ships no contract for — `known: false` is
+ * the registry saying "nothing to check against", which is deliberately NOT the
+ * same answer as "checked and clean".
+ */
+function reportDriverConfigIssues(
+  ctx: z.RefinementCtx,
+  driver: unknown,
+  config: unknown,
+  basePath: (string | number)[],
+): void {
+  const result = validateDriverConfig(driver, config);
+  if (!result.known) return;
+  for (const issue of result.issues) {
+    ctx.addIssue({
+      code: 'custom',
+      path: [...basePath, ...issue.path],
+      message: issue.message,
+    });
+  }
+}
 
 /**
  * Datasource Schema
@@ -531,6 +577,17 @@ export const DatasourceSchema = lazySchema(() => z.object({
   origin: z.enum(['code', 'runtime']).default('code')
     .describe('Datasource provenance (server-managed, read-only)'),
 }, { error: datasourceUnknownKeyError }).strict().superRefine((ds, ctx) => {
+  // The `config` gate (#4410). `config` and each `readReplicas` entry carry the
+  // same per-driver shape, so both are parsed against the contract for the
+  // declared driver and every issue is re-pathed under the slot it came from —
+  // the author sees `config.hostname`, not a detached message.
+  reportDriverConfigIssues(ctx, ds.driver, ds.config, ['config']);
+  if (Array.isArray(ds.readReplicas)) {
+    ds.readReplicas.forEach((replica, index) => {
+      reportDriverConfigIssues(ctx, ds.driver, replica, ['readReplicas', index]);
+    });
+  }
+
   if (ds.schemaMode !== 'managed' && !ds.external) {
     ctx.addIssue({
       code: 'custom',

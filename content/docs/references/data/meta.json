@@ -28,6 +28,12 @@
     "seed-loader",
     "---More---",
     "context-tokens",
+    "driver-common",
+    "driver-memory",
+    "driver-mongo",
+    "driver-mysql",
+    "driver-postgres",
+    "driver-sqlite",
     "field-value"
   ]
 }

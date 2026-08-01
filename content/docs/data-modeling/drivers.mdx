@@ -75,6 +75,56 @@ actually connect to Turso.
 > Knex client name (`pg` / `mysql2` / `better-sqlite3`) when you instantiate
 > `SqlDriver`.
 
+## `config` is validated per driver
+
+A datasource's `config` is driver-specific — a SQLite `filename` and a Postgres
+`host` share no shape — so the datasource schema keeps that slot open at the top
+level and parses it against the contract for the driver you named. Each built-in
+driver ships that contract as a zod schema, exported from `@objectstack/spec/data`:
+
+| `driver` | Contract | Keys |
+| :--- | :--- | :--- |
+| `postgres` \| `postgresql` \| `pg` | `PostgresConfigSchema` | `url`, `host`, `port`, `database`, `username`, `password`, `ssl`, `schema`, `applicationName`, `statementTimeout`, `autoMigrate` |
+| `mysql` \| `mysql2` \| `mariadb` | `MysqlConfigSchema` | `url`, `host`, `port`, `database`, `username`, `password`, `ssl`, `autoMigrate` |
+| `sqlite` \| `sqlite3` | `SqliteConfigSchema` | `filename`, `autoMigrate` |
+| `sqlite-wasm` \| `wasm-sqlite` | `SqliteWasmConfigSchema` | `filename`, `persist` |
+| `mongo` \| `mongodb` | `MongoConfigSchema` | `url`, `host`, `port`, `database`, `username`, `password`, `authSource`, `options` |
+| `memory` \| `in-memory` | `MemoryConfigSchema` | `initialData`, `strictMode`, `persistence` |
+
+An unrecognised key is rejected with its correction, at authoring time and in the
+Setup → Datasources wizard alike:
+
+```text
+Unrecognized key(s) on this postgres datasource's config: `hostname`.
+Did you mean `hostname` → `host`?
+```
+
+This matters more than a typical typo check, because the failure it replaces was
+silent: a misspelled key was dropped, the driver fell back to its own defaults,
+and the datasource connected to `localhost` while every signal — the parse, the
+save, the connection probe — reported success.
+
+Two things live **outside** `config`, because they are not driver-specific:
+
+- **Pool sizing** — the `pool` block on the datasource (`min`, `max`,
+  `idleTimeoutMillis`, `connectionTimeoutMillis`), honoured for every SQL driver
+  and mapped onto the Mongo client's `minPoolSize` / `maxPoolSize`.
+- **TLS certificates** — the `ssl` block on the datasource (`enabled`,
+  `rejectUnauthorized`, `ca`, `cert`, `key`). Inside `config`, `ssl` is the
+  on/off boolean shorthand.
+- **`schemaMode`** — the ADR-0015 ownership mode, declared next to `driver`.
+
+A plugin-contributed driver (`com.vendor.snowflake`) has no contract in this
+repo, so its `config` is left unvalidated rather than judged against a shape the
+platform does not have.
+
+<Callout type="info">
+The same schemas are projected to JSON Schema for
+`DriverDefinitionSchema.configSchema` and for `GET /api/v1/datasources/drivers`,
+which the Studio connection form renders — so the form offers exactly the fields
+the validator accepts.
+</Callout>
+
 ## Startup: a driver that cannot connect aborts the boot
 
 `ObjectQLEngine.init()` connects every registered driver during kernel

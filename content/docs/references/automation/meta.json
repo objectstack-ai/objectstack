@@ -21,6 +21,7 @@
     "job",
     "---More---",
     "builtin-node-config",
+    "events-core",
     "flow-function",
     "io-node-config",
     "schemaless-node-config"

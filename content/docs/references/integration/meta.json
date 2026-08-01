@@ -11,7 +11,13 @@
     "object-storage",
     "offline",
     "---Tenancy---",
-    "misc",
-    "tenant"
+    "tenant",
+    "---More---",
+    "connector-database",
+    "connector-file-storage",
+    "connector-github",
+    "connector-message-queue",
+    "connector-saas",
+    "connector-vercel"
   ]
 }

@@ -15,9 +15,12 @@
  *   - `sqlite` / `sqlite3`             → `@objectstack/driver-sql` (better-sqlite3)
  *   - `sqlite-wasm` / `wasm-sqlite`    → `@objectstack/driver-sqlite-wasm` (pure-JS)
  *   - `mysql` / `mysql2`               → `@objectstack/driver-sql` (client `mysql2`)
- *   - `mongodb` / `mongo`             → `@objectstack/driver-mongodb` (peer dep)
- *   - `memory` / `inmemory`           → `@objectstack/driver-memory` (ephemeral,
+ *   - `mongo` / `mongodb`              → `@objectstack/driver-mongodb` (peer dep)
+ *   - `memory` / `inmemory`            → `@objectstack/driver-memory` (ephemeral,
  *     per-datasource — see {@link buildMemoryConfig})
+ *
+ * The full alias table lives in `@objectstack/spec` (`resolveDriverId`), which
+ * is also what selects each driver's config contract — see {@link resolveKind}.
  *
  * `sqlite-wasm` joined for ADR-0062 D1 (#3826): the standalone stack's
  * `default` datasource is a *declared definition* connected through the shared
@@ -32,34 +35,28 @@
  */
 
 import { join } from 'node:path';
+import { resolveDriverId, type BuiltinDriverId } from '@objectstack/spec/data';
 import type {
   IDatasourceDriverFactory,
   DatasourceConnectionSpec,
   DatasourceDriverHandle,
 } from './contracts/index.js';
 
-type ResolvedKind = 'postgres' | 'sqlite' | 'sqlite-wasm' | 'mysql' | 'mongodb' | 'memory';
-
-const DRIVER_ID_ALIASES: Record<string, ResolvedKind> = {
-  postgres: 'postgres',
-  postgresql: 'postgres',
-  pg: 'postgres',
-  sqlite: 'sqlite',
-  sqlite3: 'sqlite',
-  'better-sqlite3': 'sqlite',
-  'sqlite-wasm': 'sqlite-wasm',
-  'wasm-sqlite': 'sqlite-wasm',
-  mysql: 'mysql',
-  mysql2: 'mysql',
-  mongodb: 'mongodb',
-  mongo: 'mongodb',
-  memory: 'memory',
-  inmemory: 'memory',
-  'in-memory': 'memory',
-};
+/**
+ * Driver-id resolution comes from the spec since #4410 — this file used to keep
+ * its own copy of the alias table.
+ *
+ * Two tables meant the id that selects a DRIVER and the id that selects that
+ * driver's CONFIG CONTRACT could disagree: a spelling only this table knew
+ * would be built while its config was validated against nothing — the exact
+ * silent acceptance the config gate exists to end, reintroduced as a lookup
+ * miss. One table, so "buildable" and "has a contract" are the same set by
+ * construction.
+ */
+type ResolvedKind = BuiltinDriverId;
 
 function resolveKind(driverId: string): ResolvedKind | undefined {
-  return DRIVER_ID_ALIASES[String(driverId ?? '').toLowerCase()];
+  return resolveDriverId(driverId);
 }
 
 /**
@@ -78,11 +75,64 @@ function toHandle(driver: any, serverVersion?: () => Promise<string | undefined>
   };
 }
 
+/**
+ * Postgres connection options that are neither the target nor the credentials —
+ * declared on `PostgresConfigSchema` and carried onto every connection shape
+ * (DSN or discrete fields alike), since `pg` accepts them next to a
+ * `connectionString`.
+ *
+ * These were declared in the spec and read by nothing until #4410. Giving
+ * `config` a gate means every key inside it now claims to be honoured, so each
+ * one is either wired (here) or removed from the contract — a declared key that
+ * silently does nothing is the defect this whole campaign is about.
+ */
+function pgConnectionExtras(cfg: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...(cfg.applicationName ? { application_name: cfg.applicationName } : {}),
+    ...(cfg.statementTimeout != null ? { statement_timeout: cfg.statementTimeout } : {}),
+  };
+}
+
+/**
+ * The `ssl` value to hand a SQL client, from the datasource's TLS block or the
+ * per-driver on/off shorthand.
+ *
+ * `datasource.ssl` is declared, strict, documented — and until #4410 stopped at
+ * the record: nothing put it on the connection spec, so a TLS block with a CA
+ * certificate in it configured precisely nothing, which is the failure its own
+ * schema comment warns about ("a TLS setting that never took effect looked
+ * identical to one that did"). The block wins when present because it is the
+ * more specific statement; `config.ssl` remains the boolean shorthand.
+ */
+function resolveSslOption(spec: DatasourceConnectionSpec): unknown {
+  const block = spec.ssl as
+    | { enabled?: boolean; rejectUnauthorized?: boolean; ca?: string; cert?: string; key?: string }
+    | undefined;
+  if (block) {
+    if (block.enabled === false) return false;
+    const options = {
+      ...(block.rejectUnauthorized !== undefined ? { rejectUnauthorized: block.rejectUnauthorized } : {}),
+      ...(block.ca ? { ca: block.ca } : {}),
+      ...(block.cert ? { cert: block.cert } : {}),
+      ...(block.key ? { key: block.key } : {}),
+    };
+    // `ssl: {}` would read as "TLS with default options" to `pg`, which is what
+    // `enabled: true` with nothing else means anyway — but an empty object is
+    // an odd thing to hand a client, so collapse it to the boolean.
+    return Object.keys(options).length > 0 ? options : true;
+  }
+  const shorthand = (spec.config ?? {}).ssl;
+  return shorthand == null ? undefined : shorthand;
+}
+
 /** Build the Knex `connection` for a SQL driver from a spec's config + secret. */
 function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'better-sqlite3'): unknown {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
 
   if (client === 'better-sqlite3') {
+    // `file` / `database` are pre-#4410 tolerance for shapes already persisted
+    // by the runtime store. Authoring rejects both with a rename hint
+    // (`SqliteConfigSchema`), so nothing new can arrive spelled this way.
     const filename =
       (cfg.filename as string | undefined) ??
       (cfg.file as string | undefined) ??
@@ -93,10 +143,18 @@ function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'bett
 
   // pg — accept either a connection string (`url`/`connectionString`) or
   // discrete fields. The secret is the password and is never part of `config`.
+  const ssl = resolveSslOption(spec);
   const url = (cfg.url as string | undefined) ?? (cfg.connectionString as string | undefined);
   if (url) {
     // For a DSN, a separately-supplied secret overrides the embedded password.
-    return spec.secret ? { connectionString: url, password: spec.secret } : { connectionString: url };
+    // TLS still applies: `sslmode` in a DSN and the `ssl` option are separate
+    // channels to `pg`, and a datasource that declares one should get it.
+    return {
+      connectionString: url,
+      ...(spec.secret ? { password: spec.secret } : {}),
+      ...(ssl !== undefined ? { ssl } : {}),
+      ...pgConnectionExtras(cfg),
+    };
   }
   return {
     host: cfg.host,
@@ -104,7 +162,29 @@ function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'bett
     database: cfg.database,
     user: cfg.user ?? cfg.username,
     ...(spec.secret ? { password: spec.secret } : cfg.password ? { password: cfg.password } : {}),
-    ...(cfg.ssl != null ? { ssl: cfg.ssl } : {}),
+    ...(ssl !== undefined ? { ssl } : {}),
+    ...pgConnectionExtras(cfg),
+  };
+}
+
+/**
+ * Knex pool options for a SQL driver, from the datasource's own `pool` block.
+ *
+ * `datasource.pool` is declared, strict, documented and — until #4410 — read by
+ * nobody: `toSpec` carried it into the connection spec and this factory then
+ * hardcoded `{ min: 0, max: 5 }` over the top, so an author who sized their pool
+ * got the defaults and no indication. Those defaults are preserved for the
+ * unspecified case, so nothing that did not set `pool` changes behaviour.
+ */
+function buildSqlPool(spec: DatasourceConnectionSpec): Record<string, unknown> {
+  const pool = (spec.pool ?? {}) as Record<string, unknown>;
+  return {
+    min: typeof pool.min === 'number' ? pool.min : 0,
+    max: typeof pool.max === 'number' ? pool.max : 5,
+    ...(typeof pool.idleTimeoutMillis === 'number' ? { idleTimeoutMillis: pool.idleTimeoutMillis } : {}),
+    ...(typeof pool.connectionTimeoutMillis === 'number'
+      ? { acquireTimeoutMillis: pool.connectionTimeoutMillis }
+      : {}),
   };
 }
 
@@ -116,6 +196,7 @@ function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'bett
  */
 function buildMysqlConnection(spec: DatasourceConnectionSpec): unknown {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
+  const mysqlSsl = resolveSslOption(spec);
   const url = (cfg.url as string | undefined) ?? (cfg.connectionString as string | undefined);
   if (url) return url;
   return {
@@ -124,7 +205,7 @@ function buildMysqlConnection(spec: DatasourceConnectionSpec): unknown {
     database: cfg.database,
     user: cfg.user ?? cfg.username,
     ...(spec.secret ? { password: spec.secret } : cfg.password ? { password: cfg.password } : {}),
-    ...(cfg.ssl != null ? { ssl: cfg.ssl } : {}),
+    ...(mysqlSsl !== undefined ? { ssl: mysqlSsl } : {}),
   };
 }
 
@@ -200,17 +281,31 @@ function buildMemoryConfig(spec: DatasourceConnectionSpec): Record<string, unkno
   return { ...cfg, persistence: scopeMemoryPersistence(cfg.persistence, spec.name ?? 'default') };
 }
 
-/** Build a mongodb connection URL from a spec's config + secret. */
+/**
+ * Build a mongodb connection URL from a spec's config + secret.
+ *
+ * Two keys became real here in #4410. `password` was declared on
+ * `MongoConfigSchema` and ignored — a mongo datasource carrying one composed
+ * `user:@host`, i.e. connected with an EMPTY password, which fails as an auth
+ * error nobody would trace back to a config key. `authSource` was declared and
+ * dropped the same way. Both now behave the way the SQL builders already did:
+ * a datasource secret wins, the config value is the fallback.
+ */
 function buildMongoUrl(spec: DatasourceConnectionSpec): string {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
+  // `uri` is pre-#4410 tolerance for already-persisted shapes; authoring
+  // rejects it with a rename hint to `url` (`MongoConfigSchema`).
   const explicit = (cfg.url as string | undefined) ?? (cfg.uri as string | undefined);
   if (explicit) return explicit;
   const host = (cfg.host as string | undefined) ?? 'localhost';
   const port = (cfg.port as number | string | undefined) ?? 27017;
   const db = (cfg.database as string | undefined) ?? '';
   const user = (cfg.user as string | undefined) ?? (cfg.username as string | undefined);
-  const auth = user ? `${encodeURIComponent(user)}:${encodeURIComponent(spec.secret ?? '')}@` : '';
-  return `mongodb://${auth}${host}:${port}/${db}`;
+  const password = spec.secret ?? (cfg.password as string | undefined) ?? '';
+  const auth = user ? `${encodeURIComponent(user)}:${encodeURIComponent(password)}@` : '';
+  const authSource = cfg.authSource as string | undefined;
+  const query = authSource ? `?authSource=${encodeURIComponent(authSource)}` : '';
+  return `mongodb://${auth}${host}:${port}/${db}${query}`;
 }
 
 /**
@@ -242,7 +337,15 @@ export function createDefaultDatasourceDriverFactory(
         throw new Error(`Unsupported driver id '${spec.driver}'.`);
       }
 
-      const schemaMode = (spec.external as { schemaMode?: string } | undefined)?.schemaMode
+      // ADR-0015's ownership mode. `spec.schemaMode` — the datasource's own
+      // declared key — is FIRST since #4410; before that the first two arms
+      // were all there was, and neither could ever hold it: `external` is the
+      // federation-settings block (no `schemaMode` key), and nothing wrote the
+      // `config` copy. So `schemaMode: 'external'` on a datasource reached the
+      // driver as `undefined` and a database ObjectStack is a guest in was
+      // treated as managed — DDL ungated at the driver.
+      const schemaMode = spec.schemaMode
+        ?? (spec.external as { schemaMode?: string } | undefined)?.schemaMode
         ?? ((spec.config as Record<string, unknown> | undefined)?.schemaMode as string | undefined);
       // Host-composition passthroughs (#3826): the CLI's declared `default`
       // definition carries the dev loosen-only self-heal (#2186) and the wasm
@@ -254,10 +357,15 @@ export function createDefaultDatasourceDriverFactory(
 
       if (kind === 'postgres') {
         const { SqlDriver } = await import('@objectstack/driver-sql');
+        // `searchPath` is knex's own key for postgres' default schema — the
+        // landing site for `config.schema`, declared since the protocol's first
+        // postgres shape and read by nothing until #4410.
+        const searchPath = cfg.schema as string | undefined;
         const driver = new SqlDriver({
           client: 'pg',
           connection: buildSqlConnection(spec, 'pg') as any,
-          pool: { min: 0, max: 5 },
+          pool: buildSqlPool(spec),
+          ...(searchPath ? { searchPath } : {}),
           ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
           ...(autoMigrate ? { autoMigrate } : {}),
         } as any);
@@ -310,14 +418,14 @@ export function createDefaultDatasourceDriverFactory(
         const driver = new SqlDriver({
           client: 'mysql2',
           connection: buildMysqlConnection(spec) as any,
-          pool: { min: 0, max: 5 },
+          pool: buildSqlPool(spec),
           ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
           ...(autoMigrate ? { autoMigrate } : {}),
         } as any);
         return toHandle(driver);
       }
 
-      if (kind === 'mongodb') {
+      if (kind === 'mongo') {
         let MongoDBDriver: any;
         try {
           ({ MongoDBDriver } = await import('@objectstack/driver-mongodb' as any));
@@ -326,7 +434,17 @@ export function createDefaultDatasourceDriverFactory(
             `mongodb driver requested but @objectstack/driver-mongodb is not installed (${err?.message ?? err}).`,
           );
         }
-        const driver = new MongoDBDriver({ url: buildMongoUrl(spec) });
+        // `options` (the MongoClient passthrough) and the datasource's `pool`
+        // block reach the client since #4410 — the driver has always read
+        // `options` / `minPoolSize` / `maxPoolSize`; only `url` was ever passed.
+        const pool = (spec.pool ?? {}) as Record<string, unknown>;
+        const driver = new MongoDBDriver({
+          url: buildMongoUrl(spec),
+          ...(cfg.database ? { database: cfg.database } : {}),
+          ...(cfg.options && typeof cfg.options === 'object' ? { options: cfg.options } : {}),
+          ...(typeof pool.min === 'number' ? { minPoolSize: pool.min } : {}),
+          ...(typeof pool.max === 'number' ? { maxPoolSize: pool.max } : {}),
+        });
         return toHandle(driver);
       }
 

@@ -53,6 +53,8 @@ export interface ConnectableDatasource {
     validation?: { onMismatch?: 'fail' | 'warn' | 'ignore' };
   }) | undefined;
   pool?: Record<string, unknown>;
+  /** Datasource-level TLS block — carried to the driver since #4410. */
+  ssl?: Record<string, unknown>;
   active?: boolean;
   origin?: 'code' | 'runtime';
   /**
@@ -673,8 +675,12 @@ function toSpec(record: ConnectableDatasource): DatasourceConnectionSpec {
     name: record.name,
     driver: record.driver,
     config: record.config ?? {},
+    // #4410: dropped here before, which is why the factory went looking for
+    // `schemaMode` in two places that could never hold it.
+    ...(record.schemaMode ? { schemaMode: record.schemaMode } : {}),
     external: record.external,
     pool: record.pool,
+    ssl: record.ssl,
   };
 }
 
