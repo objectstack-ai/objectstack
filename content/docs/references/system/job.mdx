@@ -65,6 +65,13 @@ const result = CronSchedule.parse(data);
 | **retryPolicy** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number }` | optional | Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = backoffMs * backoffMultiplier^(retry-1)) up to maxRetries retries after the initial attempt (#3494). Omit for the legacy single-attempt behavior. |
 | **timeout** | `integer` | optional | Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout" (#3494). The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit. |
 | **enabled** | `boolean` | optional | Whether the job is enabled |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
 
 ---

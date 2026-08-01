@@ -169,9 +169,34 @@ dropped at parse, and nothing failed.
 
    The check separates the two severities, because they are not the same bug:
    *rejecting* the envelope is live breakage and is asserted unconditionally with
-   no exemption list; *stripping* it silently loses protection metadata on
-   round-trip and is tracked with a debt list (`field` only) — and each entry
-   there becomes a rejection the day its schema is closed.
+   no exemption list; *not declaring* it silently loses protection metadata on
+   round-trip and is tracked with a debt list — and each entry there becomes a
+   rejection the day its schema is closed.
+9. **And then that check turned out to be hollow — one change after this file
+   recorded the same lesson about the gate above.** Its declaration half probed
+   each schema with one generic body and asked whether `_packageId` survived. A
+   type whose required fields that body did not satisfy failed for unrelated
+   reasons and the assertion returned early, so **24 of 25 registered types took
+   that early return**. Only `field` was ever really checked, and the suite
+   reported green.
+
+   Rewritten to walk the schema *structurally* — unwrapping `lazy` / `pipe` /
+   `optional` / `default`, expanding unions — which needs no valid instance and
+   therefore cannot skip. Two guards keep it honest: a type the walker cannot
+   resolve is a hard failure (the walker going quiet is precisely when the test
+   would otherwise stop covering something), and the debt list carries a reverse
+   pin that fails when an entry is fixed, so the list cannot outlive its debt.
+
+   It then found **8** undeclared envelopes rather than 1 — `action`, `book`,
+   `field`, `job`, `mapping`, `page`, `translation`, `validation`. `job` and
+   `book` were closed immediately; 6 remain.
+
+   Three occurrences now of one pattern, in three different instruments: the
+   ledger gate's non-recursive directory walk, the strip probe's early return,
+   and (from the other direction) `strictObject(` not matching the site count.
+   Each was a measuring tool reporting completeness it did not have. **The rule
+   this file keeps re-deriving: before trusting a green check, make it go red on
+   something you know is there.**
 
 This is the empirical argument for the ratchet: the inference "no metadata in
 the repo carries unknown keys" was **false three times over**, and only the

@@ -8,6 +8,7 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
  * Schedule jobs using cron expressions
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const CronScheduleSchema = lazySchema(() => z.object({
   type: z.literal('cron'),
   expression: CronExpressionInputSchema.describe('Cron expression — cron`0 0 * * *` for daily at midnight. Build emits {dialect:"cron",source} envelope.'),
@@ -90,6 +91,14 @@ export const JobSchema = lazySchema(() => z.object({
   retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = backoffMs * backoffMultiplier^(retry-1)) up to maxRetries retries after the initial attempt (#3494). Omit for the legacy single-attempt behavior.'),
   timeout: z.number().int().positive().optional().describe('Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout" (#3494). The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit.'),
   enabled: z.boolean().default(true).describe('Whether the job is enabled'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  // `job` is a registered metadata type, so `MetadataPlugin`'s artifact loader
+  // stamps `_packageId` / `_provenance` on it like every sibling. Undeclared,
+  // they were dropped on every parse: protection metadata lost on round-trip,
+  // and a hard 422 waiting for the day this shape is closed (see
+  // `metadata-type-schemas.test.ts` for the invariant and how it was hollow).
+  ...MetadataProtectionFields,
 }));
 
 export type Job = z.infer<typeof JobSchema>;
