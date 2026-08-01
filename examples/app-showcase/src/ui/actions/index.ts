@@ -128,8 +128,14 @@ export const RecalcEstimateAction = defineAction({
  * shape, minus the zip). Contrast with RecalcEstimateAction above: same
  * endpoint, one POST per record.
  *
- * No `locations`: like a bulk action named in `bulkActions`, an aggregate
- * def needs a selection — the view naming it is the whole declaration.
+ * `locations` still has to be declared, even though the selection bar entry
+ * comes from the view. Omitting it does NOT mean "nowhere": the action:bar
+ * renderer treats a missing/empty `locations` as "every location"
+ * (objectui `action-bar.tsx`), so a locations-less action also lands on the
+ * LIST TOOLBAR — where there is no selection, so the dispatch posts no
+ * `_selectedIds` and the endpoint rejects it. Declaring `record_more` keeps
+ * the single-record entry somewhere it works (the endpoint's per-record
+ * branch, via `recordIdParam`) and off the toolbar. See objectui#3142.
  */
 export const RecalcSelectionAction = defineAction({
   name: 'showcase_recalc_selection',
@@ -139,6 +145,8 @@ export const RecalcSelectionAction = defineAction({
   type: 'api',
   target: '/api/v1/showcase/recalc',
   successMessage: 'Estimates recalculated for the whole selection.',
+  locations: ['record_more'],
+  recordIdParam: 'recordId',
   refreshAfter: true,
 });
 
