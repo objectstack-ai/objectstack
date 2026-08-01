@@ -60,6 +60,22 @@ a row in `sys_metadata` has no author for a tombstone to teach. So a stored emai
 arrives stripped of the keys nothing read and then **refuses for naming no callable**,
 where it used to log a line and report success. That flip is the behavior change to expect.
 
+**A build gap this surfaced, fixed here.** `FlowFunctionEntrySchema` now also accepts a
+**lowered handler ref** (a non-empty string), the form `objectstack build` produces: the
+CLI lowers every inline callable to a serialisable ref *before* the stack is parsed (it
+must — `z.function()` wraps callables and would break the ref mapping), so a built
+manifest holds `{ myFn: 'myFn' }`, which neither previous member accepted. The result was
+that `defineStack({ functions })` — a documented, first-class mechanism — could not
+survive a build at all. Nothing had noticed because no bundled example used it; #4343
+turns that from latent into blocking, since `config.function` becomes the only thing a
+`script` node can run. `Hook.handler` already declared exactly this pair (`z.union([
+z.string(), <function> ])`, "string, post-build / inline function, pre-build"), so this
+brings `functions` onto the platform's established shape rather than inventing one. A
+string carries no callable and `normalizeFlowFunctionEntry` still drops it by design — the
+real functions ride in the sibling ESM module the build emits, merged by name — so
+hand-authoring one registers nothing and fails loudly at execute ("no function named '…'
+is registered"), never silently.
+
 Also in this change: the retired constants `SCRIPT_BUILTIN_ACTION_TYPES`,
 `SCRIPT_INVOKE_FUNCTION_ACTION_TYPE` and the `ScriptBuiltinActionType` type are removed
 (they described the dispatch set that no longer exists); `os validate` names a retired key

@@ -112,13 +112,33 @@ export type FlowFunctionDeclaration = z.infer<typeof FlowFunctionDeclarationSche
 export type FlowFunctionDeclarationInput = z.input<typeof FlowFunctionDeclarationSchema>;
 
 /**
- * One entry of the `functions` map as authors may write it: the handler alone
- * (pure), or a {@link FlowFunctionDeclarationSchema} that states its effect.
+ * One entry of the `functions` map: the handler alone (pure), a
+ * {@link FlowFunctionDeclarationSchema} that states its effect, or the
+ * **lowered handler ref** a built artifact carries.
+ *
+ * The first two are what an author writes. The third is what `objectstack
+ * build` produces and was, until #4343, the reason `defineStack({ functions })`
+ * could not survive a build at all: the CLI lowers every inline callable to a
+ * serialisable string ref BEFORE the stack is parsed (it must — `z.function()`
+ * wraps callables and would break the ref mapping), so the manifest reaching
+ * this schema holds `{ myFn: 'myFn' }`, which neither of the other two members
+ * accepts. The build failed on a mechanism its own docs call first-class.
+ *
+ * A string entry carries no callable, and that is correct rather than lossy:
+ * the real functions ride in the sibling ESM module esbuild emits, and
+ * {@link collectBundleFunctionEntries} merges both sources by name. The string
+ * is the artifact's record that the NAME exists — which is why
+ * {@link normalizeFlowFunctionEntry} deliberately drops it (see there).
+ *
+ * Authoring a string by hand therefore registers nothing. It fails loudly, not
+ * silently: a `script` node naming it refuses at execute with "no function
+ * named '…' is registered" (#1870).
  */
 export const FlowFunctionEntrySchema = lazySchema(() => z.union([
   z.function(),
   FlowFunctionDeclarationSchema,
-]).describe('A named handler function, or a declaration record stating its effect'));
+  z.string().min(1).describe('A lowered handler ref (built artifacts) — the callable rides in the sibling ESM module'),
+]).describe('A named handler function, a declaration record stating its effect, or a lowered handler ref'));
 
 export type FlowFunctionEntry = z.infer<typeof FlowFunctionEntrySchema>;
 
@@ -153,6 +173,12 @@ export function isFlowFunctionEffect(value: unknown): value is FlowFunctionEffec
  * Deliberately hand-written rather than a `FlowFunctionEntrySchema.parse()`:
  * the entry holds a live function, and the collectors that call this run on the
  * boot path where re-parsing every handler buys nothing.
+ *
+ * A lowered string ref (the third member of that schema) returns `undefined`
+ * here BY DESIGN — it names a function without carrying one. The callable for
+ * that name comes from the built sidecar module, which the same collector
+ * merges in; treating the string as an entry would register a name bound to
+ * nothing.
  */
 export function normalizeFlowFunctionEntry(entry: unknown): NormalizedFlowFunction | undefined {
   if (typeof entry === 'function') {
