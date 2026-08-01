@@ -228,14 +228,16 @@ describe('decision branch routing (#4414)', () => {
         expect(visited).toEqual(['proceed']);
     });
 
-    it('fails loudly on a brace-in-CEL decision predicate rather than deciding `false`', async () => {
-        engine.registerFlow('guard', guardFlow({
+    it('refuses a brace-in-CEL decision predicate rather than deciding `false`', () => {
+        // #4414 made this loud (it used to string-compare and decide `false`
+        // forever); #4439 put the slot on the expression ledger, so the refusal
+        // now lands at REGISTRATION and never reaches a run. See the
+        // registration block at the bottom of this file for the located
+        // diagnostic.
+        expect(() => engine.registerFlow('guard', guardFlow({
             proceedIsDefault: true,
             conditions: [{ label: 'Yes', expression: "{lead.status} == 'converted'" }],
-        }));
-        const result = await run({ status: 'converted' });
-        expect(result.success).toBe(false);
-        expect(String(result.error)).toMatch(/template braces|bare CEL/);
+        }))).toThrow(/template braces|bare CEL/);
     });
 
     it("lets the `default` sentinel claim the `isDefault` edge when no condition matched", async () => {
@@ -248,5 +250,49 @@ describe('decision branch routing (#4414)', () => {
         // edge claims it, without the author also labelling that edge 'default'.
         expect(visited).toEqual(['proceed']);
         expect(warnings).toHaveLength(0);
+    });
+});
+
+/**
+ * #4439 — the decision's branch predicate is now on the expression ledger, so
+ * a brace-in-CEL predicate is a REGISTRATION error rather than a run-time one.
+ *
+ * #4414 made the failure loud; this makes it early. Before both, the raw string
+ * went to the legacy `{var}` template path, `{lead.status}` never resolved, and
+ * the branch was decided by string comparison — silently, forever.
+ */
+describe('decision branch predicate is validated at registration (#4439)', () => {
+    let engine: AutomationEngine;
+
+    beforeEach(() => {
+        engine = new AutomationEngine(createTestLogger());
+        registerLogicNodes(engine, createCtx());
+    });
+
+    const flowWith = (expression: string) => ({
+        name: 'guard',
+        label: 'Guard',
+        type: 'autolaunched' as const,
+        nodes: [
+            { id: 'start', type: 'start' as const, label: 'Start' },
+            { id: 'check', type: 'decision' as const, label: 'Check', config: { conditions: [{ label: 'Yes', expression }] } },
+            { id: 'end', type: 'end' as const, label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'check' },
+            { id: 'e2', source: 'check', target: 'end', label: 'Yes' },
+        ],
+    });
+
+    it('rejects a brace-in-CEL branch predicate, naming the slot', () => {
+        const register = () => engine.registerFlow('guard', flowWith("{lead.status} == 'converted'"));
+        expect(register).toThrow(/\{lead\.status\} == 'converted'/);
+        expect(register).toThrow(/template braces|bare CEL/);
+        // The diagnostic must locate it — a flow may carry several branches.
+        expect(register).toThrow(/conditions\[0\]\.expression/);
+    });
+
+    it('accepts the bare-CEL spelling', () => {
+        expect(() => engine.registerFlow('guard', flowWith("lead.status == 'converted'"))).not.toThrow();
     });
 });

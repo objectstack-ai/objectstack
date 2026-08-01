@@ -113,9 +113,11 @@ export const FlowVariableSchema = lazySchema(() => z.object({
  *   type: "decision",
  *   label: "Is High Value?",
  *   config: {
+ *     // Bare CEL — braces are the #1491 trap and fail at registration.
+ *     // Each `label` must match an out-edge's `label` to route anywhere;
+ *     // when nothing matches, the `isDefault` out-edge is the fallback.
  *     conditions: [
- *       { label: "Yes", expression: "{amount} > 10000" },
- *       { label: "No", expression: "true" } // default
+ *       { label: "Yes", expression: "amount > 10000" }
  *     ]
  *   },
  *   position: { x: 300, y: 200 }

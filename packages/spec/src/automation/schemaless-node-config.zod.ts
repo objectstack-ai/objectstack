@@ -195,8 +195,22 @@ export type SubflowConfigParsed = z.infer<typeof SubflowConfigSchema>;
 export const DecisionConditionSchema = lazySchema(() => z.object({
   /** Branch label — must match an out-edge's `label` to route anywhere. */
   label: z.string().describe("Branch label; the winning branch resumes down the out-edge with this label (no match → the out-edge marked isDefault, or one labelled 'default')"),
-  /** Bare-CEL predicate (ADR-0032) — `{…}` template braces are the #1491 trap. */
-  expression: z.string().describe('Bare CEL predicate deciding this branch'),
+  /**
+   * Bare-CEL predicate (ADR-0032) — `{…}` template braces are the #1491 trap.
+   *
+   * `xExpression: 'expression'` is what carries that from a comment into the
+   * machine-readable contract (#4439): it rides the `.meta()` → JSON-Schema
+   * channel (same as `loop.collection`'s `'template'` marker), so the
+   * expression ledger can claim this slot even though `decision` publishes no
+   * descriptor `configSchema`, and `registerFlow` / `objectstack validate` then
+   * check it as the bare CEL it is. Before that the declaration was prose only:
+   * both validators walked a hardcoded list this key was not on, so a
+   * brace-in-CEL predicate passed the build and was only caught at run time.
+   */
+  expression: z.string().meta({
+    description: 'Bare CEL predicate deciding this branch',
+    xExpression: 'expression',
+  }),
 }));
 
 export type DecisionCondition = z.input<typeof DecisionConditionSchema>;
@@ -226,3 +240,62 @@ export const DecisionConfigSchema = lazySchema(() => z.object({
 
 export type DecisionConfig = z.input<typeof DecisionConfigSchema>;
 export type DecisionConfigParsed = z.infer<typeof DecisionConfigSchema>;
+
+// ─── registry ────────────────────────────────────────────────────────
+
+/**
+ * Every schemaless builtin's config contract, keyed by `node.type` (#4439).
+ *
+ * The descriptor-schema'd builtins can be enumerated at run time — the engine's
+ * registry hands out their `configSchema`s — but these three publish none by
+ * design, so anything that wants to reason about *all* node config contracts
+ * had to name them one by one. That is how the expression ledger's
+ * reconciliation ratchet ended up structurally unable to cover them: it derives
+ * its expectation from descriptor `configSchema`s, and a node that has none
+ * could never own a ledger entry, no matter what its contract declared.
+ *
+ * With this map the ratchet reads BOTH channels — descriptor `xExpression`
+ * markers and these schemas' `.meta({ xExpression })` markers — so a declared
+ * expression slot is covered wherever it is declared, and a stale ledger entry
+ * still fails from either side.
+ *
+ * Additive: objectui's `flow-node-config` reconciliation imports each schema by
+ * name and is unaffected.
+ */
+export const SCHEMALESS_NODE_CONFIG_SCHEMAS = {
+  script: ScriptConfigSchema,
+  subflow: SubflowConfigSchema,
+  decision: DecisionConfigSchema,
+} as const satisfies Record<string, z.ZodType>;
+
+/** Node types whose config contract lives in this module rather than a descriptor. */
+export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
+
+/**
+ * {@link SCHEMALESS_NODE_CONFIG_SCHEMAS} as JSON Schema, memoized — the same
+ * shape a descriptor's `configSchema` is, so a consumer can read both channels
+ * with one walk instead of two notions of "a declared config property" (#4439).
+ *
+ * Derived in `input` mode like {@link getApprovalNodeConfigJsonSchema}, which
+ * is what carries `.meta({ xExpression })` markers through verbatim.
+ *
+ * These are **not** published on a descriptor — that is the whole point of the
+ * schemaless class (see this module's header) — so nothing here reaches the
+ * Studio property form. It exists so validation ledgers and reconciliation
+ * ratchets can see these contracts at all.
+ */
+let cachedSchemalessNodeConfigJsonSchemas: Readonly<Record<SchemalessNodeType, unknown>> | undefined;
+export function getSchemalessNodeConfigJsonSchemas(): Readonly<Record<SchemalessNodeType, unknown>> {
+  if (cachedSchemalessNodeConfigJsonSchemas === undefined) {
+    const out = {} as Record<SchemalessNodeType, unknown>;
+    for (const [nodeType, schema] of Object.entries(SCHEMALESS_NODE_CONFIG_SCHEMAS)) {
+      out[nodeType as SchemalessNodeType] = z.toJSONSchema(schema, {
+        target: 'draft-2020-12',
+        io: 'input',
+        unrepresentable: 'any',
+      });
+    }
+    cachedSchemalessNodeConfigJsonSchemas = out;
+  }
+  return cachedSchemalessNodeConfigJsonSchemas;
+}
