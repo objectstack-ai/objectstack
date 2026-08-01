@@ -3,6 +3,7 @@
 import type { QueryAST, QueryInput, DriverOptions } from '@objectstack/spec/data';
 import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import { getValueByPath } from './memory-matcher.js';
@@ -11,6 +12,24 @@ import {
   indexTemporalFields,
   type TemporalFieldKind,
 } from './memory-temporal.js';
+
+/**
+ * [#4436] A filter this driver cannot COMPILE — see the twin in
+ * `driver-sql`'s `unsupportedFilterError`, which carries the full rationale.
+ *
+ * Kept in lockstep with driver-sql deliberately: #3948 made the two backends
+ * AGREE that an uncompilable filter is a refusal rather than a silent
+ * match-everything, and the refusal's wire envelope has to agree too. A test
+ * suite that swaps the memory driver for SQL must see the same `400
+ * INVALID_FILTER`, not a coded refusal on one backend and a bare `{error}` on
+ * the other.
+ */
+function unsupportedFilterError(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  return err;
+}
 
 /**
  * Persistence adapter interface.
@@ -764,8 +783,8 @@ export class InMemoryDriver implements IDataDriver {
         // matches EVERY record. An unapplied filter must not look like a
         // satisfied one. #3948.
         if (lower !== 'and' && lower !== 'or') {
-          throw new Error(
-            `[driver-memory] Unrecognized filter operator "${item}" in a comparison triple. ` +
+          throw unsupportedFilterError(
+            `Unrecognized filter operator "${item}" in a comparison triple. ` +
               `A filter array is either a logical node (["and"|"or", …]) or nested ` +
               `conditions ([[field, op, value], …]); a bare [field, op, value] only ` +
               `reaches the driver when its operator is outside @objectstack/spec ` +
@@ -785,8 +804,8 @@ export class InMemoryDriver implements IDataDriver {
         const cond = this.convertConditionToMongo(field, operator, value, object);
         if (cond) logicGroups[logicGroups.length - 1].conditions.push(cond);
       } else {
-        throw new Error(
-          `[driver-memory] Unrecognized filter element of type ` +
+        throw unsupportedFilterError(
+          `Unrecognized filter element of type ` +
             `"${item === null ? 'null' : typeof item}" — expected a logical keyword ` +
             `("and"/"or") or a condition array. Filter was: ${JSON.stringify(filters)}`,
         );
@@ -874,16 +893,16 @@ export class InMemoryDriver implements IDataDriver {
               : { $gte: store(value[0]), $lte: store(value[1]) },
           };
         }
-        throw new Error(
-          `[driver-memory] "between" on field "${field}" needs a two-element array, got ` +
+        throw unsupportedFilterError(
+          `"between" on field "${field}" needs a two-element array, got ` +
             `${JSON.stringify(value)}. Returning no predicate would silently match every record.`,
         );
       default:
         // Was `return null`, which the caller dropped — so an operator this
         // driver cannot express narrowed nothing instead of erroring. driver-sql
         // already threw on the same input; the two backends disagreed. #3948.
-        throw new Error(
-          `[driver-memory] Unsupported filter operator "${operator}" on field "${field}". ` +
+        throw unsupportedFilterError(
+          `Unsupported filter operator "${operator}" on field "${field}". ` +
             `Supported operators: =, !=, <, <=, >, >=, in, nin, between, contains, ` +
             `not_contains, starts_with, ends_with (see @objectstack/spec VALID_AST_OPERATORS).`,
         );
