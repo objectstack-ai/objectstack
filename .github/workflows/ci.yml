@@ -676,9 +676,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Build the CLI plus BOTH example apps' full dependency closures (the
+      # `pkg...` filter form). When this pass rode dogfood shard 1 the whole
+      # workspace was already built by the test step, so `--filter=@objectstack/cli`
+      # alone sufficed; standalone, the bundled objectstack.config imports
+      # runtime packages (e.g. @objectstack/connector-mcp for app-showcase)
+      # whose dist nothing here had built — ERR_MODULE_NOT_FOUND at verify
+      # time. The closure syntax keeps this self-maintaining as app deps move.
       - name: Verify example apps via the `objectstack verify` CLI
         run: |
-          pnpm turbo run build --filter=@objectstack/cli --concurrency=4
+          pnpm turbo run build \
+            --filter=@objectstack/cli... \
+            --filter=@objectstack/example-crm... \
+            --filter=@objectstack/example-showcase... \
+            --concurrency=4
           for app in examples/app-crm examples/app-showcase; do
             echo "::group::objectstack verify $app --rls"
             OS_LOG_LEVEL=error node packages/cli/bin/run.js verify --app "$app/objectstack.config.ts" --rls
