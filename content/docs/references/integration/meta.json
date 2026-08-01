@@ -7,17 +7,6 @@
     "mapping",
     "---Transport & Storage---",
     "http",
-    "message-queue",
-    "object-storage",
-    "offline",
-    "---Tenancy---",
-    "tenant",
-    "---More---",
-    "connector-database",
-    "connector-file-storage",
-    "connector-github",
-    "connector-message-queue",
-    "connector-saas",
-    "connector-vercel"
+    "offline"
   ]
 }

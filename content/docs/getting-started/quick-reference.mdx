@@ -193,19 +193,18 @@ Environments, marketplace, licensing, and multi-tenancy.
 | **[Plugin Security](/docs/references/cloud/plugin-security)** | `plugin-security.zod.ts` | PluginSecurityProtocol, SBOM | Plugin security policies |
 | **[Tenant](/docs/references/cloud/tenant)** | `tenant.zod.ts` | Tenant | Multi-tenancy isolation |
 
-## Integration Protocol (7 schemas)
+## Integration Protocol (1 schema)
 
-External system connectors and adapters.
+External system connectors — one protocol (ADR-0097): a connector entry is
+either a catalog descriptor or a provider-bound instance that a generic
+executor (connector-openapi / connector-mcp) materializes at boot. The
+per-provider schema "templates" (SaaS / database / file-storage /
+message-queue / GitHub / Vercel) were removed in #4480: provider shapes come
+from the provider itself, not from hand-written spec files.
 
 | Protocol | Source File | Key Schemas | Purpose |
 |:---------|:-----------|:------------|:--------|
-| **[Connector](/docs/references/integration/connector)** | `connector.zod.ts` | Connector | Generic connector interface |
-| **[SaaS Connector](/docs/references/integration/connector)** | `connector/saas.zod.ts` | SaaSConnector | SaaS integrations |
-| **[Database Connector](/docs/references/integration/connector)** | `connector/database.zod.ts` | DatabaseConnector | Database adapters |
-| **[File Storage](/docs/references/integration/connector)** | `connector/file-storage.zod.ts` | FileStorageConnector | Cloud storage |
-| **[Message Queue](/docs/references/integration/message-queue)** | `connector/message-queue.zod.ts` | MessageQueueConnector | Queue integrations |
-| **[GitHub](/docs/references/integration/connector)** | `connector/github.zod.ts` | GitHubConnector | GitHub API integration |
-| **[Vercel](/docs/references/integration/connector)** | `connector/vercel.zod.ts` | VercelConnector | Vercel deployment |
+| **[Connector](/docs/references/integration/connector)** | `connector.zod.ts` | Connector | The connector protocol — auth, sync, webhooks, rate limiting |
 
 ## Shared Protocol (5 schemas)
 
