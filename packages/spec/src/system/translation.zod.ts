@@ -7,7 +7,24 @@ import { z } from 'zod';
 // ────────────────────────────────────────────────────────────────────────────
 
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const LocaleSchema = lazySchema(() => z.string().describe('BCP-47 Language Tag (e.g. en-US, zh-CN)'));
+
+/**
+ * Shared history sentence for every shape in this file (#4001).
+ *
+ * Translation data has the most literal version of the silent-strip failure in
+ * the whole spec: a misspelled group or key is dropped, the bundle saves or
+ * loads without complaint, and the string it was meant to translate renders in
+ * the source language. There is no error, no log line, and no difference
+ * between "not translated yet" and "translated into a key nothing reads" — so
+ * the bug looks like missing coverage forever.
+ */
+const TRANSLATION_HISTORY =
+  'Until #4001 closed these shapes an unknown key was dropped silently — the bundle still '
+  + 'loaded, and whatever it was meant to translate rendered in the source language with no '
+  + 'diagnostic, indistinguishable from a translation nobody had written yet.';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Object-level Translation (per-object file)
@@ -17,7 +34,11 @@ export const LocaleSchema = lazySchema(() => z.string().describe('BCP-47 Languag
  * Field Translation Schema
  * Translation data for a single field.
  */
-export const FieldTranslationSchema = lazySchema(() => z.object({
+export const FieldTranslationSchema = lazySchema(() => strictObject({
+  surface: 'this field translation',
+  history: TRANSLATION_HISTORY,
+  aliases: { helpText: 'help', hint: 'help', tooltip: 'help', picklist: 'options', values: 'options', choices: 'options' },
+}, {
   label: z.string().optional().describe('Translated field label'),
   help: z.string().optional().describe('Translated help text'),
   placeholder: z.string().optional().describe('Translated placeholder text for form inputs'),
@@ -43,7 +64,11 @@ export type FieldTranslation = z.infer<typeof FieldTranslationSchema>;
  * action metadata (e.g. `"user.email"`, `"temporaryPassword"`). Keys may
  * contain dots — resolvers must index the record directly, not split on `.`.
  */
-export const ActionResultDialogTranslationSchema = lazySchema(() => z.object({
+export const ActionResultDialogTranslationSchema = lazySchema(() => strictObject({
+  surface: 'this action result dialog translation',
+  history: TRANSLATION_HISTORY,
+  aliases: { label: 'title', message: 'description', body: 'description', ok: 'acknowledge', confirm: 'acknowledge', acknowledgeLabel: 'acknowledge' },
+}, {
   title: z.string().optional().describe('Translated result dialog title'),
   description: z.string().optional().describe('Translated result dialog description'),
   acknowledge: z.string().optional().describe('Translated acknowledge button label'),
@@ -52,6 +77,47 @@ export const ActionResultDialogTranslationSchema = lazySchema(() => z.object({
 }).describe('Translations for an action result dialog'));
 
 export type ActionResultDialogTranslation = z.infer<typeof ActionResultDialogTranslationSchema>;
+
+/**
+ * Action translations — one shape, used at two addresses: an object's
+ * `_actions.<name>` and the top-level `globalActions.<name>` (the same split
+ * `resolveActionLabel` walks). Built by a factory rather than transcribed
+ * twice so the two cannot drift, and so closing them is one edit.
+ *
+ * `surface` differs because the rejection should say which of the two the key
+ * was written on — an author who put `confirm` under `globalActions` and one
+ * who put it under `objects.account._actions` need different things next.
+ */
+const actionTranslationSchema = (surface: string) => strictObject({
+  surface,
+  history: TRANSLATION_HISTORY,
+  aliases: {
+    name: 'label', title: 'label',
+    confirm: 'confirmText', confirmation: 'confirmText', confirmMessage: 'confirmText',
+    success: 'successMessage', successText: 'successMessage', toast: 'successMessage',
+    parameters: 'params', args: 'params', inputs: 'params',
+    result: 'resultDialog', dialog: 'resultDialog',
+  },
+}, {
+  label: z.string().optional().describe('Translated action label'),
+  confirmText: z.string().optional().describe('Translated confirmation prompt'),
+  successMessage: z.string().optional().describe('Translated success toast/message'),
+  params: z.record(z.string(), strictObject({
+    surface: 'this action parameter translation',
+    history: TRANSLATION_HISTORY,
+    // `help` is the correct spelling on a FIELD translation and on a settings
+    // key; on an action param it is `helpText`. Neighbouring-surface borrowing,
+    // which edit distance reads as a legitimate word rather than a slip.
+    aliases: { help: 'helpText', hint: 'helpText', tooltip: 'helpText', name: 'label', choices: 'options', values: 'options' },
+  }, {
+    label: z.string().optional().describe('Translated action parameter label'),
+    helpText: z.string().optional().describe('Translated action parameter help/hint text'),
+    placeholder: z.string().optional().describe('Translated action parameter placeholder'),
+    options: z.record(z.string(), z.string()).optional().describe('Param select option value to translated label'),
+  })).optional().describe('Action parameter translations keyed by parameter name'),
+  resultDialog: ActionResultDialogTranslationSchema.optional()
+    .describe('Translations for the action result dialog'),
+});
 
 /**
  * Object Translation Data Schema
@@ -74,7 +140,17 @@ export type ActionResultDialogTranslation = z.infer<typeof ActionResultDialogTra
  * }
  * ```
  */
-export const ObjectTranslationDataSchema = lazySchema(() => z.object({
+export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
+  surface: 'this object translation',
+  history: TRANSLATION_HISTORY,
+  aliases: {
+    // The group prefixes are the whole point of the `_`-prefixed convention,
+    // and the un-prefixed spelling is the one an author reaches for first.
+    views: '_views', actions: '_actions', sections: '_sections',
+    plural: 'pluralLabel', labelPlural: 'pluralLabel', name: 'label', title: 'label',
+    columns: 'fields', properties: 'fields', attributes: 'fields',
+  },
+}, {
   /**
    * Translated singular label for the object.
    *
@@ -101,10 +177,18 @@ export const ObjectTranslationDataSchema = lazySchema(() => z.object({
    *   objects.<object>._views.<view_name>.emptyState.title
    *   objects.<object>._views.<view_name>.emptyState.message
    */
-  _views: z.record(z.string(), z.object({
+  _views: z.record(z.string(), strictObject({
+    surface: 'this view translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', empty: 'emptyState', emptyMessage: 'emptyState' },
+  }, {
     label: z.string().optional().describe('Translated view label'),
     description: z.string().optional().describe('Translated view description'),
-    emptyState: z.object({
+    emptyState: strictObject({
+      surface: 'this view empty-state translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { label: 'title', heading: 'title', description: 'message', text: 'message', body: 'message' },
+    }, {
       title: z.string().optional().describe('Translated empty-state title'),
       message: z.string().optional().describe('Translated empty-state message'),
     }).optional().describe('Translated empty-state copy shown when the view has no rows'),
@@ -118,19 +202,8 @@ export const ObjectTranslationDataSchema = lazySchema(() => z.object({
    *   objects.<object>._actions.<action_name>.successMessage
    *   objects.<object>._actions.<action_name>.resultDialog.*
    */
-  _actions: z.record(z.string(), z.object({
-    label: z.string().optional().describe('Translated action label'),
-    confirmText: z.string().optional().describe('Translated confirmation prompt'),
-    successMessage: z.string().optional().describe('Translated success toast/message'),
-    params: z.record(z.string(), z.object({
-      label: z.string().optional().describe('Translated action parameter label'),
-      helpText: z.string().optional().describe('Translated action parameter help/hint text'),
-      placeholder: z.string().optional().describe('Translated action parameter placeholder'),
-      options: z.record(z.string(), z.string()).optional().describe('Param select option value to translated label'),
-    })).optional().describe('Action parameter translations keyed by parameter name'),
-    resultDialog: ActionResultDialogTranslationSchema.optional()
-      .describe('Translations for the action result dialog'),
-  })).optional().describe('Action translations keyed by action name'),
+  _actions: z.record(z.string(), actionTranslationSchema('this object action translation'))
+    .optional().describe('Action translations keyed by action name'),
 
   /**
    * Section translations keyed by section name (snake_case).
@@ -140,13 +213,86 @@ export const ObjectTranslationDataSchema = lazySchema(() => z.object({
    * (e.g. "Opportunity Information" → "商机信息"). Each section in the
    * page schema must declare a stable `name` for the lookup to fire.
    */
-  _sections: z.record(z.string(), z.object({
+  _sections: z.record(z.string(), strictObject({
+    surface: 'this section translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', heading: 'label' },
+  }, {
     label: z.string().optional().describe('Translated section label'),
     description: z.string().optional().describe('Translated section description'),
   })).optional().describe('Section translations keyed by section name'),
 }).describe('Translation data for a single object'));
 
 export type ObjectTranslationData = z.infer<typeof ObjectTranslationDataSchema>;
+
+// ────────────────────────────────────────────────────────────────────────────
+// The retired object-first dialect
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Top-level keys of the retired object-first (`o.<object>`) dialect.
+ *
+ * Exported for the runtime's benefit, not the schema's: `authored-translation-sync`
+ * scans rows that were saved *before* this shape was closed and warns rather
+ * than loading them, since nothing resolves from them. New authoring is handled
+ * by {@link TRANSLATION_KEY_GUIDANCE} on the strict shapes below.
+ */
+export const LEGACY_OBJECT_FIRST_KEYS = [
+  'o',
+  'app',
+  'nav',
+  'dashboard',
+  'reports',
+  'notifications',
+  'errors',
+  '_globalOptions',
+  '_meta',
+  'namespace',
+] as const;
+
+export type LegacyObjectFirstKey = (typeof LEGACY_OBJECT_FIRST_KEYS)[number];
+
+/**
+ * Where each retired key's content belongs now (or that it has no home).
+ *
+ * ## Why this is `guidance` and no longer a bespoke pre-parse guard
+ *
+ * #3778 retired the object-first dialect and hit the problem this whole
+ * campaign is about: Zod strips undeclared keys, so an item authored in the old
+ * shape saved cleanly and then resolved to nothing. The fix available at the
+ * time was a `z.preprocess` that scanned for these ten keys before parsing and
+ * raised a 422 naming the right group.
+ *
+ * That guard worked, and it had the shape of every workaround for silent
+ * stripping: **it could only catch the mistakes someone had already thought
+ * of.** Ten keys were named; every other misspelling — `object` for `objects`,
+ * `message` for `messages`, a group invented wholesale — went on being dropped
+ * in silence. And it only ever ran on the *item* door (`TranslationItemSchema`),
+ * so the same ten keys written into a file-authored bundle
+ * ({@link TranslationBundleSchema}, the path the examples and platform apps
+ * actually use) were stripped with no complaint at all. Exactly the asymmetry
+ * #4522 found in #1535's object guard: covered at one door, open at the other.
+ *
+ * With the shapes closed (#4001) the guard is redundant — `.strict()` catches
+ * all ten *and* everything else, at both doors — and what was worth keeping is
+ * the prescriptions, which now ride the rejection as {@link strictObject}
+ * `guidance`. An entry here suppresses the edit-distance rename, which matters:
+ * `app` → `apps` is distance 1 and would otherwise be offered as a typo fix,
+ * when the two carry different inner shapes and the content has to be rewritten,
+ * not renamed.
+ */
+const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey, string> = {
+  o: "`o` is the retired object-first dialect, which no resolver reads — use 'objects.<object_name>'",
+  app: "`app` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>'",
+  nav: "`nav` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>.navigation.<node_id>.label'",
+  dashboard: "`dashboard` is the retired object-first dialect, which no resolver reads — use 'dashboards.<dashboard_name>' (plural)",
+  reports: '`reports` is the retired object-first dialect — reports have no translation group, omit them',
+  notifications: '`notifications` is the retired object-first dialect — notifications have no translation group, omit them',
+  errors: "`errors` is the retired object-first dialect — use 'validationMessages' for rule messages; other errors have no translation group",
+  _globalOptions: "`_globalOptions` is the retired object-first dialect — use 'objects.<object_name>.fields.<field_name>.options'",
+  _meta: "`_meta` is the retired object-first dialect — use the top-level 'locale' field (on a bundle, the locale is the map key)",
+  namespace: '`namespace` is not part of the translation contract — omit it (ADR-0006 D4 retired namespaces platform-wide)',
+};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Locale-level Translation Data (per-locale aggregate)
@@ -164,15 +310,41 @@ export type ObjectTranslationData = z.infer<typeof ObjectTranslationDataSchema>;
  * }
  * ```
  */
-export const TranslationDataSchema = lazySchema(() => z.object({
+/**
+ * The translation groups, as a shape rather than a schema.
+ *
+ * Two schemas need exactly these keys: {@link TranslationDataSchema} (one entry
+ * of a file-authored bundle) and {@link TranslationItemSchema} (the registered
+ * `translation` metadata type — the same groups plus `locale` and the ADR-0010
+ * envelope). The item used to reach them with `.extend()`, which is correct for
+ * the *validation* but wrong for the *error*: `.extend()` inherits the strict
+ * error map that closed over the keys the BASE was built with, so a typo of
+ * `locale` on an item would be rejected with `locale` missing from the
+ * candidate list. A shape spread into two `strictObject` calls gives each
+ * surface its own full key set — the pattern the six `validation` variants
+ * settled on in the same campaign.
+ *
+ * A function, not a `const`: the values reference `lazySchema` proxies, and
+ * building the shape eagerly at module load would defeat the laziness those
+ * exist for.
+ */
+const translationDataShape = () => ({
   /** Object translations */
   objects: z.record(z.string(), ObjectTranslationDataSchema).optional().describe('Object translations keyed by object name'),
-  
+
   /** App/Menu translations */
-  apps: z.record(z.string(), z.object({
+  apps: z.record(z.string(), strictObject({
+    surface: 'this app translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', nav: 'navigation', menu: 'navigation', menus: 'navigation' },
+  }, {
     label: z.string().describe('Translated app label'),
     description: z.string().optional().describe('Translated app description'),
-    navigation: z.record(z.string(), z.object({
+    navigation: z.record(z.string(), strictObject({
+      surface: 'this navigation group translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label', text: 'label' },
+    }, {
       label: z.string().describe('Translated navigation group label'),
     })).optional().describe('Navigation group translations keyed by group ID'),
   })).optional().describe('App translations keyed by app name'),
@@ -193,19 +365,8 @@ export const TranslationDataSchema = lazySchema(() => z.object({
    *   globalActions.<action_name>.successMessage
    *   globalActions.<action_name>.resultDialog.*
    */
-  globalActions: z.record(z.string(), z.object({
-    label: z.string().optional().describe('Translated action label'),
-    confirmText: z.string().optional().describe('Translated confirmation prompt'),
-    successMessage: z.string().optional().describe('Translated success toast/message'),
-    params: z.record(z.string(), z.object({
-      label: z.string().optional().describe('Translated action parameter label'),
-      helpText: z.string().optional().describe('Translated action parameter help/hint text'),
-      placeholder: z.string().optional().describe('Translated action parameter placeholder'),
-      options: z.record(z.string(), z.string()).optional().describe('Param select option value to translated label'),
-    })).optional().describe('Action parameter translations keyed by parameter name'),
-    resultDialog: ActionResultDialogTranslationSchema.optional()
-      .describe('Translations for the action result dialog'),
-  })).optional().describe('Global action translations keyed by action name'),
+  globalActions: z.record(z.string(), actionTranslationSchema('this global action translation'))
+    .optional().describe('Global action translations keyed by action name'),
 
   /**
    * Dashboard translations keyed by dashboard name.
@@ -216,13 +377,28 @@ export const TranslationDataSchema = lazySchema(() => z.object({
    *   dashboards.<name>.widgets.<widgetId>.title
    *   dashboards.<name>.widgets.<widgetId>.description
    */
-  dashboards: z.record(z.string(), z.object({
+  dashboards: z.record(z.string(), strictObject({
+    surface: 'this dashboard translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', components: 'widgets', charts: 'widgets', cards: 'widgets' },
+  }, {
     label: z.string().optional().describe('Translated dashboard title'),
     description: z.string().optional().describe('Translated dashboard description'),
-    actions: z.record(z.string(), z.object({
+    actions: z.record(z.string(), strictObject({
+      surface: 'this dashboard header action translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label', text: 'label' },
+    }, {
       label: z.string().optional().describe('Translated header action label'),
     })).optional().describe('Header action label translations keyed by action url/key'),
-    widgets: z.record(z.string(), z.object({
+    widgets: z.record(z.string(), strictObject({
+      surface: 'this widget translation',
+      history: TRANSLATION_HISTORY,
+      // A widget's headline is `title`; a dashboard's is `label`. Same document,
+      // one level apart, opposite spellings — so `label` on a widget is the
+      // likeliest mistake on this surface and the least likely to be noticed.
+      aliases: { label: 'title', name: 'title', heading: 'title', subtitle: 'description' },
+    }, {
       title: z.string().optional().describe('Translated widget title'),
       description: z.string().optional().describe('Translated widget description'),
     })).optional().describe('Widget translations keyed by widget id'),
@@ -245,7 +421,11 @@ export const TranslationDataSchema = lazySchema(() => z.object({
    * `page:header` instances carry no stable `id`; the page name is the only
    * addressable identifier on the metadata document.
    */
-  pages: z.record(z.string(), z.object({
+  pages: z.record(z.string(), strictObject({
+    surface: 'this page translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', heading: 'title', header: 'title', subheading: 'subtitle', tagline: 'subtitle' },
+  }, {
     label: z.string().optional().describe('Translated page label (nav / breadcrumb)'),
     description: z.string().optional().describe('Translated page description'),
     title: z.string().optional().describe('Translated `page:header` title (defaults to `label`)'),
@@ -269,21 +449,44 @@ export const TranslationDataSchema = lazySchema(() => z.object({
    *   settings.<namespace>.actions.<action_id>.confirmText
    *   settings.<namespace>.actions.<action_id>.successMessage
    */
-  settings: z.record(z.string(), z.object({
+  settings: z.record(z.string(), strictObject({
+    surface: 'this settings manifest translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { label: 'title', name: 'title', sections: 'groups', fields: 'keys', settings: 'keys' },
+  }, {
     title: z.string().optional().describe('Translated settings manifest title'),
     description: z.string().optional().describe('Translated settings manifest description'),
-    groups: z.record(z.string(), z.object({
+    groups: z.record(z.string(), strictObject({
+      surface: 'this settings group translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { label: 'title', name: 'title', heading: 'title' },
+    }, {
       title: z.string().optional().describe('Translated group title'),
       description: z.string().optional().describe('Translated group description'),
     })).optional().describe('Group translations keyed by group key'),
-    keys: z.record(z.string(), z.object({
+    keys: z.record(z.string(), strictObject({
+      surface: 'this setting translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { title: 'label', name: 'label', helpText: 'help', hint: 'help', description: 'help', choices: 'options', values: 'options' },
+    }, {
       label: z.string().optional().describe('Translated setting label'),
       help: z.string().optional().describe('Translated setting help text'),
       placeholder: z.string().optional().describe('Translated input placeholder'),
       options: z.record(z.string(), z.string()).optional()
         .describe('Enum option value → translated label'),
     })).optional().describe('Per-setting field translations keyed by setting key'),
-    actions: z.record(z.string(), z.object({
+    actions: z.record(z.string(), strictObject({
+      surface: 'this settings action translation',
+      history: TRANSLATION_HISTORY,
+      // Settings actions have no `params`/`resultDialog` — a settings button is
+      // not an action-metadata action. Say so, rather than suggesting the
+      // nearest key and sending the author round again.
+      aliases: { name: 'label', title: 'label', confirm: 'confirmText', success: 'successMessage' },
+      guidance: {
+        params: 'settings actions take no parameters — there is no `params` group to translate',
+        resultDialog: 'settings actions have no result dialog — `resultDialog` translations belong under `objects.<object>._actions` or `globalActions`',
+      },
+    }, {
       label: z.string().optional().describe('Translated action label'),
       confirmText: z.string().optional().describe('Translated confirmation prompt'),
       successMessage: z.string().optional().describe('Translated success toast/message'),
@@ -328,14 +531,26 @@ export const TranslationDataSchema = lazySchema(() => z.object({
    * }
    * ```
    */
-  metadataForms: z.record(z.string(), z.object({
+  metadataForms: z.record(z.string(), strictObject({
+    surface: 'this metadata-form translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', groups: 'sections', properties: 'fields' },
+  }, {
     label: z.string().optional().describe('Translated metadata-type display label (overrides registry label)'),
     description: z.string().optional().describe('Translated metadata-type description'),
-    sections: z.record(z.string(), z.object({
+    sections: z.record(z.string(), strictObject({
+      surface: 'this metadata-form section translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label', heading: 'label' },
+    }, {
       label: z.string().optional().describe('Translated section label'),
       description: z.string().optional().describe('Translated section description'),
     })).optional().describe('Section translations keyed by section.name'),
-    fields: z.record(z.string(), z.object({
+    fields: z.record(z.string(), strictObject({
+      surface: 'this metadata-form field translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label', help: 'helpText', hint: 'helpText', description: 'helpText' },
+    }, {
       label: z.string().optional().describe('Translated field label'),
       helpText: z.string().optional().describe('Translated field help/hint text'),
       placeholder: z.string().optional().describe('Translated field placeholder text'),
@@ -347,8 +562,18 @@ export const TranslationDataSchema = lazySchema(() => z.object({
    * badges, inheritance chips, lock reasons, common actions. Resolved
    * via the `resolveSettingsCommon*` helpers in `i18n-resolver.ts`.
    */
-  settingsCommon: z.object({
-    sourceLabels: z.object({
+  settingsCommon: strictObject({
+    surface: 'the shared Settings UI translations',
+    history: TRANSLATION_HISTORY,
+  }, {
+    sourceLabels: strictObject({
+      surface: 'the settings source-badge labels',
+      history: TRANSLATION_HISTORY,
+      // The layers are a closed set (ADR-0010 / the settings resolution order),
+      // so an unknown one here is a badge that will never render, not a layer
+      // the platform is about to grow.
+      aliases: { org: 'tenant', workspace: 'tenant', system: 'global', fallback: 'default', environment: 'env' },
+    }, {
       env: z.string().optional(),
       global: z.string().optional(),
       tenant: z.string().optional(),
@@ -356,7 +581,18 @@ export const TranslationDataSchema = lazySchema(() => z.object({
       default: z.string().optional(),
     }).optional().describe('Source badge labels by resolution layer'),
   }).optional().describe('Cross-namespace Settings UI strings'),
-}).describe('Translation data for objects, apps, and UI messages'));
+});
+
+export const TranslationDataSchema = lazySchema(() => strictObject({
+  surface: 'this locale of the translation bundle',
+  history: TRANSLATION_HISTORY,
+  guidance: TRANSLATION_KEY_GUIDANCE,
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  // `locale` lives on the ITEM, not on a bundle entry (the bundle keys ARE the
+  // locales). Naming it keeps the suggestion useful for an author who moved a
+  // `translation` item into a bundle and left the field behind.
+  extraKeys: ['locale'],
+}, translationDataShape()).describe('Translation data for objects, apps, and UI messages'));
 
 export type TranslationData = z.infer<typeof TranslationDataSchema>;
 
@@ -405,7 +641,24 @@ export function defineTranslationBundle(config: z.input<typeof TranslationBundle
  * });
  * ```
  */
-export const TranslationConfigSchema = lazySchema(() => z.object({
+export const TranslationConfigSchema = lazySchema(() => strictObject({
+  surface: 'the i18n configuration',
+  history:
+    'Until #4001 closed this shape an unknown key was dropped silently — the stack still '
+    + 'built, with the setting the author wrote never reaching any runtime.',
+  aliases: { locale: 'defaultLocale', defaultLanguage: 'defaultLocale', locales: 'supportedLocales', languages: 'supportedLocales', fallback: 'fallbackLocale', fallbackLanguage: 'fallbackLocale' },
+  // #3494 removed these four. They were the exemplar the liveness audit
+  // (#1878/#1893) was built to find — declared, authored, and read by nothing —
+  // and removing them made a config that was *already* a no-op into a config
+  // that was a silent no-op for a second reason. A tombstone is the only thing
+  // that tells an author upgrading from <17 why their setting vanished.
+  guidance: {
+    fileOrganization: '`fileOrganization` was removed in #3494 — no runtime ever read it; how you split bundle files is a convention of your source tree, and the loader reads whatever `translations` you hand `defineStack`',
+    messageFormat: '`messageFormat` was removed in #3494 — there is no ICU engine; interpolation is always simple `{variable}` substitution',
+    lazyLoad: '`lazyLoad` was removed in #3494 — no runtime ever read it, so setting it changed nothing',
+    cache: '`cache` was removed in #3494 — no runtime ever read it, so setting it changed nothing',
+  },
+}, {
   /** Default locale for the application */
   defaultLocale: LocaleSchema.describe('Default locale (e.g., "en")'),
   /** Supported BCP-47 locale codes */
@@ -421,46 +674,6 @@ export type TranslationConfig = z.infer<typeof TranslationConfigSchema>;
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Top-level keys of the retired object-first (`o.<object>`) dialect.
- *
- * {@link TranslationItemSchema} checks for them *before* parsing, because Zod
- * strips undeclared keys silently: an item authored in the old shape would
- * otherwise save cleanly and then resolve to nothing — exactly the failure
- * this type is being fixed for (#3778). Guarding ahead of the parse turns
- * that silence into a 422 naming the correct group, while keeping the retired
- * keys out of the schema itself, so neither the generated JSON Schema nor the
- * Studio editor advertises a shape that cannot work.
- */
-export const LEGACY_OBJECT_FIRST_KEYS = [
-  'o',
-  'app',
-  'nav',
-  'dashboard',
-  'reports',
-  'notifications',
-  'errors',
-  '_globalOptions',
-  '_meta',
-  'namespace',
-] as const;
-
-export type LegacyObjectFirstKey = (typeof LEGACY_OBJECT_FIRST_KEYS)[number];
-
-/** Where each retired key's content belongs now (or that it has no home). */
-const LEGACY_KEY_MIGRATION: Record<LegacyObjectFirstKey, string> = {
-  o: "use 'objects.<object_name>'",
-  app: "use 'apps.<app_name>'",
-  nav: "use 'apps.<app_name>.navigation.<node_id>.label'",
-  dashboard: "use 'dashboards.<dashboard_name>'",
-  reports: 'reports have no translation group — omit them',
-  notifications: 'notifications have no translation group — omit them',
-  errors: "use 'validationMessages' for rule messages; other errors have no translation group",
-  _globalOptions: "use 'objects.<object_name>.fields.<field_name>.options'",
-  _meta: "use the top-level 'locale' field",
-  namespace: 'namespaces are not part of the translation contract — omit it',
-};
-
-/**
  * TranslationItemSchema
  *
  * The shape of a single `translation` metadata item — one locale's worth of
@@ -474,7 +687,8 @@ const LEGACY_KEY_MIGRATION: Record<LegacyObjectFirstKey, string> = {
  * object-first (`o.<object>`) dialect that no resolver ever read, so a
  * translation authored in the product saved successfully and then rendered
  * nothing. That dialect is gone, and its keys are rejected outright rather
- * than stripped — see {@link LEGACY_OBJECT_FIRST_KEYS}.
+ * than stripped — see {@link LEGACY_OBJECT_FIRST_KEYS}. Since #4001 so is
+ * every *other* undeclared key, which is the part #3778 could not reach.
  *
  * `locale` is required rather than inferred from the item name: the runtime
  * sync skips an item whose locale it cannot resolve, and a skip is invisible
@@ -497,40 +711,49 @@ const LEGACY_KEY_MIGRATION: Record<LegacyObjectFirstKey, string> = {
  * });
  * ```
  */
-/**
- * The item's own shape, without the retired-key guard. Private: it exists so
- * the guard can wrap it (and so the factory below can type its argument) —
- * {@link TranslationItemSchema} is the schema every caller should use.
- */
-const TranslationItemDataSchema = lazySchema(() => TranslationDataSchema.extend({
+export const TranslationItemSchema = lazySchema(() => strictObject({
+  surface: 'this translation',
+  history: TRANSLATION_HISTORY,
+  guidance: TRANSLATION_KEY_GUIDANCE,
+  aliases: { object: 'objects', app: 'apps', page: 'pages', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
+}, {
+  ...translationDataShape(),
   locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),
+
+  // Item identity. Every other registered metadata type declares these;
+  // `translation` did not, because #3778 rebuilt the shape as "one entry of a
+  // bundle, plus `locale`" and the identity keys were not part of a bundle
+  // entry. They ARE part of an item: the platform's own create seed
+  // (`metadata-create-seeds.ts`) sends both, and `authored-translation-sync`
+  // destructures `name` back out of the stored body — it knows the body has it.
+  // Undeclared, they were stripped on every parse, so the metadata door quietly
+  // discarded an item's own name on the way through.
+  //
+  // Not snake_case-constrained the way `job.name` is: translation items are
+  // conventionally named after their locale (`zh-CN`), and the runtime sync
+  // reads `row.name` as a locale fallback for exactly that reason. Optional
+  // because `locale`, not `name`, is this type's required identity — that call
+  // was deliberate (a skipped item is invisible) and is not being reopened.
+  name: z.string().optional().describe('Item name — conventionally the locale code (`zh-CN`); the runtime sync falls back to it when `locale` is absent'),
+  label: z.string().optional().describe('Human-readable label shown in metadata lists'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  // `translation` is a registered metadata type, so `MetadataPlugin`'s artifact
+  // loader stamps `_packageId` / `_provenance` on it. Undeclared, they were
+  // dropped on every parse — and `authored-translation-sync` has to strip them
+  // by hand on the read side precisely because the schema could not hold them.
+  ...MetadataProtectionFields,
 }).describe('One locale of translations — the `translation` metadata type'));
 
-export const TranslationItemSchema = lazySchema(() => z.preprocess((raw, ctx) => {
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    for (const key of LEGACY_OBJECT_FIRST_KEYS) {
-      if ((raw as Record<string, unknown>)[key] === undefined) continue;
-      ctx.addIssue({
-        code: 'custom',
-        path: [key],
-        message:
-          `'${key}' belongs to the retired object-first translation shape, which no resolver `
-          + `reads — ${LEGACY_KEY_MIGRATION[key]}.`,
-      });
-    }
-  }
-  return raw;
-}, TranslationItemDataSchema));
-
 /** A single `translation` metadata item. */
-export type TranslationItem = z.infer<typeof TranslationItemDataSchema>;
+export type TranslationItem = z.infer<typeof TranslationItemSchema>;
 
 /**
  * Type-safe factory for a single-locale `translation` item. Validates at
  * authoring time via `.parse()` — preferred over a bare `: TranslationItem`
  * literal, which cannot catch a retired key.
  */
-export function defineTranslation(config: z.input<typeof TranslationItemDataSchema>): TranslationItem {
+export function defineTranslation(config: z.input<typeof TranslationItemSchema>): TranslationItem {
   return TranslationItemSchema.parse(config);
 }
 

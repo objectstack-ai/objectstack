@@ -198,6 +198,47 @@ dropped at parse, and nothing failed.
    this file keeps re-deriving: before trusting a green check, make it go red on
    something you know is there.**
 
+10. **A bespoke guard against silent stripping could only catch the ten
+    mistakes someone had already thought of — and only at one of the two
+    doors.** `translation` (step 5). #3778 retired the object-first (`o.<object>`)
+    dialect and hit this campaign's problem head-on: an item authored in the old
+    shape saved cleanly and then resolved to nothing. The fix available then was
+    a `z.preprocess` that scanned for ten named keys and raised a 422 with the
+    right destination for each.
+
+    It worked, and it had the shape every workaround for `.strip` has. Ten keys
+    were enumerated; `object` for `objects`, `message` for `messages`, a group
+    invented wholesale — all still stripped in silence. And it ran on the *item*
+    door only, so those same ten keys written into a file-authored bundle (the
+    path the examples and the platform apps actually use) were dropped with no
+    complaint at all. **The same asymmetry #4522 found in #1535's object guard**:
+    covered at one door, open at the other, by two different authors solving the
+    problem in front of them.
+
+    With the shape closed the guard is redundant — `.strict()` catches all ten
+    and everything else, at both doors — so it was retired and its ten
+    prescriptions became `guidance` on the rejection. Which is the general
+    lesson: **what was worth keeping from a bespoke guard is never the
+    detection, it is the prose.** Detection generalizes for free the moment the
+    default flips; the sentence telling an author where their content goes does
+    not, and is the part these workarounds were really carrying.
+
+11. **The canonical "create seed ≠ spec" gate could only fail in one
+    direction.** `metadata-create-seeds.test.ts` exists so a designer's minimal
+    create shape cannot drift from the schema — it asserts every seed parses.
+    The `translation` seed ships `{ name, label, locale, objects }`, and the type
+    declared neither `name` nor `label`, so **two thirds of the authoritative
+    create shape was being stripped while the gate that exists to catch exactly
+    that reported green.** A gate built on a `.strip` schema can catch a MISSING
+    required key and can never catch an EXTRA undeclared one; it was doing half
+    its job and reading as if it did all of it.
+
+    Fixed by declaring them — `translation` was the only registered type of 25
+    without a `name`, and that irregularity is what an AI author trips on — and
+    classified honestly in the liveness ledger as dead *body* keys, the row
+    column being the live one. Fifth instance of finding 9's pattern, and the
+    first where the blinded instrument was a gate rather than a measurement.
+
 This is the empirical argument for the ratchet: the inference "no metadata in
 the repo carries unknown keys" was **false three times over**, and only the
 strict gate could prove it. Note the asymmetry in the two schema gaps — both

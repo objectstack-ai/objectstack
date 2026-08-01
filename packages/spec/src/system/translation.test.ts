@@ -666,9 +666,68 @@ describe('TranslationItemSchema', () => {
       [key]: { account: { label: '客户' } },
     });
     expect(result.success).toBe(false);
-    const issue = result.error?.issues.find((i) => i.path[0] === key);
+    // The prescriptions used to come from a bespoke `z.preprocess` that scanned
+    // for these ten keys; since #4001 they ride the strict unknown-key error as
+    // `guidance`, so the issue is `unrecognized_keys` naming the key rather than
+    // a custom issue at `path: [key]`. The message is what an author reads, and
+    // it still has to carry the destination.
+    const issue = result.error?.issues.find((i) => i.code === 'unrecognized_keys');
     expect(issue).toBeDefined();
+    expect((issue as { keys?: string[] } | undefined)?.keys).toContain(key);
     expect(issue?.message).toContain(hint);
+  });
+
+  it('should not offer `app` → `apps` as a rename — the inner shapes differ', () => {
+    // Edit distance 1, so without a `guidance` entry the suggester would call
+    // this a typo. It is not: the object-first `app.<object>` and the current
+    // `apps.<app_name>` hold different content, so the fix is a rewrite. A
+    // guidance entry suppresses the rename, which is the point of having one.
+    const result = TranslationItemSchema.safeParse({ locale: 'en', app: { account: { label: 'Account' } } });
+    expect(result.success).toBe(false);
+    const message = result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
+    expect(message).not.toContain('Did you mean');
+    expect(message).toContain('apps.<app_name>');
+  });
+
+  it('should reject an unknown key the retired-key list never named (#4001)', () => {
+    // What the #3778 guard could not do. It enumerated ten keys someone had
+    // thought of; `object` for `objects` was not one of them, and a bundle
+    // written that way saved clean and resolved to nothing.
+    const result = TranslationItemSchema.safeParse({
+      locale: 'zh-CN',
+      object: { account: { label: '客户' } },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+      .toContain('`object` → `objects`');
+  });
+
+  it('should round-trip its own identity keys (the Studio create seed sends both)', () => {
+    // `metadata-create-seeds.ts` ships `{ name, label, locale, objects }` as the
+    // authoritative minimal create shape, and its test asserts every seed is
+    // spec-valid — the canonical guard for "designer create shape ≠ spec".
+    // That guard could only ever catch a MISSING required key: an extra key the
+    // schema did not declare was stripped, so the seed validated while two
+    // thirds of it was being thrown away. Closing the shape made it fail, which
+    // is the guard finally working in both directions.
+    const item = TranslationItemSchema.parse({ name: 'zh-CN', label: '简体中文', locale: 'zh-CN' });
+    expect(item.name).toBe('zh-CN');
+    expect(item.label).toBe('简体中文');
+  });
+
+  it('should declare the ADR-0010 protection envelope', () => {
+    // The loader stamps these on every registered type; undeclared, they were
+    // dropped on each parse, and `authored-translation-sync` strips them by
+    // hand on the read side because the schema could not hold them.
+    const item = TranslationItemSchema.parse({
+      locale: 'en',
+      objects: { account: { label: 'Account' } },
+      _packageId: 'com.example.pkg',
+      _provenance: 'package',
+      _lock: 'no-overlay',
+    });
+    expect(item._packageId).toBe('com.example.pkg');
+    expect(item._lock).toBe('no-overlay');
   });
 
   it('should reject the retired shape rather than silently stripping it (#3778)', () => {
@@ -719,6 +778,115 @@ describe('TranslationItemSchema', () => {
     const bundle = TranslationBundleSchema.parse({ [locale]: data });
     expect(bundle['zh-CN'].objects?.account.label).toBe('客户');
   });
+});
+
+// ============================================================================
+// Unknown-key strictness across the translation groups (#4001)
+// ============================================================================
+
+describe('translation unknown-key strictness (#4001)', () => {
+  // The failure this file is closing is unusually cruel: a translation that
+  // resolves to nothing is indistinguishable from a translation nobody wrote.
+  // There is no wrong string on screen to notice — just the source language,
+  // forever, exactly as if the key were still on the backlog.
+
+  it('rejects a retired key on the file-authored BUNDLE path, which the guard never covered', () => {
+    // #3778's `z.preprocess` ran on the item door only. The examples and the
+    // platform apps author bundles (`defineTranslationBundle`), and the same
+    // ten keys were stripped there in silence. Same asymmetry #4522 found in
+    // #1535's object guard: closed at one door, open at the other.
+    const result = TranslationBundleSchema.safeParse({
+      en: { o: { account: { label: 'Account' } } },
+    });
+    expect(result.success).toBe(false);
+    const message = result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
+    expect(message).toContain('objects.<object_name>');
+  });
+
+  it.each([
+    ['a top-level group', { messsages: { 'common.save': 'Save' } }, 'messages'],
+    ['an app translation', { apps: { crm: { label: 'CRM', nagivation: {} } } }, 'navigation'],
+    ['a page translation', { pages: { home: { subtitel: 'Welcome' } } }, 'subtitle'],
+    ['a dashboard widget', { dashboards: { sales: { widgets: { rev: { titel: 'Revenue' } } } } }, 'title'],
+    ['a settings key', { settings: { mail: { keys: { host: { lable: 'Host' } } } } }, 'label'],
+    ['a metadata form field', { metadataForms: { object: { fields: { name: { helpTxt: 'x' } } } } }, 'helpText'],
+  ])('rejects a typo in %s and names the key it meant', (_what, body, expected) => {
+    const result = TranslationDataSchema.safeParse(body);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+      .toContain(`→ \`${expected}\``);
+  });
+
+  it.each([
+    ['object', { objects: { account: { views: {} } } }, '_views'],
+    ['object', { objects: { account: { actions: {} } } }, '_actions'],
+    ['object', { objects: { account: { sections: {} } } }, '_sections'],
+  ])('points the un-prefixed %s group at its `_`-prefixed name', (_what, body, expected) => {
+    const result = TranslationDataSchema.safeParse(body);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+      .toContain(`→ \`${expected}\``);
+  });
+
+  it('sends `help` on an action param to `helpText`, the spelling that surface uses', () => {
+    // `help` is correct on a FIELD translation and on a settings key; on an
+    // action param it is `helpText`. Borrowing from a neighbouring surface
+    // reads as a real word, not a slip, so edit distance cannot rule on it —
+    // this is what the alias tables are for.
+    const result = TranslationDataSchema.safeParse({
+      globalActions: { export_csv: { params: { format: { help: 'CSV or XLSX' } } } },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+      .toContain('`help` → `helpText`');
+  });
+
+  it('names which action surface the key landed on', () => {
+    const onObject = TranslationDataSchema.safeParse({
+      objects: { account: { _actions: { merge: { confirm: 'ok?' } } } },
+    });
+    const onGlobal = TranslationDataSchema.safeParse({
+      globalActions: { log_call: { confirm: 'ok?' } },
+    });
+    expect(onObject.error?.issues[0]?.message).toContain('this object action translation');
+    expect(onGlobal.error?.issues[0]?.message).toContain('this global action translation');
+  });
+
+  it('still accepts every declared group together', () => {
+    // The shape is spread into two schemas (bundle entry + metadata item); this
+    // is the guard against closing one of them against a stale key list.
+    const body = {
+      objects: { account: { label: 'Account', _views: { all: { label: 'All', emptyState: { title: 'None' } } } } },
+      apps: { crm: { label: 'CRM', navigation: { sales: { label: 'Sales' } } } },
+      messages: { 'common.save': 'Save' },
+      validationMessages: { discount_limit: 'Too high' },
+      globalActions: { export_csv: { label: 'Export', params: { format: { label: 'Format' } } } },
+      dashboards: { sales: { label: 'Sales', widgets: { rev: { title: 'Revenue' } } } },
+      pages: { home: { label: 'Home', title: 'Welcome' } },
+      settings: { mail: { title: 'Mail', keys: { host: { label: 'Host' } } } },
+      metadataForms: { object: { label: 'Object', fields: { name: { label: 'Name' } } } },
+      settingsCommon: { sourceLabels: { env: 'Env', tenant: 'Tenant' } },
+    };
+    expect(() => TranslationDataSchema.parse(body)).not.toThrow();
+    expect(() => TranslationItemSchema.parse({ locale: 'en', ...body })).not.toThrow();
+  });
+
+  it.each(['fileOrganization', 'messageFormat', 'lazyLoad', 'cache'])(
+    'tells an author upgrading from <17 where the removed i18n knob `%s` went',
+    (key) => {
+      // #3494 removed these four because no runtime read them. Removing a key
+      // that was already a no-op leaves the author with the same silence and one
+      // more reason for it — the tombstone is the only thing that says why.
+      const result = TranslationConfigSchema.safeParse({
+        defaultLocale: 'en',
+        supportedLocales: ['en'],
+        [key]: true,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+        .toContain('#3494');
+    },
+  );
 });
 
 // ============================================================================

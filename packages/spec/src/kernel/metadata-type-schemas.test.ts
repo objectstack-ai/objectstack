@@ -72,10 +72,11 @@ const PROBE: Record<string, unknown> = {
  *
  * The structural walk found 8 of these; the probe it replaced had been hiding 7.
  * `job` and `book` were closed in the same pass, leaving 6; `validation` came off
- * when its six union variants were converted, leaving 5.
+ * when its six union variants were converted, leaving 5; `translation` came off
+ * when its groups were closed, leaving 4.
  */
 const UNDECLARED_ENVELOPE = new Set<string>([
-  'action', 'field', 'mapping', 'page', 'translation',
+  'action', 'field', 'mapping', 'page',
 ]);
 
 /**

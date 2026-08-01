@@ -5,9 +5,19 @@ description: Translation protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Field Translation Schema
+Shared history sentence for every shape in this file (#4001).
 
-Translation data for a single field.
+Translation data has the most literal version of the silent-strip failure in
+
+the whole spec: a misspelled group or key is dropped, the bundle saves or
+
+loads without complaint, and the string it was meant to translate renders in
+
+the source language. There is no error, no log line, and no difference
+
+between "not translated yet" and "translated into a key nothing reads" — so
+
+the bug looks like missing coverage forever.
 
 <Callout type="info">
 **Source:** `packages/spec/src/system/translation.zod.ts`
@@ -208,6 +218,15 @@ One locale of translations — the `translation` metadata type
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, { label?: string; description?: string }>; fields?: Record<string, { label?: string; helpText?: string; placeholder?: string }> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **locale** | `string` | ✅ | BCP-47 locale this item translates (e.g. "zh-CN") |
+| **name** | `string` | optional | Item name — conventionally the locale code (`zh-CN`); the runtime sync falls back to it when `locale` is absent |
+| **label** | `string` | optional | Human-readable label shown in metadata lists |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
 
 ---
