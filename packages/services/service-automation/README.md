@@ -131,6 +131,11 @@ The built-in node type ids (`FLOW_BUILTIN_NODE_TYPES`, from `FlowNodeAction` in
 `type` is validated against the **live action registry** at `registerFlow()`, not
 against a closed enum, so plugin-registered node types are equally legal.
 
+The registry is also why `FlowNodeAction` is not the whole list: the ADR-0031
+structured constructs **`parallel`** and **`try_catch`** ship built-in executors
+(`builtin/parallel-node.ts`, `builtin/try-catch-node.ts`) without appearing in
+that enum. See [Advanced Features](#advanced-features) below.
+
 The CRUD quartet's `config` — the shape most often written from memory, and the
 one this README used to get wrong:
 
