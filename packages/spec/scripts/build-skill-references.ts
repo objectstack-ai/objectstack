@@ -79,7 +79,6 @@ const SKILL_MAP: Record<string, string[]> = {
   ],
   'objectstack-automation': [
     'automation/flow.zod.ts',
-    'automation/trigger-registry.zod.ts',
     'automation/time-relative-trigger.zod.ts',
     'automation/approval.zod.ts',
     'automation/state-machine.zod.ts',

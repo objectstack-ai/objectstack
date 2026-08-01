@@ -70,7 +70,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`flow.zod.ts`](src/automation/flow.zod.ts) | ⭐ | **Visual Flow**. Complex orchestration logic (decisions, loops, CRUD). |
 | [`approval.zod.ts`](src/automation/approval.zod.ts) | ⭐ | **Approval Node**. Flow node config for human approval pauses. |
 | [`webhook.zod.ts`](src/automation/webhook.zod.ts) | ⭐ | **Webhooks**. Outbound HTTP notification configuration. |
-| [`trigger-registry.zod.ts`](src/automation/trigger-registry.zod.ts) | | **Trigger Registry**. Central registry for all automation triggers. |
 | [`etl.zod.ts`](src/automation/etl.zod.ts) | | **ETL Jobs**. Extract-Transform-Load definitions. |
 | [`sync.zod.ts`](src/automation/sync.zod.ts) | | **Data Sync**. Bi-directional synchronization rules. |
 

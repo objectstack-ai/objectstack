@@ -194,13 +194,12 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `external-catalog.zod.ts` | 4 | wire (p) | |
 | `field-value.zod.ts` / `seed.zod.ts` / `validation.zod.ts` | 1 ea | mixed (p) | |
 
-### `automation/` — 99 sites
+### `automation/` — 88 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
 | `flow.zod.ts` | 11 | authorable | **strict as of #4001** (4 schemas; `FlowVersionHistorySchema` is runtime — stays tolerant) |
 | `sync.zod.ts` / `etl.zod.ts` | 12+10 | authorable (p) | authored pipelines — **candidates** |
-| `trigger-registry.zod.ts` | 11 | mixed | descriptors are code-registered (wire-ish); bindings authored |
 | `execution.zod.ts` | 13 | wire | run-state envelopes — never strict. +5 at #4354 (the run-summary family: step metrics / skip reason / per-node / per-gate / the summary itself) — engine-emitted telemetry read by the Console and by operator queries, nobody authors them, so the `wire` verdict covers them unchanged |
 | `state-machine.zod.ts` | 7 | authorable (p) | |
 | `control-flow.zod.ts` | 6 | authorable (p) | validated structurally by `validateControlFlow` |
@@ -212,6 +211,8 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `schemaless-node-config.zod.ts` | 4 | authorable | Same family, third panel (#4278): `script` / `subflow` / `decision` (+ the decision branch item) — the descriptor-schemaless nodes whose form lives in objectui's hand-written table. Written from the executors; the drift check is objectui's `flow-node-config.spec-reconciliation` test (cross-repo, via the published exports). Contract exports only — nothing parses node config with them yet, so strictness candidacy follows `io-node-config` |
 | `webhook.zod.ts` | 1 | authorable (p) | spec-only (#3461) |
 | `flow-function.zod.ts` | 1 | authorable | `FlowFunctionDeclarationSchema` (#4396) — the `{ handler, effect }` form of a `defineStack({ functions })` entry. Authored, but note what an undeclared key here would be: a sibling of a **live function**, not data. `defineStack`'s union already rejects a record whose `handler` is not callable, and the boot-path reader is the hand-written `normalizeFlowFunctionEntry` rather than a `.parse()` (re-validating a live handler every boot buys nothing), so strictness would bind at authoring only. Candidate on the same verify-first rule as its `*-node-config` neighbours |
+
+`trigger-registry.zod.ts` had a row here (11 sites, "mixed — descriptors are code-registered (wire-ish); bindings authored") until #4499 deleted the file: all 11 sites were the third connector-vocabulary declaration (`ConnectorSchema` / `Authentication*` / `Operation*` / `ConnectorInstance`), and the old row's classification was optimistic twice over — nothing was ever code-registered against these descriptors and no binding was ever authored. The engine registers against `integration/connector.zod.ts` (ADR-0097), which keeps its own row.
 
 ### `security/` — 20 sites
 
