@@ -17,7 +17,7 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
@@ -2965,10 +2965,18 @@ export class ObjectQL implements IObjectQLEngine {
       // declared it expandable. Reading the shared set is what stops the
       // protocol's expand gate (which validates against the same set) from ever
       // admitting a field this loop then silently skips.
-      if (!fieldDef || !fieldDef.reference) continue;
+      //
+      // [cloud#983] The TARGET comes from `referenceTargetOf` for that same
+      // anti-drift reason. A raw `fieldDef.reference` read made `{ type:
+      // 'user' }` (no `reference`) targetless here AND at the gate — but
+      // `user`'s target is fixed BY THE TYPE (`sys_user`; `Field.user()` takes
+      // no target argument), so the field was fully specified and the request
+      // was refused `400 … declares no target object`. Both sides now ask the
+      // one function what a reference field points at.
+      if (!fieldDef) continue;
       if (!REFERENCE_VALUE_TYPES.has(fieldDef.type)) continue;
-
-      const referenceObject = fieldDef.reference;
+      const referenceObject = referenceTargetOf(fieldDef);
+      if (!referenceObject) continue;
 
       // Collect all foreign key IDs from records (handle both single and multiple values)
       const allIds: any[] = [];

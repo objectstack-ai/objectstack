@@ -178,8 +178,14 @@ export type SubflowConfigParsed = z.infer<typeof SubflowConfigSchema>;
 /**
  * One `decision` branch — what the executor reads per condition
  * (logic-nodes.ts): the first branch whose bare-CEL `expression` evaluates
- * true wins, and the run continues down the out-edge labelled `label`
- * (no match → the edge labelled `default`).
+ * true wins, and the run continues down the out-edge labelled `label`. When no
+ * branch matches, the run takes the declared fallback — the out-edge marked
+ * `isDefault: true`, or one literally labelled `default`.
+ *
+ * `label` must match an out-edge's `label` **exactly**. A label nothing claims
+ * cannot route: traversal logs a warning and falls back to considering every
+ * out-edge, and `os validate` reports it as `flow-branch-label-unmatched`
+ * (#4414 — every decision label in the repo used to miss, silently).
  *
  * The designer's branch rows also show a **Target** column — that is a
  * VIRTUAL column projected from the node's out-edges by the designer
@@ -188,7 +194,7 @@ export type SubflowConfigParsed = z.infer<typeof SubflowConfigSchema>;
  */
 export const DecisionConditionSchema = lazySchema(() => z.object({
   /** Branch label — must match an out-edge's `label` to route anywhere. */
-  label: z.string().describe("Branch label; the winning branch resumes down the out-edge with this label ('true' expression = default/else path)"),
+  label: z.string().describe("Branch label; the winning branch resumes down the out-edge with this label (no match → the out-edge marked isDefault, or one labelled 'default')"),
   /** Bare-CEL predicate (ADR-0032) — `{…}` template braces are the #1491 trap. */
   expression: z.string().describe('Bare CEL predicate deciding this branch'),
 }));
@@ -198,15 +204,22 @@ export type DecisionCondition = z.input<typeof DecisionConditionSchema>;
 /**
  * `decision` node config — what the executor reads.
  *
- * A decision may also carry no `conditions` at all and rely purely on
- * condition-bearing OUT-EDGES (`edge.condition`, evaluated by the engine's
- * traversal) — that is the legacy shape. The legacy singular
- * `config.condition` is a structural surface the engine parse-validates on
- * every node at registration but the decision executor never reads; branching
- * predicates live in `conditions[]` or on the edges.
+ * A decision may also carry no `conditions` at all and rely purely on the
+ * OUT-EDGES (`edge.condition` per branch + `isDefault` on the fallback,
+ * evaluated by the engine's traversal) — a plain BPMN exclusive gateway, and
+ * the shape every bundled example uses. A node that declares no `conditions`
+ * reports no branch at all, so nothing competes with the edges.
+ *
+ * Pick **one** mechanism per decision. Declaring `conditions` here *and*
+ * per-edge `condition`s means the node picks a branch and then that branch's
+ * edge re-decides — the double-declaration behind #4414.
+ *
+ * The legacy singular `config.condition` is a structural surface the engine
+ * parse-validates on every node at registration but the decision executor never
+ * reads; branching predicates live in `conditions[]` or on the edges.
  */
 export const DecisionConfigSchema = lazySchema(() => z.object({
-  /** Ordered branches; first true expression wins, else the `default`-labelled edge. */
+  /** Ordered branches; first true expression wins, else the declared default edge. */
   conditions: z.array(DecisionConditionSchema).optional()
     .describe('Ordered decision branches (first true expression wins; omit to branch purely on edge conditions)'),
 }));

@@ -42,6 +42,65 @@ import { ExpressionEngine, validateExpression, nearestName } from '@objectstack/
 const UNRESOLVED_CEL_REFERENCE = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/;
 
 /**
+ * A legacy single-brace **template hole** — `{amount}`, `{get_lead.id}`. This is
+ * the exact shape `{var}` substitution can consume (it splits on the literal
+ * `{<key>}` text for each variable key), which is what makes it a sound dialect
+ * discriminator in {@link AutomationEngine.evaluateCondition}: a condition
+ * containing one was written in the template dialect, and a condition containing
+ * none was written as CEL (#4336).
+ *
+ * No whitespace is tolerated inside the braces, deliberately — `{ amount }`
+ * is not a token substitution can resolve, so treating it as a hole would only
+ * move the failure. It is not valid CEL either (a map literal needs `key: value`
+ * pairs), so it lands on the CEL path and gets the brace-trap diagnostic.
+ */
+const TEMPLATE_HOLE = /\{[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\}/g;
+
+/** A quoted string literal, anywhere in a condition. */
+const QUOTED_SEGMENT = /'[^']*'|"[^"]*"/g;
+
+/** A single-quoted or double-quoted string literal, whole-operand. */
+const QUOTED_LITERAL = /^'([^']*)'$|^"([^"]*)"$/;
+
+/**
+ * Every legacy `{var}` hole in `source`, ignoring any that sits **inside a
+ * string literal** — `record.name == '{unresolved}'` is a CEL predicate
+ * comparing against text that happens to contain braces, not a template.
+ *
+ * This is both the dialect discriminator and the unresolved-hole report, so the
+ * two can never disagree about what counts as a hole. It reads the AUTHORED
+ * source rather than the substituted result, so a variable whose *value*
+ * contains braces cannot masquerade as an unresolved reference.
+ */
+function templateHoles(source: string): string[] {
+    return source.replace(QUOTED_SEGMENT, '').match(TEMPLATE_HOLE) ?? [];
+}
+
+/**
+ * Strip one layer of matching quotes from a template-dialect operand, so a
+ * quoted string literal compares as its contents (#4336). Anything that is not
+ * a whole quoted literal is returned untouched — including a value that merely
+ * contains a quote.
+ */
+function unquoteLiteral(operand: string): string {
+    const m = QUOTED_LITERAL.exec(operand);
+    return m ? (m[1] ?? m[2] ?? '') : operand;
+}
+
+/**
+ * The branch a `decision` node reports when it DECLARED `config.conditions` and
+ * none of them matched — "fall through to the declared fallback".
+ *
+ * Two spellings claim it in {@link AutomationEngine.traverseNext}: an out-edge
+ * literally `label`led `'default'` (the historical, documented spelling) and an
+ * out-edge marked `isDefault: true` (the BPMN default flow, canonical since
+ * #4414). A decision that declares NO conditions reports no branch at all — it
+ * has nothing to fall through *from*, and inventing a label for it is what made
+ * every decision node in the repo emit an unclaimable `'default'`.
+ */
+export const DEFAULT_BRANCH_LABEL = 'default';
+
+/**
  * The slice of a descriptor's JSON-Schema `configSchema` that the undeclared-key
  * walk reads (#4045). Structural only — no validation semantics.
  */
@@ -3599,10 +3658,37 @@ export class AutomationEngine implements IAutomationService {
      * {@link executeNode} so {@link resume} can re-enter traversal from a
      * suspended node without re-running the node body.
      *
-     * @param branchLabel - When set (e.g. from a resume signal), restrict
-     *   traversal to out-edges whose `label` matches — this is how an Approval
-     *   node's `approve`/`reject` decision selects its downstream branch. When
-     *   no edge carries the label, traversal falls back to the normal edge set.
+     * Three declared mechanisms select a branch here, and #4414 found two of
+     * them doing nothing. They now compose as ONE model, applied in this order:
+     *
+     *  1. **`branchLabel`** (from a `decision`/`approval` executor or a resume
+     *     signal) narrows the edge set to out-edges carrying that `label`.
+     *     {@link DEFAULT_BRANCH_LABEL} is the engine's own sentinel for "the
+     *     node's declared conditions all failed" and is additionally claimed by
+     *     the BPMN default edge. A label NO edge claims is a metadata error —
+     *     traversal still falls back to the full edge set (a run mid-flight must
+     *     not die on it) but it is now **logged**, not silent: the decision had
+     *     computed a branch and nothing routed it, which is how app-crm's
+     *     convert-lead guard ran its abort screen AND its wizard.
+     *  2. **`edge.condition`** — evaluated per edge; a closed gate records a
+     *     `skipped` step (#4354).
+     *  3. **`edge.isDefault`** — BPMN default flow. Traversed **only** when no
+     *     conditional sibling in the selected set matched. Before #4414 this key
+     *     had zero readers: it parsed, it was documented as "the default path
+     *     when no other conditions match", and it routed nothing — an author who
+     *     reached for it got an ordinary unconditional edge that ran on every
+     *     pass, in parallel with the branch that *did* match.
+     *
+     * A default edge is therefore NOT part of the unconditional parallel fan-out
+     * — that distinction is the whole point of the marker. An edge that carries
+     * both a `condition` and `isDefault` is self-contradictory (BPMN forbids it);
+     * the `condition` wins here, and the flow linter flags the shape at authoring
+     * time (`flow-default-edge-with-condition`) so it is caught before it runs —
+     * Prime Directive #12.
+     *
+     * @param branchLabel - When set, restrict traversal to out-edges whose
+     *   `label` matches — this is how an Approval node's `approve`/`reject`
+     *   decision selects its downstream branch.
      */
     private async traverseNext(
         node: FlowNodeParsed,
@@ -3612,31 +3698,61 @@ export class AutomationEngine implements IAutomationService {
         steps: StepLogEntry[],
         branchLabel?: string,
     ): Promise<void> {
-        // Find next nodes — separate conditional and unconditional edges
-        let outEdges = flow.edges.filter(
+        // Find next nodes — separate conditional, default and unconditional edges
+        const allOutEdges = flow.edges.filter(
             e => e.source === node.id && e.type !== 'fault',
         );
+        let outEdges = allOutEdges;
 
-        // Branch selection (resume): prefer edges tagged with the decision label.
+        // Branch selection: prefer edges tagged with the decision label.
         if (branchLabel) {
-            const labeled = outEdges.filter(e => e.label === branchLabel);
-            if (labeled.length > 0) outEdges = labeled;
+            let claimed = outEdges.filter(e => e.label === branchLabel);
+            // The `default` sentinel is also claimed by the BPMN default edge, so
+            // "none of my conditions matched" routes to the declared fallback
+            // without the author having to ALSO label that edge 'default'.
+            if (claimed.length === 0 && branchLabel === DEFAULT_BRANCH_LABEL) {
+                claimed = outEdges.filter(e => e.isDefault);
+            }
+            if (claimed.length > 0) {
+                outEdges = claimed;
+            } else {
+                // #4414 — do not fall back silently. The node computed a branch
+                // and no out-edge claims it, so every out-edge is about to be
+                // considered: the guard the author wrote is not guarding.
+                const declared = allOutEdges
+                    .map(e => (e.label ? `'${e.label}'` : `(unlabelled ${e.id})`))
+                    .join(', ');
+                this.logger.warn(
+                    // `flow.name` is absent on the synthetic view `runRegion` builds.
+                    `Flow '${flow.name ?? '(region)'}' node '${node.id}' (${node.type}) selected branch ` +
+                    `'${branchLabel}', but no out-edge carries that label — out-edge labels are ` +
+                    `[${declared || 'none'}]. The branch selection is IGNORED and every out-edge is ` +
+                    `evaluated instead, so unconditional siblings run regardless of the decision. ` +
+                    `Make an out-edge's \`label\` match the branch, or mark the fallback edge ` +
+                    `\`isDefault: true\`. (#4414)`,
+                );
+            }
         }
 
         const conditionalEdges: FlowEdgeParsed[] = [];
+        const defaultEdges: FlowEdgeParsed[] = [];
         const unconditionalEdges: FlowEdgeParsed[] = [];
         for (const edge of outEdges) {
             if (edge.condition) {
                 conditionalEdges.push(edge);
+            } else if (edge.isDefault) {
+                defaultEdges.push(edge);
             } else {
                 unconditionalEdges.push(edge);
             }
         }
 
         // Conditional edges: evaluate sequentially (mutually exclusive)
+        let anyConditionMet = false;
         for (const edge of conditionalEdges) {
             const nextNode = flow.nodes.find(n => n.id === edge.target);
             if (this.evaluateCondition(edge.condition!, variables)) {
+                anyConditionMet = true;
                 if (nextNode) {
                     await this.executeNode(nextNode, flow, variables, context, steps);
                 }
@@ -3652,6 +3768,38 @@ export class AutomationEngine implements IAutomationService {
                 // The step is `skipped`, never a run: the re-entrancy guard,
                 // per-node `runs` counts and node status all exclude it, so
                 // recording a non-event stays a non-event to execution.
+                const at = new Date().toISOString();
+                steps.push({
+                    nodeId: nextNode.id,
+                    nodeType: nextNode.type,
+                    ...(nextNode.label ? { nodeLabel: nextNode.label } : {}),
+                    status: 'skipped',
+                    startedAt: at,
+                    completedAt: at,
+                    durationMs: 0,
+                    skippedBy: {
+                        nodeId: node.id,
+                        ...(edge.id ? { edgeId: edge.id } : {}),
+                        ...(edge.label ? { label: edge.label } : {}),
+                    },
+                });
+            }
+        }
+
+        // Default edges (BPMN default flow, #4414): the fallback, taken only
+        // when NO conditional sibling matched. `isDefault` is what makes this an
+        // "otherwise" rather than a second unconditional path — without it the
+        // author's only spelling of "otherwise" was to hand-write the negation
+        // of every sibling condition, and forgetting to do that ran both
+        // branches. A default edge passed over because a real branch won records
+        // the same `skipped` trace a closed gate does (#4354).
+        for (const edge of defaultEdges) {
+            const nextNode = flow.nodes.find(n => n.id === edge.target);
+            if (!anyConditionMet) {
+                if (nextNode) {
+                    await this.executeNode(nextNode, flow, variables, context, steps);
+                }
+            } else if (nextNode) {
                 const at = new Date().toISOString();
                 steps.push({
                     nodeId: nextNode.id,
@@ -3762,15 +3910,42 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * Safe expression evaluator.
-     * Uses simple operator-based parsing without `new Function`.
-     * Supports: comparisons (>, <, >=, <=, ==, !=, ===, !==),
-     * boolean literals (true, false), and basic arithmetic.
+     * Evaluate a flow condition to a boolean.
+     *
+     * ## Which dialect a condition is in
+     *
+     * A condition is **CEL** unless it is written in the legacy single-brace
+     * `{var}` template dialect — and that is decided by looking at the *source*,
+     * not at whether an envelope happens to be present (#4336).
+     *
+     * It used to be decided by the envelope, and that was the bug: only an
+     * `{ dialect, source }` envelope reached the CEL engine, so a condition
+     * authored as a plain string — the shape `ExpressionInput` accepts by design,
+     * and the shape every node `config` still holds, since `FlowNodeSchema.config`
+     * is an open `z.record` no transform can reach — fell through to the template
+     * path and was compared **as text**. The failure direction depended on the
+     * predicate, which is what made it dangerous:
+     *
+     *     'existingTask == null'  →  'existingTask' === 'null'   →  always FALSE
+     *     'record.rating >= 4'    →  'record.rating' >= '4'      →  always TRUE
+     *
+     * — one gate that never opens, one branch pinned open, both reporting
+     * `success`. Reading the source instead means the same predicate evaluates
+     * the same way wherever it is authored: an edge (parsed into an envelope by
+     * `FlowEdgeSchema`), a start-node gate, or a `decision` node's
+     * `config.conditions[].expression`, which no schema normalizes.
+     *
+     * The `{var}` dialect stays supported for the flows that use it — but it no
+     * longer answers `false` when it could not resolve something. Per ADR-0032
+     * §1c a predicate that cannot be evaluated is a **fault**, never a quiet
+     * branch decision, so an unresolved hole is refused with the source attached.
+     *
+     * Braces inside a **CEL envelope** remain the #1491 brace-trap and still
+     * throw: an explicit `dialect: 'cel'` is the author saying "this is CEL", and
+     * `{…}` is a map literal there. The sniff only applies where the dialect was
+     * never stated.
      */
     evaluateCondition(expression: string | { dialect?: string; source?: string; ast?: unknown }, variables: Map<string, unknown>): boolean {
-        // M9.5+ wiring: route Expression envelopes through @objectstack/formula
-        // ExpressionEngine. CEL is the default; legacy `{var}` template syntax
-        // is preserved as a fallback for back-compat.
         const isEnvelope = typeof expression === 'object' && expression != null && 'dialect' in expression;
         const dialect = isEnvelope ? (expression as { dialect?: string }).dialect : undefined;
         const exprStr = typeof expression === 'string' ? expression : ((expression as { source?: string })?.source ?? '');
@@ -3780,9 +3955,23 @@ export class AutomationEngine implements IAutomationService {
             return false;
         }
 
+        // An absent / empty condition is not a predicate to evaluate. Callers that
+        // mean "unconditional" guard before calling; this is the one that does not
+        // (a `decision` node whose `conditions[]` entry has no `expression`), and
+        // an unauthored branch must not open.
+        if (exprStr.trim() === '') return false;
+
+        // The dialect decision (see the doc comment). An explicit `template`/`flow`
+        // envelope takes the author at their word; a bare string is sniffed for a
+        // `{var}` hole; everything else — including an envelope with no dialect —
+        // is CEL.
+        const holes = templateHoles(exprStr);
+        const declaredTemplate = isEnvelope && (dialect === 'template' || dialect === 'flow');
+        const useTemplateDialect = declaredTemplate || (!isEnvelope && holes.length > 0);
+
         // CEL path — bind `vars` scope for `{step.result}` style references via
         // the equivalent `vars.step.result` CEL identifier path.
-        if (dialect === 'cel' || (isEnvelope && !dialect)) {
+        if (!useTemplateDialect) {
             try {
                 const vars: Record<string, unknown> = {};
                 for (const [key, value] of variables) {
@@ -3838,10 +4027,14 @@ export class AutomationEngine implements IAutomationService {
 
         // No `try { … } catch { return false }` around this block (#4347). Nothing
         // in it throws — `indexOf` / `slice` / `Number` / `compareValues` are all
-        // total — so the catch guarded nothing, and the one thing that CAN throw
-        // here now is the deliberate refusal below, which a swallow-to-`false`
-        // would turn straight back into the silent wrong answer it exists to
+        // total — so the catch guarded nothing, and the things that CAN throw
+        // here now are the deliberate refusals below, which a swallow-to-`false`
+        // would turn straight back into the silent wrong answer they exist to
         // prevent (ADR-0032 §1c, same rule as the CEL path above).
+
+        // A hole naming nothing in the variable map is unresolvable (#4336).
+        // Refuse — see the helper for why `false` was the wrong answer.
+        this.refuseUnresolvedTemplateHole(exprStr, holes.filter(h => !variables.has(h.slice(1, -1))));
 
         // Boolean literals
         if (resolved === 'true') return true;
@@ -3863,7 +4056,57 @@ export class AutomationEngine implements IAutomationService {
         const numVal = Number(resolved);
         if (!isNaN(numVal)) return numVal !== 0;
 
-        return false;
+        // No operator, not a boolean, not a number — this path has no way to
+        // decide the branch, and `false` used to be its answer (#4336). That made
+        // a truthy gate on a non-boolean variable — `'{record.status}'`, where
+        // the value is `'open'` — read as "condition not met" forever, with the
+        // run still recorded as `success`. Refuse instead, same rule as above.
+        throw new Error(
+            `condition evaluation error: \`${resolved}\` is not a predicate — source: \`${exprStr}\`. ` +
+            `The legacy \`{var}\` template dialect decides a branch by comparing the substituted ` +
+            `text, so it needs a comparison (\`{status} == 'open'\`) or a value that reads as a ` +
+            `boolean or number; a bare non-boolean value gives it nothing to compare and used to ` +
+            `answer \`false\` regardless of the value. Write the predicate as CEL — a condition ` +
+            `without \`{…}\` braces is evaluated by the CEL engine, where \`record.isActive\` is a ` +
+            `truthy gate and \`record.status == 'open'\` resolves the field.`,
+        );
+    }
+
+    /**
+     * Refuse a legacy-dialect condition whose `{…}` holes name no variable
+     * (#4336).
+     *
+     * Substitution replaces the literal text `{<key>}` for each key in the
+     * variable map, so an unmatched hole survives into the comparison — and the
+     * template path would then compare the *brace text itself*:
+     *
+     *     '{lead_record.status} == \'converted\''
+     *         →  '{lead_record.status}' === "'converted'"  →  always FALSE
+     *
+     * The gate never opens, for any record, and the run still reports `success`.
+     *
+     * The common way to land here is a **field access on an object variable**:
+     * `get_record`'s `outputVariable` stores the whole record under one name
+     * (`lead_record`), so `{lead_record.status}` asks for a key that was never
+     * written. Note the asymmetry that let this survive — a node's outputs ARE
+     * flattened into dotted keys (`${node.id}.${key}`), so `{get_lead.id}`
+     * resolves and looks like proof the spelling works.
+     *
+     * CEL resolves that access properly, which is why the prescription is to drop
+     * the braces rather than to spell the hole differently.
+     */
+    private refuseUnresolvedTemplateHole(source: string, unresolved: readonly string[]): void {
+        if (unresolved.length === 0) return;
+        const names = [...new Set(unresolved)];
+        throw new Error(
+            `condition evaluation error: ${names.map(h => `\`${h}\``).join(', ')} did not resolve — ` +
+            `source: \`${source}\`. The legacy \`{var}\` template dialect substitutes a WHOLE flow ` +
+            `variable by name, and no variable is named ${names.map(h => `\`${h.slice(1, -1)}\``).join(', ')}. ` +
+            `Leaving it in place would compare the brace text as a STRING — a branch that is silently ` +
+            `wrong rather than merely unevaluated — so this is refused. Drop the braces: a condition ` +
+            `without them is evaluated as CEL, which resolves field access on an object variable ` +
+            `(\`lead_record.status == 'converted'\`) instead of looking for a variable spelled that way.`,
+        );
     }
 
     /**
@@ -3884,6 +4127,12 @@ export class AutomationEngine implements IAutomationService {
      * rather than warns, the same rule ADR-0032 §1c set for the CEL path: a
      * predicate that cannot be evaluated is a fault, never a quiet `false` (or,
      * here, a quiet `true`).
+     *
+     * Since #4336 a *wholly* brace-free condition no longer arrives here at all —
+     * it is CEL, and `oppRecord.amount > 500000` simply evaluates. What still
+     * reaches this guard is a dotted reference **mixed into** a template-dialect
+     * condition (`'{limit} > record.amount'`), where the author is one operand
+     * away from the right dialect and the string compare would answer anyway.
      *
      * Only *dotted* references are refused. A bare word compares as a string on
      * purpose — `'{status} == active'` is the documented legacy spelling, and
@@ -3906,8 +4155,19 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * Compare two string-represented values with an operator.
+     *
+     * Quoted operands are unquoted first (#4336). The template dialect compares
+     * text, so `'{status} == \'active\''` used to substitute to `active ==
+     * 'active'` and compare `active` against `'active'` **with the quotes** —
+     * never equal, for any value of `status`. That spelling is not exotic: it is
+     * what the flow docs show for a decision node, and quoting a string literal
+     * is what every other predicate surface on the platform requires. So the
+     * quotes are stripped and both the quoted and the bare form (`{status} ==
+     * active`, the older documented spelling) compare the same way.
      */
     private compareValues(left: string, op: string, right: string): boolean {
+        left = unquoteLiteral(left);
+        right = unquoteLiteral(right);
         const lNum = Number(left);
         const rNum = Number(right);
         const bothNumeric = !isNaN(lNum) && !isNaN(rNum) && left !== '' && right !== '';

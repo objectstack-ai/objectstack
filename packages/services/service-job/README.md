@@ -312,17 +312,12 @@ jobs.scheduleInterval({
 });
 ```
 
-## REST API Endpoints
+## No HTTP Surface
 
-```
-GET    /api/v1/jobs                    # List all jobs
-GET    /api/v1/jobs/:name              # Get job details
-POST   /api/v1/jobs/:name/run          # Run job immediately
-POST   /api/v1/jobs/:name/stop         # Stop job
-POST   /api/v1/jobs/:name/resume       # Resume job
-DELETE /api/v1/jobs/:name              # Delete job
-GET    /api/v1/jobs/:name/history      # Get execution history
-```
+This service is kernel-internal: it is consumed in-process via the service
+registry (`kernel.getService('job')`) and mounts **no** REST routes. Discovery
+advertises no route for the `job` slot and reports `handlerReady: false`
+(ADR-0076 D12, #4318).
 
 ## Best Practices
 
