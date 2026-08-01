@@ -1,8 +1,19 @@
 # CLAUDE.md
 
 **[AGENTS.md](./AGENTS.md) is the source of truth for working in this repo — read it.**
-Its Prime Directives are binding. Do not rely on this file alone; the one rule that must
-never be missed is inlined here because missing it corrupts other agents' work.
+Its Prime Directives are binding. Do not rely on this file alone; the two rules that must
+never be missed are inlined here because missing either one wastes or corrupts other
+agents' work.
+
+## ⛔ Claim the issue before you write any code
+
+Assign the issue to yourself (`gh issue edit <n> --add-assignee @me`, or `issue_write`
+with `assignees`) as the **first action of the task** — before the worktree, before the
+first read. Several agents work this repo at once and an unassigned issue reads as an
+open invitation: two that both start on it burn the same hours twice, then race to land
+conflicting shapes for one problem. Already assigned to someone else? It is taken — pick
+another or ask; never reassign it to yourself. File findings unassigned when you are only
+recording them; assign at the moment you start.
 
 ## ⛔ Worktree-first — before your FIRST file edit (AGENTS.md Prime Directive #11)
 

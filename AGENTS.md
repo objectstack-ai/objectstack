@@ -106,8 +106,24 @@ this is mandatory, not a preference (Prime Directive #11), and a PreToolUse hook
 blocks edits made while on the shared `main` branch. Working in the shared `main`
 checkout is *not* a supported fallback: branches get switched and shared files —
 including ones you just wrote — get reset *under you* mid-task (a full session's
-work was silently reverted twice before this rule was enforced). Even inside your
-own worktree, operate defensively:
+work was silently reverted twice before this rule was enforced).
+
+**Claim the issue BEFORE you write any code.** Assign it to yourself
+(`gh issue edit <n> --add-assignee @me`, or the `issue_write` MCP tool with
+`assignees`) as the *first* action of the task — before the worktree, before the
+first read. An unassigned issue reads as an open invitation, and several agents
+work this repo at once: two that both start on it burn the same hours twice and
+then race to land conflicting shapes for the same problem, which is worse than
+either one alone. If it is already assigned to someone else it is taken — pick
+another, or say so and ask; never reassign it to yourself.
+
+The claim is also what makes the *finding* rule (Prime Directive #10) safe to
+follow. Once out-of-scope discoveries become issues, the issue list is a real
+queue other agents read, and a claim is the only thing separating "someone is on
+this" from "nobody has looked yet". File it unassigned when you are merely
+recording a finding; assign it at the moment you actually start.
+
+Even inside your own worktree, operate defensively:
 
 1. **Only touch the files your task needs.** Don't "fix" unrelated diffs,
    reverts, or other agents' in-flight edits, and don't try to manage the whole
