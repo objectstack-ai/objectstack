@@ -421,3 +421,114 @@ diverged (#3903). This addendum extends the contract to data at rest:
   at boot would unhook live tables and make the row unfixable in Studio
   (availability over purity for data at rest; the same verdict reaches Studio
   as `_diagnostics` on every read).
+
+## Addendum (2026-08-01) — the stored chain gets a finish line (#4327)
+
+The addendum above makes a legacy row read canonical *forever*, which is the
+correctness guarantee — and, read literally, also a promise that the chain runs
+on that row forever. `os migrate meta --stored`
+(`ObjectStackProtocolImplementation.migrateStoredMetadata`) lets a deployment
+end that for itself: it walks `sys_metadata` (active + draft, all orgs), replays
+the same `applyConversionsToStoredItem` pass, and re-saves each changed body
+through `saveMetaItem` with `source: 'migrate-stored'` — history row, checksum,
+mutation projectors and all. Preview is the default; `--apply` is the only
+writing mode.
+
+- **Not load-bearing, and no flag.** #3855's conclusion stands: an operator-run
+  migration cannot be relied on, so the read path — not this — remains the
+  guarantee, and nothing gates on it having run. Deliberately no `sys_migration`
+  row either: unlike ADR-0104's two gates, a flag here would advertise
+  enforcement that does not exist. The verifiable statement operators wanted is
+  the **re-run** — a second pass reporting every row canonical exits 0, so "my
+  metadata is on protocol N" is a check rather than a belief.
+- **The write path's gate is not bypassed.** A body that still fails the current
+  schema after conversion is refused (422) and reported, exactly as the bullet
+  above describes for reads: it is a genuine contract violation, and the pass
+  has no more standing to persist it than an author does. It keeps reading
+  through the chain and stays fixable in Studio.
+- **The version layer stays verbatim.** `sys_metadata_history` is appended to,
+  never rewritten. Canonicalizing a past version's body would break the
+  checksum↔body pairing this contract depends on — the migration is a new
+  commit, not a rewrite of history.
+- **What the pass does not cover, it names.** Types with no repository write
+  path are reported as `skipped` with the reason, never counted as done.
+
+## Addendum (2026-08-01b) — flows reach the finish line too (#4454)
+
+The pass above initially skipped `flow` rows, which was the largest hole in it:
+the graduated flow-node conversions are where the most stored dialect lives.
+Closing it needed three decisions.
+
+- **One canonicalization policy, two shapes.**
+  `AutomationEngine.canonicalizeStoredFlow` is now the single implementation and
+  `registerFlow` calls it, so the load seam and the migration cannot disagree
+  about what canonical means. It returns `parsed` (for execution — schema
+  defaults materialized) and `storable` (for persistence).
+- **`storable` excludes schema defaults, and this is load-bearing.** Measured,
+  not assumed: driving a pre-17 flow through parse + the region pass *removes*
+  nothing (`FlowSchema` is strict since #4001 — an unknown key throws rather
+  than being dropped, so the `graftNormalizedOperators` precedent does not
+  transfer) and *adds* only defaults: `version`, `runAs`, per-edge `type` /
+  `isDefault`. Persisting a default the author never wrote would pin every
+  migrated row to today's value while untouched rows follow tomorrow's — two
+  populations with different behaviour, which is the drift this pass exists to
+  remove. So the write-back is conversions plus the schema's `condition`
+  envelopes, and nothing else.
+- **The engine is borrowed, not started.** `AutomationServicePlugin` gains
+  `armRuntime: false`: built-in nodes installed and `automation:ready` fired
+  (the registry must be COMPLETE, or the conflict guard reads a live custom node
+  type as unowned and rewrites over it), then a hard stop before anything is
+  armed — no flow registered, no trigger or schedule bound, no connector
+  materialized, no suspended run resumed. `registerFlow` arms triggers as a side
+  effect, so skipping only the boot pull would not have been enough; the
+  `kernel:ready` and `metadata:reloaded` re-syncs are skipped for the same
+  reason. A migration process must not become a second server.
+
+A refused rename — the guard firing because the old token is a live name owned
+by something else — fails that row loudly with the token and its owner. Never a
+silent skip, never a clobber; that is the whole reason the guard exists.
+
+## Addendum (2026-08-01c) — "strictly shrinking" was false for flows (#4498)
+
+The bullet above claims new rows are always canonical, *therefore* the stored
+pass is a strictly shrinking concern. `duplicatePackage` was a live producer
+contradicting it: it canonicalizes each source row before re-saving, but through
+`convertStoredItem`, which returns `flow` bodies untouched. `FlowNodeSchema.config`
+is an open `z.record`, so a pre-17 body sailed through `saveMetaItem`'s gate and
+landed verbatim in a brand-new row. An operator could run the migration, get a
+clean report, duplicate a package, and be back to pre-protocol rows — with the
+report still saying protocol N until the next run.
+
+- **The capability was already reachable; only the wiring was missing.** The
+  protocol is constructed with an accessor for the kernel's service table (the
+  same one `analytics` and `package` are read from), and the automation service
+  registers under `automation`. `resolveFlowCanonicalizer` reads
+  `canonicalizeStoredFlow` off it. So the fix is not new plumbing per call site
+  — it is one private resolver that every caller running next to a live engine
+  shares.
+- **The explicit hook becomes an override, not a requirement.**
+  `migrateStoredMetadata`'s `canonicalizeFlow` defaults to the resolver, so the
+  CLI stopped passing one (it boots the inert engine into the same kernel, so
+  both routes reached the same instance — two routes to one capability is how
+  they drift). The parameter stays for callers with no registry and for testing
+  the flow branch without an engine.
+- **Resolution is lazy, per call.** Plugin init order does not guarantee
+  `automation` is in the table when the protocol is assembled — the CLI adds it
+  after ObjectQL by design — so caching `undefined` from a too-early read would
+  disable flow canonicalization for the life of the process.
+- **The failure posture matches #4454's.** A refused rename fails that item into
+  `duplicatePackage`'s existing `failed[]` naming the token, rather than copying
+  the un-renamed body: producing exactly the row this fix exists to prevent is
+  the one outcome worse than failing the copy. A flow that cannot canonicalize
+  at all fails the same way. With **no** engine reachable (a control-plane or
+  metadata-only host) the source body is copied as-is — no worse than the source
+  row already is, and failing an unrelated duplication over it would be its own
+  regression.
+- **Reads were not changed.** `getMetaItems` / `getMetaItem` /
+  `getMetaItemLayered` / `loadMetaFromDb` still skip flows; they are reads,
+  covered by `registerFlow` canonicalizing at execution, and are not producing
+  bad data. Duplication was the one that *writes*. The resolver is the seam they
+  would adopt if that changes.
+
+The premise is restored rather than restated: the stored pass shrinks because
+every write path now canonicalizes, not because the sentence says so.

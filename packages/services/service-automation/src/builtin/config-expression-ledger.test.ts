@@ -28,6 +28,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   FLOW_NODE_EXPRESSION_PATHS,
+  getSchemalessNodeConfigJsonSchemas,
   resolveFlowNodeExpressions,
   type FlowNodeExpressionRole,
 } from '@objectstack/spec/automation';
@@ -93,29 +94,67 @@ function collectExpressionProps(
 const engine = new AutomationEngine(silentLogger());
 installBuiltinNodes(engine, ctx());
 
-/** Every declared expression slot, derived from the live descriptors. */
-function declaredFromDescriptors(): { nodeType: string; path: string; role: FlowNodeExpressionRole }[] {
-  const found: { nodeType: string; path: string; role: FlowNodeExpressionRole }[] = [];
+type DeclaredSlot = { nodeType: string; path: string; role: FlowNodeExpressionRole };
+
+/** Resolve an `xExpression` marker to its ledger role, failing loudly on an unknown one. */
+function roleOf(nodeType: string, path: string, marker: string): FlowNodeExpressionRole {
+  const role = ROLE_BY_MARKER[marker];
+  expect(
+    role,
+    `${nodeType}.${path} declares an unknown xExpression marker '${marker}' — ` +
+    `add it to ROLE_BY_MARKER and teach the validators which dialect it takes`,
+  ).toBeDefined();
+  return role!;
+}
+
+/** Declared expression slots on builtins that publish a descriptor `configSchema`. */
+function declaredFromDescriptors(): DeclaredSlot[] {
+  const found: DeclaredSlot[] = [];
   for (const descriptor of engine.getActionDescriptors()) {
     const schema = descriptor.configSchema as SchemaNode | undefined;
     for (const { path, marker } of collectExpressionProps(schema)) {
-      const role = ROLE_BY_MARKER[marker];
-      expect(
-        role,
-        `${descriptor.type}.${path} declares an unknown xExpression marker '${marker}' — ` +
-        `add it to ROLE_BY_MARKER and teach the validators which dialect it takes`,
-      ).toBeDefined();
-      found.push({ nodeType: descriptor.type, path, role: role! });
+      found.push({ nodeType: descriptor.type, path, role: roleOf(descriptor.type, path, marker) });
     }
   }
   return found;
+}
+
+/**
+ * Declared expression slots on the builtins that publish NO descriptor
+ * `configSchema` (#4439).
+ *
+ * `script` / `subflow` / `decision` keep their contract in
+ * `schemaless-node-config.zod.ts` on purpose, so deriving only from descriptors
+ * made their expression slots structurally unreachable by this ratchet — and
+ * because the reverse direction fails on a ledger entry nothing declares, they
+ * could not be entered by hand either. `decision.conditions[].expression` sat
+ * in that hole.
+ *
+ * Spec hands these over as JSON Schema — the same shape a descriptor's
+ * `configSchema` is — so the marker walk below is literally the same function.
+ * No second notion of "a declared expression property", which is the
+ * duplication a ledger exists to remove.
+ */
+function declaredFromSchemalessConfigs(): DeclaredSlot[] {
+  const found: DeclaredSlot[] = [];
+  for (const [nodeType, json] of Object.entries(getSchemalessNodeConfigJsonSchemas())) {
+    for (const { path, marker } of collectExpressionProps(json as SchemaNode)) {
+      found.push({ nodeType, path, role: roleOf(nodeType, path, marker) });
+    }
+  }
+  return found;
+}
+
+/** Every declared expression slot, from BOTH declaration channels. */
+function declaredEverywhere(): DeclaredSlot[] {
+  return [...declaredFromDescriptors(), ...declaredFromSchemalessConfigs()];
 }
 
 const key = (e: { nodeType: string; path: string; role: string }) => `${e.nodeType}.${e.path} (${e.role})`;
 
 describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
   it('every xExpression property a builtin declares is in the ledger', () => {
-    const declared = declaredFromDescriptors();
+    const declared = declaredEverywhere();
     // Sanity: if this ever empties, the derivation broke and the whole ratchet
     // would pass vacuously — the failure mode a ledger test must not have.
     expect(declared.length, 'no xExpression properties found — derivation is broken').toBeGreaterThan(0);
@@ -129,13 +168,39 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
     ).toEqual([]);
   });
 
+  // Each channel must be non-empty on its own. Merging them into one list would
+  // let a broken derivation on either side hide behind the other's results —
+  // which is exactly how the schemaless channel went unnoticed until #4439.
+  it.each([
+    ['descriptor configSchema', declaredFromDescriptors],
+    ['schemaless-node-config.zod.ts', declaredFromSchemalessConfigs],
+  ] as const)('derives at least one slot from the %s channel', (_channel, derive) => {
+    expect(derive().length).toBeGreaterThan(0);
+  });
+
   it('the ledger carries no path a builtin no longer declares', () => {
-    const declared = new Set(declaredFromDescriptors().map(key));
+    const declared = new Set(declaredEverywhere().map(key));
     // Structural predicate surfaces (`config.condition`, `edge.condition`) are
-    // not descriptor properties and are deliberately absent from the ledger, so
-    // every ledger entry must correspond to a real declared property.
+    // not declared config properties on either channel and are deliberately
+    // absent from the ledger, so every ledger entry must correspond to a real
+    // declared property.
     const stale = FLOW_NODE_EXPRESSION_PATHS.map(key).filter((k) => !declared.has(k));
-    expect(stale, 'stale ledger entries — the descriptor no longer declares these').toEqual([]);
+    expect(stale, 'stale ledger entries — no descriptor or schemaless schema declares these').toEqual([]);
+  });
+
+  it('decision.conditions[].expression is covered — the #4439 hole', () => {
+    const decision = FLOW_NODE_EXPRESSION_PATHS.find(
+      (e) => e.nodeType === 'decision' && e.path === 'conditions[].expression',
+    );
+    expect(
+      decision,
+      'the slot a schemaless node could not own: declared bare CEL, walked by neither validator',
+    ).toBeDefined();
+    expect(decision!.role).toBe('predicate');
+    // And it must reach the ledger through the schemaless channel specifically —
+    // `decision` publishes no descriptor configSchema, by design.
+    expect(declaredFromSchemalessConfigs().map(key)).toContain(key(decision!));
+    expect(declaredFromDescriptors().map(key)).not.toContain(key(decision!));
   });
 
   it('screen.fields[].visibleWhen is covered — the #3528 regression', () => {
@@ -185,7 +250,25 @@ describe('resolveFlowNodeExpressions — path resolution (#4027)', () => {
     expect(resolveFlowNodeExpressions('screen', { fields: 'nope' })).toEqual([]);
   });
 
+  it('resolves each decision branch predicate, with its index (#4439)', () => {
+    const found = resolveFlowNodeExpressions('decision', {
+      conditions: [
+        { label: 'Yes', expression: "lead.status == 'converted'" },
+        { label: 'No', expression: 'true' },
+      ],
+    });
+    expect(found.map((f) => f.path)).toEqual([
+      'conditions[0].expression',
+      'conditions[1].expression',
+    ]);
+    expect(found.every((f) => f.entry.role === 'predicate')).toBe(true);
+  });
+
   it('returns nothing for a node type with no declared slots', () => {
+    // `config.condition` is a STRUCTURAL surface both validators already walk,
+    // deliberately not a ledger entry — and `assignment` declares no slots.
+    expect(resolveFlowNodeExpressions('assignment', { condition: 'a == b' })).toEqual([]);
+    // A decision branching purely on its edges declares no predicate here.
     expect(resolveFlowNodeExpressions('decision', { condition: 'a == b' })).toEqual([]);
   });
 });

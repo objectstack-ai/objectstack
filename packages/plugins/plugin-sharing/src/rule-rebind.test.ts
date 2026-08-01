@@ -171,11 +171,16 @@ describe('SharingServicePlugin reconciles grants on rule writes (#3821)', () => 
       listRules: vi.fn(async () => []),
       evaluateRule: vi.fn(async () => ({ ruleId: 'r1', matchedRecords: 2, expandedUsers: 1, grantsCreated: 2, grantsUpdated: 0, grantsRevoked: 0 })),
       revokeRuleGrants: vi.fn(async () => 2),
+      sweepOrphanedRuleGrants: vi.fn(async () => 0),
     };
     (plugin as any).ruleService = ruleService;
     const ctx = makeCtx();
     logger = ctx.logger;
     (plugin as any).bindRuleRebindTriggers(engine, ctx);
+    // [#4433] Boot is over — `kernel:bootstrapped` has run its backfill, so
+    // runtime rule writes own reconciliation from here. Before this point the
+    // trigger defers to that pass (see the boot-phase describe below).
+    (plugin as any).ruleGrantsBootReconciled = true;
   });
 
   it('backfills existing records when a rule is created', async () => {
@@ -196,12 +201,26 @@ describe('SharingServicePlugin reconciles grants on rule writes (#3821)', () => 
     expect(ruleService.evaluateRule).not.toHaveBeenCalled();
   });
 
-  it('skips system-context writes — boot backfill owns those', async () => {
-    await engine.fire('afterInsert', 'sys_sharing_rule', {
-      result: { id: 'r1' },
+  /**
+   * objectstack#4433 — this is the defect, and it hid behind the test that
+   * used to live here ("skips system-context writes").
+   *
+   * `SharingRuleService.defineRule` — the ONLY implementation behind
+   * `POST /sharing/rules`, the documented way to deactivate a rule — writes
+   * `sys_sharing_rule` with SYSTEM_CTX unconditionally, because it has to
+   * reach a platform table the sharing middleware otherwise gates. So the old
+   * `session.isSystem` skip did not filter out "boot seeding"; it filtered out
+   * every REST authoring write there is. The old test passed a mocked
+   * `session: { isSystem: true }` that the real REST path never sends, and
+   * asserted the reconcile did NOT happen — pinning the bug as the contract.
+   */
+  it('reconciles a SYSTEM_CTX authoring write once boot is done (#4433)', async () => {
+    // Exactly what `POST /sharing/rules` with `active: false` produces.
+    await engine.fire('afterUpdate', 'sys_sharing_rule', {
+      result: { id: 'r1', active: false },
       session: { isSystem: true },
     });
-    expect(ruleService.evaluateRule).not.toHaveBeenCalled();
+    expect(ruleService.evaluateRule).toHaveBeenCalledWith('r1', expect.objectContaining({ isSystem: true }));
   });
 
   it('never fails the authoring write when reconciliation throws', async () => {
@@ -226,5 +245,73 @@ describe('SharingServicePlugin reconciles grants on rule writes (#3821)', () => 
     await engine.fire('afterInsert', 'sys_sharing_rule', { result: { id: 'r1' } });
 
     expect(order).toEqual(['rebind', 'reconcile']);
+  });
+});
+
+/**
+ * [#4433] Boot phase — the predicate that replaced the `isSystem` skip.
+ *
+ * The skip exists to avoid duplicating work: declared-rule seeding and package
+ * bootstrap write `sys_sharing_rule` before `kernel:bootstrapped`, and that
+ * pass reconciles every rule anyway. That is a statement about WHEN a write
+ * happens, not about WHO made it — so it is gated on boot phase, which is true
+ * for exactly the writes the backfill covers and false for every runtime one.
+ */
+describe('SharingServicePlugin defers reconciliation to the boot backfill (#4433)', () => {
+  let engine: ReturnType<typeof makeEngine>;
+  let plugin: SharingServicePlugin;
+  let ruleService: AnyRecord;
+
+  beforeEach(() => {
+    engine = makeEngine();
+    plugin = new SharingServicePlugin();
+    ruleService = {
+      listRules: vi.fn(async () => []),
+      evaluateRule: vi.fn(async () => ({ ruleId: 'r1', matchedRecords: 0, expandedUsers: 0, grantsCreated: 0, grantsUpdated: 0, grantsRevoked: 0 })),
+      revokeRuleGrants: vi.fn(async () => 0),
+      sweepOrphanedRuleGrants: vi.fn(async () => 0),
+    };
+    (plugin as any).ruleService = ruleService;
+    (plugin as any).bindRuleRebindTriggers(engine, makeCtx());
+    // Boot still in flight — `ruleGrantsBootReconciled` defaults to false.
+  });
+
+  it('skips the per-write reconcile while boot is still in flight', async () => {
+    await engine.fire('afterInsert', 'sys_sharing_rule', { result: { id: 'seeded' } });
+    expect(ruleService.evaluateRule).not.toHaveBeenCalled();
+  });
+
+  it('still rebinds the lifecycle hooks during boot', async () => {
+    // Deferring the reconcile must not defer the binding — a rule seeded at
+    // boot has to be enforceable for records written straight afterwards.
+    await engine.fire('afterInsert', 'sys_sharing_rule', { result: { id: 'seeded' } });
+    expect(ruleService.listRules).toHaveBeenCalled();
+  });
+
+  it('reconciles every write once the backfill has run — user session', async () => {
+    (plugin as any).ruleGrantsBootReconciled = true;
+    await engine.fire('afterUpdate', 'sys_sharing_rule', {
+      result: { id: 'r1', active: false },
+      session: { userId: 'admin' },
+    });
+    expect(ruleService.evaluateRule).toHaveBeenCalledWith('r1', expect.objectContaining({ isSystem: true }));
+  });
+
+  it('reconciles every write once the backfill has run — system session', async () => {
+    (plugin as any).ruleGrantsBootReconciled = true;
+    await engine.fire('afterUpdate', 'sys_sharing_rule', {
+      result: { id: 'r1', active: false },
+      session: { isSystem: true },
+    });
+    expect(ruleService.evaluateRule).toHaveBeenCalledWith('r1', expect.objectContaining({ isSystem: true }));
+  });
+
+  it('purges on a post-boot delete regardless of session kind', async () => {
+    (plugin as any).ruleGrantsBootReconciled = true;
+    await engine.fire('afterDelete', 'sys_sharing_rule', {
+      input: { id: 'r1' },
+      session: { isSystem: true },
+    });
+    expect(ruleService.revokeRuleGrants).toHaveBeenCalledWith('r1');
   });
 });

@@ -10,9 +10,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** `z.object(` occurrences — the ledger's own stated counting method. */
+/**
+ * Object sites — `z.object(` **or** `strictObject(` — the ledger's own stated
+ * counting method.
+ *
+ * `strictObject(` counts because it *is* an object site; it is what a converted
+ * schema looks like. Counting only `z.object(` would have made every conversion
+ * silently shrink the ledger's measured surface, so a directory being solved and
+ * a directory being deleted would read identically — and a genuinely new,
+ * un-triaged `strictObject` schema would never register as undeclared surface.
+ *
+ * The gate caught this itself on the first conversion (`data/seed.zod.ts`, 1 → 0),
+ * which is the behaviour to preserve: a change in how schemas are written must
+ * fail this check rather than quietly rebase what it measures.
+ */
 export function countSites(file: string): number {
-  return (fs.readFileSync(file, 'utf-8').match(/z\.object\(/g) ?? []).length;
+  const src = fs.readFileSync(file, 'utf-8');
+  return (src.match(/z\.object\(|(?<![A-Za-z0-9_])strictObject\(/g) ?? []).length;
 }
 
 /**

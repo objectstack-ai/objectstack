@@ -227,6 +227,135 @@ describe('validateActionNameRefs — navigation action items', () => {
   });
 });
 
+describe('validateActionNameRefs — bulkActionDefs (#4457)', () => {
+  it('errors on an aggregate def naming nothing', () => {
+    // `resolveBulkActions` resolves an aggregate def's `name` against the
+    // object's actions to get the dispatcher it calls once for the selection.
+    // No match → no dispatcher → the dialog opens and the run reports "has no
+    // dispatcher wired". Same dead affordance as a bulkActions name.
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      views: [
+        {
+          name: 'crm_lead',
+          list: { bulkActionDefs: [{ name: 'export_zip', operation: 'custom', execution: 'aggregate' }] },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('views[0].list.bulkActionDefs[0].name');
+    expect(findings[0].where).toContain('bulkActionDefs[0]');
+  });
+
+  it('accepts an aggregate def that resolves', () => {
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      views: [
+        {
+          name: 'crm_lead',
+          list: { bulkActionDefs: [{ name: 'crm_convert_lead', operation: 'custom', execution: 'aggregate' }] },
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it("leaves an update/delete def alone — its `name` is a button id, not a reference", () => {
+    // Resolving `archive` against `stack.actions` would be nonsense: the
+    // executor writes fields through the data API and never looks the name up.
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      views: [
+        {
+          name: 'crm_lead',
+          list: {
+            bulkActionDefs: [
+              { name: 'archive', operation: 'update', patch: { archived: true } },
+              { name: 'purge', operation: 'delete' },
+            ],
+          },
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('skips a def carrying an inlined `actionDef` — it brings its own dispatcher', () => {
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      views: [
+        {
+          name: 'crm_lead',
+          list: {
+            bulkActionDefs: [
+              { name: 'export_zip', operation: 'custom', execution: 'aggregate', actionDef: { type: 'api' } },
+            ],
+          },
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('tells the author no `locations` entry is needed for a selection-bar action', () => {
+    // The selection bar is the ONE surface that does not filter on
+    // `locations` — the generic "with the location this surface needs" hint
+    // would send an author to add a placement that changes nothing.
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      views: [{ name: 'crm_lead', list: { bulkActions: ['mass_update'] } }],
+    });
+    expect(findings[0].hint).toContain('the selection bar places it by name');
+    expect(findings[0].hint).not.toContain('the location this surface needs');
+  });
+
+  it('still says "location" for a row-action menu, which DOES filter', () => {
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      views: [{ name: 'crm_lead', list: { rowActions: ['complete_task'] } }],
+    });
+    expect(findings[0].hint).toContain('the location this surface needs');
+  });
+});
+
+describe('validateActionNameRefs — object-embedded list views (#4457)', () => {
+  it('walks an object’s own listViews, which have no top-level `list`', () => {
+    const findings = validateActionNameRefs({
+      objects: [
+        {
+          name: 'crm_lead',
+          listViews: {
+            all: {
+              rowActions: ['ghost_row'],
+              bulkActionDefs: [{ name: 'ghost_zip', operation: 'custom', execution: 'aggregate' }],
+            },
+          },
+        },
+      ],
+      actions: [{ name: 'crm_convert_lead', type: 'script' }],
+    });
+    expect(findings.map((f) => f.path)).toEqual([
+      'objects[0].listViews.all.rowActions[0]',
+      'objects[0].listViews.all.bulkActionDefs[0].name',
+    ]);
+    expect(findings[0].where).toContain('object "crm_lead"');
+  });
+
+  it('resolves against the object’s OWN actions, not just stack.actions', () => {
+    const findings = validateActionNameRefs({
+      objects: [
+        {
+          name: 'crm_lead',
+          actions: [{ name: 'crm_score', type: 'script' }],
+          listViews: { all: { bulkActions: ['crm_score'] } },
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+});
+
 describe('validateActionNameRefs — floor', () => {
   it('is silent on a clean stack and tolerates empty input', () => {
     expect(validateActionNameRefs(withActions())).toEqual([]);

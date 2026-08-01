@@ -158,11 +158,19 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateReadonlyFlowWrites', run: validateReadonlyFlowWrites },
   // The `kind:'react'` page surface. Every prop a react block binds BY FIELD
   // NAME is resolved against the object it names (#4340) — `<ListView columns>`,
-  // `<ObjectForm fields>`, the `record:*` family through the SAME
+  // `<ObjectForm fields>`, `<Block type="element:…">` through the SAME
   // `COMPONENT_FIELD_SPECS` table `validatePageFieldBindings` walks one surface
   // over, plus `<ObjectChart>`'s aggregate/axes (#3701/#3729) and
   // `searchableFields` (#4329). Squarely the charter's question, on the surface
   // where it had no answer at all.
+  //
+  // It also carries `react-block-needs-record-context` (#4413) — a BINDING
+  // question rather than a resolution one: the `record:*` family reads its
+  // record from a record page's context, so on THIS surface the binding does
+  // not exist at all and the props the contract published for it were read by
+  // no renderer. This rule used to resolve those props' field names against
+  // the object they named — lint standing guard over a binding that never ran.
+  // It rejects the blocks now, out of the same parse.
   //
   // It was hand-wired into `os validate` ALONE, so `os lint` and `os compile`
   // accepted a react page whose every field binding was stale — including the

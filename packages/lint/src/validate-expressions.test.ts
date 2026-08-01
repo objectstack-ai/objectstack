@@ -68,31 +68,29 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
   });
 
   // #1870 — a `script` node that names no callable is a silent no-op.
-  it('flags a script node that declares neither actionType nor function (#1870)', () => {
+  it('flags a script node that declares no function (#1870)', () => {
     const issues = validateStackExpressions({
       flows: [{
         name: 'helpdesk_flow',
         nodes: [
           { id: 'start', type: 'start', config: {} },
-          { id: 'triage', type: 'script', config: { actionType: undefined } },
+          { id: 'triage', type: 'script', config: {} },
         ],
         edges: [],
       }],
     });
     expect(issues).toHaveLength(1);
     expect(issues[0].where).toContain("node 'triage' (script) callable");
-    expect(issues[0].message).toMatch(/neither .*actionType.* nor .*function/);
+    expect(issues[0].message).toMatch(/declares no .*function/);
   });
 
-  it('accepts a script node that names a built-in action or a function (#1870)', () => {
+  it('accepts a script node that names a function (#1870)', () => {
     const issues = validateStackExpressions({
       flows: [{
         name: 'helpdesk_flow',
         nodes: [
           { id: 'start', type: 'start', config: {} },
-          { id: 'mail', type: 'script', config: { actionType: 'email' } },
           { id: 'triage', type: 'script', config: { function: 'helpdesk.aiTriageStub' } },
-          { id: 'inline', type: 'script', config: { script: 'variables.x = 1;' } },
         ],
         edges: [],
       }],
@@ -107,7 +105,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         name: 'helpdesk_flow',
         nodes: [
           { id: 'start', type: 'start', config: {} },
-          { id: 'triage', type: 'script', config: { actionType: 'invoke_function', functionName: 'helpdesk.aiTriageStub' } },
+          { id: 'triage', type: 'script', config: { functionName: 'helpdesk.aiTriageStub' } },
         ],
         edges: [],
       }],
@@ -115,19 +113,56 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     expect(issues).toHaveLength(0);
   });
 
-  it('flags actionType invoke_function with no function/functionName', () => {
+  // #4343 — the retired dispatch keys. Naming them beats the generic "no
+  // callable": they are what the author actually wrote, and each branch has a
+  // different replacement.
+  it('flags a retired dispatch key and prescribes the replacement mechanism', () => {
     const issues = validateStackExpressions({
       flows: [{
         name: 'helpdesk_flow',
         nodes: [
           { id: 'start', type: 'start', config: {} },
-          { id: 'triage', type: 'script', config: { actionType: 'invoke_function', inputs: { x: 1 } } },
+          { id: 'mail', type: 'script', config: { actionType: 'email', template: 't', recipients: ['a'] } },
         ],
         edges: [],
       }],
     });
     expect(issues).toHaveLength(1);
-    expect(issues[0].message).toMatch(/invoke_function.*no .*function/i);
+    expect(issues[0].message).toMatch(/#4343/);
+    expect(issues[0].message).toMatch(/config\.actionType/);
+    expect(issues[0].message).toMatch(/config\.template/);
+    expect(issues[0].message).toMatch(/`notify` node/);
+    expect(issues[0].message).toMatch(/os migrate meta --from 16/);
+  });
+
+  it('tells a shorthand actionType exactly where its name belongs', () => {
+    const issues = validateStackExpressions({
+      flows: [{
+        name: 'helpdesk_flow',
+        nodes: [
+          { id: 'start', type: 'start', config: {} },
+          { id: 'triage', type: 'script', config: { actionType: 'helpdesk.aiTriageStub' } },
+        ],
+        edges: [],
+      }],
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/function: 'helpdesk\.aiTriageStub'/);
+  });
+
+  it('flags an inline script body — the runtime never executed it', () => {
+    const issues = validateStackExpressions({
+      flows: [{
+        name: 'helpdesk_flow',
+        nodes: [
+          { id: 'start', type: 'start', config: {} },
+          { id: 'inline', type: 'script', config: { script: 'variables.x = 1;' } },
+        ],
+        edges: [],
+      }],
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/config\.script/);
   });
 
   // #1928 — bare field references are silently null in `record`-scoped sites
@@ -576,6 +611,43 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         { name: 'opportunityName', visibleWhen: 'createOpportunity == true' },
       ]));
       expect(issues).toHaveLength(0);
+    });
+
+    /**
+     * #4439 — `decision.conditions[].expression` reaches the ledger through the
+     * SCHEMALESS channel (`decision` publishes no descriptor `configSchema`, so
+     * the marker rides `.meta({ xExpression })` on the Zod contract). Until then
+     * the ratchet could only see descriptor-declared slots, so this predicate —
+     * documented bare CEL, evaluated as bare CEL since #4414 — was checked by
+     * nobody and a `{…}` spelling passed `objectstack validate`.
+     */
+    const decisionFlow = (expression: string) => ({
+      objects,
+      flows: [{
+        name: 'convert_lead',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
+          { id: 'check', type: 'decision', config: { conditions: [{ label: 'Yes', expression }] } },
+        ],
+        edges: [],
+      }],
+    });
+
+    it('flags a `{var}` template dialect in a decision branch expression (#4439)', () => {
+      // The exact predicate app-crm shipped (#4414).
+      const issues = validateStackExpressions(decisionFlow("{lead_record.status} == 'converted'"));
+      const found = issues.filter(i => i.where.includes('conditions[0].expression'));
+      expect(found).toHaveLength(1);
+      expect(found[0].severity).toBe('error');
+      expect(found[0].where).toContain("flow 'convert_lead'");
+      expect(found[0].where).toContain("node 'check'");
+      expect(found[0].where).toContain('decision branch expression');
+      expect(found[0].source).toBe("{lead_record.status} == 'converted'");
+    });
+
+    it('passes the corrected bare-CEL decision predicate (#4439)', () => {
+      const issues = validateStackExpressions(decisionFlow("lead_record.status == 'converted'"));
+      expect(issues.filter(i => i.where.includes('conditions'))).toHaveLength(0);
     });
 
     it('leaves a correct single-brace loop collection alone', () => {

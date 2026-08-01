@@ -58,6 +58,13 @@ function makeEngine() {
       return t[i];
     },
     async delete(o: string, opts?: any) {
+      // Mirror `ObjectQLEngine.delete`'s dispatch guard (#4434) — see the same
+      // note in sharing-rule.test.ts. A fake looser than the contract it
+      // stands in for is how a green suite ships a dead route.
+      const whereId = opts?.where && typeof opts.where === 'object' ? (opts.where as any).id : undefined;
+      const t0 = typeof whereId;
+      const scalarId = whereId != null && (t0 === 'string' || t0 === 'number' || t0 === 'bigint');
+      if (!scalarId && !opts?.multi) throw new Error('Delete requires an ID or options.multi=true');
       const t = ensure(o); const where = opts?.where ?? {};
       for (let i = t.length - 1; i >= 0; i--) if (matches(t[i], where)) t.splice(i, 1);
       return { ok: true };
@@ -124,6 +131,94 @@ describe('backfillRuleGrants (#2926 ③ — seed rows materialize at boot)', () 
     expect(warn).toHaveBeenCalledOnce();
     // The healthy rule still materialized.
     expect((engine._tables.sys_record_share ?? []).some((s) => s.record_id === 'inq_new')).toBe(true);
+  });
+});
+
+/**
+ * objectstack#4433 (restart half) — "not at boot".
+ *
+ * The boot pass was handed `listRules({ activeOnly: true })`, so a deactivated
+ * rule was never evaluated and the grants it had materialised survived every
+ * restart: the rule read `active: false` while the orphaned `source: 'rule'`
+ * row kept answering. The pass is the last line of defence for withdrawal, so
+ * it has to walk EVERY rule — `evaluateRule` purges the ones it finds inactive.
+ */
+describe('boot rule backfill withdraws deactivated rules (#4433)', () => {
+  let engine: ReturnType<typeof makeEngine>;
+  let sharing: SharingService;
+  let rules: SharingRuleService;
+
+  beforeEach(async () => {
+    engine = makeEngine();
+    sharing = new SharingService({ engine: engine as any });
+    rules = new SharingRuleService({ engine: engine as any, sharing });
+    engine._tables.showcase_private_note = [
+      { id: 'note_n', title: 'rc1 rule target', owner_id: 'admin' },
+    ];
+    await rules.defineRule({
+      name: 'rc1_rule_livetest', label: 'RC1 live test', object: 'showcase_private_note',
+      criteria: { title: 'rc1 rule target' },
+      recipientType: 'user', recipientId: 'member_b', accessLevel: 'read',
+    }, SYS);
+    // Boot 1 materialises the grant — the issue's step 3 baseline.
+    await backfillRuleGrants(rules, await rules.listRules({}, SYS));
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(1);
+  });
+
+  it('revokes a deactivated rule\'s grants on the next boot', async () => {
+    // Admin switches the rule off. Nothing else touches the record.
+    await rules.defineRule({
+      name: 'rc1_rule_livetest', label: 'RC1 live test', object: 'showcase_private_note',
+      criteria: { title: 'rc1 rule target' },
+      recipientType: 'user', recipientId: 'member_b', accessLevel: 'read', active: false,
+    }, SYS);
+
+    // Restart: the pass must see the inactive rule to be able to purge it.
+    await backfillRuleGrants(rules, await rules.listRules({}, SYS));
+
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+  });
+
+  it('an activeOnly rule list can never withdraw — the #4433 boot repro', async () => {
+    await rules.defineRule({
+      name: 'rc1_rule_livetest', label: 'RC1 live test', object: 'showcase_private_note',
+      criteria: { title: 'rc1 rule target' },
+      recipientType: 'user', recipientId: 'member_b', accessLevel: 'read', active: false,
+    }, SYS);
+
+    // The old call site, pinned as the defect it was: an inactive rule is
+    // absent from the list, so the pass has nothing to purge with.
+    const activeOnly = await rules.listRules({ activeOnly: true }, SYS);
+    expect(activeOnly).toHaveLength(0);
+    await backfillRuleGrants(rules, activeOnly);
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(1); // still granted
+
+    // Reconciling every rule is what repairs it.
+    await backfillRuleGrants(rules, await rules.listRules({}, SYS));
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+  });
+
+  it('still materialises active rules (the #2926 behaviour is untouched)', async () => {
+    engine._tables.showcase_private_note.push({ id: 'note_2', title: 'rc1 rule target', owner_id: 'admin' });
+    await backfillRuleGrants(rules, await rules.listRules({}, SYS));
+    expect((engine._tables.sys_record_share ?? []).map((s) => s.record_id).sort()).toEqual(['note_2', 'note_n']);
+  });
+
+  it('sweeps grants whose rule row vanished before the restart', async () => {
+    // A rule removed by a path that never reached deleteRule (data-API delete
+    // with the hook unbound, a migration, a crash mid-delete).
+    engine._tables.sys_sharing_rule = [];
+    await backfillRuleGrants(rules, await rules.listRules({}, SYS));
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(1); // unreachable by rule iteration
+
+    expect(await rules.sweepOrphanedRuleGrants()).toBe(1);
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+  });
+
+  it('the sweep is idempotent across repeated boots', async () => {
+    expect(await rules.sweepOrphanedRuleGrants()).toBe(0);
+    expect(await rules.sweepOrphanedRuleGrants()).toBe(0);
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(1);
   });
 });
 

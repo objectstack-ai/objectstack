@@ -115,7 +115,7 @@ describe('testConnection', () => {
   it('probes with the cleartext secret without persisting anything', async () => {
     const { service, store, probed } = makeHarness();
     const res = await service.testConnection(
-      { name: 'tmp', driver: 'postgres', config: { host: 'db.internal' } },
+      { name: 'tmp', driver: 'postgres', config: { host: 'db.internal', database: 'analytics' } },
       { value: 's3cret' },
     );
     expect(res.ok).toBe(true);
@@ -136,9 +136,42 @@ describe('testConnection', () => {
         throw new Error('ECONNREFUSED');
       },
     });
-    const res = await service.testConnection({ name: 'x', driver: 'postgres' });
+    const res = await service.testConnection({
+      name: 'x',
+      driver: 'postgres',
+      config: { database: 'app' },
+    });
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/ECONNREFUSED/);
+  });
+
+  // #4410. A probe is the wizard's evidence that a connection works, so it must
+  // not run against a config the driver would silently discard: `hostname` is
+  // dropped, `pg` opens its own localhost default, and a green "Connection
+  // successful" is reported for a datasource pointing somewhere else.
+  it('refuses to probe a config the driver would silently ignore', async () => {
+    const { service, probed } = makeHarness();
+    const res = await service.testConnection({
+      name: 'x',
+      driver: 'postgres',
+      config: { hostname: 'db.internal', database: 'app' },
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('`hostname` → `host`');
+    expect(probed).toHaveLength(0);
+  });
+
+  it('probes a driver the platform ships no contract for, unchanged', async () => {
+    const { service, probed } = makeHarness();
+    const res = await service.testConnection({
+      name: 'x',
+      driver: 'com.vendor.snowflake',
+      config: { account: 'xy12345' },
+    });
+
+    expect(res.ok).toBe(true);
+    expect(probed).toHaveLength(1);
   });
 });
 
@@ -168,8 +201,27 @@ describe('createDatasource', () => {
 
   it('hot-registers the pool after create', async () => {
     const { service, registered } = makeHarness();
-    await service.createDatasource({ name: 'reporting', driver: 'postgres' });
+    await service.createDatasource({
+      name: 'reporting',
+      driver: 'postgres',
+      config: { database: 'analytics' },
+    });
     expect(registered).toContain('reporting');
+  });
+
+  // The wizard is the OTHER authoring door: `createDatasource` writes through
+  // `metadata.register`, whose validation is a structural name/label check, so
+  // a bad config reached the store even after DatasourceSchema's gate landed.
+  it('rejects a config its driver would not honour (#4410)', async () => {
+    const { service, store } = makeHarness();
+    await expect(
+      service.createDatasource({
+        name: 'reporting',
+        driver: 'postgres',
+        config: { hostname: 'db.internal', database: 'analytics' },
+      }),
+    ).rejects.toThrow(/`hostname` → `host`/);
+    expect(store.size).toBe(0);
   });
 
   it('rejects a name owned by a code-defined datasource', async () => {
@@ -177,7 +229,11 @@ describe('createDatasource', () => {
       seed: [{ name: 'crm_primary', driver: 'sqlite', origin: 'code' }],
     });
     await expect(
-      service.createDatasource({ name: 'crm_primary', driver: 'postgres' }),
+      service.createDatasource({
+        name: 'crm_primary',
+        driver: 'postgres',
+        config: { database: 'analytics' },
+      }),
     ).rejects.toThrow(/code-defined/i);
   });
 
@@ -186,14 +242,22 @@ describe('createDatasource', () => {
       seed: [{ name: 'reporting', driver: 'postgres', origin: 'runtime' }],
     });
     await expect(
-      service.createDatasource({ name: 'reporting', driver: 'postgres' }),
+      service.createDatasource({
+        name: 'reporting',
+        driver: 'postgres',
+        config: { database: 'analytics' },
+      }),
     ).rejects.toThrow(/already exists/i);
   });
 
   it('rejects an invalid name', async () => {
     const { service } = makeHarness();
     await expect(
-      service.createDatasource({ name: 'Bad-Name', driver: 'postgres' }),
+      service.createDatasource({
+        name: 'Bad-Name',
+        driver: 'postgres',
+        config: { database: 'analytics' },
+      }),
     ).rejects.toThrow(/must match/i);
   });
 });

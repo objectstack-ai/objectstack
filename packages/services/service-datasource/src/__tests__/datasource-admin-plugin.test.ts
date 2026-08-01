@@ -73,7 +73,7 @@ describe('DatasourceAdminServicePlugin: probe', () => {
       driverFactory: fakeFactory(),
     });
     const res = await service.testConnection(
-      { name: 'reporting', driver: 'postgres', config: { host: 'db' } },
+      { name: 'reporting', driver: 'postgres', config: { host: 'db', database: 'analytics' } },
       { value: 's3cret' },
     );
     expect(res.ok).toBe(true);
@@ -91,7 +91,7 @@ describe('DatasourceAdminServicePlugin: probe', () => {
 
   it('returns ok:false when no factory is registered at all', async () => {
     const { service } = await boot();
-    const res = await service.testConnection({ name: 'x', driver: 'postgres', config: {} });
+    const res = await service.testConnection({ name: 'x', driver: 'postgres', config: { database: 'analytics' } });
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/no driver factory is registered/i);
   });
@@ -101,7 +101,10 @@ describe('DatasourceAdminServicePlugin: secret fail-closed', () => {
   it('refuses to create a secret-bearing datasource without a secret binder', async () => {
     const { service, registry } = await boot({ driverFactory: fakeFactory() });
     await expect(
-      service.createDatasource({ name: 'reporting', driver: 'postgres', config: {} }, { value: 'pw' }),
+      service.createDatasource(
+        { name: 'reporting', driver: 'postgres', config: { database: 'analytics' } },
+        { value: 'pw' },
+      ),
     ).rejects.toThrow(/no secret store configured/i);
     // nothing persisted
     expect(registry.get('datasource')?.size ?? 0).toBe(0);
@@ -118,7 +121,10 @@ describe('DatasourceAdminServicePlugin: secret fail-closed', () => {
         },
       },
     });
-    await service.createDatasource({ name: 'reporting', driver: 'postgres', config: {} }, { value: 'pw' });
+    await service.createDatasource(
+      { name: 'reporting', driver: 'postgres', config: { database: 'analytics' } },
+      { value: 'pw' },
+    );
     const rec = registry.get('datasource')?.get('reporting') as any;
     expect(rec.origin).toBe('runtime');
     expect(rec.external?.credentialsRef).toBe('sys_secret://datasource/reporting#1');
@@ -181,7 +187,7 @@ describe('DatasourceAdminServicePlugin: boot rehydration', () => {
             driver: 'postgres',
             origin: 'runtime',
             active: true,
-            config: { host: 'db' },
+            config: { host: 'db', database: 'analytics' },
             external: { credentialsRef: 'sys_secret:abc' },
           },
         ],
@@ -220,7 +226,7 @@ describe('DatasourceAdminServicePlugin: persistence + bound count', () => {
     // seed an object bound to a runtime datasource
     registry.set('object', new Map([['lead', { name: 'lead', datasource: 'reporting' }]]));
 
-    await service.createDatasource({ name: 'reporting', driver: 'postgres', config: {} });
+    await service.createDatasource({ name: 'reporting', driver: 'postgres', config: { database: 'analytics' } });
 
     const list = await service.listDatasources();
     expect(list.find((d) => d.name === 'crm_primary')?.origin).toBe('code');

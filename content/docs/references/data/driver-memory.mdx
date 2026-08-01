@@ -1,0 +1,101 @@
+---
+title: Driver Memory
+description: Driver Memory protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Memory Driver Configuration Schema
+
+Defines the configuration options for the in-memory driver.
+
+Reference: objectql/packages/drivers/memory (Mingo-powered production-ready driver)
+
+The memory driver is ideal for:
+
+- Unit testing (no database setup required)
+
+- Development & prototyping
+
+- Edge/Worker environments (Cloudflare Workers, Deno Deploy)
+
+- Client-side state management
+
+- Temporary data caching
+
+- CI/CD pipelines
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/driver/memory.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { AutoPersistenceConfig, FilePersistenceConfig, LocalStoragePersistenceConfig, PersistenceType } from '@objectstack/spec/data';
+import type { AutoPersistenceConfig, FilePersistenceConfig, LocalStoragePersistenceConfig, PersistenceType } from '@objectstack/spec/data';
+
+// Validate data
+const result = AutoPersistenceConfig.parse(data);
+```
+
+---
+
+## AutoPersistenceConfig
+
+Auto-detect persistence configuration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'auto'` | ✅ |  |
+| **path** | `string` | optional | File path override for Node.js environments |
+| **autoSaveInterval** | `number` | optional | Auto-save interval override for Node.js environments |
+| **key** | `string` | optional | localStorage key override for browser environments |
+
+
+---
+
+## FilePersistenceConfig
+
+File-system persistence configuration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'file'` | ✅ |  |
+| **path** | `string` | optional | File path to persist data |
+| **autoSaveInterval** | `number` | ✅ | Auto-save interval in ms |
+
+
+---
+
+## LocalStoragePersistenceConfig
+
+localStorage persistence configuration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'local'` | ✅ |  |
+| **key** | `string` | optional | localStorage key for persisted data |
+
+
+---
+
+## PersistenceType
+
+Persistence backend type
+
+### Allowed Values
+
+* `file`
+* `local`
+* `auto`
+
+
+---
+

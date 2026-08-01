@@ -654,6 +654,32 @@ export class ObjectStackClient {
     },
 
     /**
+     * ADR-0087: rewrite stored `sys_metadata` rows into today's canonical
+     * shape — the server-side form of `os migrate meta --stored` (#4327),
+     * for operators who cannot reach the deployment's database from a shell.
+     *
+     * **Preview by default.** Without `apply: true` this reports what it
+     * would do and writes nothing; the report is the same
+     * `StoredMigrationReport` the CLI renders (`scanned` / `canonical` /
+     * `pending` / `rewritten` / `skipped` / `failed`, plus a `rows` list of
+     * everything that is not already canonical).
+     *
+     * Requires the `manage_metadata` capability (403 otherwise) — it rewrites
+     * every eligible row in the deployment, not one item.
+     */
+    migrateStored: async (opts?: { apply?: boolean; types?: string[] }) => {
+        const route = this.getRoute('metadata');
+        const res = await this.fetch(`${this.baseUrl}${route}/_migrate-stored`, {
+            method: 'POST',
+            body: JSON.stringify({
+                ...(opts?.apply === true ? { apply: true } : {}),
+                ...(opts?.types && opts.types.length > 0 ? { types: opts.types } : {}),
+            }),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
      * ADR-0020 D3.3 FSM introspection: the legal next states for `field`
      * from state `from`, per the object's `state_machine` validation rule.
      * `next` is `null` when no FSM governs the field (or `from` is omitted),
@@ -4542,7 +4568,8 @@ export class ObjectStackClient {
       automation: '/api/v1/automation',
       packages: '/api/v1/packages',
       realtime: '/api/v1/realtime',
-      workflow: '/api/v1/workflow',
+      // `workflow` removed (#4451, v17): the slot retired with the ApiRoutes
+      // field — there was never a surface behind the convention.
       approvals: '/api/v1/approvals',
       notifications: '/api/v1/notifications',
       ai: '/api/v1/ai',
@@ -4963,10 +4990,8 @@ export type {
   RealtimeSubscribeRequest,
   RealtimeSubscribeResponse,
   GetPresenceResponse,
-  GetWorkflowConfigResponse,
-  GetWorkflowStateResponse,
-  WorkflowTransitionRequest,
-  WorkflowTransitionResponse,
+  // Workflow re-exports removed (#4451, v17): the types were deleted from
+  // @objectstack/spec/api with the retired workflow slot.
   ListViewsResponse,
   GetViewResponse,
   CreateViewResponse,

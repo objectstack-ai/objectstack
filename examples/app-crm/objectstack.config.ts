@@ -56,11 +56,20 @@ export default defineStack({
   requires: ['ui', 'automation'],
 
   // Infrastructure
+  //
+  // No `datasourceMapping`. These two datasources are declared to exercise the
+  // metadata surface, not to route anything: both are `:memory:`, and every
+  // object here has always been served by the host's `default` store. The
+  // mapping that used to sit here (`namespace: 'crm'` + `default: true` →
+  // `crm_primary`) was decorative — `namespace` is deprecated and no object
+  // sets it, and `crm_primary` had no live driver, so routing fell through to
+  // `default`. #4462 stopped routing from falling through, because that
+  // fall-through is what silently put a mapped object's rows in a different
+  // database than the one it declared. Deleting the rule is what keeps this
+  // example's behavior IDENTICAL under the new posture; keeping it would move
+  // the whole app — platform objects included — onto an in-memory database
+  // that is empty on every boot.
   datasources: [CrmDatasource, CrmAnalyticsDatasource],
-  datasourceMapping: [
-    { namespace: 'crm', datasource: 'crm_primary' },
-    { default: true, datasource: 'crm_primary' },
-  ],
 
   // Internationalisation
   translations: [CrmTranslationBundle],

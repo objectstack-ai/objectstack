@@ -7,11 +7,30 @@
  * generating templates) toward the robust pattern without failing the build on
  * a technically-legal construct.
  *
- * A finding carrying `severity: 'error'` FAILS the build. That is reserved for
- * shapes that are a *guaranteed* runtime failure rather than a risk — currently
- * only {@link FLOW_RUNAS_UNSCOPED}, where the runtime refuses the data
- * operation outright (#3760), so warning about it would just be a slower way of
- * finding out.
+ * A finding carrying `severity: 'error'` FAILS the build. The bar is: **no
+ * reading of the author's metadata does what it says, deterministically, on
+ * every run.** Warning about such a shape is just a slower way of finding out.
+ * That covers two kinds, and only these:
+ *
+ *  - **The runtime refuses.** {@link FLOW_RUNAS_UNSCOPED} — a user-less trigger
+ *    with `runAs:'user'` has no identity to scope to, so the data operation is
+ *    refused outright (#3760).
+ *  - **The declaration is inert and the route silently differs from what is
+ *    written.** {@link FLOW_BRANCH_LABEL_UNMATCHED} — a decision computes a
+ *    branch no out-edge carries, so the branch is discarded and every out-edge
+ *    is considered instead. {@link FLOW_DEFAULT_EDGE_WITH_CONDITION} — an edge
+ *    that is both the default and conditional; the condition wins and the
+ *    marker routes nothing. Neither *fails*; both are wrong every time, and
+ *    silently, which is worse (#4414).
+ *
+ * The bar is deliberately about *provability*, not severity of consequence. A
+ * shape with a legitimate reading stays a warning even when it is usually a
+ * mistake — {@link FLOW_DECISION_UNCONDITIONAL_BRANCH} is normally a guard that
+ * does not guard, but a decision with one guarded and one unconditional out-edge
+ * is a legal "maybe notify, always continue" fan-out, and
+ * {@link FLOW_MULTIPLE_DEFAULT_EDGES} can genuinely mean "when nothing matched,
+ * do both". Failing a customer's build on a shape we cannot prove wrong is a
+ * worse trade than letting the warning be ignored.
  *
  * #1874 — time-relative rules via record-change date-EQUALITY. A start-node
  * trigger condition like `end_date == daysFromNow(60)` on a `record-*` trigger
@@ -78,6 +97,36 @@ export const FLOW_APPROVAL_REVISE_DISABLED = 'flow-approval-revise-disabled';
  */
 export const FLOW_RUNAS_UNSCOPED = 'flow-runas-unscoped';
 export const FLOW_ERROR_LABEL_NOT_FAULT = 'flow-error-label-not-fault';
+/** #4414 — the four ways a decision's declared branching fails to route. */
+export const FLOW_BRANCH_LABEL_UNMATCHED = 'flow-branch-label-unmatched';
+export const FLOW_DECISION_UNCONDITIONAL_BRANCH = 'flow-decision-unconditional-branch';
+export const FLOW_DEFAULT_EDGE_WITH_CONDITION = 'flow-default-edge-with-condition';
+export const FLOW_MULTIPLE_DEFAULT_EDGES = 'flow-multiple-default-edges';
+/** #4414 — `config.condition` on a node whose executor never reads it. */
+export const FLOW_INERT_NODE_CONDITION = 'flow-inert-node-condition';
+
+/**
+ * Node types that ship in the box. `config.condition` is only ever READ on the
+ * `start` node (the trigger gate — `AutomationEngine.execute` and the trigger
+ * bindings); every other builtin ignores it, so a predicate written there is a
+ * guard that does not guard.
+ *
+ * Deliberately a closed list rather than "any node type": ADR-0018 keeps
+ * `node.type` open so plugins can register their own, and a plugin executor is
+ * free to declare and read `config.condition` from its own `configSchema`. We
+ * can only prove the key is inert for the types we ship.
+ *
+ * Kept as a literal rather than imported from `FLOW_BUILTIN_NODE_TYPES` because
+ * membership here means "we have read this executor and it ignores the key",
+ * which is a stronger claim than "this id is built in" — a new builtin must be
+ * checked, not silently inherited.
+ */
+const INERT_CONDITION_NODE_TYPES = new Set([
+  'decision', 'assignment', 'loop', 'parallel', 'try_catch',
+  'create_record', 'update_record', 'delete_record', 'get_record',
+  'http', 'notify', 'script', 'screen', 'wait', 'subflow', 'map',
+  'connector_action', 'approval', 'end',
+]);
 
 /** Node types that perform a data operation — the ones `flow.runAs` governs (#1888). */
 const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
@@ -288,6 +337,198 @@ function scanErrorLabelledEdges(
         `must be fixed in the metadata, not handled. (#3863)`,
       rule: FLOW_ERROR_LABEL_NOT_FAULT,
     });
+  }
+}
+
+/**
+ * #4414 — a decision node that DECLARES a branch it cannot route.
+ *
+ * A decision has three declared ways to pick a branch, and until #4414 only one
+ * of them worked. They now compose (`branchLabel` narrows the edge set →
+ * `condition` gates → `isDefault` catches the rest), but composing them still
+ * leaves four authorable shapes where what the author wrote does not route what
+ * they meant. All four are silent at run time — the flow completes green, having
+ * taken the wrong path — so they are caught here, at authoring time:
+ *
+ *  (1) `flow-branch-label-unmatched` — the decision's `conditions[].label` names
+ *      a branch no out-edge carries. Traversal cannot honour a label nothing
+ *      claims, so it falls back to considering EVERY out-edge. This is the
+ *      shipped defect: app-crm's convert-lead guard computed `'No — proceed'`
+ *      against out-edges labelled `'Yes'` / `'No'`, matched nothing, and ran
+ *      both branches.
+ *  (2) `flow-decision-unconditional-branch` — an out-edge of a decision that has
+ *      no `condition`, no `isDefault`, and no label the decision can select. It
+ *      is traversed on EVERY pass, in parallel with whichever branch did match,
+ *      so the guard next to it does not guard.
+ *  (3) `flow-default-edge-with-condition` — `isDefault` means "when nothing else
+ *      matched"; a condition on the same edge contradicts it (BPMN forbids a
+ *      conditional default flow). The condition wins and the marker is inert.
+ *  (4) `flow-multiple-default-edges` — two fallbacks out of one node. Both are
+ *      traversed when nothing matched, which is a parallel fan-out, not the
+ *      exclusive "otherwise" the marker promises.
+ *  (5) `flow-inert-node-condition` — `config.condition` on a node that never
+ *      reads it. The key is the trigger gate on `start` and dead on every other
+ *      builtin, so the predicate reads like a guard and gates nothing.
+ *
+ * (1) and (3) GATE — neither has a reading under which the author's metadata
+ * routes what it says, on any run, so a warning would just be a slower way of
+ * finding out. (2) and (4) stay advisory: an unconditional sibling is a legal
+ * "maybe notify, always continue" fan-out, and two defaults can mean "when
+ * nothing matched, do both". See the severity policy at the top of this file.
+ *
+ * The engine also warns when it hits (1) live — a stored flow authored before
+ * this rule existed still reaches run time.
+ */
+function scanBranchRouting(
+  flowName: string,
+  nodes: AnyRec[],
+  edges: AnyRec[],
+  findings: FlowLintFinding[],
+): void {
+  const outEdgesBySource = new Map<string, AnyRec[]>();
+  for (const e of edges) {
+    if (e.type === 'fault') continue; // error routing, not branch selection
+    const src = typeof e.source === 'string' ? e.source : '';
+    if (!src) continue;
+    if (!outEdgesBySource.has(src)) outEdgesBySource.set(src, []);
+    outEdgesBySource.get(src)!.push(e);
+  }
+
+  // (3) + (4) apply to every node's out-edges, not just decisions — `isDefault`
+  //     is meaningful wherever conditional siblings exist.
+  for (const [src, outs] of outEdgesBySource) {
+    for (const e of outs) {
+      if (e.isDefault === true && e.condition) {
+        findings.push({
+          where: `flow '${flowName}' · edge '${src}' → '${String(e.target)}'`,
+          message:
+            `edge sets \`isDefault: true\` AND a \`condition\` — contradictory. \`isDefault\` means ` +
+            `"take this edge when NO sibling condition matched"; a condition makes it an ordinary ` +
+            `guarded branch. The condition wins and the default marker routes nothing.`,
+          hint:
+            `Drop one: keep \`condition\` for a guarded branch, or drop it and keep \`isDefault: true\` ` +
+            `for the "otherwise" path. (#4414)`,
+          rule: FLOW_DEFAULT_EDGE_WITH_CONDITION,
+          // Gating: the two keys contradict, the condition always wins, and the
+          // marker never routes. No reading makes it do what it says.
+          severity: 'error',
+        });
+      }
+    }
+    const defaults = outs.filter((e) => e.isDefault === true && !e.condition);
+    if (defaults.length > 1) {
+      findings.push({
+        where: `flow '${flowName}' · node '${src}'`,
+        message:
+          `${defaults.length} out-edges are marked \`isDefault: true\` (${defaults
+            .map((e) => `'${String(e.target)}'`)
+            .join(', ')}) — a node has at most ONE default path. All of them are traversed together ` +
+          `when no condition matches, which is a parallel fan-out, not an "otherwise".`,
+        hint:
+          `Keep \`isDefault: true\` on the single fallback edge and give the others a \`condition\` ` +
+          `(or leave them unconditional if the fan-out really is intended). (#4414)`,
+        rule: FLOW_MULTIPLE_DEFAULT_EDGES,
+      });
+    }
+  }
+
+  // (5) #4414 — `config.condition` on a node that never reads it.
+  //
+  // The key is LIVE on `start`, where it is the trigger gate, and dead
+  // everywhere else: the engine parse-validates it on every node at
+  // registration (so a malformed one is caught), and then no executor but the
+  // start path looks at it. On a `decision` the name makes it read as the
+  // branch predicate — app-todo's `check_recurring` carried one for exactly
+  // that reason, a third copy of a predicate its out-edges were already
+  // enforcing. Where the out-edges are NOT already deciding, the same shape is
+  // a guard that does nothing and every out-edge runs.
+  //
+  // Advisory: the surrounding edges usually still route correctly, so this is
+  // dead weight rather than a provable misroute (the gating bar is at the top
+  // of this file).
+  for (const node of nodes) {
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+    if (!INERT_CONDITION_NODE_TYPES.has(nodeType)) continue;
+    const cfg = (node.config ?? {}) as AnyRec;
+    if (cfg.condition == null || conditionSource(cfg.condition).trim() === '') continue;
+    findings.push({
+      where: `flow '${flowName}' · node '${String(node.id)}' (${nodeType})`,
+      message:
+        `\`config.condition\` is set but nothing reads it — the key is the trigger gate on a \`start\` ` +
+        `node and is ignored on every other node type, so this predicate never gates anything. ` +
+        `(It is still parse-validated at registration, which is why a malformed one is caught and an ` +
+        `inert one is not.)`,
+      hint:
+        nodeType === 'decision'
+          ? `Branching lives on the OUT-EDGES: give each branch its own \`condition\` and mark the ` +
+            `fallback \`isDefault: true\`. If the edges already carry the predicate, delete this copy. (#4414)`
+          : `Delete it, or move the predicate to the incoming edge's \`condition\` if this step was ` +
+            `meant to be conditional. (#4414)`,
+      rule: FLOW_INERT_NODE_CONDITION,
+    });
+  }
+
+  // (1) + (2) are about a DECISION's own declared branching.
+  for (const node of nodes) {
+    if (node.type !== 'decision') continue;
+    const nid = typeof node.id === 'string' ? node.id : '';
+    if (!nid) continue;
+    const outs = outEdgesBySource.get(nid) ?? [];
+    if (outs.length === 0) continue;
+
+    const cfg = (node.config ?? {}) as AnyRec;
+    const declaredLabels = new Set(
+      (Array.isArray(cfg.conditions) ? (cfg.conditions as AnyRec[]) : [])
+        .map((c) => (typeof c?.label === 'string' ? c.label.trim().toLowerCase() : ''))
+        .filter(Boolean),
+    );
+    const edgeLabels = new Set(outs.map(edgeLabelOf).filter(Boolean));
+
+    // (1) a declared branch label nothing claims. `default` is the engine's own
+    //     sentinel for "no declared condition matched" and is additionally
+    //     claimed by the BPMN default edge, so it is never counted as unclaimed.
+    const unclaimed = [...declaredLabels].filter((l) => !edgeLabels.has(l));
+    if (unclaimed.length > 0) {
+      findings.push({
+        where: `flow '${flowName}' · decision '${nid}'`,
+        message:
+          `declares branch label(s) ${unclaimed.map((l) => `'${l}'`).join(', ')} that no out-edge ` +
+          `carries — out-edge labels are [${[...edgeLabels].map((l) => `'${l}'`).join(', ') || 'none'}]. ` +
+          `Traversal cannot honour a label nothing claims, so it falls back to considering EVERY ` +
+          `out-edge and the branch the decision computed is ignored.`,
+        hint:
+          `Make an out-edge's \`label\` match the declared branch exactly, or drop \`config.conditions\` ` +
+          `and branch on the edges instead (\`condition\` per branch + \`isDefault: true\` on the ` +
+          `fallback) — one mechanism per decision, never both. (#4414)`,
+        rule: FLOW_BRANCH_LABEL_UNMATCHED,
+        // Gating: a label nothing claims cannot route under ANY reading, on
+        // every run. See the severity policy at the top of this file.
+        severity: 'error',
+      });
+    }
+
+    // (2) an out-edge nothing can gate: no condition, not the default, and not
+    //     selectable by a label the decision declares.
+    const gated = outs.filter((e) => e.condition || e.isDefault === true);
+    if (gated.length === 0) continue; // no branching declared at all — nothing to undercut
+    const ungated = outs.filter(
+      (e) => !e.condition && e.isDefault !== true && !declaredLabels.has(edgeLabelOf(e)),
+    );
+    if (ungated.length > 0) {
+      findings.push({
+        where: `flow '${flowName}' · decision '${nid}'`,
+        message:
+          `has guarded out-edge(s) alongside unconditional one(s) ` +
+          `(${ungated.map((e) => `'${String(e.target)}'`).join(', ')}) — an unconditional out-edge is ` +
+          `traversed on EVERY pass, in parallel with whichever guarded branch matched, so the ` +
+          `decision does not actually exclude it. A \`label\` alone does not select a path unless the ` +
+          `decision declares a matching \`conditions[].label\`.`,
+        hint:
+          `Mark the fallback \`isDefault: true\` so it is taken only when no sibling condition matched ` +
+          `(BPMN default flow), or give it its own \`condition\`. (#4414)`,
+        rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
+      });
+    }
   }
 }
 
@@ -503,6 +744,11 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
     //     unconditional out-edge: the handler runs on every SUCCESS, in parallel
     //     with the real path, and never on a failure.
     scanErrorLabelledEdges(flowName, nodes, edges, findings);
+
+    // (e) #4414 — a decision that declares a branch it cannot route: an
+    //     unclaimable branch label, an unconditional sibling that runs anyway,
+    //     or a self-contradictory / duplicated `isDefault` marker.
+    scanBranchRouting(flowName, nodes, edges, findings);
   }
   return findings;
 }

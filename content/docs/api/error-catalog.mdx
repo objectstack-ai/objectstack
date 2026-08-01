@@ -110,9 +110,40 @@ substitute. See the [Data API](/docs/api/data-api).
 **Retry:** `no_retry`
 
 ### `INVALID_REFERENCE`
-**Cause:** A `lookup` or `master_detail` field references a record that does not exist.  
-**Fix:** Verify the referenced record ID exists in the target object.  
+**Cause:** Reserved for an invalid foreign-key reference. **No route emits it
+today.** A `lookup` / `master_detail` pointing at a record that does not exist
+is refused as a *field-level* failure instead — see below.  
+**Fix:** Do not branch on this code; branch on `VALIDATION_FAILED` +
+`fields[].code === 'reference_not_found'`.  
 **Retry:** `no_retry`
+
+<Callout type="info">
+**A dangling reference answers `VALIDATION_FAILED`, not `INVALID_REFERENCE`** (#4441).
+Writing a `lookup` / `master_detail` value with no matching row in the target
+object is rejected with `400 VALIDATION_FAILED`, and the specifics ride in
+`fields[]` — which names the field, the target object and the unresolvable id:
+
+```json
+{
+  "error": "Permission Set: no sys_permission_set record has id \"ps_missing\"",
+  "code": "VALIDATION_FAILED",
+  "fields": [{
+    "field": "permission_set_id",
+    "code": "reference_not_found",
+    "label": "Permission Set",
+    "constraint": { "target": "sys_permission_set" },
+    "value": "ps_missing"
+  }]
+}
+```
+
+The check covers create, update and bulk update. Three cases are deliberately
+*not* rejections: an empty value (`null` / `""` / `[]`) means "no link", a
+`isSystem` write is exempt (seed replay and package install legitimately write
+in an order that only resolves once the batch completes), and a target that
+cannot be checked at all — an unregistered object, an unreachable datasource —
+fails **open** rather than inventing a rejection.
+</Callout>
 
 ### `DUPLICATE_VALUE`
 **Cause:** A field with `unique: true` already has a record with the same value.  

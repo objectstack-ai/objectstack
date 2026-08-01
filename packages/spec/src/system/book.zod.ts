@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
 /**
  * Package Documentation Navigation — the `book` element (ADR-0046 §6).
@@ -115,6 +116,13 @@ export const BookSchema = lazySchema(() =>
     order: z.number().optional().describe('Orders books within the portal'),
     audience: BookAudienceSchema.optional().describe("Access audience; defaults to 'org' (inherits package grant)"),
     groups: z.array(BookGroupSchema).describe('The spine: ordered sections. Two levels total.'),
+
+    // ADR-0010 — runtime protection envelope (internal — set by the loader).
+    // `book` is a registered metadata type, so the artifact loader stamps
+    // `_packageId` / `_provenance` on it like every sibling. Undeclared, they
+    // were dropped on every parse — protection metadata lost on round-trip, and
+    // a hard 422 waiting for the day this shape is closed.
+    ...MetadataProtectionFields,
   }),
 );
 

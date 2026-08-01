@@ -32,6 +32,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { SystemObjectName } from '../system/constants/system-names';
 import type { FieldType } from './field.zod';
 import { AddressSchema } from './field.zod';
 
@@ -92,6 +93,50 @@ export const MULTI_OPTION_TYPES: ReadonlySet<string> = new Set([
 export const REFERENCE_VALUE_TYPES: ReadonlySet<string> = new Set([
   'lookup', 'master_detail', 'user', 'tree',
 ] as const satisfies readonly FieldType[]);
+
+/**
+ * Reference types whose target object is FIXED BY THE TYPE rather than chosen
+ * by the author, mapped to that target.
+ *
+ * `user` is the only member: `field.zod` defines it as "a lookup specialized to
+ * the `sys_user` system object … target fixed to the `sys_user` system object",
+ * and the `Field.user()` builder — unlike `Field.lookup(reference, …)` /
+ * `Field.masterDetail(reference, …)` — takes NO target argument and writes
+ * `reference: 'sys_user'` itself. The target is a CONSTANT OF THE TYPE, so
+ * `reference` on a `user` field materializes that constant; it does not supply
+ * it. Metadata authored without it (hand-written JSON, an AI author, a Studio
+ * form) is fully specified, not under-specified.
+ */
+const IMPLICIT_REFERENCE_TARGETS: ReadonlyMap<string, string> = new Map([
+  ['user', SystemObjectName.USER],
+]);
+
+/**
+ * The object a reference-typed field points at — the SINGLE arbiter of "what
+ * does this field expand into", for the gate that admits an `expand` and the
+ * engine that performs it alike.
+ *
+ * Returns `undefined` only when the field genuinely names no target: a
+ * non-reference type, or a `lookup`/`master_detail`/`tree` with no `reference`
+ * (an authoring bug — those types carry an author-chosen target and nothing
+ * can supply it for them).
+ *
+ * Framework#4443 / cloud#983: the two callers used to read `field.reference`
+ * raw, which made a `{ type: 'user' }` field targetless to BOTH — the expand
+ * gate refused `?expand=<that field>` with `400 INVALID_FIELD … declares no
+ * target object`, so an AI-authored app whose default list view expanded its
+ * "responsible person" column answered its very first screen with an error
+ * page. Deriving the target here (rather than requiring every author to
+ * restate a constant) is what keeps the gate and the engine agreeing on the
+ * one question they both ask.
+ */
+export function referenceTargetOf(def: unknown): string | undefined {
+  if (!def || typeof def !== 'object') return undefined;
+  const { type, reference } = def as { type?: unknown; reference?: unknown };
+  if (typeof type !== 'string' || !REFERENCE_VALUE_TYPES.has(type)) return undefined;
+  if (typeof reference === 'string' && reference) return reference;
+  return IMPLICIT_REFERENCE_TARGETS.get(type);
+}
 
 /**
  * Media/attachment types. Stored form TODAY is the legacy inline metadata
@@ -267,8 +312,47 @@ export const FileLikeValueSchema = lazySchema(() => z.union([
   FileValueSchema,
 ]));
 
-/** Record-id string — the stored form of every reference type. */
-export const ReferenceIdValueSchema = lazySchema(() => z.string().min(1));
+/**
+ * A stored reference value that is really an EMBEDDED RECORD, serialized.
+ *
+ * In a document store the expanded form arrives as an object and `z.string()`
+ * already rejects it. In a SQL deployment the same value reaches storage as
+ * JSON *text* in a TEXT column — a non-empty string — which is exactly how a
+ * legacy embedded reference survives into a relational table. Anchored on the
+ * first non-space character rather than a `JSON.parse` attempt so the check
+ * stays allocation-free on the write path: no record id the platform mints, and
+ * no external key any datasource can supply, begins with `{` or `[`.
+ */
+const EMBEDDED_REFERENCE_TEXT = /^\s*[[{]/;
+
+/**
+ * Record-id string — the stored form of every reference type.
+ *
+ * Non-empty is not the whole contract. `os migrate value-shapes` is the
+ * evidence half of the ADR-0104 D1 per-deployment gate, and its own header
+ * names "a `lookup` holding an expanded record object" as a case it exists to
+ * find — but a bare `z.string().min(1)` accepts the JSON text such a value is
+ * stored as, so the gate closed on evidence it never collected (#4455). The
+ * scan deliberately imports the write-path predicate, so the write path was
+ * equally blind and the value survived future writes too.
+ *
+ * The rejection is deliberately NARROW — an embedded object/array, not an id
+ * charset. Its file sibling {@link FileReferenceIdValueSchema} can bound its
+ * charset because a `sys_file` id is minted by the platform and by nothing
+ * else; a reference id is whatever the target object's primary key holds,
+ * including an external key an ADR-0015 federated datasource supplies. So this
+ * rejects the shape that is provably not an id and leaves the id alphabet to
+ * the object that owns it. Widening it further needs evidence about real
+ * external keys, not a guess.
+ */
+export const ReferenceIdValueSchema = lazySchema(() =>
+  z.string().min(1).refine((v) => !EMBEDDED_REFERENCE_TEXT.test(v), {
+    message:
+      'Expected a record id, but the value is an embedded record object. A reference stores an ' +
+      'opaque id; the expanded record is the READ shape ($expand produces it) and is never stored. ' +
+      'Replace the value with the referenced record\'s id.',
+  }),
+);
 
 function optionCodes(def: ValueShapeFieldDef): string[] {
   if (!Array.isArray(def.options)) return [];

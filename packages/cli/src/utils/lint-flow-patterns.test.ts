@@ -13,6 +13,11 @@ import {
   FLOW_APPROVAL_REVISE_DISABLED,
   FLOW_RUNAS_UNSCOPED,
   FLOW_ERROR_LABEL_NOT_FAULT,
+  FLOW_BRANCH_LABEL_UNMATCHED,
+  FLOW_DECISION_UNCONDITIONAL_BRANCH,
+  FLOW_DEFAULT_EDGE_WITH_CONDITION,
+  FLOW_MULTIPLE_DEFAULT_EDGES,
+  FLOW_INERT_NODE_CONDITION,
 } from './lint-flow-patterns.js';
 
 const CEL = (source: string) => ({ dialect: 'cel', source });
@@ -185,10 +190,16 @@ describe('lintFlowPatterns — wrong interpolation syntax (#1315)', () => {
       expect(rules(nodeFlow({ objectName: 'm', fields: { price: '$5.00', label: 'Total $5' } }))).toEqual([]);
     });
     it('a CEL condition (skipped — not a template value)', () => {
-      expect(rules({ flows: [{ name: 'd', nodes: [
+      // Scoped to the #1315 interpolation rules on purpose: this shape DOES
+      // trip `flow-inert-node-condition` (#4414 — a decision never reads
+      // `config.condition`), a different finding about a different defect,
+      // which must not make this case read as a brace mistake.
+      const found = rules({ flows: [{ name: 'd', nodes: [
         { id: 'start', type: 'start', config: {} },
         { id: 'dec', type: 'decision', config: { condition: 'record.amount > 100' } },
-      ], edges: [] }] })).toEqual([]);
+      ], edges: [] }] });
+      expect(found).not.toContain(FLOW_DOUBLE_BRACE_INTERP);
+      expect(found).not.toContain(FLOW_BARE_DOLLAR_REF);
     });
   });
 });
@@ -447,4 +458,231 @@ describe('flow-error-label-not-fault (#3863)', () => {
       expect(lintFlowPatterns(edgeFlow({ label: 'error' }, sourceType))).toHaveLength(0);
     },
   );
+});
+
+/**
+ * #4414 — a decision that declares a branch it cannot route.
+ *
+ * `guardFlow` is `examples/app-crm/src/flows/convert-lead.flow.ts`'s guard,
+ * reduced: one CEL-guarded abort branch and one fallback branch.
+ */
+function guardFlow(opts: {
+  conditions?: Array<{ label: string; expression: string }>;
+  proceed?: Record<string, unknown>;
+  extra?: Array<Record<string, unknown>>;
+} = {}) {
+  return {
+    flows: [{
+      name: 'convert_lead',
+      type: 'screen',
+      nodes: [
+        { id: 'start', type: 'start', config: {} },
+        {
+          id: 'check', type: 'decision',
+          ...(opts.conditions ? { config: { conditions: opts.conditions } } : {}),
+        },
+        { id: 'abort', type: 'screen', config: {} },
+        { id: 'proceed', type: 'screen', config: {} },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'check' },
+        { id: 'e_yes', source: 'check', target: 'abort', label: 'Yes', condition: "lead.status == 'converted'" },
+        { id: 'e_no', source: 'check', target: 'proceed', label: 'No', ...(opts.proceed ?? {}) },
+        ...(opts.extra ?? []),
+      ],
+    }],
+  };
+}
+
+describe('flow-branch-label-unmatched (#4414)', () => {
+  // The shipped shape: labels `'Yes — already converted'` / `'No — proceed'`
+  // against out-edges labelled `'Yes'` / `'No'` — zero matches.
+  it('flags decision branch labels no out-edge carries', () => {
+    const fnds = lintFlowPatterns(guardFlow({
+      proceed: { isDefault: true },
+      conditions: [
+        { label: 'Yes — already converted', expression: "lead.status == 'converted'" },
+        { label: 'No — proceed', expression: 'true' },
+      ],
+    })).filter((f) => f.rule === FLOW_BRANCH_LABEL_UNMATCHED);
+
+    expect(fnds).toHaveLength(1);
+    // Gating: a label nothing claims cannot route under any reading (#4414).
+    expect(fnds[0].severity).toBe('error');
+    expect(fnds[0].where).toContain("decision 'check'");
+    expect(fnds[0].message).toContain("'yes — already converted'");
+    expect(fnds[0].message).toContain("'no — proceed'");
+    // The consequence, not just the mismatch.
+    expect(fnds[0].message).toContain('EVERY');
+  });
+
+  it('flags a partial mismatch — one claimed label does not excuse the other', () => {
+    const fnds = lintFlowPatterns(guardFlow({
+      proceed: { isDefault: true },
+      conditions: [
+        { label: 'Yes', expression: "lead.status == 'converted'" },
+        { label: 'No — proceed', expression: 'true' },
+      ],
+    })).filter((f) => f.rule === FLOW_BRANCH_LABEL_UNMATCHED);
+    expect(fnds).toHaveLength(1);
+    // Only the unclaimed label is reported as unclaimed; `'yes'` still shows up
+    // later in the message as one of the out-edge labels that DO exist.
+    expect(fnds[0].message).toMatch(/declares branch label\(s\) 'no — proceed' that no out-edge/);
+  });
+
+  it('does NOT flag labels that match (case/whitespace-insensitively)', () => {
+    expect(lintFlowPatterns(guardFlow({
+      proceed: { isDefault: true },
+      conditions: [{ label: ' yes ', expression: 'true' }],
+    })).filter((f) => f.rule === FLOW_BRANCH_LABEL_UNMATCHED)).toHaveLength(0);
+  });
+
+  it('does NOT flag a decision that declares no conditions at all', () => {
+    expect(lintFlowPatterns(guardFlow({ proceed: { isDefault: true } }))).toHaveLength(0);
+  });
+});
+
+describe('flow-decision-unconditional-branch (#4414)', () => {
+  // The actual hole: `e_no` has no condition and no `isDefault`, so it is
+  // traversed on every pass — the abort screen AND the wizard behind it.
+  it('flags an unconditional out-edge alongside a guarded one', () => {
+    const fnds = lintFlowPatterns(guardFlow()).filter(
+      (f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH,
+    );
+    expect(fnds).toHaveLength(1);
+    // Advisory, deliberately: one guarded + one unconditional out-edge is also
+    // a legal "maybe notify, always continue" fan-out, so this shape cannot be
+    // proved wrong the way the two gating rules can.
+    expect(fnds[0].severity).toBeUndefined();
+    expect(fnds[0].message).toContain("'proceed'");
+    expect(fnds[0].message).toContain('EVERY pass');
+    expect(fnds[0].hint).toContain('isDefault');
+  });
+
+  it('does NOT flag once the fallback is marked isDefault — the fix', () => {
+    expect(lintFlowPatterns(guardFlow({ proceed: { isDefault: true } }))).toHaveLength(0);
+  });
+
+  it('does NOT flag once the fallback carries its own condition', () => {
+    expect(lintFlowPatterns(guardFlow({
+      proceed: { condition: "lead.status != 'converted'" },
+    }))).toHaveLength(0);
+  });
+
+  it('does NOT flag an edge the decision CAN select by declared label', () => {
+    expect(lintFlowPatterns(guardFlow({
+      conditions: [{ label: 'No', expression: 'true' }, { label: 'Yes', expression: 'false' }],
+    })).filter((f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH)).toHaveLength(0);
+  });
+
+  it('does NOT flag a decision with no guarded edge at all — nothing to undercut', () => {
+    expect(lintFlowPatterns({
+      flows: [{
+        name: 'plain',
+        nodes: [{ id: 'start', type: 'start', config: {} }, { id: 'check', type: 'decision' }, { id: 'a', type: 'screen', config: {} }],
+        edges: [
+          { id: 'e1', source: 'start', target: 'check' },
+          { id: 'e2', source: 'check', target: 'a' },
+        ],
+      }],
+    })).toHaveLength(0);
+  });
+
+  it('does NOT flag a fault edge — error routing is not branch selection', () => {
+    expect(lintFlowPatterns(guardFlow({
+      proceed: { isDefault: true },
+      extra: [{ id: 'e_err', source: 'check', target: 'abort', type: 'fault' }],
+    }))).toHaveLength(0);
+  });
+});
+
+describe('flow-default-edge-with-condition / flow-multiple-default-edges (#4414)', () => {
+  it('flags an edge that is both the default and conditional', () => {
+    const fnds = lintFlowPatterns(guardFlow({
+      proceed: { isDefault: true, condition: "lead.status != 'converted'" },
+    })).filter((f) => f.rule === FLOW_DEFAULT_EDGE_WITH_CONDITION);
+    expect(fnds).toHaveLength(1);
+    // Gating: the condition always wins, so the marker never routes (#4414).
+    expect(fnds[0].severity).toBe('error');
+    expect(fnds[0].message).toContain('contradictory');
+  });
+
+  it('flags two default edges out of one node', () => {
+    const fnds = lintFlowPatterns(guardFlow({
+      proceed: { isDefault: true },
+      extra: [{ id: 'e_also', source: 'check', target: 'abort', isDefault: true }],
+    })).filter((f) => f.rule === FLOW_MULTIPLE_DEFAULT_EDGES);
+    expect(fnds).toHaveLength(1);
+    // Advisory: two defaults can genuinely mean "when nothing matched, do both".
+    expect(fnds[0].severity).toBeUndefined();
+    expect(fnds[0].where).toContain("node 'check'");
+  });
+
+  it('does NOT flag one default edge per node', () => {
+    expect(lintFlowPatterns(guardFlow({ proceed: { isDefault: true } }))).toHaveLength(0);
+  });
+});
+
+/**
+ * #4414 — `config.condition` on a node that never reads it.
+ *
+ * The key is LIVE on `start` (the trigger gate) and dead on every other
+ * builtin. `app-todo`'s `check_recurring` carried one for years: a third copy
+ * of a predicate its out-edges were already enforcing.
+ */
+function conditionNodeFlow(nodeType: string, config: Record<string, unknown>) {
+  return {
+    flows: [{
+      name: 'cond_flow',
+      nodes: [
+        { id: 'start', type: 'start', config: { objectName: 'todo_task', triggerType: 'record-after-update' } },
+        { id: 'n', type: nodeType, config },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'n' }],
+    }],
+  };
+}
+
+describe('flow-inert-node-condition (#4414)', () => {
+  it('flags `config.condition` on a decision, pointing at the out-edges', () => {
+    const fnds = lintFlowPatterns(
+      conditionNodeFlow('decision', { condition: 'vars.completedTask.is_recurring == true' }),
+    ).filter((f) => f.rule === FLOW_INERT_NODE_CONDITION);
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].where).toContain("node 'n' (decision)");
+    expect(fnds[0].message).toContain('nothing reads it');
+    expect(fnds[0].hint).toContain('isDefault');
+    // Advisory: the surrounding edges usually still route correctly.
+    expect(fnds[0].severity).toBeUndefined();
+  });
+
+  it('flags it on a non-decision node too, with the generic hint', () => {
+    const fnds = lintFlowPatterns(
+      conditionNodeFlow('update_record', { objectName: 'todo_task', condition: 'a == b' }),
+    ).filter((f) => f.rule === FLOW_INERT_NODE_CONDITION);
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].hint).toContain("incoming edge's `condition`");
+  });
+
+  it('does NOT flag the start node — that is where the key is read', () => {
+    expect(lintFlowPatterns({
+      flows: [{
+        name: 'gated',
+        runAs: 'system',
+        nodes: [{ id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *', condition: 'record.active == true' } }],
+        edges: [],
+      }],
+    }).filter((f) => f.rule === FLOW_INERT_NODE_CONDITION)).toHaveLength(0);
+  });
+
+  it('does NOT flag a node with no condition, or an empty one', () => {
+    expect(lintFlowPatterns(conditionNodeFlow('decision', {}))).toHaveLength(0);
+    expect(lintFlowPatterns(conditionNodeFlow('decision', { condition: '   ' }))).toHaveLength(0);
+  });
+
+  it('does NOT flag a PLUGIN node type — its executor may legitimately read it', () => {
+    // ADR-0018 keeps `node.type` open; we can only prove the key inert for the
+    // builtins we ship.
+    expect(lintFlowPatterns(conditionNodeFlow('acme_custom_step', { condition: 'a == b' }))).toHaveLength(0);
+  });
 });

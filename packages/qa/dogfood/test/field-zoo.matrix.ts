@@ -18,6 +18,65 @@ export type Check =
   | { kind: 'masked'; write: unknown } // secret: POSTed plaintext must read back as SECRET_MASK
   | { kind: 'computed'; expected: unknown }; // derived, asserted not written
 
+/**
+ * Stand-in for a reference id the suite only knows at runtime.
+ *
+ * The three relational entries below name a target object but cannot name a
+ * ROW: nothing exists until the suite creates one. The HTTP suite creates a row
+ * in each target and substitutes its real id — keyed on the field appearing in
+ * {@link REFERENCE_TARGETS}, which is the authoritative list, so this value is
+ * documentation rather than a control signal and can never leak to the wire.
+ *
+ * It is a STRING, deliberately. This table has two consumers: the HTTP suite,
+ * which substitutes, and `field-zoo-value-shape.test.ts`, which parses every
+ * `write` vector against the spec's `valueSchemaFor(type, 'stored')` WITHOUT
+ * booting a stack and therefore never substitutes. A `Symbol` placeholder
+ * satisfied the first and broke the second (`expected string, received
+ * symbol`) — and because the two live in different FILES, and dogfood shards by
+ * file, that surfaced as "shard 2 fixed, shard 1 regressed". A reference's
+ * stored form is an id string, so the placeholder is one.
+ */
+export const REFERENCE_PLACEHOLDER = 'zoo_reference_id_resolved_at_runtime';
+
+/**
+ * Reference field → the object whose row supplies its id, and the minimal body
+ * that creates one. Consumed by the HTTP round-trip suite; the value-shape
+ * contract test ignores these entries (it never writes).
+ *
+ * ORDERED, and `body` is a factory, because the targets reference each other:
+ * `showcase_project` declares a REQUIRED lookup to `showcase_account`, so the
+ * account has to exist first and the project has to be given its real id. That
+ * dependency is itself a small proof of #4441 — seeding these in the wrong
+ * order now fails loudly instead of writing a project that points at nothing.
+ */
+export const REFERENCE_TARGETS: ReadonlyArray<{
+  field: string;
+  object: string;
+  body: (seeded: Readonly<Record<string, string>>) => Record<string, unknown>;
+}> = [
+  {
+    field: 'f_lookup',
+    object: 'showcase_account',
+    body: () => ({ name: 'zoo-ref-account', status: 'active' }),
+  },
+  {
+    field: 'f_master_detail',
+    object: 'showcase_project',
+    body: (seeded) => ({
+      name: 'zoo-ref-project',
+      // `planned` is the state machine's declared initial state — anything else
+      // is refused with `invalid_initial_state`.
+      status: 'planned',
+      account: seeded.f_lookup,
+    }),
+  },
+  {
+    field: 'f_tree',
+    object: 'showcase_category',
+    body: () => ({ name: 'zoo-ref-category' }),
+  },
+];
+
 export interface FieldCase {
   field: string;
   type: string;
@@ -88,12 +147,20 @@ export const MATRIX: FieldCase[] = [
   { field: 'f_file', type: 'file', check: { kind: 'equal', write: 'file_zoo_doc' } },
   { field: 'f_avatar', type: 'avatar', check: { kind: 'equal', write: 'file_zoo_avatar' } },
   // relational — store a reference id as a string and read it back verbatim.
-  // FK enforcement is off in this harness, so this asserts value fidelity
-  // (id string → id string), not referential integrity / $expand (covered
-  // elsewhere). The point here is the stored type doesn't drift.
-  { field: 'f_lookup', type: 'lookup', check: { kind: 'equal', write: 'acc_synthetic_0001' } },
-  { field: 'f_master_detail', type: 'master_detail', check: { kind: 'equal', write: 'proj_synthetic_0001' } },
-  { field: 'f_tree', type: 'tree', check: { kind: 'equal', write: 'cat_synthetic_0001' } },
+  // This asserts value fidelity (id string → id string), not `$expand`, which
+  // is covered elsewhere. The point here is that the stored type doesn't drift.
+  //
+  // The `write` values below are PLACEHOLDERS: the suite creates a real row in
+  // each target object and substitutes its id before the create, then asserts
+  // against that same id (see REFERENCE_TARGETS in the spec file). They used to
+  // be synthetic ids (`acc_synthetic_0001`, …) under a comment reading "FK
+  // enforcement is off in this harness" — which described a HOLE that #4441
+  // closed: a lookup pointing at a row that does not exist is now refused.
+  // Round-tripping a REAL id proves the same fidelity and stops the matrix
+  // depending on a defect.
+  { field: 'f_lookup', type: 'lookup', check: { kind: 'equal', write: REFERENCE_PLACEHOLDER } },
+  { field: 'f_master_detail', type: 'master_detail', check: { kind: 'equal', write: REFERENCE_PLACEHOLDER } },
+  { field: 'f_tree', type: 'tree', check: { kind: 'equal', write: REFERENCE_PLACEHOLDER } },
   // security — both credential types mask on read (plaintext never echoes back
   // over HTTP). `secret` is encrypted at rest; `password` on a generic object is
   // plaintext at rest but masked to SECRET_MASK on read (ADR-0100 / #2036 — the

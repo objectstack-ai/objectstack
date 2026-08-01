@@ -30,15 +30,17 @@ export const TaskReminderFlow: Flow = {
       config: { collection: '{tasksToRemind}', iteratorVariable: 'currentTask' },
     },
     {
-      id: 'send_reminder', type: 'script', label: 'Send Reminder Email',
+      // `notify` is what actually delivers (#4343): it hands the messaging
+      // service the notification — the in-app inbox by default, and email once
+      // `@objectstack/plugin-email` is installed. The `script` node this
+      // replaced only ever logged a line and reported success.
+      id: 'send_reminder', type: 'notify', label: 'Send Reminder',
       config: {
-        actionType: 'email',
-        inputs: {
-          to: '{currentTask.owner.email}',
-          subject: 'Task Due Tomorrow: {currentTask.subject}',
-          template: 'task_reminder_email',
-          data: { taskSubject: '{currentTask.subject}', dueDate: '{currentTask.due_date}', priority: '{currentTask.priority}' },
-        },
+        recipients: '{currentTask.owner}',
+        title: 'Task due tomorrow: {currentTask.subject}',
+        message: 'Due {currentTask.due_date} · priority {currentTask.priority}.',
+        sourceObject: 'todo_task',
+        sourceId: '{currentTask.id}',
       },
     },
     { id: 'end', type: 'end', label: 'End' },
@@ -90,15 +92,14 @@ export const OverdueEscalationFlow: Flow = {
       },
     },
     {
-      id: 'notify_owner', type: 'script', label: 'Notify Task Owner',
+      id: 'notify_owner', type: 'notify', label: 'Notify Task Owner',
       config: {
-        actionType: 'email',
-        inputs: {
-          to: '{currentTask.owner.email}',
-          subject: 'URGENT: Task Overdue - {currentTask.subject}',
-          template: 'overdue_escalation_email',
-          data: { taskSubject: '{currentTask.subject}', dueDate: '{currentTask.due_date}', daysOverdue: '{currentTask.days_overdue}' },
-        },
+        recipients: '{currentTask.owner}',
+        title: 'URGENT: task overdue — {currentTask.subject}',
+        message: 'Due {currentTask.due_date}, {currentTask.days_overdue} day(s) overdue.',
+        severity: 'critical',
+        sourceObject: 'todo_task',
+        sourceId: '{currentTask.id}',
       },
     },
     { id: 'end', type: 'end', label: 'End' },
@@ -131,10 +132,12 @@ export const TaskCompletionFlow: Flow = {
       id: 'get_task', type: 'get_record', label: 'Get Completed Task',
       config: { objectName: 'todo_task', filter: { id: '{taskId}' }, outputVariable: 'completedTask' },
     },
-    {
-      id: 'check_recurring', type: 'decision', label: 'Is Recurring Task?',
-      config: { condition: 'vars.completedTask.is_recurring == true' },
-    },
+    // A plain exclusive gateway — the branching is on the OUT-EDGES (e3/e4
+    // carry the predicate and its negation). It used to also set
+    // `config.condition`, which no executor reads: that key is the trigger gate
+    // on a `start` node and inert everywhere else, so it was a third copy of the
+    // same predicate, doing nothing (#4414).
+    { id: 'check_recurring', type: 'decision', label: 'Is Recurring Task?' },
     {
       id: 'create_next_task', type: 'create_record', label: 'Create Next Recurring Task',
       config: {

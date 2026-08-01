@@ -190,19 +190,19 @@ describe('DatasourceSchema', () => {
     expect(() => DatasourceSchema.parse({
       name: 'valid_datasource_name',
       driver: 'postgres',
-      config: {},
+      config: { database: 'mydb' },
     })).not.toThrow();
 
     expect(() => DatasourceSchema.parse({
       name: 'InvalidDatasource',
       driver: 'postgres',
-      config: {},
+      config: { database: 'mydb' },
     })).toThrow();
 
     expect(() => DatasourceSchema.parse({
       name: 'invalid-datasource',
       driver: 'postgres',
-      config: {},
+      config: { database: 'mydb' },
     })).toThrow();
   });
 
@@ -210,7 +210,7 @@ describe('DatasourceSchema', () => {
     const datasource = DatasourceSchema.parse({
       name: 'test_db',
       driver: 'postgres',
-      config: {},
+      config: { database: 'mydb' },
     });
 
     expect(datasource.active).toBe(true);
@@ -278,11 +278,27 @@ describe('DatasourceSchema', () => {
       name: 'mongo_db',
       driver: 'mongo',
       config: {
-        connectionString: 'mongodb://localhost:27017/mydb',
+        url: 'mongodb://localhost:27017/mydb',
       },
     });
 
     expect(datasource.driver).toBe('mongo');
+  });
+
+  // This fixture used to spell the URI `connectionString`, a key the mongo
+  // builder never read — so the datasource it described would have connected to
+  // mongodb://localhost:27017 with no database, and the test asserting it was
+  // "accepted" was asserting the silence #4410 removed.
+  it('rejects a mongo config that spells the URI `connectionString`', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'mongo_db',
+      driver: 'mongo',
+      config: { connectionString: 'mongodb://localhost:27017/mydb' },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.path).toEqual(['config']);
+    expect(result.error!.issues[0]!.message).toContain('`connectionString` → `url`');
   });
 
   it('should accept Redis datasource', () => {
@@ -341,7 +357,7 @@ describe('DatasourceSchema', () => {
     const datasource = DatasourceSchema.parse({
       name: 'disabled_db',
       driver: 'postgres',
-      config: {},
+      config: { database: 'mydb' },
       active: false,
     });
 
@@ -352,7 +368,7 @@ describe('DatasourceSchema', () => {
     const datasource = DatasourceSchema.parse({
       name: 'custom_db',
       driver: 'postgres',
-      config: {},
+      config: { database: 'mydb' },
       capabilities: {
         queryWindowFunctions: false,
         querySubqueries: false,
@@ -386,26 +402,45 @@ describe('DatasourceSchema', () => {
         host: 'localhost',
         port: 5432,
         database: 'mydb',
-        pool: {
-          min: 2,
-          max: 10,
-          idleTimeoutMillis: 30000,
-        },
-        ssl: {
-          rejectUnauthorized: false,
-          ca: 'certificate_content',
-        },
+        ssl: true,
+      },
+      pool: {
+        min: 2,
+        max: 10,
+        idleTimeoutMillis: 30000,
+      },
+      ssl: {
+        enabled: true,
+        rejectUnauthorized: false,
+        ca: 'certificate_content',
       },
     });
 
-    expect(datasource.config.pool).toBeDefined();
-    expect(datasource.config.ssl).toBeDefined();
+    expect(datasource.pool).toBeDefined();
+    expect(datasource.config.ssl).toBe(true);
+    // Certificates belong to the datasource-level block, which the factory now
+    // carries down to the client (#4410). Inside `config`, `ssl` is on/off.
+    expect(datasource.ssl?.ca).toBe('certificate_content');
+  });
+
+  // The fixture above used to nest `pool` INSIDE `config`, where no driver
+  // reads it — so it asserted a pooled datasource that was running on the
+  // factory's hardcoded defaults. The rejection now carries the relocation.
+  it('rejects pool sizing nested inside `config`', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'complex_db',
+      driver: 'postgres',
+      config: { database: 'mydb', pool: { min: 2, max: 10 } },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain('`pool: { max: … }`');
   });
 
   it('should reject datasource without required fields', () => {
     expect(() => DatasourceSchema.parse({
       driver: 'postgres',
-      config: {},
+      config: { database: 'mydb' },
     })).toThrow();
 
     expect(() => DatasourceSchema.parse({
@@ -429,7 +464,7 @@ describe('DatasourceSchema - ssl', () => {
     const result = DatasourceSchema.parse({
       name: 'secure_db',
       driver: 'postgres',
-      config: { host: 'db.example.com', port: 5432 },
+      config: { host: 'db.example.com', port: 5432, database: 'mydb' },
       ssl: {
         enabled: true,
         rejectUnauthorized: true,
@@ -445,7 +480,7 @@ describe('DatasourceSchema - ssl', () => {
     const result = DatasourceSchema.parse({
       name: 'mtls_db',
       driver: 'postgres',
-      config: { host: 'db.secure.com' },
+      config: { host: 'db.secure.com', database: 'mydb' },
       ssl: {
         enabled: true,
         ca: '/certs/ca.pem',
@@ -461,7 +496,7 @@ describe('DatasourceSchema - ssl', () => {
     const result = DatasourceSchema.parse({
       name: 'ssl_db',
       driver: 'mysql',
-      config: {},
+      config: { database: 'mydb' },
       ssl: { enabled: true },
     });
     expect(result.ssl?.rejectUnauthorized).toBe(true);
@@ -471,7 +506,7 @@ describe('DatasourceSchema - ssl', () => {
     const result = DatasourceSchema.parse({
       name: 'local_db',
       driver: 'sqlite',
-      config: { path: './data.db' },
+      config: { filename: './data.db' },
     });
     expect(result.ssl).toBeUndefined();
   });
@@ -482,7 +517,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     const ds = DatasourceSchema.parse({
       name: 'default',
       driver: 'postgres',
-      config: {},
+      config: { database: 'mydb' },
     });
     expect(ds.schemaMode).toBe('managed');
     expect(ds.external).toBeUndefined();
@@ -502,7 +537,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     const ds = DatasourceSchema.parse({
       name: 'warehouse',
       driver: 'postgres',
-      config: { connectionString: 'postgres://...' },
+      config: { url: 'postgres://user@warehouse.internal/analytics' },
       schemaMode: 'external',
       external: { label: 'Analytics Warehouse' },
     });
@@ -518,7 +553,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     const result = DatasourceSchema.safeParse({
       name: 'warehouse',
       driver: 'postgres',
-      config: {},
+      config: { database: 'mydb' },
       schemaMode: 'external',
     });
     expect(result.success).toBe(false);
@@ -531,7 +566,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     const result = DatasourceSchema.safeParse({
       name: 'default',
       driver: 'postgres',
-      config: {},
+      config: { database: 'mydb' },
       schemaMode: 'managed',
       external: { allowWrites: true },
     });
@@ -545,7 +580,7 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     const result = DatasourceSchema.safeParse({
       name: 'warehouse',
       driver: 'postgres',
-      config: {},
+      config: { database: 'mydb' },
       schemaMode: 'validate-only',
     });
     expect(result.success).toBe(false);

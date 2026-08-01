@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Complete reference of all 139 ObjectStack protocol specifications
+description: Complete reference of all 133 ObjectStack protocol specifications
 ---
 
 # Protocol Reference
@@ -30,7 +30,7 @@ These reference pages are **auto-generated** from the Zod source files in `packa
 | [QA Protocol](#qa-protocol) | 1 | Test Suites and BDD Scenarios |
 | [Studio Protocol](#studio-protocol) | 1 | Studio plugin development |
 
-**Total: 175 Zod schemas** (across 14 protocol modules + 1 root stack schema)
+**Total: 169 Zod schemas** (across 14 protocol modules + 1 root stack schema)
 
 ---
 
@@ -313,19 +313,18 @@ Defines marketplace and multi-tenancy capabilities.
 ## Integration Protocol
 
 **Location:** `packages/spec/src/integration/`
-**Count:** 7 schemas
+**Count:** 1 schema
 
-Defines external system connectors and adapters.
+Defines external system connectors — one protocol (ADR-0097). A connector
+entry is either a catalog descriptor or a provider-bound instance that a
+generic executor (connector-openapi / connector-mcp) materializes at boot.
+The per-provider "templates" (`connector/saas.zod.ts` and five siblings) were
+removed in #4480: they hand-modelled each external system's shape inside the
+spec, which ADR-0023 rejected, and nothing ever consumed them.
 
 | File | Schema | Purpose |
 | :--- | :--- | :--- |
-| `connector.zod.ts` | `ConnectorSchema` | Generic connector interface |
-| `connector/saas.zod.ts` | `SaaSConnectorSchema` | SaaS platform connectors (Salesforce, HubSpot, etc.) |
-| `connector/database.zod.ts` | `DatabaseConnectorSchema` | Database connection adapters |
-| `connector/file-storage.zod.ts` | `FileStorageConnectorSchema` | Cloud storage connectors (S3, Azure Blob, etc.) |
-| `connector/message-queue.zod.ts` | `MessageQueueConnectorSchema` | Message queue integrations (RabbitMQ, Kafka, etc.) |
-| `connector/github.zod.ts` | `GitHubConnectorSchema` | GitHub API integration |
-| `connector/vercel.zod.ts` | `VercelConnectorSchema` | Vercel deployment integration |
+| `connector.zod.ts` | `ConnectorSchema` | The connector protocol — auth, sync, webhooks, rate limiting |
 
 **Learn more:** [Integration Protocol Reference](/docs/references/integration)
 

@@ -528,7 +528,41 @@ const step17: MigrationStep = {
     + 'with `timerDuration` already set it is dropped, having been dead metadata. Like the other '
     + 'keys retired for MISDESCRIBING themselves rather than for being renamed, both leave the '
     + 'load path: absorbing them silently would let an author keep believing they configured a '
-    + 'timeout.',
+    + 'timeout.\n\n'
+    + 'Closing the same audit on the data side, `datasource.readReplicas` is removed (#4468). '
+    + 'It described replica connections nothing ever opened: `ConnectableDatasource` and '
+    + '`DatasourceConnectionSpec` carry no replicas field, the driver factory never reads the '
+    + 'key, and no query path distinguishes a read from a write — read/write splitting does not '
+    + 'exist in the platform, so every statement always went to the primary. A lossless delete '
+    + 'with no target to move to; front replicas behind one endpoint (pgpool, ProxySQL, an RDS '
+    + 'reader endpoint) and point `config` at it. Notable as the case that shows how a key gets '
+    + 'MORE convincing as it stays dead: #4410, closing the datasource-config gap, taught the '
+    + 'schema to validate each replica entry against the declared driver\'s config contract, so '
+    + 'sources written in between carry replica blocks that were genuinely checked — precise '
+    + 'hosts, correct port types, typos rejected. Precision applied to an inert slot reads as '
+    + 'evidence the slot is live, which is why ADR-0049 asks for a consumer rather than for '
+    + 'rigor. Retired from the load path with the rest of the keys that misdescribed themselves.\n\n'
+    + 'The `script` flow node converges on its one real path (#4343). It had four ways to name '
+    + 'what it ran and only one of them ran anything: `config.actionType: \'email\' | \'slack\'` '
+    + 'were logger-backed stubs that wrote a line, reported success and delivered nothing under '
+    + 'any configuration — with `config.template` / `.recipients` / `.variables` feeding a '
+    + 'message no channel ever sent; inline `config.script` was recognized and never executed '
+    + '(the built-in runtime has no server-side JS sandbox), so the node warned and no-op\'d; and '
+    + 'every other `actionType` value was shorthand for a registered-function name, a second '
+    + 'spelling of `config.function`. All five keys are retired and `function` becomes required, '
+    + 'which is also what finally made the contract PARSEABLE: while the legal key set depended '
+    + 'on `actionType`, a flat parse would either reject valid shapes or wave everything through, '
+    + 'so `script` (with `subflow`) now runs through the same execute-time contract parse #4277 '
+    + 'gave the flat builtins. A shorthand `actionType` CONVERTS into `function` — that is what '
+    + 'it meant — unless `function` is already set, in which case it was dead metadata the '
+    + 'executor never reached. The other four are dropped outright: nothing read them, so there '
+    + 'is no value to preserve, and rebuilding the intent is an authoring decision the tombstones '
+    + 'prescribe per branch (a `notify` node for mail — it delivers through the messaging '
+    + 'service, the in-app inbox by default and real email once `@objectstack/plugin-email` is '
+    + 'installed; a `connector_action` with the Slack connector, or an `http` node posting to a '
+    + 'webhook, for Slack; a registered function for an inline body). Retired from the load path '
+    + 'for the same reason as the rest: absorbing `actionType: \'email\'` silently would let an '
+    + 'author keep believing the flow sends mail.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -553,6 +587,8 @@ const step17: MigrationStep = {
     'skill-trigger-phrases-removed',
     'stack-api-require-auth-removed',
     'flow-node-wait-timeout-keys-removed',
+    'datasource-read-replicas-removed',
+    'flow-node-script-branch-keys-removed',
   ],
   semantic: [
     {
@@ -737,6 +773,36 @@ const step17: MigrationStep = {
         + 'deduplication goes through `groupBy` / `count_distinct` / the drivers\' `distinct()` '
         + 'door. A query still carrying the key fails to parse with the removal prescription, '
         + 'and the REST list response reports a real `total` for queries that used to send it.',
+    },
+    {
+      id: 'workflow-service-slot-retired',
+      surface:
+        "CoreServiceName 'workflow' / IWorkflowService / WorkflowProtocol / "
+        + 'discovery routes.workflow / RestApiRouteCategory workflow',
+      replacement:
+        'the live mechanisms the slot only ever pointed at: `state_machine` validation rules '
+        + 'for record state machines, approval flow nodes on the approvals runtime (ADR-0019) '
+        + 'for approvals, lifecycle hooks + `record_change` flows (service-automation) for '
+        + 'record-triggered automation',
+      reason:
+        'The workflow slot was declared end to end and implemented nowhere: no code in either '
+        + 'repository ever registered or resolved it (ADR-0115 Evidence 5 — the only touches '
+        + 'were plugin-dev\'s retired stub probe and the generic discovery walk), no '
+        + 'implementation of any WorkflowProtocol method ever existed, and no host ever '
+        + 'mounted `/api/v1/workflow` (the pre-#3586 DEFAULT_DISPATCHER_ROUTES listed it among '
+        + 'routes that never existed). Every part of it was ADR-0078\'s silently-inert '
+        + 'declaration: a CoreServiceName nothing filled, a contract nothing implemented, a '
+        + 'protocol nothing served, a discovery route field no builder could truthfully '
+        + 'populate. These are TS/API surfaces and a discovery RESPONSE field — never stored '
+        + 'in stack metadata, so there is no source for the chain to rewrite; consumers of the '
+        + 'deleted types move their imports themselves. ADR-0049 / ADR-0078, #4451.',
+      acceptanceCriteria:
+        'No import of IWorkflowService, WorkflowProtocol or the Get/WorkflowState/Config/'
+        + 'Transition types resolves; no code calls getService(\'workflow\') or reads '
+        + 'discovery `routes.workflow` / `services.workflow`; record state machines, '
+        + 'approvals and record-triggered automation go through the replacement mechanisms. '
+        + 'Discovery output on a default boot is unchanged (the slot was always reported '
+        + 'unavailable; now it is simply absent).',
     },
   ],
 };

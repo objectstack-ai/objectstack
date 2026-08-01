@@ -1,11 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { defineActionDescriptor, SubflowConfigSchema } from '@objectstack/spec/automation';
+import type { SubflowConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
 import { refuseNode } from '../guard-refusal.js';
+import { parseNodeConfig } from './parse-config.js';
 
 /** Hard cap on subflow nesting — turns an accidental cycle into a clean error. */
 const MAX_SUBFLOW_DEPTH = 16;
@@ -52,14 +54,18 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
       supportsPause: true,
     }),
     async execute(node, variables, context) {
-      const cfg = (node.config ?? {}) as Record<string, unknown>;
+      // #4343 — the contract is parsed before anything runs, the same seam the
+      // flat builtins got in #4277: a missing or empty `flowName` refuses this
+      // node as a GUARD (wrong metadata; a rerun cannot supply it), with the
+      // path named, instead of the hand-written check this replaces.
+      //
       // The historical `flow` alias is canonicalized at load by the ADR-0087 D2
       // conversion 'flow-node-subflow-flow-alias' (#4278), so only the
-      // canonical key is read here (contract: SubflowConfigSchema).
-      const flowName = typeof cfg.flowName === 'string' ? cfg.flowName : undefined;
-      if (!flowName) {
-        return refuseNode(`subflow '${node.id}': config.flowName is required`);
-      }
+      // canonical key reaches the parse.
+      const parsed = parseNodeConfig<SubflowConfigParsed>('subflow', node.id, SubflowConfigSchema, node.config);
+      if (!parsed.ok) return parsed.refusal;
+      const cfg = parsed.config;
+      const flowName = cfg.flowName;
 
       // Cycle guard: depth rides on the context so it accumulates across nesting.
       const depth = Number((context as { $subflowDepth?: number } | undefined)?.$subflowDepth ?? 0);
@@ -72,10 +78,9 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
       }
 
       // Map inputs (resolve `{var}` against the parent's variables/context).
-      const rawInput = (cfg.input && typeof cfg.input === 'object' ? cfg.input : {}) as Record<string, unknown>;
-      const params = interpolate(rawInput, variables, context ?? ({} as AutomationContext)) as Record<string, unknown>;
+      const params = interpolate(cfg.input ?? {}, variables, context ?? ({} as AutomationContext)) as Record<string, unknown>;
 
-      const outVar = typeof cfg.outputVariable === 'string' && cfg.outputVariable ? cfg.outputVariable : undefined;
+      const outVar = cfg.outputVariable || undefined;
 
       // Parent linkage for nested durable pause: should the child suspend, the
       // engine persists these with the child run and uses them to bubble the

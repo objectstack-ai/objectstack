@@ -5,7 +5,7 @@ import {
 } from '@objectstack/core';
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
-import { CoreServiceName, serviceUnavailableMessage } from '@objectstack/spec/system';
+import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { readServiceSelfInfo, DispatcherErrorCode } from '@objectstack/spec/api';
 import { apiErrorResponse } from './error-envelope.js';
@@ -876,7 +876,7 @@ export class HttpDispatcher {
         // that request handlers (handleI18n, handleAuth, …) use.
         const [
             authSvc, searchSvc, realtimeSvc, filesSvc,
-            analyticsSvc, workflowSvc, aiSvc, notificationSvc, i18nSvc,
+            analyticsSvc, aiSvc, notificationSvc, i18nSvc,
             protocolSvc, automationSvc, cacheSvc, queueSvc, jobSvc, mcpSvc,
             metadataSvc, dataSvc,
         ] = await Promise.all([
@@ -885,7 +885,6 @@ export class HttpDispatcher {
             this.resolveService(CoreServiceName.enum.realtime),
             this.resolveService(CoreServiceName.enum['file-storage']),
             this.resolveService(CoreServiceName.enum.analytics),
-            this.resolveService(CoreServiceName.enum.workflow),
             this.resolveService(CoreServiceName.enum.ai),
             this.resolveService(CoreServiceName.enum.notification),
             this.resolveService(CoreServiceName.enum.i18n),
@@ -943,7 +942,6 @@ export class HttpDispatcher {
         const automationRegistered   = !!automationSvc;
         const hasFiles        = isServiceServeable(filesSvc);
         const hasAnalytics    = isServiceServeable(analyticsSvc);
-        const hasWorkflow     = !!workflowSvc;
         const hasAi           = isServiceServeable(aiSvc);
         const hasNotification = isServiceServeable(notificationSvc);
         const hasI18n         = isServiceServeable(i18nSvc);
@@ -977,7 +975,9 @@ export class HttpDispatcher {
                 storage:       hasFiles ? `${prefix}/storage` : undefined,
                 analytics:     hasAnalytics ? `${prefix}/analytics` : undefined,
                 automation:    hasAutomation ? `${prefix}/automation` : undefined,
-                workflow:      hasWorkflow ? `${prefix}/workflow` : undefined,
+                // `workflow` removed (#4451, v17): the slot retired — nothing
+                // ever registered it and this dispatcher never had a /workflow
+                // branch, so the advertisement could never come true.
                 // Never advertised (ADR-0076 D12, #2462): service-realtime is an
                 // in-process pub/sub bus — the dispatcher has no /realtime branch
                 // and no plugin mounts one, so an advertised route would 404.
@@ -1037,6 +1037,23 @@ export class HttpDispatcher {
             enabled: false, status: 'unavailable' as const, handlerReady: false,
             message: serviceUnavailableMessage(name),
         });
+        // [#4318] Kernel-internal slots (cache/queue/job): their providers
+        // mount no HTTP routes, so no route is advertised and `handlerReady`
+        // is `false` as a fact, not a proxy — `svcAvailable` would claim a
+        // handler that does not exist. An unmarked occupant stays `available`:
+        // the slot's contract is in-process, so "no HTTP surface" is not
+        // reduced capability (contrast `realtime` below, whose advertised
+        // capability IS the missing surface). Message written once in
+        // `@objectstack/spec/system` so both discovery builders agree.
+        const svcInProcess = (name: string, svc: unknown) => {
+            const self = svc ? readServiceSelfInfo(svc) : undefined;
+            return {
+                enabled: true,
+                status: self?.status ?? ('available' as const),
+                handlerReady: false,
+                message: self?.message ?? inProcessServiceMessage(name),
+            };
+        };
 
         // Self-description of the registered realtime service, if any (D12).
         const realtimeSelf = realtimeSvc ? readServiceSelfInfo(realtimeSvc) : undefined;
@@ -1073,7 +1090,6 @@ export class HttpDispatcher {
                 files: hasFiles,
                 analytics: hasAnalytics,
                 ai: hasAi,
-                workflow: hasWorkflow,
                 notifications: hasNotification,
                 i18n: hasI18n,
             },
@@ -1148,9 +1164,9 @@ export class HttpDispatcher {
                 // "install a plugin" would say strictly less.
                 automation:     automationRegistered ? svcAvailable(routes.automation, undefined, automationSvc) : svcUnavailable('automation'),
                 analytics:      analyticsRegistered ? svcAvailable(routes.analytics, undefined, analyticsSvc) : svcUnavailable('analytics'),
-                cache:          hasCache ? svcAvailable(undefined, undefined, cacheSvc) : svcUnavailable('cache'),
-                queue:          hasQueue ? svcAvailable(undefined, undefined, queueSvc) : svcUnavailable('queue'),
-                job:            hasJob ? svcAvailable(undefined, undefined, jobSvc) : svcUnavailable('job'),
+                cache:          hasCache ? svcInProcess('cache', cacheSvc) : svcUnavailable('cache'),
+                queue:          hasQueue ? svcInProcess('queue', queueSvc) : svcUnavailable('queue'),
+                job:            hasJob ? svcInProcess('job', jobSvc) : svcUnavailable('job'),
                 // [#4093] Reported from what serves it, like the route above:
                 // `/ui` is a dispatcher domain answered by the `protocol`
                 // service, so its self-description (none today — MetadataPlugin
@@ -1164,7 +1180,8 @@ export class HttpDispatcher {
                                         enabled: false, status: 'unavailable' as const, handlerReady: false,
                                         message: serviceUnavailableMessage('ui'),
                                     },
-                workflow:       hasWorkflow ? svcAvailable(routes.workflow, undefined, workflowSvc) : svcUnavailable('workflow'),
+                // `workflow` entry removed (#4451, v17) with the slot itself —
+                // it could only ever report `unavailable`.
                 // Honest entry (ADR-0076 D12, #2462): the registered realtime
                 // service is an in-process event bus with NO mounted HTTP/WS
                 // surface — report it degraded with handlerReady:false (or as

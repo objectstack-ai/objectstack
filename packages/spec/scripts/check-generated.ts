@@ -61,7 +61,10 @@ const GATED: ReadonlyArray<{ check: string; gen: string; artifact: string; reads
 const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   { check: 'check:liveness', why: 'audits whether declared spec properties have a reader — no artifact' },
   { check: 'check:empty-state', why: 'audits empty-state coverage — no artifact' },
-  { check: 'check:react-conformance', why: 'audits react blocks against their contract — no artifact' },
+  {
+    check: 'check:react-declaration-parity',
+    why: 'compares the spec schema props against the registry-declared inputs — two declarations, no artifact (and no renderer: #4472)',
+  },
   { check: 'check:skill-examples', why: 'validates skill examples parse — no artifact' },
   // Landed in #4177 while this ledger landed in #4183 — neither PR could see the
   // other, so `main` carried an unclassified script and this reconciliation was
@@ -84,6 +87,15 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   {
     check: 'check:exported-any',
     why: 'audits the built .d.ts for exported types/schemas that resolve to `any` — no artifact (needs a fresh `pnpm build`)',
+  },
+  // Reads the built dist like exported-any. Its baseline
+  // (dual-source-exports.baseline.json) is a shrink-only ledger edited by hand
+  // under review — deliberately NOT a generated artifact, because a `gen:` that
+  // rewrites it would admit a new dual-source via "run the fix command" instead
+  // of via a maintainer decision (#4446).
+  {
+    check: 'check:dual-source-exports',
+    why: 'audits the built .d.ts for same-name exports resolving to DIFFERENT declarations across entry points — baseline is hand-ratcheted, not generated (needs a fresh `pnpm build`)',
   },
 ];
 

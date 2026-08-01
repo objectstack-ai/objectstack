@@ -110,13 +110,47 @@ export type SystemUserId = typeof SystemUserId[keyof typeof SystemUserId];
 /**
  * System Field Names — Protocol Layer Constants
  *
- * These constants define the canonical, protocol-level names for common system fields.
- * All API calls, SDK references, and permission checks MUST use these constants
- * instead of hardcoded strings or physical column names.
+ * The canonical, protocol-level SPELLING of each column the platform manages
+ * rather than the author. All API calls, SDK references, and permission checks
+ * MUST use these constants instead of hardcoded strings or physical column
+ * names.
  *
  * The physical storage column always equals the field key (the driver does not
  * support per-field column overrides; external objects map columns via
  * `external.columnMap`, ADR-0062 D7 / ADR-0015).
+ *
+ * ## ⚠️ This is a NAME registry, not the injected-column SET
+ *
+ * WHICH of these columns exists on a given object is decided PER OBJECT by
+ * `applySystemFields()` (`@objectstack/objectql` registry), from that object's
+ * own declarations: `ownership: 'org' | 'none'` withholds `owner_id`,
+ * `tenancy.enabled: false` withholds `organization_id`, and
+ * `systemFields: false` / `managedBy: 'better-auth'` disable the pass
+ * entirely. So the SAME NAME can be a system column on one object and an
+ * ordinary authored business field on another — a business field named
+ * `owner`, say (cloud#979, an observed failure: it was treated as a system
+ * column, so seeded rows left it blank).
+ *
+ * A consumer asking **"is this field system-managed ON THIS OBJECT?"** must
+ * therefore NOT test membership in this table. Branch on the per-field
+ * `Field.system` flag (`@objectstack/spec/data`) — `applySystemFields` stamps
+ * it on every column it injects, and no authored field carries it. That flag
+ * is the per-object answer; this table only answers "what is the canonical
+ * spelling of the column that plays role X".
+ *
+ * Related declarations, each with a different job — do not conflate them:
+ * - `FIELD_GROUP_SYSTEM_FIELDS` (`@objectstack/spec/data`) — names excluded
+ *   from a default form/detail layout.
+ * - `PUBLIC_FORM_SERVER_MANAGED_FIELDS` (`@objectstack/spec/security`) — names
+ *   never client-suppliable on the anonymous surface, pinned by objectql's
+ *   `system-managed-fields-conformance.test.ts` to be exactly (what open-core
+ *   injects ∪ documented reserved names).
+ *
+ * Every entry below records whether open-core actually INJECTS it, because
+ * that is the distinction hand-copied lists keep getting wrong
+ * (framework#4330, cloud#982 — where three copies had drifted onto
+ * `tenant_id`/`org_id`/`space`, two of which no injection site has ever
+ * produced).
  *
  * @example
  * ```ts
@@ -129,19 +163,44 @@ export type SystemUserId = typeof SystemUserId[keyof typeof SystemUserId];
  * ```
  */
 export const SystemFieldName = {
-  /** Primary key */
+  /** Primary key. Provisioned by the driver, not by `applySystemFields`. */
   ID: 'id',
-  /** Record creation timestamp */
+  /** Record creation timestamp. INJECTED (audit provenance). */
   CREATED_AT: 'created_at',
-  /** Record last-updated timestamp */
+  /** User who created the record (lookup to user). INJECTED (audit provenance). */
+  CREATED_BY: 'created_by',
+  /** Record last-updated timestamp. INJECTED (audit provenance). */
   UPDATED_AT: 'updated_at',
-  /** Record owner (lookup to user) */
+  /** User who last modified the record (lookup to user). INJECTED (audit provenance). */
+  UPDATED_BY: 'updated_by',
+  /** Record owner (lookup to user). INJECTED unless `ownership: 'org' | 'none'`. */
   OWNER_ID: 'owner_id',
-  /** Tenant isolation key */
+  /**
+   * THE tenant isolation key — a lookup to `sys_organization`. INJECTED unless
+   * tenancy is disabled for the object; org-scoping populates it on insert and
+   * it stays NULL on single-tenant stacks.
+   */
+  ORGANIZATION_ID: 'organization_id',
+  /**
+   * Legacy / enterprise tenant alias. **NOT injected by open-core** — nothing
+   * provisions this column. It is stamped (from the session's *organization*
+   * id, `objectql` plugin) only on an object that DECLARES it, and it stays on
+   * the public-form denylist as defense-in-depth. Use
+   * {@link SystemFieldName.ORGANIZATION_ID} for tenant scoping; this constant
+   * exists so the legacy spelling still has one canonical reference.
+   */
   TENANT_ID: 'tenant_id',
-  /** Foreign key to user on session / account objects */
+  /**
+   * Foreign key to user on session / account objects. **Authored**, not
+   * injected — an ordinary business object may legitimately declare its own
+   * `user_id` lookup, so this name must never be used to classify a column as
+   * system-managed.
+   */
   USER_ID: 'user_id',
-  /** Soft-delete timestamp */
+  /**
+   * Soft-delete timestamp. **NOT injected by `applySystemFields`** — written by
+   * the lifecycle / trash layer at runtime.
+   */
   DELETED_AT: 'deleted_at',
 } as const;
 

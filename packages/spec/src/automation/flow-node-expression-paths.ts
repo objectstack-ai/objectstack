@@ -25,10 +25,33 @@
  *
  * This ledger is the declared source both validators now read, mirroring the
  * dispatcher↔client route ledger of #3569: one list, two consumers, plus a
- * reconciliation test that fails when a descriptor's `configSchema` declares an
- * `xExpression` property this ledger does not carry
+ * reconciliation test that fails when a declared `xExpression` property this
+ * ledger does not carry appears anywhere
  * (`config-expression-ledger.test.ts` in `service-automation`). A new expression
  * key can no longer be added to a designer form and silently go unvalidated.
+ *
+ * ## The two channels a slot can be declared through
+ *
+ * A node type declares its config contract one of two ways, and the ratchet
+ * reads both (#4439):
+ *
+ *  - **descriptor `configSchema`** — the JSON-Schema literal an executor
+ *    publishes. Its `xExpression` properties are enumerable from the live
+ *    registry.
+ *  - **`schemaless-node-config.zod.ts`** — `script` / `subflow` / `decision`
+ *    publish NO descriptor `configSchema` on purpose (a published partial
+ *    schema would drop the editors their hand-written forms need — the #4210
+ *    incident), so their contract is a Zod schema in that module and the marker
+ *    rides `.meta({ xExpression })` through `z.toJSONSchema`, the same channel
+ *    `loop.collection` already used.
+ *
+ * Until #4439 only the first channel was read, and because the ratchet also
+ * fails on a ledger entry no channel declares, a schemaless node's expression
+ * slot could not be entered here even deliberately. `decision`'s
+ * `conditions[].expression` sat in exactly that hole: declared bare CEL by its
+ * own schema and its own comments, walked by neither validator, so a `{…}`
+ * predicate passed `objectstack validate` and surfaced only when the flow ran
+ * (#4414 made that run-time failure loud; this makes it a build failure).
  *
  * ## Why the dialect must be recorded, not assumed
  *
@@ -97,7 +120,18 @@ export interface FlowNodeExpressionPath {
  *
  * Not listed here (deliberately): `config.condition` and `edge.condition`. Those
  * are *structural* predicate surfaces on every node and edge rather than
- * descriptor-declared config properties, and both validators already walk them.
+ * declared config properties, and both validators already walk them.
+ *
+ * Also deliberately absent: config values that merely INTERPOLATE `{token}`
+ * templates — `script.inputs` / `script.variables` / `subflow.input`,
+ * `notify.body`, `create_record.fields.*` and so on. Those are text-with-holes,
+ * the shape essentially every node config string has, already covered
+ * generically (`validate-flow-template-paths`, the CLI flow linter's
+ * `collectTemplateStrings`). A `flow-template` ledger entry means something
+ * narrower: a slot whose value is a *reference that must resolve to a value*,
+ * like `loop.collection`. The #4439 sweep of the schemaless class found exactly
+ * one genuinely declared expression slot — `decision.conditions[].expression` —
+ * and `script.template` is a template **id**, not a template body.
  */
 export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
   {
@@ -105,6 +139,15 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     path: 'fields[].visibleWhen',
     role: 'predicate',
     label: 'screen field visibleWhen',
+  },
+  {
+    // Declared through the schemaless channel — `decision` publishes no
+    // descriptor `configSchema`, so the marker lives on
+    // `DecisionConditionSchema.expression`'s `.meta()` (#4439).
+    nodeType: 'decision',
+    path: 'conditions[].expression',
+    role: 'predicate',
+    label: 'decision branch expression',
   },
   {
     nodeType: 'loop',

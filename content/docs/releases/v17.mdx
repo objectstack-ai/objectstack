@@ -412,20 +412,28 @@ schema to the two highest-risk authorable surfaces, per the triage in
 - **Datasources** — `DatasourceSchema` with its `pool` / `healthCheck` / `ssl` /
   `retryPolicy` blocks, the ADR-0015 `external` federation settings and their
   `validation` policy, `DatasourceCapabilities`, and `DriverDefinitionSchema`.
-  `config` and `readReplicas` stay **open** records: their shape is per-driver.
-  Nothing validates *inside* them — an earlier version of this note said the
-  driver's own `configSchema` did, which was wrong; the per-driver schemas exist
-  (`PostgresConfigSchema` and siblings) but nothing parses `config` against
-  them, tracked as #4410. So a misspelling one level *down* is still silent
-  today. That openness is why the
+  `config` stays an **open** record: its shape is per-driver. What it no longer
+  is, is unvalidated — #4410 wired the per-driver schemas
+  (`PostgresConfigSchema` and siblings) into `DatasourceSchema`'s refinement, so
+  a misspelling one level *down* is now rejected with the canonical key named.
+  An earlier version of this note said the driver's own `configSchema` did that,
+  which was wrong for two releases: the field existed, nothing read it. That
+  openness is why the
   top level had to close — a connection key written one level too high (`host`
   next to `driver` instead of inside `config`) was stripped, and the datasource
   then connected on driver defaults rather than failing. Those keys now
   prescribe the move into `config`; a top-level `password` is instead pointed at
   `external.credentialsRef`, because relocating an inlined secret is not the fix.
-  A dropped key in `capabilities` was quieter still: an unregistered capability
-  reads as `false`, so the engine stopped pushing that work down to the driver
-  and recomputed it in memory.
+  A dropped key in `capabilities` was quieter still — though not for the reason
+  this note used to give. It claimed an unregistered capability "reads as
+  `false`, so the engine stopped pushing that work down to the driver and
+  recomputed it in memory", which was never true: the #4487 liveness audit
+  found the whole `capabilities` block has no reader at all. The engine gates
+  pushdown on the runtime driver's own `supports.*` object, a different
+  mechanism with a non-overlapping vocabulary. Every key in the block is `dead`
+  in `liveness/datasource.json`, and `capabilities.readOnly` is the one to know
+  about: it reads as a safety switch and gates nothing — `external.allowWrites:
+  false` is the enforced write gate.
 
 One clarification, since these flips are easy to over-read: making a schema
 strict does **not** change its published JSON Schema. `build-schemas.ts`
@@ -930,6 +938,50 @@ honoured — `updateManyData`, `deleteManyData` and `batchData` persisted
 regardless, so a caller sending it to *preview* a mutation got it executed. It
 is HTTP-only; stop sending it.
 
+### `findOne` must say which record it wants (#4419)
+
+`findOne` reads a single row. That makes its predicate the only thing standing
+between the caller and *an arbitrary record* — and when the predicate is missing
+the result is not `null`, it is the object's **first row**: a real,
+plausible-looking record with nothing to do with the request, which the
+`if (!row)` check every call site already has cannot catch, and which then
+propagates into whatever is computed next. Downstream of one such call, line
+items defaulted their price from the first product in the catalog, and
+"is this deal already closed?" was answered against an unrelated record while
+the write that followed correctly targeted the intended id.
+
+So a query that selects nothing in particular is now **refused** rather than
+answered. Say which record you want in one of three ways:
+
+| Instead of | Write | Meaning |
+|---|---|---|
+| `findOne(o)` / `findOne(o, {})` / `findOne(o, { where: {} })` | `findOne(o, { where: … })` | the record matching this predicate |
+| | `findOne(o, { search: 'Acme' })` | the record this search finds |
+| | `findOne(o, { orderBy: [{ field: 'created_at', order: 'desc' }] })` | the FIRST record in this order — the newest |
+| | `find(o, { limit: 1 })` | any row will genuinely do — and the call site says so |
+
+The error names all four. `find` and `count` are unchanged: returning or counting
+every row is an honest answer, and only `findOne`'s implicit "just one of them"
+turns a missing predicate into a confidently wrong record.
+
+Two silent drops that produced the same wrong record are fixed with it:
+
+- **`findOne({ search })` now applies the search.** The ADR-0061 `search` →
+  cross-field `$contains` expansion ran in `find` only, while both methods are
+  checked against the same legal-key set — so `search` passed the gate, reached a
+  driver that does not read it, and the read came back unpredicated. The
+  expansion is now one function both call, and a drift pin requires every option
+  `findOne` declares to have an observable effect.
+- **`MongoDBDriver.findOne` now applies `orderBy`, `fields` and `offset`.** It
+  translated `where` and dropped the rest, so "the newest record" returned
+  whichever document the scan reached first. No ordering is imposed when the
+  caller supplies none (#4363) — that part is unchanged, on both drivers.
+
+Together with the `filter` → `where` fold on every entry point and the
+unknown-key rejection (both already in this release), a read parameter the engine
+does not execute now fails at the call site instead of quietly changing the
+answer.
+
 ### Dead spec clusters removed
 
 **App shell (2026-06 liveness audit, #4001 app step).** `App.version`,
@@ -970,6 +1022,11 @@ import or the authored key.
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
 | `ChartInteraction.zoom` / `.clickAction` | never implemented (#3752) |
+| The `workflow` service slot — `CoreServiceName 'workflow'`, `IWorkflowService`, `WorkflowProtocol`, the `Get/WorkflowState/Config/Transition` schema cluster, discovery `routes.workflow` / `services.workflow` / `features.workflow`, the `RestApiRouteCategory 'workflow'` member and the stray `graphql` provider entry | declared end to end and implemented nowhere: nothing ever registered or resolved the slot (ADR-0115 Evidence 5), no method of `WorkflowProtocol` was ever implemented, no host ever mounted `/api/v1/workflow`. State machines are `state_machine` validation rules; approvals are flow nodes (ADR-0019); record-triggered automation is hooks + `record_change` flows (#4451) |
+| `datasource.readReplicas` | replica connections nothing ever opened — no driver reads the key and no query path splits reads from writes, so every statement went to the primary. #4410 had just taught the schema to validate each entry against the declared driver's contract, which made a dead slot look rigorously alive (#4468) |
+| The per-provider connector "template" cluster (`@objectstack/spec/integration` — `DatabaseConnectorSchema`, `FileStorageConnectorSchema`, `GitHubConnectorSchema`, `MessageQueueConnectorSchema`, `SaasConnectorSchema`, `VercelConnectorSchema`, their ~100 sub-schema/type/example exports, and the six generated reference pages) | the losing side of a decided architecture fight, left standing: ADR-0023 rejected hand-modelling each external system's shape inside the spec, and the live ADR-0097 protocol gets provider shapes from the provider itself (connector-openapi / connector-mcp materialize at boot). Zero consumers — `engine.registerConnector()` validates against `ConnectorSchema` from `connector.zod.ts` alone, and nothing referenced the six files, not even their own module's live half. `DatabaseConnectorSchema` also declared read-replica routing a *second* time (`readReplicaConfig`, see the row above), down to a `weight` field for a load balancer that does not exist (#4480) |
+| The `trigger-registry.zod.ts` Connector cluster (`@objectstack/spec/automation` — `ConnectorSchema`, `ConnectorInstanceSchema`, `ConnectorOperationSchema`, `ConnectorTriggerSchema`, the `Authentication*`/`OAuth2Config`/`Operation*` vocabulary, the `Connector.apiKey()`/`.oauth2()` factory helpers, and the generated reference page) | the *third* declaration of the same business need, and the file never contained what its name promises — no trigger registry, 630 lines of connector vocabulary with zero consumers. The automation engine registers connectors against `integration/connector.zod.ts` (ADR-0097) and the stack `connectors:` collection parses `DeclarativeConnectorEntrySchema`; nothing registered, validated or executed against this copy. Its header even carried a "When to use" comparison steering lightweight cases here — a signpost to a dead end, removed with it (#4499) |
+| The `kernel` metadata-loader envelope family — `MetadataFormat`, `MetadataStats`, `MetadataLoadOptions`, `MetadataSaveOptions`, `MetadataExportOptions`, `MetadataImportOptions`, `MetadataLoadResult`, `MetadataSaveResult`, `MetadataWatchEvent`, `MetadataCollectionInfo`, `MetadataLoaderContract` (`@objectstack/spec/kernel`) | eleven names that each existed **twice**, with a different shape, on `./kernel` and `./system` — so which type you got depended on your import path. Every consumer imported the `./system` copy; the `./kernel` copies had zero consumers. Import them from `@objectstack/spec/system` (#4411, ADR-0049). `MetadataManagerConfig` / `MetadataFallbackStrategy` are unaffected and still ship from both entries |
 
 The Console side follows: `@object-ui/types` drops its
 `ObjectStack`/`ObjectOS`/`ObjectQL`/`ObjectUI` Capabilities re-exports, which
@@ -1672,7 +1729,12 @@ platform capabilities an administrator gains, then the Console delta.
   source at every read seam (including `registerFlow` rehydration) — a stored
   action with the removed `execute` dispatches via `target` again; boot
   hydration validates each row post-conversion and diagnoses invalid ones
-  with `[metadata_spec_invalid]` instead of shrugging.
+  with `[metadata_spec_invalid]` instead of shrugging. **The rows themselves
+  can now be brought forward too (#4327):** `os migrate meta --stored`
+  replays the chain over `sys_metadata` and rewrites what still carries a
+  pre-protocol shape, through the normal write path. Optional — the read path
+  is the guarantee either way — but it is what makes the conversion pass a
+  no-op on your data instead of a permanent shim.
 - **Studio's metadata forms tell the truth (#3786).** Four of seventeen forms
   had drifted from their schemas, so controls saved nothing: the Object →
   Capabilities toggles bound a key the schema does not declare (all seven
@@ -1977,9 +2039,21 @@ covers are folded into the list below rather than left to the changelog.)
   fix what it reports before `--apply`. It converts nothing — the values it
   names are application data — and a scan that was truncated or could not read
   an object fails the gate even at zero violations.
+- **Stored metadata (optional):** run `os migrate meta --stored` to see which
+  `sys_metadata` rows still carry a pre-17 shape, and `--apply` to rewrite
+  them. Unlike the two above this opens no gate and nothing depends on it —
+  those rows already read canonically, forever. It stops them re-converting on
+  every load, keeps diffs and exports clean going forward, and gives you an
+  exit code to assert on: nothing left to do exits `0`.
 - **Datasources:** verify every declared datasource connects in every
   environment — a bound datasource that cannot connect now fails the boot
-  instead of failing every later query.
+  instead of failing every later query. Delete `readReplicas` (`os migrate meta`
+  does it). Nothing ever opened those connections, so read throughput is
+  unchanged by removing them; if you need replica reads, front them behind one
+  endpoint (pgpool, ProxySQL, an RDS reader endpoint) and point `config` there.
+  Also re-check what you wrote under `config`: it is parsed against the driver's
+  contract now, so a key that used to be ignored — and left the datasource on
+  driver defaults — is rejected by name.
 - **Sharing rules:** rewrite `sharedWith.type: 'group'` → `'team'`; drop `guest`
   and owner-type rules; expect `accessLevel: 'full'` to convert to `'edit'`.
   **A rule must state its criteria** — authoring one without is rejected, and a
@@ -2025,6 +2099,13 @@ covers are folded into the list below rather than left to the changelog.)
   device/preference helpers, `client.ai.{nlq,suggest,insights}` and
   `projects.listTemplates()`; repoint marketplace publish to
   `POST /api/v1/packages/publish`; drop `os environments create --template`.
+  Imports of `IWorkflowService`, `WorkflowProtocol` or the
+  `Get/WorkflowState/Config/Transition` types no longer resolve — the
+  `workflow` slot retired with them (#4451); use `state_machine` validation
+  rules, approval flow nodes and `record_change` flows instead. Discovery
+  responses no longer carry `services.workflow` / `routes.workflow` /
+  `features.workflow` — a reader keying on them saw only `unavailable`/`false`
+  before, so delete the read.
 - **Console hosts:** the same removals land in objectui — drop the
   `useClientNotifications` device/preference delegates (`@object-ui/react`) and
   replace the retired `@object-ui/types` Capabilities re-exports with imports
@@ -2032,7 +2113,16 @@ covers are folded into the list below rather than left to the changelog.)
   `maplibre-gl` 5→6 / `chalk` 5→6 major bumps.
 - **Type importers:** replace `ObjectStackProtocol` / `ObjectStackProtocolSchema`
   with the narrowest per-domain slices; drop GraphQL types and any of the removed
-  dead spec clusters.
+  dead spec clusters. If you imported `MetadataFormat`, `MetadataStats`,
+  `MetadataLoadOptions`, `MetadataSaveOptions`, `MetadataExportOptions`,
+  `MetadataImportOptions`, `MetadataLoadResult`, `MetadataSaveResult`,
+  `MetadataWatchEvent`, `MetadataCollectionInfo` or `MetadataLoaderContract`
+  from `@objectstack/spec/kernel`, change the path to `@objectstack/spec/system`
+  — same names, and that copy is the one the runtime has always emitted. It is
+  the *looser* of the two, so a reader may need new narrowing: notably
+  `MetadataWatchEvent.type` also carries the raw watcher values
+  `add`/`change`/`unlink`, and `metadataType`/`name`/`timestamp` are optional
+  there. Nothing to migrate at runtime — the values were always these.
 - **Multi-org:** the `group` posture requires the enterprise runtime — deployments
   relying on it self-activating must install `@objectstack/organizations` or move
   to `isolated`.

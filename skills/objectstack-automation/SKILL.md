@@ -96,7 +96,7 @@ plugins register more via `registerNodeExecutor`, e.g. `approval` below):
 | `http` | Call an external HTTP API — canonical since protocol 11.0; `http_request` survives only as a deprecation-window alias |
 | `notify` | Send a notification through the messaging service (inbox channel by default) |
 | `connector_action` | Invoke a pre-built integration connector |
-| `script` | Dispatch to a **registered** callable — `config.actionType` (`email`/`slack`) or a registered `config.function`. Inline `config.script` JS is **not** executed (see pitfall 9) |
+| `script` | Call a **registered** function named by `config.function` (see pitfall 9) |
 | `screen` | Display a UI form to the user (screen flows only) |
 
 #### Human Decision
@@ -854,12 +854,20 @@ them right the first time:
    fires once, idempotent, no guard field. For "days remaining" in the message,
    `daysBetween(today(), record.end_date)`.
 
-9. **`script` nodes must name a callable.** Set `config.actionType` to a built-in
-   side-effect (`email` / `slack`) **or** `config.function` to a function
-   registered via `defineStack({ functions: { my_fn: (ctx) => … } })`. An empty
-   `script` node — or one pointing at an unregistered function — fails loudly.
-   Inline `config.script` JS is **not executed** by the built-in runtime (no
-   server-side sandbox) — move logic into a registered `function`.
+9. **`script` nodes call a registered function — that is all they do.** Set
+   `config.function` to a function registered via
+   `defineStack({ functions: { my_fn: (ctx) => … } })`. It is **required**: an
+   empty `script` node refuses at execute, and one pointing at an unregistered
+   function fails loudly.
+
+   The other dispatch forms were retired in spec 17 (#4343) because none of them
+   ran: `config.actionType: 'email' | 'slack'` were logger-backed stubs that
+   delivered nothing (with `config.template` / `.recipients` / `.variables`
+   feeding a message no channel sent), and inline `config.script` JS was never
+   executed (no server-side sandbox). Use a **`notify`** node for real
+   notification delivery, a **`connector_action`** (Slack connector) or `http`
+   webhook for Slack, and a registered function for logic. Stored flows convert
+   with `os migrate meta --from 16`.
 
    **A flow `function` is a PURE compute step — it does NOT read/write the
    database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`

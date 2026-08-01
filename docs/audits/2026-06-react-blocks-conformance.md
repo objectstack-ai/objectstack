@@ -1,19 +1,43 @@
 # Spec ↔ frontend conformance — react blocks (2026-06)
 
+> ## ⚠️ Correction (2026-08-01, #4472)
+>
+> **This audit did not answer the question it was asked.** The question was
+> whether the components *implement* the spec's props. What the check measures —
+> then and now — is whether two **declarations** agree: the spec zod schema's
+> props, and the `inputs` the objectui *registry config* declares. Both sides are
+> declarations (`manifestFromConfigs` copies `config.inputs` verbatim); no
+> renderer is involved anywhere in it.
+>
+> The assumption below that carried the mistake is stated in "How to read this":
+> *"The component reads its full config from the spec schema at render."* Nothing
+> here established that, and for the `record:*` family it was false — #4413 found
+> four blocks publishing `objectName`/`recordId` that no renderer read, which
+> this check reported as zero divergence for the whole life of the defect.
+>
+> The check is now `check:react-declaration-parity` and says so in its own output.
+> The findings table below is still accurate **as a declaration diff** — read
+> "frontend-only" as "the registry declared an input the spec did not", not as
+> "the component accepts it". Evidence about the render path comes from
+> objectui's `public-block-binding-reach.test.tsx`; see the ADR-0082 addendum.
+
 **Question** (raised in review): we can't guarantee the frontend (objectui)
 components actually implement the props the backend spec protocol declares —
 should we confirm it?
 
-**Answer**: confirmed — they diverge. Below is the first run of the conformance
-check (`packages/spec/scripts/check-react-blocks-conformance.ts`), comparing the
-spec schemas referenced by `REACT_BLOCKS` against the live objectui
-registry-inputs manifest (`sdui.manifest.json`).
+**Answer**: confirmed — they diverge. Below is the first run of the check
+(`packages/spec/scripts/check-react-blocks-declaration-parity.ts`, then named
+`check-react-blocks-conformance.ts`), comparing the spec schemas referenced by
+`REACT_BLOCKS` against the live objectui registry-inputs manifest
+(`sdui.manifest.json`).
 
 ## How to read this
 
 The registry `inputs` are the **designer palette** — a curated subset the visual
 editor exposes — NOT the component's full prop surface. The component reads its
-full config from the spec schema at render. So:
+full config from the spec schema at render. *(⚠️ That last sentence is the
+assumption #4472 retracted — see the correction above. It was an expectation, not
+something this audit measured.)* So:
 
 - **frontend-only** props (component declares an input the spec does not) are the
   reliable, actionable divergence: the spec is missing them or they are an
@@ -55,7 +79,7 @@ full config from the spec schema at render. So:
 
 ```
 # produce a manifest from the live registry (objectui), then:
-MANIFEST=/path/to/sdui.manifest.json pnpm --filter @objectstack/spec check:react-conformance
+MANIFEST=/path/to/sdui.manifest.json pnpm --filter @objectstack/spec check:react-declaration-parity
 # add --strict to fail on divergence (once triaged).
 ```
 
@@ -66,19 +90,21 @@ console-build time. So the conformance check is wired in as a **baseline ratchet
 at the one place the manifest is produced for free: `scripts/build-console.sh`,
 right after it dumps `sdui.manifest.json` from the freshly-built console registry.
 
-- The accepted state lives in `packages/spec/react-conformance.baseline.json`
-  (per block: the frontend-only prop set + whether the block is missing).
+- The accepted state lives in `packages/spec/react-declaration-parity.baseline.json`
+  (per block: the registry-only input set + whether the block is missing).
 - `--baseline <path>` compares the current dump against it and reports **only
-  regressions**: a component exposing a NEW undocumented prop, or a
+  regressions**: a registry config declaring a NEW undocumented input, or a
   previously-present block vanishing. The soft `spec-only` signal is not gated.
-- In `build-console.sh` it runs **warn-only** (never fails the console build).
-  Use `--strict` to gate intentionally (exit 1 on regression).
+- It runs `--strict`, so a regression fails the run. *(It shipped warn-only —
+  the exit code swallowed behind a `⚠` — which #4472 corrected along with the
+  name: "divergence recorded" and "divergence stopped" were being read as the
+  same green build.)*
 
 ```
-# accept the current frontend state as the new baseline (after an intentional change):
+# accept the current registry state as the new baseline (after an intentional change):
 MANIFEST=/path/to/sdui.manifest.json \
-  pnpm --filter @objectstack/spec check:react-conformance \
-  --baseline react-conformance.baseline.json --update
+  pnpm --filter @objectstack/spec check:react-declaration-parity \
+  --baseline react-declaration-parity.baseline.json --update
 ```
 
 When the ratchet flags a new frontend-only prop, the fix is one of: declare it in

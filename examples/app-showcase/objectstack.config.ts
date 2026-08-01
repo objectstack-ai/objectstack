@@ -204,6 +204,15 @@ export default defineStack({
 
   // Logic
   flows: allFlows,
+  // Named callables a `script` flow node invokes (#1870). Since #4343 that is
+  // the ONLY thing a script node does, so this map is what makes one runnable.
+  // A flow function is PURE: it takes `inputs`, RETURNS a value, and a later
+  // declarative node uses or persists it — it does no data I/O of its own
+  // (#4396), which is why it needs no `effect` declaration here.
+  functions: {
+    summarizeCompletedTask: ({ input }: { input: Record<string, unknown> }) =>
+      `Completed: ${String(input.title ?? 'task')} (priority ${String(input.priority ?? 'normal')}).`,
+  },
   jobs: allJobs,
   emailTemplates: allEmails,
   // Declarative REST endpoints (object_operation + flow) — the metadata

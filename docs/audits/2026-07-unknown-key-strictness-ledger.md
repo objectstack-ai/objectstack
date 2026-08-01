@@ -27,11 +27,11 @@ must explicitly `.strip()` back, because `.extend()` inherits `.strict()`.
 
 ## Standard wiring
 
-`strictUnknownKeyError` in `shared/suggestions.zod.ts` (generalized from the
-#3746 hand-rolled map) is the one factory every strict authoring schema wires:
+`strictObject` in `shared/strict-object.ts` is the one call a strict authoring
+schema needs:
 
 ```ts
-z.object({ ... }, { error: strictUnknownKeyError({ surface, knownKeys, aliases, guidance, history }) }).strict()
+lazySchema(() => strictObject({ surface, history, aliases?, guidance? }, { ...shape }))
 ```
 
 - `aliases` — semantic near-misses edit distance cannot reach (`visibleWhen` →
@@ -40,8 +40,24 @@ z.object({ ... }, { error: strictUnknownKeyError({ surface, knownKeys, aliases, 
   rejection carries the upgrade — AGENTS.md Post-Task Checklist #3) and
   wrong-layer pointers (`apiOperations` is response-side; `objectName` belongs
   on the start node).
-- Key lists live beside the schema and are **drift-guarded by tests** (an
-  "accepts every declared key" probe), because the schema body is lazy.
+- **Both are optional.** A schema with neither still names the surface, echoes
+  the offending key, and suggests the closest declared one. Curation is an
+  upgrade, not a precondition — and treating it as a precondition is part of
+  why this ratchet moved as slowly as it did.
+
+**No key list, and no drift probe.** Earlier steps hand-transcribed a
+`const X_KEYS = [...] as const` beside each schema and pinned it with an
+"accepts every declared key" test, because the schema body is lazy. That was 34
+key arrays and 16 probe files with most of the surface still ahead — and it was
+never necessary: `knownKeys` feeds only the edit-distance fallback, and the
+shape object is right there at the call site. `strictObject` reads the keys from
+`shape`, so the two copies become one and the probe has nothing left to catch.
+`extraKeys` covers the one case the shape cannot see: a base `.extend()`ed
+elsewhere.
+
+`strictUnknownKeyError` stays exported for the schemas that cannot use the
+helper — notably `z.lazy()` discriminated unions, whose variants each need
+their own key set.
 
 Every ratchet step ships only with the empirical zero-breakage pass: full
 `@objectstack/spec` suite + `tsc`, downstream consumer suites, and
@@ -110,9 +126,77 @@ dropped at parse, and nothing failed.
    now catches it was directed, with the platform's authority, at a slot where
    the same mistake is silent again: `config: { hostname: … }` is stripped and
    the datasource connects on localhost — #4001's original bug verbatim, one
-   level down. Corrected to name the per-driver shape instead of promising a
-   gate; enforcement is #4410. **A wrong instruction is worse than none**, and
-   worst for an AI author, whose only signal is whether the parse complained.
+   level down. First corrected to name the per-driver shape instead of promising
+   a gate; **#4410 then built the gate**, so the prescription makes a validation
+   claim again and the claim is true. **A wrong instruction is worse than
+   none**, and worst for an AI author, whose only signal is whether the parse
+   complained.
+
+   Two things #4410 had to fix before the sentence was safe to write, both
+   instructive beyond this schema. The prescription has to name the key the
+   contract *lands on*, not the one the author typed — pointing a misplaced
+   `user` at `config: { user: … }` when postgres spells it `username` would
+   swap a one-step correction for a two-step one. And a gate over `config`
+   means every key inside it now claims to be honoured, which forced a per-key
+   audit against the code that reads them: `indexes` / `maxRecordsPerObject`
+   (memory) were removed as inert, while `datasource.pool`, `schemaMode`,
+   postgres `schema` / `applicationName` / `statementTimeout` and mongo
+   `password` / `authSource` / `options` were **wired**, having been declared
+   and dropped on the floor. Enforcing a contract and honouring it are the same
+   task from two directions.
+8. **Three more registered types could not represent their own ADR-0010
+   protection envelope** — `seed`, `doc` and `validation`, found by applying the
+   registered-type lens above. Exactly the gap that made `permission` return a
+   hard 422 on the ADR-0094 overlay path (entry 2) and that `position` carried
+   until step 2: `MetadataPlugin`'s artifact loader stamps `_packageId` /
+   `_provenance` on **every** registered type, and `getMetaItemLayered` →
+   `saveMetaItem` round-trips a body carrying them, so an undeclared envelope was
+   stripped on every parse. Declared on `seed` and `doc` as part of closing them;
+   `validation` still carries it (its union shape defers the conversion).
+
+   Worth noting how it kept recurring: this was the **fourth** occurrence of one
+   defect, found four times by four different routes, because nothing checked
+   the invariant directly. So it is checked now —
+   `kernel/metadata-type-schemas.test.ts` asserts it over the whole registry.
+
+   **It found two more on its first run.** `hook` and `datasource` had both gone
+   `.strict()` in the #4001 data step *without* declaring the envelope, so both
+   were in the worst class — rejecting their own loader's output, a live hard 422
+   on the ADR-0094 overlay path, sitting on `main`. Three prior hand-searches for
+   exactly this defect had walked past them. That is the argument for writing the
+   check in one line: **finding the same defect repeatedly by hand is evidence
+   the check is missing, not evidence the search worked.**
+
+   The check separates the two severities, because they are not the same bug:
+   *rejecting* the envelope is live breakage and is asserted unconditionally with
+   no exemption list; *not declaring* it silently loses protection metadata on
+   round-trip and is tracked with a debt list — and each entry there becomes a
+   rejection the day its schema is closed.
+9. **And then that check turned out to be hollow — one change after this file
+   recorded the same lesson about the gate above.** Its declaration half probed
+   each schema with one generic body and asked whether `_packageId` survived. A
+   type whose required fields that body did not satisfy failed for unrelated
+   reasons and the assertion returned early, so **24 of 25 registered types took
+   that early return**. Only `field` was ever really checked, and the suite
+   reported green.
+
+   Rewritten to walk the schema *structurally* — unwrapping `lazy` / `pipe` /
+   `optional` / `default`, expanding unions — which needs no valid instance and
+   therefore cannot skip. Two guards keep it honest: a type the walker cannot
+   resolve is a hard failure (the walker going quiet is precisely when the test
+   would otherwise stop covering something), and the debt list carries a reverse
+   pin that fails when an entry is fixed, so the list cannot outlive its debt.
+
+   It then found **8** undeclared envelopes rather than 1 — `action`, `book`,
+   `field`, `job`, `mapping`, `page`, `translation`, `validation`. `job` and
+   `book` were closed immediately; 6 remain.
+
+   Three occurrences now of one pattern, in three different instruments: the
+   ledger gate's non-recursive directory walk, the strip probe's early return,
+   and (from the other direction) `strictObject(` not matching the site count.
+   Each was a measuring tool reporting completeness it did not have. **The rule
+   this file keeps re-deriving: before trusting a green check, make it go red on
+   something you know is there.**
 
 This is the empirical argument for the ratchet: the inference "no metadata in
 the repo carries unknown keys" was **false three times over**, and only the
@@ -136,17 +220,18 @@ block) when `position` joined the ratchet.
 
 ## File-level triage — the five authorable directories
 
-Site counts are `z.object(` occurrences per file (2026-07-30, this branch).
+Site counts are object sites — `z.object(` or `strictObject(` — per file (2026-07-30, this branch).
 Classification is per the rule above; **(p)** marks a provisional call made
 from the file's exports/JSDoc rather than a full read — verify before
 tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 
-### `ui/` — 197 sites
+### `ui/` — 200 sites
 
 | File | Sites | Class | Note / next action |
 |---|---|---|---|
 | `action.zod.ts` | 9 | authorable | param schema strict (#3746); remaining blocks ride later steps |
-| `view.zod.ts` | 50 | authorable | partially strict (ADR-0089); long tail of sub-blocks |
+| `view.zod.ts` | 50 | authorable | partially strict (ADR-0089); long tail of sub-blocks. `bulkActionDefs` left this file in #4457 — see the row below |
+| `bulk-action.zod.ts` | 3 | authorable | **strict as of #4457** — `BulkActionDefSchema` (the def itself). It was `z.array(z.record(z.string(), z.any()))` inline in `view.zod.ts`: a selection-bar button with **no shape at all**, so `opeartion` / `excution: 'aggregate'` parsed and shipped as a button that ran the default behaviour. Its two other sites are `BulkActionParamSchema` and that param's `options` entry, both deliberately **open**: objectui's `BulkActionParam` declares a `[key: string]: unknown` catch-all for widget config (min/max/step/format), so `.passthrough()` is the honest mirror and strictness there would reject valid config — same call as `dashboard.zod.ts`'s widget `config`. The def also refuses the combinations the executor never reads (`patch` outside an update, `execution` outside a custom, `batchSize` on an aggregate) and a hand-written `actionDef`, which is renderer-attached |
 | `component.zod.ts` | 29 | authorable | **next candidate** — SDUI component defs; check React-prop open slots first (p) |
 | `theme.zod.ts` | 14 | authorable (p) | authored themes |
 | `app.zod.ts` | 18 | authorable | **strict as of #4001 PR B** — `AppSchema` + branding / area / context-selector / contribution, and the nav-item union converted to `z.discriminatedUnion('type', …)` (the union-error question, settled empirically: matched-branch-only errors, exact recursive paths, `toJSONSchema` clean). Per-target `params` stay open. PR A (#4142) tombstoned the seven audit-dead keys first |
@@ -158,7 +243,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `notification.zod.ts` / `offline.zod.ts` / `report.zod.ts` | 3 ea | authorable (p) | |
 | `sharing.zod.ts` | 2 | authorable (p) | public-sharing config |
 
-### `data/` — 158 sites
+### `data/` — 160 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
@@ -169,8 +254,9 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `field.zod.ts` | 11 | authorable | partially strict |
 | `filter.zod.ts` / `query.zod.ts` | 11+5 | open | query dialect — user data flows through; validated semantically elsewhere. `query.zod.ts` dropped one site in #4196: `FieldNodeSchema`'s nested-select object form was declared-but-inert and narrowed to `z.string()`, so the union's second member is gone. Four more left in #4286 with the `joins`/`windowFunctions` removals: `JoinNodeBaseSchema`, `WindowFunctionNodeSchema`, and `WindowSpecSchema`'s two blocks (outer + `frame`) were deleted with their clusters. Class unchanged |
 | `driver-nosql.zod.ts` / `driver.zod.ts` / `driver-sql.zod.ts` | 10+9+2 | wire | driver capability contracts |
-| `datasource.zod.ts` | 9 | authorable | **strict as of #4001 data step** — all 9: `DatasourceSchema` (+ `pool` / `healthCheck` / `ssl` / `retryPolicy`), `ExternalDatasourceSettingsSchema` (+ `validation`), `DatasourceCapabilities`, `DriverDefinitionSchema`. `config` + `readReplicas` stay `z.record` by construction (per-driver shapes — see the `driver/` row below). This row used to add "the driver's own `configSchema` validates them"; **it does not, and never did** — corrected, and the gap is #4410. Which is precisely why the top level had to close: a connection key written one level too high was stripped, and the datasource then connected on driver defaults instead of failing |
-| `driver/memory.zod.ts` / `driver/mongo.zod.ts` / `driver/postgres.zod.ts` | 6+1+2 | authorable | The per-driver shapes for the `config` slot — what an author actually writes under `datasource.config` (`host`, `port`, `filename`, pool sizes). **Undeclared here until the coverage walk went recursive** (see below): a subdirectory was invisible to the gate, so these nine sites sat outside the map while the map reported full coverage. Authorable by the rule, but they are **contract-only exports today** — nothing parses `datasource.config` against them and both `*DriverSpec.configSchema` literals are `{}` (#4410). Strictness here would therefore enforce nothing; this row is blocked on #4410 giving it a parse site, not on a verification pass |
+| `datasource.zod.ts` | 9 | authorable | **strict as of #4001 data step** — all 9: `DatasourceSchema` (+ `pool` / `healthCheck` / `ssl` / `retryPolicy`), `ExternalDatasourceSettingsSchema` (+ `validation`), `DatasourceCapabilities`, `DriverDefinitionSchema`. `config` stays `z.record` **at this level** by construction (per-driver shapes), but is no longer unchecked: **#4410** made `DatasourceSchema`'s refinement parse it against the contract for the declared driver (`driver/config-registry.zod.ts`), so the openness here is a shape this level cannot express rather than the absence of one. This row used to add "the driver's own `configSchema` validates them", which was false until #4410 landed the parse site it names. #4410 extended the same parse to each `readReplicas` entry; **#4468 retired that key** — no driver ever opened a replica connection and no query path splits reads from writes, so the entries were being checked against a contract nothing would apply. Strictness makes a dropped key loud; it cannot make a slot live, and a *precisely validated* dead slot is the more convincing lie |
+| `driver/memory.zod.ts` / `driver/mongo.zod.ts` / `driver/postgres.zod.ts` | 6+1+1 | authorable | The per-driver shapes for the `config` slot — what an author actually writes under `datasource.config` (`host`, `port`, `filename`). **Undeclared here until the coverage walk went recursive** (see below): a subdirectory was invisible to the gate, so these sites sat outside the map while the map reported full coverage. **Strict as of #4410**, which is also what unblocked them: this row previously read "strictness here would enforce nothing" because nothing parsed `datasource.config` against these schemas and both `*DriverSpec.configSchema` literals were `{}`. Now `DatasourceSchema` parses `config` against them, and the same schemas project onto `configSchema` and onto the Studio connection form. (#4410 also ran the parse over each `readReplicas` entry; #4468 retired that key outright — see the row above.) `postgres.zod.ts` drops a site: its `ssl` was a `boolean | {ca, cert, key, …}` union, and the object arm is gone — certificates now live in the datasource-level `ssl` block (declared, strict, and until #4410 read by nobody), leaving `config.ssl` as the on/off shorthand. That narrowing is forced by the same projection: the Studio form renders anything that is not boolean/enum/number as a TEXT INPUT, so a union here would have produced a wizard whose every `ssl` value the new gate rejects. `memory.zod.ts` keeps 6 but loses two KEYS — `indexes` / `maxRecordsPerObject`, which `InMemoryDriverConfig` has no field for, removed under ADR-0049 rather than blessed by the new gate |
+| `driver/mysql.zod.ts` / `driver/sqlite.zod.ts` | 1+2 | authorable | The rest of the `config` contract, added by #4410. `mysql.zod.ts` and `sqlite.zod.ts` (sqlite + sqlite-wasm) are shapes that **never existed** — both driver ids were offered by the connection form and buildable by the shared factory, with no config contract anywhere, so `driver: 'sqlite'` + a misspelled `filename` was an ephemeral `:memory:` database reported as configured. All three sites strict, same error factory as the rest of the campaign. (Their sibling `driver/common.zod.ts` holds shared enums and prescription strings and has no `z.object(` site, so the coverage gate skips it) |
 | `analytics.zod.ts` | 8 | mixed (p) | |
 | `document.zod.ts` | 8 | wire (p) | |
 | `hook.zod.ts` / `hook-body.zod.ts` | 6+2 | mixed | **strict as of #4001 data step** for the AUTHORING shapes: `HookSchema` (+ `retryPolicy`) and both body branches (`ExpressionBodySchema` / `ScriptBodySchema`). `HookContextSchema` and its `session` / `provenance` / `user` blocks are the RUNTIME shape the engine hands a handler — they stay tolerant, and must: strictness there would make an engine-internal enrichment (as `provenance` was in #3712) a breaking change for anyone parsing a context they were given. The file's old blanket `authorable (p)` was too wide — verification split it |
@@ -178,13 +264,12 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `external-catalog.zod.ts` | 4 | wire (p) | |
 | `field-value.zod.ts` / `seed.zod.ts` / `validation.zod.ts` | 1 ea | mixed (p) | |
 
-### `automation/` — 99 sites
+### `automation/` — 88 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
 | `flow.zod.ts` | 11 | authorable | **strict as of #4001** (4 schemas; `FlowVersionHistorySchema` is runtime — stays tolerant) |
 | `sync.zod.ts` / `etl.zod.ts` | 12+10 | authorable (p) | authored pipelines — **candidates** |
-| `trigger-registry.zod.ts` | 11 | mixed | descriptors are code-registered (wire-ish); bindings authored |
 | `execution.zod.ts` | 13 | wire | run-state envelopes — never strict. +5 at #4354 (the run-summary family: step metrics / skip reason / per-node / per-gate / the summary itself) — engine-emitted telemetry read by the Console and by operator queries, nobody authors them, so the `wire` verdict covers them unchanged |
 | `state-machine.zod.ts` | 7 | authorable (p) | |
 | `control-flow.zod.ts` | 6 | authorable (p) | validated structurally by `validateControlFlow` |
@@ -193,9 +278,11 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `node-executor.zod.ts` | 4 | wire | executor contract |
 | `io-node-config.zod.ts` | 2 | authorable | `NotifyConfigSchema` / `HttpConfigSchema` (#4045) — the sibling contracts that validate the **open** `config` slot on flow `notify` / `http` nodes. Authored per-node, so the open-slot exemption above does not extend to them; candidate once the executors' own drift is verified |
 | `builtin-node-config.zod.ts` | 8 | authorable | Same family (#4045): the CRUD quartet, `screen`, `map`. Written from what the executors read rather than from the descriptors' `configSchema` literals, and reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` — so unlike most rows here, this one already has a drift check of its own. Same candidacy note as `io-node-config` |
-| `schemaless-node-config.zod.ts` | 4 | authorable | Same family, third panel (#4278): `script` / `subflow` / `decision` (+ the decision branch item) — the descriptor-schemaless nodes whose form lives in objectui's hand-written table. Written from the executors; the drift check is objectui's `flow-node-config.spec-reconciliation` test (cross-repo, via the published exports). Contract exports only — nothing parses node config with them yet, so strictness candidacy follows `io-node-config` |
+| `schemaless-node-config.zod.ts` | 4 | authorable | Same family, third panel (#4278): `script` / `subflow` / `decision` (+ the decision branch item) — the descriptor-schemaless nodes whose form lives in objectui's hand-written table. Written from the executors; the drift check is objectui's `flow-node-config.spec-reconciliation` test (cross-repo, via the published exports). Since #4343 `script` and `subflow` ARE parsed at execute time (`parse-config.ts`) — `script` once retiring its `actionType` branches left it flat — so strictness candidacy now follows `io-node-config` on the same terms rather than being moot; `decision` stays export-only |
 | `webhook.zod.ts` | 1 | authorable (p) | spec-only (#3461) |
 | `flow-function.zod.ts` | 1 | authorable | `FlowFunctionDeclarationSchema` (#4396) — the `{ handler, effect }` form of a `defineStack({ functions })` entry. Authored, but note what an undeclared key here would be: a sibling of a **live function**, not data. `defineStack`'s union already rejects a record whose `handler` is not callable, and the boot-path reader is the hand-written `normalizeFlowFunctionEntry` rather than a `.parse()` (re-validating a live handler every boot buys nothing), so strictness would bind at authoring only. Candidate on the same verify-first rule as its `*-node-config` neighbours |
+
+`trigger-registry.zod.ts` had a row here (11 sites, "mixed — descriptors are code-registered (wire-ish); bindings authored") until #4499 deleted the file: all 11 sites were the third connector-vocabulary declaration (`ConnectorSchema` / `Authentication*` / `Operation*` / `ConnectorInstance`), and the old row's classification was optimistic twice over — nothing was ever code-registered against these descriptors and no binding was ever authored. The engine registers against `integration/connector.zod.ts` (ADR-0097), which keeps its own row.
 
 ### `security/` — 20 sites
 
@@ -259,6 +346,20 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
    Not blocked on field data (Studio-written JSON is our own producer, so the
    downstream risk is the lowest on the board); it is simply unstarted. If the
    step-1 question comes back "nothing is reporting", start here instead.
+
+Done in the registered-types batch: `strictObject` (`shared/strict-object.ts`)
+replaced the four-part wiring recipe, and `seed` + `doc` became the first two
+conversions built on it — chosen by the registered-type lens above rather than
+by directory, so both are provably parsed as well as provably authored. Both
+also had to declare the ADR-0010 envelope, and the invariant test written in the
+same pass found `hook` and `datasource` rejecting it outright on `main`
+(findings log, entry 8). The ledger's site-counting method grew `strictObject(`
+in the same change, because the gate failed on the first conversion when it did
+not.
+
+Deferred from that batch: `validation` — a `z.lazy()` discriminated union whose
+variants `.extend()` a shared base, so each variant needs its own key set rather
+than one `strictObject` call. It still carries the envelope gap.
 
 Done in step 2: `security/rls.zod.ts` + `security/sharing.zod.ts` strict;
 `PositionSchema` strict with the protection envelope declared (closing the
@@ -338,10 +439,15 @@ the app step's `ACCOUNT_APP.defaultOpen` came from exactly this class of check.
 Liveness Check workflow) holds the two claims here that are mechanically
 checkable, so this map cannot go stale in silence again:
 
-- **Site counts.** The method is stated above — `z.object(` occurrences per file
-  — so every number in the triage tables is verifiable. A count that no longer
-  matches means schemas were added or removed under a `Class` verdict nobody
-  re-examined. Touching a file forces you back through this ledger.
+- **Site counts.** The method is stated above — `z.object(` or `strictObject(`
+  occurrences per file — so every number in the triage tables is verifiable. A
+  count that no longer matches means schemas were added or removed under a
+  `Class` verdict nobody re-examined. Touching a file forces you back through
+  this ledger. `strictObject(` had to join the count the moment the helper
+  existed: counting only `z.object(` would have made every conversion look like
+  surface *disappearing*, so "this directory got solved" and "this directory got
+  deleted" would produce the same number. The gate caught that itself on the
+  first conversion.
 - **Coverage.** Every `*.zod.ts` in a triaged directory that HAS sites must have
   a row. A new one is undeclared surface. The walk is **recursive**; nested files
   are declared by their path relative to the section directory

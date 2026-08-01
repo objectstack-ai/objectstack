@@ -182,6 +182,21 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
   { type: 'page', key: 'pages' },
   { type: 'view', key: 'views' },
   { type: 'webhook', key: 'webhooks' },
+  // #4487. Note what adding a TYPE costs versus adding a warned property: the
+  // doc below is right that coverage grows by marking entries `authorWarn` —
+  // but only WITHIN a type already listed here. A newly governed type needs its
+  // collection registered or its ledger warns nobody, which would leave the
+  // ledger correct and silent: the exact shape this lint exists to prevent.
+  { type: 'datasource', key: 'datasources' },
+  // #4488 — the six newly governed types that carry `authorWarn` entries.
+  // (doc / seed / validation are governed too but warn on nothing today, so
+  // they are not listed; add them here the day one of their entries warns.)
+  { type: 'app', key: 'apps' },
+  { type: 'book', key: 'books' },
+  { type: 'job', key: 'jobs' },
+  { type: 'email_template', key: 'emailTemplates' },
+  { type: 'mapping', key: 'mappings' },
+  { type: 'translation', key: 'translations' },
 ];
 
 /**

@@ -233,6 +233,18 @@ export const ShowcaseTranslationBundle = {
           legacy_row_actions: { label: '旧式行操作' },
           bulk_actions: { label: '批量操作' },
         },
+        _actions: {
+          // The two recalc surfaces of the same endpoint: one dispatch per
+          // record vs ONE dispatch for the whole selection (objectui#3139).
+          showcase_recalc_estimate: {
+            label: '重算工时',
+            successMessage: '工时已重算。',
+          },
+          showcase_recalc_selection: {
+            label: '重算所选',
+            successMessage: '已为整个选中集重算工时。',
+          },
+        },
       },
       showcase_account: {
         label: '客户',

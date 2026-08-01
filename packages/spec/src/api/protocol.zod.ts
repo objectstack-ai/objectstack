@@ -21,7 +21,6 @@ import {
 } from './analytics.zod';
 import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
 import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
-import { StateMachineSchema } from '../automation/state-machine.zod';
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
 import { TranslationDataSchema } from '../system/translation.zod';
 import {
@@ -684,67 +683,20 @@ export const GetEffectivePermissionsResponseSchema = lazySchema(() => z.object({
 }));
 
 // ==========================================
-// Workflow Operations
+// Workflow Operations — REMOVED (#4451, v17)
 // ==========================================
-
-export const GetWorkflowConfigRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name to get workflow config for'),
-}));
-
-export const GetWorkflowConfigResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  workflows: z.array(StateMachineSchema).describe('Active state-machine workflows for this object'),
-}));
-
-export const WorkflowStateSchema = lazySchema(() => z.object({
-  currentState: z.string().describe('Current workflow state name'),
-  availableTransitions: z.array(z.object({
-    name: z.string().describe('Transition name'),
-    targetState: z.string().describe('Target state after transition'),
-    label: z.string().optional().describe('Display label'),
-    requiresApproval: z.boolean().default(false).describe('Whether transition requires approval'),
-  })).describe('Available transitions from current state'),
-  history: z.array(z.object({
-    fromState: z.string().describe('Previous state'),
-    toState: z.string().describe('New state'),
-    action: z.string().describe('Action that triggered the transition'),
-    userId: z.string().describe('User who performed the action'),
-    timestamp: z.string().datetime().describe('When the transition occurred'),
-    comment: z.string().optional().describe('Optional comment'),
-  })).optional().describe('State transition history'),
-}));
-
-export const GetWorkflowStateRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  recordId: z.string().describe('Record ID to get workflow state for'),
-}));
-
-export const GetWorkflowStateResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  recordId: z.string().describe('Record ID'),
-  state: WorkflowStateSchema.describe('Current workflow state and available transitions'),
-}));
-
-export const WorkflowTransitionRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  recordId: z.string().describe('Record ID'),
-  transition: z.string().describe('Transition name to execute'),
-  comment: z.string().optional().describe('Optional comment for the transition'),
-  data: z.record(z.string(), z.unknown()).optional().describe('Additional data for the transition'),
-}));
-
-export const WorkflowTransitionResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  recordId: z.string().describe('Record ID'),
-  success: z.boolean().describe('Whether the transition succeeded'),
-  state: WorkflowStateSchema.describe('New workflow state after transition'),
-}));
-
-// ADR-0019: approval is no longer a workflow step. The approve/reject surface
-// moved off `workflow` onto the dedicated approvals runtime (a flow's Approval
-// node opens a request and suspends; a decision resumes it). Decisions are
-// recorded via `POST /approvals/requests/:id/{approve,reject}`, not on a
-// workflow record. `workflow` is reclaimed for state machines (transitions).
+// The Get/WorkflowState/Config/Transition schemas and the `WorkflowProtocol`
+// interface were deleted: no code ever implemented any of the three methods,
+// nothing ever registered the `workflow` service slot they notionally fronted
+// (ADR-0115 Evidence 5 — "no code in this repository resolves either slot",
+// verified across both repositories), and no HTTP surface ever mounted
+// `/api/v1/workflow` (the pre-#3586 DEFAULT_DISPATCHER_ROUTES listed it among
+// routes that never existed). The capability the wrappers promised is live
+// elsewhere: record state machines are enforced by the `state_machine`
+// validation rule (`StateMachineSchema` stays authorable on the object),
+// approvals are first-class flow nodes on the approvals runtime (ADR-0019 —
+// decisions via `POST /approvals/requests/:id/{approve,reject}`), and
+// record-triggered automation is lifecycle hooks + `record_change` flows.
 
 // ==========================================
 // Realtime Operations
@@ -1312,14 +1264,8 @@ export type GetObjectPermissionsResponse = z.infer<typeof GetObjectPermissionsRe
 export type GetEffectivePermissionsRequest = z.input<typeof GetEffectivePermissionsRequestSchema>;
 export type GetEffectivePermissionsResponse = z.infer<typeof GetEffectivePermissionsResponseSchema>;
 
-// Workflow Types
-export type GetWorkflowConfigRequest = z.input<typeof GetWorkflowConfigRequestSchema>;
-export type GetWorkflowConfigResponse = z.infer<typeof GetWorkflowConfigResponseSchema>;
-export type WorkflowState = z.infer<typeof WorkflowStateSchema>;
-export type GetWorkflowStateRequest = z.input<typeof GetWorkflowStateRequestSchema>;
-export type GetWorkflowStateResponse = z.infer<typeof GetWorkflowStateResponseSchema>;
-export type WorkflowTransitionRequest = z.input<typeof WorkflowTransitionRequestSchema>;
-export type WorkflowTransitionResponse = z.infer<typeof WorkflowTransitionResponseSchema>;
+// Workflow Types — removed with the schemas (#4451, v17); see the block comment
+// at "Workflow Operations — REMOVED" above.
 
 // Realtime Types
 export type RealtimeConnectRequest = z.input<typeof RealtimeConnectRequestSchema>;
@@ -1498,12 +1444,9 @@ export interface PermissionProtocol {
   getEffectivePermissions?(request: GetEffectivePermissionsRequest): Promise<GetEffectivePermissionsResponse>;
 }
 
-/** Workflows (optional). */
-export interface WorkflowProtocol {
-  getWorkflowConfig?(request: GetWorkflowConfigRequest): Promise<GetWorkflowConfigResponse>;
-  getWorkflowState?(request: GetWorkflowStateRequest): Promise<GetWorkflowStateResponse>;
-  workflowTransition?(request: WorkflowTransitionRequest): Promise<WorkflowTransitionResponse>;
-}
+// `WorkflowProtocol` (optional sub-protocol) was removed here (#4451, v17):
+// no implementation of any of its three methods ever existed. See the
+// "Workflow Operations — REMOVED" block comment above.
 
 /** Realtime / presence (optional). */
 export interface RealtimeProtocol {

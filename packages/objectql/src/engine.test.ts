@@ -668,7 +668,9 @@ describe('ObjectQL Engine', () => {
 
         it('findOne accepts context via the trailing options arg', async () => {
             (mockDriver.findOne as any).mockResolvedValue({ id: '1' });
-            await engine.findOne('task', {}, { context: { tenantId: 't-fo' } as any });
+            // `where` is not incidental: findOne refuses a query that selects no
+            // particular record (#4419).
+            await engine.findOne('task', { where: { id: '1' } }, { context: { tenantId: 't-fo' } as any });
             expect((mockDriver.findOne as any).mock.calls.at(-1)?.[2]).toMatchObject({ tenantId: 't-fo' });
         });
 
@@ -2053,7 +2055,10 @@ describe('ObjectQL Engine', () => {
                 { id: 'u1', name: 'Alice' },
             ]);
 
-            const result = await engine.findOne('task', { expand: { assignee: { object: 'assignee' } } });
+            const result = await engine.findOne('task', {
+                where: { id: 't1' },
+                expand: { assignee: { object: 'assignee' } },
+            });
 
             expect(result.assignee).toEqual({ id: 'u1', name: 'Alice' });
         });

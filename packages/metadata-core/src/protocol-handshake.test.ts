@@ -64,16 +64,65 @@ describe('rangeAdmitsMajor', () => {
     expect(rangeAdmitsMajor('workspace:*', 11)).toBeNull();
   });
 
-  it('bounds pathological input (ReDoS-safe) without a slow scan', () => {
+  it('bounds pathological input (ReDoS-safe) without catastrophic backtracking', () => {
     // The engines string is externally authored; the comparator/hyphen parsing
     // must not degrade on adversarial input (CodeQL alerts 837/838).
-    const overlong = '<' + '\t'.repeat(100_000);
-    const hyphenBomb = 'a\t-\t' + '\t'.repeat(100_000);
-    const start = performance.now();
-    expect(rangeAdmitsMajor(overlong, 11)).toBeNull();
-    expect(rangeAdmitsMajor(hyphenBomb, 11)).toBeNull();
-    expect(rangeAdmitsMajor('>=11.0.0 ' + ' '.repeat(100_000) + '<13.0.0', 11)).toBeNull();
-    expect(performance.now() - start).toBeLessThan(50);
+    //
+    // The adversarial shapes: an overlong comparator, a hyphen-range "bomb", and
+    // a comparator pair separated by a huge whitespace run.
+    const shapes = (scale: number) => [
+      '<' + '\t'.repeat(scale),
+      'a\t-\t' + '\t'.repeat(scale),
+      '>=11.0.0 ' + ' '.repeat(scale) + '<13.0.0',
+    ];
+
+    // 1. Behaviour: every shape is *unrecognized*, never a false rejection.
+    //    This is the assertion that actually pins the contract.
+    for (const input of shapes(100_000)) {
+      expect(rangeAdmitsMajor(input, 11)).toBeNull();
+    }
+
+    // 2. Cost: the parse must stay linear in the input length.
+    //
+    //    This deliberately asserts *no absolute wall-clock bound*. The previous
+    //    50ms ceiling measured machine load rather than the parser: under the
+    //    full-repo run (~130 parallel turbo tasks) it exceeded 50ms on a healthy
+    //    tree and reddened PRs that never touched this package (#4485).
+    //
+    //    What the guard is really for is catastrophic backtracking — a regression
+    //    that makes parsing *superlinear* in the input. So measure the scaling
+    //    instead: the same shapes at 1x and 8x length. Load largely cancels out of
+    //    a ratio, and min-of-N discards the samples the scheduler interrupted.
+    //
+    //    Healthy (linear) parsing tracks the input at ~8x; measured repeatedly at
+    //    8.3-8.5x. The 40x ceiling therefore keeps ~5x headroom over healthy while
+    //    still catching even a merely *quadratic* regression (which lands near
+    //    64x), let alone an exponential one — which would not finish at all.
+    //
+    //    The two timings are taken back-to-back inside one iteration and the ratio
+    //    is reduced by *minimum*, not the timings independently: a scheduler steal
+    //    that lands in only one of the two windows would skew a ratio built from
+    //    separately-minimised timings (observed reddening at 3x CPU
+    //    oversubscription), whereas the cheapest single pair is the one iteration
+    //    that ran cleanest end to end.
+    //
+    //    NB: a ratio of pathological-to-benign input would NOT work here: a benign
+    //    16-char range parses ~300x faster than a 100k-char one purely because it
+    //    is 100k characters shorter, which is linear scaling behaving correctly.
+    const small = shapes(100_000);
+    const big = shapes(800_000);
+    const scan = (inputs: readonly string[]): number => {
+      const t = performance.now();
+      for (const input of inputs) rangeAdmitsMajor(input, 11);
+      return performance.now() - t;
+    };
+
+    for (let i = 0; i < 10; i++) scan(small); // warm the JIT before measuring
+    let ratio = Infinity;
+    for (let i = 0; i < 20; i++) {
+      ratio = Math.min(ratio, scan(big) / scan(small));
+    }
+    expect(ratio).toBeLessThan(40);
   });
 });
 

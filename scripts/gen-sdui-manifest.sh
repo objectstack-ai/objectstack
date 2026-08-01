@@ -67,13 +67,22 @@ else
 fi
 popd > /dev/null
 
-# ADR-0081: ratchet the spec↔frontend react-block conformance against the
-# committed baseline. Warn-only here — run check:react-conformance --strict to
-# gate intentionally.
-if [[ -f "${FRAMEWORK_ROOT}/packages/spec/react-conformance.baseline.json" ]]; then
-  echo "→ Ratcheting spec↔frontend react-block conformance (ADR-0081)..."
+# ADR-0081/0082: ratchet the spec↔registry react-block DECLARATION PARITY against
+# the committed baseline.
+#
+# `--strict`, i.e. this now GATES. It used to run without it and swallow the exit
+# code behind a `⚠`, so "divergence recorded" and "divergence stopped" were two
+# very different things wearing the same green build (#4472, secondary finding 1).
+# The ratchet only fires on divergence NEW since the accepted baseline, so a
+# failure here is a deliberate registry change that needs either a spec/overlay
+# edit or an explicit `--update` to accept — never pre-existing noise.
+#
+# Scope, since a green line here is easy to over-read: this compares two
+# DECLARATIONS (spec zod props vs registry-declared inputs) and inspects no
+# renderer. See the header of check-react-blocks-declaration-parity.ts.
+if [[ -f "${FRAMEWORK_ROOT}/packages/spec/react-declaration-parity.baseline.json" ]]; then
+  echo "→ Ratcheting spec↔registry react-block declaration parity (ADR-0082)..."
   ( cd "${FRAMEWORK_ROOT}" && MANIFEST="${TARGET}/sdui.manifest.json" \
-    pnpm --filter @objectstack/spec check:react-conformance \
-    --baseline react-conformance.baseline.json ) || \
-    echo "⚠ conformance ratchet reported new divergence — run check:react-conformance --strict to gate."
+    pnpm --filter @objectstack/spec check:react-declaration-parity \
+    --baseline react-declaration-parity.baseline.json --strict )
 fi

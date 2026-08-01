@@ -1,0 +1,36 @@
+{
+  "type": "seed",
+  "_note": "SeedSchema. Fully live — the smallest and healthiest surface in the ledger. Consumer: SeedLoaderService (packages/metadata-protocol/src/seed-loader.ts), reached on BOTH authoring paths: (1) boot/replay — the stack's `data:` collection lands in `manifest.data`, app-plugin.ts normalizes it and calls seedLoader.load() (packages/runtime/src/app-plugin.ts:832, :971), plus the per-org replayer registered for tenant provisioning; (2) runtime drafts — publishMetaItem applies a published `seed` draft through the same loader (packages/metadata-protocol/src/protocol.ts:6764, `skipSeedApply` opt-out for package batches). Seeded 2026-08-01 (#4488).",
+  "props": {
+    "object": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts:98",
+      "note": "target object; also the dependency-graph node key (topological insert order)."
+    },
+    "externalId": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts:119",
+      "note": "upsert/uniqueness key, single or composite (framework#3434 join tables); also what OTHER datasets' reference values resolve against (buildReferenceMap threads it into the DB probe)."
+    },
+    "mode": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts:245",
+      "note": "insert/update/upsert/replace/ignore — drives decideWriteAction/writeRecord."
+    },
+    "env": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts:91",
+      "note": "filterByEnv drops datasets whose env list excludes the running environment."
+    },
+    "records": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts:434",
+      "note": "the payload rows. WALK BOUNDARY: each record is a z.record — the keys an author actually writes are the TARGET OBJECT's field names, governed by that object's own field definitions (and the defineSeed factory's compile-time key check), not by this ledger. Recorded here rather than left implicit, per the datasource `config` precedent."
+    }
+  }
+}

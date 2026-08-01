@@ -187,6 +187,10 @@ const bad = await client.meta.getDiagnostics({ severity: 'error' });
 const refs = await client.meta.getReferences('object', 'account');
 const trail = await client.meta.getAudit('object', 'account', { limit: 20 });
 const tree = await client.meta.getBookTree('handbook');
+
+// Operator: rewrite stored rows into today's canonical shape (ADR-0087).
+// Preview unless `apply: true`; requires the `manage_metadata` capability.
+const report = await client.meta.migrateStored({ apply: true });
 ```
 
 ### `client.data` — CRUD & Batch

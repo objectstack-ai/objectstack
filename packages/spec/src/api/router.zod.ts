@@ -90,7 +90,8 @@ export const RouterConfigSchema = lazySchema(() => z.object({
     storage: z.string().default('/storage').describe('Storage Protocol'),
     analytics: z.string().default('/analytics').describe('Analytics Protocol'),
     ui: z.string().default('/ui').describe('UI Metadata Protocol (Views, Layouts)'),
-    workflow: z.string().default('/workflow').describe('Workflow Engine Protocol'),
+    // `workflow` mount removed (#4451, v17): no workflow surface ever existed
+    // to mount (ADR-0115 Evidence 5).
     realtime: z.string().default('/realtime').describe('Realtime/WebSocket Protocol'),
     notifications: z.string().default('/notifications').describe('Notification Protocol'),
     ai: z.string().default('/ai').describe('AI Engine Protocol (NLQ, Chat, Suggest)'),
@@ -104,7 +105,6 @@ export const RouterConfigSchema = lazySchema(() => z.object({
     storage: '/storage',
     analytics: '/analytics',
     ui: '/ui',
-    workflow: '/workflow',
     realtime: '/realtime',
     notifications: '/notifications',
     ai: '/ai',

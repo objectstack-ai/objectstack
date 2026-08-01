@@ -70,7 +70,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`flow.zod.ts`](src/automation/flow.zod.ts) | ⭐ | **Visual Flow**. Complex orchestration logic (decisions, loops, CRUD). |
 | [`approval.zod.ts`](src/automation/approval.zod.ts) | ⭐ | **Approval Node**. Flow node config for human approval pauses. |
 | [`webhook.zod.ts`](src/automation/webhook.zod.ts) | ⭐ | **Webhooks**. Outbound HTTP notification configuration. |
-| [`trigger-registry.zod.ts`](src/automation/trigger-registry.zod.ts) | | **Trigger Registry**. Central registry for all automation triggers. |
 | [`etl.zod.ts`](src/automation/etl.zod.ts) | | **ETL Jobs**. Extract-Transform-Load definitions. |
 | [`sync.zod.ts`](src/automation/sync.zod.ts) | | **Data Sync**. Bi-directional synchronization rules. |
 
@@ -117,13 +116,7 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 
 | File | Status | Description |
 | :--- | :--- | :--- |
-| [`connector.zod.ts`](src/integration/connector.zod.ts) | ⭐ | **Connector Definition**. Metadata for external API integrations (OpenAPI wrapper). |
-| [`connector/saas.zod.ts`](src/integration/connector/saas.zod.ts) | | **SaaS Connectors**. Specifics for SaaS APIs (Salesforce, Stripe). |
-| [`connector/database.zod.ts`](src/integration/connector/database.zod.ts) | | **DB Connectors**. External database integration. |
-| [`connector/file-storage.zod.ts`](src/integration/connector/file-storage.zod.ts) | | **Storage Connectors**. S3, Blob Storage integrations. |
-| [`connector/message-queue.zod.ts`](src/integration/connector/message-queue.zod.ts) | | **MQ Connectors**. Kafka, RabbitMQ integrations. |
-| [`connector/github.zod.ts`](src/integration/connector/github.zod.ts) | | **GitHub Connector**. Logic for Git integration. |
-| [`connector/vercel.zod.ts`](src/integration/connector/vercel.zod.ts) | | **Vercel Connector**. Deployment integration. |
+| [`connector.zod.ts`](src/integration/connector.zod.ts) | ⭐ | **Connector Protocol** (ADR-0097). One schema; provider shapes come from the provider itself (connector-openapi / connector-mcp), not from per-provider spec files — the six `connector/*.zod.ts` "templates" were removed in #4480 (zero consumers; ADR-0023 rejected that design). |
 
 ---
 

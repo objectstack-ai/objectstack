@@ -106,8 +106,24 @@ this is mandatory, not a preference (Prime Directive #11), and a PreToolUse hook
 blocks edits made while on the shared `main` branch. Working in the shared `main`
 checkout is *not* a supported fallback: branches get switched and shared files —
 including ones you just wrote — get reset *under you* mid-task (a full session's
-work was silently reverted twice before this rule was enforced). Even inside your
-own worktree, operate defensively:
+work was silently reverted twice before this rule was enforced).
+
+**Claim the issue BEFORE you write any code.** Assign it to yourself
+(`gh issue edit <n> --add-assignee @me`, or the `issue_write` MCP tool with
+`assignees`) as the *first* action of the task — before the worktree, before the
+first read. An unassigned issue reads as an open invitation, and several agents
+work this repo at once: two that both start on it burn the same hours twice and
+then race to land conflicting shapes for the same problem, which is worse than
+either one alone. If it is already assigned to someone else it is taken — pick
+another, or say so and ask; never reassign it to yourself.
+
+The claim is also what makes the *finding* rule (Prime Directive #10) safe to
+follow. Once out-of-scope discoveries become issues, the issue list is a real
+queue other agents read, and a claim is the only thing separating "someone is on
+this" from "nobody has looked yet". File it unassigned when you are merely
+recording a finding; assign it at the moment you actually start.
+
+Even inside your own worktree, operate defensively:
 
 1. **Only touch the files your task needs.** Don't "fix" unrelated diffs,
    reverts, or other agents' in-flight edits, and don't try to manage the whole
@@ -130,6 +146,16 @@ own worktree, operate defensively:
    Auto-merge can land a still-red PR onto shared `main` and break it for every
    parallel agent (see #1475). Merge serially; rebase other open branches before
    merging the next one.
+   **Once the repo's merge queue is enabled, "add to queue" IS the sanctioned
+   path** — it is the opposite of the auto-merge this rule bans: the queue
+   builds your PR *as merged onto the current `main`* and lands it only if that
+   speculative result is green, which is exactly the §10 re-verification, done
+   by the platform, race-free. The manual serial protocol above is the fallback
+   for when the queue is unavailable. (Why this matters: `main` can land a PR
+   every few minutes at peak; a manual merge–reverify loop takes ~25 minutes,
+   so under load it *never* wins the race — one PR went three full green
+   cycles without managing to land. That is a livelock, not a discipline
+   failure.)
 8. **Testing needs a server? Start your own temporary one — never stop someone
    else's.** A running dev server you didn't start probably belongs to another
    agent or the user; killing it (or its port) breaks their in-flight work. Spin
@@ -158,15 +184,31 @@ own worktree, operate defensively:
    None of this is CI-visible: CI checks out fresh and installs clean. It costs
    only *your* time, which is exactly why it is worth recognising in one step
    rather than re-diagnosing per gate.
-10. **A clean merge is not a working merge.** Git conflicts on overlapping lines;
-   nothing warns you when two changes are individually fine and jointly wrong.
-   Real examples from one branch's lifetime: a test asserting a response body's
-   exact shape landed while that shape was being changed elsewhere (merged clean,
-   failed CI); a domain file was deleted while another agent's guard still
-   declared it. **Before opening a PR, and again before merging, pull `main` and
-   re-run the suite** — the second CI round is where these surface, and the guards
-   in `scripts/check-*.mjs` exist largely because this class of breakage is
-   invisible to `git merge`.
+10. **A clean merge is not a working merge — but scope the re-check to the
+   overlap.** Git conflicts on overlapping lines; nothing warns you when two
+   changes are individually fine and jointly wrong. Real examples from one
+   branch's lifetime: a test asserting a response body's exact shape landed
+   while that shape was being changed elsewhere (merged clean, failed CI); a
+   domain file was deleted while another agent's guard still declared it.
+   **Before opening a PR, pull `main`, refresh build state (§9), and run the
+   full suite once.** For the *subsequent* pre-merge merges of `main` — the
+   ones you do only because `main` moved again while CI ran — the full suite is
+   usually re-proving what three identical runs already proved, at ~15 minutes
+   per lap while `main` lands a PR every few. Scope it instead:
+   - **Always:** rebuild what the merge touched, and if `packages/spec` moved
+     on either side, `pnpm --filter @objectstack/spec build && pnpm --filter
+     @objectstack/spec check:generated` — generated snapshots (`api-surface`,
+     baselines) are the classic jointly-wrong artifact, and only a rebuild of
+     the merged source can validate them (never trust git's textual merge of a
+     generated file). Then assert your branch's *delta vs `main`* is still
+     exactly what your PR intends (e.g. "N removed / 0 added").
+   - **Full `pnpm typecheck && pnpm test` again only when** the incoming
+     commits touch the same packages or the same behavior your diff does, or a
+     conflict occurred outside trivially-mechanical files.
+   - CI on the PR (and the merge queue, once enabled) validates the merge
+     commit itself — that second CI round is where joint breakage surfaces, and
+     the guards in `scripts/check-*.mjs` exist largely because this class of
+     breakage is invisible to `git merge`.
 
 ---
 
@@ -239,6 +281,7 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 | Path | Type | Rule |
 |:---|:---|:---|
 | `content/docs/references/` | **AUTO-GEN** | ❌ Never hand-edit. Regenerated by `packages/spec/scripts/build-docs.ts`. |
+| `content/docs/releases/` | **RELEASE-OWNED** | ❌ Never edit in a code PR. Release notes are written **centrally at release time**, compiled from changesets + the ADR-0087 registries — not accreted a row per PR. Per-PR appends made `releases/v<major>.mdx` the repo's hottest conflict magnet (three PRs raced the same table inside one afternoon), and every manual resolution risks dropping someone else's row. Your PR's input is its **changeset**; for spec removals also the D2/D3 registry entries. Factual error on a releases page → dedicated docs-only PR or an issue, never a rider on code changes. |
 | `**/translations/*.generated.ts` (nine packages — `platform-objects`, five plugins, three services) | **AUTO-GEN** | ❌ Never hand-edit the file *structure*. Run `node scripts/check-i18n-bundles.mjs --write` to regenerate all nine (merge mode — every existing translation is preserved); `pnpm i18n:extract` still covers `platform-objects` alone. Translation *values* are hand-written and expected to be: the gate compares against a merge-mode extract, so editing a string is fine, while adding or dropping keys is drift. `pnpm check:i18n` gates all nine in CI, and `pnpm check:i18n-coverage` ratchets untranslated declared labels. |
 | `content/docs/guides/` | hand-written | ✅ Update `meta.json` when adding pages. |
 | `content/docs/concepts/` | hand-written | ✅ |
@@ -299,10 +342,25 @@ removals" this way while writing this section; `check:generated` now prints this
 inline when that gate is the one failing.)
 
 `check:liveness`, `check:empty-state`, `check:skill-examples`,
-`check:react-conformance` and `check:exported-any` are pure checks with no generator — a
-failure there is a real finding to fix, not an artifact to regenerate. `check:generated`
-names them as deliberately not run, so its "all up to date" never reads as "everything
-passed".
+`check:react-declaration-parity`, `check:exported-any` and `check:dual-source-exports` are
+pure checks with no generator — a failure there is a real finding to fix, not an artifact
+to regenerate. `check:generated` names them as deliberately not run, so its "all up to
+date" never reads as "everything passed". The last one asks the third question about the
+export surface (#4446): `api-surface.json` shows a name on two entries but not whether
+that is one declaration re-exported (fine) or two declarations sharing a name — the #4411
+trap, judged by symbol identity against the built dist, with the accepted cases in the
+shrink-only `dual-source-exports.baseline.json` (hand-edited under review, never
+generated: a `gen:` would admit a new dual-source via "run the fix command").
+
+⚠️ **`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against
+an implementation.** Left: the props a block's spec zod schema declares. Right: the inputs
+the objectui *registry config* declares. Both are declarations — `manifestFromConfigs`
+copies `config.inputs` verbatim — so a prop **both sides declare and no renderer reads**
+is, to this gate, perfect agreement. It was named `check:react-conformance` and opened by
+claiming it confirmed the components "ACTUALLY implement" the spec props; it never could,
+and #4413 shipped four dead blocks straight through a green run of it. Renamed and
+re-scoped in #4472. The gate is still worth having (`spec-only`, `registry-only` and
+`missing` are real signals) — just don't read it as proof anything renders.
 
 `check:exported-any` is the one of those that also reads the built `dist/*.d.ts`, so the
 stale-`dist` caveat above applies to it too. It asks the other half of the

@@ -17,6 +17,7 @@ import type { FlowParsed } from '../automation/flow.zod';
 import type { ExecutionLog, FlowRunSummary } from '../automation/execution.zod';
 import type { ActionDescriptor } from '../automation/node-executor.zod';
 import type { ConnectorDescriptor } from '../integration/connector-descriptor';
+import type { ConversionNotice, ConversionConflictNotice } from '../conversions/types';
 
 /**
  * Context passed to a flow/script execution
@@ -189,11 +190,35 @@ export interface AutomationResult {
      *    flow engine reserves for itself (a `$…` name, or one carrying a `.$`
      *    segment: `$runId`, `<nodeId>.$mapItemDone`, …). A transport maps it to
      *    **400**.
+     *  - `'RUN_NOT_FOUND'` — no suspension exists for the run id, in the hot
+     *    cache or the durable store. The run is unresumable *for good*: it
+     *    already resumed, was cancelled, or paused in a process whose state was
+     *    never persisted (#4420). A transport maps it to **404**. Callers that
+     *    persist a decision before resuming (approvals) must treat this as a
+     *    hard failure, not a no-op.
+     *  - `'STORE_UNAVAILABLE'` — the durable store could not be read, so
+     *    whether a suspension exists is UNKNOWN. Distinct from
+     *    `'RUN_NOT_FOUND'` on purpose: a transient store outage must not be
+     *    mistaken for a dead run. A transport maps it to **503**; the same
+     *    resume is expected to succeed once the store recovers.
+     *  - `'RESUME_IN_PROGRESS'` — a concurrent resume of this run is already
+     *    running; this duplicate was refused so side effects cannot run twice.
+     *    A transport maps it to **409**. The other resume is doing the work,
+     *    so callers should treat it as benign.
+     *  - `'INVALID_SCREEN_INPUT'` — the run is parked on a `screen` node and
+     *    the submitted bag violates that screen's declared field contract: a
+     *    `required` field the caller WAS asked for is missing, or a key the
+     *    screen never declared was sent (#4477). A transport maps it to
+     *    **400**. Distinct from `'INVALID_SIGNAL'`, which is about the
+     *    engine's own `$` variable namespace rather than the author's field
+     *    declarations. `visibleWhen` is evaluated against the submitted values
+     *    first, so a HIDDEN field's `required` never fires — enforcing it would
+     *    dead-end the run at a field the user was never shown (#3528).
      *
-     * Both refuse before consuming the suspension: the run stays parked and the
-     * legitimate continuation still lands.
+     * All of these refuse before consuming the suspension: the run stays parked
+     * and the legitimate continuation still lands.
      */
-    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL';
+    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS' | 'INVALID_SCREEN_INPUT';
     /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be
@@ -324,6 +349,38 @@ export interface IAutomationService {
      * @param definition - Flow definition object
      */
     registerFlow?(name: string, definition: unknown): void;
+
+    /**
+     * Canonicalize a flow definition WITHOUT registering it (#4454).
+     *
+     * The same ADR-0087 conversion policy {@link registerFlow} applies, exposed
+     * for a caller that needs a flow's canonical shape but must not arm it —
+     * `os migrate meta --stored` rewriting stored `sys_metadata` rows is the
+     * reason this is on the contract rather than only on the implementation.
+     *
+     * Only an implementation holding the live executor registry can offer this:
+     * flow-node conversions carry ADR-0078's open-namespace conflict guard, and
+     * deciding a rename from a clobber requires knowing which node types are
+     * actually owned here. Hence optional — a caller falls back to leaving flow
+     * rows alone rather than guessing.
+     *
+     * @param name - Flow name (snake_case), used for diagnostics
+     * @param definition - The stored/authored flow body
+     * @returns `parsed` (execution shape — schema defaults materialized) and
+     *   `storable` (persistence shape — conversions plus the schema's
+     *   `condition` envelopes, deliberately WITHOUT schema defaults, so a
+     *   written-back row is not frozen on today's default values), plus the
+     *   conversions applied and any rewrite the guard refused.
+     * @throws when the definition cannot be canonicalized at all (a strict-schema
+     *   violation, a malformed control-flow region) — such a flow cannot be
+     *   registered either, so a caller reports it rather than persisting a guess.
+     */
+    canonicalizeStoredFlow?(name: string, definition: unknown): {
+        parsed: FlowParsed;
+        storable: unknown;
+        notices: ConversionNotice[];
+        conflicts: ConversionConflictNotice[];
+    };
 
     /**
      * Unregister a flow by name

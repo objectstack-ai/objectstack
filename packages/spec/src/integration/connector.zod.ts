@@ -70,23 +70,18 @@ import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.
  * @see {@link file://../automation/sync.zod.ts} for Level 1 (simple sync)
  * @see {@link file://../automation/etl.zod.ts} for Level 2 (data engineering)
  * 
- * ## When to use Integration Connector vs. Trigger Registry?
- * 
- * **Use `integration/connector.zod.ts` when:**
- * - Building enterprise-grade connectors (e.g., Salesforce, SAP, Oracle)
- * - Complex OAuth2/SAML authentication required
- * - Bidirectional sync with field mapping and transformations
- * - Webhook management and rate limiting required
- * - Full CRUD operations and data synchronization
- * - Need comprehensive retry strategies and error handling
- * 
- * **Use `automation/trigger-registry.zod.ts` when:**
- * - Building simple automation triggers (e.g., "when Slack message received, create task")
- * - No complex authentication needed (simple API keys, basic auth)
- * - Lightweight, single-purpose integrations
- * - Quick setup with minimal configuration
- * 
- * @see ../../automation/trigger-registry.zod.ts for lightweight automation triggers
+ * ## There is no "Trigger Registry" alternative
+ *
+ * This header used to carry a "When to use Integration Connector vs. Trigger
+ * Registry?" comparison, steering "lightweight" cases to
+ * `automation/trigger-registry.zod.ts`. That file was a third declaration of
+ * the connector vocabulary with zero consumers — nothing registered, validated
+ * or executed against it — so the guidance pointed authors, with the
+ * platform's authority, at a dead end (#4499; removed alongside the #4480
+ * per-provider template cluster). The same defect class as the
+ * `capabilities.readOnly` prescription #4487 corrected: a signpost must land
+ * somewhere enforced. Lightweight cases are served HERE — a connector instance
+ * with simple `auth` — or by `automation/sync.zod.ts` / `etl.zod.ts` below.
  */
 
 // ============================================================================

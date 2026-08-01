@@ -7,11 +7,6 @@
     "mapping",
     "---Transport & Storage---",
     "http",
-    "message-queue",
-    "object-storage",
-    "offline",
-    "---Tenancy---",
-    "misc",
-    "tenant"
+    "offline"
   ]
 }

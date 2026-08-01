@@ -103,33 +103,27 @@ See also: [../[automation/sync.zod.ts](/docs/references/automation/sync)](/docs/
 
 See also: [../[automation/etl.zod.ts](/docs/references/automation/etl)](/docs/references/automation/etl) for Level 2 (data engineering)
 
-## When to use Integration Connector vs. Trigger Registry?
+## There is no "Trigger Registry" alternative
 
-**Use `[integration/connector.zod.ts](/docs/references/integration/connector)` when:**
+This header used to carry a "When to use Integration Connector vs. Trigger
 
-- Building enterprise-grade connectors (e.g., Salesforce, SAP, Oracle)
+Registry?" comparison, steering "lightweight" cases to
 
-- Complex OAuth2/SAML authentication required
+`[automation/trigger-registry.zod.ts](/docs/references/automation/trigger-registry)`. That file was a third declaration of
 
-- Bidirectional sync with field mapping and transformations
+the connector vocabulary with zero consumers — nothing registered, validated
 
-- Webhook management and rate limiting required
+or executed against it — so the guidance pointed authors, with the
 
-- Full CRUD operations and data synchronization
+platform's authority, at a dead end (#4499; removed alongside the #4480
 
-- Need comprehensive retry strategies and error handling
+per-provider template cluster). The same defect class as the
 
-**Use `[automation/trigger-registry.zod.ts](/docs/references/automation/trigger-registry)` when:**
+`capabilities.readOnly` prescription #4487 corrected: a signpost must land
 
-- Building simple automation triggers (e.g., "when Slack message received, create task")
+somewhere enforced. Lightweight cases are served HERE — a connector instance
 
-- No complex authentication needed (simple API keys, basic auth)
-
-- Lightweight, single-purpose integrations
-
-- Quick setup with minimal configuration
-
-See also: ../../[automation/trigger-registry.zod.ts](/docs/references/automation/trigger-registry) for lightweight automation triggers
+with simple `auth` — or by `[automation/sync.zod.ts](/docs/references/automation/sync)` / `etl.zod.ts` below.
 
 <Callout type="info">
 **Source:** `packages/spec/src/integration/connector.zod.ts`

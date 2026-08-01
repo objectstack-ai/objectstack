@@ -7,6 +7,13 @@ on:
   pull_request:
     branches:
       - main
+  # Merge queue: the queue builds each PR as speculatively merged onto the
+  # current main and only lands it if this workflow is green on that result —
+  # the race-free version of the "pull main and re-verify before merging"
+  # discipline (AGENTS.md multi-agent §7/§10). Every workflow that produces a
+  # branch-protection-required check MUST carry this trigger, or queue builds
+  # wait forever on a check that never reports.
+  merge_group:
 
 # Superseded runs on the same PR/branch waste runners and delay feedback;
 # cancel them. Push runs to main group by commit ref as well, so an in-flight
@@ -23,15 +30,21 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      docs: ${{ steps.changes.outputs.docs }}
-      core: ${{ steps.changes.outputs.core }}
-      console: ${{ steps.changes.outputs.console }}
+      # On merge_group, everything counts as changed: dorny/paths-filter has no
+      # merge_group support, and the queue build is the last validation before
+      # main — the one place a skipped job can never be the right answer. A
+      # skipped step's output is the empty string (falsy), so `|| 'true'`
+      # supplies the merge-group value without touching PR/push behavior.
+      docs: ${{ steps.changes.outputs.docs || 'true' }}
+      core: ${{ steps.changes.outputs.core || 'true' }}
+      console: ${{ steps.changes.outputs.console || 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - uses: dorny/paths-filter@v4
         id: changes
+        if: github.event_name != 'merge_group'
         with:
           filters: |
             docs:
@@ -62,18 +75,37 @@ jobs:
               - '.github/workflows/ci.yml'
 
   test:
-    name: Test Core
+    # Sharded 2-way BY PACKAGE: a core-touching PR ran the affected suite
+    # ~11½ min on one 4-vCPU runner — the longest pole in the whole workflow.
+    # scripts/partition-test-shards.mjs splits the package list into two
+    # deterministic, test-file-count-balanced halves (573/572 at the time of
+    # writing) and each shard runs its half through turbo. NOT the dogfood
+    # job's vitest --shard passthrough, deliberately: that works for dogfood
+    # because it is ONE package with ~60 files, but applied workspace-wide,
+    # vitest 4 hard-fails every package with fewer test files than the shard
+    # count — and `--passWithNoTests` converts the failure into running NOTHING
+    # on either shard (three packages have exactly one test file today). See
+    # the script header for the verification.
+    #
+    # Branch protection requires the bare "Test Core" context, which a matrix
+    # can never publish again — the test-gate job below carries that name
+    # (the #3622 lesson; see dogfood-gate).
+    name: Test Core (${{ matrix.shard }}/2)
     needs: filter
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test steps is the primary
     # detector for a #4250-style hang and fires well before this. 30 min is
-    # 2.5-3× a normal run (main ~9.5 min, PR ~12 min), with margin for a cold
-    # Turbo cache; the old 45 left a hung job "running" for half an hour past
-    # any plausible healthy finish.
+    # ~4× a normal sharded run (~6-7 min), with margin for a cold Turbo cache;
+    # the old 45 left a hung job "running" for half an hour past any plausible
+    # healthy finish.
     timeout-minutes: 30
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Checkout repository
@@ -110,14 +142,19 @@ jobs:
       # the repo's 10 GB Actions cache pool and evicted the main-branch seeds —
       # observed as sudden cold-cache spikes (Build Core 51s → 4m30s). PRs fall
       # back to main's entries via the prefix restore-keys; only main pushes
-      # save (the "Save Turbo cache" step at the end of the job).
+      # save (the "Save Turbo cache" step at the end of the job). Shard-scoped
+      # key: each shard builds/tests a different half of the workspace (same
+      # pattern as dogfood). Jobs that used to fall back to this job's
+      # namespace fall back to Build Core now — neither single shard builds a
+      # superset anymore.
       - name: Restore Turbo cache
         uses: actions/cache/restore@v6
         with:
           path: .turbo/cache
-          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-
             ${{ runner.os }}-turbo-${{ github.job }}-
 
       - name: Install dependencies
@@ -126,16 +163,41 @@ jobs:
       # PRs: only test packages affected by the diff against the PR base.
       # spec sits at the root of the dependency graph, so spec-touching PRs
       # still run (close to) everything — but the many PRs that don't touch
-      # spec skip the bulk of the 75-package matrix.
-      # --concurrency=4: turbo's default (10) oversubscribes the 4-vCPU
-      # hosted runner; matching the core count bounds peak memory and the
-      # job is CPU-bound anyway.
+      # spec skip the bulk of the 75-package matrix. Push to main and
+      # merge-queue builds partition the FULL package list instead: the queue
+      # result IS the next main, so it gets main's validation, not the PR's
+      # affected-only subset. (Spec's suite runs here plain / uninstrumented;
+      # the coverage-instrumented pass lives in the nightly coverage-nightly
+      # workflow.)
+      #
       # !@objectstack/dogfood: the ~7½-minute dogfood suite is the dedicated
       # Dogfood job's whole purpose, and both jobs run under the same `core`
       # filter — without the exclusion every core PR executed the suite twice
-      # in parallel, and it dominated this job's critical path. The exclusion
-      # subtracts from the affected set (verified: turbo unions inclusive
-      # filters, then applies `!` negations to the result).
+      # in parallel, and it dominated this job's critical path.
+      #
+      # `turbo ls` is experimental; the partition script asserts its output
+      # shape loudly so an upgrade that changes it turns into a red step
+      # naming the cause, not a silently empty shard. An EMPTY shard file must
+      # short-circuit the test step below: `turbo run test` with zero --filter
+      # args runs the entire workspace.
+      - name: Compute this shard's package set
+        env:
+          TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pnpm exec turbo ls --affected --output=json > "$RUNNER_TEMP/turbo-ls.json"
+          else
+            pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
+          fi
+          node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
+            --shard ${{ matrix.shard }}/2 --exclude @objectstack/dogfood \
+            > "$RUNNER_TEMP/shard-packages.txt"
+          echo "Packages on this shard:"
+          cat "$RUNNER_TEMP/shard-packages.txt"
+
+      # --concurrency=4: turbo's default (10) oversubscribes the 4-vCPU
+      # hosted runner; matching the core count bounds peak memory and the
+      # job is CPU-bound anyway.
       # run-with-stall-guard replaces the old `… 2>&1 | tee $log` +
       # `set -o pipefail` idiom: the guard tees combined output to the log
       # itself and propagates the suite's real exit status, so there is no
@@ -144,7 +206,7 @@ jobs:
       # job sits in_progress. Silence past --stall-minutes is declared a
       # stall — a labeled red naming the last output line — instead of a
       # 20-minute wait for a human (or the job timeout) to notice. 10 min is
-      # ~5× the longest healthy quiet gap and still under half a normal run.
+      # ~5× the longest healthy quiet gap.
       #
       # NODE_OPTIONS arms every node process (vitest workers included) to dump
       # a diagnostic report on SIGUSR2; on a stall the guard signals the frozen
@@ -152,32 +214,19 @@ jobs:
       # a process whose event loop is alive, and a named "no report = blocked
       # loop" verdict for one that is sync-spinning. The next #4250 occurrence
       # identifies its own culprit instead of costing a diagnosis.
-      - name: Run affected tests (PR)
-        if: github.event_name == 'pull_request'
-        env:
-          TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
-          NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
-        run: |
-          mkdir -p "$RUNNER_TEMP/stall-reports"
-          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 \
-            --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test --affected --filter=!@objectstack/dogfood --concurrency=4
-
-      # Push to main: full run. Spec's suite runs here plain (uninstrumented);
-      # the coverage-instrumented pass moved to the nightly Spec Coverage
-      # workflow (coverage-nightly.yml) — instrumentation added minutes to
-      # every main push for a trend artifact that is consulted occasionally at
-      # best. Dogfood is excluded for the same reason as the PR step: the
-      # Dogfood job runs it.
-      - name: Run all tests (push)
-        if: github.event_name == 'push'
+      - name: Run this shard's tests
         env:
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
         run: |
+          if [ ! -s "$RUNNER_TEMP/shard-packages.txt" ]; then
+            echo "No packages on this shard — nothing to test."
+            exit 0
+          fi
+          FILTERS=$(sed 's/^/--filter=/' "$RUNNER_TEMP/shard-packages.txt" | tr '\n' ' ')
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test --filter=!@objectstack/dogfood --concurrency=4
+            pnpm turbo run test $FILTERS --concurrency=4
 
       # Runs even when the suite failed — that is when it earns its keep. A red
       # suite plus a GREEN completeness check means real test failures; a red
@@ -195,25 +244,52 @@ jobs:
       # A stall's full diagnostic reports (JS stacks, libuv handles, heap
       # summary per process) outlive the in-log digest — keep them so a #4250
       # occurrence can be dissected offline. Free when nothing stalled: the
-      # directory is empty and if-no-files-found skips the upload.
+      # directory is empty and if-no-files-found skips the upload. Shard-scoped
+      # name so the two matrix jobs don't collide.
       - name: Upload stall diagnostic reports
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: stall-reports-test-core
+          name: stall-reports-test-core-${{ matrix.shard }}
           path: ${{ runner.temp }}/stall-reports/
           if-no-files-found: ignore
           retention-days: 14
 
       # Seed the shared Turbo cache from main only (see the restore step
       # above). always(): keep the seed fresh even when a test fails, matching
-      # the old actions/cache post-step behavior.
+      # the old actions/cache post-step behavior. Shard-scoped key so the two
+      # matrix jobs don't collide.
       - name: Save Turbo cache (main only)
         if: always() && github.event_name == 'push'
         uses: actions/cache/save@v6
         with:
           path: .turbo/cache
-          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
+
+  test-gate:
+    # Stable required-check name for the sharded Test Core matrix — the exact
+    # contract dogfood-gate documents below (#3622): branch protection requires
+    # the bare "Test Core" context, and once the job is a matrix that context
+    # can never appear again, deadlocking every PR. Keeping the contract HERE
+    # means a future shard-count change cannot deadlock the repo. See
+    # dogfood-gate for why `cancelled` passes and why this must not be
+    # `if: !cancelled()` on the job.
+    name: Test Core
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Verify test shard results
+        run: |
+          result="${{ needs.test.result }}"
+          echo "test matrix aggregate result: $result"
+          case "$result" in
+            success|skipped|cancelled) echo "Test Core gate satisfied ($result)." ;;
+            *) echo "::error::Test Core shards did not pass (aggregate result: $result)"; exit 1 ;;
+          esac
 
 
   # ── Temporal conformance against live, non-UTC servers (ADR-0053 D-A3) ─────
@@ -317,9 +393,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-v3-
 
-      # Restore-only (same policy as every other job); falls back to the Test
-      # Core namespace because that job builds a superset of what this one
-      # needs and its cache is seeded from main.
+      # Restore-only (same policy as every other job); falls back to the Build
+      # Core namespace because that job builds every package (a superset of the
+      # build closure this one needs) and its cache is seeded from main. It
+      # used to fall back to Test Core, but that namespace is per-shard now and
+      # neither single shard builds a superset.
       - name: Restore Turbo cache
         uses: actions/cache/restore@v6
         with:
@@ -327,8 +405,8 @@ jobs:
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-turbo-${{ github.job }}-
-            ${{ runner.os }}-turbo-test-${{ github.ref_name }}-
-            ${{ runner.os }}-turbo-test-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -424,8 +502,9 @@ jobs:
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test step is the primary detector
-    # for a #4250-style hang (see Test Core). 30 min is ~2.5× the slower shard
-    # (shard 1 runs the verify-CLI step too, ~12 min all in).
+    # for a #4250-style hang (see Test Core). 30 min is ~4× a shard (~7 min;
+    # the verify-CLI pass that used to ride shard 1 is its own parallel job
+    # now — dogfood-verify below).
     timeout-minutes: 30
     permissions:
       contents: read
@@ -523,21 +602,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      # Replaces the former auto-verify dogfood tests: runs the published
-      # `objectstack verify` engine over each example app through the CLI —
-      # auto-derived CRUD round-trip fidelity + the cross-owner RLS invariant.
-      # Exits non-zero on a real runtime failure, so it gates like the tests did.
-      # Not shard-dependent, so shard 1 alone runs it.
-      - name: Verify example apps via the `objectstack verify` CLI
-        if: matrix.shard == 1
-        run: |
-          pnpm turbo run build --filter=@objectstack/cli
-          for app in examples/app-crm examples/app-showcase; do
-            echo "::group::objectstack verify $app --rls"
-            OS_LOG_LEVEL=error node packages/cli/bin/run.js verify --app "$app/objectstack.config.ts" --rls
-            echo "::endgroup::"
-          done
-
       # Seed the shared Turbo cache from main only (see the restore step
       # above); shard-scoped key so the two matrix jobs don't collide.
       - name: Save Turbo cache (main only)
@@ -546,6 +610,91 @@ jobs:
         with:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
+
+  # Replaces the former auto-verify dogfood tests: runs the published
+  # `objectstack verify` engine over each example app through the CLI —
+  # auto-derived CRUD round-trip fidelity + the cross-owner RLS invariant.
+  # Exits non-zero on a real runtime failure, so it gates like the tests did.
+  #
+  # Its own job, not a rider on dogfood shard 1: the ~4½-minute pass ran
+  # SERIALLY after that shard's tests, making shard 1 (~12 min) nearly twice
+  # shard 2 (~6½ min) — the second-longest pole in the workflow for no
+  # parallelism reason. It reports through dogfood-gate (below) rather than
+  # its own required context, so the branch-protection contract is unchanged.
+  dogfood-verify:
+    name: Dogfood Verify CLI
+    needs: filter
+    if: needs.filter.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Verify pnpm version
+        run: pnpm --version
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # Restore-only, with no save step at all (the console-pin pattern): the
+      # job's only build is the CLI closure, and the build-core fallbacks are
+      # the entries that actually hit — that job builds a superset and is
+      # seeded from main.
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Build the CLI plus BOTH example apps' full dependency closures (the
+      # `pkg...` filter form). When this pass rode dogfood shard 1 the whole
+      # workspace was already built by the test step, so `--filter=@objectstack/cli`
+      # alone sufficed; standalone, the bundled objectstack.config imports
+      # runtime packages (e.g. @objectstack/connector-mcp for app-showcase)
+      # whose dist nothing here had built — ERR_MODULE_NOT_FOUND at verify
+      # time. The closure syntax keeps this self-maintaining as app deps move.
+      - name: Verify example apps via the `objectstack verify` CLI
+        run: |
+          pnpm turbo run build \
+            --filter=@objectstack/cli... \
+            --filter=@objectstack/example-crm... \
+            --filter=@objectstack/example-showcase... \
+            --concurrency=4
+          for app in examples/app-crm examples/app-showcase; do
+            echo "::group::objectstack verify $app --rls"
+            OS_LOG_LEVEL=error node packages/cli/bin/run.js verify --app "$app/objectstack.config.ts" --rls
+            echo "::endgroup::"
+          done
 
   dogfood-gate:
     # Stable required-check name for a SHARDED job (#3622 follow-up).
@@ -558,10 +707,14 @@ jobs:
     # branch protection; keeping the contract HERE instead means a future
     # shard-count change cannot deadlock the repo a second time.
     #
+    # Also aggregates dogfood-verify (the CLI pass that used to ride shard 1),
+    # so the one required context still covers everything it covered before
+    # the split.
+    #
     # `if: always()` + result inspection so a legitimately skipped matrix (the
     # `filter` job says no core paths changed) still satisfies the gate.
     name: Dogfood Regression Gate
-    needs: dogfood
+    needs: [dogfood, dogfood-verify]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -585,10 +738,16 @@ jobs:
           # Deliberately NOT `if: !cancelled()` on the job instead: a skipped
           # gate publishes no required-check context on the SHA, which is the
           # #3622 merge-deadlock all over again.
-          case "$result" in
-            success|skipped|cancelled) echo "Dogfood gate satisfied ($result)." ;;
-            *) echo "::error::Dogfood shards did not pass (aggregate result: $result)"; exit 1 ;;
-          esac
+          verify_result="${{ needs['dogfood-verify'].result }}"
+          echo "dogfood-verify result: $verify_result"
+          fail=0
+          for r in "dogfood:$result" "dogfood-verify:$verify_result"; do
+            case "${r#*:}" in
+              success|skipped|cancelled) echo "Gate leg ${r%%:*} satisfied (${r#*:})." ;;
+              *) echo "::error::Gate leg ${r%%:*} did not pass (result: ${r#*:})"; fail=1 ;;
+            esac
+          done
+          exit "$fail"
 
   build-core:
     name: Build Core

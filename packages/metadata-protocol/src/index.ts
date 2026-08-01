@@ -15,6 +15,15 @@ export type {
   ExtendedOperation,
 } from './sys-metadata-repository.js';
 
+export { formatStoredMigrationReport, storedMigrationClean } from './stored-migration.js';
+export type {
+  StoredFlowCanonicalization,
+  StoredMigrationNotice,
+  StoredMigrationOutcome,
+  StoredMigrationReport,
+  StoredMigrationRow,
+} from './stored-migration.js';
+
 export {
   computeMetadataDiagnostics,
   computeViewReferenceDiagnostics,

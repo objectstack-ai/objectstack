@@ -240,14 +240,12 @@ const stats = await cache.stats();
 await cache.resetStats();
 ```
 
-## REST API Endpoints
+## No HTTP Surface
 
-```
-GET    /api/v1/cache/stats               # Get cache statistics
-POST   /api/v1/cache/clear                # Clear cache
-DELETE /api/v1/cache/:key                 # Delete specific key
-DELETE /api/v1/cache/pattern/:pattern     # Delete by pattern
-```
+This service is kernel-internal: it is consumed in-process via the service
+registry (`kernel.getService('cache')`) and mounts **no** REST routes.
+Discovery advertises no route for the `cache` slot and reports
+`handlerReady: false` (ADR-0076 D12, #4318).
 
 ## Best Practices
 

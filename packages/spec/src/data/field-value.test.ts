@@ -27,6 +27,7 @@ import {
   MULTI_CAPABLE_TYPES,
   isMultiValueField,
   valueSchemaFor,
+  referenceTargetOf,
 } from './field-value.zod';
 
 const ok = (def: Parameters<typeof valueSchemaFor>[0], v: unknown, form?: 'stored' | 'expanded') =>
@@ -46,6 +47,44 @@ describe('semantic type classes', () => {
     ]) {
       for (const t of cls) expect(all).toContain(t);
     }
+  });
+
+  it('`referenceTargetOf` reads an author-written target, and the implied one for `user`', () => {
+    // The author-chosen half.
+    expect(referenceTargetOf({ type: 'lookup', reference: 'accounts' })).toBe('accounts');
+    expect(referenceTargetOf({ type: 'master_detail', reference: 'orders' })).toBe('orders');
+    expect(referenceTargetOf({ type: 'tree', reference: 'categories' })).toBe('categories');
+
+    // `user`'s target is a CONSTANT OF THE TYPE: `Field.user()` takes no target
+    // argument and writes `reference: 'sys_user'` itself, so a field authored
+    // without it is fully specified, not under-specified (cloud#983).
+    expect(referenceTargetOf({ type: 'user' })).toBe('sys_user');
+    expect(referenceTargetOf({ type: 'user', reference: 'sys_user' })).toBe('sys_user');
+    // An explicit target still wins — nothing here overrides authored metadata.
+    expect(referenceTargetOf({ type: 'user', reference: 'my_people' })).toBe('my_people');
+
+    // Genuinely targetless: the types whose target IS author-chosen, unwritten.
+    expect(referenceTargetOf({ type: 'lookup' })).toBeUndefined();
+    expect(referenceTargetOf({ type: 'master_detail' })).toBeUndefined();
+    expect(referenceTargetOf({ type: 'tree' })).toBeUndefined();
+    // Not a reference type at all, and non-field inputs.
+    expect(referenceTargetOf({ type: 'text', reference: 'accounts' })).toBeUndefined();
+    expect(referenceTargetOf(undefined)).toBeUndefined();
+    expect(referenceTargetOf('user')).toBeUndefined();
+  });
+
+  it('every reference type either implies a target or admits one — no third state', () => {
+    // Guards the set from drifting: adding a reference type without deciding
+    // which half it belongs to would leave `referenceTargetOf` silently
+    // answering `undefined` for a fully-authored field.
+    for (const t of REFERENCE_VALUE_TYPES) {
+      const implied = referenceTargetOf({ type: t });
+      const authored = referenceTargetOf({ type: t, reference: 'somewhere' });
+      expect(authored, `authored target for ${t}`).toBe('somewhere');
+      expect(implied === undefined || typeof implied === 'string', `implied target for ${t}`).toBe(true);
+    }
+    expect([...REFERENCE_VALUE_TYPES].filter((t) => referenceTargetOf({ type: t }) !== undefined))
+      .toEqual(['user']);
   });
 
   it('every FieldType lands in at least one value class (no unclassified types)', () => {
@@ -152,6 +191,33 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
   it('expanded form admits the in-place $expand record object for references', () => {
     ok({ type: 'lookup' }, { id: 'acc_1', name: 'Acme' }, 'expanded');
     ok({ type: 'lookup' }, 'acc_1', 'expanded'); // unresolvable ids stay ids
+  });
+
+  it('#4455: a SERIALIZED embedded record is not an id, in either form', () => {
+    // The shape the ADR-0104 D1 scan's own header names — "a `lookup` holding
+    // an expanded record object" — as it actually reaches a SQL deployment: as
+    // JSON text in a TEXT column. `z.string().min(1)` accepted it, so the scan
+    // reported clean on the one case it exists to find.
+    for (const type of ['lookup', 'master_detail', 'user', 'tree']) {
+      bad({ type }, '{"id":"acc_1","name":"embedded"}');
+      bad({ type }, '  {"id":"acc_1"}'); // padded — same value, still not an id
+      bad({ type }, '[{"id":"acc_1"}]'); // the multi-value flavour
+      // …and the expanded read form must not launder it either: `$expand`
+      // produces an OBJECT, never its serialization.
+      bad({ type }, '{"id":"acc_1","name":"embedded"}', 'expanded');
+    }
+    bad({ type: 'lookup', multiple: true }, ['acc_1', '{"id":"acc_2"}']);
+
+    // Narrow on purpose: the rejection is "this is an embedded record", not an
+    // id alphabet. A reference id is whatever the target object's key holds —
+    // including an external key an ADR-0015 federated datasource supplies — so
+    // every one of these stays valid.
+    ok({ type: 'lookup' }, 'acc_synthetic_0001');
+    ok({ type: 'lookup' }, '0e2f4c1a-9b7d-4e3f-8a1b-2c3d4e5f6a7b');
+    ok({ type: 'lookup' }, 'CB0-2026-0001');
+    ok({ type: 'lookup' }, 'SFDC:001xx000003DGb2AAG'); // external key, punctuated
+    ok({ type: 'lookup' }, 'ops/eu-west/tenant-7'); // and pathy
+    ok({ type: 'user' }, 'usr_system');
   });
 
   it('D3 wave 2: the STORED media form is an opaque sys_file id', () => {

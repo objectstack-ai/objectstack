@@ -2,7 +2,7 @@
 
 import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
-import type { AutomationEngine } from '../engine.js';
+import { DEFAULT_BRANCH_LABEL, type AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
 
 /**
@@ -26,16 +26,55 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
                 description: 'Branch execution based on conditions.',
                 icon: 'git-branch', category: 'logic', source: 'builtin',
             }),
+            /**
+             * A decision routes one of two ways, and it must not pretend to the
+             * other (#4414):
+             *
+             *  • It DECLARED `config.conditions` → the first matching entry's
+             *    `label` is the branch, and traversal restricts itself to the
+             *    out-edge carrying that label. If none matched, the branch is
+             *    {@link DEFAULT_BRANCH_LABEL} — claimed by an out-edge labelled
+             *    `'default'` or marked `isDefault: true`.
+             *  • It declared NONE → it is a plain gateway: the branching lives on
+             *    the out-edges (`condition` / `isDefault`) and the node reports
+             *    **no** branch. It used to report `'default'` regardless — a
+             *    label no out-edge in this repo ever carried — so every decision
+             *    node silently fell back to "consider every out-edge", which is
+             *    the state #4414 measured (0 label matches across all example
+             *    apps) and, on an unconditional sibling, ran both branches.
+             */
             async execute(node, variables, _context) {
                 const config = node.config as Record<string, unknown> | undefined;
                 const conditions = (config?.conditions ?? []) as Array<{ label: string; expression: string }>;
+                if (conditions.length === 0) return { success: true };
 
                 for (const cond of conditions) {
-                    if (engine.evaluateCondition(cond.expression, variables)) {
+                    // `DecisionConditionSchema.expression` is declared BARE CEL
+                    // (ADR-0032), so pin the dialect rather than let it be
+                    // inferred. #4453 made `evaluateCondition` sniff a bare
+                    // string — CEL unless it contains a `{var}` hole — which
+                    // already fixes the #4414 case this wrap was added for.
+                    //
+                    // The wrap still earns its place, for a different reason: the
+                    // sniff would route a BRACED predicate to the template
+                    // dialect and happily run it, while #4439 put this slot on
+                    // the expression ledger as a `predicate`, so `registerFlow`
+                    // and `objectstack validate` reject exactly that spelling.
+                    // Without the explicit envelope the two would disagree —
+                    // build refuses what run time accepts, the worst of both.
+                    // An explicit `dialect: 'cel'` keeps braces the #1491 trap
+                    // here, which is what the contract says and what the
+                    // validators enforce.
+                    //
+                    // Unlike `edge.condition` this slot has no `ExpressionInput`
+                    // envelope of its own to carry the dialect — the decision
+                    // descriptor is deliberately schemaless — so the executor
+                    // supplies it.
+                    if (engine.evaluateCondition({ dialect: 'cel', source: cond.expression }, variables)) {
                         return { success: true, branchLabel: cond.label };
                     }
                 }
-                return { success: true, branchLabel: 'default' };
+                return { success: true, branchLabel: DEFAULT_BRANCH_LABEL };
             },
         });
 

@@ -80,6 +80,7 @@ export {
   REACT_CHART_FIELD_UNKNOWN,
   REACT_CHART_AGGREGATE_INVALID,
   REACT_CHART_AXIS_UNKNOWN,
+  REACT_BLOCK_NEEDS_RECORD_CONTEXT,
 } from './validate-react-page-props.js';
 export type { ReactPropFinding, ReactPropSeverity } from './validate-react-page-props.js';
 export { validatePageSourceStyling, PAGE_SOURCE_CLASSNAME } from './validate-page-source-styling.js';
@@ -205,6 +206,9 @@ export type {
 
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
 export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';
+
+export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
+export type { ActionLocationsFinding, ActionLocationsSeverity } from './validate-action-locations.js';
 
 export { validatePageFieldBindings, PAGE_FIELD_UNKNOWN } from './validate-page-field-bindings.js';
 export type { PageFieldFinding, PageFieldSeverity } from './validate-page-field-bindings.js';

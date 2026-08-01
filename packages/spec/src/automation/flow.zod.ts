@@ -33,12 +33,12 @@ export const FlowNodeAction = z.enum([
   'get_record',         // CRUD: Get/Query
   'http',               // Outbound HTTP callout (ADR-0018 M3) — canonical; outbox-backed when durable
   'notify',             // Outbound notification (ADR-0012) — dispatched via the messaging service
-  'script',             // Custom action: a built-in side-effect (`config.actionType: 'email'|'slack'`)
-                        //   or a registered function (`config.function: 'name'` + `config.inputs`),
-                        //   resolved from `defineStack({ functions })`. (Inline `config.script` JS is
-                        //   recognized but NOT executed by the built-in runtime — no server-side
-                        //   sandbox.) A script node naming none of these is flagged at build and
-                        //   fails loudly at run time (#1870).
+  'script',             // Custom action: call the registered function named by `config.function`
+                        //   (+ `config.inputs`), resolved from `defineStack({ functions })`. The key
+                        //   is REQUIRED — a node naming no callable is flagged at build and refused
+                        //   at execute (#1870). The `actionType` dispatch branches (logger-backed
+                        //   'email'/'slack', inline `config.script`) were retired in 17 (#4343):
+                        //   use `notify` / a connector / a registered function instead.
   'screen',             // Screen / User-Input Element
   'wait',               // Delay/Sleep
   'subflow',            // Call another flow
@@ -113,9 +113,12 @@ export const FlowVariableSchema = lazySchema(() => z.object({
  *   type: "decision",
  *   label: "Is High Value?",
  *   config: {
+ *     // Bare CEL — braces are the #1491 trap and fail at registration.
+ *     // Each `label` must match an out-edge's `label` to route anywhere;
+ *     // when nothing matches, the `isDefault` out-edge is the fallback.
  *     conditions: [
- *       { label: "Yes", expression: "{amount} > 10000" },
- *       { label: "No", expression: "true" } // default
+ *       { label: "Yes", expression: "amount > 10000" },
+ *       { label: "No", expression: "true" }   // catch-all, NOT the default path
  *     ]
  *   },
  *   position: { x: 300, y: 200 }
@@ -315,11 +318,25 @@ export const FlowEdgeSchema = lazySchema(() => z.object({
 
   /**
    * Default Sequence Flow marker (BPMN Default Flow semantics).
-   * When true, this edge is taken when no sibling conditional edges match.
-   * Only meaningful on outgoing edges of decision/gateway nodes.
+   *
+   * When true, this edge is traversed only when NO sibling conditional edge of
+   * the same source node matched — the "otherwise" branch. A default edge is
+   * therefore not part of the unconditional parallel fan-out; when a conditional
+   * sibling wins, this edge's target records a `skipped` step instead.
+   *
+   * Enforced by `AutomationEngine.traverseNext` since #4414. It had promised
+   * exactly this since it was declared and had **zero readers** for as long: an
+   * author who marked the fallback edge got an ordinary unconditional edge that
+   * ran on every pass, alongside whichever branch actually matched. Combining it
+   * with `condition` on the same edge is self-contradictory (BPMN forbids a
+   * conditional default flow) and is flagged by the `os build` / `os validate`
+   * flow linter, as is a second default edge out of the same node.
    */
   isDefault: z.boolean().default(false)
-    .describe('Marks this edge as the default path when no other conditions match'),
+    .describe(
+      'BPMN default flow: traverse this edge only when no sibling conditional edge of the same '
+      + 'source node matched. Mutually exclusive with `condition`; at most one per source node.',
+    ),
 }, { error: flowEdgeUnknownKeyError }).strict());
 
 /**

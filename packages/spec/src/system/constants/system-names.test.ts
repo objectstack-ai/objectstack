@@ -78,8 +78,11 @@ describe('SystemFieldName', () => {
   it('should expose all expected field names', () => {
     expect(SystemFieldName.ID).toBe('id');
     expect(SystemFieldName.CREATED_AT).toBe('created_at');
+    expect(SystemFieldName.CREATED_BY).toBe('created_by');
     expect(SystemFieldName.UPDATED_AT).toBe('updated_at');
+    expect(SystemFieldName.UPDATED_BY).toBe('updated_by');
     expect(SystemFieldName.OWNER_ID).toBe('owner_id');
+    expect(SystemFieldName.ORGANIZATION_ID).toBe('organization_id');
     expect(SystemFieldName.TENANT_ID).toBe('tenant_id');
     expect(SystemFieldName.USER_ID).toBe('user_id');
     expect(SystemFieldName.DELETED_AT).toBe('deleted_at');
@@ -89,6 +92,30 @@ describe('SystemFieldName', () => {
     const names: readonly string[] = Object.values(SystemFieldName);
     expect(names).toContain('id');
     expect(names).toContain('owner_id');
+  });
+
+  // The gap this table carried until #4443: `applySystemFields` injects
+  // `organization_id` as THE tenant key and `created_by` / `updated_by` as
+  // audit provenance, yet none of the three had a canonical constant — while
+  // `tenant_id`, which open-core never injects, was documented as "Tenant
+  // isolation key". Consumers hand-copying a system-field list read that as
+  // gospel and drifted: cloud#982 found three copies carrying `tenant_id`,
+  // `org_id` and `space`, none of which any injection site produces.
+  it('names every column the registry actually injects', () => {
+    const names: readonly string[] = Object.values(SystemFieldName);
+    // Mirrors applySystemFields' injection set (objectql registry). That
+    // package's own conformance test enumerates the set from the live code;
+    // this one only asserts the protocol table has a spelling for each member.
+    for (const injected of [
+      'organization_id',
+      'created_at',
+      'created_by',
+      'updated_at',
+      'updated_by',
+      'owner_id',
+    ]) {
+      expect(names, injected).toContain(injected);
+    }
   });
 });
 

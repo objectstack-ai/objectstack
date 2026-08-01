@@ -9,6 +9,7 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { HookBodySchema } from './hook-body.zod';
 
 /*
@@ -276,6 +277,14 @@ export const HookSchema = lazySchema(() => z.object({
    * - log: Log error and continue
    */
   onError: z.enum(['abort', 'log']).default('abort').describe('Error handling strategy'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  // MISSING until the registered-type invariant test was written: `hook` closed
+  // strict in the #4001 data step without declaring it, so the `_packageId` /
+  // `_provenance` that `MetadataPlugin` stamps on every registered type were
+  // REJECTED here — the same live 422 that `permission` hit on the ADR-0094
+  // overlay path before Tier-A declared them (#4001 findings log, entries 2/8).
+  ...MetadataProtectionFields,
 }, { error: hookUnknownKeyError }).strict());
 
 /**

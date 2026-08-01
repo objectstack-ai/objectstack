@@ -51,11 +51,16 @@ objects' read metadata registered **automatically at boot** — no `onEnable` /
 
 1. it is **external** (`schemaMode !== 'managed'`), **or**
 2. an object **explicitly** binds via `object.datasource === <name>`, **or**
-3. it sets **`autoConnect: true`**.
+3. it sets **`autoConnect: true`**, **or**
+4. a **`datasourceMapping` rule routes at least one object to it**.
 
-A `managed` datasource that nothing explicitly binds (e.g. only referenced by a
-`datasourceMapping` rule) stays **metadata-only** — visible but not connected — so
-existing apps are unchanged. Set `autoConnect: true` to force a live connection.
+A `managed` datasource that nothing routes to stays **metadata-only** — visible but
+not connected. Set `autoConnect: true` to force a live connection.
+
+⚠️ A `datasourceMapping` rule is **routing, not a hint**. A rule pointing at a
+datasource that cannot be connected fails the boot, and a query against a mapped
+object throws instead of silently resolving the default store. Do not declare a
+mapping you do not mean.
 
 > `onEnable` + `ctx.drivers.register(driver)` remains supported only as an escape
 > hatch for drivers built dynamically at runtime; it is idempotent with auto-connect.

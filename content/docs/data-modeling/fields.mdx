@@ -181,6 +181,24 @@ order: Field.masterDetail('order', {
 | `inlineColumns` | `array` | Optional explicit columns for the inline grid |
 | `inlineAmountField` | `string` | Optional numeric child field for the inline running total |
 
+#### Referential integrity
+
+`reference` is **enforced on write**. A create or update that sets a
+`lookup` / `master_detail` to an id with no matching row in the target object is
+rejected with `400 VALIDATION_FAILED` and a `fields[]` entry whose `code` is
+`reference_not_found` (see the [error catalog](/docs/api/error-catalog)). The
+same check runs on bulk updates.
+
+Clearing a relationship is not a dangling reference: `null`, `""` and `[]` mean
+"no link" — exactly what `deleteBehavior: 'set_null'` writes when the parent
+goes away.
+
+<Callout type="info">
+`deleteBehavior` governs what happens to *this* record when the **referenced**
+record is deleted; the integrity check above governs what may be **written**
+here in the first place. They are two halves of the same relationship contract.
+</Callout>
+
 ### File & Media Types
 
 | Type | Factory | Description |

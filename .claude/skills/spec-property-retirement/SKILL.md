@@ -244,11 +244,15 @@ Work top to bottom; each line has a gate behind it.
       `tsc` finds these for you on the tombstone route.
 - [ ] **Published skills** — `skills/*/SKILL.md` teaching the key (tables,
       `defineX` examples) — gated by `check:skill-examples` and `check:skill-refs`.
-- [ ] **Docs** — `content/docs/**` prose, tables and code blocks. Grep the key,
-      then read the surrounding files: a removed key hides in a `defineFlow`
-      example three sections from the reference table.
-- [ ] **Release notes** — the `### Dead spec clusters removed` table in
-      `content/docs/releases/v<major>.mdx` **plus** the upgrade checklist.
+- [ ] **Docs** — `content/docs/**` prose, tables and code blocks — **EXCEPT
+      `content/docs/releases/`, which a code PR must never touch** (AGENTS.md
+      Documentation Guardrails). Release notes are written centrally at release
+      time from the changesets + the D2/D3 registries; the per-PR row this list
+      used to require made `releases/v<major>.mdx` the repo's hottest conflict
+      magnet. Your changeset (next item) is the input that reaches them. For
+      the rest of `content/docs/**`: grep the key, then read the surrounding
+      files — a removed key hides in a `defineFlow` example three sections from
+      the reference table.
 - [ ] **Changeset** — `major` for `@objectstack/spec`. AGENTS.md: a breaking
       changeset must carry the FROM → TO mapping and the one-line fix; it ships
       as `CHANGELOG.md` in the npm package and is what an upgrading agent greps

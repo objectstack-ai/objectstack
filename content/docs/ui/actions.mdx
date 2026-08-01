@@ -210,9 +210,17 @@ defineView({
 ```
 
 <Callout type="info">
-Naming an action in a widget does **not** bypass location filtering — the
+Naming an action in a **widget** does not bypass location filtering — the
 engine still requires the action to declare the matching location (that's why
 `MarkDoneAction` above includes `record_section`).
+
+The **selection bar is the exception**, and the only one: an action named in a
+list view's `bulkActions` or `bulkActionDefs` is placed by that declaration,
+not by `locations`. That is what the retired `action.bulkEnabled` tombstone
+prescribes ("the multi-select toolbar is driven by the LIST VIEW's
+`bulkActions` / `bulkActionDefs`"), and it is what lets an aggregate bulk
+action — one that acts on a whole selection and has no single-record home by
+construction — exist at all.
 </Callout>
 
 ## Collect input and shape the UX

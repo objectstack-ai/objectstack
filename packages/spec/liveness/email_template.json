@@ -1,0 +1,73 @@
+{
+  "type": "email_template",
+  "_note": "EmailTemplateDefinitionSchema. THE ENTIRE AUTHORING SURFACE IS DEAD — the webhook (#3461) disconnect shape, verified 2026-08-01 by closing the graph from both ends. Enforcement end: IEmailService.sendTemplate resolves (name, locale) against sys_email_template ROWS and honors active/variables/fromOverride/replyTo from the ROW (packages/plugins/plugin-email/src/email-service.ts:404-465). Writer end: the ONLY writers of sys_email_template are the built-in auth templates plus code-constructed EmailServicePluginOptions.templates, both via upsertTemplate (packages/plugins/plugin-email/src/email-plugin.ts:358-371, :431-468) — and no bootstrapper passes `templates` (the CLI serve composition omits it, packages/cli/src/commands/serve.ts:2165). Authoring end: every door an author can use — stack `emailTemplates:` (ingested as metadata items, metadata/src/plugin.ts:89), `*.email-template.ts` files, Studio (whose nav points at the metadata-admin list, platform-objects/src/apps/studio.app.ts:331), PUT /meta — lands items in the metadata store that NOTHING reads back; the package importer even excludes emailTemplates explicitly (packages/runtime/src/domains/packages.ts:569-571). So an admin who 'fixes' the password-reset email in Studio sees it saved and users keep receiving the builtin — ADR-0078 false compliance on AUTH mail. Enforce-or-remove tracked in #4509; upsertTemplate's field mapping (email-plugin.ts:432-449) is the future materializer's mapping table, exactly as the sys_webhook column map was for webhooks (#3489 closed that one). Per the webhook precedent, ONE per-artifact authorWarn is carried on `name` rather than one per property. `protection`/_lock*/_provenance are framework overlay fields, auto-live.",
+  "props": {
+    "name": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "authorWarn": true,
+      "authorHint": "Authoring an `email_template` metadata item does NOT register it with the mail service: sendTemplate reads sys_email_template rows, and nothing materializes metadata items into that table (see the type note). Until the bridge exists, outbound-mail templates are the built-in auth set plus code-supplied EmailServicePluginOptions.templates — a template authored here saves cleanly and is never used.",
+      "note": "Would-be row mapping: `name` (the sendTemplate lookup key, email-service.ts:404)."
+    },
+    "label": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `label` (email-plugin.ts:434). Warn carried on `name` — one heads-up per artifact, not per prop."
+    },
+    "category": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `category` (email-plugin.ts:435); a Studio filter facet even on the live rows, never behavior."
+    },
+    "locale": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `locale` (email-plugin.ts:436) — on live rows this IS enforced ((name, locale) resolution with en-US fallback, email-service.ts:410-416), which is what makes the inert metadata copy so misleading."
+    },
+    "subject": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `subject` (email-plugin.ts:437); rendered with {{path}} holes by renderTemplate on live rows (email-service.ts:444)."
+    },
+    "bodyHtml": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `body_html` (email-plugin.ts:438)."
+    },
+    "bodyText": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `body_text` (email-plugin.ts:439); live rows auto-derive text from HTML when absent (htmlToText)."
+    },
+    "variables": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `variables_json` (email-plugin.ts:448); on live rows `required` variables fail sends fast (requireVars, email-service.ts:427-431). All four child keys share this verdict — not drilled."
+    },
+    "fromOverride": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `from_address`/`from_name` (email-plugin.ts:440-443). Both child keys share this verdict."
+    },
+    "replyTo": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `reply_to` (email-plugin.ts:444); honored on live rows (email-service.ts:463-464)."
+    },
+    "active": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `active` (email-plugin.ts:445); on live rows `active: false` makes sendTemplate return TEMPLATE_INACTIVE (email-service.ts:418). default(true) boolean — could not carry authorWarn even if we wanted one (the lint cannot tell author-set from schema default)."
+    },
+    "isSystem": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `is_system` (email-plugin.ts:446); on live rows it gates re-seeding (a tenant-customised row is never overwritten, email-plugin.ts:459)."
+    },
+    "description": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "would-be row mapping: `description` (email-plugin.ts:447); docs-shaped even on live rows."
+    }
+  }
+}

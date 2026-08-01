@@ -235,6 +235,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "评论"
       },
+      via_override: {
+        label: "管理员越权操作",
+        help: "为真表示该操作者只是凭特权越权路径（#3424）被放行——他们并不在该请求的待审批人名单中。"
+      },
       reassign_from: {
         label: "转出人",
         help: "被移交待审批槽位的用户（仅转签操作）"

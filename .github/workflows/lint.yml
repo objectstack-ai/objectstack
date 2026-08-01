@@ -7,6 +7,10 @@ on:
   pull_request:
     branches:
       - main
+  # Merge queue (see ci.yml for the full note): required checks must report on
+  # queue builds or the queue stalls. This workflow has no PR-only steps, so
+  # the trigger alone is enough.
+  merge_group:
 
 # Same policy as ci.yml: superseded runs on the same PR/branch waste runners
 # and delay feedback; cancel them. Push runs to main group by commit ref, so an
@@ -435,6 +439,17 @@ jobs:
       # result is "nothing found" has to prove it can still find something.
       - name: Check no exported spec type resolves to `any`
         run: pnpm --filter @objectstack/spec run check:exported-any
+
+      # Third axis on the same surface: api-surface.json shows a name on two
+      # entries but not whether the two are ONE declaration re-exported (fine)
+      # or TWO declarations sharing a name — the #4411 trap, where which type a
+      # consumer gets depends on nothing but the import path and the copy that
+      # LOOKS canonical can be the dead one. Judged by symbol identity against
+      # the built dist; existing dual-sources live in a shrink-only baseline
+      # (dual-source-exports.baseline.json), so only a NEW one fails (#4446).
+      # Self-tests first, like exported-any.
+      - name: Check no new same-name dual-source spec exports
+        run: pnpm --filter @objectstack/spec run check:dual-source-exports
 
       # Anti-drift for the skill EXAMPLES, not just the skill reference indexes
       # (#3094). The TypeScript in skills/ is the first thing an AI copies when

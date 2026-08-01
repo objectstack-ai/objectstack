@@ -117,6 +117,39 @@ export const RecalcEstimateAction = defineAction({
   refreshAfter: true,
 });
 
+/**
+ * api, AGGREGATE-dispatched — the `execution: 'aggregate'` specimen
+ * (objectui#3139). The action itself is an ordinary api action; what makes it
+ * aggregate is the VIEW's `bulkActionDefs` entry naming it with
+ * `execution: 'aggregate'` (see `task.view.ts` → `bulk_actions`). The
+ * renderer then dispatches it ONCE for the whole selection, with every
+ * selected id in `params._selectedIds` — the recalc endpoint's batch branch
+ * recomputes all of them in that single call (the "one zip for N devices"
+ * shape, minus the zip). Contrast with RecalcEstimateAction above: same
+ * endpoint, one POST per record.
+ *
+ * `locations` still has to be declared, even though the selection bar entry
+ * comes from the view. Omitting it does NOT mean "nowhere": the action:bar
+ * renderer treats a missing/empty `locations` as "every location"
+ * (objectui `action-bar.tsx`), so a locations-less action also lands on the
+ * LIST TOOLBAR — where there is no selection, so the dispatch posts no
+ * `_selectedIds` and the endpoint rejects it. Declaring `record_more` keeps
+ * the single-record entry somewhere it works (the endpoint's per-record
+ * branch, via `recordIdParam`) and off the toolbar. See objectui#3142.
+ */
+export const RecalcSelectionAction = defineAction({
+  name: 'showcase_recalc_selection',
+  label: 'Recalculate Selection',
+  icon: 'calculator',
+  objectName: task,
+  type: 'api',
+  target: '/api/v1/showcase/recalc',
+  successMessage: 'Estimates recalculated for the whole selection.',
+  locations: ['record_more'],
+  recordIdParam: 'recordId',
+  refreshAfter: true,
+});
+
 /** form — open a parameter form dialog. */
 export const LogTimeAction = defineAction({
   name: 'showcase_log_time',
@@ -335,6 +368,7 @@ export const allActions = [
   BulkReassignAction,
   QuickViewAction,
   RecalcEstimateAction,
+  RecalcSelectionAction,
   LogTimeAction,
   NewTaskAction,
   SubmitForSignoffAction,

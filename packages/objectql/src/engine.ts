@@ -17,7 +17,7 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
@@ -76,7 +76,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
+import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import { applyHaving } from './having-filter.js';
@@ -585,6 +585,19 @@ interface SummaryDescriptor {
 // on every build, so the seven consumer-local surface declarations the contract
 // replaced can never silently drift from the engine again. IObjectQLEngine
 // extends IDataEngine, so the old claim rides along.
+/**
+ * [#4441] "The caller did not name a record here."
+ *
+ * `null` / `undefined` / `''` mean NO LINK — exactly what
+ * `deleteBehavior: 'set_null'` writes — and an empty array is the multi-value
+ * spelling of the same thing. None of them is an id to resolve.
+ */
+function isEmptyReferenceValue(v: unknown): boolean {
+  if (v === null || v === undefined || v === '') return true;
+  if (Array.isArray(v)) return v.length === 0 || v.every((e) => e === null || e === undefined || e === '');
+  return false;
+}
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -1947,6 +1960,153 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#4441] Referential integrity on the WRITE path: a `lookup` (or any
+   * reference-typed field) may not be given an id that exists in no row of the
+   * object it declares.
+   *
+   * The field metadata is unambiguous — `{"type":"lookup","required":true,
+   * "reference":"sys_permission_set"}` — and the DELETE side already reasons
+   * about the edge (`deleteBehavior: 'set_null'`). Only the insert side never
+   * checked, so `POST /data/sys_position_permission_set
+   * {"permission_set_id":"ps_does_not_exist_at_all"}` created the row.
+   *
+   * On the RBAC link tables that is a security-surface record that resolves to
+   * nothing: an administrator auditing permissions sees a binding whose target
+   * cannot be inspected, and the audience-anchor gate has to resolve that very
+   * set to evaluate the grant — so a dangling row is an unevaluable gate input,
+   * not merely an untidy one.
+   *
+   * ## Scope, deliberately narrow
+   *
+   * - **Caller-supplied keys only.** Server stamps (`owner_id`,
+   *   `organization_id`, `created_by`/`updated_by`) are lookups too; they are
+   *   written by hooks and middleware, not by the request, and re-validating
+   *   them here would turn a platform stamp into a caller-facing rejection.
+   * - **Non-system writes only**, like every other write-path guard in this
+   *   engine (`stripReadonlyFields`, `stripReadonlyForInsert`). Seed replay,
+   *   package install and boot-time provisioning legitimately write rows in an
+   *   order that resolves only once the batch completes; failing them closed
+   *   would turn an ordering detail into a boot failure. This leaves a real
+   *   residual — an `isSystem` caller can still write a dangling reference —
+   *   which is recorded on the issue rather than silently accepted.
+   * - **Empty values are not references.** `null` / `undefined` / `''` mean
+   *   "no link", which is what `deleteBehavior: 'set_null'` produces.
+   * - **Already-expanded objects are skipped.** A read round-trip can hand back
+   *   `{id, name, …}` in the slot; that is not an id write.
+   *
+   * ## Why the probe is unscoped
+   *
+   * Existence is a fact about the database, not about the caller's visibility —
+   * the same distinction the #4435 existence probe turns on. A scoped probe
+   * would refuse a link to a permission set the caller cannot READ, which is
+   * ordinary in an RLS-scoped deployment and would make the platform's own
+   * admin flows fail. Whether the caller may create the binding at all is the
+   * RBAC/RLS layer's decision, made where it already is.
+   *
+   * Fails OPEN when the target cannot be checked (unregistered object, no
+   * driver, a probe that throws): an integrity check that cannot run must not
+   * invent a rejection, and the alternative — refusing every write to an object
+   * whose target lives on an unreachable datasource — converts a connectivity
+   * problem into data loss.
+   */
+  private async assertReferencesResolve(
+    schema: any,
+    data: Record<string, unknown> | null | undefined,
+    supplied: Record<string, unknown> | null | undefined,
+    context: any,
+    msgCtx?: { locale?: string; translate?: any; objectName?: string },
+  ): Promise<void> {
+    if (context?.isSystem) return;
+    const fields = schema?.fields;
+    if (!fields || !data) return;
+
+    const failures: any[] = [];
+    for (const name of Object.keys(fields)) {
+      // A `readonly` field is never the caller's to answer for — BY
+      // CONSTRUCTION, not by exemption.
+      //
+      // `stripReadonlyFields` removes a non-system caller's value from a
+      // readonly field before the write, and the create ingress does the same
+      // (`stripReadonlyForInsert`, #3043). So any value still sitting in one at
+      // this point was written by the PLATFORM, which puts it outside this
+      // check's own stated scope ("the reference the caller named").
+      //
+      // Found by the dogfood gate rather than by reasoning: `sys_metadata_history.
+      // recorded_by` is `Field.lookup('sys_user', { readonly: true })` that the
+      // metadata repository fills with `actor ?? 'system'` — a SENTINEL STRING,
+      // not a user id, on a write that does not carry `isSystem`. Checking it
+      // rejected ordinary metadata authoring (package create / publish / clone).
+      // The sentinel-in-a-lookup is a real modelling wart and is filed
+      // separately; it is not this change's to fix, and rejecting the
+      // platform's own write is not the way to report it.
+      //
+      // This does NOT weaken #4441: the fields the issue names —
+      // `sys_position_permission_set.permission_set_id` and
+      // `showcase_task.project` — are ordinary author-facing lookups with no
+      // `readonly`, and both stay enforced (pinned in the unit suite).
+      if (fields[name]?.readonly === true) continue;
+      // Only a value the CALLER actually supplied is theirs to answer for.
+      //
+      // Key presence is not enough: a form serializes an unpicked control as
+      // an explicit `null`, and `applyFieldDefaults` then fills it from
+      // `defaultValue` — including the `current_user` token (#2706). The key is
+      // in the payload, but the ID that lands is the PLATFORM's, so validating
+      // it would report a server-derived value as the caller's bad reference
+      // (and reject a perfectly ordinary insert against a driver that has no
+      // `sys_user` row for the acting principal).
+      //
+      // So the value read for the check comes from the post-normalization
+      // `data` (multi-value strings are already split by then), while WHETHER
+      // to check is decided by the caller's own raw value being non-empty.
+      if (!supplied || isEmptyReferenceValue((supplied as Record<string, unknown>)[name])) continue;
+      if (!(name in data)) continue;
+      const def = fields[name];
+      const target = referenceTargetOf(def);
+      if (!target) continue;
+      const raw = (data as Record<string, unknown>)[name];
+      const values = Array.isArray(raw) ? raw : [raw];
+      for (const v of values) {
+        if (v === null || v === undefined || v === '') continue;
+        if (typeof v === 'object') continue;
+        const resolved = await this.referenceExists(target, v);
+        if (resolved === false) {
+          failures.push(buildFieldError(
+            {
+              field: name,
+              code: 'reference_not_found',
+              def,
+              value: String(v),
+              constraint: { target },
+            },
+            msgCtx as any,
+          ));
+        }
+      }
+    }
+    if (failures.length > 0) throw new ValidationError(failures);
+  }
+
+  /**
+   * Does `id` name a row in `target`? `false` only when the probe RAN and found
+   * nothing; `null` when it could not run at all (see the fail-open note on
+   * {@link assertReferencesResolve}).
+   */
+  private async referenceExists(target: string, id: unknown): Promise<boolean | null> {
+    try {
+      const resolved = this.resolveObjectName(target);
+      if (!this._registry.getObject(resolved)) return null;
+      const row = await this.findOne(resolved, {
+        where: { id },
+        fields: ['id'],
+        context: { isSystem: true },
+      } as any);
+      return !!row;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Register the crypto provider that backs `secret`-typed fields.
    *
    * When set, the engine encrypts secret fields on write (storing ciphertext in
@@ -2205,13 +2365,45 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     // 2. Check datasourceMapping rules
+    //
+    // A rule that MATCHES is a routing decision, not a hint (#4462). It used to
+    // fall through to steps 3-5 whenever the named datasource had no live
+    // driver, which put an object's rows in the DEFAULT store while every
+    // signal said otherwise: boot succeeded, `/ready` answered 200, the
+    // datasource name appeared nowhere in the log, and the write returned 201.
+    // An operator who routes an object to Postgres and gets the URL wrong finds
+    // out by going to look in Postgres and finding it empty.
+    //
+    // `default` is the one name that legitimately resolves onward: the default
+    // driver keeps its NATURAL name (#3826), so `drivers.has('default')` is
+    // false by construction and step 5 is how routing to it works.
     const mappedDatasource = this.resolveDatasourceFromMapping(objectName, object);
-    if (mappedDatasource && this.drivers.has(mappedDatasource)) {
-      this.logger.debug('Resolved datasource from mapping', {
-        object: objectName,
-        datasource: mappedDatasource
-      });
-      return this.drivers.get(mappedDatasource)!;
+    if (mappedDatasource && mappedDatasource !== 'default') {
+      if (this.drivers.has(mappedDatasource)) {
+        this.logger.debug('Resolved datasource from mapping', {
+          object: objectName,
+          datasource: mappedDatasource
+        });
+        return this.drivers.get(mappedDatasource)!;
+      }
+      // Same three-way diagnosis as an explicit `object.datasource` binding —
+      // the two are the same promise made in two places, so they owe the reader
+      // the same answer.
+      const unavailable = this.unavailableDatasources.get(mappedDatasource);
+      if (unavailable) {
+        throw new DatasourceUnavailableError(
+          mappedDatasource,
+          objectName,
+          unavailable.kind,
+          unavailable.publicDetail,
+        );
+      }
+      throw new Error(
+        `[ObjectQL] Datasource '${mappedDatasource}' mapped for object '${objectName}' is not registered. ` +
+        `A datasourceMapping rule routes this object to it, so falling back to the default store would ` +
+        `write the object's data to a different database than the one it declares. Fix the datasource ` +
+        `configuration, or remove the mapping rule.`,
+      );
     }
 
     // 3. Lifecycle-class separation (ADR-0057 §3.6): high-frequency
@@ -2253,6 +2445,26 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     throw new Error(`[ObjectQL] No driver available for object '${objectName}'`);
+  }
+
+  /**
+   * Which datasource do the mapping rules route `objectName` to, if any?
+   *
+   * The PUBLIC face of {@link resolveDatasourceFromMapping}, added for the boot
+   * path (#4462): the datasource-connection service must connect the
+   * datasources a mapping actually routes objects to, and it must learn which
+   * those are from the same resolver the query path uses. A second
+   * implementation of "does this rule match?" living in the connection service
+   * would drift by one clause and produce the worst of both postures — a
+   * datasource connected that routing does not use, or routed to and never
+   * connected, which is the defect itself.
+   *
+   * Returns `null` when no rule matches, and the datasource name (including
+   * `'default'`) when one does. Rule matching only — an explicit
+   * `object.datasource` binding outranks this and is not consulted here.
+   */
+  resolveMappedDatasource(objectName: string): string | null {
+    return this.resolveDatasourceFromMapping(objectName, this._registry.getObject(objectName));
   }
 
   /**
@@ -2965,10 +3177,18 @@ export class ObjectQL implements IObjectQLEngine {
       // declared it expandable. Reading the shared set is what stops the
       // protocol's expand gate (which validates against the same set) from ever
       // admitting a field this loop then silently skips.
-      if (!fieldDef || !fieldDef.reference) continue;
+      //
+      // [cloud#983] The TARGET comes from `referenceTargetOf` for that same
+      // anti-drift reason. A raw `fieldDef.reference` read made `{ type:
+      // 'user' }` (no `reference`) targetless here AND at the gate — but
+      // `user`'s target is fixed BY THE TYPE (`sys_user`; `Field.user()` takes
+      // no target argument), so the field was fully specified and the request
+      // was refused `400 … declares no target object`. Both sides now ask the
+      // one function what a reference field points at.
+      if (!fieldDef) continue;
       if (!REFERENCE_VALUE_TYPES.has(fieldDef.type)) continue;
-
-      const referenceObject = fieldDef.reference;
+      const referenceObject = referenceTargetOf(fieldDef);
+      if (!referenceObject) continue;
 
       // Collect all foreign key IDs from records (handle both single and multiple values)
       const allIds: any[] = [];
@@ -3236,6 +3456,97 @@ export class ObjectQL implements IObjectQLEngine {
     return resolved === options.where ? options : ({ ...options, where: resolved } as T);
   }
 
+  /**
+   * ADR-0061: expand `search` into a server-resolved cross-field `$or` of
+   * `$contains`, AND it with any caller `where`, then strip the search keys off
+   * the AST.
+   *
+   * Shared by `find` and `findOne` (#4419). It lived inline in `find` and
+   * nowhere else, while `ENGINE_FIND_OPTION_KEYS` — the one legal-key set BOTH
+   * methods are checked against (see {@link ENGINE_OPTION_KEY_SETS}) — declares
+   * `search`/`searchFields` for both. So `findOne({ search })` passed the gate,
+   * rode onto the AST verbatim, and reached a driver: no driver reads
+   * `ast.search` (the expansion is the engine's job by ADR-0061), so the
+   * predicate vanished and the forced `limit: 1` turned it into the first row of
+   * the WHOLE object — a real, plausible-looking record unrelated to the search.
+   * That is #4419's reported failure exactly, under a different key than the
+   * `filter` #4346 closed; one expander, called from both, is what stops the
+   * pair drifting again.
+   *
+   * Field resolution is server-side (declared `searchableFields` →
+   * auto-default); the optional `searchFields` override is intersected with the
+   * allowed set, never widened. All drivers already execute `$or`/`$contains`,
+   * so this needs no driver changes.
+   *
+   * The keys are deleted whether or not anything expanded — leaving them on
+   * would hand the driver a key it does not read, which is the same silent drop
+   * one layer down.
+   */
+  private expandSearchOnAst(ast: QueryAST, schema: ServiceObject | undefined): void {
+    // The `$search`/`$searchFields` OData spellings are NOT read here: the
+    // protocol layer normalizes them to the bare keys before the engine
+    // (protocol.ts findData), and a direct engine call carrying one is an
+    // unknown option — rejected at the entry point, not silently dropped
+    // (#4371).
+    const raw = (ast as any).search;
+    if (raw != null && schema?.fields) {
+      const requestedFields = (ast as any).searchFields
+        ?? (typeof raw === 'object' ? raw?.fields : undefined);
+      const searchFilter = expandSearchToFilter(raw, {
+        fields: schema.fields as any,
+        searchableFields: (schema as any).searchableFields,
+        requestedFields,
+        // [ADR-0079] `nameField` is the canonical primary-title pointer;
+        // `displayNameField` is the deprecated alias (still honored).
+        displayField: (schema as any).nameField ?? (schema as any).displayNameField,
+      });
+      if (searchFilter) {
+        ast.where = ast.where ? { $and: [ast.where, searchFilter] } : searchFilter;
+      }
+    }
+    delete (ast as any).search;
+    delete (ast as any).searchFields;
+  }
+
+  /**
+   * Refuse a `findOne` that selects nothing in particular (#4419).
+   *
+   * The AST reaching here is the CALLER's own intent: aliases folded, unknown
+   * keys refused, `search` expanded — but the security/sharing middlewares have
+   * not run yet, and that ordering is the point. An injected RLS predicate
+   * narrows *which* rows are visible; it does not make "whichever of them comes
+   * first" a thing the caller asked for. Judging the post-middleware AST would
+   * pass every query on a scoped object and leave the hole open where it is
+   * most expensive.
+   *
+   * "Selects nothing" is read the same way #3896 read an empty sharing
+   * criteria: absent, `null`, or `{}` — the three shapes that mean "match every
+   * row". A `where` that is not a plain object (an expression tree) is the
+   * driver's to interpret, and counts as a predicate; this guard closes the one
+   * case that is unambiguously match-everything, not everything it cannot
+   * prove.
+   *
+   * `orderBy` is the other way to be specific, and a legitimate one — "the
+   * newest", "the highest priority". It is honored on this path by every
+   * driver, so it is a real answer and not a second silent drop.
+   */
+  private requireFindOnePredicate(object: string, ast: QueryAST): void {
+    const where = ast.where as unknown;
+    const hasPredicate =
+      where != null &&
+      (typeof where !== 'object' || Array.isArray(where) || Object.keys(where).length > 0);
+    if (hasPredicate) return;
+    if (Array.isArray(ast.orderBy) && ast.orderBy.length > 0) return;
+    throw new Error(
+      `findOne('${object}') selects no particular record: 'where' is absent or empty ` +
+      `and the query carries no 'orderBy'. findOne applies limit: 1, so this would return an ` +
+      `ARBITRARY row — a real, plausible-looking record unrelated to what was asked for, which ` +
+      `no caller's null-check can catch (#4419). Pass 'where' (or a 'search' that resolves to ` +
+      `one) to select the record; pass 'orderBy' if you mean "the first record in THIS order"; ` +
+      `or call find('${object}', { limit: 1 }) if any row will genuinely do.`,
+    );
+  }
+
   async find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     // Normalize the alias spellings (`filter`→`where`, `top`→`limit`) by the
@@ -3263,35 +3574,7 @@ export class ObjectQL implements IObjectQLEngine {
     // fields needed to compute the formulas after fetch.
     const _findSchema = this._registry.getObject(object);
 
-    // ADR-0061: expand `$search` into a server-resolved cross-field `$or`
-    // of `$contains`. Field resolution is server-side (declared
-    // `searchableFields` -> auto-default); the optional `$searchFields` override
-    // is intersected with the allowed set. All drivers already execute
-    // `$or`/`$contains`, so this needs no driver changes.
-    {
-      // The `$search`/`$searchFields` OData spellings are NOT read here: the
-      // protocol layer normalizes them to the bare keys before the engine
-      // (protocol.ts findData), and a direct engine call carrying one is an
-      // unknown option — rejected above, not silently dropped (#4371).
-      const _searchRaw = (ast as any).search;
-      if (_searchRaw != null && _findSchema?.fields) {
-        const _reqFields = (ast as any).searchFields
-          ?? (typeof _searchRaw === 'object' ? _searchRaw?.fields : undefined);
-        const _searchFilter = expandSearchToFilter(_searchRaw, {
-          fields: _findSchema.fields as any,
-          searchableFields: (_findSchema as any).searchableFields,
-          requestedFields: _reqFields,
-          // [ADR-0079] `nameField` is the canonical primary-title pointer;
-          // `displayNameField` is the deprecated alias (still honored).
-          displayField: (_findSchema as any).nameField ?? (_findSchema as any).displayNameField,
-        });
-        if (_searchFilter) {
-          ast.where = ast.where ? { $and: [ast.where, _searchFilter] } : _searchFilter;
-        }
-      }
-      delete (ast as any).search;
-      delete (ast as any).searchFields;
-    }
+    this.expandSearchOnAst(ast, _findSchema);
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
 
@@ -3383,6 +3666,33 @@ export class ObjectQL implements IObjectQLEngine {
     return opCtx.result as any[];
   }
 
+  /**
+   * Read the ONE record the query selects, or `null`.
+   *
+   * `findOne` applies `limit: 1` by contract — so unlike `find`, the query's
+   * predicate is the only thing standing between the caller and *an arbitrary
+   * row*. A query that selects nothing in particular does not return nothing;
+   * it returns the object's first row, which is a real, plausible-looking
+   * record that no caller's `if (!row)` check can catch, and that propagates
+   * into whatever is computed next (#4419). So this method REQUIRES the caller
+   * to say which record it wants:
+   *
+   * - `where` (or the `filter` alias, folded here), or a `search` that expands
+   *   to one — the record is selected by predicate.
+   * - `orderBy` — "the FIRST record in this order" (the newest, the highest
+   *   priority). Deterministic without a predicate, and honored by every
+   *   driver on this path.
+   *
+   * Neither → throws. If any row genuinely will do, that is
+   * `find(object, { limit: 1 })`, which says so at the call site.
+   *
+   * No ordering is IMPOSED when the caller supplies none: `ORDER BY <pk> LIMIT
+   * 1` makes a planner abandon the predicate's own index (objectstack#4363, and
+   * see `SqlDriver.findRows`' `singleRowLookup`). `findOne` promises *a*
+   * matching record, never a position in a sequence.
+   *
+   * Fires the same `beforeFind`/`afterFind` hooks as `find` (#3195).
+   */
   async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any> {
     objectName = this.resolveObjectName(objectName);
     // Same alias fold as find() (#4346). Without it, `findOne({ filter })`
@@ -3404,6 +3714,10 @@ export class ObjectQL implements IObjectQLEngine {
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
     const _findOneSchema = this._registry.getObject(objectName);
+    // Before the guard below, so a `search` that resolves to a real filter
+    // counts as the predicate it is (#4419).
+    this.expandSearchOnAst(ast, _findOneSchema);
+    this.requireFindOnePredicate(objectName, ast);
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
 
@@ -3593,12 +3907,25 @@ export class ObjectQL implements IObjectQLEngine {
         // Locale + translation hooks for the rejection messages (#3957) —
         // resolved once for the batch, identical for every row.
         const msgCtx = this.validationMessageContext(object, opCtx.context);
+        // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
+        // resolved any `defaultValue` / `current_user` token and before the
+        // beforeInsert hooks stamped `owner_id` / `organization_id` /
+        // `created_by`. The reference check consults it to decide WHAT THE
+        // CALLER ACTUALLY SENT, so neither a platform stamp nor a backfilled
+        // default is ever reported as the caller's bad reference.
+        const suppliedPerRow: Array<Record<string, unknown>> =
+          (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
+            (row) => (row ?? {}) as Record<string, unknown>,
+          );
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
             validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx });
+            await this.assertReferencesResolve(
+              schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
+            );
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
@@ -3913,6 +4240,11 @@ export class ObjectQL implements IObjectQLEngine {
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
+               // [#4441] A repoint is as capable of dangling as an initial link.
+               await this.assertReferencesResolve(
+                 updateSchema, hookContext.input.data as Record<string, unknown>,
+                 opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+               );
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
@@ -3991,6 +4323,13 @@ export class ObjectQL implements IObjectQLEngine {
                } else {
                    evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
                }
+               // [#4441] The bulk call site too — a guard wired into single-id
+               // writes only is still a hole one call site over (AGENTS.md
+               // PD #10's own worked example, #3106).
+               await this.assertReferencesResolve(
+                 updateSchema, hookContext.input.data as Record<string, unknown>,
+                 opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+               );
                result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else {
                throw new Error('Update requires an ID or options.multi=true');

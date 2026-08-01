@@ -81,7 +81,9 @@ export const RestApiRouteCategory = z.enum([
   'permission',   // Permission/authorization checks
   'analytics',    // Analytics and reporting
   'automation',   // Automation triggers and flows
-  'workflow',     // Workflow state management
+  // 'workflow' removed (#4451, v17): no workflow surface ever existed for a
+  // route to belong to (ADR-0115 Evidence 5); state machines are a validation
+  // rule, approvals are flow nodes. Routes in that space are 'automation'.
   'ui',           // UI metadata (views, layouts)
   'realtime',     // Realtime/WebSocket
   'notification', // Notification management
