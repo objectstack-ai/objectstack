@@ -1,0 +1,48 @@
+{
+  "type": "doc",
+  "_note": "DocSchema (ADR-0046 flat Markdown package docs). Fully live. The schema header calls docs 'inert data' — true of the KERNEL (it stores `content` unparsed), but every property has a real runtime consumer in the delivery layer: the REST read layer localizes, audience-gates and serves docs (packages/rest/src/rest-server.ts:2944-3022 list, :3384-3390 single item), and the `/meta/book/:name/tree` endpoint resolves book membership from doc headers via the spec's own resolveBookTree (packages/spec/src/system/book.zod.ts:218). objectui's console docs portal is a faithful port of the same resolver (apps/console/src/pages/book-nav.ts @940ba24) rendering the reader UI — a delivery surface for readers, NOT an authoring preview. Seeded 2026-08-01 (#4488). NOTE: DocSchema declares no `tags`, yet the book-side `include: { tag }` rule and the REST corpus (`d.tags`, rest-server.ts:2965) both expect one — the tag rule can currently never match; recorded on book.groups, not silently dropped.",
+  "props": {
+    "name": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/spec/src/system/book.zod.ts:225, packages/rest/src/rest-server.ts:3129",
+      "note": "identity: the single-doc route key, the resolver's membership key (glob `include` matches over names), and the audience map key."
+    },
+    "label": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/spec/src/system/book.zod.ts:198, packages/spec/src/system/book.zod.ts:202",
+      "note": "tree entry title + the order tiebreak sort key (byOrderThenLabel)."
+    },
+    "description": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/spec/src/system/book.zod.ts:202, packages/rest/src/rest-server.ts:3131",
+      "note": "carried into tree entries and kept on the list response (which strips `content`) so portals can show summaries without fetching bodies."
+    },
+    "content": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/rest/src/rest-server.ts:3007, packages/spec/src/system/doc.zod.ts:120",
+      "note": "the document body: served whole on single-doc GET, deliberately stripped from list responses unless `?include=content`, locale-swapped by resolveDocLocale."
+    },
+    "order": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/spec/src/system/book.zod.ts:198",
+      "note": "sort key within a book group (0 when absent, then label)."
+    },
+    "group": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/spec/src/system/book.zod.ts:238",
+      "note": "explicit book-group membership; a doc joins the group whose `key` equals it when no `include` rule claims it first."
+    },
+    "translations": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/spec/src/system/doc.zod.ts:110, packages/rest/src/rest-server.ts:2996, packages/rest/src/rest-server.ts:3388",
+      "note": "per-locale {label,description,content} variants collapsed by resolveDocLocale on every read path (list, tree corpus, single item); the map itself is stripped from responses. This is the doc's OWN i18n mechanism — the generic bundle translator does not cover `doc`."
+    }
+  }
+}

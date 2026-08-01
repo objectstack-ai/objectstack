@@ -79,7 +79,7 @@ const ledgerRoot = join(specRoot, 'liveness');
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation'];
 
 // Registered metadata types that are NOT yet governed — the coverage ratchet.
 //
@@ -104,15 +104,12 @@ const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'po
 // the failure this map exists to make visible, and an entry with no issue is
 // indistinguishable from never having looked.
 const PENDING_GOVERNANCE: Record<string, string> = {
-  app: 'the #4001 app step retired seven dead keys without seeding a ledger, so the rest of AppSchema is unclassified — #4488',
-  book: 'ADR-0046 documentation spine; no property audit done — #4488',
-  doc: 'ADR-0046 flat Markdown docs; small surface, unaudited — #4488',
-  email_template: 'unaudited — #4488',
-  job: 'unaudited; `job.retryPolicy` IS enforced (runtime/src/app-plugin.ts:791), so this one must not be assumed dead — #4488',
-  mapping: '#2611 reusable import mapping; unaudited — #4488',
-  seed: 'fixture/init data applied on publish; unaudited — #4488',
-  translation: 'unaudited — #4488',
-  validation: 'ValidationRuleSchema carries the ADR-0020 record state machine, so a wrong verdict is expensive; unaudited — #4488',
+  // EMPTY since #4488 paid off all nine debts the map opened with (app, book,
+  // doc, email_template, job, mapping, seed, translation, validation) — every
+  // registered type is governed. The map stays because the ratchet is the
+  // point, not the entries: registering a NEW type without a ledger fails CI
+  // with instructions to either govern it or record the debt here (reason +
+  // issue number). Do not add an entry just to silence the gate.
 };
 
 // Spec-only override: governed types whose canonical schema is NOT (yet) in the
@@ -169,7 +166,18 @@ function unwrap(s: any, depth = 0): any {
   if (!def) return s;
   if (def.type === 'lazy' && typeof def.getter === 'function') return unwrap(def.getter(), depth + 1);
   if (['optional', 'default', 'nullable', 'readonly', 'catch', 'nonoptional', 'prefault'].includes(def.type)) return unwrap(def.innerType, depth + 1);
-  if (def.type === 'pipe') return unwrap(def.in ?? def.out, depth + 1);
+  if (def.type === 'pipe') {
+    // Two pipes, opposite authorable sides. `a.pipe(b)` authors against the IN
+    // side (a is the accepted input shape). `z.preprocess(fn, schema)` also
+    // compiles to a pipe, but its IN side is the preprocess TRANSFORM — the
+    // authorable surface is the OUT schema. Until #4488 this branch always took
+    // `def.in`, so a preprocess-wrapped registration (TranslationItemSchema's
+    // retired-dialect guard, #3778) unwrapped to the transform, walked to no
+    // shape, and made `translation` ungovernable.
+    const inDef = defOf(unwrap(def.in, depth + 1));
+    if (inDef?.type === 'transform') return unwrap(def.out, depth + 1);
+    return unwrap(def.in ?? def.out, depth + 1);
+  }
   return s;
 }
 function shapeOf(s: any): Record<string, any> | null {

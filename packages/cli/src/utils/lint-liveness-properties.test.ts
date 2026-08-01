@@ -250,4 +250,136 @@ describe('lintLivenessProperties', () => {
     });
     expect(findings).toEqual([]);
   });
+
+  // ── #4488 — the nine remaining types, governed. Pins run against the REAL
+  // ledgers, one per finding class the audit surfaced.
+
+  // The app ledger's most important entries: area-level gating keys that FAIL
+  // OPEN (nothing evaluates them, so a "hidden"/"gated" area shows for
+  // everyone), on the surface whose item-level siblings ARE enforced.
+  it('warns on the fail-open area gates and dead homePageId (#4488)', () => {
+    const findings = lintLivenessProperties({
+      apps: [{
+        name: 'crm',
+        label: 'CRM',
+        homePageId: 'nav_pipeline',
+        areas: [{
+          id: 'area_sales',
+          label: 'Sales',
+          order: 2,
+          visible: "'sales' in current_user.positions",
+          requiredPermissions: ['crm.access'],
+          navigation: [],
+        }],
+      }],
+    });
+    const msgs = paths(findings);
+    expect(msgs.some((m) => m.includes('homePageId'))).toBe(true);
+    expect(msgs.some((m) => m.includes('areas.order'))).toBe(true);
+    expect(msgs.some((m) => m.includes('areas.visible'))).toBe(true);
+    expect(msgs.some((m) => m.includes('areas.requiredPermissions'))).toBe(true);
+    // The gating hints must point at the enforced alternative (per-item gates),
+    // or the warning just relocates the author's confusion.
+    const perms = findings.find((f) => f.message.includes('areas.requiredPermissions'));
+    expect(perms!.hint).toMatch(/per item|Per-item/i);
+  });
+
+  // email_template: the WHOLE authoring surface is disconnected from
+  // sendTemplate (webhook shape) — one per-artifact warn carried on `name`.
+  it('warns once per email_template artifact via name (#4488)', () => {
+    const findings = lintLivenessProperties({
+      emailTemplates: [{
+        name: 'crm.welcome',
+        label: 'Welcome',
+        subject: 'Hi {{user.name}}',
+        bodyHtml: '<p>Welcome</p>',
+      }],
+    });
+    const hit = findings.find((f) => f.message.includes('`name`'));
+    expect(hit).toBeDefined();
+    expect(hit!.hint).toMatch(/sys_email_template/);
+  });
+
+  // translation.validationMessages: pointed at by #3778's own migration table,
+  // read by nothing — the hint must say what actually renders (rule.message).
+  it('warns on translation.validationMessages (#4488)', () => {
+    const findings = lintLivenessProperties({
+      translations: [{
+        name: 'zh_cn',
+        locale: 'zh-CN',
+        validationMessages: { discount_limit: '折扣不能超过40%' },
+      }],
+    });
+    const hit = findings.find((f) => f.message.includes('validationMessages'));
+    expect(hit).toBeDefined();
+    expect(hit!.hint).toMatch(/message/);
+  });
+
+  // book: both inline translations maps are dead (the doc-level map two files
+  // over works, which is what makes these read alive); job.id and
+  // mapping.extractQuery are the other flat dead keys.
+  it('warns on book/job/mapping dead keys (#4488)', () => {
+    const findings = lintLivenessProperties({
+      books: [{
+        name: 'crm_guide',
+        label: 'CRM Guide',
+        translations: { 'zh-CN': { label: 'CRM 指南' } },
+        groups: [{ key: 'basics', label: 'Basics', translations: { 'zh-CN': { label: '基础' } } }],
+      }],
+      jobs: [{
+        name: 'nightly_sync',
+        id: 'job_nightly',
+        schedule: { type: 'cron', expression: '0 0 * * *' },
+        handler: 'syncAll',
+      }],
+      mappings: [{
+        name: 'csv_import_contacts',
+        targetObject: 'contact',
+        fieldMapping: [],
+        extractQuery: { object: 'contact', fields: ['name'] },
+      }],
+    });
+    const msgs = paths(findings);
+    expect(msgs.some((m) => m.includes('`translations`'))).toBe(true);
+    expect(msgs.some((m) => m.includes('groups.translations'))).toBe(true);
+    expect(msgs.some((m) => m.includes('`id`'))).toBe(true);
+    expect(msgs.some((m) => m.includes('extractQuery'))).toBe(true);
+  });
+
+  // The unwarnable-default rule, negative direction: errorPolicy/batchSize
+  // (mapping) and includeAll/placement (app selectors) materialize from schema
+  // defaults on every compiled artifact, so their dead entries carry
+  // _authorWarnSkipped instead of authorWarn — a compiled stack that only has
+  // defaults must stay silent.
+  it('stays silent on schema-default values and live-only artifacts (#4488)', () => {
+    const findings = lintLivenessProperties({
+      mappings: [{
+        name: 'api_sync_orders',
+        targetObject: 'order',
+        fieldMapping: [{ source: 'Total', target: 'total' }],
+        mode: 'upsert',
+        upsertKey: ['external_ref'],
+        // materialized defaults — must NOT warn:
+        sourceFormat: 'csv',
+        errorPolicy: 'skip',
+        batchSize: 1000,
+      }],
+      apps: [{
+        name: 'sales',
+        label: 'Sales',
+        contextSelectors: [{
+          id: 'active_region',
+          label: 'Region',
+          optionsSource: { endpoint: '/api/v1/regions', valueKey: 'id', labelKey: 'name' },
+          // materialized defaults — must NOT warn:
+          includeAll: true,
+          allValue: '',
+          persist: 'query',
+          placement: 'sidebar_header',
+        }],
+      }],
+      seeds: [],
+    });
+    expect(findings).toEqual([]);
+  });
 });

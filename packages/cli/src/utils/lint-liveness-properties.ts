@@ -188,6 +188,15 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
   // collection registered or its ledger warns nobody, which would leave the
   // ledger correct and silent: the exact shape this lint exists to prevent.
   { type: 'datasource', key: 'datasources' },
+  // #4488 — the six newly governed types that carry `authorWarn` entries.
+  // (doc / seed / validation are governed too but warn on nothing today, so
+  // they are not listed; add them here the day one of their entries warns.)
+  { type: 'app', key: 'apps' },
+  { type: 'book', key: 'books' },
+  { type: 'job', key: 'jobs' },
+  { type: 'email_template', key: 'emailTemplates' },
+  { type: 'mapping', key: 'mappings' },
+  { type: 'translation', key: 'translations' },
 ];
 
 /**

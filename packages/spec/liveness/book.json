@@ -1,0 +1,103 @@
+{
+  "type": "book",
+  "_note": "BookSchema (ADR-0046 §6 documentation spine). Consumers: the REST `/meta/book/:name/tree` endpoint (packages/rest/src/rest-server.ts:3078-3169) driving the spec's pure resolveBookTree/audienceAllows (packages/spec/src/system/book.zod.ts), and objectui's console docs portal (apps/console/src/pages/book-nav.ts @940ba24 — a faithful resolver port rendering the reader UI, plus portal-only consumers for slug/icon/order). 15 of 17 live; the two dead entries are both inline `translations` maps that LOOK like the doc-level mechanism that works (`doc.translations`, resolveDocLocale) but have no resolver anywhere. Seeded 2026-08-01 (#4488).",
+  "props": {
+    "name": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/rest/src/rest-server.ts:3098",
+      "note": "tree-route identity; an unknown name is treated as a package id and resolved as the implicit per-package book (§6.4)."
+    },
+    "label": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/spec/src/system/book.zod.ts:303",
+      "note": "carried into the resolved tree; portal cards fall back to `name`."
+    },
+    "description": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "objectui @940ba24: apps/console/src/pages/book-nav.ts:341 (buildBookCards)",
+      "note": "portal landing-card subtitle. The framework tree omits it; the portal reads it off the raw /meta/book item."
+    },
+    "translations": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "authorWarn": true,
+      "authorHint": "Delete it. No resolver reads a book's inline translations map — the tree endpoint and the portal render `label`/`description` verbatim, and the generic bundle translator covers view/action/object/app/dashboard/page only (i18n-resolver.ts METADATA_DOCUMENT_TRANSLATORS), not `book`. Locale-variant doc CONTENT belongs on `doc.translations`, which IS enforced (resolveDocLocale); book/group titles currently have no i18n mechanism at all.",
+      "note": "The trap is proximity: `doc.translations` two files over works on every read path, so this map reads as the same feature. It is parsed and stored and nothing ever looks at it."
+    },
+    "slug": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "objectui @940ba24: apps/console/src/pages/book-nav.ts:132 (bookSlug), :339",
+      "note": "portal URL segment (`/docs/<slug>`), defaulting to `name`. Portal-side consumer only — the framework tree endpoint routes by `name`."
+    },
+    "icon": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "objectui @940ba24: apps/console/src/pages/book-nav.ts:345 (buildBookCards)",
+      "note": "portal landing-card icon."
+    },
+    "order": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "objectui @940ba24: apps/console/src/pages/book-nav.ts:302-312 (sortBooks)",
+      "note": "orders books on the portal landing (then label, stable). Authored books always sort ahead of synthetic per-package ones regardless of `order`."
+    },
+    "audience": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/rest/src/rest-server.ts:3113, packages/rest/src/rest-server.ts:2969, packages/spec/src/system/book.zod.ts:351",
+      "note": "ENFORCED access gate (§6.7), fail-closed: gates the whole tree (401 anonymous / 403 non-holder), and every doc's effective audience is the union over the books that claim it (resolveDocAudiences) — applied to both doc lists and tree entries. The one security-shaped property on this type, and it is real."
+    },
+    "groups": {
+      "children": {
+        "key": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "packages/spec/src/system/book.zod.ts:238, packages/spec/src/system/book.zod.ts:290",
+          "note": "group identity: explicit `doc.group` placement matches on it, and it keys the resolved tree."
+        },
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "packages/spec/src/system/book.zod.ts:290",
+          "note": "section title in the resolved tree."
+        },
+        "translations": {
+          "status": "dead",
+          "verifiedAt": "2026-08-01",
+          "authorWarn": true,
+          "authorHint": "Delete it — see the book-level `translations` entry: no resolver reads inline book/group translations; group labels render verbatim in every locale.",
+          "note": "Same dead map one level down."
+        },
+        "order": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "packages/spec/src/system/book.zod.ts:221",
+          "note": "orders groups within the book (0 default, then declaration order)."
+        },
+        "include": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "packages/spec/src/system/book.zod.ts:236, packages/spec/src/system/book.zod.ts:193",
+          "note": "the derived-membership rule — the heart of the §6.2.1 design. CAVEAT, recorded not hidden: only the GLOB form can match today. The `{ tag }` variant is declared and the resolver implements it (matchesInclude reads doc.tags), but DocSchema declares no `tags` property, so the corpus always carries `tags: undefined` and a tag rule matches nothing. Either add `doc.tags` or retire the variant (enforce-or-remove)."
+        },
+        "package": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "packages/spec/src/system/book.zod.ts:232",
+          "note": "scopes the rule to a package id (cross-package books, ADR-0048)."
+        },
+        "pages": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "packages/spec/src/system/book.zod.ts:248-286",
+          "note": "explicit curated-order override; `---` separators and `...` rest-expansion both implemented, node label/badge/icon overrides carried into entries."
+        }
+      },
+      "note": "Drilled because `translations` diverges (dead) from its six live siblings."
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "type": "validation",
+  "_note": "ValidationRuleSchema — the ADR-0020 carrier, where a wrong verdict is expensive, so the call graph was closed with extra care. The walked shape is the discriminated union's FIRST object member (the base keys + `script`'s type/condition — the #3095 union rule); per-variant keys (state_machine's field/transitions/initialStates, format's regex/format, json_schema's schema, conditional's when/then/otherwise, cross_field's fields) sit OUTSIDE the walk — an explicit blind spot recorded here (the union analog of the z.record rule), governed by the evaluator's own tests, not ledger rows. Consumer: the engine write path calls evaluateValidationRules on insert and on every matched update row (packages/objectql/src/engine.ts:3703, :4017, :4085) with rules from the OBJECT's embedded `validations` array (+ object_extension merge, engine.ts:1559). The evaluator provably honors every execution-control key — the zod header's prose claiming it 'only reads type/condition/field/events/severity/message' is STALE (it predates enforcement of active/priority) and should not be trusted over the ledger. TYPE-LEVEL GAP, recorded not hidden: a STANDALONE `validation` metadata item (file `*.validation.ts` or Studio — allowRuntimeCreate: true, metadata-plugin.zod.ts:602) never reaches any object's write path — the schema has no object-binding key, no merge code exists, and only the reference-tracker even expects one (metadata-protocol/src/protocol.ts:1306). A state machine authored through that door saves cleanly and gates nothing. The per-prop verdicts below are for rules where rules actually live (`object.validations` — the same schema instance); the standalone-door disconnect is tracked in #4509. Seeded 2026-08-01.",
+  "props": {
+    "name": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts:665, packages/objectql/src/validation/rule-validator.ts:676",
+      "note": "names the rule in violation logs and the broken-rule skip warning."
+    },
+    "label": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "governance/editor metadata, declared deliberately (the schema header says so): surfaced in rule listings, never evaluated on the write path. Docs-shaped, KEPT, not authorWarn'd — the hook.label precedent."
+    },
+    "description": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "same as `label` — governance annotation, deliberately kept."
+    },
+    "active": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts:647",
+      "note": "`active: false` filters the rule out before evaluation — genuinely enforced, unlike the retired flow.active/tool.active (worth stating on a validation surface: an rls.enabled-shaped failure here would be a data-integrity hole)."
+    },
+    "events": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts:654",
+      "note": "insert/update dispatch (default both). `delete` was removed from the enum in #3184 after being proven a silent no-op — guard deletions with a beforeDelete hook."
+    },
+    "priority": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts:657",
+      "note": "stable low-number-first sort of the evaluation order."
+    },
+    "tags": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "categorization for reporting/management — governance metadata like label/description, deliberately kept."
+    },
+    "severity": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts:671-678",
+      "note": "only 'error' blocks the write; 'warning'/'info' violations are logged and let the write proceed."
+    },
+    "message": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts:676, packages/objectql/src/engine.ts:3703",
+      "note": "the author-written violation text carried on every FieldValidationError (surfaced as 400 VALIDATION_FAILED); per-deployment overrides resolve via validationMessages in the translation bundle (#3957) without touching the authored value."
+    },
+    "type": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts:692-706",
+      "note": "the union discriminant: dispatches to the state_machine/predicate/format/json_schema/conditional checkers; the schema admits exactly the handled set."
+    },
+    "condition": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts:697",
+      "note": "the CEL predicate (script/cross_field variants), evaluated against the merged record + previous — TRUE fails the write."
+    }
+  }
+}

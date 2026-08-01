@@ -1,0 +1,316 @@
+{
+  "type": "app",
+  "_note": "AppSchema — the navigation shell, the densest hand-authored surface on the platform. Consumers: the REST read layer's filterAppForUser (packages/rest/src/rest-server.ts:1796-1847 — the SERVER-side authority for app/nav permission + capability gating and ADR-0045 hidden-app visibility), the spec i18n translateApp (i18n-resolver.ts:472), and objectui's shell (@940ba24: app-shell AppSidebar/ConsoleLayout/ContextSelectors, layout NavigationRenderer, console RootLandingRedirect). The #4001/#4142 app step already retired seven dead keys as retiredKey tombstones — they stay in the walked shape, so their rows stay here (tombstone rule, orphans.mts). WALK BOUNDARY (#3095 union rule): `navigation` drills into the union's FIRST member (the `object` variant + base keys); the other variants' payload keys sit outside the walk and were verified by hand — dashboardName (NavigationRenderer.tsx:433), pageName (:435-442), url/target (:462), reportName (:460), componentRef (:464,:644), group `expanded` (:856) all live. ONE GAP found there, recorded not hidden: an `action` item renders and gates like any other, but its click dispatches through a host-supplied `onAction` prop that NO shipped shell passes — `actionDef.actionName` currently reaches no dispatcher (#4509). Also note filterAppForUser strips only the TOP-LEVEL `navigation` tree; `areas` trees rely on the client-side per-item gates. Seeded 2026-08-01 (#4488).",
+  "props": {
+    "name": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts:478",
+      "note": "routing identity (`/apps/<name>`) and the translation-bundle key (`apps.<name>.*`); objectui RootLandingRedirect routes by it."
+    },
+    "label": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts:481; objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:327-355 (switcher/header)",
+      "note": "localized on serve by translateApp, rendered by the app switcher and shell header."
+    },
+    "description": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:333; framework packages/spec/src/system/i18n-resolver.ts:482",
+      "note": "rendered under the active app's title; localized by translateApp."
+    },
+    "icon": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:327, :355",
+      "note": "App Launcher / switcher icon."
+    },
+    "branding": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:185-186 (logo, primaryColor); objectui packages/app-shell/src/layout/ConsoleLayout.tsx:172-173 (accentColor, favicon)",
+      "note": "all four children live in the shell chrome; `accentColor` and the `separator`/`badgeVariant` nav keys were themselves inverse-drift fixes (declared to match an existing objectui read, liveness audit #1878/#1891/#1894)."
+    },
+    "active": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:178",
+      "note": "`active: false` delists the app from the switcher. Deliberately does NOT disable routing — the active-app lookup spans all apps so a direct /apps/<name> URL keeps rendering (AppSidebar:179-180 comment). Weaker than the name implies, but a real consumer."
+    },
+    "isDefault": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "objectui @940ba24: apps/console/src/components/RootLandingRedirect.tsx:46",
+      "note": "ROUTING semantics: the root landing redirects to the app marked default (it was once a display-only badge — the file says so)."
+    },
+    "hidden": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/rest/src/rest-server.ts:1811; objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:178",
+      "note": "SERVER-enforced (ADR-0045): a hidden app is served only to builders (studio/setup access) for direct-URL preview; the client switcher filter is a listing courtesy on top."
+    },
+    "navigation": {
+      "children": {
+        "id": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:125",
+          "note": "item identity: render keys, pin/reorder persistence, i18n nav key (`apps.<app>.navigation.<id>.label`)."
+        },
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts:456; objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:284-316 (resolveNavItemLabel)",
+          "note": "rendered everywhere; translateApp swaps in the per-locale label by node id."
+        },
+        "icon": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:961",
+          "note": "every variant branch resolves and renders it."
+        },
+        "order": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:1154, :913",
+          "note": "low-first stable sort at the top level and inside each group."
+        },
+        "badge": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:983-985"
+        },
+        "badgeVariant": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:983, :1024",
+          "note": "declared to match this exact read (inverse-drift fix, audit #1878/#1891/#1894)."
+        },
+        "visible": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:891 (item gate); objectui packages/app-shell/src/layout/AppSidebar.tsx:236 (CEL evaluation via ExpressionProvider)",
+          "note": "the CEL visibility gate — enforced per item. Note the contrast with `areas[].visible`, which is NOT."
+        },
+        "requiredPermissions": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "packages/rest/src/rest-server.ts:1830; objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:894",
+          "note": "enforced in BOTH layers: the server strips unsatisfied entries from the top-level navigation tree before serving, and the client re-gates per item."
+        },
+        "requiresObject": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:899-901",
+          "note": "runtime-capability gate against the SchemaRegistry (client-side; the server gates only requiresService)."
+        },
+        "requiresService": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "packages/rest/src/rest-server.ts:1832; objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:900-902",
+          "note": "ADR-0057 D10 capability gate, server + client."
+        },
+        "type": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:905-960 (branch dispatch), :397-471 (href resolution per variant)",
+          "note": "the discriminant. Variant payload keys outside this walk are covered in the type note — all live except the `actionDef` dispatch gap."
+        },
+        "objectName": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:296, :397-418"
+        },
+        "viewName": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:294-296, :418",
+          "note": "target precedence recordId → filters → viewName; also keys the view-label i18n lookup."
+        },
+        "recordId": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:397-406, :598",
+          "note": "direct-to-record deep link; {current_user_id}/{current_org_id} and context-selector {<id>} template vars substituted by the shell."
+        },
+        "recordMode": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:406"
+        },
+        "filters": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:416-418",
+          "note": "serialized as filter[<field>]=<value> params onto the bare /data surface (objectui ADR-0055); exclusivity with recordId/viewName is parse-rejected (objectNavTargetExclusivity)."
+        },
+        "children": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:910-913",
+          "note": "recursive render with per-group order sort; the server's filterNav collapses groups emptied by permission stripping (rest-server.ts:1837)."
+        }
+      },
+      "note": "Walked children are the `object` variant + base keys (union-first rule) — see the type note for the other variants' hand-verified payload keys."
+    },
+    "areas": {
+      "children": {
+        "id": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:197-210",
+          "note": "area-switcher identity and active-area state key."
+        },
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:456"
+        },
+        "icon": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:448"
+        },
+        "order": {
+          "status": "dead",
+          "verifiedAt": "2026-08-01",
+          "authorWarn": true,
+          "authorHint": "Delete it — no renderer sorts areas (AppSidebar and AppSchemaRenderer both iterate the array as authored), so declaration order is the display order. Reorder the `areas` array instead.",
+          "note": "Contrast with nav-item `order`, which IS sorted (NavigationRenderer.tsx:1154) — the sibling that works is what makes this one read alive."
+        },
+        "description": {
+          "status": "dead",
+          "verifiedAt": "2026-08-01",
+          "note": "display annotation no surface renders. Benign — docs-shaped, kept, not warned (hook.label precedent)."
+        },
+        "visible": {
+          "status": "dead",
+          "verifiedAt": "2026-08-01",
+          "authorWarn": true,
+          "authorHint": "Delete it, or gate the items INSIDE the area — nothing evaluates an area-level `visible` predicate, so a 'hidden' area renders for everyone: a capability gate that fails open, the worst shape of the silent no-op (#4001's own words). Per-ITEM `visible` IS enforced (NavigationRenderer.tsx:891).",
+          "note": "The schema declares it with the same CEL wording as the enforced item-level key, which is exactly what makes it a trap."
+        },
+        "requiredPermissions": {
+          "status": "dead",
+          "verifiedAt": "2026-08-01",
+          "authorWarn": true,
+          "authorHint": "Delete it, or gate per item / per app — no layer checks area-level permissions (the server's filterAppForUser walks only the top-level `navigation` tree, and the client area switcher renders every area). Per-item `requiredPermissions` are enforced server + client, and app-level `requiredPermissions` are enforced server-side (rest-server.ts:1814).",
+          "note": "Fail-open access gate — same class as `visible` above; the two are this ledger's most important app findings."
+        },
+        "navigation": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:210, packages/layout/src/AppSchemaRenderer.tsx:469",
+          "note": "the active area's tree replaces the top-level navigation. NOTE: area trees are NOT server-side permission-stripped (filterAppForUser reads only `item.navigation`) — per-item gating inside an area is client-side only."
+        }
+      },
+      "note": "Drilled because the gating keys diverge sharply from the live identity/tree keys."
+    },
+    "contextSelectors": {
+      "children": {
+        "id": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:199",
+          "note": "also the nav template-variable name ({<id>} substitution into recordId/params)."
+        },
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:232"
+        },
+        "icon": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:231"
+        },
+        "optionsSource": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:90-125",
+          "note": "endpoint fetched, valueKey/labelKey dotted-path mapped, `filter` predicates applied per row (rowPasses, :69-71)."
+        },
+        "includeAll": {
+          "status": "dead",
+          "verifiedAt": "2026-08-01",
+          "_authorWarnSkipped": "default(true) boolean — the lint cannot tell author-set from schema default, so marking it would warn on every selector.",
+          "note": "DELIBERATELY ignored by the renderer (ContextSelectors.tsx:242-246): selectors are mandatory-scope — an 'All' row would unscope the surface and, for Studio's package filter, leak system metadata. The renderer never shows an All option regardless of this flag. Candidate for retiredKey removal (the renderer comment is the prescription)."
+        },
+        "allValue": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:177, :199, :246",
+          "note": "READ, but only as the 'nothing concrete selected' sentinel for auto-selection and query-param defaulting — its documented purpose ('value emitted when All is selected') can never occur because includeAll is ignored (see above). Live by the letter, vestigial by intent; re-verify if includeAll is ever removed."
+        },
+        "persist": {
+          "status": "live",
+          "verifiedAt": "2026-08-01",
+          "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:164",
+          "note": "'none' opts out of persistence; query/session honored."
+        },
+        "placement": {
+          "status": "dead",
+          "verifiedAt": "2026-08-01",
+          "_authorWarnSkipped": "enum with default('sidebar_header') — the default materializes at compile, so presence ≠ authored (same rule as errorPolicy on mapping).",
+          "note": "no renderer reads it — selectors always render in the sidebar header block (AppSidebar:469-472); 'topbar' places nothing in the topbar."
+        }
+      },
+      "note": "Drilled because includeAll/placement diverge (dead) from the live core."
+    },
+    "homePageId": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "authorWarn": true,
+      "authorHint": "Delete it. No shell reads it — the landing IS the first navigation item (in `order`), and the ROOT landing follows `isDefault` routing (objectui RootLandingRedirect). Reorder `navigation` or set `isDefault` instead.",
+      "note": "The schema's own hedge ('if not set, usually defaults to the first navigation item') describes the only behavior that exists."
+    },
+    "requiredPermissions": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/rest/src/rest-server.ts:1814",
+      "note": "SERVER-enforced: an app whose required permissions are not a subset of the caller's system permissions is dropped from /meta entirely (and the single-item GET re-checks at rest-server.ts:3298)."
+    },
+    "defaultAgent": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "objectui @940ba24: packages/app-shell/src/hooks/surfaceAgent.ts:81, packages/app-shell/src/layout/ChatDock.tsx:253",
+      "note": "bounded surface-binding knob (ADR-0063): resolved to the two platform agents (ask/build), alias-aware, anything else rejected — exactly as the schema documents."
+    },
+    "version": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "retiredKey tombstone (#4142, 2026-06 audit) — authoring it is parse-rejected with the prescription (an app is versioned by its package's manifest.version). Row stays while the tombstone keeps the key in the walked shape."
+    },
+    "aria": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "retiredKey tombstone (#4142) — app-level ARIA was never read; declare aria on the rendering component/widget."
+    },
+    "objects": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "retiredKey tombstone (#4142) — objects belong to the stack; the ambient chatbot derives an app's object list from its nav items (collectNavObjects), never from App.objects."
+    },
+    "apis": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "retiredKey tombstone (#4142) — declarative endpoints belong to the stack."
+    },
+    "sharing": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "retiredKey tombstone (#4142, ADR-0049) — a declared-but-unenforced security surface; the live sharing path is FormView.sharing."
+    },
+    "embed": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "retiredKey tombstone (#4142, ADR-0049) — no iframe route ever read it; embedding is per form view."
+    },
+    "mobileNavigation": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "retiredKey tombstone (#4142) — fully unimplemented; returns if/when a real mobile navigation ships."
+    }
+  }
+}
