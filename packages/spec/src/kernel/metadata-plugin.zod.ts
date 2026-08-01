@@ -695,6 +695,40 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
   // allowRuntimeCreate:false (no runtime "create agent") and
   // allowOrgOverride:false (no per-org agent fork). The runtime catalog
   // additionally filters out any non-platform agent record (see service-ai).
+  //
+  // FOR AGENTS, THE CODE IS THE RECORD — and that is the whole answer to
+  // "where is this type's change log?" (#4507). Because the two flags above
+  // are false, `agent` is the one authorable type with NO governed write
+  // path: `saveMetaItem` would route it down the legacy raw-engine branch,
+  // and nothing calls it. The rows are written instead by the shipping
+  // plugin at boot — `AIStudioPlugin.registerMeta` → `metadataService
+  // .register()` → `MetadataManager.register` → `DatabaseLoader.save` —
+  // which writes `sys_metadata` directly with a fresh checksum and appends
+  // NO `sys_metadata_history` row. So an agent definition that changes
+  // between releases leaves no metadata-side change log, and there is no
+  // metadata-side rollback.
+  //
+  // That is accepted, not overlooked. These definitions live in version
+  // control (`@objectstack/service-ai-studio`, `cloud` repo:
+  // `agents/ask-agent.ts`, `agents/metadata-assistant-agent.ts`), so git
+  // already holds the full, reviewable history of every change. A second
+  // history in `sys_metadata` would be a WORSE record, not a better one: it
+  // would capture only the boots where a given deployment happened to see
+  // the checksum move, so two deployments on the same release would carry
+  // different "histories" of an identical, code-fixed definition. Do not add
+  // one to close a perceived gap.
+  //
+  // Two consequences that look like bugs and are not:
+  //  - `migrateStoredMetadata` reports `agent` rows `skipped` ("no repository
+  //    write path"). That is CORRECT AND PERMANENT for this type, not a
+  //    to-do — the pass declines rather than performing a historyless
+  //    rewrite that could also promote a draft.
+  //  - Studio surfaces no History tab for an agent. There is nothing to show;
+  //    the answer to "what changed" is the `cloud` commit log.
+  //
+  // If `agent` is ever OPENED to tenant authoring, this note stops applying:
+  // an author-owned definition has no git to fall back on, so opening the
+  // type and giving it a real history path are the same piece of work.
   { type: 'agent', label: 'AI Agent', filePatterns: ['**/*.agent.ts', '**/*.agent.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: true, executionPinned: true, loadOrder: 90, domain: 'ai' },
   { type: 'tool', label: 'AI Tool', filePatterns: ['**/*.tool.ts', '**/*.tool.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'ai' },
   { type: 'skill', label: 'AI Skill', filePatterns: ['**/*.skill.ts', '**/*.skill.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 88, domain: 'ai' },

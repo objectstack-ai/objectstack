@@ -6610,6 +6610,14 @@ export class ObjectStackProtocolImplementation implements
      *   raw-engine branch, which records no history and forces `state:
      *   'active'` — a historyless rewrite that could also promote a draft is
      *   not what this pass promises, so it declines instead.
+     *
+     *   Today that is exactly one type, `agent`, and its skip is **permanent
+     *   by design, not a to-do** (#4507): ADR-0063 §2 closes `*.agent.ts` to
+     *   third parties, so the only agent definitions in existence are the two
+     *   the platform ships from version control — where git, not
+     *   `sys_metadata_history`, is the change log. See the note beside the
+     *   `agent` entry in `metadata-plugin.zod.ts` before treating this branch
+     *   as a gap to close.
      * - **Rows that still fail the current schema after conversion.**
      *   `saveMetaItem` rejects them (422) and that rejection is correct: the
      *   body is a genuine contract violation, not chain-owned history. They
