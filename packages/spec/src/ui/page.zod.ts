@@ -22,7 +22,26 @@ import {
  * A named region in the template where components are dropped.
  */
 import { lazySchema } from '../shared/lazy-schema';
-export const PageRegionSchema = lazySchema(() => z.object({
+import { strictObject } from '../shared/strict-object';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+
+/**
+ * Shared history for this file (#4001).
+ *
+ * A page's failure mode is visual, and therefore easy to misread. A dropped key
+ * renders a page — just not the one that was authored. The author sees output,
+ * assumes the schema was understood, and goes looking for the mistake in their
+ * layout rather than in their spelling.
+ */
+const PAGE_HISTORY =
+  'Until #4001 closed this shape these were dropped silently — the page still rendered, '
+  + 'without whatever the key was meant to configure.';
+
+export const PageRegionSchema = lazySchema(() => strictObject({
+  surface: 'this page region',
+  history: PAGE_HISTORY,
+  aliases: { id: 'name', region: 'name', children: 'components', items: 'components', content: 'components', size: 'width', span: 'width' },
+}, {
   name: z.string().describe('Region name (e.g. "sidebar", "main", "header")'),
   width: z.enum(['small', 'medium', 'large', 'full']).optional(),
   components: z.array(z.lazy(() => PageComponentSchema)).describe('Components in this region')
@@ -53,7 +72,17 @@ export const PageComponentType = z.enum([
  * Per-element data binding for multi-object pages.
  * Overrides page-level object context so each element can query a different object.
  */
-export const ElementDataSourceSchema = lazySchema(() => z.object({
+export const ElementDataSourceSchema = lazySchema(() => strictObject({
+  surface: 'this element data source',
+  history: PAGE_HISTORY,
+  aliases: {
+    objectName: 'object', from: 'object', source: 'object', entity: 'object',
+    viewName: 'view', listView: 'view',
+    filters: 'filter', where: 'filter', criteria: 'filter',
+    orderBy: 'sort', sortBy: 'sort',
+    top: 'limit', pageSize: 'limit', maxRecords: 'limit', count: 'limit',
+  },
+}, {
   object: z.string().describe('Object to query'),
   view: z.string().optional().describe('Named view to apply'),
   filter: FilterConditionSchema.optional().describe('Additional filter criteria'),
@@ -139,7 +168,17 @@ export const PageComponentSchema = lazySchema(() => z.object({
  * writes the user's selection into `selectedProjectId`; predicates then read it
  * as `page.selectedProjectId`.
  */
-export const PageVariableSchema = lazySchema(() => z.object({
+export const PageVariableSchema = lazySchema(() => strictObject({
+  surface: 'this page variable',
+  history: PAGE_HISTORY,
+  aliases: { default: 'defaultValue', initial: 'defaultValue', initialValue: 'defaultValue', value: 'defaultValue', boundTo: 'source', writer: 'source', from: 'source', component: 'source' },
+  guidance: {
+    // The binding direction is the one thing authors reverse here, and the
+    // JSDoc above spells it out — so say it at the point of the mistake too.
+    target: 'the binding names the WRITER, not a target — `source` is the id of the component that writes this variable; readers reference it as `page.<name>`',
+    bindTo: 'the binding names the WRITER, not a target — `source` is the id of the component that writes this variable; readers reference it as `page.<name>`',
+  },
+}, {
   name: z.string().describe('Variable name. Exposed to expressions as `page.<name>`.'),
   type: z.enum(['string', 'number', 'boolean', 'object', 'array', 'record_id']).default('string'),
   defaultValue: z.unknown().optional()
@@ -228,7 +267,31 @@ export const PAGE_TYPE_ROADMAP = [
  *
  * @see Airtable Interface → right panel (Page / Data / Appearance / User filters / User actions / Advanced)
  */
-export const InterfacePageConfigSchema = lazySchema(() => z.object({
+export const InterfacePageConfigSchema = lazySchema(() => strictObject({
+  surface: 'this interface page configuration',
+  history: PAGE_HISTORY,
+  aliases: {
+    object: 'source', objectName: 'source', sourceObject: 'source',
+    fields: 'columns', columnList: 'columns',
+    orderBy: 'sort', sortBy: 'sort',
+    filter: 'filterBy', filters: 'filterBy', where: 'filterBy', baseFilter: 'filterBy',
+    view: 'sourceView',
+    actions: 'userActions', toolbar: 'buttons', toolbarButtons: 'buttons',
+    quickFilters: 'userFilters', filterBar: 'userFilters',
+    onRecordClick: 'recordAction', rowAction: 'recordAction', openIn: 'recordAction',
+    createRecord: 'addRecord', newRecord: 'addRecord',
+    showCount: 'showRecordCount', recordCount: 'showRecordCount',
+    printable: 'allowPrinting', printing: 'allowPrinting',
+  },
+  guidance: {
+    // The doc block on PageTypeSchema makes this point at length: the display
+    // mode is a VISUALIZATION, not a page type, and it is configured here.
+    visualization: "the display mode is chosen at runtime from `appearance.allowedVisualizations` (grid | kanban | calendar | gallery | timeline) — it is not a page-level key, and it is not a page `type`",
+    visualizations: "use `appearance.allowedVisualizations` — the whitelist lives under `appearance`",
+    kanban: "kanban is a VISUALIZATION of a `list` page, not a setting — allow it via `appearance.allowedVisualizations`",
+    groupBy: 'grouping belongs to the visualization — configure it under `appearance`',
+  },
+}, {
   /** Data binding (ADR-0047: pages REFERENCE views, never restate them) */
   source: z.string().optional().describe('Source object name for the page'),
 
@@ -298,7 +361,47 @@ export const InterfacePageConfigSchema = lazySchema(() => z.object({
  * - 'PageDashboard' (PascalCase)
  * - 'Settings Page' (spaces)
  */
-export const PageSchema = lazySchema(() => z.object({
+export const PageSchema = lazySchema(() => strictObject({
+  surface: 'this page',
+  history: PAGE_HISTORY,
+  aliases: {
+    title: 'label', displayName: 'label',
+    objectName: 'object', entity: 'object',
+    pageType: 'type', kindType: 'type',
+    layout: 'template', layoutTemplate: 'template',
+    sections: 'regions', areas: 'regions', zones: 'regions',
+    components: 'regions', children: 'regions',
+    state: 'variables', params: 'variables', vars: 'variables',
+    config: 'interfaceConfig', interface: 'interfaceConfig',
+    profiles: 'assignedProfiles', assignedTo: 'assignedProfiles',
+    default: 'isDefault',
+    jsx: 'source', html: 'source', code: 'source', content: 'source',
+    dependencies: 'requires', plugins: 'requires',
+  },
+  guidance: {
+    // The removals this file's own comments record. Each was a page type or a
+    // block with no renderer; deleting them left an author writing something
+    // that had never worked and, until now, was not told so.
+    recordReview:
+      '`recordReview` was removed with the `record_review` page type (framework#2265) — it had '
+      + 'no renderer, so the page validated and then failed at runtime. Use `type: \'record\'` with '
+      + '`regions`, or `kind: \'slotted\'` to override individual slots.',
+    blankLayout:
+      '`blankLayout` was removed with the `blank` page type (framework#2265) — it had no renderer. '
+      + 'A free-form page is `kind: \'html\'` with `source` (ADR-0080).',
+    // `route` is the key an author reaches for first, and it has never existed.
+    // The page's `name` IS its routing identity — this file's own naming
+    // convention says so ("Page names are used in routing") — so a page that
+    // declared `route: '/landing'` was routed by its name regardless, and the
+    // author's chosen URL silently did nothing. The platform's own test suite
+    // authored one for years; see `stack.test.ts`.
+    route: '`route` is not a page key — a page is routed by its `name` (lowercase snake_case). Rename the page rather than declaring a path.',
+    path: '`path` is not a page key — a page is routed by its `name` (lowercase snake_case).',
+    url: '`url` is not a page key — a page is routed by its `name`. To link OUT to an address, use a navigation node on the app.',
+    visibleWhen: 'page-level conditional rendering does not exist — put `visibleWhen` on the COMPONENT inside a region, or gate the page with `assignedProfiles`',
+    permissions: 'a page is not permission-gated by a field — reach it through `assignedProfiles`, and gate the DATA it shows with the object\'s permission sets (which is what actually protects the records)',
+  },
+}, {
   name: SnakeCaseIdentifierSchema.describe('Page unique name (lowercase snake_case)'),
   label: I18nLabelSchema,
   description: I18nLabelSchema.optional(),
@@ -389,7 +492,14 @@ export const PageSchema = lazySchema(() => z.object({
    *
    * Only honored when `kind === 'slotted'`.
    */
-  slots: z.object({
+  slots: strictObject({
+    surface: 'this slot map',
+    history: PAGE_HISTORY,
+    // The slot menu is a CLOSED v1 set (each slot has a `buildDefault*`
+    // sub-builder behind it), so an unknown slot name is not a slot that will
+    // start working later — it is content that never renders.
+    aliases: { activity: 'discussion', chatter: 'discussion', comments: 'discussion', related: 'tabs', relatedLists: 'tabs', fields: 'details', body: 'details', banner: 'alerts', toolbar: 'actions', buttons: 'actions', summary: 'highlights' },
+  }, {
     header: z.union([PageComponentSchema, z.array(PageComponentSchema)]).optional(),
     actions: z.union([PageComponentSchema, z.array(PageComponentSchema)]).optional(),
     alerts: z.union([PageComponentSchema, z.array(PageComponentSchema)]).optional(),
@@ -411,6 +521,13 @@ export const PageSchema = lazySchema(() => z.object({
   /** Plugin namespaces the JSX source references — inferred at compile, checked at save AND load (ADR-0048 provenance). */
   requires: z.array(z.string()).optional()
     .describe('Plugin namespaces the JSX source references (validated at save and load)'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  // `page` is a registered metadata type, so `MetadataPlugin`'s loader stamps
+  // `_packageId` / `_provenance` on it. Undeclared, they were dropped on every
+  // parse — protection metadata lost on round-trip, and a hard 422 the day this
+  // shape closed.
+  ...MetadataProtectionFields,
 }).superRefine((page, ctx) => {
   // ADR-0080/0081 + ADR-0078 (completeness): an html/react/jsx page with no
   // `source` is silently inert — fail loudly at author time, never render empty.

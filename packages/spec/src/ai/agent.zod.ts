@@ -10,7 +10,30 @@ import { StateMachineSchema } from '../automation/state-machine.zod';
  * AI Model Configuration
  */
 import { lazySchema } from '../shared/lazy-schema';
-export const AIModelConfigSchema = lazySchema(() => z.object({
+import { strictObject } from '../shared/strict-object';
+
+/**
+ * Shared history for this file (#4001).
+ *
+ * An agent is configuration for something that then behaves autonomously. A
+ * dropped key does not stop it — the agent registers, answers, and calls tools,
+ * just without the constraint its author wrote. The output looks like a working
+ * agent, which is why this surface hides its mistakes better than most.
+ */
+const AGENT_HISTORY =
+  'Until #4001 closed this shape these were dropped silently — the agent still registered '
+  + 'and still answered, minus whatever the key was meant to configure or constrain.';
+
+export const AIModelConfigSchema = lazySchema(() => strictObject({
+  surface: 'this model configuration',
+  history: AGENT_HISTORY,
+  aliases: {
+    modelName: 'model', llm: 'model', deployment: 'model', engine: 'model',
+    temp: 'temperature',
+    maxOutputTokens: 'maxTokens', max_tokens: 'maxTokens', tokenLimit: 'maxTokens',
+    top_p: 'topP', nucleus: 'topP',
+  },
+}, {
   provider: z.enum(['openai', 'azure_openai', 'anthropic', 'local']).default('openai'),
   model: z.string().describe('Model name (e.g. gpt-4, claude-3-opus)'),
   temperature: z.number().min(0).max(2).default(0.7),
@@ -53,7 +76,18 @@ export const TransformPipelineStepSchema = lazySchema(() => z.enum([
  * Structured Output Configuration
  * Controls how the agent formats and validates its output
  */
-export const StructuredOutputConfigSchema = lazySchema(() => z.object({
+export const StructuredOutputConfigSchema = lazySchema(() => strictObject({
+  surface: 'this structured-output configuration',
+  history: AGENT_HISTORY,
+  aliases: {
+    type: 'format', outputFormat: 'format',
+    jsonSchema: 'schema', responseSchema: 'schema',
+    retries: 'maxRetries', maxAttempts: 'maxRetries',
+    retryOnFailure: 'retryOnValidationFailure', retry: 'retryOnValidationFailure',
+    fallback: 'fallbackFormat',
+    pipeline: 'transformPipeline', transforms: 'transformPipeline', postProcess: 'transformPipeline',
+  },
+}, {
   /** Output format type */
   format: StructuredOutputFormatSchema.describe('Expected output format'),
 
@@ -104,7 +138,53 @@ export type StructuredOutputConfig = z.infer<typeof StructuredOutputConfigSchema
  * });
  * ```
  */
-export const AgentSchema = lazySchema(() => z.object({
+export const AgentSchema = lazySchema(() => strictObject({
+  surface: 'this agent',
+  history: AGENT_HISTORY,
+  aliases: {
+    displayName: 'label', title: 'label',
+    persona: 'role', systemRole: 'role',
+    prompt: 'instructions', systemPrompt: 'instructions', primeDirectives: 'instructions',
+    enabled: 'active', isActive: 'active',
+    allowedUsers: 'access', users: 'access', audience: 'access',
+    capabilities: 'skills', abilities: 'skills',
+    icon: 'avatar', image: 'avatar',
+    output: 'structuredOutput', responseFormat: 'structuredOutput',
+    limits: 'guardrails', safety: 'guardrails',
+  },
+  guidance: {
+    // ── The two security-shaped removals ──────────────────────────────────
+    // Both were dropped rather than tombstoned (see the block below `access`)
+    // because at the time there was no rejection to hang a prescription on —
+    // the shape was `.strip`, so any tombstone would have been prose in a
+    // comment. Closing the shape creates that channel, so they get one now.
+    // These are `guidance` rather than `retiredKey` deliberately: both removals
+    // are a major behind, and re-declaring a key on the published type a major
+    // after deleting it is a worse trade than carrying the sentence here.
+    //
+    // This is the `skill.permissions` class, which is the class this campaign
+    // cares most about: a key that READS as a security control, is not one, and
+    // says nothing when you write it. An author who set `visibility: 'private'`
+    // believed the agent was hidden. It was listed to everyone, and had been
+    // all along.
+    visibility:
+      '`visibility` was removed in #1901 — it never hid anything. No runtime read it: '
+      + 'the chat-access evaluator ignored it and the agent list route did not filter on it, '
+      + "so `private` listed the agent to everyone. Use `access` (who may chat) and/or "
+      + '`permissions` (required permission-set capabilities) — both ENFORCED at the chat route since #1884.',
+    tenantId:
+      '`tenantId` was removed in #2377 — it never scoped anything. Tenancy comes from the '
+      + 'request context (`resolveAuthzContext`), never from a field on the artifact, so this '
+      + 'key did not restrict which tenant could reach the agent. Delete it; scope reachability '
+      + 'with `access` / `permissions`.',
+    // ── Wrong-layer pointers ──────────────────────────────────────────────
+    temperature: 'model settings live under `model` — write `model: { temperature: … }`',
+    provider: 'model settings live under `model` — write `model: { provider: … }`',
+    maxTokens:
+      'ambiguous at this level — per-request model output is `model.maxTokens`; a budget '
+      + 'ceiling for the whole invocation is `guardrails.maxTokensPerInvocation`',
+  },
+}, {
   /** Identity */
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Agent unique identifier'),
   label: z.string().describe('Agent display name'),
@@ -193,13 +273,29 @@ export const AgentSchema = lazySchema(() => z.object({
   //     real owner/org semantics.
 
   /** Autonomous Reasoning */
-  planning: z.object({
+  planning: strictObject({
+    surface: 'this planning configuration',
+    history: AGENT_HISTORY,
+    aliases: { maxSteps: 'maxIterations', maxLoops: 'maxIterations', iterations: 'maxIterations', maxTurns: 'maxIterations' },
+  }, {
     /** Maximum reasoning iterations before stopping */
     maxIterations: z.number().int().min(1).max(100).default(10).describe('Maximum planning loop iterations'),
   }).optional().describe('Autonomous reasoning and planning configuration'),
 
   /** Memory Management */
-  memory: z.object({
+  memory: strictObject({
+    surface: 'this memory configuration',
+    history: AGENT_HISTORY,
+    aliases: { persistent: 'longTerm', persistence: 'longTerm', reflection: 'reflectionInterval', reflectEvery: 'reflectionInterval' },
+    guidance: {
+      // The removal recorded in the note below, given the rejection it never had.
+      shortTerm:
+        '`shortTerm` was removed (ADR-0013 D3, cloud#339) — it declared a working-memory '
+        + 'window nothing in the runtime consumed. Cross-turn grounding comes from tools reading '
+        + 'live state, and the context budget is governed by the per-request token guardrail, '
+        + 'not by this block. Delete it.',
+    },
+  }, {
     // NOTE: `shortTerm` ({maxMessages,maxTokens}) was removed (ADR-0013 D3,
     // cloud#339). It declared a working-memory window that NOTHING in the
     // runtime consumed — a config that lies. Cross-turn grounding is done by
@@ -208,7 +304,11 @@ export const AgentSchema = lazySchema(() => z.object({
     // `reflectionInterval` are kept as forward-looking, off-by-default config.
 
     /** Long-term (persistent) memory configuration */
-    longTerm: z.object({
+    longTerm: strictObject({
+      surface: 'this long-term memory configuration',
+      history: AGENT_HISTORY,
+      aliases: { backend: 'store', storage: 'store', provider: 'store', limit: 'maxEntries', maxItems: 'maxEntries', active: 'enabled' },
+    }, {
       /** Whether long-term memory is enabled */
       enabled: z.boolean().default(false).describe('Enable long-term memory persistence'),
 
@@ -224,7 +324,25 @@ export const AgentSchema = lazySchema(() => z.object({
   }).optional().describe('[EXPERIMENTAL — not enforced] Agent memory management. Parsed but no runtime consumer yet (liveness #1878/#1893).'),
 
   /** Guardrails */
-  guardrails: z.object({
+  guardrails: strictObject({
+    surface: 'these guardrails',
+    history: AGENT_HISTORY,
+    aliases: {
+      maxTokens: 'maxTokensPerInvocation', tokenBudget: 'maxTokensPerInvocation', tokenLimit: 'maxTokensPerInvocation',
+      timeout: 'maxExecutionTimeSec', maxExecutionTime: 'maxExecutionTimeSec', timeoutSec: 'maxExecutionTimeSec',
+      blocked: 'blockedTopics', forbiddenTopics: 'blockedTopics', denyTopics: 'blockedTopics',
+    },
+    guidance: {
+      // Guardrails are the block an author reaches for when they want a limit
+      // enforced, so a near-miss here is more likely than elsewhere to be
+      // someone asking for a control that does not exist. Say which do.
+      allowedTopics:
+        'there is no allow-list — only `blockedTopics` (a deny-list). Steer permitted scope '
+        + 'in `instructions`; restrict WHO can invoke the agent with `access` / `permissions`',
+      maxCostUsd: 'there is no cost ceiling here — budget by tokens with `maxTokensPerInvocation`',
+      rateLimit: 'per-caller rate limiting is not an agent field — it is enforced by the quota service',
+    },
+  }, {
     /** Maximum tokens the agent may consume per invocation */
     maxTokensPerInvocation: z.number().int().min(1).optional().describe('Token budget per single invocation'),
 

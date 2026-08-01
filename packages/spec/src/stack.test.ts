@@ -409,7 +409,11 @@ describe('defineStack - Map Format Support', () => {
         landing: {
           label: 'Landing Page',
           type: 'app',
-          route: '/landing',
+          // `route: '/landing'` used to sit here. `PageSchema` has never
+          // declared a `route` key — a page is routed by its `name`, which in
+          // map format IS the map key (`landing`), which is what this test
+          // asserts six lines down. `.strip` ate it, so the fiction rode along
+          // in the platform's own suite until the shape closed (#4001).
           regions: [
             { name: 'main', components: [{ type: 'page:section', properties: {} }] },
           ],

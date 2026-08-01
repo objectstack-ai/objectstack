@@ -21,6 +21,8 @@ import {
 import { STACK_KEY_GUIDANCE, STACK_RUNTIME_MEMBERS } from '../data/authoring-key-lint';
 import { PLURAL_TO_SINGULAR } from '../shared/metadata-collection.zod';
 import { ObjectSchema } from '../data/object.zod';
+import { PageSchema } from '../ui/page.zod';
+import { AgentSchema } from '../ai/agent.zod';
 import { ObjectStackDefinitionSchema } from '../stack.zod';
 import { getMetadataTypeSchema } from './metadata-type-schemas';
 
@@ -39,15 +41,23 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // list below; that confirmation is the whole point of pinning a number here.
     // 15 → 13 when `seed` + `doc` graduated (#4001 registered-types batch);
     // 13 → 12 when `object` closed on the parse path; 12 → 6 when the seven
-    // small registered types closed in one batch. Note what did NOT shrink with
-    // `object`: its 71 NESTED strip sites still report, because the walk no
-    // longer gates a whole collection on its root's posture — so this number
-    // tracks ROOTS that graduated, not coverage lost.
-    expect(lintables.length).toBeGreaterThanOrEqual(6);
+    // small registered types closed in one batch; 6 → 3 when `mapping`, `agent`
+    // and `page` closed. Note what did NOT shrink with `object`: its 71 NESTED
+    // strip sites still report, because the walk no longer gates a whole
+    // collection on its root's posture — so this number tracks ROOTS that
+    // graduated, not coverage lost.
+    //
+    // Lowering this number is only honest if each departed root is now REJECTED
+    // by the parse rather than merely unwatched. That was checked directly for
+    // this shrink — `agent.zzz`, `page.zzz`, and the nested
+    // `page.regions[0].zzz` all `safeParse` to failure — and the check is worth
+    // repeating on the next one, because a broken walk and a successful
+    // graduation shrink this count identically.
+    expect(lintables.length).toBeGreaterThanOrEqual(3);
     // `view` matters doubly: it is a UNION (container | ViewItem | overlay), so
     // its presence pins the union half of the posture logic — a regression that
     // silently dropped unions would shrink coverage without failing the count.
-    for (const expected of ['page', 'agent', 'dashboard', 'action', 'view']) {
+    for (const expected of ['dashboard', 'action', 'view']) {
       expect(lintableTypes, `expected '${expected}' to be lint-covered`).toContain(expected);
     }
   });
@@ -146,16 +156,33 @@ describe('the #4148 behaviours survive the generalization', () => {
   });
 
   it('reports across collections in one walk, with per-type surfaces', () => {
+    // `page` and `agent` used to appear here too. They closed (#4001 batch 6a),
+    // so the parse rejects those keys and the lint correctly stays quiet — the
+    // hand-off this whole layer was built to make. `dashboard` keeps a
+    // second collection in the walk so this still proves per-type surfacing
+    // rather than degenerating into a single-collection test.
     const findings = lintUnknownAuthoringKeys({
       objects: [{ name: 'a', label: 'A', fields: { x: { type: 'text', indexed: true } } }],
-      pages: [{ name: 'p', label: 'P', zzz: 1 }],
-      agents: [{ name: 'ag', zzz: 1 }],
+      dashboards: [{ name: 'd', label: 'D', zzz: 1 }],
     });
     expect(findings.map((f) => `${f.surface}:${f.path}`).sort()).toEqual([
-      'agent:agents.ag.zzz',
+      'dashboard:dashboards.d.zzz',
       'field:objects.a.fields.x.indexed',
-      'page:pages.p.zzz',
     ]);
+  });
+
+  it('hands off to the parse for the roots that closed', () => {
+    // The other half of the assertion above, and the one that makes lowering
+    // the coverage floor honest: these keys are not unreported, they are
+    // REJECTED. A broken walk would produce the same empty lint result.
+    expect(lintUnknownAuthoringKeys({
+      pages: [{ name: 'p', label: 'P', zzz: 1 }],
+      agents: [{ name: 'ag', zzz: 1 }],
+    })).toEqual([]);
+    expect(PageSchema.safeParse({ name: 'p', label: 'P', zzz: 1 }).success).toBe(false);
+    expect(AgentSchema.safeParse({
+      name: 'ag', label: 'A', role: 'r', instructions: 'i', zzz: 1,
+    }).success).toBe(false);
   });
 
   it('survives malformed input rather than throwing', () => {
@@ -193,10 +220,17 @@ describe('nested descent (#4001 evidence phase)', () => {
   });
 
   it('reports inside an array element, indexed by position', () => {
+    // Was `pages[].regions[]` until `page` closed (#4001 batch 6a) — the parse
+    // rejects that key now. `object.actions[]` is the same structural case and
+    // carries a second property worth pinning: `object` itself is CLOSED, and
+    // its nested strip sites still report. That is the #4522 fix — the walk
+    // descends per node instead of gating a whole collection on its root's
+    // posture — so this test now covers the array index and that regression at
+    // once.
     const [finding] = lintUnknownAuthoringKeys({
-      pages: [{ name: 'p1', regions: [{ name: 'r', zzz_nested: 1 }] }],
+      objects: [{ name: 'o1', actions: [{ name: 'a', zzz_nested: 1 }] }],
     });
-    expect(finding).toMatchObject({ path: 'pages.p1.regions.0.zzz_nested', surface: 'page' });
+    expect(finding).toMatchObject({ path: 'objects.o1.actions.0.zzz_nested', surface: 'object' });
   });
 
   it('carries the field surface through a record INTO its nested array', () => {

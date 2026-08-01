@@ -62,6 +62,51 @@ import { z } from 'zod';
 
 import { strictUnknownKeyError } from './suggestions.zod';
 
+/**
+ * True when `schema` accepts no value at all — a `z.never()`, however wrapped.
+ *
+ * The case this exists for is {@link retiredKey}, which declares a removed key
+ * as `z.never().optional()` so the removal is audible in both channels an
+ * upgrading author hits: `tsc` (the input type is `never`) and the parse (the
+ * value raises the upgrade prescription). That declaration is deliberate and
+ * strictly stronger than a `guidance` entry — but it also puts the dead key in
+ * `Object.keys(shape)`, and the suggester happily offered it.
+ *
+ * Which produced this, on `skill`, from the campaign's own helper:
+ *
+ *     Unrecognized key(s) on this skill: `triggerPhrase`. …
+ *     Did you mean `triggerPhrase` → `triggerPhrases`?
+ *
+ * `triggerPhrases` was REMOVED. An author who took the advice landed on the
+ * tombstone and got a second rejection telling them to delete what they had
+ * just been told to write. Not silent — but it is the shape the ledger's
+ * finding 7 already records twice: **this campaign's own fix signposting the
+ * way into the failure mode it exists to kill.**
+ *
+ * The rule is narrower than "skip tombstones" and holds without knowing why a
+ * key is unwritable: **never suggest a key the schema cannot accept.** A
+ * structural check gets that for free, and keeps working if the tombstone
+ * helper is ever reshaped.
+ */
+function acceptsNothing(schema: unknown, depth = 0): boolean {
+  if (depth > 6) return false;
+  const def = (schema as { _zod?: { def?: { type?: string; innerType?: unknown } } })._zod?.def;
+  if (!def?.type) return false;
+  if (def.type === 'never') return true;
+  switch (def.type) {
+    case 'optional':
+    case 'nullable':
+    case 'default':
+    case 'prefault':
+    case 'readonly':
+    case 'nonoptional':
+    case 'catch':
+      return acceptsNothing(def.innerType, depth + 1);
+    default:
+      return false;
+  }
+}
+
 /** Authoring-surface metadata for {@link strictObject}. */
 export interface StrictObjectOptions {
   /** Prose name of the surface the key was written on (e.g. `'this widget'`). */
@@ -97,7 +142,14 @@ export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptio
     .object(shape, {
       error: strictUnknownKeyError({
         surface,
-        knownKeys: [...Object.keys(shape), ...extraKeys],
+        // Declared-but-unwritable keys (tombstones) are excluded — see
+        // `acceptsNothing`. They stay in the SHAPE, so writing one still raises
+        // its own prescription; they are only kept out of the candidate list a
+        // typo gets pointed at.
+        knownKeys: [
+          ...Object.keys(shape).filter((k) => !acceptsNothing(shape[k])),
+          ...extraKeys,
+        ],
         history,
         aliases,
         guidance,

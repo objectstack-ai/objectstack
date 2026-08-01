@@ -196,4 +196,22 @@ describe('#3896 close-out — retired `triggerPhrases`', () => {
     expect(message).toMatch(/triggerConditions/);
     expect(message).toMatch(/#3896/);
   });
+
+  it('does not offer the retired key as the fix for a near-miss of it', () => {
+    // When `skill` went strict (#4001 batch 4) the tombstone landed in the
+    // suggester's candidate list, so a `triggerPhrase` typo was answered with
+    // "Did you mean `triggerPhrases`?" — routing the author onto a REMOVED key,
+    // and into a second rejection telling them to delete what they had just
+    // been told to write. `strictObject` now excludes keys the schema cannot
+    // accept; see `shared/strict-object.test.ts` for the general rule.
+    const result = SkillSchema.safeParse({
+      name: 'case_mgmt',
+      label: 'Cases',
+      triggerPhrase: ['open a ticket'],
+    });
+    expect(result.success).toBe(false);
+    const message = result.error?.issues.map((i) => i.message).join(' | ') ?? '';
+    expect(message).toContain('`triggerPhrase`');
+    expect(message).not.toContain('triggerPhrases');
+  });
 });

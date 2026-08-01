@@ -153,3 +153,59 @@ describe('strictObject', () => {
     expect(stripJson.additionalProperties).toBe(false);
   });
 });
+
+/**
+ * Never suggest a key the schema cannot accept.
+ *
+ * `retiredKey` declares a removed key as `z.never().optional()` so the removal
+ * is audible in both channels an upgrading author hits — `tsc` and the parse.
+ * That is deliberate and stronger than a `guidance` entry. But it also leaves
+ * the dead key in `Object.keys(shape)`, and the suggester offered it: on
+ * `skill`, a `triggerPhrase` typo was answered with
+ * "Did you mean `triggerPhrases`?" — a key that had been REMOVED. An author who
+ * complied got a second rejection telling them to delete what they had just
+ * been told to write.
+ *
+ * Ledger finding 7, third occurrence: this campaign's own fix signposting the
+ * way into the failure mode it exists to kill. Pinned here because the two
+ * helpers are each correct alone and only wrong in combination — which is the
+ * kind of defect no per-schema test goes looking for.
+ */
+describe('strictObject × retiredKey — suggestions never point at a dead key', () => {
+  const Tombstoned = lazySchema(() =>
+    strictObject(
+      {
+        surface: 'this thing',
+        history: 'Until #4001 these were dropped silently.',
+      },
+      {
+        label: z.string(),
+        // Shaped exactly as `retiredKey()` builds it.
+        triggerPhrases: z
+          .never({ error: () => '`triggerPhrases` was removed in vX. Delete it.' })
+          .optional(),
+      },
+    ),
+  );
+
+  const messageFor = (body: Record<string, unknown>) => {
+    const r = Tombstoned.safeParse({ label: 'x', ...body });
+    expect(r.success).toBe(false);
+    return r.error!.issues.map((i) => i.message).join(' | ');
+  };
+
+  it('does not offer a removed key as the fix for a near-miss of it', () => {
+    expect(messageFor({ triggerPhrase: ['hi'] })).not.toContain('triggerPhrases');
+  });
+
+  it('still offers a LIVE key for a near-miss of it', () => {
+    // The narrowing must not cost the suggester its actual job.
+    expect(messageFor({ lable: 'x' })).toContain('`lable` → `label`');
+  });
+
+  it('still raises the tombstone prescription when the dead key is written', () => {
+    // Excluded from the CANDIDATE list, not from the shape — writing it must
+    // still produce the upgrade instruction, not a generic unknown-key error.
+    expect(messageFor({ triggerPhrases: ['hi'] })).toContain('was removed in vX');
+  });
+});

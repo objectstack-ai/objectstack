@@ -76,7 +76,7 @@ const PROBE: Record<string, unknown> = {
  * when its groups were closed, leaving 4.
  */
 const UNDECLARED_ENVELOPE = new Set<string>([
-  'action', 'field', 'mapping', 'page',
+  'action', 'field',
 ]);
 
 /**
@@ -197,4 +197,89 @@ describe('registered metadata types', () => {
       ).toBe(false);
     },
   );
+});
+
+/**
+ * The #4001 headline number, derived instead of tallied.
+ *
+ * "N of 25 registered types closed" was carried by hand across batches and had
+ * drifted by one before anyone measured it — in a campaign whose recurring
+ * finding is that hand-maintained measurements of coverage go stale (the ledger
+ * gate's non-recursive walk, the hollow envelope probe, the lint's root-gated
+ * posture). A number nobody can check is the same class of instrument.
+ *
+ * `STILL_STRIP` carries the same reverse pin as `UNDECLARED_ENVELOPE`: closing a
+ * type fails this suite until the list shrinks, so the list cannot outlive the
+ * debt and start exempting types that no longer need exempting.
+ */
+const STILL_STRIP = new Set<string>(['action', 'dashboard', 'field', 'view']);
+
+/** The registered schema's own top-level posture: `.strict()` sets a `never` catchall. */
+function topLevelPosture(schema: unknown, depth = 0): 'strict' | 'strip' | null {
+  if (!schema || depth > 12) return null;
+  const s = schema as { _zod?: { def?: Def }; def?: Def };
+  const def = s._zod?.def ?? s.def;
+  switch (def?.type) {
+    case 'object': {
+      const catchall = (def as { catchall?: { _zod?: { def?: Def } } }).catchall;
+      return catchall?._zod?.def?.type === 'never' ? 'strict' : 'strip';
+    }
+    case 'lazy':
+      try {
+        return topLevelPosture(def.getter?.(), depth + 1);
+      } catch {
+        return null;
+      }
+    case 'pipe':
+      return topLevelPosture(def.out, depth + 1) ?? topLevelPosture(def.in, depth + 1);
+    case 'union': {
+      // A union is closed only when EVERY variant is — one open variant is an
+      // open door, and `validation` is exactly this shape.
+      const seen = (def.options ?? []).map((o) => topLevelPosture(o, depth + 1));
+      if (seen.length === 0) return null;
+      if (seen.every((r) => r === 'strict')) return 'strict';
+      return seen.some((r) => r !== null) ? 'strip' : null;
+    }
+    case 'optional':
+    case 'nullable':
+    case 'default':
+    case 'prefault':
+    case 'readonly':
+    case 'nonoptional':
+    case 'catch':
+      return topLevelPosture(def.innerType, depth + 1);
+    default:
+      return null;
+  }
+}
+
+describe('#4001 — registered-type closure is derived, not tallied', () => {
+  const types = listMetadataTypeSchemaTypes();
+
+  it.each(types.filter((t) => !STILL_STRIP.has(t)))('%s REJECTS unknown keys', (type) => {
+    const posture = topLevelPosture(getMetadataTypeSchema(type));
+    // A type the walker cannot resolve is a hard failure, never a pass — the
+    // walker going quiet is precisely when this would stop covering something.
+    expect(posture, `could not resolve a top-level posture for '${type}'`).not.toBeNull();
+    expect(
+      posture,
+      `'${type}' still strips unknown keys. Close it with \`strictObject\`, or add it to `
+      + 'STILL_STRIP with a reason.',
+    ).toBe('strict');
+  });
+
+  it.each([...STILL_STRIP])('%s is still on the strip list (remove it once closed)', (type) => {
+    expect(types).toContain(type);
+    expect(
+      topLevelPosture(getMetadataTypeSchema(type)),
+      `'${type}' is now strict — remove it from STILL_STRIP and update the count.`,
+    ).toBe('strip');
+  });
+
+  it('reports the campaign number so a reader never has to count', () => {
+    const closed = types.filter((t) => !STILL_STRIP.has(t));
+    expect(closed.length + STILL_STRIP.size).toBe(types.length);
+    expect(closed.length).toBe(21);
+    expect(types.length).toBe(25);
+  });
 });

@@ -239,6 +239,53 @@ dropped at parse, and nothing failed.
     column being the live one. Fifth instance of finding 9's pattern, and the
     first where the blinded instrument was a gate rather than a measurement.
 
+12. **The campaign's own helper started signposting removed keys.** `skill`
+    (batch 4) closed with `strictObject` while still carrying `retiredKey`
+    tombstones — and `strictObject` built its candidate list from
+    `Object.keys(shape)`, which includes them. So:
+
+        Unrecognized key(s) on this skill: `triggerPhrase`. …
+        Did you mean `triggerPhrase` → `triggerPhrases`?
+
+    `triggerPhrases` was REMOVED. An author who complied landed on the tombstone
+    and got a second rejection telling them to delete what they had just been
+    told to write.
+
+    **Third occurrence of finding 7's shape** — this campaign's fix pointing the
+    way into the failure it exists to kill — and the first one the campaign put
+    in its own *shared* helper, where it would have reached every conversion
+    after it. Both helpers were correct alone; only the combination was wrong,
+    which is the kind of defect no per-schema test looks for.
+
+    Fixed structurally rather than by special-casing tombstones: **never suggest
+    a key the schema cannot accept.** `strictObject` drops candidates that
+    accept `never` (however wrapped), so the rule holds without knowing why a
+    key is unwritable. Note the two helpers stay complementary — `retiredKey` is
+    *stronger* than a `guidance` entry, not redundant with it, because it types
+    the key as `never` and so fails `tsc` even when the config arrives through a
+    variable, where excess-property checking would not fire.
+
+13. **`route` on a page — a fiction the platform's own test suite carried.**
+    `stack.test.ts` authored `route: '/landing'` on a page for years.
+    `PageSchema` has never declared `route`; a page is routed by its `name`,
+    which in the map format under test IS the map key. The test asserted exactly
+    that, six lines below the key contradicting it.
+
+    Fifth instance of a test codifying a strip-era fiction as intent
+    (`position.parent`, `object.namespace`, `compactLayout`,
+    `skill.permissions`, now `page.route`) — and the most likely of them to be
+    reinvented, because `route` is the first key anyone reaches for on a page.
+    Now tombstoned along with `path` and `url`.
+
+    Two more from the same file's own comments, and they are the
+    `skill.permissions` class again: `agent.visibility` and `agent.tenantId`
+    were **removed as unenforced security properties** and left without a
+    tombstone, because at the time the shape was `.strip` and there was no
+    rejection to attach a prescription to. An author who wrote
+    `visibility: 'private'` believed the agent was hidden; it was listed to
+    everyone, and always had been. Closing the shape created the channel, so
+    both got their sentence.
+
 This is the empirical argument for the ratchet: the inference "no metadata in
 the repo carries unknown keys" was **false three times over**, and only the
 strict gate could prove it. Note the asymmetry in the two schema gaps — both

@@ -5,9 +5,17 @@ description: Mapping protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Transformation Logic
+Shared history for this file (#4001).
 
-Built-in helpers for converting data during import.
+An import mapping is instructions for moving somebody's data. A dropped key
+
+does not fail the import — it runs, to completion, with a "success" the
+
+author reads as "the data arrived the way I described it". The rows land
+
+untransformed, or unmatched, or duplicated, and the diagnosis starts from a
+
+green run.
 
 <Callout type="info">
 **Source:** `packages/spec/src/data/mapping.zod.ts`
@@ -55,6 +63,13 @@ const result = FieldMapping.parse(data);
 | **extractQuery** | `{ object: string; fields?: string[]; where?: any; search?: string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }; … }` | optional | Query to run for export only |
 | **errorPolicy** | `Enum<'skip' \| 'abort' \| 'retry'>` | ✅ |  |
 | **batchSize** | `number` | ✅ |  |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
 
 ---
