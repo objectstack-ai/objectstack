@@ -656,6 +656,25 @@ export class SchemaRegistry {
   /** FQN → Merged ServiceObject (cached, invalidated on changes) */
   private mergedObjectCache = new Map<string, ServiceObject>();
 
+  /**
+   * Monotonic counter bumped on every change to the registered object set.
+   *
+   * Consumers that derive their OWN cache from the registry (the engine's
+   * roll-up summary index) key it on this, so a runtime registration can never
+   * leave them stale. Before it existed, the engine's summary index had a single
+   * invalidation site — `engine.registerApp` — which the runtime publish path
+   * does not go through (it calls `registry.registerObject` directly). Any
+   * kernel that had already performed one write therefore held an index built
+   * before the object existed, and every child write of a newly-published
+   * roll-up silently skipped the recompute until the process restarted.
+   */
+  private _objectRevision = 0;
+
+  /** See {@link _objectRevision}. Read it, compare it, rebuild when it moves. */
+  get objectRevision(): number {
+    return this._objectRevision;
+  }
+
   /** Namespace → Set<PackageId> (multiple packages can share a namespace) */
   private namespaceRegistry = new Map<string, Set<string>>();
 
@@ -878,6 +897,9 @@ export class SchemaRegistry {
 
     // Invalidate merge cache
     this.mergedObjectCache.delete(fqn);
+    // …and tell registry-derived caches (the engine's roll-up summary index)
+    // that the object set moved, whichever path got here.
+    this._objectRevision += 1;
 
     this.log(`[Registry] Registered object: ${fqn} (${ownership}, priority=${priority}) from ${packageId}`);
     return fqn;
@@ -1079,6 +1101,7 @@ export class SchemaRegistry {
 
       // Invalidate cache
       this.mergedObjectCache.delete(fqn);
+      this._objectRevision += 1;
     }
   }
 
@@ -1702,6 +1725,7 @@ export class SchemaRegistry {
    * name are invalidated.
    */
   invalidate(fqnOrName: string): void {
+    this._objectRevision += 1;
     if (this.mergedObjectCache.has(fqnOrName)) {
       this.mergedObjectCache.delete(fqnOrName);
       return;
@@ -1718,6 +1742,7 @@ export class SchemaRegistry {
   /** Drop every entry from the merged-schema cache. */
   invalidateAll(): void {
     this.mergedObjectCache.clear();
+    this._objectRevision += 1;
   }
 
   /**
@@ -1729,6 +1754,7 @@ export class SchemaRegistry {
     this.namespaceRegistry.clear();
     this.metadata.clear();
     this.appNavContributions.clear();
+    this._objectRevision += 1;
     this.log('[Registry] Reset complete');
   }
 }

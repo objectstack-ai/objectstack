@@ -2819,8 +2819,26 @@ export class ObjectQL implements IObjectQLEngine {
     return index;
   }
 
+  /** `registry.objectRevision` the cached {@link summaryIndex} was built at. */
+  private summaryIndexRevision = -1;
+
   private getSummaryDescriptors(childObject: string): SummaryDescriptor[] {
-    if (!this.summaryIndex) this.summaryIndex = this.buildSummaryIndex();
+    // Rebuild whenever the REGISTRY's object set has moved since the index was
+    // built — not only when someone remembered to call
+    // `invalidateSummaryIndex`. That single site (`registerApp`) is bypassed by
+    // the runtime publish path, which registers straight into the registry
+    // (`protocol.saveMetaItem` → `registry.registerObject`). A kernel that had
+    // already done one write — publishing itself writes `sys_metadata` — held an
+    // index built before the new object existed, so every child write of a
+    // freshly published roll-up skipped the recompute and the parent read null
+    // until the process restarted. That is exactly how an AI-built app's
+    // "已完成任务数" shipped empty over correct metadata (cloud#970).
+    const revision = (this._registry as unknown as { objectRevision?: number })?.objectRevision;
+    const stale = typeof revision === 'number' && revision !== this.summaryIndexRevision;
+    if (!this.summaryIndex || stale) {
+      this.summaryIndex = this.buildSummaryIndex();
+      if (typeof revision === 'number') this.summaryIndexRevision = revision;
+    }
     return this.summaryIndex.get(childObject) ?? [];
   }
 

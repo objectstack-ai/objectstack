@@ -237,3 +237,49 @@ describe('roll-up summary fields with a filter predicate', () => {
     expect(pub(p.id).total_events).toBe(1); // the unfiltered count still sees the view
   });
 });
+
+describe('roll-up summary index — a roll-up registered at RUNTIME still computes', () => {
+  it('picks up an object registered after the index was already built', async () => {
+    // The runtime publish path registers straight into the registry
+    // (`protocol.saveMetaItem` → `registry.registerObject`), never through
+    // `engine.registerApp` — the sole site that used to invalidate the engine's
+    // summary index. Any kernel that had already written a row (publishing
+    // itself writes `sys_metadata`) held an index built before the new object,
+    // so a freshly published roll-up silently never recomputed until restart:
+    // an AI-built "已完成任务数" over correct metadata, permanently empty
+    // (cloud#970).
+    const engine = new ObjectQL();
+    const d = makeDriver();
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+
+    // A write BEFORE the roll-up exists — this is what warmed the stale cache.
+    engine.registry.registerObject({ name: 'note', fields: { body: { type: 'text' } } } as any);
+    await engine.insert('note', { body: 'warm the summary index' });
+
+    // Now publish the parent + child, the way a runtime publish does.
+    engine.registry.registerObject({
+      name: 'project',
+      fields: {
+        name: { type: 'text' },
+        task_count: { type: 'summary', summaryOperations: { object: 'task', field: 'id', function: 'count' } },
+        completed_task_count: {
+          type: 'summary',
+          summaryOperations: { object: 'task', field: 'id', function: 'count', filter: { status: 'completed' } },
+        },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'task',
+      fields: { title: { type: 'text' }, status: { type: 'text' }, project: { type: 'master_detail', reference: 'project' } },
+    } as any);
+
+    const p = await engine.insert('project', { name: 'Apollo' });
+    await engine.insert('task', { title: 'a', status: 'completed', project: p.id });
+    await engine.insert('task', { title: 'b', status: 'todo', project: p.id });
+
+    const parent = d.storeFor('project').get(p.id);
+    expect(parent.task_count).toBe(2);
+    expect(parent.completed_task_count).toBe(1);
+  });
+});
