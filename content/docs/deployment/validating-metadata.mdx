@@ -290,16 +290,36 @@ filter chip, or one form field short.
 Checked on every injected block: `<ListView>`'s
 `fields`/`columns`/`sort`/`grouping`/`userFilters`, `<ObjectForm>`'s `fields`,
 `initialValues` keys, `sections[].fields[]` and `subforms` (each against its own
-`childObject`), and `<RecordHighlights>` / `<RecordDetails>` / `<RecordPath>` /
-`<RecordRelatedList>` — those last four through the **same** descriptor table
-§5 uses, so a component's field-bearing props are described once and checked on
-both surfaces. `<Block type="…">` reaches that table by the type the author
-writes, so the escape hatch is covered rather than left as a hole.
+`childObject`). `<Block type="…">` reaches the §5 descriptor table by the type
+the author writes, so the escape hatch is covered rather than left as a hole.
 
-`<RecordRelatedList objectName>` is the **related (child)** object whose records
-are listed — the parent record is bound by `recordId`, and `relationshipField`
-is the child's field pointing back at it. Passing the parent there is the
-mistake this check was extended to catch.
+### 10b. A `record:*` block on a react page
+
+The `record:*` family — `<RecordDetails>`, `<RecordHighlights>`,
+`<RecordRelatedList>`, `<RecordPath>`, and the rest — renders from the record
+context a **record page** mounts once for the record it routed to. A
+`kind:'react'` page mounts no such context, so these blocks render empty
+whatever props they are given; the react contract published `objectName` /
+`recordId` for four of them and no renderer ever read either.
+
+```jsx
+<RecordHighlights objectName="crm_account" recordId={sel} fields={['name']} />
+//  ↑ error: renders empty here — those props are not read
+```
+
+They are withdrawn from the react tier, and using one is an **error**
+(`react-block-needs-record-context`) — by tag, and through
+`<Block type="record:…">` alike. On a react page the parent record is ordinary
+React state, so bind it with a block that reads its own props: `<ListView
+objectName="<child>" filters={['<lookup>', '=', parentId]}>` for a related list,
+`<ObjectForm mode="view" recordId={…}>` for a field panel. To use the family
+itself, author the page as `type:'record'`.
+
+On a **record page**, where these blocks do work, §5 checks their field-bearing
+props, and `<RecordRelatedList objectName>` is the **related (child)** object
+whose records are listed — the parent record comes from the page, and
+`relationshipField` is the child's field pointing back at it. Passing the parent
+there is the mistake that check was extended to catch.
 
 A **filter position** is the exception that gates:
 
