@@ -34,8 +34,8 @@ batch-draft. This is the safety valve for low-specificity input.
 ## TypeScript Usage
 
 ```typescript
-import { BlueprintApp, BlueprintDashboard, BlueprintField, BlueprintNavItem, BlueprintObject, BlueprintSeed, BlueprintView, BlueprintWidgetCondition, SolutionBlueprint, SolutionBlueprintStrict } from '@objectstack/spec/ai';
-import type { BlueprintApp, BlueprintDashboard, BlueprintField, BlueprintNavItem, BlueprintObject, BlueprintSeed, BlueprintView, BlueprintWidgetCondition, SolutionBlueprint, SolutionBlueprintStrict } from '@objectstack/spec/ai';
+import { BlueprintApp, BlueprintCondition, BlueprintDashboard, BlueprintField, BlueprintNavItem, BlueprintObject, BlueprintSeed, BlueprintSummaryOperations, BlueprintView, BlueprintWidgetCondition, SolutionBlueprint, SolutionBlueprintStrict } from '@objectstack/spec/ai';
+import type { BlueprintApp, BlueprintCondition, BlueprintDashboard, BlueprintField, BlueprintNavItem, BlueprintObject, BlueprintSeed, BlueprintSummaryOperations, BlueprintView, BlueprintWidgetCondition, SolutionBlueprint, SolutionBlueprintStrict } from '@objectstack/spec/ai';
 
 // Validate data
 const result = BlueprintApp.parse(data);
@@ -53,6 +53,19 @@ const result = BlueprintApp.parse(data);
 | **label** | `string` | optional | App display label |
 | **icon** | `string` | optional | Lucide icon for the App Launcher |
 | **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
+
+
+---
+
+## BlueprintCondition
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field on the target object to filter by (e.g. "stock_quantity", "status") |
+| **op** | `Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq' \| 'ne'>` | ✅ | Comparison operator |
+| **value** | `number \| string \| boolean` | ✅ | Comparison value — for a select field use its option VALUE, never its label (e.g. "completed", not "已完成") |
 
 
 ---
@@ -82,6 +95,7 @@ const result = BlueprintApp.parse(data);
 | **required** | `boolean` | optional | Whether the field is required |
 | **reference** | `string` | optional | Target object name for lookup / master_detail relationship fields |
 | **options** | `{ label: string; value: string }[]` | optional | Choices for select / multiselect / radio fields |
+| **summaryOperations** | `{ object: string; function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>; field?: string; relationshipField?: string; … }` | optional | REQUIRED when `type` is "summary" (a roll-up of child records: 任务总数 / 报名人数 / 合计金额 / 已完成任务数). Names the child object, the aggregation, and — for a qualified count/sum — the condition. A "summary" field without it materializes runtime-dead. |
 
 
 ---
@@ -127,6 +141,22 @@ const result = BlueprintApp.parse(data);
 
 ---
 
+## BlueprintSummaryOperations
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The CHILD object whose records are aggregated (snake_case). It must carry a lookup / master_detail field pointing back at this parent, or the roll-up never computes. |
+| **function** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregation: "数量 / 个数 / 计数" → count; "合计 / 总额 / 累计" → sum; "平均" → avg |
+| **field** | `string` | optional | Numeric field on the CHILD object to aggregate. Ignored for "count" (pass "id" or omit it). |
+| **relationshipField** | `string` | optional | The child FK field pointing back at this parent. Auto-detected from the child's lookup / master_detail; set it only when the child has more than one reference to this parent. |
+| **conditions** | `{ field: string; op: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq' \| 'ne'>; value: number \| string \| boolean }[]` | optional | CONDITIONAL roll-up: aggregate only the child rows matching these comparisons (ANDed). REQUIRED whenever the field name carries a qualifier — "已完成任务数 / 已收货金额 / 待处理工单数", any 已X / 未X / `<某状态>`的 count-or-sum → e.g. [`{ field: "status", op: "eq", value: "completed" }`]. WITHOUT it the roll-up silently counts EVERY child and reports a plausible-looking WRONG number, which is worse than a visible 0. |
+| **filter** | `any` | optional | The same predicate as a canonical query filter map (e.g. `{ status: "completed" }`, `{ status: { $in: ["received", "partial"] }` }). Use it when hand-authoring a blueprint; the structured design path uses `conditions` instead. Wins over `conditions` when both are given. |
+
+
+---
+
 ## BlueprintView
 
 ### Properties
@@ -149,9 +179,9 @@ const result = BlueprintApp.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field on the widget object to filter by (e.g. "stock_quantity", "status") |
+| **field** | `string` | ✅ | Field on the target object to filter by (e.g. "stock_quantity", "status") |
 | **op** | `Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq' \| 'ne'>` | ✅ | Comparison operator |
-| **value** | `number \| string \| boolean` | ✅ | Comparison value (e.g. 10, "open") |
+| **value** | `number \| string \| boolean` | ✅ | Comparison value — for a select field use its option VALUE, never its label (e.g. "completed", not "已完成") |
 
 
 ---
@@ -162,7 +192,7 @@ const result = BlueprintApp.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **summary** | `string` | ✅ | One-line description of the proposed solution |
+| **summary** | `string` | optional | One-line description of the proposed solution |
 | **assumptions** | `string[]` | ✅ | Design assumptions made from the underspecified goal |
 | **questions** | `string[]` | optional | At most 1-2 structure-deciding questions to confirm before building |
 | **objects** | `{ name: string; label?: string; description?: string; fields: { name: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; required?: boolean; … }[]; … }[]` | ✅ | Objects (tables) to create |
