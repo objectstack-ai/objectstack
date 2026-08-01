@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { FieldType } from '../data/field.zod';
+import { FilterConditionSchema } from '../data/filter.zod';
 
 /**
  * Solution Blueprint Schema (ADR-0033 §4 — plan-first authoring)
@@ -23,6 +24,55 @@ import { FieldType } from '../data/field.zod';
 const SNAKE_CASE = /^[a-z_][a-z0-9_]*$/;
 
 /**
+ * One `field op value` comparison in a blueprint predicate.
+ *
+ * Deliberately FLAT — no nested maps — because a blueprint is emitted through
+ * OpenAI *strict* structured output, which rejects the open-ended
+ * `additionalProperties` a real {@link FilterConditionSchema} map needs. Both
+ * places a blueprint scopes a record set (a dashboard widget, a conditional
+ * roll-up) use this shape; the builder compiles it to the real query filter.
+ */
+export const BlueprintConditionSchema = lazySchema(() => z.object({
+  field: z.string().regex(SNAKE_CASE).describe('Field on the target object to filter by (e.g. "stock_quantity", "status")'),
+  op: z.enum(['lt', 'lte', 'gt', 'gte', 'eq', 'ne']).describe('Comparison operator'),
+  value: z.union([z.number(), z.string(), z.boolean()]).describe('Comparison value — for a select field use its option VALUE, never its label (e.g. "completed", not "已完成")'),
+}));
+export type BlueprintCondition = z.infer<typeof BlueprintConditionSchema>;
+
+/**
+ * A roll-up (`summary` field) declared IN the blueprint — the aggregation of
+ * CHILD records onto this parent record that `apply_blueprint` materializes as
+ * the object field's `summaryOperations`.
+ *
+ * Why it lives on the blueprint at all: a `summary` field with no aggregation
+ * config is runtime-DEAD (the engine's summary index skips it, so it reads
+ * null/0 everywhere), and roll-ups are only recomputed when a CHILD row is
+ * written — so a roll-up configured AFTER the build's sample data loaded stays
+ * empty until someone edits a child. The design phase is where the aggregation
+ * is actually known ("已完成任务数 counts only completed tasks"), so it must be
+ * expressible here rather than left to a follow-up patch.
+ *
+ * `conditions` is the strict-structured-output-safe way to write the predicate;
+ * `filter` accepts the canonical query map directly for a hand-authored
+ * blueprint. Give at most one — `filter` wins when both are present.
+ */
+export const BlueprintSummaryOperationsSchema = lazySchema(() => z.object({
+  object: z.string().regex(SNAKE_CASE)
+    .describe('The CHILD object whose records are aggregated (snake_case). It must carry a lookup / master_detail field pointing back at this parent, or the roll-up never computes.'),
+  function: z.enum(['count', 'sum', 'avg', 'min', 'max'])
+    .describe('Aggregation: "数量 / 个数 / 计数" → count; "合计 / 总额 / 累计" → sum; "平均" → avg'),
+  field: z.string().regex(SNAKE_CASE).optional()
+    .describe('Numeric field on the CHILD object to aggregate. Ignored for "count" (pass "id" or omit it).'),
+  relationshipField: z.string().regex(SNAKE_CASE).optional()
+    .describe('The child FK field pointing back at this parent. Auto-detected from the child\'s lookup / master_detail; set it only when the child has more than one reference to this parent.'),
+  conditions: z.array(BlueprintConditionSchema).optional()
+    .describe('CONDITIONAL roll-up: aggregate only the child rows matching these comparisons (ANDed). REQUIRED whenever the field name carries a qualifier — "已完成任务数 / 已收货金额 / 待处理工单数", any 已X / 未X / <某状态>的 count-or-sum → e.g. [{ field: "status", op: "eq", value: "completed" }]. WITHOUT it the roll-up silently counts EVERY child and reports a plausible-looking WRONG number, which is worse than a visible 0.'),
+  filter: FilterConditionSchema.optional()
+    .describe('The same predicate as a canonical query filter map (e.g. { status: "completed" }, { status: { $in: ["received", "partial"] } }). Use it when hand-authoring a blueprint; the structured design path uses `conditions` instead. Wins over `conditions` when both are given.'),
+}));
+export type BlueprintSummaryOperations = z.infer<typeof BlueprintSummaryOperationsSchema>;
+
+/**
  * A proposed field on a blueprint object. `reference` carries the target
  * object for `lookup` / `master_detail` types — relationships are expressed
  * inline as reference fields rather than in a separate block.
@@ -38,6 +88,8 @@ export const BlueprintFieldSchema = lazySchema(() => z.object({
     label: z.string(),
     value: z.string().regex(SNAKE_CASE),
   })).optional().describe('Choices for select / multiselect / radio fields'),
+  summaryOperations: BlueprintSummaryOperationsSchema.optional()
+    .describe('REQUIRED when `type` is "summary" (a roll-up of child records: 任务总数 / 报名人数 / 合计金额 / 已完成任务数). Names the child object, the aggregation, and — for a qualified count/sum — the condition. A "summary" field without it materializes runtime-dead.'),
 }));
 export type BlueprintField = z.infer<typeof BlueprintFieldSchema>;
 
@@ -71,12 +123,12 @@ export type BlueprintView = z.infer<typeof BlueprintViewSchema>;
  * counts/aggregates — kept deliberately simple (one field op value) so the
  * builder can compile it to a widget `runtimeFilter`, and the model can emit it
  * reliably, instead of leaving a "low stock" / "overdue" card counting every row.
+ *
+ * Alias of {@link BlueprintConditionSchema} (the same `{field, op, value}` shape
+ * a conditional roll-up uses); kept as its own export/type for the widget call
+ * sites that name it.
  */
-export const BlueprintWidgetConditionSchema = lazySchema(() => z.object({
-  field: z.string().regex(SNAKE_CASE).describe('Field on the widget object to filter by (e.g. "stock_quantity", "status")'),
-  op: z.enum(['lt', 'lte', 'gt', 'gte', 'eq', 'ne']).describe('Comparison operator'),
-  value: z.union([z.number(), z.string(), z.boolean()]).describe('Comparison value (e.g. 10, "open")'),
-}));
+export const BlueprintWidgetConditionSchema = BlueprintConditionSchema;
 export type BlueprintWidgetCondition = z.infer<typeof BlueprintWidgetConditionSchema>;
 
 /** A proposed dashboard with a few widgets (kept intentionally light). */
@@ -143,7 +195,14 @@ export type BlueprintSeed = z.infer<typeof BlueprintSeedSchema>;
  * structure-deciding clarifications it should ask before proposing.
  */
 export const SolutionBlueprintSchema = lazySchema(() => z.object({
-  summary: z.string().describe('One-line description of the proposed solution'),
+  // OPTIONAL on purpose. The design step (SolutionBlueprintStrictSchema) always
+  // produces it, but this lenient schema is also what `apply_blueprint` parses
+  // the model's re-emitted blueprint against — and a purely descriptive
+  // one-liner must never sink a structurally complete build. It did: a
+  // hand-authored blueprint that omitted it was rejected with
+  // `path: "summary"`, which the model read as "the summary FIELDS are
+  // invalid" and "fixed" by DELETING the roll-up fields (cloud#970).
+  summary: z.string().optional().describe('One-line description of the proposed solution'),
   assumptions: z.array(z.string()).default([])
     .describe('Design assumptions made from the underspecified goal'),
   questions: z.array(z.string()).max(2).optional()
@@ -185,6 +244,23 @@ export function defineSolutionBlueprint(config: z.input<typeof SolutionBlueprint
 // SolutionBlueprintSchema} (and every existing consumer/test) is unchanged.
 // ---------------------------------------------------------------------------
 
+// The roll-up config, strict-shaped: every key present, "optional" → nullable,
+// and the predicate as a flat `conditions` ARRAY because strict mode cannot
+// express the canonical `filter` map (open-ended additionalProperties). The
+// blueprint tools compile `conditions` back into a real query filter.
+const StrictSummaryOperations = z.object({
+  object: z.string().describe('The CHILD object whose records are aggregated (snake_case). It MUST have a lookup/master_detail field pointing back at this parent.'),
+  function: z.enum(['count', 'sum', 'avg', 'min', 'max']).describe('Aggregation: "数量/个数/计数" → count; "合计/总额/累计" → sum; "平均" → avg'),
+  field: z.string().nullable().describe('Numeric field on the CHILD to aggregate; null (or "id") for count'),
+  relationshipField: z.string().nullable().describe('Child FK field back to this parent, or null to auto-detect'),
+  conditions: z.array(z.object({
+    field: z.string().describe('Field on the CHILD object'),
+    op: z.enum(['lt', 'lte', 'gt', 'gte', 'eq', 'ne']).describe('Comparison operator'),
+    value: z.union([z.number(), z.string(), z.boolean()]).describe('Comparison value — a select field\'s option VALUE, never its label'),
+  })).nullable()
+    .describe('CONDITIONAL roll-up: aggregate only child rows matching these (ANDed), or null to aggregate every child. REQUIRED whenever the field name carries a qualifier ("已完成任务数 / 已收货金额 / 待处理工单数", any 已X / 未X / <某状态>的 count-or-sum) — e.g. [{field:"status",op:"eq",value:"completed"}]. Without it the roll-up counts EVERYTHING and reports a plausible WRONG number.'),
+});
+
 const StrictField = z.object({
   name: z.string().describe('Field machine name (snake_case)'),
   label: z.string().nullable().describe('Human-readable field label, or null'),
@@ -193,6 +269,8 @@ const StrictField = z.object({
   reference: z.string().nullable().describe('Target object for lookup/master_detail, or null'),
   options: z.array(z.object({ label: z.string(), value: z.string() })).nullable()
     .describe('Choices for select-family fields, or null'),
+  summaryOperations: StrictSummaryOperations.nullable()
+    .describe('REQUIRED when type is "summary" (a roll-up of child records onto this parent: 任务总数 / 报名人数 / 合计金额 / 已完成任务数); null for every other field type. A "summary" field without it is runtime-dead — it reads 0/empty everywhere.'),
 });
 
 const StrictObject = z.object({

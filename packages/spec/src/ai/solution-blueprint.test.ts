@@ -43,6 +43,48 @@ describe('SolutionBlueprintSchema', () => {
     expect(parsed.views?.[0].type).toBe('list');
   });
 
+  it('keeps summaryOperations (incl. a conditional roll-up) on a summary field', () => {
+    // z.object STRIPS unknown keys, so before this slot existed a blueprint that
+    // correctly declared { type:'summary', summaryOperations:{…filter…} } lost the
+    // config at the parse waist and materialized runtime-dead (cloud#970).
+    const parsed = SolutionBlueprintSchema.parse({
+      summary: 'tasks',
+      objects: [
+        {
+          name: 'project',
+          fields: [
+            { name: 'task_total', type: 'summary', summaryOperations: { object: 'task', field: 'id', function: 'count' } },
+            {
+              name: 'completed_task_count', type: 'summary',
+              summaryOperations: { object: 'task', field: 'id', function: 'count', filter: { status: 'completed' } },
+            },
+            {
+              name: 'open_task_count', type: 'summary',
+              summaryOperations: { object: 'task', function: 'count', conditions: [{ field: 'status', op: 'ne', value: 'completed' }] },
+            },
+          ],
+        },
+      ],
+    });
+    expect(parsed.objects[0].fields[0].summaryOperations).toEqual({ object: 'task', field: 'id', function: 'count' });
+    expect(parsed.objects[0].fields[1].summaryOperations?.filter).toEqual({ status: 'completed' });
+    expect(parsed.objects[0].fields[2].summaryOperations?.conditions).toEqual([
+      { field: 'status', op: 'ne', value: 'completed' },
+    ]);
+  });
+
+  it('accepts a blueprint with no top-level `summary` — a prose one-liner must not sink a valid build', () => {
+    // cloud#970: apply_blueprint parses the model's re-emitted blueprint with this
+    // schema. A missing `summary` used to hard-fail with `path: "summary"`, which
+    // the model read as "the summary FIELDS are invalid" and repaired by deleting
+    // the roll-up fields.
+    const parsed = SolutionBlueprintSchema.parse({
+      objects: [{ name: 'thing', fields: [{ name: 'name', type: 'text' }] }],
+    });
+    expect(parsed.summary).toBeUndefined();
+    expect(parsed.objects).toHaveLength(1);
+  });
+
   it('defaults assumptions to an empty array and view type to list', () => {
     const parsed = SolutionBlueprintSchema.parse({
       summary: 'minimal',
@@ -68,9 +110,9 @@ describe('SolutionBlueprintSchema', () => {
     expect(parsed.views?.map((v) => v.type)).toEqual(['gallery', 'gantt']);
   });
 
-  it('rejects a missing summary', () => {
-    const { summary: _drop, ...noSummary } = validBlueprint;
-    expect(() => SolutionBlueprintSchema.parse(noSummary)).toThrow();
+  it('still rejects a missing `objects` — structure is required even though prose is not', () => {
+    const { objects: _drop, ...noObjects } = validBlueprint;
+    expect(() => SolutionBlueprintSchema.parse(noObjects)).toThrow();
   });
 
   it('rejects an invalid field type', () => {
@@ -203,7 +245,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
         label: null,
         description: null,
         fields: [
-          { name: 'name', label: null, type: 'text', required: null, reference: null, options: null },
+          { name: 'name', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null },
         ],
       },
     ],
@@ -242,11 +284,48 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const badField = {
       ...strictBp,
       objects: [
-        { name: 'x', label: null, description: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null }] },
+        { name: 'x', label: null, description: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null }] },
       ],
     };
     // `f` is missing the (nullable, required) `label` key.
+    delete (badField.objects[0].fields[0] as { label?: unknown }).label;
     expect(() => SolutionBlueprintStrictSchema.parse(badField)).toThrow();
+  });
+
+  it('carries summaryOperations on a strict field, with the predicate as a flat conditions ARRAY', () => {
+    // The design step's structured output is the ONLY place a conditional
+    // roll-up can be designed — the aggregation is known there ("已完成任务数
+    // counts only completed tasks") and roll-ups only recompute on child writes,
+    // so a config bolted on after the build's sample data loaded stays empty.
+    // Strict mode cannot express the canonical `filter` MAP, hence `conditions`.
+    const parsed = SolutionBlueprintStrictSchema.parse({
+      ...strictBp,
+      objects: [
+        {
+          name: 'project',
+          label: null,
+          description: null,
+          fields: [
+            {
+              name: 'task_total', label: '任务总数', type: 'summary', required: null, reference: null, options: null,
+              summaryOperations: { object: 'task', function: 'count', field: 'id', relationshipField: null, conditions: null },
+            },
+            {
+              name: 'completed_task_count', label: '已完成任务数', type: 'summary', required: null, reference: null, options: null,
+              summaryOperations: {
+                object: 'task', function: 'count', field: 'id', relationshipField: null,
+                conditions: [{ field: 'status', op: 'eq', value: 'completed' }],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(parsed.objects[0].fields[0].summaryOperations).toMatchObject({ object: 'task', function: 'count' });
+    expect(parsed.objects[0].fields[0].summaryOperations?.conditions).toBeNull();
+    expect(parsed.objects[0].fields[1].summaryOperations?.conditions).toEqual([
+      { field: 'status', op: 'eq', value: 'completed' },
+    ]);
   });
 
   it('drops the un-strict-able seedData record (OpenAI strict cannot represent open key/value maps)', () => {
