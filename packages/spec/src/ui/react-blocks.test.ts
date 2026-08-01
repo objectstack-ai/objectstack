@@ -7,7 +7,15 @@
 
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { REACT_BLOCKS, REACT_OVERLAY_SHADOWS } from './react-blocks';
+import {
+  REACT_BLOCKS,
+  REACT_OVERLAY_SHADOWS,
+  REACT_RECORD_BLOCK_ALTERNATIVES,
+  RECORD_CONTEXT_BLOCK_TAGS,
+  isRecordContextBlockType,
+  reactBlockTagFor,
+} from './react-blocks';
+import { ComponentPropsMap } from './component.zod';
 
 /** The prop names a block's spec schema declares, as the contract generator reads them. */
 function schemaPropNames(schema: unknown): string[] {
@@ -64,26 +72,60 @@ describe('REACT_BLOCKS — overlay/schema seam', () => {
     for (const tag of Object.keys(REACT_OVERLAY_SHADOWS)) expect(tags.has(tag)).toBe(true);
   });
 
-  /**
-   * The `record:related_list` reading, pinned where an author and the linter
-   * both read it. `validate-page-field-bindings` resolves this component's
-   * `columns`/`sort`/`filter` against `properties.objectName` as the RELATED
-   * object on the metadata surface, and `validate-react-page-props` now does
-   * the same on the react surface — both are wrong the moment this description
-   * says "parent" again.
-   */
-  it('<RecordRelatedList objectName> is published as the related (child) object', () => {
-    const block = REACT_BLOCKS.find((b) => b.tag === 'RecordRelatedList');
-    const objectName = block?.interactions.find((i) => i.name === 'objectName');
-    expect(objectName).toBeDefined();
-    expect(objectName!.description).toMatch(/RELATED \(child\) object/);
-    expect(objectName!.description).toMatch(/NOT the parent/);
-    // The spec schema is the authority it must agree with.
-    expect(schemaPropNames(block!.schema)).toContain('objectName');
-  });
-
   it('every block tag is unique (the contract is keyed by it)', () => {
     const tags = REACT_BLOCKS.map((b) => b.tag);
     expect(new Set(tags).size).toBe(tags.length);
+  });
+});
+
+/**
+ * #4413. Four `record:*` blocks were published here with `objectName` /
+ * `recordId` overlay props that NO renderer reads: every one of them takes its
+ * record from the context a record page mounts, and a `kind:'react'` page
+ * mounts none — so a page authored exactly to contract rendered empty, silently.
+ *
+ * The index is the authority the publish gate reads, so the exclusion has to
+ * hold HERE or the gate rejects what the contract still advertises (or, worse,
+ * stops rejecting what came back).
+ */
+describe('REACT_BLOCKS — the record:* family is out (#4413)', () => {
+  it('publishes no block that needs a record context', () => {
+    const offenders = REACT_BLOCKS.filter((b) => isRecordContextBlockType(b.schemaType));
+    expect(offenders.map((b) => b.tag)).toEqual([]);
+  });
+
+  it('covers every record:* type the spec declares, under the tag the react scope injects', () => {
+    const specTypes = Object.keys(ComponentPropsMap).filter(isRecordContextBlockType);
+    // Not a hand-kept list: a record component added to ComponentPropsMap is
+    // gated the day it lands, under the tag objectui's `toPascal` gives it.
+    expect(specTypes.length).toBeGreaterThan(0);
+    expect([...RECORD_CONTEXT_BLOCK_TAGS.entries()].sort()).toEqual(
+      specTypes.map((t) => [reactBlockTagFor(t), t]).sort(),
+    );
+    // The four that were published, spelled out — the regression this pins.
+    for (const tag of ['RecordDetails', 'RecordHighlights', 'RecordRelatedList', 'RecordPath']) {
+      expect(RECORD_CONTEXT_BLOCK_TAGS.has(tag)).toBe(true);
+    }
+  });
+
+  it('classifies by the `record:` prefix, not by a tag spelling', () => {
+    expect(isRecordContextBlockType('record:related_list')).toBe(true);
+    expect(isRecordContextBlockType('record:activity')).toBe(true);
+    expect(isRecordContextBlockType('list-view')).toBe(false);
+    expect(isRecordContextBlockType('element:record_picker')).toBe(false);
+  });
+
+  it('names a working replacement for each withdrawn block', () => {
+    // The gate quotes these; an empty one would leave an author with a refusal
+    // and no way forward.
+    for (const type of ['record:details', 'record:highlights', 'record:related_list', 'record:path']) {
+      expect(REACT_RECORD_BLOCK_ALTERNATIVES[type]).toBeTruthy();
+    }
+    // Each names a block the react tier actually publishes.
+    const tags = REACT_BLOCKS.map((b) => b.tag);
+    expect(REACT_RECORD_BLOCK_ALTERNATIVES['record:related_list']).toContain('ListView');
+    expect(REACT_RECORD_BLOCK_ALTERNATIVES['record:details']).toContain('ObjectForm');
+    expect(tags).toContain('ListView');
+    expect(tags).toContain('ObjectForm');
   });
 });

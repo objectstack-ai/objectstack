@@ -144,7 +144,7 @@ Components are the building blocks placed inside regions.
 The `type` field is a union of the standard `PageComponentType` enum and any custom string. The standard (namespaced) component types include:
 
 - **Structure:** `page:header`, `page:footer`, `page:sidebar`, `page:tabs`, `page:accordion`, `page:card`, `page:section`
-- **Record context:** `record:details`, `record:highlights`, `record:related_list`, `record:activity`, `record:chatter`, `record:path`, `record:alert`, `record:quick_actions`, `record:reference_rail`, `record:history`
+- **Record context:** `record:details`, `record:highlights`, `record:related_list`, `record:activity`, `record:chatter`, `record:path`, `record:alert`, `record:quick_actions`, `record:reference_rail`, `record:history` — each renders from the record context a **record page** mounts, so they belong on a `type:'record'` page. A `kind:'react'` page mounts no such context and `os validate` rejects them there (see Validating metadata §10b)
 - **Navigation:** `app:launcher`, `nav:menu`, `nav:breadcrumb`
 - **Utility:** `global:search`, `global:notifications`, `user:profile`
 - **AI:** `ai:chat_window`, `ai:suggestion`
