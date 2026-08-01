@@ -7,7 +7,7 @@ import type {
   CubeMeta,
   DatasetSelection,
 } from '@objectstack/spec/contracts';
-import type { Cube, FilterCondition } from '@objectstack/spec/data';
+import { percentScaleOf, type Cube, type FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Dataset } from '@objectstack/spec/ui';
 import type { Logger } from '@objectstack/spec/contracts';
@@ -216,13 +216,20 @@ export interface AnalyticsServiceConfig {
    */
   relationshipResolver?: RelationshipResolver;
   /**
-   * ADR-0053 currency chain — resolve a measure's SOURCE FIELD currency
-   * metadata so a monetary measure that omits an explicit `currency` falls back
-   * to the field's declared currency, then the tenant default (`ctx.currency`).
-   * Returns the source field's `type` and (fixed-mode) `defaultCurrency`;
-   * `undefined` for an unknown field. Non-`currency` fields never get a code.
+   * Resolve the metadata of a dimension's or measure's SOURCE FIELD on the
+   * dataset's base object — the one seam through which display semantics that
+   * live on the field reach the result columns. `undefined` for an unknown
+   * field. Feeds three chains:
+   *
+   * - ADR-0053 currency: a monetary measure that omits an explicit `currency`
+   *   falls back to the field's declared currency, then the tenant default
+   *   (`ctx.currency`). Non-`currency` fields never get a code.
+   * - Percent scale (objectui#3136): a measure over a `percent` field inherits
+   *   that field's storage scale via `percentScaleOf`, so a renderer scales by
+   *   declared metadata instead of guessing from the value.
+   * - Date bucketing: a date vs datetime dimension drills by the right bound.
    */
-  measureCurrency?: (object: string, field: string) => { type?: string; defaultCurrency?: string } | undefined;
+  sourceFieldMeta?: (object: string, field: string) => { type?: string; defaultCurrency?: string; max?: number } | undefined;
   /** Pre-defined datasets to compile + register at construction (ADR-0021). */
   datasets?: Dataset[];
   /**
@@ -286,7 +293,7 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly datasetRegistry = new Map<string, CompiledDataset>();
   /** Optional object-graph resolver used when compiling datasets. */
   private readonly relationshipResolver?: RelationshipResolver;
-  private readonly measureCurrency?: AnalyticsServiceConfig['measureCurrency'];
+  private readonly sourceFieldMeta?: AnalyticsServiceConfig['sourceFieldMeta'];
   /** Optional dimension display-label resolver (select options / lookup names). */
   private readonly labelResolver?: DimensionLabelDeps;
   /** ADR-0037 P3: pending-seed row resolver for draft data preview. */
@@ -309,7 +316,7 @@ export class AnalyticsService implements IAnalyticsService {
 
     this.readScopeProvider = config.getReadScope;
     this.relationshipResolver = config.relationshipResolver;
-    this.measureCurrency = config.measureCurrency;
+    this.sourceFieldMeta = config.sourceFieldMeta;
     this.labelResolver = config.labelResolver;
     this.draftRowsResolver = config.draftRowsResolver;
     this.isRegisteredObject = config.isRegisteredObject;
@@ -657,7 +664,7 @@ export class AnalyticsService implements IAnalyticsService {
       if (!d.field || d.type !== 'date') continue;
       const granularity = resolveDimensionGranularity(selection, d.name, d.dateGranularity);
       if (!granularity) continue;
-      const ftype = this.measureCurrency?.(dataset.object, d.field as string)?.type;
+      const ftype = this.sourceFieldMeta?.(dataset.object, d.field as string)?.type;
       if (ftype === 'datetime') rangeDims.push({ d, granularity, instant: true });
       else if (ftype === 'date') rangeDims.push({ d, granularity, instant: false });
       else if (rangeTz === 'UTC') rangeDims.push({ d, granularity, instant: false });
@@ -746,13 +753,23 @@ export class AnalyticsService implements IAnalyticsService {
         // number) never receive a currency code.
         const fc = f as { currency?: string };
         const mc = m as { currency?: string };
+        const meta = m.field ? this.sourceFieldMeta?.(dataset.object, m.field) : undefined;
         if (fc.currency == null) {
-          const meta = m.field ? this.measureCurrency?.(dataset.object, m.field) : undefined;
           const monetary = !!mc.currency || meta?.type === 'currency';
           if (monetary) {
             const resolved = mc.currency ?? meta?.defaultCurrency ?? context?.currency;
             if (resolved) fc.currency = resolved;
           }
+        }
+        // Percent scale chain (objectui#3136) — the currency chain's sibling.
+        // A `%` format says how to PRINT a number, not what scale it is on, and
+        // the two readings collide at exactly 1 ("100%" vs "1%"). Both answers
+        // are in metadata, so answer here instead of leaving the renderer to
+        // guess from the value's magnitude: a `ratio` is a 0–1 fraction by
+        // definition, and any aggregate of a `percent` field (avg/min/max —
+        // sum is already rejected as incoherent) keeps that field's own scale.
+        if (f.percentScale == null) {
+          f.percentScale = m.derived?.op === 'ratio' ? 'fraction' : percentScaleOf(meta);
         }
       }
     }

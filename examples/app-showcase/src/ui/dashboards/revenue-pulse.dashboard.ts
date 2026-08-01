@@ -64,5 +64,14 @@ export const RevenuePulseDashboard: Dashboard = {
     { id: 'col_accounts_by_month', type: 'column', title: 'Accounts Signed by Month', dataset: accountDs, dimensions: ['signed_on'], values: ['account_count'], chartConfig: cfg('column', 'signed_on', 'account_count'), filterBindings: { dateRange: 'signed_on', region: 'sales_region' }, layout: { x: 6, y: 2, w: 6, h: 4 } },
     { id: 'donut_invoices_by_status', type: 'donut', title: 'Invoices by Status', dataset: invoiceDs, dimensions: ['status'], values: ['invoice_count'], chartConfig: cfg('donut', 'status', 'invoice_count'), layout: { x: 0, y: 6, w: 6, h: 4 } },
     { id: 'bar_accounts_by_industry', type: 'bar', title: 'Accounts by Industry', dataset: accountDs, dimensions: ['industry'], values: ['account_count'], chartConfig: cfg('bar', 'industry', 'account_count'), filterBindings: { dateRange: 'signed_on', region: 'sales_region' }, layout: { x: 6, y: 6, w: 6, h: 4 } },
+
+    // ── Percent scale (objectui#3136) ────────────────────────────────────
+    // A ratio measure rendered on the two surfaces that disagreed: a KPI card
+    // and a grouped table. Grouping by status pins the Paid row's rate at
+    // exactly 1 — the boundary where "is this a 0–1 ratio or a percentage
+    // point?" cannot be answered from the number, and where guessing printed
+    // "1.0%". The column now carries its declared scale, so it reads 100.0%.
+    { id: 'kpi_paid_rate', type: 'metric', title: 'Paid Rate', dataset: invoiceDs, values: ['paid_rate'], colorVariant: 'orange', layout: { x: 0, y: 10, w: 3, h: 2 } },
+    { id: 'table_rate_by_status', type: 'table', title: 'Paid Rate by Status', dataset: invoiceDs, dimensions: ['status'], values: ['invoice_count', 'paid_count', 'paid_rate'], layout: { x: 3, y: 10, w: 9, h: 4 } },
   ],
 };

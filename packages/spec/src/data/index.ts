@@ -71,6 +71,10 @@ export * from './analytics.zod';
 // and build-time coherence validation.
 export * from './aggregation-policy';
 
+// Percent storage scale (0–1 fraction vs whole percentage points) — resolved
+// from field metadata so renderers never guess it from the value's magnitude.
+export * from './percent-scale';
+
 // Record display-name contract (ADR-0079) — title eligibility, primary-field
 // resolution/derivation, record display-name rendering, primary provisioning,
 // and title-completeness classification. Shared by authoring, display

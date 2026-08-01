@@ -123,12 +123,12 @@ describe('AnalyticsService.queryDataset', () => {
   });
 
   // ── ADR-0053 currency chain (measure → field currencyConfig → tenant ctx) ──
-  function pricedSvc(rows: Array<Record<string, unknown>>, measureCurrency?: (o: string, f: string) => { type?: string; defaultCurrency?: string } | undefined) {
+  function pricedSvc(rows: Array<Record<string, unknown>>, sourceFieldMeta?: (o: string, f: string) => { type?: string; defaultCurrency?: string; max?: number } | undefined) {
     return new AnalyticsService({
       queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
       executeRawSql: async () => rows,
       getReadScope: (_o, ctx?: ExecutionContext) => (ctx?.tenantId ? { organization_id: ctx.tenantId } : undefined),
-      ...(measureCurrency ? { measureCurrency } : {}),
+      ...(sourceFieldMeta ? { sourceFieldMeta } : {}),
     });
   }
   const moneyDataset = (measure: Record<string, unknown>) => DatasetSchema.parse({
@@ -159,6 +159,65 @@ describe('AnalyticsService.queryDataset', () => {
     const svc = pricedSvc([{ stage: 'Won', revenue: 1000 }], (_o, f) => f === 'amount' ? { type: 'number' } : undefined);
     const r = await svc.queryDataset(moneyDataset({}), { dimensions: ['stage'], measures: ['revenue'] }, { tenantId: 'o', currency: 'USD' } as ExecutionContext) as any;
     expect(r.fields.find((f: any) => f.name === 'revenue')?.currency).toBeUndefined();
+  });
+
+  // ── percent scale chain (objectui#3136) ───────────────────────────────────
+  // A "%" format says how to PRINT a number, not what scale it is on, and the
+  // two readings collide at exactly 1 ("100%" vs "1%"). The scale is answerable
+  // from metadata, so it rides onto the result column next to `currency`.
+  const rateDataset = (measures: Array<Record<string, unknown>>) => DatasetSchema.parse({
+    name: 'sla', label: 'SLA', object: 'ticket', include: [],
+    dimensions: [{ name: 'status', field: 'status', type: 'string' }],
+    measures,
+  });
+
+  it('marks a derived RATIO as fraction-scaled — the 1.0 = 100% case', async () => {
+    // Two of two met: the ratio is exactly 1, the value that renders as "1.0%"
+    // when a renderer guesses the scale from the number's magnitude.
+    const svc = pricedSvc([{ status: 'met', met_count: 2, base_count: 2 }]);
+    const r = await svc.queryDataset(
+      rateDataset([
+        { name: 'base_count', aggregate: 'count', label: 'Applicable' },
+        { name: 'met_count', aggregate: 'count', field: 'met', label: 'Met' },
+        { name: 'sla_rate', label: 'SLA rate', derived: { op: 'ratio', of: ['met_count', 'base_count'] }, format: '0.0%' },
+      ]),
+      { dimensions: ['status'], measures: ['base_count', 'met_count', 'sla_rate'] },
+      { tenantId: 'o' } as ExecutionContext,
+    ) as any;
+    expect(r.rows[0].sla_rate).toBe(1);
+    expect(r.fields.find((f: any) => f.name === 'sla_rate')?.percentScale).toBe('fraction');
+    // A count is not a percentage — annotating it would be a lie about the scale.
+    expect(r.fields.find((f: any) => f.name === 'base_count')?.percentScale).toBeUndefined();
+  });
+
+  it('inherits the SOURCE FIELD scale: a `max: 100` percent field is whole-scaled', async () => {
+    const svc = pricedSvc([{ status: 'open', allocation: 80 }], (_o, f) => f === 'allocation_percent' ? { type: 'percent', max: 100 } : undefined);
+    const r = await svc.queryDataset(
+      rateDataset([{ name: 'allocation', aggregate: 'avg', field: 'allocation_percent', label: 'Allocation', format: '0.0%' }]),
+      { dimensions: ['status'], measures: ['allocation'] },
+      { tenantId: 'o' } as ExecutionContext,
+    ) as any;
+    expect(r.fields.find((f: any) => f.name === 'allocation')?.percentScale).toBe('whole');
+  });
+
+  it('inherits the SOURCE FIELD scale: a bare percent field is fraction-scaled', async () => {
+    const svc = pricedSvc([{ status: 'open', win: 0.75 }], (_o, f) => f === 'win_probability' ? { type: 'percent' } : undefined);
+    const r = await svc.queryDataset(
+      rateDataset([{ name: 'win', aggregate: 'avg', field: 'win_probability', label: 'Win', format: '0.0%' }]),
+      { dimensions: ['status'], measures: ['win'] },
+      { tenantId: 'o' } as ExecutionContext,
+    ) as any;
+    expect(r.fields.find((f: any) => f.name === 'win')?.percentScale).toBe('fraction');
+  });
+
+  it('leaves a plain-number measure unannotated — its format string stays the only word', async () => {
+    const svc = pricedSvc([{ status: 'open', tax: 7 }], (_o, f) => f === 'tax_rate' ? { type: 'number', max: 100 } : undefined);
+    const r = await svc.queryDataset(
+      rateDataset([{ name: 'tax', aggregate: 'avg', field: 'tax_rate', label: 'Tax', format: '0.0%' }]),
+      { dimensions: ['status'], measures: ['tax'] },
+      { tenantId: 'o' } as ExecutionContext,
+    ) as any;
+    expect(r.fields.find((f: any) => f.name === 'tax')?.percentScale).toBeUndefined();
   });
 
   it('enriches dimension columns with their dataset display label', async () => {
@@ -259,7 +318,7 @@ describe('AnalyticsService.queryDataset', () => {
       // closed_at is a datetime instant → its month bucket boundary is that tz's
       // MIDNIGHT INSTANT. June/July 2026 in New York are EDT (−04), so local
       // midnight is 04:00 UTC.
-      measureCurrency: (_o, f) => (f === 'closed_at' ? { type: 'datetime' } : undefined),
+      sourceFieldMeta: (_o, f) => (f === 'closed_at' ? { type: 'datetime' } : undefined),
       getReadScope: (_o, ctx?: ExecutionContext) => (ctx?.tenantId ? { organization_id: ctx.tenantId } : undefined),
     });
     const result = await svc.queryDataset(
@@ -282,7 +341,7 @@ describe('AnalyticsService.queryDataset', () => {
     const svc = new AnalyticsService({
       queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
       executeAggregate: async () => [{ close_date: '2026-06', revenue: 100 }],
-      measureCurrency: (_o, f) => (f === 'close_date' ? { type: 'date' } : undefined),
+      sourceFieldMeta: (_o, f) => (f === 'close_date' ? { type: 'date' } : undefined),
       getReadScope: (_o, ctx?: ExecutionContext) => (ctx?.tenantId ? { organization_id: ctx.tenantId } : undefined),
     });
     const result = await svc.queryDataset(

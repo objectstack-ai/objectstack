@@ -2,6 +2,7 @@
 
 import type { Cube } from '../data/analytics.zod.js';
 import type { FilterCondition } from '../data/filter.zod.js';
+import type { PercentScale } from '../data/percent-scale.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { Dataset } from '../ui/dataset.zod.js';
 
@@ -72,6 +73,23 @@ export interface AnalyticsResult {
         label?: string;
         /** Display format hint (e.g. measure `format` like "$0,0", "0.0%"). */
         format?: string;
+        /**
+         * ADR-0053 currency chain — the resolved ISO 4217 code for a MONETARY
+         * measure (explicit measure `currency` → source-field default → tenant
+         * default). Absent on non-monetary columns, which must never render a
+         * symbol.
+         */
+        currency?: string;
+        /**
+         * The column's percent SCALE, when it is a percentage: `fraction` for a
+         * 0–1 ratio (`1` ⇒ "100%"), `whole` for percentage points (`1` ⇒ "1%").
+         * Resolved from metadata — a `derived: { op: 'ratio' }` measure is a
+         * fraction by definition, and a measure over a `percent` field inherits
+         * that field's scale (see `percentScaleOf` in `spec/data`). Absent when
+         * the column is not a percentage; renderers that receive it must scale
+         * by it instead of guessing from the value (objectui#3136).
+         */
+        percentScale?: PercentScale;
     }>;
     /** Generated SQL (if available) */
     sql?: string;

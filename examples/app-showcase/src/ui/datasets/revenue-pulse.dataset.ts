@@ -24,6 +24,18 @@ export const ShowcaseInvoiceDataset = defineDataset({
   measures: [
     { name: 'invoice_count', label: 'Invoices', aggregate: 'count' },
     { name: 'subtotal_sum', label: 'Subtotal', aggregate: 'sum', field: 'total', format: '0,0' },
+    // A RATE — the percent-scale case (objectui#3136). `paid_rate` is a 0–1
+    // ratio by construction, and grouping by `status` makes the Paid bucket
+    // exactly 1: the value a magnitude-guessing renderer printed as "1.0%"
+    // instead of "100.0%". The server annotates the column's scale from the
+    // `ratio` operator, so display no longer has to infer it.
+    { name: 'paid_count', label: 'Paid Invoices', aggregate: 'count', filter: { status: 'paid' } },
+    {
+      name: 'paid_rate',
+      label: 'Paid Rate',
+      derived: { op: 'ratio', of: ['paid_count', 'invoice_count'] },
+      format: '0.0%',
+    },
   ],
 });
 

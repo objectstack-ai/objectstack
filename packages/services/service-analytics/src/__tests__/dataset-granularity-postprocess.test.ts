@@ -58,7 +58,7 @@ function service(bucketByGranularity: Record<string, string>) {
       return [{ created_at: bucketByGranularity[g ?? 'none'], task_count: 10, account_count: 10 }];
     },
     // `created_at` is a tz-naive calendar date → ranges are exact under any tz.
-    measureCurrency: (_o, f) => (f === 'created_at' ? { type: 'date' } : undefined),
+    sourceFieldMeta: (_o, f) => (f === 'created_at' ? { type: 'date' } : undefined),
   });
   return { svc, seen };
 }

@@ -518,12 +518,14 @@ export class AnalyticsServicePlugin implements Plugin {
       coerceTemporalFilterColumn,
       relationshipResolver,
       labelResolver,
-      // ADR-0053 — source-field currency metadata for the measure currency chain.
-      measureCurrency: (object: string, field: string) => {
+      // Source-field metadata behind the display chains on result columns:
+      // ADR-0053 currency (`currencyConfig.defaultCurrency`) and percent scale
+      // (`max`, which is what marks whole-percent storage — objectui#3136).
+      sourceFieldMeta: (object: string, field: string) => {
         const f = dataEngine()?.getObject?.(object)?.fields?.[field] as
-          | { type?: string; currencyConfig?: { defaultCurrency?: string } }
+          | { type?: string; max?: number; currencyConfig?: { defaultCurrency?: string } }
           | undefined;
-        return f ? { type: f.type, defaultCurrency: f.currencyConfig?.defaultCurrency } : undefined;
+        return f ? { type: f.type, max: f.max, defaultCurrency: f.currencyConfig?.defaultCurrency } : undefined;
       },
       // ADR-0062 D6 — a federated object carries an `external` block (ADR-0015).
       // Reported so NativeSQLStrategy declines it (its hand-compiled FROM would
