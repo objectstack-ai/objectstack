@@ -103,6 +103,45 @@ describe('scanValueShapes (ADR-0104 D1 / #3438)', () => {
     expect(valueShapeScanPassed(report)).toBe(false);
   });
 
+  it('#4455: a lookup holding a SERIALIZED embedded record is found, and closes the gate', async () => {
+    // The exact case the scan's own header names — and the exact way it reaches
+    // a SQL deployment: the expanded record object stored as JSON text in a
+    // TEXT column. It read as a non-empty string, so `ReferenceIdValueSchema`
+    // waved it through, the scan reported "✓ No malformed values found", and
+    // `--apply` closed the gate on evidence that was never collected.
+    const engine = makeEngine({
+      contact: [
+        { id: 'c1', account: 'acc_1' }, // a real id — must stay clean
+        { id: 'c2', account: '{"id":"acc_1","name":"embedded"}' },
+        { id: 'c3', account: '  {"id":"acc_2"}' },
+      ],
+    });
+    const report = await scanValueShapes(engine, silent);
+
+    expect(report.scannedRecords).toBe(3);
+    expect(report.blocking).toBe(2);
+    const account = report.findings.find((f) => f.field === 'account')!;
+    expect(account.count).toBe(2);
+    expect(account.sampleRecordIds).toEqual(['c2', 'c3']);
+    expect(account.detail).toMatch(/embedded record object/);
+    // The verdict the gate reads: this deployment may NOT record the flag.
+    expect(valueShapeScanPassed(report)).toBe(false);
+
+    // …and the same value is a write rejection under strict, so the flag would
+    // not have been attesting something the validator disagrees with.
+    expect(() =>
+      validateRecord(
+        OBJECTS.contact,
+        { account: '{"id":"acc_1","name":"embedded"}' },
+        'update',
+        { valueShapeStrict: true },
+      ),
+    ).toThrow(ValidationError);
+    expect(() =>
+      validateRecord(OBJECTS.contact, { account: 'acc_1' }, 'update', { valueShapeStrict: true }),
+    ).not.toThrow();
+  });
+
   it('the scan counts exactly what strict mode rejects — one predicate, not two', async () => {
     // The anti-drift property: every value the scan flags must also be a write
     // rejection under the strict gate, and every value it passes must write.

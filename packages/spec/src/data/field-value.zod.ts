@@ -312,8 +312,47 @@ export const FileLikeValueSchema = lazySchema(() => z.union([
   FileValueSchema,
 ]));
 
-/** Record-id string — the stored form of every reference type. */
-export const ReferenceIdValueSchema = lazySchema(() => z.string().min(1));
+/**
+ * A stored reference value that is really an EMBEDDED RECORD, serialized.
+ *
+ * In a document store the expanded form arrives as an object and `z.string()`
+ * already rejects it. In a SQL deployment the same value reaches storage as
+ * JSON *text* in a TEXT column — a non-empty string — which is exactly how a
+ * legacy embedded reference survives into a relational table. Anchored on the
+ * first non-space character rather than a `JSON.parse` attempt so the check
+ * stays allocation-free on the write path: no record id the platform mints, and
+ * no external key any datasource can supply, begins with `{` or `[`.
+ */
+const EMBEDDED_REFERENCE_TEXT = /^\s*[[{]/;
+
+/**
+ * Record-id string — the stored form of every reference type.
+ *
+ * Non-empty is not the whole contract. `os migrate value-shapes` is the
+ * evidence half of the ADR-0104 D1 per-deployment gate, and its own header
+ * names "a `lookup` holding an expanded record object" as a case it exists to
+ * find — but a bare `z.string().min(1)` accepts the JSON text such a value is
+ * stored as, so the gate closed on evidence it never collected (#4455). The
+ * scan deliberately imports the write-path predicate, so the write path was
+ * equally blind and the value survived future writes too.
+ *
+ * The rejection is deliberately NARROW — an embedded object/array, not an id
+ * charset. Its file sibling {@link FileReferenceIdValueSchema} can bound its
+ * charset because a `sys_file` id is minted by the platform and by nothing
+ * else; a reference id is whatever the target object's primary key holds,
+ * including an external key an ADR-0015 federated datasource supplies. So this
+ * rejects the shape that is provably not an id and leaves the id alphabet to
+ * the object that owns it. Widening it further needs evidence about real
+ * external keys, not a guess.
+ */
+export const ReferenceIdValueSchema = lazySchema(() =>
+  z.string().min(1).refine((v) => !EMBEDDED_REFERENCE_TEXT.test(v), {
+    message:
+      'Expected a record id, but the value is an embedded record object. A reference stores an ' +
+      'opaque id; the expanded record is the READ shape ($expand produces it) and is never stored. ' +
+      'Replace the value with the referenced record\'s id.',
+  }),
+);
 
 function optionCodes(def: ValueShapeFieldDef): string[] {
   if (!Array.isArray(def.options)) return [];
