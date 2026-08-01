@@ -454,5 +454,6 @@ writing mode.
   `AutomationEngine.registerFlow`, which holds the executor registry the
   conflict guard needs) and types with no repository write path are reported as
   `skipped` with the reason, never counted as done. Giving flows the same finish
-  line needs a canonicalization entry point on the automation engine and is
-  tracked separately.
+  line needs a canonicalization entry point on the automation engine — tracked
+  as #4454, and worth doing precisely because the graduated flow-node
+  conversions are where the most stored dialect lives.
