@@ -15,19 +15,9 @@ import {
 } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
-import { validateStackExpressions } from '@objectstack/lint';
-import { validateVisibilityPredicates } from '@objectstack/lint';
-import { validateWidgetBindings } from '@objectstack/lint';
-import { validateDashboardActionRefs } from '@objectstack/lint';
-import { validateFilterTokens } from '@objectstack/lint';
-import { validateReferenceIntegrity } from '@objectstack/lint';
-import { validateResponsiveStyles } from '@objectstack/lint';
-import { validateSecurityPosture, validateOrgAxisRedLines, buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
-import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
-import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
-import { lintUniqueDeclarations } from '../lint/data-model-rules.js';
-import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
-import { lintViewRefs } from '../utils/lint-view-refs.js';
+import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
+import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '../lint/authoring-rules.js';
+import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { buildRuntimeBundle, cleanupOldRuntimeBundles } from '../utils/build-runtime.js';
@@ -173,46 +163,62 @@ export default class Compile extends Command {
         this.exit(1);
       }
 
-      // 3b. Validate expressions against the resolved schema (ADR-0032 §1a/1b).
-      //     The whole normalized stack is in hand here, so flow/validation
-      //     predicates are checked for CEL syntax AND that `record.<field>`
-      //     references exist on the target object — failing the build with a
-      //     located, corrective message instead of a silent runtime `false`.
-      if (!flags.json) printStep('Validating expressions (ADR-0032)...');
-      const exprIssues = validateStackExpressions(result.data as Record<string, unknown>);
-      const exprErrors = exprIssues.filter((i) => i.severity !== 'warning');
-      const exprWarnings = exprIssues.filter((i) => i.severity === 'warning');
-      if (exprErrors.length > 0) {
+      // 3b. The author-time rule registry (#4409) — one table, three commands.
+      //     `os build` was the WEAKEST of the three authoring gates before it:
+      //     it published stacks `os validate` or `os lint` refuse, because the
+      //     rules each command ran were whatever its author remembered to wire.
+      //     `validateApprovalApprovers` was the worked example — a flow whose
+      //     expression approver does not parse built and published green while
+      //     `os lint` rejected it. The build is the command that SHIPS, so
+      //     "weakest gate" here means broken metadata reaching an environment.
+      //
+      //     Which rules run, on which stack tier, and why any of them is scoped
+      //     is declared in `lint/authoring-rules.ts`. Do not add a call site here.
+      const registered = authoringRulesFor('build');
+      if (!flags.json) printStep(`Running author-time rules (${registered.length})...`);
+      const findings = runAuthoringRules('build', {
+        normalized: normalized as Record<string, unknown>,
+        parsed: result.data as Record<string, unknown>,
+        sduiManifest: resolveSduiManifest(),
+      });
+      const { errors: ruleErrors, advisories: ruleAdvisories } = splitBySeverity(findings);
+
+      if (ruleAdvisories.length > 0 && !flags.json) {
+        console.log('');
+        for (const f of ruleAdvisories.slice(0, 50)) {
+          printWarning(`${f.where}: ${f.message}`);
+          if (f.hint) console.log(chalk.dim(`    ${f.hint}`));
+          console.log(chalk.dim(`    rule: ${f.rule}  at ${f.path}`));
+        }
+      }
+      if (ruleErrors.length > 0) {
+        // Every failing rule reports at once — see the note in `validate.ts`.
         if (flags.json) {
-          await emitJson({ success: false, error: 'expression validation failed', issues: exprErrors, warnings: exprWarnings }, 0, { compact: true });
+          await emitJson(
+            { success: false, error: 'author-time rules failed', issues: ruleErrors, warnings: ruleAdvisories },
+            0,
+            { compact: true },
+          );
           this.exit(1);
         }
         console.log('');
-        printError(`Expression validation failed (${exprErrors.length} issue${exprErrors.length > 1 ? 's' : ''})`);
-        for (const i of exprErrors.slice(0, 50)) {
-          console.log(`  • ${i.where}: ${i.message}`);
-          console.log(`      source: \`${i.source}\``);
+        printError(`Author-time rules failed (${ruleErrors.length} issue${ruleErrors.length > 1 ? 's' : ''})`);
+        for (const f of ruleErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
         }
         this.exit(1);
       }
-      // Advisory expression warnings (#1928 tier 3) — surfaced, never fatal.
-      if (exprWarnings.length > 0 && !flags.json) {
-        printWarning(`Expression warnings (${exprWarnings.length})`);
-        for (const i of exprWarnings.slice(0, 50)) {
-          console.log(`  • ${i.where}: ${i.message}`);
-          console.log(`      source: \`${i.source}\``);
-        }
-      }
 
-      // 3b-ter. [#3366] Installable-provider preflight. Every capability the app
+      // 3c. [#3366] Installable-provider preflight. Every capability the app
       //     DECLARES in `requires: [...]` must have a provider resolvable in the
-      //     active edition. `os validate` only checks the token vocabulary and
-      //     `os build` never resolved providers, so a `requires` entry whose
-      //     provider has NO installable version in this edition (e.g. `ai` →
-      //     @objectstack/service-ai, cloud-only since ADR-0025) slipped through
-      //     to a generic `os start` crash. Fail the build with the edition-aware
-      //     message instead; an absent-but-installable provider is a `pnpm add`
-      //     hint (advisory), and a satisfied list passes silently.
+      //     active edition. A `requires` entry whose provider has NO installable
+      //     version in this edition (e.g. `ai` → @objectstack/service-ai,
+      //     cloud-only since ADR-0025) otherwise slips through to a generic
+      //     `os start` crash. Absent-but-installable is a `pnpm add` hint.
+      //
+      //     Not a registry rule: it reads `node_modules`, not the stack.
       if (!flags.json) printStep('Checking capability providers (#3366)...');
       const capPreflight = preflightRequiredCapabilities({
         requires: Array.isArray((config as { requires?: unknown[] }).requires)
@@ -243,25 +249,11 @@ export default class Compile extends Command {
         }
       }
 
-      // 3b-bis. ADR-0089 D3b — deprecated visibility aliases + mis-layered
-      //     binding root. Checked on `normalized` (PRE-parse): the schema folds
-      //     `visibleOn`/`visibility` into `visibleWhen` at parse, so `result.data`
-      //     no longer carries the alias the author wrote. Advisory, never fatal.
-      const visibilityFindings = validateVisibilityPredicates(normalized as Record<string, unknown>);
-      if (visibilityFindings.length > 0 && !flags.json) {
-        printWarning(`Visibility warnings (${visibilityFindings.length}) — ADR-0089`);
-        for (const f of visibilityFindings.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(`      ${f.hint}`);
-          console.log(`      rule: ${f.rule}  at ${f.path}`);
-        }
-      }
-
-      // 3b-ter. [#3786] Keys `ObjectSchema` / `FieldSchema` do not declare, and
-      //     so drop silently on the way to storage. PRE-parse for the same
-      //     reason as the rule above. `defineStack` already warns for configs
-      //     authored through it; this covers the ones that skip it (a plain
-      //     object default-export, `strict: false`) and would otherwise emit an
+      // 3d. [#3786] Keys `ObjectSchema` / `FieldSchema` do not declare, and so
+      //     drop silently on the way to storage. PRE-parse, since the parse is
+      //     what strips them. `defineStack` already warns for configs authored
+      //     through it; this covers the ones that skip it (a plain object
+      //     default-export, `strict: false`) and would otherwise emit an
       //     artifact with the key quietly gone. Advisory, never fatal.
       const unknownKeyFindings = [
         ...lintUnknownStackKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
@@ -274,356 +266,16 @@ export default class Compile extends Command {
         }
       }
 
-      // 3c. Widget-binding diagnostics (issues #1719/#1721) — semantic checks
-      //     that need the widget's `dataset` reference resolved to its dataset
-      //     and `dimensions`/`values` resolved to declared names. Errors are
-      //     unresolvable bindings (dangling dataset/dimension/measure or a
-      //     chartConfig field the query result won't contain) and fail the
-      //     build; warnings are advisory and suppressible per widget via
-      //     `suppressWarnings: ['<rule-id>']`.
-      if (!flags.json) printStep('Checking dashboard widget bindings (ADR-0021)...');
-      const widgetFindings = validateWidgetBindings(result.data as Record<string, unknown>);
-      const widgetErrors = widgetFindings.filter((f) => f.severity === 'error');
-      const widgetWarnings = widgetFindings.filter((f) => f.severity === 'warning');
-      if (widgetErrors.length > 0) {
-        if (flags.json) {
-          await emitJson({ success: false, error: 'widget binding validation failed', issues: widgetErrors }, 0, { compact: true });
-          this.exit(1);
-        }
-        console.log('');
-        printError(`Dashboard widget integrity failed (${widgetErrors.length} issue${widgetErrors.length > 1 ? 's' : ''})`);
-        for (const f of widgetErrors.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
-        this.exit(1);
-      }
-      if (widgetWarnings.length > 0 && !flags.json) {
-        console.log('');
-        for (const w of widgetWarnings) {
-          printWarning(`${w.where}: ${w.message}`);
-          console.log(chalk.dim(`    ${w.hint}`));
-          console.log(chalk.dim(`    rule: ${w.rule}  at ${w.path}`));
-        }
-      }
-
-      // 3c-bis. Dashboard action/route reference integrity (ADR-0049 for
-      //     references, #3367). A header/widget action naming a `script`/`modal`
-      //     target that resolves to no defined action, or a `url` target that
-      //     matches no in-app route, ships a button that renders and silently
-      //     does nothing on click. Dead script/modal targets fail the build
-      //     (they fail open at runtime); unresolved url routes are advisory.
-      if (!flags.json) printStep('Checking dashboard action references (ADR-0049)...');
-      const actionRefFindings = validateDashboardActionRefs(result.data as Record<string, unknown>);
-      const actionRefErrors = actionRefFindings.filter((f) => f.severity === 'error');
-      const actionRefWarnings = actionRefFindings.filter((f) => f.severity === 'warning');
-      if (actionRefErrors.length > 0) {
-        if (flags.json) {
-          await emitJson({ success: false, error: 'dashboard action reference validation failed', issues: actionRefErrors }, 0, { compact: true });
-          this.exit(1);
-        }
-        console.log('');
-        printError(`Dashboard action reference check failed (${actionRefErrors.length} issue${actionRefErrors.length > 1 ? 's' : ''})`);
-        for (const f of actionRefErrors.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
-        this.exit(1);
-      }
-      if (actionRefWarnings.length > 0 && !flags.json) {
-        console.log('');
-        for (const w of actionRefWarnings) {
-          printWarning(`${w.where}: ${w.message}`);
-          console.log(chalk.dim(`    ${w.hint}`));
-          console.log(chalk.dim(`    rule: ${w.rule}  at ${w.path}`));
-        }
-      }
-
-      // 3a-ter. Filter placeholder resolvability (#3574). A filter value that
-      //     resolves in neither vocabulary — `{current_user}` instead of
-      //     `{current_user_id}` — reaches the data engine as a literal and
-      //     matches nothing, so the surface renders empty with no error. That
-      //     silent zero is indistinguishable from a genuine zero at review
-      //     time, and an AI author reads it as a successful query. Fails the
-      //     build because authoring time is the last point the author sees it.
-      if (!flags.json) printStep('Checking filter placeholders (#3574)...');
-      const filterTokenFindings = validateFilterTokens(result.data as Record<string, unknown>);
-      const filterTokenErrors = filterTokenFindings.filter((f) => f.severity === 'error');
-      if (filterTokenErrors.length > 0) {
-        if (flags.json) {
-          await emitJson({ success: false, error: 'filter placeholder validation failed', issues: filterTokenErrors }, 0, { compact: true });
-          this.exit(1);
-        }
-        console.log('');
-        printError(`Filter placeholder check failed (${filterTokenErrors.length} issue${filterTokenErrors.length > 1 ? 's' : ''})`);
-        for (const f of filterTokenErrors.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
-        this.exit(1);
-      }
-
-      // 3b-bis. Object & action name references (#3583) — the reference sites
-      //     `defineStack` does not cover: action-param `reference` /
-      //     `objectOverride`, dashboard filter `optionsFrom.object`, nav
-      //     `requiresObject` gates, and the name-bound action surfaces
-      //     (`bulkActions`/`rowActions`, page quick-actions, nav action items).
-      //     Plus page-component field bindings and the chart surfaces outside
-      //     dashboards (report charts, list-view charts, dataset-bound page
-      //     chart components) — same ADR-0021 semantic layer, where an axis
-      //     naming a raw field instead of a measure renders an empty series.
-      //     All plain strings in the schema, so a name resolving to nothing
-      //     ships and fails silently. Errors fail the build; the
-      //     platform-prefixed-but-unregistered case is advisory (a third-party
-      //     package may still provide it). Translation bundles are checked in
-      //     the reverse direction (keys naming metadata that does not exist,
-      //     option keys written as the display label) — advisory throughout,
-      //     since an orphan key is inert rather than broken.
-      if (!flags.json) printStep('Checking object & action references (#3583)...');
-      const refFindings = validateReferenceIntegrity(result.data as Record<string, unknown>);
-      const refErrors = refFindings.filter((f) => f.severity === 'error');
-      const refWarnings = refFindings.filter((f) => f.severity === 'warning');
-      if (refErrors.length > 0) {
-        if (flags.json) {
-          await emitJson({ success: false, error: 'reference integrity validation failed', issues: refErrors }, 0, { compact: true });
-          this.exit(1);
-        }
-        console.log('');
-        printError(`Reference integrity check failed (${refErrors.length} issue${refErrors.length > 1 ? 's' : ''})`);
-        for (const f of refErrors.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
-        this.exit(1);
-      }
-      if (!flags.json) {
-        for (const w of refWarnings.slice(0, 50)) {
-          console.log(chalk.yellow(`  ⚠ ${w.where}: ${w.message}`));
-          console.log(chalk.dim(`      ${w.hint}`));
-        }
-      }
-
-      // 3c. SDUI scoped-styling correctness (ADR-0065) — a styled node without
-      //     an `id` drops its CSS silently; Tailwind-in-className does nothing
-      //     from metadata. Same bar for hand-authored and AI-generated pages
-      //     (ADR-0019). Errors fail the build; warnings are advisory.
-      if (!flags.json) printStep('Checking SDUI styling (ADR-0065)...');
-      const styleFindings = validateResponsiveStyles(result.data as Record<string, unknown>);
-      const styleErrors = styleFindings.filter((f) => f.severity === 'error');
-      const styleWarnings = styleFindings.filter((f) => f.severity === 'warning');
-      if (styleErrors.length > 0) {
-        if (flags.json) {
-          await emitJson({ success: false, error: 'SDUI styling validation failed', issues: styleErrors }, 0, { compact: true });
-          this.exit(1);
-        }
-        console.log('');
-        printError(`SDUI styling check failed (${styleErrors.length} issue${styleErrors.length > 1 ? 's' : ''})`);
-        for (const f of styleErrors.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
-        this.exit(1);
-      }
-      if (styleWarnings.length > 0 && !flags.json) {
-        console.log('');
-        for (const w of styleWarnings) {
-          printWarning(`${w.where}: ${w.message}`);
-          console.log(chalk.dim(`    ${w.hint}`));
-          console.log(chalk.dim(`    rule: ${w.rule}  at ${w.path}`));
-        }
-      }
-
-      // 3d. Flow authoring anti-pattern lint (#1874) — for valid-but-fragile flow
-      //     metadata (e.g. a record-change trigger using a date-EQUALITY time
-      //     condition that only fires on the exact day). Guides the author — very
-      //     often an AI generating templates — toward the robust pattern.
-      //
-      //     Findings are advisory by DEFAULT, but a finding marked
-      //     `severity: 'error'` FAILS the build (#3760). Before that, this gate
-      //     read as a gate and behaved as a comment: `flow-runas-unscoped` flags
-      //     metadata the runtime now REFUSES to execute, and for the audience the
-      //     rule exists to protect — very often an AI generating flows in bulk —
-      //     an advisory line is close to no net at all.
-      const flowLint = lintFlowPatterns(result.data as Record<string, unknown>);
-      const flowLintErrors = flowLint.filter((f) => f.severity === 'error');
-      const flowLintWarnings = flowLint.filter((f) => f.severity !== 'error');
-      if (flowLintWarnings.length > 0 && !flags.json) {
-        console.log('');
-        for (const fnd of flowLintWarnings) {
-          printWarning(`${fnd.where}: ${fnd.message}`);
-          console.log(chalk.dim(`    ${fnd.hint}`));
-          console.log(chalk.dim(`    rule: ${fnd.rule}`));
-        }
-      }
-      if (flowLintErrors.length > 0) {
-        if (flags.json) {
-          this.log(JSON.stringify({ success: false, flowLintErrors }, null, 2));
-          this.exit(1);
-        }
-        console.log('');
-        printError(`Flow authoring check failed (${flowLintErrors.length} error${flowLintErrors.length > 1 ? 's' : ''})`);
-        for (const fnd of flowLintErrors) {
-          console.log(`  • ${fnd.where}: ${fnd.message}`);
-          console.log(chalk.dim(`      ${fnd.hint}`));
-          console.log(chalk.dim(`      rule: ${fnd.rule}`));
-        }
-        this.exit(1);
-      }
-
-      // 3d-bis. Liveness author-warning lint — close the spec-liveness loop on
-      //     the author side: an authored property the ledger marks dead-and-
-      //     misleading (e.g. `object.enable.files`, `field.columnName`) or
-      //     experimental is set hopefully but does nothing / isn't enforced at
-      //     runtime. Advisory only; ledger-driven (entries opt in via
-      //     `authorWarn`), so it's high-signal and NEVER fails the build.
-      const livenessLint = lintLivenessProperties(result.data as Record<string, unknown>);
-      if (livenessLint.length > 0 && !flags.json) {
-        console.log('');
-        for (const fnd of livenessLint) {
-          printWarning(`${fnd.where}: ${fnd.message}`);
-          console.log(chalk.dim(`    ${fnd.hint}`));
-          console.log(chalk.dim(`    rule: ${fnd.rule}`));
-        }
-      }
-
-      // 3d-ter. Autonumber `{field}` interpolation lint. A format like
-      //     `{plan_no}{000}` makes the referenced field part of the counter
-      //     scope, so it must exist and be set at create time — otherwise the
-      //     runtime throws (or, unlinted, silently mis-numbers). An unknown
-      //     field is broken → fails the build; an optional field is fragile →
-      //     advisory warning. Mirrors the broken/fragile two-level guardrail.
-      const autonumberLint = lintAutonumberFormats(result.data as Record<string, unknown>);
-      const autonumberErrors = autonumberLint.filter((f) => f.severity === 'error');
-      const autonumberWarnings = autonumberLint.filter((f) => f.severity === 'warning');
-      if (autonumberErrors.length > 0) {
-        if (flags.json) {
-          await emitJson({ success: false, error: 'autonumber format validation failed', issues: autonumberErrors }, 0, { compact: true });
-          this.exit(1);
-        }
-        console.log('');
-        printError(`Autonumber format validation failed (${autonumberErrors.length} issue${autonumberErrors.length > 1 ? 's' : ''})`);
-        for (const f of autonumberErrors) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}`));
-        }
-        this.exit(1);
-      }
-      if (autonumberWarnings.length > 0 && !flags.json) {
-        console.log('');
-        for (const f of autonumberWarnings) {
-          printWarning(`${f.where}: ${f.message}`);
-          console.log(chalk.dim(`    ${f.hint}`));
-          console.log(chalk.dim(`    rule: ${f.rule}`));
-        }
-      }
-
-      // 3d-quinquies. Contradictory uniqueness declarations (#3991). A column
-      //     carrying BOTH a field-level `unique: true` and a single-column
-      //     declared unique index has two intents, of which exactly one takes
-      //     effect: since #3696 the field-level form is per-tenant while a
-      //     declared index is platform-wide, so the global index wins and the
-      //     tenant composite becomes unreachable. Advisory — the artifact is
-      //     well-defined; the cost is a declaration that does nothing. Shares
-      //     `lintUniqueDeclarations` with `os lint` so both agree.
-      const uniqueLint = lintUniqueDeclarations(
-        Array.isArray((result.data as Record<string, unknown>).objects)
-          ? ((result.data as Record<string, unknown>).objects as any[])
-          : [],
-      );
-      if (uniqueLint.length > 0 && !flags.json) {
-        console.log('');
-        for (const f of uniqueLint) {
-          printWarning(`${f.path}: ${f.message}`);
-          if (f.fix) console.log(chalk.dim(`    ${f.fix}`));
-          console.log(chalk.dim(`    rule: ${f.rule}`));
-        }
-      }
-
-      // 3d-quater. View-reference lint (#2554) — resolves form action targets
-      //     and view-key collisions at build time. A `type:'form'` target that
-      //     names a missing view or a LIST view opens a broken/blank form at
-      //     runtime; a list/form key collision silently renames one view so
-      //     references resolve to the OTHER. Both are broken → fail the build.
-      //     This shifts objectui's runtime `viewKind` guard left to compile.
-      const viewRefLint = lintViewRefs(result.data as Record<string, unknown>);
-      const viewRefErrors = viewRefLint.filter((f) => f.severity === 'error');
-      const viewRefWarnings = viewRefLint.filter((f) => f.severity === 'warning');
-      if (viewRefErrors.length > 0) {
-        if (flags.json) {
-          await emitJson({ success: false, error: 'view reference validation failed', issues: viewRefErrors }, 0, { compact: true });
-          this.exit(1);
-        }
-        console.log('');
-        printError(`View reference validation failed (${viewRefErrors.length} issue${viewRefErrors.length > 1 ? 's' : ''})`);
-        for (const f of viewRefErrors) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}`));
-        }
-        this.exit(1);
-      }
-      if (viewRefWarnings.length > 0 && !flags.json) {
-        console.log('');
-        for (const f of viewRefWarnings) {
-          printWarning(`${f.where}: ${f.message}`);
-          console.log(chalk.dim(`    ${f.hint}`));
-          console.log(chalk.dim(`    rule: ${f.rule}`));
-        }
-      }
-
-      // 3e. [ADR-0090 D7] Security-domain publish linter. Every error rule
-      //     mirrors a runtime enforcement point (fail-closed OWD default,
-      //     canonical enum, anchor binding gate, vocabulary freeze) — the lint
-      //     moves the failure from a runtime deny to an author-time fix-it.
-      //     Errors GATE the build (per ADR-0049 this is not advisory
-      //     security); `info` findings are printed dimmed and never fatal.
-      if (!flags.json) printStep('Checking security posture (ADR-0090 D7)...');
-      const securityFindings = [
-        ...validateSecurityPosture(result.data as Record<string, unknown>),
-        // [ADR-0105 D6] Organization-axis red lines: no permission inheritance
-        // along the org tree, and business-unit trees stay org-internal. Same
-        // finding shape, same gate — an `error` here blocks exactly as a
-        // security-posture error does.
-        ...validateOrgAxisRedLines(result.data as Record<string, unknown>),
-      ];
-      const securityErrors = securityFindings.filter((f) => f.severity === 'error');
-      const securityAdvisories = securityFindings.filter((f) => f.severity !== 'error');
-      if (securityErrors.length > 0) {
-        if (flags.json) {
-          await emitJson({ success: false, error: 'security posture validation failed', issues: securityErrors }, 0, { compact: true });
-          this.exit(1);
-        }
-        console.log('');
-        printError(`Security posture check failed (${securityErrors.length} issue${securityErrors.length > 1 ? 's' : ''})`);
-        for (const f of securityErrors.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
-        this.exit(1);
-      }
-      if (securityAdvisories.length > 0 && !flags.json) {
-        console.log('');
-        for (const f of securityAdvisories) {
-          printWarning(`${f.where}: ${f.message}`);
-          console.log(chalk.dim(`    ${f.hint}`));
-          console.log(chalk.dim(`    rule: ${f.rule}`));
-        }
-      }
-
-      // 3f. [ADR-0090 D6] Access-matrix snapshot gate. Opt-in per app: when
+      // 3e. [ADR-0090 D6] Access-matrix snapshot gate. Opt-in per app: when
       //     `access-matrix.json` sits next to the config, the (permission set
       //     × object) capability matrix derived from THIS build must match it
       //     — a drift fails the build with a SEMANTIC diff ("'crm_admin'
       //     gains delete on 'crm_lead'") until the snapshot is updated via
       //     --update-access-matrix. An unchanged matrix auto-passes, so the
       //     gate costs nothing until someone changes who-can-do-what.
+      //
+      //     Not a registry rule: it reads (and with the flag, writes) a file
+      //     next to the config rather than answering a question about the stack.
       {
         const matrixPath = path.join(path.dirname(absolutePath), 'access-matrix.json');
         const currentMatrix = buildAccessMatrix(result.data as Record<string, unknown>);
@@ -657,11 +309,14 @@ export default class Compile extends Command {
         }
       }
 
-      // 3d. Package docs (ADR-0046): compile flat `src/docs/*.md` into
+      // 3f. Package docs (ADR-0046): compile flat `src/docs/*.md` into
       //     `docs: DocSchema[]` and lint the combined set (flatness,
       //     namespace-prefixed names, MDX/image ban, same-package link
       //     resolution). Errors fail the build — the artifact is the
       //     publish unit, so this IS the publish lint for docs.
+      //
+      //     Not a registry rule: it reads `src/docs/` off disk, and the docs it
+      //     collects there are an INPUT to the artifact, not just a check.
       if (!flags.json) printStep('Collecting package docs (ADR-0046)...');
       const docsResult = collectAndLintDocs(absolutePath, result.data as Record<string, unknown>);
       const docErrors = docsResult.issues.filter((i) => i.severity === 'error');
@@ -776,7 +431,10 @@ export default class Compile extends Command {
           handlersBundled: lowering.count,
           runtimeModule: runtimeBundle?.outputFileName ?? null,
           runtimeModuleSize: runtimeBundle?.size ?? 0,
-          warnings: widgetWarnings,
+          // The whole registry's advisory set, in the shape `os validate --json`
+          // reports. This key used to carry the widget rule's warnings alone —
+          // one gate out of the twenty-odd that raise them.
+          warnings: ruleAdvisories,
           // Same key `os validate --json` uses, so a CI consumer reads one shape
           // from either command rather than learning two.
           conversions: conversionNotices,
@@ -790,8 +448,8 @@ export default class Compile extends Command {
       // 5. Summary
       console.log('');
       printSuccess(`Build complete ${chalk.dim(`(${timer.display()})`)}`);
-      if (widgetWarnings.length > 0) {
-        printWarning(`${widgetWarnings.length} widget-binding warning(s) — see above`);
+      if (ruleAdvisories.length > 0) {
+        printWarning(`${ruleAdvisories.length} author-time warning(s) — see above`);
       }
       console.log('');
       printMetadataStats(stats);

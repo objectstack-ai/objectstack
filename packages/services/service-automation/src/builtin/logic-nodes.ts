@@ -2,7 +2,7 @@
 
 import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
-import type { AutomationEngine } from '../engine.js';
+import { DEFAULT_BRANCH_LABEL, type AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
 
 /**
@@ -26,16 +26,43 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
                 description: 'Branch execution based on conditions.',
                 icon: 'git-branch', category: 'logic', source: 'builtin',
             }),
+            /**
+             * A decision routes one of two ways, and it must not pretend to the
+             * other (#4414):
+             *
+             *  • It DECLARED `config.conditions` → the first matching entry's
+             *    `label` is the branch, and traversal restricts itself to the
+             *    out-edge carrying that label. If none matched, the branch is
+             *    {@link DEFAULT_BRANCH_LABEL} — claimed by an out-edge labelled
+             *    `'default'` or marked `isDefault: true`.
+             *  • It declared NONE → it is a plain gateway: the branching lives on
+             *    the out-edges (`condition` / `isDefault`) and the node reports
+             *    **no** branch. It used to report `'default'` regardless — a
+             *    label no out-edge in this repo ever carried — so every decision
+             *    node silently fell back to "consider every out-edge", which is
+             *    the state #4414 measured (0 label matches across all example
+             *    apps) and, on an unconditional sibling, ran both branches.
+             */
             async execute(node, variables, _context) {
                 const config = node.config as Record<string, unknown> | undefined;
                 const conditions = (config?.conditions ?? []) as Array<{ label: string; expression: string }>;
+                if (conditions.length === 0) return { success: true };
 
                 for (const cond of conditions) {
-                    if (engine.evaluateCondition(cond.expression, variables)) {
+                    // `DecisionConditionSchema.expression` is declared BARE CEL
+                    // (ADR-0032) — evaluate it as such. Handing the raw string to
+                    // `evaluateCondition` routed it to the legacy `{var}` template
+                    // path instead, which reads a declared-CEL field in a second
+                    // dialect: `lead.status == 'converted'` never resolves there,
+                    // so the branch it decides is decided by string comparison.
+                    // Unlike `edge.condition` this slot has no `ExpressionInput`
+                    // envelope to carry the dialect — the decision descriptor is
+                    // deliberately schemaless — so the executor supplies it.
+                    if (engine.evaluateCondition({ dialect: 'cel', source: cond.expression }, variables)) {
                         return { success: true, branchLabel: cond.label };
                     }
                 }
-                return { success: true, branchLabel: 'default' };
+                return { success: true, branchLabel: DEFAULT_BRANCH_LABEL };
             },
         });
 

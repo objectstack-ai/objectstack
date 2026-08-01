@@ -2668,8 +2668,9 @@ describe('HttpDispatcher', () => {
         // `available`. Table-driven so the next fallback added to the table is
         // gated the day it lands; this class of hole recurs with every new
         // fallback. cache/queue/job had no per-slot pin before this — dropping
-        // their `svcAvailable(…, svc)` third argument, the exact #4130
-        // regression shape, was test-invisible.
+        // their occupant argument (`svcAvailable(…, svc)` then,
+        // `svcInProcess(slot, svc)` since #4318), the exact #4130 regression
+        // shape, was test-invisible.
 
         it('reports every CORE_FALLBACK_FACTORIES product as degraded, never available (#3898)', async () => {
             const { CORE_FALLBACK_FACTORIES } = await import('@objectstack/core');
@@ -2686,6 +2687,56 @@ describe('HttpDispatcher', () => {
                 expect(reported.enabled, `services.${slot}.enabled`).toBe(true);
                 expect(reported.status, `services.${slot}.status`).toBe('degraded');
                 expect(reported.message, `services.${slot}.message`).toBeTruthy();
+            }
+        });
+
+        // ── Kernel-internal slots (#4318): no route, handlerReady is the fact ──
+        //
+        // service-cache/-queue/-job mount no HTTP routes — the slots are
+        // in-process contracts, so no route is ever advertised for them and
+        // `handlerReady` is `false` as a fact, not a proxy. `svcAvailable`
+        // used to claim `handlerReady: true` for an unmarked occupant here — a
+        // handler that does not exist. The status stays `available` for an
+        // unmarked real implementation: "no HTTP surface" is not reduced
+        // capability for an in-process contract (contrast realtime).
+        it('reports unmarked cache/queue/job occupants available with no route and handlerReady false (#4318)', async () => {
+            for (const slot of ['cache', 'queue', 'job']) {
+                const svc = { /* real, unmarked */ };
+                (kernel as any).getService = vi.fn().mockImplementation((n: string) => (n === slot ? svc : null));
+                (kernel as any).services = new Map([[slot, svc]]);
+
+                const info = await dispatcher.getDiscoveryInfo('/api/v1');
+                const reported = (info.services as Record<string, any>)[slot];
+                expect(reported.enabled, `services.${slot}.enabled`).toBe(true);
+                expect(reported.status, `services.${slot}.status`).toBe('available');
+                expect(reported.handlerReady, `services.${slot}.handlerReady`).toBe(false);
+                expect(reported.route, `services.${slot}.route`).toBeUndefined();
+                expect(reported.message, `services.${slot}.message`).toContain('no HTTP surface');
+            }
+        });
+
+        it('answers the cache/queue/job slots identically to the metadata-protocol builder (#4318)', async () => {
+            const { ObjectStackProtocolImplementation } = await import('@objectstack/metadata-protocol');
+            const { CORE_FALLBACK_FACTORIES } = await import('@objectstack/core');
+
+            for (const slot of ['cache', 'queue', 'job']) {
+                // Both shapes an occupant can take: a real (unmarked) service
+                // and the kernel's self-describing in-memory fallback.
+                for (const svc of [{}, CORE_FALLBACK_FACTORIES[slot]()]) {
+                    (kernel as any).getService = vi.fn().mockImplementation((n: string) => (n === slot ? svc : null));
+                    (kernel as any).services = new Map([[slot, svc]]);
+
+                    const fromDispatcher = ((await dispatcher.getDiscoveryInfo('/api/v1')).services as Record<string, any>)[slot];
+                    const fromProtocol = (await new ObjectStackProtocolImplementation(
+                        mockObjectQL as any,
+                        () => new Map<string, any>([[slot, svc]]),
+                    ).getDiscovery()).services[slot];
+
+                    expect(fromDispatcher.status, `${slot}.status`).toBe(fromProtocol.status);
+                    expect(fromDispatcher.handlerReady, `${slot}.handlerReady`).toBe(fromProtocol.handlerReady);
+                    expect(fromDispatcher.message, `${slot}.message`).toBe(fromProtocol.message);
+                    expect(fromDispatcher.route, `${slot}.route`).toBe(fromProtocol.route);
+                }
             }
         });
     });

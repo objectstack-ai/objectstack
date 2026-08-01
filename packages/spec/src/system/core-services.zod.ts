@@ -149,6 +149,27 @@ export function serviceUnavailableMessage(slot: string): string {
 }
 
 /**
+ * The message discovery reports for an occupied slot that is kernel-internal
+ * by construction — `cache`, `queue`, `job` (#4318). Their shipped providers
+ * (see {@link CORE_SERVICE_PROVIDER}) mount no HTTP routes: the slots are
+ * consumed in-process via the service registry, so no route is ever advertised
+ * for them (ADR-0076 D12) and `handlerReady` is reported `false` — for these
+ * slots it is not a proxy for anything, it is the fact itself.
+ *
+ * An unmarked occupant still reports `available`: the slot's contract is
+ * in-process, so "no HTTP surface" is not reduced capability. Contrast
+ * `realtime`, whose advertised capability IS the missing HTTP/WS surface —
+ * there an in-process bus reports `degraded`.
+ *
+ * Written once here so the two discovery builders (`HttpDispatcher` and the
+ * metadata-protocol implementation) cannot drift apart — the same reason
+ * {@link serviceUnavailableMessage} lives here (#4089, #4130).
+ */
+export function inProcessServiceMessage(slot: string): string {
+  return `Kernel-internal service — consumed in-process via the service registry; no HTTP surface exists for the '${slot}' slot`;
+}
+
+/**
  * Service Criticality Level
  * Defines the startup behavior when a service is missing.
  */
