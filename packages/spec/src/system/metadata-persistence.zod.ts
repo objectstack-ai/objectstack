@@ -161,6 +161,15 @@ export const PackagePublishResultSchema = lazySchema(() => z.object({
 
 export type PackagePublishResult = z.infer<typeof PackagePublishResultSchema>;
 
+// ─── Loader / watch envelope types ───────────────────────────────────────────
+//
+// Everything from here to `MetadataSource` below is the SINGLE source for the
+// metadata loader + watch vocabulary. `kernel/metadata-loader.zod` used to
+// declare a differently-shaped copy of each of these names on the
+// `@objectstack/spec/kernel` entry — an import-path coin-flip that no consumer
+// ever won on purpose (every one of them imported from here). The kernel copies
+// had zero consumers and were removed in #4411; keep new envelope types here.
+
 /**
  * Metadata Format
  * Supported file formats for metadata serialization.
@@ -322,6 +331,10 @@ export const MetadataSourceSchema = lazySchema(() => z.enum([
  * historically declared a narrower duplicate; we re-export the kernel version
  * here so a single TypeScript type is observed everywhere `@objectstack/spec`
  * consumers reach for it.
+ *
+ * This pair is the ONLY thing this file takes from kernel, and it is the
+ * direction that survived #4411: manager *wiring* is owned by kernel, the
+ * loader/watch *envelope* is owned here. Nothing is declared twice.
  */
 export {
   MetadataFallbackStrategySchema,
