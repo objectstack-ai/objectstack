@@ -448,26 +448,30 @@ const actionObject = () => strictObject({
     visibleWhen: 'visible', showWhen: 'visible',
     disabledWhen: 'disabled',
     style: 'variant', color: 'variant', appearance: 'variant',
-    placement: 'location', locations: 'location', position: 'location',
+    placement: 'locations', location: 'locations', position: 'locations',
     verb: 'method', httpMethod: 'method',
     body: 'bodyExtra', payload: 'bodyExtra',
     llm: 'ai', tool: 'ai',
     dialog: 'resultDialog', result: 'resultDialog',
     refresh: 'refreshAfter', reload: 'refreshAfter',
+    // The capability gate on an action IS a declared key — `requiredPermissions`
+    // (ADR-0066 D4), enforced with a 403 on the platform action route. So the
+    // near-misses of it must RENAME onto it, never be told the gate lives
+    // somewhere else.
+    permissions: 'requiredPermissions', capabilities: 'requiredPermissions',
+    requiresPermissions: 'requiredPermissions', requiredCapabilities: 'requiredPermissions',
+    acl: 'requiredPermissions',
   },
   guidance: {
-    // The one that reads as a security control and is not one — the class this
-    // campaign exists for, and the reason `visible` / `disabled` are named here:
-    // they hide or grey a button, they do not stop a request.
-    permissions:
-      'an action is not permission-gated by a key here. Authorization comes from the OBJECT\'s '
-      + 'permission sets (what the caller may read/write) and, on the AI surface, from the agent\'s '
-      + '`access` / `permissions` (enforced at the chat route since #1884). `visible` and `disabled` '
-      + 'are UI predicates — they hide or grey a button, they do not stop a request.',
-    requiredPermissions:
-      'an action is not permission-gated by a key here — see `permissions`. To gate a FIELD, '
-      + 'declare `requiredPermissions` on that field (ADR-0066 D3); to gate the operation itself, '
-      + 'use the object\'s permission sets.',
+    // `visible` / `disabled` are the trap worth naming on this surface: they
+    // look like access control and are not. The real gate is
+    // `requiredPermissions`, which is why the near-misses above rename onto it
+    // rather than pointing anywhere else.
+    hidden:
+      '`hidden` is not an action key, and hiding is not gating — `visible` and `disabled` are UI '
+      + 'predicates that hide or grey a button, they do not stop a request. To actually gate '
+      + 'invocation use `requiredPermissions` (ADR-0066 D4, enforced with a 403 on the platform '
+      + 'action route). To declare an action with no UI surface at all, set `locations: []`.',
     // Two AI-block keys authors reach for at the top level. Silently stripping
     // either meant an action was armed for agents, or left ungated, in silence.
     exposed:
