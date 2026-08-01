@@ -2,9 +2,12 @@
 
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
+import { strictObject } from '../shared/strict-object';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { FilterConditionSchema } from './filter.zod';
+import { FIELD_KEY_GUIDANCE } from './authoring-key-lint';
 
 /**
  * Field Type Enum
@@ -93,7 +96,25 @@ export type FieldType = z.infer<typeof FieldType>;
  * { label: 'In Progress', value: 'In Progress' } // spaces and uppercase
  * { label: 'Closed Won', value: 'Closed_Won' } // mixed case
  */
-export const SelectOptionSchema = lazySchema(() => z.object({
+/**
+ * Shared history for the authorable shapes in this file (#4001).
+ *
+ * This object carries more silently-stripped keys than any other in the spec,
+ * and it documented the fact about itself for two releases: the notes below on
+ * `accept`/`maxSize` and on the five pruned governance keys both say a write
+ * "parsed clean and the key was silently stripped", and both call it the
+ * ADR-0104 failure class. `FieldSchema` was not `.strict()`, so the only
+ * available fix each time was a comment. This is the fix those comments wanted.
+ */
+const FIELD_HISTORY =
+  'Until #4001 closed this shape these were dropped silently — the field was still created, '
+  + 'minus whatever the key was meant to constrain, protect or compute.';
+
+export const SelectOptionSchema = lazySchema(() => strictObject({
+  surface: 'this select option',
+  history: FIELD_HISTORY,
+  aliases: { text: 'label', name: 'label', title: 'label', key: 'value', id: 'value', isDefault: 'default', selected: 'default', colour: 'color', visible: 'visibleWhen', showWhen: 'visibleWhen' },
+}, {
   label: z.string().describe('Display label (human-readable, any case allowed)'),
   value: SystemIdentifierSchema.describe('Stored value (lowercase machine identifier)'),
   color: z.string().optional().describe('Color code for badges/charts'),
@@ -142,7 +163,11 @@ export const LocationCoordinatesSchema = lazySchema(() => z.object({
  * - Custom business-specific codes
  * Stricter validation can be implemented at the application layer based on business requirements.
  */
-export const CurrencyConfigSchema = lazySchema(() => z.object({
+export const CurrencyConfigSchema = lazySchema(() => strictObject({
+  surface: 'this currency configuration',
+  history: FIELD_HISTORY,
+  aliases: { decimals: 'precision', scale: 'precision', mode: 'currencyMode', currency: 'defaultCurrency', code: 'defaultCurrency', isoCode: 'defaultCurrency' },
+}, {
   precision: z.number().int().min(0).max(10).default(2).describe('Decimal precision (default: 2)'),
   currencyMode: z.enum(['dynamic', 'fixed']).default('dynamic').describe('Currency mode: dynamic (user selectable) or fixed (single currency)'),
   defaultCurrency: z.string().length(3).default('CNY').describe('Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR)'),
@@ -257,7 +282,89 @@ export function isUniqueDeclared(unique: unknown): boolean {
   return unique === true || unique === 'global';
 }
 
-export const FieldSchema = lazySchema(() => z.object({
+/**
+ * `FIELD_KEY_GUIDANCE`, re-expressed as `strictObject` options.
+ *
+ * That table is the curated list of near-misses and retirements on this exact
+ * surface — twenty-odd entries, every one found in the wild, and already held
+ * honest by `authoring-key-lint.test.ts` (every `to` must name a key this schema
+ * really declares; no entry may exist for a key that is still live). Copying it
+ * here would have made a second copy of the truth, which is the thing this
+ * campaign keeps finding rotted.
+ *
+ * It also carries knowledge the fallback cannot rederive, and the proof is in
+ * that file: `pii` is three edits from `min`, so an edit-distance suggester
+ * offers "did you mean `min`?" — confident, wrong, and about an unrelated
+ * concept. The lint suppressed that years ago. Closing this shape without
+ * reusing the table reintroduced it verbatim, which is how this wiring got
+ * written.
+ *
+ * `to` becomes an alias (the concept survives under another key); `why` becomes
+ * guidance (a retirement with no successor, which also suppresses the rename).
+ * The table's consumer changes here — the lint no longer reaches `field` now
+ * that the parse rejects first — but the table itself is unchanged and still
+ * tested.
+ */
+function fieldKeyGuidanceAsStrictOptions() {
+  const aliases: Record<string, string> = {};
+  const guidance: Record<string, string> = {};
+  for (const [key, hint] of Object.entries(FIELD_KEY_GUIDANCE)) {
+    if (hint.to) aliases[key] = hint.to;
+    else if (hint.why) guidance[key] = hint.why;
+  }
+  return { aliases, guidance };
+}
+
+export const FieldSchema = lazySchema(() => strictObject({
+  surface: 'this field',
+  history: FIELD_HISTORY,
+  aliases: {
+    ...fieldKeyGuidanceAsStrictOptions().aliases,
+    fieldName: 'name', key: 'name', column: 'name',
+    dataType: 'type', fieldType: 'type',
+    title: 'label', displayName: 'label',
+    help: 'inlineHelpText', helpText: 'inlineHelpText', hint: 'inlineHelpText', tooltip: 'inlineHelpText',
+    default: 'defaultValue', initialValue: 'defaultValue',
+    isRequired: 'required', mandatory: 'required', notNull: 'required',
+    isUnique: 'unique',
+    values: 'options', choices: 'options', picklist: 'options', selectOptions: 'options',
+    relatedTo: 'reference', referenceTo: 'reference', target: 'reference', targetObject: 'reference', lookupObject: 'reference',
+    onDelete: 'deleteBehavior', deleteRule: 'deleteBehavior', cascade: 'deleteBehavior',
+    formula: 'expression', calculation: 'expression', compute: 'expression',
+    rollup: 'summaryOperations', rollUp: 'summaryOperations', summary: 'summaryOperations', aggregate: 'summaryOperations',
+    length: 'maxLength', size: 'maxLength',
+    decimals: 'scale', decimalPlaces: 'scale', digits: 'precision',
+    isReadonly: 'readonly', disabled: 'readonly',
+    isHidden: 'hidden', invisible: 'hidden',
+    section: 'group', category: 'group', fieldset: 'group',
+    component: 'widget', renderer: 'widget', control: 'widget',
+    mimeTypes: 'accept', allowedTypes: 'accept', fileTypes: 'accept',
+    maxFileSize: 'maxSize', maxBytes: 'maxSize',
+    trackChanges: 'trackHistory', feedTracked: 'trackHistory',
+    permissions: 'requiredPermissions', requiredCapabilities: 'requiredPermissions',
+  },
+  guidance: {
+    ...fieldKeyGuidanceAsStrictOptions().guidance,
+    // Entries the lint's table does not carry, because the lint never had to:
+    // these are the removals recorded only as comments on this object, and a
+    // comment is visible to everyone except the author who got it wrong.
+    columnName:
+      '`columnName` was removed in the 16.x line (#2377) — the SQL driver hardcodes the physical '
+      + 'column to the field key, so a custom name was ignored. External/federated objects map '
+      + 'physical columns with `external.columnMap` (ADR-0062 D7).',
+    referenceFilters:
+      '`referenceFilters` (string[]) was removed in the 16.x line (#2377) — the lookup picker only '
+      + 'ever read the structured form. Use `lookupFilters: [{ field, operator, value }]`.',
+    // `notNull` is aliased to `required` above for the common case, but ADR-0113
+    // makes the two deliberately distinct and the distinction IS the point, so
+    // the flattened spelling gets its own sentence rather than a rename.
+    storageNotNull:
+      'physical column constraints live under `storage` — write `storage: { notNull: true }` '
+      + '(ADR-0113). `required` is the WRITE contract and deliberately does not imply the column '
+      + 'constraint.',
+    tracked: '`tracked` is not a field key — per-field timeline tracking is `trackHistory: true` (ADR-0052 §5b).',
+  },
+}, {
   /** Identity */
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Machine name (snake_case)').optional(),
   label: z.string().optional().describe('Human readable label'),
@@ -426,19 +533,37 @@ export const FieldSchema = lazySchema(() => z.object({
    */
   displayField: z.string().optional().describe("Field shown as each candidate's label in the picker/popover (defaults to the referenced object's name/title)."),
   descriptionField: z.string().optional().describe('Secondary field shown under the label in the quick-select popover.'),
-  lookupColumns: z.array(z.union([z.string(), z.object({
+  lookupColumns: z.array(z.union([z.string(), strictObject({
+    surface: 'this lookup column',
+    history: FIELD_HISTORY,
+    aliases: { name: 'field', fieldName: 'field', key: 'field', title: 'label', header: 'label', size: 'width' },
+  }, {
     field: z.string(),
     label: z.string().optional(),
     width: z.string().optional(),
     type: z.string().optional(),
   })])).optional().describe('Explicit columns for the record-picker table; auto-derived from the referenced object when omitted.'),
   lookupPageSize: z.number().int().positive().optional().describe('Rows per page in the record-picker dialog (default 10).'),
-  lookupFilters: z.array(z.object({
+  lookupFilters: z.array(strictObject({
+    surface: 'this lookup filter',
+    history: FIELD_HISTORY,
+    aliases: { name: 'field', fieldName: 'field', op: 'operator', comparator: 'operator', condition: 'operator' },
+    guidance: {
+      // A filter that silently does nothing on a PICKER is a filter that offers
+      // records the author meant to exclude — worth naming the vocabulary.
+      $in: "the operator vocabulary here is flat, not Mongo-style — write `{ field, operator: 'in', value: [...] }`",
+      values: 'a multi-value filter puts the array in `value` with `operator: \'in\'`',
+    },
+  }, {
     field: z.string(),
     operator: z.enum(['eq', 'ne', 'gt', 'lt', 'gte', 'lte', 'contains', 'in', 'notIn']),
     value: z.any(),
   })).optional().describe('Base filters restricting which records are selectable (e.g. only active). The structured, picker-honoured lookup filter.'),
-  dependsOn: z.array(z.union([z.string(), z.object({
+  dependsOn: z.array(z.union([z.string(), strictObject({
+    surface: 'this dependsOn entry',
+    history: FIELD_HISTORY,
+    aliases: { name: 'field', fieldName: 'field', local: 'field', remote: 'param', remoteField: 'param', key: 'param' },
+  }, {
     field: z.string(),
     param: z.string().optional(),
   })])).optional().describe("Declares that this field's available values depend on the value of other field(s) on the same record — the form gates the field until they are set and re-evaluates as they change. For `lookup`/`master_detail` it scopes the candidate query (string = same local/remote key; {field,param} when the remote filter key differs — the {field,param} form is lookup-only). For `select`/`multiselect`/`radio` the actual per-option rule lives in each option's `visibleWhen`; list the referenced fields here (string form) so the option list gates and refreshes with the parent."),
@@ -455,7 +580,17 @@ export const FieldSchema = lazySchema(() => z.object({
    */
   returnType: z.enum(['number', 'text', 'boolean', 'date']).optional()
     .describe('Inferred value type of a formula field (number/text/boolean/date)'),
-  summaryOperations: z.object({
+  summaryOperations: strictObject({
+    surface: 'this roll-up summary',
+    history: FIELD_HISTORY,
+    aliases: {
+      child: 'object', childObject: 'object', from: 'object', source: 'object',
+      aggregate: 'function', operation: 'function', op: 'function', aggregation: 'function',
+      summaryField: 'field', targetField: 'field',
+      foreignKey: 'relationshipField', fk: 'relationshipField', via: 'relationshipField', parentField: 'relationshipField',
+      where: 'filter', criteria: 'filter', condition: 'filter',
+    },
+  }, {
     object: z.string().describe('Source child object name for roll-up'),
     field: z.string().describe('Field on child object to aggregate (ignored for count)'),
     function: z.enum(['count', 'sum', 'min', 'max', 'avg']).describe('Aggregation function to apply'),
@@ -626,6 +761,14 @@ export const FieldSchema = lazySchema(() => z.object({
   // driver builds indexes from the object's `indexes[]` array; a field-level
   // `index: true` created no index. Declare the index in object `indexes[]`.
   externalId: z.boolean().default(false).describe('Is external ID for upsert operations'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  // `field` is a registered metadata type, so `MetadataPlugin`'s loader stamps
+  // `_packageId` / `_provenance` on it. Undeclared, they were dropped on every
+  // parse. This was the ONE type the original envelope probe actually checked
+  // (see `metadata-type-schemas.test.ts` for how the other 24 took an early
+  // return) — so it has been a known gap longer than any of its siblings.
+  ...MetadataProtectionFields,
 }).superRefine((field, ctx) => {
   // ADR-0113: `storage.notNull` × `requiredWhen` is a contradiction, rejected
   // at the authoring seam — when the condition is FALSE the write contract

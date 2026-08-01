@@ -138,22 +138,42 @@ export interface StrictObjectOptions {
  */
 export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptions, shape: T) {
   const { surface, history, aliases, guidance, extraKeys = [] } = options;
-  return z
-    .object(shape, {
-      error: strictUnknownKeyError({
-        surface,
-        // Declared-but-unwritable keys (tombstones) are excluded — see
-        // `acceptsNothing`. They stay in the SHAPE, so writing one still raises
-        // its own prescription; they are only kept out of the candidate list a
-        // typo gets pointed at.
-        knownKeys: [
-          ...Object.keys(shape).filter((k) => !acceptsNothing(shape[k])),
-          ...extraKeys,
-        ],
-        history,
-        aliases,
-        guidance,
-      }),
-    })
-    .strict();
+
+  // The error map is built on FIRST USE, not at construction.
+  //
+  // `suggestions.zod` imports `FieldType` from `data/field.zod`, so the moment
+  // `field.zod` started using this helper the import graph closed a loop:
+  // field → strict-object → suggestions → field. Under `OS_EAGER_SCHEMAS=1`
+  // (how `build-schemas.ts` runs) every `lazySchema` body executes at module
+  // init, and whichever module the loader entered first saw a
+  // half-initialized partner — `strictUnknownKeyError` undefined, and a
+  // TypeError before a single schema was built.
+  //
+  // Worth noting HOW that surfaced: the whole test suite passed. Tests import
+  // lazily, so the cycle never resolved in the order that breaks. Only the
+  // eager build hit it — the same lesson this campaign keeps re-learning from
+  // the other side, that a green check can simply be the wrong instrument.
+  //
+  // Deferring costs nothing (the map is needed only when a key is rejected)
+  // and makes the helper cycle-proof for every schema after this one, rather
+  // than making each of them prove it is not in a loop. Same shape as the
+  // deferred map `data/object.zod.ts` already carries for its TDZ problem.
+  let build: z.core.$ZodErrorMap | undefined;
+  const error: z.core.$ZodErrorMap = (issue) =>
+    (build ??= strictUnknownKeyError({
+      surface,
+      // Declared-but-unwritable keys (tombstones) are excluded — see
+      // `acceptsNothing`. They stay in the SHAPE, so writing one still raises
+      // its own prescription; they are only kept out of the candidate list a
+      // typo gets pointed at.
+      knownKeys: [
+        ...Object.keys(shape).filter((k) => !acceptsNothing(shape[k])),
+        ...extraKeys,
+      ],
+      history,
+      aliases,
+      guidance,
+    }))(issue);
+
+  return z.object(shape, { error }).strict();
 }

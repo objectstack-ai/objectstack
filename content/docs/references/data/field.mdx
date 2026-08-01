@@ -130,6 +130,13 @@ const result = Address.parse(data);
 | **inlineHelpText** | `string` | optional | Help text displayed below the field in forms |
 | **autonumberFormat** | `string` | optional | Auto-number format: literal text + `{0000}` counter, `{YYYY}`/`{MM}`/`{DD}`/`{YYYYMMDD}` date tokens (business tz), and `{field_name}` interpolation. Counter resets per rendered prefix (e.g. AD`{YYYYMMDD}``{0000}` resets daily). |
 | **externalId** | `boolean` | optional | Is external ID for upsert operations |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
 
 ---

@@ -73,10 +73,16 @@ const PROBE: Record<string, unknown> = {
  * The structural walk found 8 of these; the probe it replaced had been hiding 7.
  * `job` and `book` were closed in the same pass, leaving 6; `validation` came off
  * when its six union variants were converted, leaving 5; `translation` came off
- * when its groups were closed, leaving 4.
+ * when its groups were closed, leaving 4; `mapping` and `page` when they closed,
+ * leaving 2; `field` when it closed, leaving 1.
+ *
+ * `field` is worth a line of its own: it was the ONE type the original probe
+ * actually checked (the other 24 took an early return), so it was the only
+ * envelope gap anyone could see for as long as that probe was green — and it
+ * outlasted every gap the probe was hiding.
  */
 const UNDECLARED_ENVELOPE = new Set<string>([
-  'action', 'field',
+  'action',
 ]);
 
 /**
@@ -212,7 +218,7 @@ describe('registered metadata types', () => {
  * type fails this suite until the list shrinks, so the list cannot outlive the
  * debt and start exempting types that no longer need exempting.
  */
-const STILL_STRIP = new Set<string>(['action', 'dashboard', 'field', 'view']);
+const STILL_STRIP = new Set<string>(['action', 'dashboard', 'view']);
 
 /** The registered schema's own top-level posture: `.strict()` sets a `never` catchall. */
 function topLevelPosture(schema: unknown, depth = 0): 'strict' | 'strip' | null {
@@ -279,7 +285,7 @@ describe('#4001 — registered-type closure is derived, not tallied', () => {
   it('reports the campaign number so a reader never has to count', () => {
     const closed = types.filter((t) => !STILL_STRIP.has(t));
     expect(closed.length + STILL_STRIP.size).toBe(types.length);
-    expect(closed.length).toBe(21);
+    expect(closed.length).toBe(22);
     expect(types.length).toBe(25);
   });
 });

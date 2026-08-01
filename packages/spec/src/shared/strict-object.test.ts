@@ -209,3 +209,53 @@ describe('strictObject × retiredKey — suggestions never point at a dead key',
     expect(messageFor({ triggerPhrases: ['hi'] })).toContain('was removed in vX');
   });
 });
+
+/**
+ * The error map must be built lazily, which is what makes this helper safe
+ * inside an import cycle.
+ *
+ * `suggestions.zod` imports `FieldType` from `data/field.zod`, so when
+ * `field.zod` adopted `strictObject` the graph closed a loop
+ * (field → strict-object → suggestions → field). Under `OS_EAGER_SCHEMAS=1`
+ * — how `build-schemas.ts` runs — every `lazySchema` body executes at module
+ * init, so whichever module the loader entered first saw a half-initialized
+ * partner and threw before a single schema was built.
+ *
+ * The whole test suite passed through that: tests import lazily, so the cycle
+ * never resolved in the order that breaks. Only the eager build caught it. The
+ * gate is real (`check:generated` runs `gen:schema`), but it is a whole-package
+ * build — this pins the actual property, right next to the helper, so a future
+ * edit that hoists the map back to construction time fails here first.
+ */
+describe('strictObject — the error map is lazy, so cycles cannot break it', () => {
+  it('does not build the error map until a key is actually rejected', () => {
+    // `strictUnknownKeyError` normalizes the alias table via `Object.entries`,
+    // so a getter on it fires exactly when the map is built — an observable
+    // proxy for "has construction reached into the imported module yet?".
+    let aliasesRead = 0;
+    const aliases = Object.defineProperty({} as Record<string, string>, 'visibleWhen', {
+      enumerable: true,
+      get() {
+        aliasesRead++;
+        return 'visible';
+      },
+    });
+
+    const Schema = strictObject({ surface: 's', history: 'h', aliases }, { a: z.string() });
+    expect(aliasesRead, 'the map was built at construction — cycles will break it').toBe(0);
+
+    // A clean parse never reaches the unknown-key path either.
+    expect(Schema.safeParse({ a: 'x' }).success).toBe(true);
+    expect(aliasesRead).toBe(0);
+
+    // First rejection builds it, and the deferral costs nothing in the message.
+    const result = Schema.safeParse({ a: 'x', visibleWhen: 1 });
+    expect(result.success).toBe(false);
+    expect(aliasesRead).toBe(1);
+    expect(result.error!.issues[0].message).toContain('`visibleWhen` → `visible`');
+
+    // Built once, then reused.
+    Schema.safeParse({ a: 'x', bogus: 1 });
+    expect(aliasesRead).toBe(1);
+  });
+});

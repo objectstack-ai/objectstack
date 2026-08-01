@@ -286,6 +286,50 @@ dropped at parse, and nothing failed.
     everyone, and always had been. Closing the shape created the channel, so
     both got their sentence.
 
+14. **Closing `field` put `strictObject` inside an import cycle, and the whole
+    test suite passed through it.** `shared/suggestions.zod` imports `FieldType`
+    from `data/field.zod`, so the moment `field.zod` adopted the helper the graph
+    closed a loop: field → strict-object → suggestions → field. Under
+    `OS_EAGER_SCHEMAS=1` — how `build-schemas.ts` runs — every `lazySchema` body
+    executes at module init, so whichever module the loader entered first saw a
+    half-initialized partner and threw `Cannot read properties of undefined
+    (reading 'strictUnknownKeyError')` before a single schema was built.
+
+    **284 test files and 7,239 cases went green over it.** Tests import lazily,
+    so the cycle never resolved in the order that breaks; only the eager build
+    hit it. This is finding 9's rule from the other side — there the instrument
+    reported coverage it did not have, here the instrument was simply the wrong
+    one, and a green suite meant nothing about the failure mode in question.
+
+    Fixed by deferring the error map to first use, which costs nothing (it is
+    needed only when a key is rejected) and makes the helper cycle-proof for
+    every schema after this one, instead of making each new conversion prove it
+    is not in a loop. The property is now pinned in
+    `shared/strict-object.test.ts` via an observable — an alias-table getter that
+    fires exactly when the map is built — and verified to go red when the map is
+    hoisted back to construction time.
+
+15. **`field` carried the campaign's richest curated table, in the wrong layer.**
+    `FIELD_KEY_GUIDANCE` (in `data/authoring-key-lint.ts`) holds twenty-odd
+    entries for this one surface — every one found in the wild, held honest by a
+    test that every `to` names a key `FieldSchema` really declares and that no
+    entry exists for a key still live.
+
+    The first pass at closing `field` hand-wrote a guidance table beside it. That
+    is a second copy of the truth, and it immediately proved the point: the
+    lint's table suppresses a suggestion for `pii` **because `pii` is three edits
+    from `min`**, so a bare edit-distance suggester answers a
+    personally-identifiable-information key with "did you mean `min`?" —
+    confident, wrong, about an unrelated concept. The hand-written table did not
+    know that, and the rejection said exactly that. `FieldSchema` now derives its
+    aliases and guidance from the table (`to` → alias, `why` → guidance), so the
+    curation has one home and keeps its existing test.
+
+    Worth noting what moved: the table did not change and is not deprecated — its
+    *consumer* changed. The lint no longer reaches `field` now that the parse
+    rejects first, so the same curation that used to power a warning now powers a
+    rejection. That is the intended end state for every entry in it.
+
 This is the empirical argument for the ratchet: the inference "no metadata in
 the repo carries unknown keys" was **false three times over**, and only the
 strict gate could prove it. Note the asymmetry in the two schema gaps — both

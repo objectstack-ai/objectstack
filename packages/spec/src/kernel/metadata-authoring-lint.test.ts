@@ -22,6 +22,7 @@ import { STACK_KEY_GUIDANCE, STACK_RUNTIME_MEMBERS } from '../data/authoring-key
 import { PLURAL_TO_SINGULAR } from '../shared/metadata-collection.zod';
 import { ObjectSchema } from '../data/object.zod';
 import { PageSchema } from '../ui/page.zod';
+import { FieldSchema, SelectOptionSchema } from '../data/field.zod';
 import { AgentSchema } from '../ai/agent.zod';
 import { ObjectStackDefinitionSchema } from '../stack.zod';
 import { getMetadataTypeSchema } from './metadata-type-schemas';
@@ -126,16 +127,22 @@ describe('the #4148 behaviours survive the generalization', () => {
     expect(lintUnknownAuthoringKeys(stackWith({}, {}))).toEqual([]);
   });
 
-  it('reports a retired field key with guidance and no suggestion', () => {
-    const [finding, ...rest] = lintUnknownAuthoringKeys(stackWith({}, { pii: true }));
-    expect(rest).toEqual([]);
-    expect(finding).toMatchObject({
-      path: 'objects.crm_case.fields.owner.pii',
-      surface: 'field',
-      key: 'pii',
-    });
-    expect(finding.guidance).toBeTruthy();
-    expect(finding.suggestion).toBeUndefined();
+  it('hands the retired field keys to the parse, guidance and suppression intact', () => {
+    // `field` closed in #4001 batch 6b, so the lint no longer reaches it and
+    // `FieldSchema` carries `FIELD_KEY_GUIDANCE` directly. What this test has
+    // always really been protecting is the SUPPRESSION: `pii` is three edits
+    // from `min`, so a bare edit-distance suggester answers a
+    // personally-identifiable-information key with "did you mean `min`?" —
+    // confident, wrong, about an unrelated concept. Closing the shape without
+    // reusing the table reintroduced exactly that, which is how the schema came
+    // to derive from it. Assert the property, wherever it now lives.
+    expect(lintUnknownAuthoringKeys(stackWith({}, { pii: true }))).toEqual([]);
+
+    const parsed = FieldSchema.safeParse({ type: 'text', pii: true });
+    expect(parsed.success).toBe(false);
+    const message = parsed.success ? '' : parsed.error.issues.map((i) => i.message).join(' ');
+    expect(message).toContain('pruned in 2026-06');
+    expect(message).not.toContain('Did you mean');
   });
 
   it('no longer WARNS on a renamed object key — the parse rejects it now', () => {
@@ -156,18 +163,20 @@ describe('the #4148 behaviours survive the generalization', () => {
   });
 
   it('reports across collections in one walk, with per-type surfaces', () => {
-    // `page` and `agent` used to appear here too. They closed (#4001 batch 6a),
-    // so the parse rejects those keys and the lint correctly stays quiet — the
-    // hand-off this whole layer was built to make. `dashboard` keeps a
-    // second collection in the walk so this still proves per-type surfacing
-    // rather than degenerating into a single-collection test.
+    // `page`/`agent` (batch 6a) and `field` (batch 6b) used to appear here too;
+    // each closed, so the parse rejects and the lint correctly stays quiet —
+    // the hand-off this whole layer was built to make. Two collections still
+    // participate, so this keeps proving per-type surfacing rather than
+    // degenerating into a single-collection test: `object` reports a NESTED
+    // strip site under a CLOSED root (the #4522 behaviour), and `dashboard`
+    // reports at its root.
     const findings = lintUnknownAuthoringKeys({
-      objects: [{ name: 'a', label: 'A', fields: { x: { type: 'text', indexed: true } } }],
+      objects: [{ name: 'a', label: 'A', actions: [{ name: 'act', zzz: 1 }] }],
       dashboards: [{ name: 'd', label: 'D', zzz: 1 }],
     });
     expect(findings.map((f) => `${f.surface}:${f.path}`).sort()).toEqual([
       'dashboard:dashboards.d.zzz',
-      'field:objects.a.fields.x.indexed',
+      'object:objects.a.actions.0.zzz',
     ]);
   });
 
@@ -233,21 +242,23 @@ describe('nested descent (#4001 evidence phase)', () => {
     expect(finding).toMatchObject({ path: 'objects.o1.actions.0.zzz_nested', surface: 'object' });
   });
 
-  it('carries the field surface through a record INTO its nested array', () => {
-    // The override is keyed on the path relative to the item root, so a record's
-    // author-chosen keys must not join that path — otherwise only the first
-    // field would resolve as `field`. This also proves the descent continues
-    // BELOW the override rather than stopping at it.
-    const [finding] = lintUnknownAuthoringKeys({
+  it('hands the field record and its nested array to the parse', () => {
+    // Was `objects[].fields{}.options[]` reporting as surface `field`, which
+    // proved the record-override survived a descent into a nested array.
+    // `field` and `SelectOptionSchema` both closed in #4001 batch 6b, so the
+    // parse rejects there now and the lint is correctly silent. The
+    // record-override path itself is still exercised — every remaining
+    // `object`-surface descent runs through the same code — and the graduation
+    // is asserted rather than assumed, because a broken walk looks identical.
+    expect(lintUnknownAuthoringKeys({
       objects: [{
         name: 'o2',
         fields: { s: { type: 'select', options: [{ label: 'A', value: 'a', zzz_nested: 1 }] } },
       }],
-    });
-    expect(finding).toMatchObject({
-      path: 'objects.o2.fields.s.options.0.zzz_nested',
-      surface: 'field',
-    });
+    })).toEqual([]);
+
+    expect(FieldSchema.safeParse({ type: 'text', zzz_nested: 1 }).success).toBe(false);
+    expect(SelectOptionSchema.safeParse({ label: 'A', value: 'a', zzz_nested: 1 }).success).toBe(false);
   });
 
   it('stays silent where the nested parse is already strict', () => {
