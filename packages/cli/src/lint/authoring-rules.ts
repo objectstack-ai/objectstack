@@ -94,6 +94,7 @@ import {
   validateVisibilityPredicates,
   validateSecurityPosture,
   validateOrgAxisRedLines,
+  validateActionLocations,
 } from '@objectstack/lint';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
 import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
@@ -385,6 +386,20 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-semantic-roles.ts',
     run: (stack) => validateSemanticRoles(stack),
   },
+  // ADR-0078 Phase 3 (Tier-A `action-locations`) — an action that declares no
+  // `locations` and that no view places by name renders on no surface at all.
+  // objectui#3142 made that measurable: four renderers used to show an
+  // undeclared action anyway, and now none does. Advisory: a view in another
+  // installed package may be the one placing it, and `locations: []` (the
+  // documented headless shape) is deliberately never flagged.
+  {
+    name: 'validateActionLocations',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-action-locations.ts',
+    run: (stack) => validateActionLocations(stack),
+  },
   // framework#3434 — seeds replay on every boot, so a `mode: 'insert'` dataset
   // duplicates its table on every restart.
   {
@@ -419,8 +434,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     run: (stack) => validateVisibilityPredicates(stack),
   },
   // #1874 — flow authoring anti-patterns. Advisory by default; a finding marked
-  // `error` gates (#3760 promoted `flow-runas-unscoped`, which flags metadata
-  // the runtime now REFUSES to execute).
+  // `error` gates. Three do today: `flow-runas-unscoped` (#3760 — metadata the
+  // runtime REFUSES to execute), plus `flow-branch-label-unmatched` and
+  // `flow-default-edge-with-condition` (#4414 — a declaration that is inert, so
+  // the route silently differs from what the author wrote). The bar for
+  // promoting one is stated at the top of `lint-flow-patterns.ts`.
   {
     name: 'lintFlowPatterns',
     tier: 'gating',

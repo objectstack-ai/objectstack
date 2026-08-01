@@ -278,7 +278,7 @@ Sort with `orderBy` — an array of sort nodes:
 
 ### Keyset Pagination (Performant)
 
-> ⛔ **`query.cursor` was REMOVED in `@objectstack/spec` 18 (#4286).** No
+> ⛔ **`query.cursor` was REMOVED in `@objectstack/spec` 17 (#4286).** No
 > engine or driver ever read it — a query carrying `cursor` silently returned
 > **page 1 forever**. The key is tombstoned (a query carrying it fails to
 > parse with the prescription) and `QueryBuilder.cursor()` is gone. Do keyset
@@ -443,7 +443,7 @@ Load related records through lookup/master_detail fields:
 
 ## Joins
 
-> ⛔ **REMOVED in `@objectstack/spec` 18 (#4286, ADR-0049).** `query.joins`
+> ⛔ **REMOVED in `@objectstack/spec` 17 (#4286, ADR-0049).** `query.joins`
 > (and the `JoinNode`/`JoinType`/`JoinStrategy` vocabulary) is gone from the
 > `QueryAST` schema — no engine or driver ever consumed it, so it only ever
 > declared a capability that did not run. The key is tombstoned: authoring it
@@ -504,7 +504,7 @@ auto-default of name/title + short-text fields), resolved server-side.
 
 ## Window Functions (Analytics)
 
-> ⛔ **REMOVED from the request surface in `@objectstack/spec` 18 (#4286).**
+> ⛔ **REMOVED from the request surface in `@objectstack/spec` 17 (#4286).**
 > `query.windowFunctions` is gone from the `QueryAST` schema — the engine
 > never routed it to any driver, so every OVER clause it declared was
 > silently dropped. The key is tombstoned (a query carrying it fails to

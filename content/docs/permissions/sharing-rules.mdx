@@ -161,6 +161,38 @@ covered; an unauthorized call fails with `403 PERMISSION_DENIED`. Boot
 seeding, lifecycle hooks, and backfills run as system context and are
 unaffected.
 
+### Switching a rule off withdraws the access it granted
+
+A sharing rule's grants are **materialized** — evaluating a rule writes real
+`sys_record_share` rows with `source: 'rule'` and `source_id` set to the rule.
+Because those rows outlive the evaluation that produced them, withdrawal has to
+be an explicit act, and it happens at **three** moments:
+
+| When | What is reconciled |
+|:--|:--|
+| **The write that deactivates or edits the rule** | That rule's grants, immediately — deactivating with `active: false` (or `POST {basePath}/sharing/rules` with the same name) revokes them before the call returns |
+| **The next insert/update of a matching record** | That record's grants for every rule on the object — an inactive rule desires nothing, so its rows are revoked |
+| **Every boot** | All rules, plus a sweep of `source: 'rule'` rows whose `source_id` no longer resolves to any rule |
+
+Deleting a rule withdraws its grants too, whether you delete it through
+`DELETE {basePath}/sharing/rules/:idOrName` (by id **or** by name) or through
+the plain data API in Setup.
+
+The practical guarantee: **an over-granting rule is always recoverable from the
+API surface.** Switch it off or delete it, and the access it materialized is
+gone — not on the next time somebody happens to touch the record, and not only
+after a restart (objectstack#4433, #4434). A grant whose rule row has vanished
+entirely is retired by the boot sweep, so a database repaired by hand — or
+upgraded from a build that leaked these rows — converges on the next start.
+
+<Callout type="info">
+  Because withdrawal is materialized rather than computed at read time, the
+  revocation is visible in `sys_record_share` itself. `GET
+  {basePath}/data/:object/:id/shares` is the fastest way to confirm a rule's
+  access is really gone, and `POST {basePath}/sharing/rules/:idOrName/evaluate`
+  forces a reconcile on demand.
+</Callout>
+
 ### There is no "share every record" rule
 
 The predicate is **mandatory on every authoring path**, whether you declare

@@ -31,228 +31,156 @@ const stack = defineStack({
 
 ## Flow Types
 
-ObjectStack supports three types of flows:
+`type` declares how a flow starts:
 
-### 1. Autolaunched Flows
-Triggered automatically by record changes:
+| `type` | Starts when |
+|:---|:---|
+| `record_change` | a record is created / updated / deleted — bound on the `start` node |
+| `schedule` | a cron schedule fires |
+| `screen` | a user runs it interactively and supplies input |
+| `autolaunched` | another flow, an action or an API call invokes it |
+| `api` | it is exposed as an API-callable flow |
+
+## Flow Structure
+
+A flow is a **directed graph**: a flat list of `nodes` joined by a flat list of
+`edges`. Nodes never contain child steps — branching, looping and error paths are
+all expressed as edges between top-level nodes.
+
+The record-change binding lives on the `start` node's `config`
+(`{ objectName, triggerType, condition }`), not at the flow top level.
 
 ```typescript
-const autoFlow = defineFlow({
-  name: 'welcome_email',
-  type: 'autolaunched',
-  trigger: {
-    object: 'user',
-    when: 'after_insert',
-  },
-  steps: [
+const escalateCase = {
+  name: 'escalate_high_priority_case',
+  label: 'Escalate High Priority Case',
+  type: 'record_change',
+  version: 1,
+  status: 'active',
+
+  nodes: [
     {
-      type: 'action',
-      action: 'send_email',
-      inputs: {
-        to: '{!trigger.record.email}',
-        subject: 'Welcome to ObjectStack!',
-        body: 'Hello {!trigger.record.name}...',
+      id: 'start',
+      type: 'start',
+      label: 'Start',
+      config: {
+        objectName: 'crm_case',
+        triggerType: 'record-after-write', // created OR updated
       },
     },
-  ],
-});
-```
-
-### 2. Screen Flows
-Interactive flows with user input:
-
-```typescript
-const screenFlow = defineFlow({
-  name: 'create_opportunity',
-  type: 'screen',
-  steps: [
     {
-      type: 'screen',
-      fields: [
-        { name: 'account_id', label: 'Account', type: 'lookup', object: 'account' },
-        { name: 'amount', label: 'Amount', type: 'currency' },
-        { name: 'close_date', label: 'Close Date', type: 'date' },
-      ],
-    },
-    {
-      type: 'record_create',
-      object: 'opportunity',
-      fields: {
-        account_id: '{!screen.account_id}',
-        amount: '{!screen.amount}',
-        close_date: '{!screen.close_date}',
-        stage: 'prospecting',
+      id: 'check_priority',
+      type: 'decision',
+      label: 'Is High Priority?',
+      // Conditions are bare CEL — no braces. Each `label` MUST match an
+      // out-edge's `label` exactly, or the branch cannot route (#4414).
+      config: {
+        conditions: [
+          { label: 'High', expression: "record.priority == 'high'" },
+          { label: 'Otherwise', expression: 'true' },
+        ],
       },
     },
-  ],
-});
-```
-
-### 3. Scheduled Flows
-Run on a schedule (cron syntax):
-
-```typescript
-const scheduledFlow = defineFlow({
-  name: 'daily_report',
-  type: 'scheduled',
-  schedule: '0 9 * * *', // Every day at 9 AM
-  steps: [
     {
-      type: 'query',
-      object: 'order',
-      filters: [
-        { field: 'created_at', operator: 'yesterday' },
-      ],
-      output: 'orders',
-    },
-    {
-      type: 'action',
-      action: 'send_email',
-      inputs: {
-        to: 'admin@company.com',
-        subject: 'Daily Orders Report',
-        body: 'Total orders: {!orders.length}',
+      id: 'load_owner',
+      type: 'get_record',
+      label: 'Load Owner',
+      config: {
+        objectName: 'sys_user',
+        filter: { id: '{record.owner_id}' },
+        fields: ['id', 'name', 'email'],
+        outputVariable: 'owner',
       },
     },
-  ],
-});
-```
-
-## Flow Steps
-
-### Record Operations
-
-```typescript
-// Create record
-{
-  type: 'record_create',
-  object: 'contact',
-  fields: {
-    name: '{!input.name}',
-    email: '{!input.email}',
-  },
-  output: 'new_contact',
-}
-
-// Update record
-{
-  type: 'record_update',
-  object: 'account',
-  recordId: '{!trigger.recordId}',
-  fields: {
-    status: 'active',
-  },
-}
-
-// Delete record
-{
-  type: 'record_delete',
-  object: 'task',
-  recordId: '{!input.taskId}',
-}
-```
-
-### Query Step
-
-```typescript
-{
-  type: 'query',
-  object: 'opportunity',
-  filters: [
-    { field: 'account_id', operator: 'eq', value: '{!trigger.record.account_id}' },
-    { field: 'stage', operator: 'eq', value: 'closed_won' },
-  ],
-  sort: [{ field: 'amount', direction: 'desc' }],
-  limit: 10,
-  output: 'opportunities',
-}
-```
-
-### Decision (Conditional) Step
-
-```typescript
-{
-  type: 'decision',
-  conditions: [
     {
-      label: 'High Value',
-      expression: '{!trigger.record.amount} > 10000',
-      steps: [
-        { type: 'action', action: 'notify_sales_manager' },
-      ],
-    },
-    {
-      label: 'Medium Value',
-      expression: '{!trigger.record.amount} > 1000',
-      steps: [
-        { type: 'action', action: 'assign_to_sales_rep' },
-      ],
-    },
-  ],
-  defaultSteps: [
-    { type: 'action', action: 'auto_approve' },
-  ],
-}
-```
-
-### Loop Step
-
-```typescript
-{
-  type: 'loop',
-  collection: '{!query_results}',
-  variable: 'item',
-  steps: [
-    {
-      type: 'record_update',
-      object: 'task',
-      recordId: '{!item.id}',
-      fields: {
-        status: 'completed',
+      id: 'flag_case',
+      type: 'update_record',
+      label: 'Flag Case',
+      config: {
+        objectName: 'crm_case',
+        filter: { id: '{record.id}' },
+        // Field values interpolate — braces required.
+        fields: { escalated: true, escalation_note: 'Escalated to {owner.name}' },
       },
     },
+    { id: 'end', type: 'end', label: 'End' },
   ],
-}
+
+  edges: [
+    { id: 'e1', source: 'start', target: 'check_priority', type: 'default' },
+    // Branching is an edge, not a nested step list. A decision routes by
+    // matching its branch `label` to an out-edge `label`.
+    { id: 'e2', source: 'check_priority', target: 'load_owner', label: 'High', type: 'conditional' },
+    { id: 'e3', source: 'check_priority', target: 'end', label: 'Otherwise', type: 'conditional' },
+    { id: 'e4', source: 'load_owner', target: 'flag_case', type: 'default' },
+    { id: 'e5', source: 'flag_case', target: 'end', type: 'default' },
+  ],
+};
 ```
 
-### Custom Action Step
+## Node Types
 
-```typescript
-{
-  type: 'action',
-  action: 'calculate_tax',
-  inputs: {
-    amount: '{!opportunity.amount}',
-    region: '{!account.billing_region}',
-  },
-  output: 'tax_amount',
-}
-```
+The built-in node type ids (`FLOW_BUILTIN_NODE_TYPES`, from `FlowNodeAction` in
+`@objectstack/spec`):
 
-## Variable Expressions
+`start` · `end` · `decision` · `assignment` · `loop` · `create_record` ·
+`update_record` · `delete_record` · `get_record` · `http` · `notify` · `script` ·
+`screen` · `wait` · `subflow` · `map` · `connector_action` · `parallel_gateway` ·
+`join_gateway` · `boundary_event`
 
-Access variables in flow steps using `{!variable.path}` syntax:
+`type` is validated against the **live action registry** at `registerFlow()`, not
+against a closed enum, so plugin-registered node types are equally legal.
 
-```typescript
-// Trigger record fields
-'{!trigger.record.name}'
-'{!trigger.record.account.industry}'
+The registry is also why `FlowNodeAction` is not the whole list: the ADR-0031
+structured constructs **`parallel`** and **`try_catch`** ship built-in executors
+(`builtin/parallel-node.ts`, `builtin/try-catch-node.ts`) without appearing in
+that enum. See [Advanced Features](#advanced-features) below.
 
-// Screen input
-'{!screen.fieldName}'
+The CRUD quartet's `config` — the shape most often written from memory, and the
+one this README used to get wrong:
 
-// Query results
-'{!query_results[0].name}'
-'{!query_results.length}'
+| Node | `config` keys |
+|:---|:---|
+| `get_record` | `objectName`, `filter`, `fields`, `limit`, `outputVariable` |
+| `create_record` | `objectName`, `fields`, `outputVariable` |
+| `update_record` | `objectName`, `filter`, `fields` — **no** `outputVariable`; the executor does not read one |
+| `delete_record` | `objectName`, `filter` |
 
-// Step outputs
-'{!step_name.output_field}'
+`filter` is an **object** of field/value pairs (`{ id: '{record.id}' }`), not an
+array of `{ field, operator, value }` triples; operator objects such as
+`{ "$ne": null }` are legal values. There is no `recordId` key — select by id
+through `filter`. Unknown keys are rejected at `registerFlow()`.
 
-// System variables
-'{!now}'
-'{!today}'
-'{!currentUser.id}'
-```
+For every other node's `config`, and for loops, parallel blocks, subflows, waits
+and error handling, see the maintained reference — **[Flows](/content/docs/automation/flows.mdx)**.
+This README deliberately does not keep a second copy of that per-node reference.
+
+## Expressions
+
+A flow mixes **two dialects**, and the rule is short: **every condition is CEL;
+braces are for values.**
+
+| Where | Dialect | Write it like |
+|:---|:---|:---|
+| Start-node `condition` | CEL — bare, no braces | `record.amount > 500` |
+| Edge `condition` | CEL — bare, no braces | `record.status == 'open'` |
+| Decision `conditions[].expression` | CEL — bare, no braces | `order_amount > 10000` |
+| Field values in `create_record` / `update_record` | Interpolation — braces required | `'Follow up on {record.name}'`, `'{TODAY() + 7}'` |
+
+Value bindings: `{var}`, `{var.path}`, `{$User.Id}`, `{$User.Email}`, `{NOW()}`,
+`{TODAY()}`, `{TODAY() + 90}`.
+
+The two failure modes to memorize:
+
+1. **Braces missing in a field value** — `due_date: 'TODAY() + 7'` writes the
+   literal text into the field. Write `'{TODAY() + 7}'`.
+2. **Braces put *into* a condition** — `'{record.amount} > 500'`. Since #4336
+   conditions reject this loudly: `registerFlow()` / `objectstack validate`
+   refuse the flow with a CEL error naming the reference. Before that they were
+   compared as text and were silently always-true or always-false.
+
+There is no `{!…}` dialect. That is Salesforce syntax; the platform has never
+parsed it.
 
 ## Service API
 
@@ -326,46 +254,64 @@ POST   /api/v1/automation/triggers/:name          # Trigger a flow
 
 ## Advanced Features
 
-### Parallel Execution
+`loop`, `parallel` and `try_catch` are **structured control-flow constructs**
+(ADR-0031). Each owns its body as a single-entry/single-exit **region** carried in
+`config` — a nested `{ nodes, edges }` sub-graph, *not* a `steps` array — so the
+outer graph stays acyclic. A region runs in the enclosing variable scope; the
+container's ordinary out-edges are the continuation.
+
+### Loop
 
 ```typescript
-const flow = defineFlow({
-  name: 'parallel_processing',
-  steps: [
-    {
-      type: 'parallel',
-      branches: [
-        {
-          name: 'branch1',
-          steps: [{ type: 'action', action: 'process_a' }],
-        },
-        {
-          name: 'branch2',
-          steps: [{ type: 'action', action: 'process_b' }],
-        },
-      ],
+{
+  id: 'notify_each',
+  type: 'loop',
+  label: 'For each task',
+  config: {
+    collection: '{tasks}',      // template/variable resolving to an array
+    iteratorVariable: 'task',   // current item, visible inside the body
+    indexVariable: 'i',         // optional zero-based index
+    maxIterations: 500,         // hard cap (clamped to the engine ceiling)
+    body: {
+      nodes: [{ id: 'send', type: 'notify', label: 'Notify', config: { /* … */ } }],
+      edges: [],
     },
-  ],
-});
+  },
+}
+```
+
+### Parallel Execution
+
+Branches run concurrently and join implicitly when all complete — there is no
+author-visible split/join gateway.
+
+```typescript
+{
+  id: 'fan_out',
+  type: 'parallel',
+  label: 'Notify in parallel',
+  config: {
+    branches: [ // ≥ 2 regions
+      { name: 'Email', nodes: [{ id: 'email', type: 'notify', label: 'Email', config: { /* … */ } }], edges: [] },
+      { name: 'Slack', nodes: [{ id: 'slack', type: 'notify', label: 'Slack', config: { /* … */ } }], edges: [] },
+    ],
+  },
+}
 ```
 
 ### Error Handling
 
 ```typescript
 {
+  id: 'guarded',
   type: 'try_catch',
-  trySteps: [
-    { type: 'action', action: 'risky_operation' },
-  ],
-  catchSteps: [
-    {
-      type: 'action',
-      action: 'send_error_notification',
-      inputs: {
-        error: '{!error.message}',
-      },
-    },
-  ],
+  label: 'Charge with fallback',
+  config: {
+    try: { nodes: [{ id: 'charge', type: 'http', label: 'Charge', config: { /* … */ } }], edges: [] },
+    catch: { nodes: [{ id: 'flag', type: 'update_record', label: 'Flag failure', config: { /* … */ } }], edges: [] },
+    errorVariable: '$error',
+    retry: { maxRetries: 3, retryDelayMs: 1000, backoffMultiplier: 2 },
+  },
 }
 ```
 
@@ -373,27 +319,39 @@ const flow = defineFlow({
 
 ```typescript
 {
+  id: 'validate',
   type: 'subflow',
-  flowName: 'validate_address',
-  inputs: {
-    street: '{!input.street}',
-    city: '{!input.city}',
+  label: 'Validate Address',
+  config: {
+    flowName: 'validate_address',
+    input: { street: '{input.street}', city: '{input.city}' },
+    outputVariable: 'validated_address',
   },
-  output: 'validated_address',
 }
 ```
 
-### Wait Step
+### Wait
+
+`wait` suspends the run durably. Its contract is the node-level
+`waitEventConfig` block — **not** `config`:
 
 ```typescript
 {
+  id: 'hold',
   type: 'wait',
-  duration: { hours: 24 },
-  nextSteps: [
-    { type: 'action', action: 'send_reminder' },
-  ],
+  label: 'Wait 24h',
+  waitEventConfig: {
+    eventType: 'timer',          // 'timer' | 'signal' | 'webhook' | 'manual' | 'condition'
+    timerDuration: 'PT24H',      // ISO 8601 duration
+  },
 }
 ```
+
+The node resumes down its ordinary out-edges; there is no `nextSteps` key.
+
+> BPMN `parallel_gateway` / `join_gateway` / `boundary_event` remain in the
+> protocol as the **interop** representation and map onto these constructs on
+> import/export — they are not the native authoring model.
 
 ## Best Practices
 

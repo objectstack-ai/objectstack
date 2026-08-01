@@ -30,6 +30,7 @@ import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import type { IAutomationService } from '@objectstack/spec/contracts';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -511,12 +512,15 @@ export default class MigrateMeta extends Command {
 
     let stack;
     try {
-      // `PlatformObjectsPlugin` only — this pass needs `sys_metadata` and its
-      // history/audit siblings, which the protocol assembly registers itself.
-      // No storage adapter: unlike the file migration, nothing here reads bytes.
+      // `PlatformObjectsPlugin` for `sys_metadata` and its history/audit
+      // siblings, plus the automation engine in INERT mode so `flow` rows are
+      // covered too (#4454) — flow-node conversions need its executor registry
+      // for the conflict guard, and `armRuntime: false` means taking it arms
+      // nothing. No storage adapter: unlike the file migration, nothing here
+      // reads bytes.
       stack = await bootSchemaStack({
         ...(flags['database-url'] ? { databaseUrl: flags['database-url'] } : {}),
-        extraPlugins: await buildDataMigrationPlugins(),
+        extraPlugins: await buildDataMigrationPlugins({ automation: true }),
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); return; }
@@ -541,10 +545,23 @@ export default class MigrateMeta extends Command {
       const { formatStoredMigrationReport, storedMigrationClean } =
         await import('@objectstack/metadata-protocol');
 
+      // The automation engine canonicalizes `flow` rows — it holds the executor
+      // registry ADR-0078's conflict guard needs (#4454). It is booted inert, so
+      // this is the only thing it does in this process. Absent (an older stack,
+      // or a boot that skipped it), flow rows keep reporting `skipped` with the
+      // reason rather than being silently counted done.
+      // `SchemaStack.kernel` is untyped, so the slot's contract is stated on the
+      // result rather than as a type argument — narrowing, not erasing.
+      let automation: IAutomationService | undefined;
+      try { automation = stack.kernel.getService('automation') as IAutomationService | undefined; }
+      catch { /* not registered — flows stay reported as skipped */ }
+      const canonicalize = automation?.canonicalizeStoredFlow?.bind(automation);
+
       const report = await protocol.migrateStoredMetadata({
         apply,
         ...(flags.type && flags.type.length > 0 ? { types: flags.type } : {}),
         actor: 'os migrate meta --stored',
+        ...(canonicalize ? { canonicalizeFlow: canonicalize } : {}),
       });
       const clean = storedMigrationClean(report);
       if (!clean) exitCode = 1;

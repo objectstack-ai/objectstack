@@ -93,6 +93,14 @@ function isMissingSourceError(err: unknown): boolean {
 }
 
 /**
+ * [#4437] A name that is a plain column/table identifier and nothing else.
+ * Anything with a dot, a paren, whitespace or an operator is a SQL EXPRESSION
+ * (or a cross-object reference) whose parts this layer cannot attribute to a
+ * single field — such measures pass the source-field gate untouched.
+ */
+const BARE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/i;
+
+/**
  * Configuration for AnalyticsService.
  */
 export interface AnalyticsServiceConfig {
@@ -210,6 +218,26 @@ export interface AnalyticsServiceConfig {
    */
   isRegisteredObject?: (name: string) => boolean;
   /**
+   * [#4437] The FIELD NAMES `objectName` declares, or `undefined` when nothing
+   * authoritative can answer.
+   *
+   * Consulted by {@link AnalyticsService.ensureCube} to validate the SOURCE
+   * FIELD a measure resolves to BEFORE any SQL is built. `inferMeasure` maps a
+   * suffix convention onto a field name (`ghost_sum` → `SUM(ghost)`) and used
+   * to accept any spelling, so a typo'd measure reached the driver as a column
+   * and came back as an opaque `500 SQLITE_ERROR` — a driver error class on the
+   * wire for a caller-shaped mistake (ADR-0112). The DATA route already refuses
+   * the same mistake with a `400 INVALID_FIELD` naming the field (#4315/#4254);
+   * this hook is what lets the ANALYTICS route give the same answer.
+   *
+   * Same tiering as {@link isRegisteredObject}: absence means "skip the check"
+   * (registry-less hosts, engine doubles, external datasources whose columns
+   * are not mirrored locally). The production bridge in `plugin.ts` wires it
+   * from the same schema registry the data path's gate reads, so "which fields
+   * exist" has ONE answer across `/data` and `/analytics`.
+   */
+  getObjectFieldNames?: (objectName: string) => readonly string[] | undefined;
+  /**
    * ADR-0021 — optional object-graph resolver used when compiling datasets:
    * `(baseObject, relationshipName) => relatedObjectName | undefined`. When
    * provided, `queryDataset` validates that every declared `include` exists.
@@ -293,6 +321,8 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly draftRowsResolver?: AnalyticsServiceConfig['draftRowsResolver'];
   /** [#3867] Schema-registry probe gating cube auto-inference. */
   private readonly isRegisteredObject?: AnalyticsServiceConfig['isRegisteredObject'];
+  /** [#4437] Field-name probe gating measure source-field resolution. */
+  private readonly getObjectFieldNames?: AnalyticsServiceConfig['getObjectFieldNames'];
   /** [#3867] One-shot flag for the {@link assertInferableCube} stand-down warning. */
   private warnedNoObjectRegistry = false;
   readonly cubeRegistry: CubeRegistry;
@@ -313,6 +343,7 @@ export class AnalyticsService implements IAnalyticsService {
     this.labelResolver = config.labelResolver;
     this.draftRowsResolver = config.draftRowsResolver;
     this.isRegisteredObject = config.isRegisteredObject;
+    this.getObjectFieldNames = config.getObjectFieldNames;
 
     // Compile + register pre-defined datasets (ADR-0021).
     if (config.datasets) {
@@ -843,6 +874,11 @@ export class AnalyticsService implements IAnalyticsService {
       // such check: it was authored, and its `sql` is whatever it declares.
       this.assertInferableCube(name);
       cube = this.inferCubeFromQuery(query);
+      // [#4437] Validate the inferred measures' SOURCE FIELDS before the cube
+      // is registered — a rejected query must leave no trace in the registry
+      // (same rule the #3867 gate above keeps), or a retry would find a
+      // "registered" cube carrying the bogus measure and sail straight to SQL.
+      this.assertMeasureFields(query, cube, Object.keys(cube.measures));
       this.cubeRegistry.register(cube);
       // A scalar query — only measures, no grouping (no `dimensions`/
       // `timeDimensions`) — is the first-class "metric over an object" path
@@ -877,10 +913,107 @@ export class AnalyticsService implements IAnalyticsService {
         ...cube,
         measures: { ...cube.measures, ...extraMeasures },
       };
+      // [#4437] The cube's DECLARED measures are the ones a caller may name;
+      // the suffix-inferred entries just added are a convenience, not a
+      // vocabulary. Snapshot the declared list BEFORE registering the augmented
+      // cube so the rejection can suggest what the caller could have meant —
+      // and so a rejected query leaves the registry as it found it.
+      this.assertMeasureFields(query, augmented, Object.keys(cube.measures));
       this.cubeRegistry.register(augmented);
       this.logger.debug(
         `[Analytics] Augmented cube "${name}" with inferred measures: ${Object.keys(extraMeasures).join(',')}`,
       );
+    } else {
+      // No inference happened — every measure is declared. Still validate: an
+      // authored cube can declare a measure over a field the object dropped.
+      this.assertMeasureFields(query, cube, Object.keys(cube.measures));
+    }
+  }
+
+  /**
+   * [#4437] Reject a measure whose SOURCE FIELD the backing object does not
+   * have, BEFORE the strategy compiles it into SQL.
+   *
+   * `inferMeasure` maps a suffix convention onto a field name and has no way to
+   * know whether that field exists: `ghost_sum` happily became `SUM(ghost)`, the
+   * driver threw `no such column`, and the caller got
+   * `500 {"code":"SQLITE_ERROR","message":"Internal server error"}` — a driver
+   * error class on the wire, and nothing actionable, for what is a plain typo.
+   * The DATA route has refused the same mistake with a `400 INVALID_FIELD`
+   * naming the field since #4315/#4254; this is the analytics half of that
+   * answer, and it is deliberately the SAME envelope (`code`/`field`/`object`/
+   * `param`) so one mistake has one shape across both routes.
+   *
+   * What it checks, and what it deliberately does not:
+   *
+   * - Only when the cube's `sql` is a bare OBJECT NAME. An authored cube whose
+   *   `sql` is a real SQL expression has no field list to check against.
+   * - Only when {@link AnalyticsServiceConfig.getObjectFieldNames} answers.
+   *   Absent hook / unknown object → stand down (see the config field's doc).
+   * - Only measures whose source is a BARE COLUMN. `count(*)` has no source
+   *   field, and a dotted reference (`account.industry`) resolves through a
+   *   join whose target this check cannot see — both pass through untouched.
+   * - `id` / `created_at` / `updated_at` are admitted unconditionally, matching
+   *   the data path's `resolveQueryFields`: they are engine-assigned rather than
+   *   declared, and a gate stricter than the engine it guards would reject
+   *   queries that used to work.
+   */
+  private assertMeasureFields(query: AnalyticsQuery, cube: Cube, declaredMeasures: string[]): void {
+    const probe = this.getObjectFieldNames;
+    if (!probe) return;
+    const measures = query.measures ?? [];
+    if (measures.length === 0) return;
+
+    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!object || !BARE_IDENTIFIER.test(object)) return;
+    const fieldNames = probe(object);
+    if (!fieldNames || fieldNames.length === 0) return;
+    const known = new Set<string>([...fieldNames, 'id', 'created_at', 'updated_at']);
+
+    const stripPrefix = (m: string) => (m.includes('.') ? m.split('.').slice(1).join('.') : m);
+    /** The source field a measure aggregates, or null when there is nothing to check. */
+    const sourceFieldOf = (measure: string): string | null => {
+      const metric = cube.measures[stripPrefix(measure)] as { type?: string; sql?: unknown } | undefined;
+      if (!metric) return null;
+      // `count(*)` is the one legitimately field-less aggregate.
+      if (metric.type === 'count' && (metric.sql === '*' || metric.sql == null)) return null;
+      const source = typeof metric.sql === 'string' ? metric.sql.trim() : '';
+      if (!source || source === '*' || !BARE_IDENTIFIER.test(source)) return null;
+      return source;
+    };
+
+    // Two passes so the rejection can suggest the measures that WOULD have
+    // worked. On the auto-inference path `cube.measures` already carries the
+    // caller's own bogus spelling (it was inferred from the query moments ago),
+    // so echoing the cube's measure list verbatim would offer the typo back as
+    // a valid alternative — the one suggestion guaranteed to be wrong.
+    const invalid = new Set<string>();
+    for (const measure of measures) {
+      const source = sourceFieldOf(measure);
+      if (source && !known.has(source)) invalid.add(stripPrefix(measure));
+    }
+    if (invalid.size === 0) return;
+    const usable = declaredMeasures.filter((m) => !invalid.has(m));
+
+    for (const measure of measures) {
+      const source = sourceFieldOf(measure);
+      if (!source || known.has(source)) continue;
+
+      const err = new Error(
+        `Measure '${measure}' on cube '${cube.name}' aggregates field '${source}', which object ` +
+          `'${object}' does not have. ` +
+          `Valid measures: ${usable.join(', ') || '(none)'}. ` +
+          `Other measures are inferred from the object's OWN fields as ` +
+          `'<field>_sum' / '_avg' / '_min' / '_max' / '_count_distinct', so check the spelling of ` +
+          `'${source}' — known fields: ${[...fieldNames].sort().join(', ')}.`,
+      ) as Error & { code?: string; status?: number; field?: string; object?: string; param?: string; measure?: string };
+      err.code = 'INVALID_FIELD';
+      err.status = 400;
+      err.field = source;
+      err.object = object;
+      err.param = 'measures';
+      err.measure = measure;
+      throw err;
     }
   }
 

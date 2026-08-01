@@ -17,6 +17,7 @@ export type {
 
 export { formatStoredMigrationReport, storedMigrationClean } from './stored-migration.js';
 export type {
+  StoredFlowCanonicalization,
   StoredMigrationNotice,
   StoredMigrationOutcome,
   StoredMigrationReport,

@@ -42,10 +42,18 @@ export interface SharingPluginOptions {
  * but seed rows are written with `isSystem` (which the hooks deliberately
  * skip — see rule-hooks.ts), so a fresh deploy's seed data carried no
  * `sys_record_share` rows until each record was touched at runtime.
- * Reconcile every active rule once per boot: `evaluateRule` is idempotent
+ * Reconcile every rule once per boot: `evaluateRule` is idempotent
  * (diff-based grant/update/revoke), so repeated boots are no-ops.
  * Best-effort per rule — one broken rule must not block startup or its
  * siblings. Returns the number of rules successfully reconciled.
+ *
+ * [#4433] Callers must pass EVERY rule, not just the active ones. This pass is
+ * the last line of defence for withdrawal: `evaluateRule` purges the grants of
+ * a rule it finds inactive, so an inactive rule in this list is what turns a
+ * restart into a repair. Handed only active rules — as it was — the pass could
+ * physically never revoke anything a deactivated rule had left behind, which
+ * is why the #4433 repro survived a full restart with the rule reading
+ * `active: false` and the grant still answering.
  */
 export async function backfillRuleGrants(
   ruleService: SharingRuleService,
@@ -223,6 +231,21 @@ export class SharingServicePlugin implements Plugin {
   /** Resolved once in `kernel:ready`; reused by the `kernel:bootstrapped` backfills. */
   private engine?: SharingEngine;
 
+  /**
+   * [#4433] Has the `kernel:bootstrapped` rule-grant backfill finished?
+   *
+   * This is the real question the rule-write trigger needs to answer before it
+   * decides to skip a reconcile — "is the boot pass going to cover this write
+   * anyway?" It used to ask `session.isSystem` instead, which is a different
+   * question with a very different answer: `SharingRuleService.defineRule`
+   * writes `sys_sharing_rule` with SYSTEM_CTX **always** (it must, to reach a
+   * platform table the sharing middleware otherwise gates), so every runtime
+   * authoring write — including `POST /sharing/rules` with `active: false` —
+   * looked exactly like boot seeding and was skipped. That is the whole of
+   * #4433's first half: deactivation returned 200, and nothing reconciled.
+   */
+  private ruleGrantsBootReconciled = false;
+
   constructor(options: SharingPluginOptions = {}) {
     this.options = options;
   }
@@ -265,8 +288,19 @@ export class SharingServicePlugin implements Plugin {
    * `evaluateRule` the REST `/sharing/rules/:id/evaluate` endpoint runs, which
    * is diff-based and purges when the rule is inactive. Deletes can't go
    * through it (the row is gone, `RULE_NOT_FOUND`), so they purge directly.
-   * System-context writes are skipped: seeding and package bootstrap write
-   * with `isSystem`, and `kernel:bootstrapped` already backfills those.
+   *
+   * [#4433] The reconcile is skipped only until the `kernel:bootstrapped`
+   * backfill has run — NOT for every `isSystem` write, as it was. #3821 built
+   * this seam and then gated it on the one predicate that switches it off
+   * everywhere it mattered: `defineRule` — the sole implementation behind
+   * `POST /sharing/rules`, the documented way to deactivate a rule — writes
+   * with SYSTEM_CTX unconditionally, so the `isSystem` skip caught 100% of
+   * REST authoring. The withdrawal path was present, tested (against a mocked
+   * `session` the real path never sends) and unreachable in production: an
+   * admin saving `active: false` got a 200 and no reconcile, and because boot
+   * backfill then only walked ACTIVE rules, the orphaned grant outlived every
+   * restart. Boot phase is the honest predicate — before it, the backfill owes
+   * this table a pass; after it, nothing else will do the work.
    */
   private bindRuleRebindTriggers(engine: any, ctx: PluginContext): void {
     const scheduleRebind = (): Promise<void> => {
@@ -310,9 +344,14 @@ export class SharingServicePlugin implements Plugin {
           error: err?.message,
         });
       }
-      // Seeding / package bootstrap write with `isSystem`; `kernel:bootstrapped`
-      // backfills those, so reconciling here would only duplicate that work.
-      if (hookCtx?.session?.isSystem) return;
+      // [#4433] Skip only while the boot backfill still owes this table a
+      // pass. Declared-rule seeding and package bootstrap run before
+      // `kernel:bootstrapped`, and that pass reconciles every rule, so
+      // reconciling here would duplicate it. Once it has run, every write
+      // reconciles — regardless of `isSystem`, which cannot distinguish boot
+      // seeding from an admin's `POST /sharing/rules` (both arrive as
+      // SYSTEM_CTX from `defineRule`).
+      if (!this.ruleGrantsBootReconciled) return;
       const data = hookCtx?.result ?? hookCtx?.input?.data ?? {};
       const ruleId = String(data?.id ?? hookCtx?.input?.id ?? '');
       if (!ruleId) return;
@@ -595,11 +634,26 @@ export class SharingServicePlugin implements Plugin {
 
       if (!this.ruleService) return;
       try {
-        const rules = await this.ruleService.listRules({ activeOnly: true }, { isSystem: true } as any);
+        // [#4433] EVERY rule, not `activeOnly` — a deactivated rule's grants
+        // are withdrawn by reconciling it, so excluding inactive rules made
+        // the boot pass structurally incapable of repairing them.
+        const rules = await this.ruleService.listRules({}, { isSystem: true } as any);
         await backfillRuleGrants(this.ruleService, rules, ctx.logger as any);
       } catch (err: any) {
         ctx.logger.warn('SharingServicePlugin: boot rule backfill (kernel:bootstrapped) failed', { error: err?.message });
       }
+      // [#4433] Grants whose rule row is gone entirely are unreachable by
+      // reconciling rules — there is no rule left to iterate. Sweep them
+      // separately so "the rule is gone" and "its access is gone" mean the
+      // same thing after a restart, whichever path removed the rule.
+      try {
+        await this.ruleService.sweepOrphanedRuleGrants();
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: orphaned rule-grant sweep (kernel:bootstrapped) failed', { error: err?.message });
+      }
+      // Withdrawal is now complete for this boot; runtime rule writes own it
+      // from here (see bindRuleRebindTriggers).
+      this.ruleGrantsBootReconciled = true;
     });
   }
 }

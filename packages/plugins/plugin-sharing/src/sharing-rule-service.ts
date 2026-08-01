@@ -246,10 +246,25 @@ export class SharingRuleService implements ISharingRuleService {
     const row = await this.getRule(idOrName, context);
     if (!row) return;
     // Drop materialised grants first so we don't orphan them.
-    await this.engine.delete('sys_record_share', {
-      where: { source: 'rule', source_id: row.id },
-      context: SYSTEM_CTX,
-    } as any);
+    //
+    // [#4434] This used to be a predicate-shaped `engine.delete` on
+    // `sys_record_share` (`where: { source, source_id }`) with neither a
+    // scalar id nor `multi: true` — the one shape the engine's dispatch
+    // refuses, so EVERY `DELETE /sharing/rules/:idOrName` threw
+    // 'Delete requires an ID or options.multi=true' and answered 500 before
+    // it ever reached the rule row. Both address forms died on it, which left
+    // an over-granting rule unrecoverable from the API surface once #4433 had
+    // also closed the deactivation path.
+    //
+    // The fix routes through {@link purgeRuleGrants} rather than adding
+    // `multi: true` to the bulk call: it is the same revoke path every other
+    // withdrawal already uses (`evaluateRule` on an inactive rule,
+    // `revokeRuleGrants` after a data-API delete), so a rule's grants are
+    // retired exactly one way — through `SharingService.revoke`, one row at a
+    // time by scalar id — instead of two divergent ones. Adding `multi` here
+    // would have fixed the 500 while keeping delete as the only withdrawal
+    // that bypasses the sharing service (AGENTS.md PD #5).
+    await this.purgeRuleGrants(row.id);
     await this.engine.delete('sys_sharing_rule', {
       where: { id: row.id },
       context: SYSTEM_CTX,
@@ -281,16 +296,82 @@ export class SharingRuleService implements ISharingRuleService {
     return this.purgeRuleGrants(ruleId);
   }
 
+  /**
+   * [#4433] Revoke every `source: 'rule'` grant whose `source_id` no longer
+   * resolves to a rule row at all, and report how many went.
+   *
+   * Reconciling the rules themselves — which the boot backfill now does for
+   * inactive rules too — can only reach grants some surviving rule still
+   * claims. A grant whose rule row is GONE is unreachable that way: there is
+   * nothing left to iterate. Those orphans are exactly the rows #4433 found
+   * still answering after a restart, and they arise from every path that
+   * removes a rule without going through {@link deleteRule} — a data-API
+   * delete while the reconcile hook was unbound, a row dropped by a migration
+   * or by hand, a crash between the two writes in `deleteRule`. Sweeping at
+   * boot is what makes "the rule is gone" and "its access is gone" the same
+   * statement no matter which path removed it.
+   *
+   * Reads the rule ids first and diffs in memory: the grant table is the big
+   * one, and a per-grant existence probe would be one query per row.
+   */
+  async sweepOrphanedRuleGrants(): Promise<number> {
+    const ruleRows = await this.engine.find('sys_sharing_rule', {
+      fields: ['id'],
+      limit: 100000,
+      context: SYSTEM_CTX,
+    });
+    const live = new Set<string>();
+    for (const r of (ruleRows ?? [])) live.add(String((r as any).id));
+
+    const grants = await this.engine.find('sys_record_share', {
+      where: { source: 'rule' },
+      fields: ['id', 'source_id'],
+      limit: 100000,
+      context: SYSTEM_CTX,
+    });
+    let revoked = 0;
+    for (const g of (grants ?? [])) {
+      const sourceId = (g as any).source_id;
+      // A `source: 'rule'` row with no `source_id` names no rule that could
+      // ever re-grant it — equally unreachable, equally void.
+      if (sourceId != null && live.has(String(sourceId))) continue;
+      await this.sharing.revoke(String((g as any).id), SYSTEM_CTX as any);
+      revoked += 1;
+    }
+    if (revoked > 0) {
+      this.logger?.warn?.(
+        '[sharing-rule] revoked rule grants whose rule row no longer exists',
+        { grants: revoked },
+      );
+    }
+    return revoked;
+  }
+
+  /**
+   * Reconcile every rule on `object` against ONE record — the per-record pass
+   * the afterInsert/afterUpdate hooks run.
+   *
+   * [#4433] Deliberately lists ALL rules, not just active ones. Filtering to
+   * `activeOnly` here meant a deactivated rule was simply absent from the
+   * loop, so the grants it had already materialised were never even looked
+   * at: touching the record — the very event that created the grant — walked
+   * straight past it. An inactive rule is not "no rule", it is a rule whose
+   * desired grant set is EMPTY, and only by reconciling it can the stale rows
+   * be revoked. `match: false` for an inactive rule sends `reconcileForRecord`
+   * down its existing revoke-the-remainder branch, so nothing new is needed to
+   * withdraw them.
+   */
   async evaluateAllForRecord(
     object: string,
     recordId: string,
     context: SharingExecutionContext,
   ): Promise<SharingRuleEvaluationResult[]> {
-    const rules = await this.listRules({ object, activeOnly: true }, context);
+    const rules = await this.listRules({ object }, context);
     if (rules.length === 0) return [];
     const results: SharingRuleEvaluationResult[] = [];
     for (const rule of rules) {
-      const match = await this.recordMatches(rule, recordId);
+      // An inactive rule desires nothing; skip the criteria query entirely.
+      const match = rule.active ? await this.recordMatches(rule, recordId) : false;
       const users = match ? await this.expandRecipient(rule) : [];
       results.push(await this.reconcileForRecord(rule, recordId, match, users));
     }

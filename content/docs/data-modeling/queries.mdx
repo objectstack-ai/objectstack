@@ -256,7 +256,7 @@ backend chooses, exactly as before.
 
 ### Keyset Pagination — a `where` predicate on the sort key
 
-`query.cursor` was **removed in `@objectstack/spec` 18** (#4286): nothing on the server
+`query.cursor` was **removed in `@objectstack/spec` 17** (#4286): nothing on the server
 ever read it, so a cursor query silently returned the same first page every time. The
 key is tombstoned and `QueryBuilder.cursor()` was removed with it. Express the keyset
 directly — seek past the last row instead of offsetting:
@@ -422,7 +422,7 @@ come later behind a driver capability flag without changing these semantics.
 ## Joins — removed
 
 <Callout type="warn">
-`query.joins` was **removed in `@objectstack/spec` 18** (#4286, ADR-0049
+`query.joins` was **removed in `@objectstack/spec` 17** (#4286, ADR-0049
 enforce-or-remove): no driver's `find()` ever executed a join — the SQL, in-memory, and
 MongoDB drivers all ignored the array, so it only ever declared a capability that did
 not run. The key is tombstoned: authoring it is a `tsc` error, and a query carrying it
@@ -532,7 +532,7 @@ by `@objectstack/plugin-pinyin-search`) recomputes the column on demand.
 ## Window Functions — removed from the request surface
 
 <Callout type="warn">
-`query.windowFunctions` was **removed in `@objectstack/spec` 18** (#4286):
+`query.windowFunctions` was **removed in `@objectstack/spec` 17** (#4286):
 `ObjectQL.find()` / `.aggregate()` and the `POST /api/v1/data/:object/query` route never
 routed it anywhere, so sending it had no effect. The key is tombstoned — a query carrying
 it fails to parse with the upgrade prescription — and the
@@ -565,7 +565,7 @@ report/dashboard metadata.
 
 ### Distinct Records — removed flag, three live spellings
 
-The top-level `query.distinct` flag was **removed in `@objectstack/spec` 18** (#4286):
+The top-level `query.distinct` flag was **removed in `@objectstack/spec` 17** (#4286):
 no driver's `find()` ever applied it, and its only observable effect was mis-wired —
 it silently suppressed the REST list count while still returning duplicate rows (the
 count is truthful again). The key is tombstoned and `QueryBuilder.distinct()` was

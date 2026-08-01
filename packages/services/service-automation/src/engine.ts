@@ -14,7 +14,7 @@ import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import type { Logger } from '@objectstack/spec/contracts';
 import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, normalizeControlFlowRegions, collectFlowGraphs, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
 import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
-import { applyConversionsToFlow } from '@objectstack/spec';
+import { applyConversionsToFlow, type ConversionNotice, type ConversionConflictNotice } from '@objectstack/spec';
 import type { FlowRegionParsed } from '@objectstack/spec/automation';
 import type {
     Connector,
@@ -916,6 +916,69 @@ export interface SuspendedRunStore {
     loadTerminal?(runId: string): Promise<RunRecord | null>;
 }
 
+/**
+ * Lift the `{ dialect, source }` envelopes the flow schema derives for edge
+ * `condition`s back onto the conversion output — and take nothing else with
+ * them (#4454).
+ *
+ * This is the persistence half of {@link AutomationEngine.canonicalizeStoredFlow}.
+ * A stored flow that is written back must end up in the shape the load seam
+ * would produce, or the seam keeps re-deriving it on every boot and the
+ * migration was pointless. But `FlowSchema.parse` also materializes defaults
+ * (`version`, `runAs`, per-edge `type` / `isDefault`), and persisting a default
+ * the author never wrote pins that row to today's value forever — so the graft
+ * is deliberately narrow: it copies the lowered `condition`, nothing more.
+ *
+ * Structural alignment is by position, which is sound because neither the parse
+ * nor `normalizeControlFlowRegions` reorders or drops array members — both are
+ * copy-on-write maps. Where the two sides disagree in shape (a caller passed a
+ * mismatched pair), the converted side is returned untouched: this only ever
+ * lifts a value it can positively match.
+ *
+ * Node `config.condition` (e.g. a start node's record-change predicate) is
+ * left alone by construction — `FlowNodeSchema.config` is an open `z.record`,
+ * so the parse never lowers it, so there is no envelope on the parsed side to
+ * copy and the recursion finds a string facing a string.
+ */
+function graftConditionEnvelopes(converted: unknown, parsed: unknown): unknown {
+    if (Array.isArray(converted)) {
+        if (!Array.isArray(parsed)) return converted;
+        let changed = false;
+        const out = converted.map((entry, i) => {
+            const next = graftConditionEnvelopes(entry, parsed[i]);
+            if (next !== entry) changed = true;
+            return next;
+        });
+        return changed ? out : converted;
+    }
+    if (
+        converted && typeof converted === 'object'
+        && parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ) {
+        const parsedRec = parsed as Record<string, unknown>;
+        let changed = false;
+        const out: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(converted as Record<string, unknown>)) {
+            if (key === 'condition' && typeof value === 'string') {
+                const lowered = parsedRec[key];
+                if (
+                    lowered && typeof lowered === 'object' && !Array.isArray(lowered)
+                    && typeof (lowered as { source?: unknown }).source === 'string'
+                ) {
+                    out[key] = lowered;
+                    changed = true;
+                    continue;
+                }
+            }
+            const next = graftConditionEnvelopes(value, parsedRec[key]);
+            if (next !== value) changed = true;
+            out[key] = next;
+        }
+        return changed ? out : converted;
+    }
+    return converted;
+}
+
 export class AutomationEngine implements IAutomationService {
     /**
      * ADR-0044: maximum times a single node may be (re-)entered at the top
@@ -1611,7 +1674,37 @@ export class AutomationEngine implements IAutomationService {
 
     // ── IAutomationService Contract Implementation ────────
 
-    registerFlow(name: string, definition: unknown): void {
+    /**
+     * Canonicalize a flow definition the way the load seam does — the ONE
+     * policy, exposed so a caller that is not registering the flow can still
+     * ask "what is this flow's canonical shape?" (#4454).
+     *
+     * Two consumers, two shapes, one pass — because they share every expensive
+     * step and must never drift apart:
+     *
+     * - `parsed` is for **execution**: `FlowSchema.parse` output with the
+     *   region pass applied, i.e. schema defaults materialized. This is what
+     *   {@link registerFlow} runs and stores in `this.flows`.
+     * - `storable` is for **persistence** (`os migrate meta --stored`, #4327):
+     *   the conversion output plus the `condition` envelopes the schema lowers,
+     *   and *deliberately nothing else*. Schema defaults (`version`, `runAs`,
+     *   per-edge `type` / `isDefault`) are excluded on purpose — writing values
+     *   the author never wrote would freeze every migrated row on today's
+     *   defaults while untouched rows follow tomorrow's, i.e. two populations
+     *   with different behaviour. That is exactly the drift a canonicalization
+     *   pass exists to remove, so the pass must not become a source of it.
+     *
+     * Throws whatever the parse throws. `FlowSchema` is **strict** (#4001), so
+     * a flow carrying an unrecognized key is a hard error here rather than a
+     * silent drop; a caller migrating stored rows reports that row as failed
+     * instead of persisting a guess.
+     */
+    canonicalizeStoredFlow(name: string, definition: unknown): {
+        parsed: FlowParsed;
+        storable: unknown;
+        notices: ConversionNotice[];
+        conflicts: ConversionConflictNotice[];
+    } {
         // ADR-0087 D2 — the runtime load seam. A stored flow authored against an
         // old shape (a `webhook`/`http_request` callout node, a `delete_record`
         // with `config.filters`) is canonicalized on rehydration, BEFORE parse +
@@ -1636,11 +1729,19 @@ export class AutomationEngine implements IAutomationService {
             ...this.nodeExecutors.keys(),
             ...this.actionDescriptors.keys(),
         ]);
+        const notices: ConversionNotice[] = [];
+        const conflicts: ConversionConflictNotice[] = [];
         const converted = applyConversionsToFlow(definition, {
             reservedNodeTypes,
             includeRetired: true,
-            onNotice: (n) => this.logger.warn(`[flow '${name}'] ${n.code}: ${n.message}`),
-            onConflict: (c) => this.logger.warn(`[flow '${name}'] ${c.code}: ${c.message}`),
+            onNotice: (n) => {
+                notices.push(n);
+                this.logger.warn(`[flow '${name}'] ${n.code}: ${n.message}`);
+            },
+            onConflict: (c) => {
+                conflicts.push(c);
+                this.logger.warn(`[flow '${name}'] ${c.code}: ${c.message}`);
+            },
         });
         const flowShell = FlowSchema.parse(converted);
 
@@ -1661,6 +1762,20 @@ export class AutomationEngine implements IAutomationService {
         // depth. Runs after `validateControlFlow` so a malformed region is
         // still reported by the validator that owns that message.
         const parsed = normalizeControlFlowRegions(flowShell);
+
+        return {
+            parsed,
+            storable: graftConditionEnvelopes(converted, parsed),
+            notices,
+            conflicts,
+        };
+    }
+
+    registerFlow(name: string, definition: unknown): void {
+        // One canonicalization policy, shared with the stored-row migration so
+        // the two can never disagree about what "canonical" means (#4454).
+        // Execution takes the parsed shape (schema defaults materialized).
+        const { parsed } = this.canonicalizeStoredFlow(name, definition);
 
         // ADR-0018 §M1 — validate node types against the live action registry.
         // The protocol no longer gates `type` with a closed enum; membership is

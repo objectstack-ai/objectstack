@@ -211,12 +211,12 @@ export const BudgetApprovalFlow = defineFlow({
       // load, but the showcase should demonstrate the declared spelling.
       waitEventConfig: { eventType: 'signal', signalName: 'budget_revision' },
     },
-    {
-      id: 'needs_exec',
-      type: 'decision',
-      label: 'Budget Above $500k?',
-      config: { condition: 'budget > 500000' },
-    },
+    // A plain exclusive gateway: the predicate is on the out-edges (e4/e5).
+    // It also carried `config.condition` — inert on every node but `start`, and
+    // the comment on those edges already said so. Keeping a copy that nothing
+    // reads is the shape #4414 is about, so it is gone; `os validate` reports
+    // it as `flow-inert-node-condition`.
+    { id: 'needs_exec', type: 'decision', label: 'Budget Above $500k?' },
     {
       id: 'exec_review',
       type: 'approval',
@@ -236,10 +236,11 @@ export const BudgetApprovalFlow = defineFlow({
     { id: 'e1', source: 'start', target: 'manager_review' },
     { id: 'e2', source: 'manager_review', target: 'needs_exec', label: 'approve' },
     { id: 'e3', source: 'manager_review', target: 'rejected', label: 'reject' },
-    // Decision branching is edge-condition driven (flow spec): the engine
-    // routes a decision node by evaluating each out-edge's `condition`. Carry
-    // the predicate on the edges (the node `config.condition` alone is not
-    // evaluated by the engine), so budgets ≤ $500k skip the executive step.
+    // Decision branching is edge-condition driven: the engine routes a decision
+    // by evaluating each out-edge's `condition`, so the predicate lives here and
+    // budgets ≤ $500k skip the executive step. These two are complementary, so
+    // exactly one runs; the other correct spelling is one `condition` plus
+    // `isDefault: true` on the fallback edge (#4414).
     { id: 'e4', source: 'needs_exec', target: 'exec_review', label: 'true', condition: 'budget > 500000' },
     { id: 'e5', source: 'needs_exec', target: 'approved', label: 'false', condition: 'budget <= 500000' },
     { id: 'e6', source: 'exec_review', target: 'approved', label: 'approve' },

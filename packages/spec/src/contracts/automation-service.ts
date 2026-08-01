@@ -17,6 +17,7 @@ import type { FlowParsed } from '../automation/flow.zod';
 import type { ExecutionLog, FlowRunSummary } from '../automation/execution.zod';
 import type { ActionDescriptor } from '../automation/node-executor.zod';
 import type { ConnectorDescriptor } from '../integration/connector-descriptor';
+import type { ConversionNotice, ConversionConflictNotice } from '../conversions/types';
 
 /**
  * Context passed to a flow/script execution
@@ -339,6 +340,38 @@ export interface IAutomationService {
      * @param definition - Flow definition object
      */
     registerFlow?(name: string, definition: unknown): void;
+
+    /**
+     * Canonicalize a flow definition WITHOUT registering it (#4454).
+     *
+     * The same ADR-0087 conversion policy {@link registerFlow} applies, exposed
+     * for a caller that needs a flow's canonical shape but must not arm it —
+     * `os migrate meta --stored` rewriting stored `sys_metadata` rows is the
+     * reason this is on the contract rather than only on the implementation.
+     *
+     * Only an implementation holding the live executor registry can offer this:
+     * flow-node conversions carry ADR-0078's open-namespace conflict guard, and
+     * deciding a rename from a clobber requires knowing which node types are
+     * actually owned here. Hence optional — a caller falls back to leaving flow
+     * rows alone rather than guessing.
+     *
+     * @param name - Flow name (snake_case), used for diagnostics
+     * @param definition - The stored/authored flow body
+     * @returns `parsed` (execution shape — schema defaults materialized) and
+     *   `storable` (persistence shape — conversions plus the schema's
+     *   `condition` envelopes, deliberately WITHOUT schema defaults, so a
+     *   written-back row is not frozen on today's default values), plus the
+     *   conversions applied and any rewrite the guard refused.
+     * @throws when the definition cannot be canonicalized at all (a strict-schema
+     *   violation, a malformed control-flow region) — such a flow cannot be
+     *   registered either, so a caller reports it rather than persisting a guess.
+     */
+    canonicalizeStoredFlow?(name: string, definition: unknown): {
+        parsed: FlowParsed;
+        storable: unknown;
+        notices: ConversionNotice[];
+        conflicts: ConversionConflictNotice[];
+    };
 
     /**
      * Unregister a flow by name

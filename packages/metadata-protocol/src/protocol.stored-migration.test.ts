@@ -288,6 +288,156 @@ describe('migrateStoredMetadata — apply (#4327)', () => {
     });
 });
 
+describe('migrateStoredMetadata — flow rows via the canonicalizeFlow hook (#4454)', () => {
+    // A body the write path's schema gate accepts — the hook canonicalizes the
+    // shape, it does not exempt the row from validation.
+    const flowBody = (config: Record<string, unknown>) => ({
+        name: 'purge_flow',
+        label: 'Purge Stale Leads',
+        type: 'autolaunched',
+        status: 'active',
+        nodes: [{ id: 'n1', type: 'delete_record', label: 'Purge', config }],
+        edges: [],
+    });
+    const flowRow = {
+        type: 'flow',
+        name: 'purge_flow',
+        metadata: flowBody({ objectName: 'lead', filters: { status: 'stale' } }),
+    };
+    /** Stands in for `AutomationEngine.canonicalizeStoredFlow` — same contract. */
+    const canonicalizeFlow = (_name: string, body: any) => {
+        const node = body?.nodes?.[0];
+        if (!node || !('filters' in (node.config ?? {}))) {
+            // Copy-on-write: an unchanged body comes back BY REFERENCE, which is
+            // what the pass reads as "already canonical".
+            return { storable: body, notices: [], conflicts: [] };
+        }
+        const { filters, ...rest } = node.config;
+        return {
+            storable: { ...body, nodes: [{ ...node, config: { ...rest, filter: filters } }] },
+            notices: [{
+                conversionId: 'flow-node-crud-filter-alias',
+                surface: 'flow.node.config.filter',
+                from: 'filters',
+                to: 'filter',
+                path: 'flows[0].nodes[0].config',
+                message: 'filters → filter',
+            }],
+            conflicts: [],
+        };
+    };
+
+    it('rewrites a flow row when the caller supplies the engine hook', async () => {
+        const { engine, tables } = makeStubEngine([flowRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true, canonicalizeFlow });
+
+        expect(report.rewritten).toBe(1);
+        expect(report.skipped).toBe(0);
+        const stored = JSON.parse(metaRows(tables)[0]!.metadata);
+        expect(stored.nodes[0].config.filter).toEqual({ status: 'stale' });
+        expect('filters' in stored.nodes[0].config).toBe(false);
+        expect(historyRows(tables)[0]).toMatchObject({ type: 'flow', source: 'migrate-stored' });
+    });
+
+    it('still skips — with the reason — when no hook is supplied', async () => {
+        const { engine, tables } = makeStubEngine([flowRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true });
+
+        expect(report.skipped).toBe(1);
+        expect(report.rows[0]!.reason).toMatch(/registerFlow/);
+        expect(historyRows(tables)).toHaveLength(0);
+    });
+
+    it('counts an already-canonical flow as canonical, not as a rewrite', async () => {
+        const canonicalFlow = {
+            type: 'flow',
+            name: 'purge_flow',
+            metadata: flowBody({ objectName: 'lead', filter: { status: 'stale' } }),
+        };
+        const { engine, tables } = makeStubEngine([canonicalFlow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true, canonicalizeFlow });
+
+        expect(report.canonical).toBe(1);
+        expect(report.rewritten).toBe(0);
+        expect(historyRows(tables)).toHaveLength(0);
+    });
+
+    it('rewrites a flow the hook changed WITHOUT emitting a notice — the condition envelope case', async () => {
+        // The `{dialect, source}` envelope is a schema transform, not a
+        // conversion, so it reports no notice while still changing the body.
+        // Reading notices alone would call this row canonical and leave it
+        // re-deriving on every boot — the exact thing the pass exists to end.
+        const envelopeOnly = (_n: string, body: any) => ({
+            storable: {
+                ...body,
+                edges: [{ ...body.edges[0], condition: { dialect: 'cel', source: "x == 'y'" } }],
+            },
+            notices: [],
+            conflicts: [],
+        });
+        const row = {
+            type: 'flow',
+            name: 'purge_flow',
+            metadata: {
+                ...flowBody({ objectName: 'lead', filter: { status: 'stale' } }),
+                edges: [{ id: 'e1', source: 'n1', target: 'n1', condition: "x == 'y'" }],
+            },
+        };
+        const { engine, tables } = makeStubEngine([row]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true, canonicalizeFlow: envelopeOnly });
+
+        expect(report.rewritten).toBe(1);
+        expect(JSON.parse(metaRows(tables)[0]!.metadata).edges[0].condition)
+            .toEqual({ dialect: 'cel', source: "x == 'y'" });
+    });
+
+    it('fails the row loudly when the guard refuses a rename over a live name', async () => {
+        const conflicting = (_n: string, body: any) => ({
+            storable: body,
+            notices: [],
+            conflicts: [{
+                conversionId: 'flow-node-type-rename',
+                token: 'webhook',
+                path: 'flows[0].nodes[0].type',
+                message: "'webhook' is registered by a custom executor in this environment.",
+            }],
+        });
+        const { engine, tables } = makeStubEngine([flowRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true, canonicalizeFlow: conflicting });
+
+        expect(report.failed).toBe(1);
+        expect(report.rewritten).toBe(0);
+        expect(report.rows[0]!.reason).toMatch(/live name/);
+        expect(report.rows[0]!.reason).toMatch(/webhook/);
+        // Never a silent skip and never a clobber — the owner's node survives.
+        expect(historyRows(tables)).toHaveLength(0);
+        expect(storedMigrationClean(report)).toBe(false);
+    });
+
+    it('reports a flow that cannot canonicalize instead of persisting a guess', async () => {
+        const throwing = () => { throw new Error('Unrecognized key(s) on this flow: `_uiPosition`'); };
+        const { engine, tables } = makeStubEngine([flowRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true, canonicalizeFlow: throwing });
+
+        expect(report.failed).toBe(1);
+        expect(report.rows[0]!.reason).toMatch(/does not canonicalize/);
+        expect(report.rows[0]!.reason).toMatch(/_uiPosition/);
+        expect(historyRows(tables)).toHaveLength(0);
+    });
+});
+
 describe('migrateStoredMetadata — what it declines to touch, loudly (#4327)', () => {
     it('skips flow rows and names the seam that owns them', async () => {
         const legacyFlow = {

@@ -95,7 +95,7 @@ on the `find()` path:
 `top` is the exception that *is* honored — the engine normalises it to `limit`.
 
 The #4286 sweep (ADR-0049 enforce-or-remove) settled every other declared-but-inert
-member. **Removed** — tombstoned in `@objectstack/spec` 18, so a query carrying one
+member. **Removed** — tombstoned in `@objectstack/spec` 17, so a query carrying one
 fails to parse with the upgrade prescription and authoring it is a `tsc` error:
 `joins` (related records are read through `expand`), `windowFunctions` (a SQL-driver
 door remains: `SqlDriver.findWithWindowFunctions()`), `cursor` (express the keyset as
@@ -723,7 +723,7 @@ the driver's raw rows.
 
 ### Distinct
 
-`query.distinct` was **removed in `@objectstack/spec` 18** (#4286): no driver ever
+`query.distinct` was **removed in `@objectstack/spec` 17** (#4286): no driver ever
 rendered `SELECT DISTINCT`, and the flag's only observable effect was mis-wired — it
 silently suppressed the REST list count (`total`/`hasMore` degraded to a page-local
 estimate) while still returning duplicate rows. The key is tombstoned and
@@ -793,7 +793,7 @@ expansion ignores them.
 
 ### Joins — removed (#4286)
 
-`query.joins` was **removed in `@objectstack/spec` 18** (#4286, ADR-0049
+`query.joins` was **removed in `@objectstack/spec` 17** (#4286, ADR-0049
 enforce-or-remove): no driver ever read it, so a query carrying `joins` silently ran
 as a single-table query. The key is tombstoned — authoring it is a `tsc` error, and a
 query that still carries it (even as an empty array) fails to parse with the upgrade
@@ -805,7 +805,7 @@ joined in application code.
 
 ### Window Functions — removed from the request surface (#4286)
 
-`query.windowFunctions` was **removed in `@objectstack/spec` 18** (#4286): `find()`
+`query.windowFunctions` was **removed in `@objectstack/spec` 17** (#4286): `find()`
 never applied it, so every OVER clause it declared was silently dropped. The key is
 tombstoned, and the `WindowFunction` / `WindowSpec` / `WindowFunctionNode` exports
 left with it — they declared `field` / `over` / `frame` members that no executor ever
@@ -871,7 +871,7 @@ every page full and every row real (objectui#3106, #4363). A query with no
 ### Keyset Pagination
 
 <Callout type="warn">
-`query.cursor` was **removed in `@objectstack/spec` 18** (#4286): no driver ever
+`query.cursor` was **removed in `@objectstack/spec` 17** (#4286): no driver ever
 implemented keyset pagination, so a cursor was accepted and ignored and every page came
 back identical — a caller looping "until `hasMore` is false" never terminated. The key
 is tombstoned (on `EngineQueryOptions` too) and `QueryBuilder.cursor()` was removed

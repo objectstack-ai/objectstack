@@ -61,6 +61,28 @@ export interface AutomationServicePluginOptions {
     /** Enable debug logging for flow execution */
     debug?: boolean;
     /**
+     * Bring up the automation **runtime**, not just the engine. Default `true`
+     * — every server, dev stack and test host wants this and is unaffected.
+     *
+     * Set `false` for a one-shot tool that needs the engine as a *reference*
+     * rather than a runtime — today that is `os migrate meta --stored` (#4454),
+     * which needs the live executor registry so ADR-0078's open-namespace
+     * conflict guard can tell a flow-node rename from a clobber, and needs
+     * nothing else. Inert mode still installs the built-in nodes and still
+     * fires `automation:ready` (so third-party executors register and the
+     * registry is COMPLETE — a partial one would make the guard's verdict
+     * wrong), then stops before anything is armed:
+     *
+     * | Skipped in inert mode | Why it must be |
+     * |---|---|
+     * | flow pull + `kernel:ready` / `metadata:reloaded` re-sync | `registerFlow` calls `activateFlowTrigger` — record triggers and scheduled jobs would go live |
+     * | declarative connector materialization | opens real connections; an MCP provider spawns a child process |
+     * | suspended-run wait-timer re-arm | would RESUME someone's paused approval mid-migration |
+     *
+     * A migration process must not become a second server.
+     */
+    armRuntime?: boolean;
+    /**
      * Durable suspended-run persistence (ADR-0019):
      *  - `'auto'` (default): persist to `sys_automation_run` via the ObjectQL
      *    engine when one is available, otherwise stay in-memory.
@@ -477,6 +499,37 @@ export class AutomationServicePlugin implements Plugin {
         ctx.logger.info(
             `[Automation] Engine started with ${nodeTypes.length} node types: ${nodeTypes.join(', ') || '(none)'}`,
         );
+
+        // ── Inert mode (#4454) — an engine, and nothing armed ─────────────────
+        // A one-shot tool (`os migrate meta --stored`) needs this engine for one
+        // read-only thing: `reservedNodeTypes`, the live executor registry that
+        // ADR-0078's open-namespace conflict guard consults to tell a rename
+        // from a clobber. It does NOT want the runtime this plugin normally
+        // brings up, and everything below this line arms something:
+        //
+        //   • the flow pull calls `registerFlow`, which calls
+        //     `activateFlowTrigger` — record triggers and scheduled jobs go live;
+        //   • `materializeDeclaredConnectors` opens real connections (an MCP
+        //     provider spawns a child process);
+        //   • the `metadata:reloaded` / `kernel:ready` hooks re-register flows,
+        //     so a long-lived process would arm them later even if we skipped
+        //     the boot pull;
+        //   • `rearmSuspendedWaitTimers` RESUMES suspended runs — a migration
+        //     that silently continues someone's paused approval is indefensible.
+        //
+        // The return is placed AFTER `automation:ready` deliberately: that hook
+        // is how third-party plugins contribute node executors, and a partial
+        // registry would make the conflict guard's answer wrong — it would read
+        // a live custom node type as unowned and rewrite over it. Registry
+        // population is the one thing inert mode must NOT skip.
+        if (this.options.armRuntime === false) {
+            ctx.logger.info(
+                '[Automation] inert mode (armRuntime: false) — engine and node registry are up; '
+                + 'no flow registered, no trigger or schedule armed, no connector materialized, '
+                + 'no suspended run resumed.',
+            );
+            return;
+        }
 
         // Upgrade to durable suspended-run persistence when an ObjectQL engine is
         // present (ADR-0019). The engine was constructed in init() before

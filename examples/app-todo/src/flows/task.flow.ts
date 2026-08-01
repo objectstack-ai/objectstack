@@ -131,10 +131,12 @@ export const TaskCompletionFlow: Flow = {
       id: 'get_task', type: 'get_record', label: 'Get Completed Task',
       config: { objectName: 'todo_task', filter: { id: '{taskId}' }, outputVariable: 'completedTask' },
     },
-    {
-      id: 'check_recurring', type: 'decision', label: 'Is Recurring Task?',
-      config: { condition: 'vars.completedTask.is_recurring == true' },
-    },
+    // A plain exclusive gateway — the branching is on the OUT-EDGES (e3/e4
+    // carry the predicate and its negation). It used to also set
+    // `config.condition`, which no executor reads: that key is the trigger gate
+    // on a `start` node and inert everywhere else, so it was a third copy of the
+    // same predicate, doing nothing (#4414).
+    { id: 'check_recurring', type: 'decision', label: 'Is Recurring Task?' },
     {
       id: 'create_next_task', type: 'create_record', label: 'Create Next Recurring Task',
       config: {
