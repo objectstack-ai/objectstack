@@ -59,11 +59,30 @@ function makeEngine() {
       return t[i];
     },
     async delete(o: string, opts?: any) {
+      assertDeletable(opts);
       const t = ensure(o); const where = opts?.where ?? {};
       for (let i = t.length - 1; i >= 0; i--) if (matches(t[i], where)) t.splice(i, 1);
       return { ok: true };
     },
   };
+}
+
+/**
+ * Mirror `ObjectQLEngine.delete`'s dispatch guard (objectstack#4434).
+ *
+ * The real engine routes a delete by SCALAR `where.id` to `driver.delete` and
+ * anything else to `driver.deleteMany` — but only when `options.multi` is set;
+ * otherwise it throws `'Delete requires an ID or options.multi=true'`. The fake
+ * used to accept any `where`, so `deleteRule`'s predicate-shaped purge of
+ * `sys_record_share` passed here while the running server answered 500 to every
+ * `DELETE /sharing/rules/:idOrName`. A fake looser than the contract it stands
+ * in for is how a green suite ships a dead route.
+ */
+function assertDeletable(opts?: any): void {
+  const whereId = opts?.where && typeof opts.where === 'object' ? (opts.where as any).id : undefined;
+  const t = typeof whereId;
+  const scalarId = whereId != null && (t === 'string' || t === 'number' || t === 'bigint');
+  if (!scalarId && !opts?.multi) throw new Error('Delete requires an ID or options.multi=true');
 }
 
 describe('TeamGraphService (flat — better-auth sys_team)', () => {
@@ -319,6 +338,146 @@ describe('SharingRuleService', () => {
     await rules.deleteRule(r.id, SYS);
     expect(engine._tables.sys_sharing_rule).toHaveLength(0);
     expect(engine._tables.sys_record_share).toHaveLength(0);
+  });
+
+  /**
+   * objectstack#4434 — `DELETE /sharing/rules/:idOrName` answered 500 for BOTH
+   * address forms. `deleteRule` purged `sys_record_share` with a
+   * predicate-shaped `engine.delete` carrying neither a scalar id nor
+   * `multi: true`, the one shape the engine's dispatch refuses, so it threw
+   * before ever reaching the rule row. With #4433 also closing the
+   * deactivation path, an over-granting rule had no withdrawal path left at
+   * all — the reason both were RC-exit blockers.
+   */
+  it('deleteRule issues only engine-legal deletes — by NAME (#4434)', async () => {
+    await rules.defineRule({
+      name: 'rc1_rule_livetest', label: 'HV', object: 'opportunity',
+      criteria: { amount: { $gte: 100000 } },
+      recipientType: 'team', recipientId: 'sales',
+    }, SYS);
+    await rules.evaluateRule('rc1_rule_livetest', SYS);
+    expect(engine._tables.sys_record_share.length).toBeGreaterThan(0);
+
+    // The repro addressed the rule by name; the throw was unconditional.
+    await expect(rules.deleteRule('rc1_rule_livetest', SYS)).resolves.toBeUndefined();
+    expect(engine._tables.sys_sharing_rule).toHaveLength(0);
+    expect(engine._tables.sys_record_share).toHaveLength(0);
+  });
+
+  it('deleteRule issues only engine-legal deletes — by ID (#4434)', async () => {
+    const r = await rules.defineRule({
+      name: 'rc1_rule_livetest', label: 'HV', object: 'opportunity',
+      criteria: { amount: { $gte: 100000 } },
+      recipientType: 'team', recipientId: 'sales',
+    }, SYS);
+    await rules.evaluateRule(r.id, SYS);
+    await expect(rules.deleteRule(r.id, SYS)).resolves.toBeUndefined();
+    expect(engine._tables.sys_sharing_rule).toHaveLength(0);
+    expect(engine._tables.sys_record_share).toHaveLength(0);
+  });
+
+  it('deleteRule withdraws grants through the sharing service, not a bulk delete (#4434)', async () => {
+    const r = await rules.defineRule({
+      name: 'hv', label: 'HV', object: 'opportunity',
+      criteria: { amount: { $gte: 100000 } },
+      recipientType: 'team', recipientId: 'sales',
+    }, SYS);
+    await rules.evaluateRule(r.id, SYS);
+    const granted = engine._tables.sys_record_share.length;
+    expect(granted).toBeGreaterThan(0);
+
+    // Every grant retires down the same path as every other withdrawal
+    // (evaluateRule-on-inactive, revokeRuleGrants) — one revoke per row —
+    // rather than a second, divergent bulk-delete path.
+    const revoke = vi.spyOn(sharing, 'revoke');
+    await rules.deleteRule(r.id, SYS);
+    expect(revoke).toHaveBeenCalledTimes(granted);
+    revoke.mockRestore();
+  });
+
+  /**
+   * objectstack#4433 (record-touch half) — `evaluateAllForRecord` listed only
+   * ACTIVE rules, so a deactivated rule was absent from the loop entirely and
+   * the grants it had materialised were never even examined. Touching the
+   * record — the very event that created the grant — walked past it, which is
+   * step 6 of the issue's repro.
+   */
+  it('touching a record withdraws a deactivated rule\'s grants (#4433)', async () => {
+    const r = await rules.defineRule({
+      name: 'hv', label: 'HV', object: 'opportunity',
+      criteria: { amount: { $gte: 100000 } },
+      recipientType: 'team', recipientId: 'sales',
+    }, SYS);
+    await rules.evaluateRule(r.id, SYS);
+    const before = engine._tables.sys_record_share.filter(s => s.record_id === 'opp1');
+    expect(before.length).toBeGreaterThan(0);
+
+    // Admin switches the rule OFF (no explicit evaluate), then the record is
+    // touched — the afterUpdate hook's call.
+    await rules.defineRule({
+      name: 'hv', label: 'HV', object: 'opportunity',
+      criteria: { amount: { $gte: 100000 } },
+      recipientType: 'team', recipientId: 'sales', active: false,
+    }, SYS);
+    const res = await rules.evaluateAllForRecord('opportunity', 'opp1', SYS);
+
+    expect(res[0].grantsRevoked).toBe(before.length);
+    expect(engine._tables.sys_record_share.filter(s => s.record_id === 'opp1')).toHaveLength(0);
+  });
+
+  it('an inactive rule never re-grants on touch (#4433)', async () => {
+    const r = await rules.defineRule({
+      name: 'hv', label: 'HV', object: 'opportunity',
+      criteria: { amount: { $gte: 100000 } },
+      recipientType: 'team', recipientId: 'sales', active: false,
+    }, SYS);
+    await rules.evaluateAllForRecord('opportunity', 'opp1', SYS);
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+    expect(r.active).toBe(false);
+  });
+
+  /**
+   * objectstack#4433 — a grant whose rule row is GONE cannot be reached by
+   * reconciling rules (there is no rule left to iterate), so it needs its own
+   * sweep. These are the rows left by every path that removes a rule without
+   * `deleteRule`: a data-API delete while the hook was unbound, a migration, a
+   * crash between `deleteRule`'s two writes.
+   */
+  it('sweepOrphanedRuleGrants revokes grants whose rule row is gone (#4433)', async () => {
+    const r = await rules.defineRule({
+      name: 'hv', label: 'HV', object: 'opportunity',
+      criteria: { amount: { $gte: 100000 } },
+      recipientType: 'team', recipientId: 'sales',
+    }, SYS);
+    await rules.evaluateRule(r.id, SYS);
+    const granted = engine._tables.sys_record_share.length;
+    expect(granted).toBeGreaterThan(0);
+
+    // Rule row vanishes behind the service's back.
+    engine._tables.sys_sharing_rule = [];
+
+    expect(await rules.sweepOrphanedRuleGrants()).toBe(granted);
+    expect(engine._tables.sys_record_share).toHaveLength(0);
+  });
+
+  it('sweepOrphanedRuleGrants leaves live rule grants and manual shares alone (#4433)', async () => {
+    const r = await rules.defineRule({
+      name: 'hv', label: 'HV', object: 'opportunity',
+      criteria: { amount: { $gte: 100000 } },
+      recipientType: 'team', recipientId: 'sales',
+    }, SYS);
+    await rules.evaluateRule(r.id, SYS);
+    const ruleGrants = engine._tables.sys_record_share.length;
+    // A hand-made share, plus a grant from a rule that no longer exists.
+    engine._tables.sys_record_share.push(
+      { id: 'manual1', object_name: 'opportunity', record_id: 'opp1', recipient_id: 'zoe', source: 'manual' },
+      { id: 'orphan1', object_name: 'opportunity', record_id: 'opp1', recipient_id: 'zoe', source: 'rule', source_id: 'srule_gone' },
+    );
+
+    expect(await rules.sweepOrphanedRuleGrants()).toBe(1);
+    expect(engine._tables.sys_record_share).toHaveLength(ruleGrants + 1);
+    expect(engine._tables.sys_record_share.some(s => s.id === 'manual1')).toBe(true);
+    expect(engine._tables.sys_record_share.some(s => s.id === 'orphan1')).toBe(false);
   });
 
   it('inactive rule purges grants on evaluate', async () => {

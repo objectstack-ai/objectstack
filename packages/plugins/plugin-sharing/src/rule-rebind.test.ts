@@ -171,11 +171,16 @@ describe('SharingServicePlugin reconciles grants on rule writes (#3821)', () => 
       listRules: vi.fn(async () => []),
       evaluateRule: vi.fn(async () => ({ ruleId: 'r1', matchedRecords: 2, expandedUsers: 1, grantsCreated: 2, grantsUpdated: 0, grantsRevoked: 0 })),
       revokeRuleGrants: vi.fn(async () => 2),
+      sweepOrphanedRuleGrants: vi.fn(async () => 0),
     };
     (plugin as any).ruleService = ruleService;
     const ctx = makeCtx();
     logger = ctx.logger;
     (plugin as any).bindRuleRebindTriggers(engine, ctx);
+    // [#4433] Boot is over — `kernel:bootstrapped` has run its backfill, so
+    // runtime rule writes own reconciliation from here. Before this point the
+    // trigger defers to that pass (see the boot-phase describe below).
+    (plugin as any).ruleGrantsBootReconciled = true;
   });
 
   it('backfills existing records when a rule is created', async () => {
