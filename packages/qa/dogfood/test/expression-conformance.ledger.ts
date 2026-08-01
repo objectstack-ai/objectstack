@@ -134,6 +134,17 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     ],
   },
   {
+    id: 'cel-bulk-action-visible',
+    summary: "selection-bar bulk action per-record eligibility (bulkActionDefs[].visible, objectui#3067)",
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
+    enforcement: 'console (objectui) partitionBulkRows (plugin-grid/bulkEligibility.ts) → evalRowPredicate → @objectstack/formula celEngine (interpret), evaluated ONCE PER SELECTED RECORD with that record bound: the button is offered when at least one selected record passes, and the run covers only those — the rest are reported as skipped in the dialog. Faults hide the record (fallback:false, warnOnError) rather than acting on one the predicate was written to exclude; UI gating only, write enforcement stays with permissions/hooks',
+    // Reached the ledger in #4457, not #3067: the key existed and was evaluated
+    // all along, but it lived inside `bulkActionDefs: z.array(z.record(z.any()))`,
+    // so the conformance walk had no declared surface to see. Typing the def is
+    // what made it visible — which is the argument for typing it in one line.
+    covers: ['ui/bulk-action.zod.ts:visible'],
+  },
+  {
     id: 'cel-row-crud-visible',
     summary: 'built-in row Edit/Delete per-record visibility (userActions.{edit,delete}.visibleWhen, objectui#2614)',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',

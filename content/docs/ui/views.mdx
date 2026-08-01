@@ -188,9 +188,15 @@ An aggregate dispatch delivers the selection to the handler as
 all-or-nothing: a handler that cannot cover the whole selection must reject,
 and per-row retry is replaced by re-running the action. `batchSize` does not
 apply (the call is never chunked); set `maxRecords` when the server work is
-expensive. `execution` defaults to `'perRecord'`, so existing views are
-unchanged, and the bare-string `bulkActions` form always dispatches per record
-— aggregate requires the def form, which is where the flag lives.
+expensive.
+
+**Pick the right key for the dispatch you mean.** Per-record is
+`bulkActions: ['<name>']` — the bare-string form, which has nowhere to carry a
+flag and is promoted with the action's own label, params and `visible`.
+Aggregate is the def form, which is where `execution` lives. A def that says
+`operation: 'custom'` without `execution: 'aggregate'` is rejected at parse
+time: the renderer has no action attached to such a def, so it used to render a
+button that reported success for every selected record and did nothing.
 
 A url or api action rendered on the list **toolbar** can also read the current
 selection through target interpolation — `${ctx.selection.ids}` (comma-joined)
@@ -200,6 +206,14 @@ and `${ctx.selection.count}` — without any bulk wiring.
   `action.bulkEnabled` was retired in spec 17. The multi-select toolbar is
   driven by these two view keys only.
 </Callout>
+
+A `bulkActionDefs` entry is a typed shape — see the
+[BulkActionDef reference](/docs/references/ui/bulk-action). Unknown keys are
+rejected with the canonical spelling named, and so are keys the executor would
+never read (`patch` outside an `update`, `execution` outside a `custom`,
+`batchSize` on an aggregate). One key is deliberately not authorable:
+`actionDef` is attached by the renderer when it resolves the def's `name`, and
+writing it by hand would smuggle an action definition past the action registry.
 
 ### Data Source
 

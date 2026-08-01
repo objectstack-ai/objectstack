@@ -25,6 +25,8 @@
     "http",
     "i18n",
     "notification",
-    "sharing"
+    "sharing",
+    "---More---",
+    "bulk-action"
   ]
 }

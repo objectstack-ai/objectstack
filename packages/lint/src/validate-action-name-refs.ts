@@ -10,8 +10,12 @@
  * `z.array(z.string())` / `z.string()`, so a name that matches no defined action
  * parses and ships:
  *
- *   - list views — `rowActions[]` / `bulkActions[]` (both the default `list`
- *     container and each `listViews.<key>` entry)
+ *   - list views — `rowActions[]` / `bulkActions[]`, plus each
+ *     `bulkActionDefs[]` entry that is a reference rather than a button id
+ *     (`execution: 'aggregate'` — see the walk). Across all three tiers: the
+ *     default `list` container, each `listViews.<key>` entry, and an OBJECT's
+ *     own `listViews.<key>` (added in #4457; an object has no top-level `list`,
+ *     so that tier had simply never been walked)
  *   - page components — `record:quick_actions` → `properties.actionNames[]`
  *   - app navigation — `{ type: 'action', actionDef: { actionName } }`
  *
@@ -133,7 +137,21 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
 
   const known = collectActionNames(stack);
 
-  const check = (name: string, where: string, path: string, surface: string) => {
+  const check = (
+    name: string,
+    where: string,
+    path: string,
+    surface: string,
+    /**
+     * What the newly-defined action still needs to be reachable from THIS
+     * surface. A row/quick-action menu filters on `locations`; the selection
+     * bar does not — naming the action in the view is its whole declaration
+     * (the `action.bulkEnabled` tombstone says so, and `content/docs/ui/
+     * actions.mdx` names it as the one exception to location filtering). One
+     * hint for both would have to be wrong for one of them.
+     */
+    placement = 'with the location this surface needs',
+  ) => {
     if (known.has(name)) return;
     findings.push({
       severity: 'error',
@@ -147,41 +165,105 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
         suggest(name, known),
       hint:
         `Define an action named "${name}" (in \`stack.actions\` or the object's \`actions\`) ` +
-        `with the location this surface needs, remove the reference, or ignore this if the ` +
+        `${placement}, remove the reference, or ignore this if the ` +
         `action is contributed by another installed package.` +
         (known.size > 0 ? ` Defined actions: ${[...known].sort().join(', ')}.` : ''),
     });
   };
 
-  // ── List views: rowActions / bulkActions on `list` + each `listViews.<key>` ──
+  /** Naming an action in the selection bar IS its placement — see `check`. */
+  const SELECTION_BAR_PLACEMENT =
+    '(no `locations` entry needed — the selection bar places it by name)';
+
+  /**
+   * One list container: the default `list`, a `listViews.<key>` entry, or an
+   * object-embedded one. Shared so the three tiers cannot drift into checking
+   * different keys — an object has no top-level `list`, and its `listViews`
+   * went unchecked until #4457 while the view-level ones were covered.
+   */
+  const checkListContainer = (
+    container: unknown,
+    owner: string,
+    label: string,
+    path: string,
+  ) => {
+    if (!container || typeof container !== 'object') return;
+    const list = container as AnyRec;
+    for (const key of ['rowActions', 'bulkActions'] as const) {
+      const names = strList(list[key]);
+      for (let ai = 0; ai < names.length; ai++) {
+        check(
+          names[ai],
+          `${owner} · ${label} · ${key}`,
+          `${path}.${key}[${ai}]`,
+          key === 'bulkActions' ? 'Bulk-action menu' : 'Row-action menu',
+          key === 'bulkActions' ? SELECTION_BAR_PLACEMENT : undefined,
+        );
+      }
+    }
+
+    // `bulkActionDefs` — only SOME entries are name references (#4457).
+    //
+    // An `update`/`delete` def is a data-plane mass mutation: its `name` is a
+    // button id and resolving it against `stack.actions` would be nonsense.
+    // The one entry that IS a reference is `execution: 'aggregate'`, which is
+    // exactly what objectui's `resolveBulkActions` looks up by name to attach
+    // the action it dispatches — a name that hits nothing leaves the def with
+    // no dispatcher, so the button opens its dialog and the run resolves to
+    // "no dispatcher wired". Same dead affordance, same severity.
+    //
+    // (Spec's `BulkActionDefSchema` rejects a hand-written `actionDef`, but a
+    // stack can reach lint through paths that never parsed — a raw JSON fixture,
+    // an older package — so an inlined definition is skipped rather than
+    // assumed impossible: it carries its own dispatcher and resolves nothing.)
+    const defs = Array.isArray(list.bulkActionDefs) ? (list.bulkActionDefs as AnyRec[]) : [];
+    for (let di = 0; di < defs.length; di++) {
+      const def = defs[di];
+      if (!def || typeof def !== 'object') continue;
+      if (def.execution !== 'aggregate') continue;
+      if (def.actionDef !== undefined) continue;
+      const name = strName(def.name);
+      if (!name) continue;
+      check(
+        name,
+        `${owner} · ${label} · bulkActionDefs[${di}]`,
+        `${path}.bulkActionDefs[${di}].name`,
+        'Aggregate bulk action',
+        SELECTION_BAR_PLACEMENT,
+      );
+    }
+  };
+
+  // ── List views: `list` + each `listViews.<key>`, on views AND on objects ──
   const views = asArray(stack.views);
   for (let vi = 0; vi < views.length; vi++) {
     const view = views[vi];
     if (!view || typeof view !== 'object') continue;
     const viewName = strName(view.name) ?? strName(view.object) ?? `#${vi}`;
+    const owner = `view "${viewName}"`;
 
-    const checkListContainer = (container: unknown, label: string, path: string) => {
-      if (!container || typeof container !== 'object') return;
-      const list = container as AnyRec;
-      for (const key of ['rowActions', 'bulkActions'] as const) {
-        const names = strList(list[key]);
-        for (let ai = 0; ai < names.length; ai++) {
-          check(
-            names[ai],
-            `view "${viewName}" · ${label} · ${key}`,
-            `${path}.${key}[${ai}]`,
-            key === 'bulkActions' ? 'Bulk-action menu' : 'Row-action menu',
-          );
-        }
-      }
-    };
-
-    checkListContainer(view.list, 'list', `views[${vi}].list`);
+    checkListContainer(view.list, owner, 'list', `views[${vi}].list`);
     const listViews = view.listViews;
     if (listViews && typeof listViews === 'object' && !Array.isArray(listViews)) {
       for (const [key, lv] of Object.entries(listViews as AnyRec)) {
-        checkListContainer(lv, `listViews.${key}`, `views[${vi}].listViews.${key}`);
+        checkListContainer(lv, owner, `listViews.${key}`, `views[${vi}].listViews.${key}`);
       }
+    }
+  }
+
+  // An object carries its own `listViews` (it has no top-level `list`), and a
+  // reference there is as dead as one in a standalone view — it was simply
+  // never walked. Object-EMBEDDED actions were already collected as
+  // definitions above; this is the consuming half.
+  const objects = asArray(stack.objects);
+  for (let oi = 0; oi < objects.length; oi++) {
+    const obj = objects[oi];
+    if (!obj || typeof obj !== 'object') continue;
+    const objListViews = obj.listViews;
+    if (!objListViews || typeof objListViews !== 'object' || Array.isArray(objListViews)) continue;
+    const owner = `object "${strName(obj.name) ?? `#${oi}`}"`;
+    for (const [key, lv] of Object.entries(objListViews as AnyRec)) {
+      checkListContainer(lv, owner, `listViews.${key}`, `objects[${oi}].listViews.${key}`);
     }
   }
 

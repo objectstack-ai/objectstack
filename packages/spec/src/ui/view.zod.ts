@@ -11,6 +11,7 @@ import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
 import { retiredKey } from '../shared/retired-key';
 import { FieldType, SelectOptionSchema } from '../data/field.zod';
+import { BulkActionDefSchema } from './bulk-action.zod';
 
 /**
  * HTTP Method Enum & HTTP Request Schema
@@ -737,16 +738,20 @@ export const ListViewSchema = lazySchema(() => z.object({
   /** Row & Bulk Actions */
   rowActions: z.array(z.string()).optional().describe('Actions available for individual row items'),
   bulkActions: z.array(z.string()).optional().describe('Actions available when multiple rows are selected'),
-  bulkActionDefs: z.array(z.record(z.string(), z.any())).optional().describe(
-    'Rich bulk action definitions (schema-driven, executed via BulkActionDialog). '
-    + "A `custom` def dispatches once per selected record by default; set `execution: 'aggregate'` "
-    + '(objectui#3139) to dispatch the named object action ONCE for the whole selection — the renderer '
-    + 'injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call '
-    + 'can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are '
-    + 'all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is '
-    + 'replaced by re-running the action. `batchSize` does not apply in aggregate mode; set `maxRecords` on '
-    + 'defs whose server work is expensive. Toolbar url/api actions can also interpolate the current '
-    + 'selection via `${ctx.selection.ids}` / `${ctx.selection.count}`.',
+  bulkActionDefs: z.array(BulkActionDefSchema).optional().describe(
+    'Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a '
+    + "mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for "
+    + "an `operation: 'custom'` + `execution: 'aggregate'` entry (objectui#3139) that dispatches the "
+    + 'action it NAMES once for the whole selection — the renderer injects `params._selectedIds: '
+    + 'string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate '
+    + 'artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a '
+    + 'handler that cannot cover the whole selection must reject, and per-row retry is replaced by '
+    + 're-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` '
+    + "on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` "
+    + 'instead — the bare-string form, promoted with the action\'s own label, params and `visible`; a '
+    + "'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time "
+    + '(#4457). Toolbar url/api actions can also interpolate the current selection via '
+    + '`${ctx.selection.ids}` / `${ctx.selection.count}`.',
   ),
 
   /** Performance */
