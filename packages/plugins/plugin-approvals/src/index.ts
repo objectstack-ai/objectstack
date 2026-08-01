@@ -23,6 +23,8 @@ export {
   // #3447 P2 — expression approvers + empty-slate auto-approve outcome.
   type ApproverExpressionContext,
   type ApprovalNodeAutoOutcome,
+  // #4469 — the read-only stranded-request inspection's report shape.
+  type StrandedApprovalRequest,
 } from './approval-service.js';
 export {
   ApprovalsServicePlugin,

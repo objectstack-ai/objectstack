@@ -168,6 +168,42 @@ const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
   'completed', 'failed', 'cancelled', 'timed_out',
 ]);
 
+/**
+ * Request statuses that can leave a ZOMBIE behind (#4469) — the terminal states
+ * a decision reaches only by ALSO resuming the owning run.
+ *
+ * `recalled` is deliberately absent: a recall ABANDONS the request on purpose,
+ * and {@link ApprovalService.recall} explicitly tolerates a run it cannot
+ * resume (the withdrawal and the lock release are the point). Reporting those
+ * would bury the real findings under expected ones.
+ */
+const STRANDABLE_REQUEST_STATUSES = ['approved', 'rejected', 'returned'] as const;
+
+/**
+ * One terminal request whose owning flow run is unrecoverable (#4469) — the
+ * decision was recorded and the flow never moved. Reporting shape only: the
+ * sweep never rewrites these rows (see
+ * {@link ApprovalService.inspectStrandedRequests}).
+ */
+export interface StrandedApprovalRequest {
+  requestId: string;
+  /** Terminal status the request reached — the decision that WAS recorded. */
+  status: string;
+  /** The `flow_run_id` that resolves to neither a suspension nor a run history row. */
+  runId: string;
+  flowName?: string;
+  /** Approval node the run should have continued from. */
+  nodeId?: string;
+  objectName: string;
+  recordId: string;
+  organizationId?: string | null;
+  completedAt?: string;
+  /** `config.approvalStatusField`, when the node mirrors status onto the record. */
+  mirrorField?: string;
+  /** What that mirror field currently reads — usually the stale value an operator sees. */
+  mirroredStatus?: string;
+}
+
 /** Default lifetime of an actionable-link token (ADR-0043). */
 export const ACTION_TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
 
@@ -2837,6 +2873,145 @@ export class ApprovalService implements IApprovalService {
    * the real cause and {@link DEAD_RUN_ACTOR_ID} the real actor, so a dead-run
    * release is never mistaken for a submitter's withdrawal.
    */
+  /**
+   * Read-only inspection for the OTHER dead-run shape: a request that is
+   * already TERMINAL while its `flow_run_id` points at nothing (#4469).
+   *
+   * #4460 stopped new ones being produced; nothing found the ones already
+   * stuck. The failure mode (#4420) is a request row flipped to `approved` /
+   * `rejected` / `returned` whose owning run no longer exists — the decision
+   * landed, the flow never moved. Any deployment on 17.0.0-rc.1 that hit the
+   * wiring hole and crossed a restart mid-approval can be carrying these rows.
+   *
+   * {@link releaseDeadRunRequests} cannot see them, for a reason worth naming:
+   * it scans `status: 'pending'`, and the very step that zombified the request
+   * is the one that took it OUT of `pending`. The act of breaking it removed it
+   * from the only sweeper's field of view — which is a large part of why this
+   * class of failure stayed silent.
+   *
+   * It also could not have answered the question even if it looked: its
+   * liveness oracle is `getRun`, which reads the execution LOG, and after a
+   * restart that returns `null` for a perfectly ALIVE suspended run. It treats
+   * `null` as alive (conservative, correct) — but that means it has no way to
+   * say "this run is really gone".
+   *
+   * So this uses BOTH oracles, and a row must fail both to be reported:
+   *
+   *  - `hasSuspendedRun(runId) === false` — the suspension store itself says no
+   *    live pause exists. It THROWS when the store cannot be read, and that
+   *    case is SKIPPED, never counted as dead: an unreadable store means
+   *    "unknown", and a storage outage must not be published as a lost run.
+   *  - `getRun(runId) == null` — no terminal history row either (the `run_`
+   *    prefixed rows in `sys_automation_run`). A run that merely finished is
+   *    not stranded; a request whose run neither waits nor ever completed is.
+   *
+   * **Reports; never rewrites.** No status is changed and no run is cancelled.
+   * The decision genuinely happened — a human approved or rejected — and
+   * silently rolling it back would make the audit trail disagree with the
+   * facts. What an operator needs first is visibility: which requests are stuck
+   * at which step, and what the mirrored status field on the business record
+   * still says. Whether to re-run the downstream actions or re-open the
+   * approval is a judgement call this cannot make.
+   */
+  async inspectStrandedRequests(options?: { limit?: number }): Promise<{
+    scanned: number;
+    stranded: StrandedApprovalRequest[];
+    /** Rows skipped because the suspension store could not be read — NOT healthy, just unknown. */
+    undetermined: number;
+  }> {
+    const empty = { scanned: 0, stranded: [] as StrandedApprovalRequest[], undetermined: 0 };
+    // Both oracles are required. Without `hasSuspendedRun` there is no way to
+    // tell a live cross-restart pause from a dead run, and reporting on
+    // `getRun` alone would name every healthy paused approval as stranded.
+    if (typeof this.automation?.hasSuspendedRun !== 'function') return empty;
+    if (typeof this.automation?.getRun !== 'function') return empty;
+
+    const limit = options?.limit ?? 500;
+    let rows: any[] = [];
+    try {
+      rows = await this.engine.find('sys_approval_request', {
+        where: { status: { $in: [...STRANDABLE_REQUEST_STATUSES] } }, limit, context: SYSTEM_CTX,
+      }) ?? [];
+    } catch (err: any) {
+      this.logger?.warn?.('[approvals] stranded-request scan failed to list requests', {
+        error: err?.message ?? String(err),
+      });
+      return empty;
+    }
+
+    const stranded: StrandedApprovalRequest[] = [];
+    let undetermined = 0;
+    for (const raw of rows) {
+      const runId = raw?.flow_run_id ? String(raw.flow_run_id) : '';
+      if (!runId) continue;   // not node-driven — no run was ever supposed to move
+
+      let suspended: boolean;
+      try {
+        suspended = await this.automation.hasSuspendedRun!(runId);
+      } catch (err: any) {
+        // Store unreadable ⇒ existence unknown. Skipping is the only safe
+        // answer; counted so "0 stranded" can never be read as "all clear"
+        // when nothing could actually be checked.
+        undetermined++;
+        this.logger?.warn?.('[approvals] stranded-request scan could not read the suspension store', {
+          request: raw?.id, run: runId, error: err?.message ?? String(err),
+        });
+        continue;
+      }
+      if (suspended) continue;   // still parked — the run is alive and resumable
+
+      let terminal: { status?: string } | null = null;
+      try {
+        terminal = await this.automation.getRun!(runId);
+      } catch (err: any) {
+        undetermined++;
+        this.logger?.warn?.('[approvals] stranded-request scan could not read the run history', {
+          request: raw?.id, run: runId, error: err?.message ?? String(err),
+        });
+        continue;
+      }
+      if (terminal) continue;    // the run ran to a terminal state — it is not dangling
+
+      // Neither suspended nor ever finished: the run this decision was supposed
+      // to advance is genuinely gone.
+      const config = parseJson<ApprovalNodeConfig>(
+        raw.node_config_json, { approvers: [], behavior: 'first_response' } as any,
+      );
+      const mirrorField = config.approvalStatusField;
+      let mirroredStatus: string | undefined;
+      if (mirrorField) {
+        try {
+          const recs = await this.engine.find(raw.object_name, {
+            where: { id: raw.record_id }, limit: 1, context: SYSTEM_CTX,
+          });
+          const rec: any = Array.isArray(recs) ? recs[0] : null;
+          if (rec) mirroredStatus = rec[mirrorField] ?? undefined;
+        } catch { /* display-only — a mirror read must never fail the scan */ }
+      }
+      stranded.push({
+        requestId: String(raw.id),
+        status: raw.status,
+        runId,
+        flowName: typeof raw.process_name === 'string' ? raw.process_name.replace(/^flow:/, '') : undefined,
+        nodeId: raw.flow_node_id ?? raw.current_step ?? undefined,
+        objectName: raw.object_name,
+        recordId: raw.record_id,
+        organizationId: raw.organization_id ?? null,
+        completedAt: raw.completed_at ?? undefined,
+        mirrorField,
+        mirroredStatus,
+      });
+    }
+
+    if (stranded.length || undetermined) {
+      this.logger?.warn?.('[approvals] stranded terminal requests (decision recorded, flow run gone)', {
+        scanned: rows.length, stranded: stranded.length, undetermined,
+        requests: stranded.map(s => `${s.requestId}@${s.nodeId ?? '?'} → run ${s.runId}`),
+      });
+    }
+    return { scanned: rows.length, stranded, undetermined };
+  }
+
   async releaseDeadRunRequests(): Promise<{ scanned: number; released: number }> {
     // No liveness oracle → no basis to declare anything dead.
     if (typeof this.automation?.getRun !== 'function') return { scanned: 0, released: 0 };
