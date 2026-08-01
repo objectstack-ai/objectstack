@@ -110,9 +110,24 @@ dropped at parse, and nothing failed.
    now catches it was directed, with the platform's authority, at a slot where
    the same mistake is silent again: `config: { hostname: … }` is stripped and
    the datasource connects on localhost — #4001's original bug verbatim, one
-   level down. Corrected to name the per-driver shape instead of promising a
-   gate; enforcement is #4410. **A wrong instruction is worse than none**, and
-   worst for an AI author, whose only signal is whether the parse complained.
+   level down. First corrected to name the per-driver shape instead of promising
+   a gate; **#4410 then built the gate**, so the prescription makes a validation
+   claim again and the claim is true. **A wrong instruction is worse than
+   none**, and worst for an AI author, whose only signal is whether the parse
+   complained.
+
+   Two things #4410 had to fix before the sentence was safe to write, both
+   instructive beyond this schema. The prescription has to name the key the
+   contract *lands on*, not the one the author typed — pointing a misplaced
+   `user` at `config: { user: … }` when postgres spells it `username` would
+   swap a one-step correction for a two-step one. And a gate over `config`
+   means every key inside it now claims to be honoured, which forced a per-key
+   audit against the code that reads them: `indexes` / `maxRecordsPerObject`
+   (memory) were removed as inert, while `datasource.pool`, `schemaMode`,
+   postgres `schema` / `applicationName` / `statementTimeout` and mongo
+   `password` / `authSource` / `options` were **wired**, having been declared
+   and dropped on the floor. Enforcing a contract and honouring it are the same
+   task from two directions.
 
 This is the empirical argument for the ratchet: the inference "no metadata in
 the repo carries unknown keys" was **false three times over**, and only the
@@ -158,7 +173,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `notification.zod.ts` / `offline.zod.ts` / `report.zod.ts` | 3 ea | authorable (p) | |
 | `sharing.zod.ts` | 2 | authorable (p) | public-sharing config |
 
-### `data/` — 158 sites
+### `data/` — 160 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
@@ -169,8 +184,9 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `field.zod.ts` | 11 | authorable | partially strict |
 | `filter.zod.ts` / `query.zod.ts` | 11+5 | open | query dialect — user data flows through; validated semantically elsewhere. `query.zod.ts` dropped one site in #4196: `FieldNodeSchema`'s nested-select object form was declared-but-inert and narrowed to `z.string()`, so the union's second member is gone. Four more left in #4286 with the `joins`/`windowFunctions` removals: `JoinNodeBaseSchema`, `WindowFunctionNodeSchema`, and `WindowSpecSchema`'s two blocks (outer + `frame`) were deleted with their clusters. Class unchanged |
 | `driver-nosql.zod.ts` / `driver.zod.ts` / `driver-sql.zod.ts` | 10+9+2 | wire | driver capability contracts |
-| `datasource.zod.ts` | 9 | authorable | **strict as of #4001 data step** — all 9: `DatasourceSchema` (+ `pool` / `healthCheck` / `ssl` / `retryPolicy`), `ExternalDatasourceSettingsSchema` (+ `validation`), `DatasourceCapabilities`, `DriverDefinitionSchema`. `config` + `readReplicas` stay `z.record` by construction (per-driver shapes — see the `driver/` row below). This row used to add "the driver's own `configSchema` validates them"; **it does not, and never did** — corrected, and the gap is #4410. Which is precisely why the top level had to close: a connection key written one level too high was stripped, and the datasource then connected on driver defaults instead of failing |
-| `driver/memory.zod.ts` / `driver/mongo.zod.ts` / `driver/postgres.zod.ts` | 6+1+2 | authorable | The per-driver shapes for the `config` slot — what an author actually writes under `datasource.config` (`host`, `port`, `filename`, pool sizes). **Undeclared here until the coverage walk went recursive** (see below): a subdirectory was invisible to the gate, so these nine sites sat outside the map while the map reported full coverage. Authorable by the rule, but they are **contract-only exports today** — nothing parses `datasource.config` against them and both `*DriverSpec.configSchema` literals are `{}` (#4410). Strictness here would therefore enforce nothing; this row is blocked on #4410 giving it a parse site, not on a verification pass |
+| `datasource.zod.ts` | 9 | authorable | **strict as of #4001 data step** — all 9: `DatasourceSchema` (+ `pool` / `healthCheck` / `ssl` / `retryPolicy`), `ExternalDatasourceSettingsSchema` (+ `validation`), `DatasourceCapabilities`, `DriverDefinitionSchema`. `config` + `readReplicas` stay `z.record` **at this level** by construction (per-driver shapes), but are no longer unchecked: **#4410** made `DatasourceSchema`'s refinement parse both against the contract for the declared driver (`driver/config-registry.zod.ts`), so the openness here is a shape this level cannot express rather than the absence of one. This row used to add "the driver's own `configSchema` validates them", which was false until #4410 landed the parse site it names |
+| `driver/memory.zod.ts` / `driver/mongo.zod.ts` / `driver/postgres.zod.ts` | 6+1+1 | authorable | The per-driver shapes for the `config` slot — what an author actually writes under `datasource.config` (`host`, `port`, `filename`). **Undeclared here until the coverage walk went recursive** (see below): a subdirectory was invisible to the gate, so these sites sat outside the map while the map reported full coverage. **Strict as of #4410**, which is also what unblocked them: this row previously read "strictness here would enforce nothing" because nothing parsed `datasource.config` against these schemas and both `*DriverSpec.configSchema` literals were `{}`. Now `DatasourceSchema` parses `config` (and each `readReplicas` entry) against them, and the same schemas project onto `configSchema` and onto the Studio connection form. `postgres.zod.ts` drops a site: its `ssl` was a `boolean | {ca, cert, key, …}` union, and the object arm is gone — certificates now live in the datasource-level `ssl` block (declared, strict, and until #4410 read by nobody), leaving `config.ssl` as the on/off shorthand. That narrowing is forced by the same projection: the Studio form renders anything that is not boolean/enum/number as a TEXT INPUT, so a union here would have produced a wizard whose every `ssl` value the new gate rejects. `memory.zod.ts` keeps 6 but loses two KEYS — `indexes` / `maxRecordsPerObject`, which `InMemoryDriverConfig` has no field for, removed under ADR-0049 rather than blessed by the new gate |
+| `driver/mysql.zod.ts` / `driver/sqlite.zod.ts` | 1+2 | authorable | The rest of the `config` contract, added by #4410. `mysql.zod.ts` and `sqlite.zod.ts` (sqlite + sqlite-wasm) are shapes that **never existed** — both driver ids were offered by the connection form and buildable by the shared factory, with no config contract anywhere, so `driver: 'sqlite'` + a misspelled `filename` was an ephemeral `:memory:` database reported as configured. All three sites strict, same error factory as the rest of the campaign. (Their sibling `driver/common.zod.ts` holds shared enums and prescription strings and has no `z.object(` site, so the coverage gate skips it) |
 | `analytics.zod.ts` | 8 | mixed (p) | |
 | `document.zod.ts` | 8 | wire (p) | |
 | `hook.zod.ts` / `hook-body.zod.ts` | 6+2 | mixed | **strict as of #4001 data step** for the AUTHORING shapes: `HookSchema` (+ `retryPolicy`) and both body branches (`ExpressionBodySchema` / `ScriptBodySchema`). `HookContextSchema` and its `session` / `provenance` / `user` blocks are the RUNTIME shape the engine hands a handler — they stay tolerant, and must: strictness there would make an engine-internal enrichment (as `provenance` was in #3712) a breaking change for anyone parsing a context they were given. The file's old blanket `authorable (p)` was too wide — verification split it |

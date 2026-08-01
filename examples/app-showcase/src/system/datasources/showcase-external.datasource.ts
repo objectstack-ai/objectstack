@@ -52,7 +52,7 @@ export const ShowcaseExternalDatasource = defineDatasource({
 //   label: 'Analytics Warehouse (Postgres)',
 //   driver: 'postgres',
 //   schemaMode: 'external',
-//   config: { host: 'localhost', port: 5432, database: 'analytics', user: 'readonly' },
+//   config: { host: 'localhost', port: 5432, database: 'analytics', username: 'readonly' },
 //   external: {
 //     allowWrites: false,
 //     credentialsRef: 'secret:warehouse/password',

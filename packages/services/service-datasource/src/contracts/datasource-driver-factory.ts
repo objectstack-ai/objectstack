@@ -29,12 +29,34 @@ export interface DatasourceConnectionSpec {
   driver: string;
   /** Driver-specific connection config (host, port, database, …). No secrets. */
   config: Record<string, unknown>;
+  /**
+   * Schema ownership mode (ADR-0015) — whether ObjectStack owns this schema or
+   * is a guest in a database it must never run DDL against.
+   *
+   * Carried here since #4410. The factory used to look for it on `external`
+   * (the federation-settings block, which has no such key) and then inside
+   * `config` (which nothing ever wrote), so a datasource's own declared
+   * `schemaMode` never reached the driver: an `external` database was
+   * constructed as `managed`, with DDL ungated at the driver level.
+   */
+  schemaMode?: 'managed' | 'external' | 'validate-only';
   /** Cleartext secret (password / DSN) injected for this connection only. */
   secret?: string;
   /** External federation settings (timeouts, allowed schemas, …). */
   external?: Record<string, unknown>;
   /** Connection pool settings. */
   pool?: Record<string, unknown>;
+  /**
+   * Datasource-level TLS block (`enabled`, `rejectUnauthorized`, `ca`, `cert`,
+   * `key`).
+   *
+   * Carried here since #4410. It was declared on the datasource, strict,
+   * documented — and never reached a driver, because it stopped at the record:
+   * nothing put it on this spec. So a TLS configuration that never took effect
+   * looked exactly like one that did, which is the failure `datasource.ssl`'s
+   * own schema comment warns about.
+   */
+  ssl?: Record<string, unknown>;
 }
 
 /**

@@ -35,7 +35,7 @@ export const Warehouse = defineDatasource({
   label: 'Analytics Warehouse (Postgres)',
   driver: 'postgres',
   schemaMode: 'external',          // ObjectStack never runs DDL here
-  config: { host: 'db.internal', port: 5432, database: 'analytics', user: 'readonly' },
+  config: { host: 'db.internal', port: 5432, database: 'analytics', username: 'readonly' },
   external: {
     allowWrites: false,                 // read-only (the default)
     credentialsRef: 'sys_secret:9f2c…', // opaque handle minted by the secret store

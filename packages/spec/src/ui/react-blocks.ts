@@ -14,12 +14,7 @@
 
 import type { ZodTypeAny } from 'zod';
 import { ListViewSchema, FormViewSchema } from './view.zod';
-import {
-  RecordDetailsProps,
-  RecordRelatedListProps,
-  RecordHighlightsProps,
-  RecordPathProps,
-} from './component.zod';
+import { ComponentPropsMap } from './component.zod';
 import { ChartConfigSchema } from './chart.zod';
 
 export type ReactPropKind = 'data' | 'binding' | 'controlled' | 'callback';
@@ -69,11 +64,94 @@ export const REACT_OVERLAY_SHADOWS: Readonly<Record<string, readonly string[]>> 
   // the React-side rule that pairs it with `onRowClick` — neither of which the
   // declarative schema has anywhere to say.
   ListView: ['navigation'],
-  // Same prop, same meaning as the schema's "Related object name". Kept in the
-  // overlay because it IS this block's data binding (`kind: 'binding'`, and
-  // required, as the schema declares it) and because the trap #4340 found is
-  // worth spelling out where an author reads it.
-  RecordRelatedList: ['objectName'],
+};
+
+/**
+ * The `record:*` family is NOT part of the react tier, and never was in the
+ * runtime (#4413). This is the ledger of that exclusion — the reason, and what
+ * an author writes instead.
+ *
+ * ## Why they are out
+ *
+ * These blocks are RECORD-PAGE COMPOSITION blocks, not data blocks. Every one
+ * of them reads its record from the shared record context a record page mounts
+ * once (`RecordDetailView` fetches the record; N blocks render it), and they
+ * are coupled THROUGH that context: `record:details` drops the fields a
+ * mounted `record:highlights` registered, and the record-level inline-edit save
+ * bar commits one draft for all of them under a single `ifMatch` version.
+ *
+ * A `kind:'react'` page mounts no such context, so `useRecordContext()` returns
+ * null and each block renders its "bind a record to preview" placeholder — or,
+ * for `record:related_list` (the one that reads `schema.objectName`), a list
+ * that refuses to fetch because the parent id never arrives.
+ *
+ * The react tier nonetheless published `objectName` / `recordId` overlay props
+ * on four of them, which no renderer reads. That contract was not merely
+ * unimplemented, it was the wrong SHAPE: per-block bindings describe four
+ * independent fetches of one record, which is precisely the coupling the shared
+ * context exists to prevent. Implementing it would have fossilized that
+ * (ADR-0082 D1 / Prime Directive #12), so the props were withdrawn instead —
+ * ADR-0080 "capability ≠ contract".
+ *
+ * The react tier already has blocks that DO bind by their own props
+ * (`<ObjectForm>` reads `schema.objectName`/`schema.recordId`, `<ListView>`
+ * reads `schema.objectName` + `filters`), and on a react page the parent record
+ * is ordinary React state — so the scenarios these blocks served are expressible
+ * without a context to fake. {@link REACT_RECORD_BLOCK_ALTERNATIVES} is what the
+ * lint tells an author who reaches for one.
+ *
+ * If the family is ever wanted here, the shape is a record SCOPE provider block
+ * an author wraps around them (one fetch, shared context) — not per-block props.
+ */
+export const RECORD_CONTEXT_TYPE_PREFIX = 'record:';
+
+/** Whether a registry component type needs the record page's record context. */
+export function isRecordContextBlockType(type: string): boolean {
+  return type.startsWith(RECORD_CONTEXT_TYPE_PREFIX);
+}
+
+/**
+ * PascalCase tag the react scope injects for a registry type — objectui's
+ * `toPascal` in `renderers/layout/react-page.tsx`, which builds the scope from
+ * EVERY public non-container block. Restated here because that is what makes a
+ * withdrawn block still reachable as `<RecordHighlights>`, and so what the
+ * publish gate has to recognise.
+ */
+export function reactBlockTagFor(schemaType: string): string {
+  return schemaType
+    .split(/[-_:]/)
+    .filter(Boolean)
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+    .join('');
+}
+
+/**
+ * Every `record:*` type the spec declares, keyed by the tag the react scope
+ * injects for it. Derived from `ComponentPropsMap` rather than restated, so a
+ * record component added to the spec is covered by the publish gate the day it
+ * lands.
+ */
+export const RECORD_CONTEXT_BLOCK_TAGS: ReadonlyMap<string, string> = new Map(
+  Object.keys(ComponentPropsMap)
+    .filter(isRecordContextBlockType)
+    .map((type) => [reactBlockTagFor(type), type]),
+);
+
+/**
+ * What to write instead, per withdrawn block. Read by the publish gate
+ * (`react-block-needs-record-context`) so the error names the working prop-bound
+ * block rather than only the broken one. Types without an entry fall back to the
+ * generic advice: author the page as `type:'record'`.
+ */
+export const REACT_RECORD_BLOCK_ALTERNATIVES: Readonly<Record<string, string>> = {
+  'record:details':
+    '<ObjectForm objectName="…" mode="view" recordId={…} fields={[…]} /> — it binds by its own props.',
+  'record:highlights':
+    '<ObjectForm objectName="…" mode="view" recordId={…} fields={[…]} />, or read the record with useAdapter().findOne and lay the strip out in JSX.',
+  'record:related_list':
+    '<ListView objectName="<child object>" filters={[\'<lookup field>\', \'=\', parentId]} columns={[…]} /> — the parent binding is an ordinary filter on a react page.',
+  'record:path':
+    'read the record with useAdapter().findOne and render the stage bar in JSX (layout is this tier\'s job).',
 };
 
 export interface ReactBlockDef {
@@ -168,57 +246,15 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
       { name: 'data', type: 'any[]', kind: 'binding', description: 'Static/precomputed data to chart directly instead of binding via objectName + aggregate.' },
     ],
   },
-  {
-    tag: 'RecordDetails',
-    schemaType: 'record:details',
-    summary: 'Field-detail panel for the bound record. Config props from the spec RecordDetails schema.',
-    schema: RecordDetailsProps,
-    interactions: [
-      { name: 'recordId', type: 'string | number', kind: 'controlled', description: 'The record to show.' },
-      { name: 'objectName', type: 'string', kind: 'binding', description: 'The record’s object.' },
-    ],
-  },
-  {
-    tag: 'RecordHighlights',
-    schemaType: 'record:highlights',
-    summary: 'Highlights panel — a strip of key fields. Config props from the spec RecordHighlights schema.',
-    schema: RecordHighlightsProps,
-    interactions: [
-      { name: 'recordId', type: 'string | number', kind: 'controlled', description: 'The record to summarize.' },
-      { name: 'objectName', type: 'string', kind: 'binding', description: 'The record’s object.' },
-    ],
-  },
-  {
-    tag: 'RecordRelatedList',
-    schemaType: 'record:related_list',
-    summary:
-      'Related child records via a lookup. `objectName` is the RELATED (child) object whose records are listed — NOT the parent; the parent record is bound by `recordId`, and `relationshipField` is the child field pointing back at it. Config props from the spec RecordRelatedList schema.',
-    schema: RecordRelatedListProps,
-    interactions: [
-      { name: 'recordId', type: 'string | number', kind: 'controlled', description: 'The parent record whose children are listed.' },
-      // Restates RecordRelatedListProps.objectName — ledgered in
-      // REACT_OVERLAY_SHADOWS. This block is the ONE whose spec schema already
-      // declares `objectName`, and it means the CHILD object; the overlay used
-      // to gloss it as the parent, which is the contract conflict #4340 opened
-      // on. Same meaning as the schema now, said in the words that keep an
-      // author from writing the parent here.
-      { name: 'objectName', type: 'string', kind: 'binding', required: true, description: 'The RELATED (child) object whose records this list renders — e.g. objectName="invoice" on an account page. NOT the parent object: the parent record is bound by recordId.' },
-    ],
-  },
-  {
-    tag: 'RecordPath',
-    schemaType: 'record:path',
-    summary: 'Stage/progress bar driven by a status field. Config props from the spec RecordPath schema.',
-    schema: RecordPathProps,
-    interactions: [
-      { name: 'recordId', type: 'string | number', kind: 'controlled', description: 'The record whose stage to show.' },
-      { name: 'objectName', type: 'string', kind: 'binding', description: 'The record’s object.' },
-    ],
-  },
+  // NOTE: `<RecordDetails>` / `<RecordHighlights>` / `<RecordRelatedList>` /
+  // `<RecordPath>` were published here until #4413 and are deliberately gone —
+  // no renderer read the `objectName`/`recordId` this index declared for them.
+  // See REACT_RECORD_BLOCK_ALTERNATIVES above for the ledger and the blocks
+  // that replace them; the publish gate rejects them on a react page.
   {
     tag: 'Block',
     schemaType: '(any)',
-    summary: 'Escape hatch — render any registered component by type. <Block type="object-kanban" objectName="task" /> etc.',
+    summary: 'Escape hatch — render any registered component by type. <Block type="object-kanban" objectName="task" /> etc. Not a way back to the record:* family: those need a record page\'s record context and are rejected here too (#4413).',
     interactions: [
       { name: 'type', type: 'string', kind: 'binding', required: true, description: 'The registered component type to render.' },
     ],

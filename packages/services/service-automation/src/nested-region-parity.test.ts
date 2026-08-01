@@ -350,17 +350,25 @@ describe("#4347 — the legacy `{var}` path refuses an unresolved reference", ()
   let engine: AutomationEngine;
   beforeEach(() => { engine = new AutomationEngine(silentLogger()); });
 
-  it('refuses a dotted reference instead of comparing it lexicographically', () => {
+  it('evaluates a wholly brace-free dotted predicate as CEL', () => {
     const vars = new Map<string, unknown>([['oppRecord', { amount: 10 }]]);
     // The reported footgun: 'oppRecord.amount' > '500000' compares 'o' to '5',
-    // so this used to be TRUE for every record regardless of the amount.
-    expect(() => engine.evaluateCondition('oppRecord.amount > 500000', vars)).toThrow(/unresolved expression reference/);
-    expect(() => engine.evaluateCondition('oppRecord.amount > 500000', vars)).toThrow(/dialect: 'cel'/);
+    // so this used to be TRUE for every record regardless of the amount. #4347
+    // stopped the wrong answer by refusing it; #4336 goes on to give the RIGHT
+    // one — a condition with no `{…}` hole is CEL, so the amount is compared.
+    expect(engine.evaluateCondition('oppRecord.amount > 500000', vars)).toBe(false);
+    expect(engine.evaluateCondition('oppRecord.amount > 5', vars)).toBe(true);
   });
 
-  it('refuses it on either side of the operator', () => {
-    const vars = new Map<string, unknown>();
-    expect(() => engine.evaluateCondition('5 == row.shouldRun', vars)).toThrow(/unresolved expression reference/);
+  it('still refuses a dotted reference mixed INTO a template-dialect condition', () => {
+    // A `{…}` hole puts the whole condition in the template dialect, where a
+    // dotted operand is text and the compare would answer anyway. One operand
+    // away from the right dialect, so the refusal names the fix.
+    const vars = new Map<string, unknown>([['limit', 5]]);
+    expect(() => engine.evaluateCondition('{limit} > record.amount', vars)).toThrow(/unresolved expression reference/);
+    expect(() => engine.evaluateCondition('{limit} > record.amount', vars)).toThrow(/dialect: 'cel'/);
+    // Either side of the operator.
+    expect(() => engine.evaluateCondition('{limit} == row.shouldRun', vars)).toThrow(/unresolved expression reference/);
   });
 
   it('evaluates the same predicate correctly once it is a CEL envelope', () => {

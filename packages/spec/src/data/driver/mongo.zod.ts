@@ -1,78 +1,163 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { DriverDefinitionSchema } from '../datasource.zod';
+
+import { lazySchema } from '../../shared/lazy-schema';
+import { strictUnknownKeyError } from '../../shared/suggestions.zod';
+import type { DriverDefinition } from '../datasource.zod';
+import {
+  driverConfigJsonSchema,
+  READ_ONLY_BELONGS_ON_DATASOURCE,
+  SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+} from './common.zod';
 
 /**
  * MongoDB Standard Driver Protocol
  *
  * Describes the MongoDB connection settings and capabilities.
  *
- * CONTRACT ONLY — nothing parses `datasource.config` against this. This block
- * used to claim it was "used by the Platform to validate `datasource.config`
- * when `driver: 'mongo'`", which was never true: the config slot is a `z.record`
- * and this schema has no consumer (#4410). It is the shape to author against,
- * not a gate that runs. Say "validates" here again only once #4410 lands.
+ * ENFORCED as of #4410. This block used to claim it was "used by the Platform
+ * to validate `datasource.config` when `driver: 'mongo'`", which was false: the
+ * config slot was a bare `z.record` and this schema had no consumer at all —
+ * not even an export, since `data/driver/` was reachable only from its own
+ * tests. It is now what `DatasourceSchema` parses `config` against for a mongo
+ * datasource, and the same schema is projected onto
+ * {@link MongoDriverSpec}.configSchema for the connection form.
  */
 
 // ==========================================================================
 // 1. Connection Configuration
 // ==========================================================================
 
-import { lazySchema } from '../../shared/lazy-schema';
+const MONGO_CONFIG_KEYS = [
+  'url', 'host', 'port', 'database', 'username', 'password', 'authSource', 'options',
+] as const;
+
+const mongoConfigUnknownKeyError = strictUnknownKeyError({
+  surface: "this mongo datasource's config",
+  knownKeys: MONGO_CONFIG_KEYS,
+  aliases: {
+    uri: 'url',
+    connectionstring: 'url',
+    dsn: 'url',
+    hostname: 'host',
+    server: 'host',
+    dbname: 'database',
+    db: 'database',
+    user: 'username',
+    passwd: 'password',
+    pwd: 'password',
+    authdb: 'authSource',
+    authdatabase: 'authSource',
+    replicaset: 'options',
+  },
+  guidance: {
+    pool:
+      '`pool` is not driver config — connection pooling is configured once for every driver in '
+      + "the datasource's own `pool` block, which the factory maps onto the Mongo client's "
+      + '`minPoolSize`/`maxPoolSize`. Move it next to `driver`.',
+    schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+    readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
+    ssl:
+      '`ssl` is not a top-level mongo key. TLS is a connection-string concern here: put it in '
+      + '`url` (`?tls=true`) or in the `options` passthrough the Mongo client reads.',
+  },
+  history:
+    'Until #4410 nothing validated `datasource.config` at all — an unrecognised connection key '
+    + 'was accepted in silence and the datasource then connected to mongodb://localhost:27017 '
+    + 'rather than failing.',
+});
+
 export const MongoConfigSchema = lazySchema(() => z.object({
   /**
-   * Connection URI (Standard Connection String)
-   * If provided, host/port/username/password fields may be ignored or merged depending on driver logic.
-   * Format: mongodb://[username:password@]host1[:port1][,...hostN[:portN]][/[defaultauthdb][?options]]
+   * Connection URI (standard connection string). When present it supersedes
+   * `host`/`port`/`database`/`username`/`authSource` — those are only used to
+   * COMPOSE a URI when none is given.
+   * Format: `mongodb://[username:password@]host1[:port1][,…][/[db][?options]]`
    */
-  url: z.string().describe('Connection URI').optional(),
+  url: z.string().optional().describe('Connection URI (supersedes the discrete fields)')
+    .meta({ title: 'Connection URI' }),
 
   /**
-   * Database Name (Required)
-   * The logical database to store collections.
+   * Database name — the logical database holding the collections.
+   * Required unless `url` carries it.
    */
-  database: z.string().min(1).describe('Database Name'),
+  database: z.string().min(1).optional().describe('Database name').meta({ title: 'Database' }),
 
-  /** Hostname (Optional if url is provided) */
-  host: z.string().default('127.0.0.1').describe('Host address').optional(),
+  /** Hostname. Used only when `url` is absent. */
+  host: z.string().default('localhost').describe('Host address').meta({ title: 'Host' }),
 
-  /** Port (Optional, default 27017) */
-  port: z.number().int().default(27017).describe('Port number').optional(),
+  /** Port. Used only when `url` is absent. */
+  port: z.number().int().default(27017).describe('Port number').meta({ title: 'Port' }),
 
-  /** Username for authentication */
-  username: z.string().describe('Authentication Username').optional(),
-
-  /** Password for authentication */
-  password: z.string().describe('Authentication Password').optional(),
-  
-  /** Authentication Database (Defaults to admin or database name) */
-  authSource: z.string().describe('Authentication Database').optional(),
+  /** Authentication user. Used only when `url` is absent. */
+  username: z.string().optional().describe('Authentication user').meta({ title: 'User' }),
 
   /**
-   * Connection Options
-   * Passthrough options to the underlying MongoDB driver (e.g. valid certs, timeouts)
+   * Authentication password. Prefer `external.credentialsRef` — a datasource
+   * secret always wins over this value.
    */
-  options: z.record(z.string(), z.unknown()).describe('Extra driver options (ssl, poolSize, etc)').optional(),
-}).describe('MongoDB Connection Configuration'));
+  password: z.string().optional()
+    .describe('Authentication password (prefer external.credentialsRef)')
+    .meta({ title: 'Password', format: 'password' }),
+
+  /** Authentication database, when it differs from `database`. */
+  authSource: z.string().optional().describe('Authentication database')
+    .meta({ title: 'Auth source' }),
+
+  /**
+   * Passthrough options handed to the MongoDB client verbatim
+   * (`replicaSet`, `tls`, timeouts, …).
+   */
+  options: z.record(z.string(), z.unknown()).optional()
+    .describe('Extra MongoClient options (replicaSet, tls, timeouts, …)'),
+}, { error: mongoConfigUnknownKeyError }).strict()
+  .describe('MongoDB Connection Configuration')
+  .superRefine((cfg, ctx) => {
+    if (!cfg.url && !cfg.database) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['database'],
+        message:
+          'A mongo datasource needs a connection target: set `database` (with `host`/`port`) or '
+          + 'a full `url`. Neither was given, so the connection would fall back to '
+          + 'mongodb://localhost:27017 with no database selected.',
+      });
+    }
+  }));
+
+/**
+ * JSON-Schema projection of {@link MongoConfigSchema}, memoized — what
+ * {@link MongoDriverSpec} publishes as its `configSchema`.
+ */
+export const getMongoConfigJsonSchema = driverConfigJsonSchema(MongoConfigSchema);
 
 // ==========================================================================
 // 2. Driver Definition (Metadata)
 // ==========================================================================
 
 /**
- * The static definition of the Mongo driver's capabilities and default metadata.
- * This implements the `DriverDefinitionSchema` contract.
+ * The static definition of the Mongo driver's capabilities and default
+ * metadata, satisfying the `DriverDefinitionSchema` contract (proved by
+ * `mongo.test.ts`, which parses this constant).
+ *
+ * `configSchema` is a getter so the JSON-Schema projection is computed on first
+ * read rather than at module load — the same deferral `lazySchema` exists for,
+ * and what lets this constant drop its runtime import of `DatasourceSchema`'s
+ * module (a `.parse()` at module scope would have made the config registry and
+ * this file a cycle). It used to be `{}` with a comment promising it would be
+ * "populated with a JSON Schema version of MongoConfigSchema at runtime"; no
+ * such code ever existed (#4410), so the promise is discharged here rather than
+ * described.
  */
-export const MongoDriverSpec = DriverDefinitionSchema.parse({
+export const MongoDriverSpec = {
   id: 'mongo',
   label: 'MongoDB',
   description: 'Official MongoDB Driver for ObjectStack. Supports rich queries, aggregation, and atomic updates.',
   icon: 'database',
-  // Empty, and nothing fills it. This comment used to promise the field would be
-  // "populated with a JSON Schema version of MongoConfigSchema at runtime" — no
-  // such code exists here or in any consumer (#4410).
-  configSchema: {},
+  get configSchema() {
+    return getMongoConfigJsonSchema();
+  },
   capabilities: {
     transactions: true,
     // Query
@@ -80,11 +165,15 @@ export const MongoDriverSpec = DriverDefinitionSchema.parse({
     queryAggregations: true,
     querySorting: true,
     queryPagination: true,
+    queryWindowFunctions: false,
+    querySubqueries: false,
+    joins: false,
     fullTextSearch: true,
+    readOnly: false,
     // Schema
     dynamicSchema: true,
-  }
-});
+  },
+} satisfies DriverDefinition;
 
 /**
  * Derived Types

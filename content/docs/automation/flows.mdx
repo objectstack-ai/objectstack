@@ -31,10 +31,10 @@ const approvalFlow = {
       type: 'decision',
       label: 'Check Amount',
       config: {
-        // decision expressions use {braces} around variables — see Expressions in flows
+        // decision expressions are bare CEL, like every other condition — no braces
         conditions: [
-          { label: 'High Value', expression: '{order_amount} > 10000' },
-          { label: 'Standard', expression: '{order_amount} <= 10000' },
+          { label: 'High Value', expression: 'order_amount > 10000' },
+          { label: 'Standard', expression: 'order_amount <= 10000' },
         ],
       },
     },
@@ -169,8 +169,8 @@ or missing-`required` violation (#4277). A node type that publishes no
   label: 'Check Status',
   config: {
     conditions: [
-      { label: 'Approved', expression: "{status} == 'approved'" },
-      { label: 'Rejected', expression: "{status} == 'rejected'" },
+      { label: 'Approved', expression: "status == 'approved'" },
+      { label: 'Rejected', expression: "status == 'rejected'" },
     ],
   },
 }
@@ -972,30 +972,40 @@ failures so one broken flow does not abort startup.
 
 ## Expressions in flows
 
-A flow mixes **three expression dialects**, and using the wrong one is the
-single most common way a flow silently misbehaves. Which dialect applies is
-decided by *where* the expression sits — not by what it looks like:
+A flow mixes **two expression dialects**, and the rule is short: **every
+condition is CEL; braces are for values.**
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
 | Start-node `condition` | **CEL** (bare, no braces) | `record.amount > 500` | `record.*`, `previous.*`, bare field names, `vars.*` |
 | Edge `condition` | **CEL** (bare, no braces) | `record.status == 'open'` | same as above |
-| Decision-node `conditions[].expression` | **Template compare** (braces required) | `{order_amount} > 10000` | flow variables by name, in `{…}` |
+| Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | same as above |
 | Field values in `create_record` / `update_record` | **Interpolation** (braces required) | `'Follow up on {record.name}'`, `'{TODAY() + 7}'` | `{var}`, `{var.path}`, `{$User.Id}`, `{$User.Email}`, `{NOW()}`, `{TODAY()}`, `{TODAY() + 90}` (whole days) |
 
 <Callout type="warn">
-**The two failure modes to memorize:**
+**The failure modes to memorize:**
 
-1. **Braces missing in a decision expression** — `'order_amount > 10000'` isn't
-   evaluated as a variable at all. It compares the *string* `"order_amount"`
-   against `"10000"`, which is **always true**, so the flow always takes the
-   first branch and never tells you. Write `'{order_amount} > 10000'`.
-2. **Braces missing in a field value** — `due_date: 'TODAY() + 7'` writes the
+1. **Braces missing in a field value** — `due_date: 'TODAY() + 7'` writes the
    literal text `TODAY() + 7` into the field. Write `'{TODAY() + 7}'`.
+2. **Braces put *into* a condition** — `'{record.amount} > 500'`. Conditions
+   fail loudly rather than silently, with an error that tells you to drop the
+   braces.
+</Callout>
 
-The mirror mistake is putting braces *into* a CEL condition
-(`'{record.amount} > 500'`) — CEL conditions fail loudly rather than silently,
-with an error that tells you to drop the braces.
+<Callout type="info">
+**Decision-node expressions used to be compared as text** (#4414, #4336), so
+`'order_amount > 10000'` compared the string `"order_amount"` against `"10000"`
+and was **always true**, while `'{lead_record.status} == "converted"'` was
+**always false** — the brace form substitutes a whole flow variable by name, and
+a field access on an object variable is not one. Both reported `success`. They
+are bare CEL now, so the spellings in the table above are the correct ones and
+`lead_record.status == 'converted'` resolves the field.
+
+The `{var}` form still works where it always did — `{amount} > 100`,
+`{status} == 'active'` — but the two ways it used to answer `false` without
+saying so are now **loud errors** naming the reference: a `{…}` hole that
+matches no flow variable, and a substituted value that is neither a boolean, a
+number, nor part of a comparison (#4336).
 </Callout>
 
 CEL conditions that fail to evaluate raise an error and stop the run — they

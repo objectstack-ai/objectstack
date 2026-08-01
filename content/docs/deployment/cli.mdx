@@ -435,6 +435,14 @@ os validate path/to/config   # Validate specific file
    `dataset` / `dimensions` / `values` resolves to a declared dataset/field, so
    a dangling binding fails here instead of rendering an empty chart.
 
+…and every other author-time rule the three commands share — view shape,
+name/action/filter references, page sources, approval approvers, security
+posture, the autonumber and view-reference lints. All of them come from one
+registry, so the list is the same on `os build` and `os lint`; see
+[The one gate, three entry points](/docs/deployment/validating-metadata#the-one-gate-three-entry-points)
+for the full matrix. Every failing rule is reported in a single run rather than
+stopping at the first, so one pass shows the whole hole.
+
 **Options:**
 - `--strict` — Treat warnings as errors (exit code 1)
 - `--json` — Output results as JSON
@@ -444,13 +452,18 @@ os validate path/to/config   # Validate specific file
 - Missing `manifest.namespace` (required for multi-app hosting)
 - No objects defined
 - No apps or plugins defined
+- Every advisory the rule registry raised (dangling `stageField` /
+  `highlightFields` pointers, replay-unsafe seeds, ambiguous flow status,
+  deprecated visibility aliases, …)
 
 <Callout type="tip">
-`os validate` and `os build` share one validator, so a config that passes
-`os validate` will not fail the build on schema/predicate/binding grounds. In a
-scaffolded project these are wired as `npm run validate` and `npm run build`;
-your `AGENTS.md` tells coding agents to run `npm run validate` after editing
-metadata. See [Validating metadata](/docs/deployment/validating-metadata).
+`os validate`, `os build` and `os lint` share one rule registry, so a config that
+passes any of them will not fail another on schema/predicate/binding grounds — a
+CLI test fails the build if a rule that can gate runs on fewer than all three
+(#4409). In a scaffolded project these are wired as `npm run validate` and
+`npm run build`; your `AGENTS.md` tells coding agents to run `npm run validate`
+after editing metadata. See
+[Validating metadata](/docs/deployment/validating-metadata).
 </Callout>
 
 #### `os info`
@@ -819,20 +832,31 @@ os create example my-app      # Create examples/my-app
 
 | Command | Description |
 |---------|-------------|
-| `os lint [config]` | Check metadata for style and convention issues (beyond `validate`'s hard gates) |
+| `os lint [config]` | Every author-time gate `validate`/`build` run, plus style and convention checks |
 | `os test [files]` | Run Quality Protocol test scenarios against a running server |
 | `os doctor` | Check development environment health |
 
 #### `os lint`
 
-Style and convention checks on top of `os validate` — naming, labels, translation coverage — with a 0-100 quality score:
+The cheapest of the three author-time commands. It runs the same rule registry
+`os validate` and `os build` run — so anything that can fail a build fails here
+too — and adds its own style rubric: naming, labels, namespace prefixes,
+data-model conventions, translation coverage, with a 0-100 quality score.
 
 ```bash
-os lint                # Style / convention checks
+os lint                # Author-time rules + style / convention checks
 os lint --score        # Append a 0-100 metadata quality score (letter-graded)
 os lint --fix          # Show what would be fixed (dry-run)
 os lint --json         # JSON output for CI
 ```
+
+It does not replace `os validate`: `os lint` never parses the stack against the
+Zod schema (a schema error is `os validate`'s verdict to give), and it emits no
+artifact. What it does guarantee is the direction that matters for a pre-flight
+— a green `os lint` is not followed by a red `os build`. That was not true
+before #4409: `os lint` ran one gating rule neither other command ran and missed
+six that both of them ran, so it disagreed with the build in **both**
+directions.
 
 #### `os test`
 

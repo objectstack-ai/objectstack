@@ -25,8 +25,6 @@ describe('MemoryConfigSchema', () => {
     expect(config.strictMode).toBe(false);
     expect(config.initialData).toBeUndefined();
     expect(config.persistence).toBe(false);
-    expect(config.indexes).toBeUndefined();
-    expect(config.maxRecordsPerObject).toBeUndefined();
   });
 
   it('still accepts "auto" as an explicit opt-in to the previous behaviour', () => {
@@ -179,25 +177,26 @@ describe('MemoryConfigSchema', () => {
     expect(typeof p.adapter.flush).toBe('function');
   });
 
-  it('should accept config with indexes', () => {
-    const config = MemoryConfigSchema.parse({
-      indexes: {
-        users: ['email', 'role'],
-        posts: ['author_id', 'status'],
-      },
+  // `indexes` and `maxRecordsPerObject` were declared here and read by nobody:
+  // `InMemoryDriverConfig` has no field for either, the driver keeps no indexes
+  // (every read is a linear Mingo scan) and evicts nothing. These tests used to
+  // assert they were "accepted" — which was true, and meant nothing. #4410 gave
+  // `config` a gate, so a key inside it now claims to be honoured; both were
+  // removed rather than blessed, and the rejection carries the reason.
+  it('rejects `indexes`, which the memory driver never kept', () => {
+    const result = MemoryConfigSchema.safeParse({
+      indexes: { users: ['email', 'role'] },
     });
 
-    expect(config.indexes).toBeDefined();
-    expect(config.indexes!.users).toEqual(['email', 'role']);
-    expect(config.indexes!.posts).toEqual(['author_id', 'status']);
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain('the memory driver keeps no indexes');
   });
 
-  it('should accept config with maxRecordsPerObject', () => {
-    const config = MemoryConfigSchema.parse({
-      maxRecordsPerObject: 10000,
-    });
+  it('rejects `maxRecordsPerObject`, which the memory driver never enforced', () => {
+    const result = MemoryConfigSchema.safeParse({ maxRecordsPerObject: 10000 });
 
-    expect(config.maxRecordsPerObject).toBe(10000);
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain('the memory driver evicts nothing');
   });
 
   it('should accept full config with all options', () => {
@@ -211,18 +210,12 @@ describe('MemoryConfigSchema', () => {
         path: '/var/data/memory.json',
         autoSaveInterval: 3000,
       },
-      indexes: {
-        users: ['email'],
-      },
-      maxRecordsPerObject: 50000,
     });
 
     expect(config.strictMode).toBe(true);
     expect(config.initialData!.users).toHaveLength(1);
     const p = config.persistence as { type: 'file'; path?: string };
     expect(p.path).toBe('/var/data/memory.json');
-    expect(config.indexes!.users).toEqual(['email']);
-    expect(config.maxRecordsPerObject).toBe(50000);
   });
 
   it('should reject file persistence with invalid autoSaveInterval', () => {

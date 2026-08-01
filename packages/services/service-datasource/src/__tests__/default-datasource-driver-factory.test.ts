@@ -169,3 +169,97 @@ describe('createDefaultDatasourceDriverFactory — memory construction (#4083)',
     await explicit.handle.disconnect?.();
   });
 });
+
+// #4410 — the keys that were DECLARED and dropped on the floor. Each of these
+// was authorable, strict, documented and read by nothing, so a datasource that
+// set it behaved exactly like one that did not. The gate over `datasource.config`
+// is only honest if the contract it enforces is one the factory honours, which
+// is what these pin.
+describe('createDefaultDatasourceDriverFactory — declared keys reach the driver (#4410)', () => {
+  /** The knex config a constructed SqlDriver was built from. */
+  function knexConfigOf(driver: any): any {
+    return driver?.config ?? driver?.knexConfig ?? driver?.options ?? {};
+  }
+
+  it('honours the datasource `pool` block instead of the hardcoded min0/max5', async () => {
+    const handle: any = await factory().create({
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'analytics' },
+      pool: { min: 2, max: 20, idleTimeoutMillis: 45_000 },
+    });
+    const cfg = knexConfigOf(handle.driver ?? handle);
+    expect(cfg.pool).toMatchObject({ min: 2, max: 20, idleTimeoutMillis: 45_000 });
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+
+  it('keeps the previous defaults when no pool is declared', async () => {
+    const handle: any = await factory().create({
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'analytics' },
+    });
+    expect(knexConfigOf(handle.driver ?? handle).pool).toMatchObject({ min: 0, max: 5 });
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+
+  it('carries postgres schema / applicationName / statementTimeout onto the connection', async () => {
+    const handle: any = await factory().create({
+      driver: 'postgres',
+      config: {
+        host: 'db.internal',
+        database: 'analytics',
+        schema: 'reporting',
+        applicationName: 'objectstack',
+        statementTimeout: 30_000,
+      },
+    });
+    const cfg = knexConfigOf(handle.driver ?? handle);
+    expect(cfg.searchPath).toBe('reporting');
+    expect(cfg.connection).toMatchObject({
+      application_name: 'objectstack',
+      statement_timeout: 30_000,
+    });
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+
+  it('carries the datasource `ssl` block onto the connection, certificates and all', async () => {
+    const handle: any = await factory().create({
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'analytics' },
+      ssl: { enabled: true, rejectUnauthorized: false, ca: 'CA-PEM' },
+    });
+    expect(knexConfigOf(handle.driver ?? handle).connection).toMatchObject({
+      ssl: { rejectUnauthorized: false, ca: 'CA-PEM' },
+    });
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+
+  it('reads `ssl: false` on the block as TLS off, not as absent', async () => {
+    const handle: any = await factory().create({
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'analytics', ssl: true },
+      ssl: { enabled: false },
+    });
+    expect(knexConfigOf(handle.driver ?? handle).connection).toMatchObject({ ssl: false });
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+
+  it('falls back to the per-driver boolean shorthand when no block is declared', async () => {
+    const handle: any = await factory().create({
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'analytics', ssl: true },
+    });
+    expect(knexConfigOf(handle.driver ?? handle).connection).toMatchObject({ ssl: true });
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+
+  it("applies the datasource's own schemaMode, which never reached the driver before", async () => {
+    const handle: any = await factory().create({
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'analytics' },
+      schemaMode: 'external',
+    });
+    const driver: any = handle.driver ?? handle;
+    expect(knexConfigOf(driver).schemaMode ?? driver.schemaMode).toBe('external');
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+});

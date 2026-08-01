@@ -1,0 +1,62 @@
+---
+title: Driver Common
+description: Driver Common protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Shared building blocks for the per-driver `datasource.config` shapes (#4410).
+
+Every schema under `data/driver/` describes ONE driver's `config` slot — the
+
+keys an author may write and the platform actually reads. They are the
+
+enforcement half of the `config` escape hatch `datasource.zod.ts` opens: the
+
+slot stays `z.record` at the top of `DatasourceSchema` because a sqlite
+
+`filename` and a postgres `host` share no shape, and `DatasourceSchema`'s
+
+refinement then parses it against the schema for the declared driver.
+
+The rule these files are written to: **a key is declared here only if some
+
+code path reads it.** A config key that no driver and no factory consumes is
+
+the same silent-strip defect one level down (#4001, ADR-0078), so an unread
+
+key is either wired or rejected with a prescription — never left in the
+
+contract to look supported.
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/driver/common.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { DriverSslToggle, SqlAutoMigrate } from '@objectstack/spec/data';
+import type { DriverSslToggle, SqlAutoMigrate } from '@objectstack/spec/data';
+
+// Validate data
+const result = DriverSslToggle.parse(data);
+```
+
+---
+
+
+---
+
+## SqlAutoMigrate
+
+Dev-only non-destructive schema self-heal (#2186)
+
+### Allowed Values
+
+* `off`
+* `safe`
+
+
+---
+
