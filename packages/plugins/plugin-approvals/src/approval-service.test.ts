@@ -916,6 +916,43 @@ describe('ApprovalService (node era)', () => {
     expect(out.resumed).toBe(false);
   });
 
+  // ── #4420: a REPORTED resume failure is a failure ────────────────
+  //
+  // The engine answers a lost run with `{ success: false }` rather than by
+  // throwing, so every one of these used to come back as `resumed: true`.
+
+  it('decide: refuses before writing anything when the run is already gone', async () => {
+    svc.attachAutomation({
+      async hasSuspendedRun() { return false; },
+      async resume() { return { success: true }; },
+    } as any);
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+
+    await expect(svc.decide(req.id, { decision: 'approve', actorId: 'u9' }, SYS))
+      .rejects.toThrow(/RESUME_TARGET_LOST/);
+    const [row] = await engine.find('sys_approval_request', { where: { id: req.id } });
+    expect(row.status, 'nothing recorded against a run that cannot advance').toBe('pending');
+  });
+
+  it('decide: fails loudly when a resume reports failure without throwing', async () => {
+    svc.attachAutomation({
+      async resume() { return { success: false, code: 'RUN_NOT_FOUND', error: `No suspended run 'run_1'` }; },
+    } as any);
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+
+    await expect(svc.decide(req.id, { decision: 'approve', actorId: 'u9' }, SYS))
+      .rejects.toThrow(/RESUME_FAILED/);
+  });
+
+  it('decide: a resume that returns nothing still counts as success', async () => {
+    // The historical shape: an engine (or a test double) that reports nothing
+    // is reporting no failure, and must not be read as one.
+    svc.attachAutomation({ async resume() { /* returns undefined */ } });
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const out = await svc.decide(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    expect(out.resumed).toBe(true);
+  });
+
   // ── read API ────────────────────────────────────────────────────
 
   it('listRequests: filters by approver and status', async () => {

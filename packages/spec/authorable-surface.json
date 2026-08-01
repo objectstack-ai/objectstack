@@ -3292,7 +3292,6 @@
     "data/Datasource:name",
     "data/Datasource:origin",
     "data/Datasource:pool",
-    "data/Datasource:readReplicas",
     "data/Datasource:retryPolicy",
     "data/Datasource:schemaMode",
     "data/Datasource:ssl",

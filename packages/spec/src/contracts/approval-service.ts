@@ -374,6 +374,12 @@ export interface ApprovalRecallResult {
    * "did not pass" semantics.
    */
   resumed?: boolean;
+  /**
+   * Why the run was not resumed, when `resumed` is false but the recall itself
+   * succeeded. A recall abandons the request, so a lost run does not fail the
+   * call — but it must not read as a clean resume either (#4420).
+   */
+  resumeError?: string;
 }
 
 /** Input for sending a pending request back for revision (ADR-0044). */
@@ -391,6 +397,12 @@ export interface ApprovalSendBackResult {
   runId?: string | null;
   /** True when the owning flow run was resumed (down `revise`, or `reject` on auto-reject). */
   resumed?: boolean;
+  /**
+   * Why the run was not resumed, on the paths that tolerate it (a concurrent
+   * duplicate resume). A resume failure that strands the run throws instead —
+   * see `RESUME_TARGET_LOST` / `RESUME_FAILED` (#4420).
+   */
+  resumeError?: string;
   /**
    * True when the send-back exceeded the node's `maxRevisions` budget and the
    * request was auto-rejected instead (resumed down `reject` with
@@ -413,6 +425,12 @@ export interface ApprovalResubmitResult {
   runId?: string | null;
   /** True when the owning flow run was resumed (it re-enters the approval node and opens round N+1). */
   resumed?: boolean;
+  /**
+   * Why the run was not resumed, on the paths that tolerate it (a concurrent
+   * duplicate resume). A resume failure that strands the run throws instead —
+   * see `RESUME_TARGET_LOST` / `RESUME_FAILED` (#4420).
+   */
+  resumeError?: string;
 }
 
 /** Result of a decision that resumes the owning flow when finalised. */
@@ -423,8 +441,22 @@ export interface ApprovalDecisionResult {
   decision: 'approve' | 'reject';
   /** The suspended flow run that was (or will be) resumed, if any. */
   runId?: string | null;
-  /** True when the owning flow run was resumed as a result of this decision. */
+  /**
+   * True when the owning flow run was resumed as a result of this decision.
+   *
+   * A decision that finalises a flow-bound request and CANNOT resume its run
+   * throws rather than returning `resumed: false` — a recorded decision whose
+   * flow never advances is the zombie half-state of #4420. `false` here means
+   * either there was nothing to resume (no run, not finalised, no automation
+   * attached) or a benign duplicate, in which case see {@link resumeError}.
+   */
   resumed?: boolean;
+  /**
+   * Why the run was not resumed, on the one path that tolerates it: a
+   * concurrent duplicate resume (`RESUME_IN_PROGRESS`) — the other caller is
+   * already advancing the run, so this decision is complete and correct.
+   */
+  resumeError?: string;
 }
 
 /**

@@ -112,23 +112,25 @@ describe('DatasourceSchema × driver config (#4410)', () => {
   });
 
   /**
-   * `readReplicas` is the sibling escape hatch — same per-driver shape, same
-   * silence before #4410. Reported per index so the author is told WHICH
-   * replica is wrong.
+   * #4410 extended this gate over `readReplicas` too. #4468 retired the key —
+   * nothing ever opened a replica connection — so the parse must now REJECT the
+   * slot rather than check what goes in it. Pinned here, next to the config
+   * cases, because the two are easy to re-conflate: both are per-driver record
+   * shapes, and only one of them has a consumer.
    */
-  it('validates each readReplicas entry and paths issues by index', () => {
+  it('rejects readReplicas outright, with the retirement prescription', () => {
     const result = DatasourceSchema.safeParse({
       ...base,
       config: { host: 'db.internal', database: 'analytics' },
-      readReplicas: [
-        { host: 'replica-1.internal', database: 'analytics' },
-        { hostname: 'replica-2.internal', database: 'analytics' },
-      ],
+      readReplicas: [{ host: 'replica-1.internal', database: 'analytics' }],
     });
 
     expect(result.success).toBe(false);
-    expect(result.error!.issues).toHaveLength(1);
-    expect(result.error!.issues[0]!.path).toEqual(['readReplicas', 1]);
+    // A well-formed replica block: the rejection is about the key existing at
+    // all, not about anything being wrong inside it.
+    expect(result.error!.issues[0]!.message).toMatch(
+      /`datasource\.readReplicas` was removed.*no query path separates reads from writes.*Delete the key/s,
+    );
   });
 
   it('rejects a sqlite datasource whose filename is misspelled', () => {

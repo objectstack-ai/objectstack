@@ -173,7 +173,10 @@ describe('resume authorization gate (#3801)', () => {
   it('reports machine-state errors, not a refusal, for an unknown run', async () => {
     const result = await engine.resume('run_does_not_exist');
     expect(result.success).toBe(false);
-    expect(result.code).toBeUndefined();
+    // Its own code, distinct from the refusals above: a caller that already
+    // wrote a decision down needs "this run is gone" to be actionable, not
+    // just a message string (#4420).
+    expect(result.code).toBe('RUN_NOT_FOUND');
     expect(result.error).toContain('No suspended run');
   });
 

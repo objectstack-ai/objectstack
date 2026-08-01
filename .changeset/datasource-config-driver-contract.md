@@ -13,7 +13,7 @@ package. So `config: { hostname: 'db.internal' }` (the key is `host`) was
 accepted in silence and the datasource connected to `localhost` while the parse,
 the save and the connection probe all reported success.
 
-`DatasourceSchema` now parses `config` — and each `readReplicas` entry — against
+`DatasourceSchema` now parses `config` against
 the contract for the declared driver, and `DatasourceAdminService`
 (create/update/test, the Setup wizard's path) applies the same check. Both read
 one registry in `@objectstack/spec/data`, which also projects each contract to

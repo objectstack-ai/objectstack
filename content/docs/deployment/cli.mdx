@@ -589,6 +589,7 @@ written.
 | `os migrate plan` | Warns and continues — a plan writes nothing either way |
 | `os migrate apply` | **Refuses** (exit 1, `error: database_busy` under `--json`). Stop the other process, or pass `--force` |
 | `os migrate files-to-references --apply` | **Refuses** likewise — it rewrites rows, so a concurrent writer is at least as dangerous |
+| `os migrate meta --stored --apply` | **Refuses** likewise — it rewrites `sys_metadata` rows, and a live process saving metadata is exactly the collision |
 
 The check applies to SQLite only: Postgres and MySQL take their own server-side
 locks. Only same-user processes are visible without elevated privileges, and a
@@ -642,6 +643,7 @@ where the data lives.
 |---------|-------------|
 | `os migrate files-to-references` | Convert legacy file-field values to `sys_file` references, verify the ownership ledger, and record the deployment's migration flag |
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
+| `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 
 ```bash
 os migrate files-to-references            # Dry run: full report, writes nothing
@@ -773,6 +775,64 @@ and the command that closes it. Only the lax posture announces itself: a
 closed gate logs that it is enforcing, and an app that declares neither class
 of field says nothing at all. So a running deployment always tells you the
 state of its own data — which is the question `os migrate meta` cannot answer.
+
+#### `os migrate meta --stored`
+
+The two commands above are about **application data**. This one is about the
+**metadata itself**, at rest: the `sys_metadata` rows Studio and the runtime
+authoring APIs write.
+
+Those rows already *read* correctly whatever protocol they were written under —
+every rehydration seam replays the full conversion chain, so a body from an
+older major is served in today's canonical shape and always will be. What the
+rows do not do is *change*: they keep their original bytes, the chain re-lowers
+them on every load, and each one logs a conversion notice once per boot. This
+command ends that for the deployment that runs it.
+
+```bash
+os migrate meta --stored                    # Preview: per-row report, writes nothing
+os migrate meta --stored --apply            # Rewrite the rows (prompts)
+os migrate meta --stored --apply --yes --json   # CI / scripts
+os migrate meta --stored --type view --type object   # Restrict to a type (repeatable)
+```
+
+It walks `active` and `draft` rows across every organization (archived rows are
+a record of what *was* and are never read), replays the same chain the read path
+does, and re-saves each changed body through the normal write path — so a
+rewritten row gets a `sys_metadata_history` entry, a fresh checksum, and the
+mutation projectors, exactly like an author's save. The history entry's source
+is `migrate-stored`, so a later diff shows which changes were an upgrade and
+which were somebody's edit.
+
+Three things it deliberately declines, and names in the report rather than
+counting as done:
+
+| Not rewritten | Why |
+| :--- | :--- |
+| `flow` rows | Flow-node conversions carry a conflict guard that needs the automation engine's live executor registry; flows canonicalize at their own seam when the engine loads them |
+| Types with no repository write path (`agent`) | Their write path records no history and would force a draft live — a half-write is worse than leaving the row to the read path |
+| Rows that still fail the current schema after conversion | That is a genuine contract violation, not chain-owned history. The write path's rejection is correct; fix the row in Studio |
+
+<Callout type="warn">
+`--apply` is the only writing mode, and it rewrites **metadata** — each affected
+row's checksum moves and each gets a history entry. Preview first. Like the
+other row-rewriting migration, an apply run refuses to start while another
+process holds the SQLite database (`--force` overrides).
+</Callout>
+
+**Nothing gates on this having run.** The read path is the guarantee, for every
+deployment, whether or not anyone runs this — an operator-run migration is not
+something the platform can depend on. What running it buys is hygiene (cleaner
+diffs, exports and history from here on, and the recurring boot notices go
+quiet) plus one thing that was previously unobtainable: **you can assert it.**
+A run with nothing left to do exits `0`; a deployment with rows still carrying
+an old dialect exits `1`. So "my metadata is on protocol N" becomes a check
+rather than a belief.
+
+Note the division of labour with the default mode: `os migrate meta --from N`
+rewrites an **author's source** and reads no database; `--stored` rewrites **one
+deployment's rows** and reads no config. Same chain, opposite ends of the
+contract — which is why the two modes are mutually exclusive.
 
 ### Scaffolding
 
