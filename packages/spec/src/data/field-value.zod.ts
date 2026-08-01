@@ -32,6 +32,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { SystemObjectName } from '../system/constants/system-names';
 import type { FieldType } from './field.zod';
 import { AddressSchema } from './field.zod';
 
@@ -92,6 +93,50 @@ export const MULTI_OPTION_TYPES: ReadonlySet<string> = new Set([
 export const REFERENCE_VALUE_TYPES: ReadonlySet<string> = new Set([
   'lookup', 'master_detail', 'user', 'tree',
 ] as const satisfies readonly FieldType[]);
+
+/**
+ * Reference types whose target object is FIXED BY THE TYPE rather than chosen
+ * by the author, mapped to that target.
+ *
+ * `user` is the only member: `field.zod` defines it as "a lookup specialized to
+ * the `sys_user` system object … target fixed to the `sys_user` system object",
+ * and the `Field.user()` builder — unlike `Field.lookup(reference, …)` /
+ * `Field.masterDetail(reference, …)` — takes NO target argument and writes
+ * `reference: 'sys_user'` itself. The target is a CONSTANT OF THE TYPE, so
+ * `reference` on a `user` field materializes that constant; it does not supply
+ * it. Metadata authored without it (hand-written JSON, an AI author, a Studio
+ * form) is fully specified, not under-specified.
+ */
+const IMPLICIT_REFERENCE_TARGETS: ReadonlyMap<string, string> = new Map([
+  ['user', SystemObjectName.USER],
+]);
+
+/**
+ * The object a reference-typed field points at — the SINGLE arbiter of "what
+ * does this field expand into", for the gate that admits an `expand` and the
+ * engine that performs it alike.
+ *
+ * Returns `undefined` only when the field genuinely names no target: a
+ * non-reference type, or a `lookup`/`master_detail`/`tree` with no `reference`
+ * (an authoring bug — those types carry an author-chosen target and nothing
+ * can supply it for them).
+ *
+ * Framework#4443 / cloud#983: the two callers used to read `field.reference`
+ * raw, which made a `{ type: 'user' }` field targetless to BOTH — the expand
+ * gate refused `?expand=<that field>` with `400 INVALID_FIELD … declares no
+ * target object`, so an AI-authored app whose default list view expanded its
+ * "responsible person" column answered its very first screen with an error
+ * page. Deriving the target here (rather than requiring every author to
+ * restate a constant) is what keeps the gate and the engine agreeing on the
+ * one question they both ask.
+ */
+export function referenceTargetOf(def: unknown): string | undefined {
+  if (!def || typeof def !== 'object') return undefined;
+  const { type, reference } = def as { type?: unknown; reference?: unknown };
+  if (typeof type !== 'string' || !REFERENCE_VALUE_TYPES.has(type)) return undefined;
+  if (typeof reference === 'string' && reference) return reference;
+  return IMPLICIT_REFERENCE_TARGETS.get(type);
+}
 
 /**
  * Media/attachment types. Stored form TODAY is the legacy inline metadata
