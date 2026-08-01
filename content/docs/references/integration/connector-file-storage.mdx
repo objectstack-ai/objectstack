@@ -1,0 +1,170 @@
+---
+title: Connector File Storage
+description: Connector File Storage protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+File Storage Connector Protocol Template
+
+Specialized connector for file storage systems (S3, Azure Blob, Google Cloud Storage, etc.)
+
+Extends the base connector with file-specific features like multipart uploads,
+
+versioning, and metadata extraction.
+
+<Callout type="info">
+**Source:** `packages/spec/src/integration/connector/file-storage.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { FileAccessPattern, FileFilterConfig, FileMetadataConfig, FileStorageConnector, FileStorageProvider, FileVersioningConfig, StorageBucket } from '@objectstack/spec/integration';
+import type { FileAccessPattern, FileFilterConfig, FileMetadataConfig, FileStorageConnector, FileStorageProvider, FileVersioningConfig, StorageBucket } from '@objectstack/spec/integration';
+
+// Validate data
+const result = FileAccessPattern.parse(data);
+```
+
+---
+
+## FileAccessPattern
+
+File access pattern
+
+### Allowed Values
+
+* `public_read`
+* `private`
+* `authenticated_read`
+* `bucket_owner_read`
+* `bucket_owner_full`
+
+
+---
+
+## FileFilterConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **includePatterns** | `string[]` | optional | File patterns to include (glob) |
+| **excludePatterns** | `string[]` | optional | File patterns to exclude (glob) |
+| **minFileSize** | `number` | optional | Minimum file size in bytes |
+| **maxFileSize** | `number` | optional | Maximum file size in bytes |
+| **allowedExtensions** | `string[]` | optional | Allowed file extensions |
+| **blockedExtensions** | `string[]` | optional | Blocked file extensions |
+
+
+---
+
+## FileMetadataConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **extractMetadata** | `boolean` | ✅ | Extract file metadata |
+| **metadataFields** | `Enum<'content_type' \| 'file_size' \| 'last_modified' \| 'etag' \| 'checksum' \| 'creator' \| 'created_at' \| 'custom'>[]` | optional | Metadata fields to extract |
+| **customMetadata** | `Record<string, string>` | optional | Custom metadata key-value pairs |
+
+
+---
+
+## FileStorageConnector
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique connector identifier |
+| **label** | `string` | ✅ | Display label |
+| **type** | `'file_storage'` | ✅ |  |
+| **description** | `string` | optional | Connector description |
+| **icon** | `string` | optional | Icon identifier |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
+| **provider** | `Enum<'s3' \| 'azure_blob' \| 'gcs' \| 'dropbox' \| 'box' \| 'onedrive' \| 'google_drive' \| 'sharepoint' \| 'ftp' \| 'local' \| 'custom'>` | ✅ | File storage provider type |
+| **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
+| **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
+| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional | Trigger definitions (not yet enforced — never read at registration; see #3197) |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Field mapping rules |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete'>[]; … }[]` | optional | Webhook configurations (not yet enforced — never read at registration; see #3197) |
+| **rateLimitConfig** | `{ strategy?: Enum<'fixed_window' \| 'sliding_window' \| 'token_bucket' \| 'leaky_bucket'>; maxRequests: number; windowSeconds: number; burstCapacity?: number; … }` | optional | Rate limiting configuration |
+| **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
+| **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
+| **requestTimeoutMs** | `number` | optional | Request timeout in ms |
+| **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
+| **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
+| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
+| **metadata** | `Record<string, any>` | optional | Custom connector metadata |
+| **storageConfig** | `{ endpoint?: string; region?: string; pathStyle?: boolean }` | optional | Storage configuration |
+| **buckets** | `{ name: string; label: string; bucketName: string; region?: string; … }[]` | ✅ | Buckets/containers to sync |
+| **metadataConfig** | `{ extractMetadata?: boolean; metadataFields?: Enum<'content_type' \| 'file_size' \| 'last_modified' \| 'etag' \| 'checksum' \| 'creator' \| 'created_at' \| 'custom'>[]; customMetadata?: Record<string, string> }` | optional | Metadata extraction configuration |
+| **multipartConfig** | `{ enabled?: boolean; partSize?: number; maxConcurrentParts?: number; threshold?: number }` | optional | Multipart upload configuration |
+| **versioningConfig** | `{ enabled?: boolean; maxVersions?: number; retentionDays?: number }` | optional | File versioning configuration |
+| **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES256' \| 'aws:kms' \| 'custom'>; kmsKeyId?: string }` | optional | Encryption configuration |
+| **lifecyclePolicy** | `{ enabled?: boolean; deleteAfterDays?: number; archiveAfterDays?: number }` | optional | Lifecycle policy |
+| **contentProcessing** | `{ extractText?: boolean; generateThumbnails?: boolean; thumbnailSizes?: { width: number; height: number }[]; virusScan?: boolean }` | optional | Content processing configuration |
+| **bufferSize** | `number` | optional | Buffer size in bytes |
+| **transferAcceleration** | `boolean` | optional | Enable transfer acceleration |
+
+
+---
+
+## FileStorageProvider
+
+File storage provider type
+
+### Allowed Values
+
+* `s3`
+* `azure_blob`
+* `gcs`
+* `dropbox`
+* `box`
+* `onedrive`
+* `google_drive`
+* `sharepoint`
+* `ftp`
+* `local`
+* `custom`
+
+
+---
+
+## FileVersioningConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ | Enable file versioning |
+| **maxVersions** | `number` | optional | Maximum versions to retain |
+| **retentionDays** | `number` | optional | Version retention period in days |
+
+
+---
+
+## StorageBucket
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Bucket identifier in ObjectStack (snake_case) |
+| **label** | `string` | ✅ | Display label |
+| **bucketName** | `string` | ✅ | Actual bucket/container name in storage system |
+| **region** | `string` | optional | Storage region |
+| **enabled** | `boolean` | ✅ | Enable sync for this bucket |
+| **prefix** | `string` | optional | Prefix/path within bucket |
+| **accessPattern** | `Enum<'public_read' \| 'private' \| 'authenticated_read' \| 'bucket_owner_read' \| 'bucket_owner_full'>` | optional | Access pattern |
+| **fileFilters** | `{ includePatterns?: string[]; excludePatterns?: string[]; minFileSize?: number; maxFileSize?: number; … }` | optional | File filter configuration |
+
+
+---
+

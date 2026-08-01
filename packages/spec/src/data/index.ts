@@ -60,6 +60,12 @@ export * from './document.zod';
 export * from './external-lookup.zod';
 export * from './datasource.zod';
 
+// Per-driver `datasource.config` contracts (#4410) — the enforcement half of
+// the `config` escape hatch DatasourceSchema leaves open at the top level.
+// Exported because they are now load-bearing; nothing could import them while
+// they were merely the shapes authors were TOLD to write against.
+export * from './driver/index';
+
 // External Datasource Federation — SQL↔field type compatibility (ADR-0015)
 export * from './type-compat';
 export * from './external-catalog.zod';

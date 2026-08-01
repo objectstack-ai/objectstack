@@ -22,6 +22,10 @@ export const CrmDatasource = defineDatasource({
 
 /**
  * Read-replica for analytics queries — demonstrates datasource routing.
+ *
+ * `readOnly` is a datasource CAPABILITY, not sqlite config. It sat inside
+ * `config` here until #4410 gave that slot a gate — a key no driver read, so
+ * the "read replica" was writable while every signal said it was not.
  */
 export const CrmAnalyticsDatasource = defineDatasource({
   name: 'crm_analytics',
@@ -29,6 +33,8 @@ export const CrmAnalyticsDatasource = defineDatasource({
   driver: 'sqlite',
   config: {
     filename: ':memory:',
+  },
+  capabilities: {
     readOnly: true,
   },
   active: true,

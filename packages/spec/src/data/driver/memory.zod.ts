@@ -1,11 +1,18 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { DriverDefinitionSchema } from '../datasource.zod';
+
+import { strictUnknownKeyError } from '../../shared/suggestions.zod';
+import type { DriverDefinition } from '../datasource.zod';
+import {
+  driverConfigJsonSchema,
+  READ_ONLY_BELONGS_ON_DATASOURCE,
+  SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+} from './common.zod';
 
 /**
  * Memory Driver Configuration Schema
- * 
+ *
  * Defines the configuration options for the in-memory driver.
  * Reference: objectql/packages/drivers/memory (Mingo-powered production-ready driver)
  * 
@@ -158,6 +165,50 @@ export const MemoryPersistenceConfigSchema = lazySchema(() => z.union([
 // 2. Connection Configuration
 // ==========================================================================
 
+const MEMORY_CONFIG_KEYS = ['initialData', 'strictMode', 'persistence'] as const;
+
+/**
+ * Two keys were declared here and read by nobody: `indexes` and
+ * `maxRecordsPerObject`. `InMemoryDriverConfig` (`driver-memory`) has no field
+ * for either — the driver indexes nothing (its reads are a linear Mingo scan)
+ * and evicts nothing (there is no LRU) — so an author who bounded a store or
+ * asked for an index got a clean parse and no behaviour. #4410's enforce step
+ * is what surfaced them: giving `config` a gate means every key inside it now
+ * claims to be honoured, so a key that is not gets removed rather than blessed.
+ * Both are rejected with the prescription below (ADR-0049 enforce-or-remove).
+ */
+const memoryConfigUnknownKeyError = strictUnknownKeyError({
+  surface: "this memory datasource's config",
+  knownKeys: MEMORY_CONFIG_KEYS,
+  aliases: {
+    data: 'initialData',
+    seed: 'initialData',
+    seeddata: 'initialData',
+    strict: 'strictMode',
+    persist: 'persistence',
+    persistent: 'persistence',
+  },
+  guidance: {
+    indexes:
+      '`indexes` was declared but never read: the memory driver keeps no indexes — every read is '
+      + 'a linear Mingo scan — so it changed nothing. Drop it, or move the datasource to a '
+      + 'driver that indexes (`sqlite` / `postgres`), where object-level `indexes` apply.',
+    maxRecordsPerObject:
+      '`maxRecordsPerObject` was declared but never read: the memory driver evicts nothing, so a '
+      + 'bound here was never enforced and the store grew unbounded regardless. Drop it and bound '
+      + 'the data you load, or use a driver with real storage limits.',
+    filename:
+      '`filename` is a sqlite key. For a memory datasource that survives restarts set '
+      + "`persistence: 'file'` (the file is scoped per datasource); for a real file-backed SQL "
+      + "database set `driver: 'sqlite'`.",
+    schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+    readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
+  },
+  history:
+    'Until #4410 nothing validated `datasource.config` at all — an unrecognised key was accepted '
+    + 'in silence and the store came up on the driver defaults instead.',
+});
+
 export const MemoryConfigSchema = lazySchema(() => z.object({
   /**
    * Initial data to pre-populate the in-memory store.
@@ -238,45 +289,41 @@ export const MemoryConfigSchema = lazySchema(() => z.object({
    * so two pools that DO opt in still need it to avoid aliasing one file.
    */
   persistence: MemoryPersistenceConfigSchema.or(z.literal(false)).default(false).describe('Persistence configuration (opt-in; defaults to pure in-memory)'),
+}, { error: memoryConfigUnknownKeyError }).strict()
+  .describe('Memory Driver Connection Configuration'));
 
-  /**
-   * Fields to index for faster lookups.
-   * Maps object names to arrays of field names to index.
-   * 
-   * @example
-   * {
-   *   users: ['email', 'role'],
-   *   posts: ['author_id', 'status']
-   * }
-   */
-  indexes: z.record(
-    z.string(),
-    z.array(z.string())
-  ).optional().describe('Index configuration per object'),
-
-  /**
-   * Maximum number of records per object type.
-   * When exceeded, oldest records may be evicted (LRU).
-   * Useful for caching or bounded memory usage.
-   */
-  maxRecordsPerObject: z.number().min(1).optional().describe('Max records per object (memory bound)'),
-
-}).describe('Memory Driver Connection Configuration'));
+/**
+ * JSON-Schema projection of {@link MemoryConfigSchema}, memoized — what
+ * {@link MemoryDriverSpec} publishes as its `configSchema`.
+ *
+ * The custom-adapter branch of `persistence` is an object of functions, which
+ * has no JSON-Schema form; the shared projection emits `{}` for it rather than
+ * throwing, so the connection form stays renderable.
+ */
+export const getMemoryConfigJsonSchema = driverConfigJsonSchema(MemoryConfigSchema);
 
 // ==========================================================================
 // 3. Driver Definition (Metadata)
 // ==========================================================================
 
 /**
- * The static definition of the Memory driver's capabilities and default metadata.
- * Implements the `DriverDefinitionSchema` contract.
+ * The static definition of the Memory driver's capabilities and default
+ * metadata, satisfying the `DriverDefinitionSchema` contract (proved by
+ * `memory.test.ts`, which parses this constant).
+ *
+ * `configSchema` was `{}` here — a declared slot that nothing filled and
+ * nothing read (#4410). It now projects {@link MemoryConfigSchema}, lazily, so
+ * the shape the connection form renders and the shape `DatasourceSchema`
+ * enforces are the same object seen twice.
  */
-export const MemoryDriverSpec = DriverDefinitionSchema.parse({
+export const MemoryDriverSpec = {
   id: 'memory',
   label: 'In-Memory',
   description: 'High-performance in-memory driver powered by Mingo (MongoDB-compatible query engine). Supports filtering, aggregation pipelines, sorting, projection.',
   icon: 'memory',
-  configSchema: {},
+  get configSchema() {
+    return getMemoryConfigJsonSchema();
+  },
   capabilities: {
     transactions: true,
     // Query
@@ -290,10 +337,12 @@ export const MemoryDriverSpec = DriverDefinitionSchema.parse({
     querySubqueries: false,
     // No full-text search (linear scan)
     fullTextSearch: false,
+    // Not read-only
+    readOnly: false,
     // Dynamic schema (no DDL needed)
     dynamicSchema: true,
   },
-});
+} satisfies DriverDefinition;
 
 // ==========================================================================
 // 4. Derived Types

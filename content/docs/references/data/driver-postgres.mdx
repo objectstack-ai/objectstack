@@ -1,0 +1,62 @@
+---
+title: Driver Postgres
+description: Driver Postgres protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+PostgreSQL driver configuration — the `config` slot of a `datasource` whose
+
+`driver` resolves to `postgres` (`pg` / `postgresql`).
+
+ENFORCED as of #4410: `DatasourceSchema` parses `config` against this schema,
+
+so a misspelled connection key fails at authoring time instead of leaving the
+
+datasource on the client's localhost defaults. Every key here is read by
+
+`createDefaultDatasourceDriverFactory` (→ `SqlDriver`, knex `pg`).
+
+Pool sizing is NOT here: it lives in the driver-agnostic `datasource.pool`
+
+block, which the factory now honours for every SQL driver.
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/driver/postgres.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { PostgresConfig } from '@objectstack/spec/data';
+import type { PostgresConfig } from '@objectstack/spec/data';
+
+// Validate data
+const result = PostgresConfig.parse(data);
+```
+
+---
+
+## PostgresConfig
+
+PostgreSQL connection configuration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | optional | Connection URI (supersedes the discrete fields) |
+| **host** | `string` | ✅ | Host address |
+| **port** | `integer` | ✅ | Port number |
+| **database** | `string` | optional | Database name |
+| **username** | `string` | optional | Authentication user |
+| **password** | `string` | optional | Authentication password (prefer external.credentialsRef) |
+| **ssl** | `boolean` | optional | Enable TLS. Certificates go in the datasource-level `ssl` block. |
+| **schema** | `string` | ✅ | Default schema (knex searchPath) |
+| **applicationName** | `string` | optional | Postgres application_name |
+| **statementTimeout** | `integer` | optional | Abort statements running longer than this (ms) |
+| **autoMigrate** | `Enum<'off' \| 'safe'>` | optional | Dev-only non-destructive schema self-heal (#2186) |
+
+
+---
+

@@ -11,8 +11,6 @@ describe('PostgresConfigSchema', () => {
     expect(config.host).toBe('localhost');
     expect(config.port).toBe(5432);
     expect(config.schema).toBe('public');
-    expect(config.max).toBe(10);
-    expect(config.min).toBe(0);
   });
 
   it('should accept config with connection URI', () => {
@@ -35,10 +33,6 @@ describe('PostgresConfigSchema', () => {
       schema: 'app_schema',
       ssl: true,
       applicationName: 'objectstack',
-      max: 50,
-      min: 5,
-      idleTimeoutMillis: 60000,
-      connectionTimeoutMillis: 10000,
       statementTimeout: 30000,
     });
 
@@ -47,10 +41,6 @@ describe('PostgresConfigSchema', () => {
     expect(config.schema).toBe('app_schema');
     expect(config.ssl).toBe(true);
     expect(config.applicationName).toBe('objectstack');
-    expect(config.max).toBe(50);
-    expect(config.min).toBe(5);
-    expect(config.idleTimeoutMillis).toBe(60000);
-    expect(config.connectionTimeoutMillis).toBe(10000);
     expect(config.statementTimeout).toBe(30000);
   });
 
@@ -62,15 +52,11 @@ describe('PostgresConfigSchema', () => {
     expect(config.host).toBe('localhost');
     expect(config.port).toBe(5432);
     expect(config.schema).toBe('public');
-    expect(config.max).toBe(10);
-    expect(config.min).toBe(0);
     expect(config.url).toBeUndefined();
     expect(config.username).toBeUndefined();
     expect(config.password).toBeUndefined();
     expect(config.ssl).toBeUndefined();
     expect(config.applicationName).toBeUndefined();
-    expect(config.idleTimeoutMillis).toBeUndefined();
-    expect(config.connectionTimeoutMillis).toBeUndefined();
     expect(config.statementTimeout).toBeUndefined();
   });
 
@@ -113,9 +99,20 @@ describe('PostgresConfigSchema', () => {
     expect(sslObj.rejectUnauthorized).toBe(true);
   });
 
-  it('should reject config without database', () => {
+  it('should reject a config with no connection target at all', () => {
+    // Neither `database` nor `url`: the pg client would then open its own
+    // default (localhost, the OS user's database), so an empty config is a
+    // datasource pointing somewhere nobody chose.
     expect(() => PostgresConfigSchema.parse({})).toThrow();
     expect(() => PostgresConfigSchema.parse({ host: 'localhost' })).toThrow();
+  });
+
+  it('accepts a `url` on its own as the connection target', () => {
+    const config = PostgresConfigSchema.parse({
+      url: 'postgresql://user@db.example.com:5432/analytics',
+    });
+
+    expect(config.database).toBeUndefined();
   });
 
   it('should reject config with invalid port type', () => {
@@ -132,11 +129,37 @@ describe('PostgresConfigSchema', () => {
     })).toThrow();
   });
 
-  it('should reject config with invalid max pool type', () => {
-    expect(() => PostgresConfigSchema.parse({
+  it('rejects pool sizing, and says where it belongs', () => {
+    // `max` / `min` / `idleTimeoutMillis` / `connectionTimeoutMillis` were
+    // declared here and read by nothing: the factory hardcoded its own pool. The
+    // datasource-level `pool` block is the one the factory now honours, so the
+    // rejection relocates rather than merely refusing (#4410).
+    const result = PostgresConfigSchema.safeParse({
       database: 'mydb',
-      max: 'ten',
-    })).toThrow();
+      max: 100,
+      min: 10,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain('`pool: { max: … }`');
+    expect(result.error!.issues[0]!.message).toContain('`pool: { min: … }`');
+  });
+
+  it('rejects an unknown key with a rename suggestion', () => {
+    const result = PostgresConfigSchema.safeParse({
+      database: 'mydb',
+      hostname: 'db.internal',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain('`hostname` → `host`');
+  });
+
+  it('rejects `user`, pointing at the canonical `username`', () => {
+    const result = PostgresConfigSchema.safeParse({ database: 'mydb', user: 'app' });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain('`user` → `username`');
   });
 
   it('should accept config with environment variable patterns', () => {
@@ -151,25 +174,10 @@ describe('PostgresConfigSchema', () => {
     expect(config.host).toBe('${DB_HOST}');
   });
 
-  it('should accept zero as min pool size', () => {
-    const config = PostgresConfigSchema.parse({
-      database: 'mydb',
-      min: 0,
-    });
-
-    expect(config.min).toBe(0);
-  });
-
-  it('should accept custom pool configuration', () => {
-    const config = PostgresConfigSchema.parse({
-      database: 'mydb',
-      max: 100,
-      min: 10,
-      idleTimeoutMillis: 120000,
-      connectionTimeoutMillis: 5000,
-    });
-
-    expect(config.max).toBe(100);
-    expect(config.min).toBe(10);
+  it('accepts the dev-only autoMigrate passthrough', () => {
+    expect(PostgresConfigSchema.parse({ database: 'mydb', autoMigrate: 'safe' }).autoMigrate)
+      .toBe('safe');
+    expect(() => PostgresConfigSchema.parse({ database: 'mydb', autoMigrate: 'destructive' }))
+      .toThrow();
   });
 });
