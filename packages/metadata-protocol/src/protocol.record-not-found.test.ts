@@ -91,14 +91,33 @@ describe('[#4435] updateData refuses an id that names no row', () => {
     expect(res).toMatchObject({ object: 'task', id: 'real', record: { title: 'y' } });
   });
 
-  it('the existence probe is asked with the CALLER context, like getData', async () => {
-    // A row outside the caller's row scope is not-found FOR THEM on the read
-    // path; a write path that answered 200 for it would contradict the very
-    // next GET.
+  it('the existence probe asks EXISTENCE, not the caller\'s visibility', async () => {
+    // Load-bearing, and the first cut of this fix got it backwards. Probing
+    // with the CALLER's context turns the existence gate into an authorization
+    // gate: a row the caller cannot read comes back null and the PATCH 404s.
+    // That would (a) move an RLS decision out of the write policy where #1994
+    // put it, and (b) disarm `@proof: rls-by-id-write` — the dogfood fixture
+    // whose RED half asserts that a member who cannot READ a row but has no
+    // write policy still mutates it by id. A caller-scoped probe makes that
+    // proof go green, so the gate could no longer prove it can go red, and a
+    // future revert of #1994 would be masked by this probe.
+    //
+    // So the probe runs as system: "does this row exist", nothing more.
+    // Authorization stays inside engine.update, exactly where it was.
     const { p, findOne } = makeProtocol({ real: { id: 'real' } });
-    const ctx = { userId: 'u1' };
-    await p.updateData({ object: 'task', id: 'real', data: {}, context: ctx } as any);
-    expect(findOne.mock.calls[0][1]).toMatchObject({ where: { id: 'real' }, context: ctx });
+    await p.updateData({ object: 'task', id: 'real', data: {}, context: { userId: 'u1' } } as any);
+    expect(findOne.mock.calls[0][1]).toMatchObject({
+      where: { id: 'real' },
+      context: { isSystem: true },
+    });
+  });
+
+  it('a PATCH the caller may not see is still decided by RLS, not by the probe', async () => {
+    // The row exists, so the probe passes it through to the engine — where the
+    // write policy answers, as it always has. The probe must not pre-empt it.
+    const { p, update } = makeProtocol({ hidden: { id: 'hidden' } });
+    await p.updateData({ object: 'task', id: 'hidden', data: { title: 'x' }, context: { userId: 'nobody' } } as any);
+    expect(update).toHaveBeenCalledOnce();
   });
 });
 
