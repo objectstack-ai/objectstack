@@ -1,0 +1,246 @@
+---
+title: Connector Github
+description: Connector Github protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+GitHub Connector Protocol
+
+Specialized connector for GitHub integration enabling automated
+
+version control operations, CI/CD workflows, and release management.
+
+Use Cases:
+
+- Automated code commits and pull requests
+
+- GitHub Actions workflow management
+
+- Issue and project tracking
+
+- Release and tag management
+
+- Repository administration
+
+@example
+
+```typescript
+
+import \{ GitHubConnector \} from '@objectstack/spec/integration';
+
+const githubConnector: GitHubConnector = \{
+
+name: 'github_enterprise',
+
+label: 'GitHub Enterprise',
+
+type: 'saas',
+
+provider: 'github',
+
+baseUrl: 'https://api.github.com',
+
+authentication: \{
+
+type: 'oauth2',
+
+clientId: '$\{GITHUB_CLIENT_ID\}',
+
+clientSecret: '$\{GITHUB_CLIENT_SECRET\}',
+
+authorizationUrl: 'https://github.com/login/oauth/authorize',
+
+tokenUrl: 'https://github.com/login/oauth/access_token',
+
+grantType: 'authorization_code',
+
+scopes: ['repo', 'workflow', 'admin:org'],
+
+\},
+
+repositories: [
+
+\{
+
+owner: 'objectstack-ai',
+
+name: 'spec',
+
+defaultBranch: 'main',
+
+autoMerge: false,
+
+\},
+
+],
+
+\};
+
+```
+
+<Callout type="info">
+**Source:** `packages/spec/src/integration/connector/github.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { GitHubActionsWorkflow, GitHubCommitConfig, GitHubConnector, GitHubIssueTracking, GitHubProvider, GitHubPullRequestConfig, GitHubReleaseConfig, GitHubRepository } from '@objectstack/spec/integration';
+import type { GitHubActionsWorkflow, GitHubCommitConfig, GitHubConnector, GitHubIssueTracking, GitHubProvider, GitHubPullRequestConfig, GitHubReleaseConfig, GitHubRepository } from '@objectstack/spec/integration';
+
+// Validate data
+const result = GitHubActionsWorkflow.parse(data);
+```
+
+---
+
+## GitHubActionsWorkflow
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Workflow name |
+| **path** | `string` | ✅ | Workflow file path (e.g., .github/workflows/ci.yml) |
+| **enabled** | `boolean` | ✅ | Enable workflow |
+| **triggers** | `Enum<'push' \| 'pull_request' \| 'release' \| 'schedule' \| 'workflow_dispatch' \| 'repository_dispatch'>[]` | optional | Workflow triggers |
+| **env** | `Record<string, string>` | optional | Environment variables |
+| **secrets** | `string[]` | optional | Required secrets |
+
+
+---
+
+## GitHubCommitConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **authorName** | `string` | optional | Commit author name |
+| **authorEmail** | `string` | optional | Commit author email |
+| **signCommits** | `boolean` | ✅ | Sign commits with GPG |
+| **messageTemplate** | `string` | optional | Commit message template |
+| **useConventionalCommits** | `boolean` | ✅ | Use conventional commits format |
+
+
+---
+
+## GitHubConnector
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Unique connector identifier |
+| **label** | `string` | ✅ | Display label |
+| **type** | `'saas'` | ✅ |  |
+| **description** | `string` | optional | Connector description |
+| **icon** | `string` | optional | Icon identifier |
+| **authentication** | `{ type: 'oauth2'; authorizationUrl: string; tokenUrl: string; clientId: string; … } \| { type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional | Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead. |
+| **provider** | `Enum<'github' \| 'github_enterprise'>` | ✅ | GitHub provider |
+| **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
+| **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
+| **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional | Trigger definitions (not yet enforced — never read at registration; see #3197) |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **fieldMappings** | `{ source: string; target: string; transform?: { type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }; defaultValue?: any; … }[]` | optional | Field mapping rules |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete'>[]; … }[]` | optional | Webhook configurations (not yet enforced — never read at registration; see #3197) |
+| **rateLimitConfig** | `{ strategy?: Enum<'fixed_window' \| 'sliding_window' \| 'token_bucket' \| 'leaky_bucket'>; maxRequests: number; windowSeconds: number; burstCapacity?: number; … }` | optional | Rate limiting configuration |
+| **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
+| **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
+| **requestTimeoutMs** | `number` | optional | Request timeout in ms |
+| **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
+| **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
+| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
+| **metadata** | `Record<string, any>` | optional | Custom connector metadata |
+| **baseUrl** | `string` | optional | GitHub API base URL |
+| **repositories** | `{ owner: string; name: string; defaultBranch?: string; autoMerge?: boolean; … }[]` | ✅ | Repositories to manage |
+| **commitConfig** | `{ authorName?: string; authorEmail?: string; signCommits?: boolean; messageTemplate?: string; … }` | optional | Commit configuration |
+| **pullRequestConfig** | `{ titleTemplate?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; bodyTemplate?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; defaultReviewers?: string[]; defaultAssignees?: string[]; … }` | optional | Pull request configuration |
+| **workflows** | `{ name: string; path: string; enabled?: boolean; triggers?: Enum<'push' \| 'pull_request' \| 'release' \| 'schedule' \| 'workflow_dispatch' \| 'repository_dispatch'>[]; … }[]` | optional | GitHub Actions workflows |
+| **releaseConfig** | `{ tagPattern?: string; semanticVersioning?: boolean; autoReleaseNotes?: boolean; releaseNameTemplate?: string; … }` | optional | Release configuration |
+| **issueTracking** | `{ enabled?: boolean; defaultLabels?: string[]; templatePaths?: string[]; autoAssign?: boolean; … }` | optional | Issue tracking configuration |
+| **enableWebhooks** | `boolean` | optional | Enable GitHub webhooks |
+| **webhookEvents** | `Enum<'push' \| 'pull_request' \| 'issues' \| 'issue_comment' \| 'release' \| 'workflow_run' \| 'deployment' \| 'deployment_status' \| 'check_run' \| 'check_suite' \| 'status'>[]` | optional | Webhook events to subscribe to |
+
+
+---
+
+## GitHubIssueTracking
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ | Enable issue tracking |
+| **defaultLabels** | `string[]` | optional | Default issue labels |
+| **templatePaths** | `string[]` | optional | Issue template paths |
+| **autoAssign** | `boolean` | ✅ | Auto-assign issues |
+| **autoCloseStale** | `{ enabled: boolean; daysBeforeStale: integer; daysBeforeClose: integer; staleLabel: string }` | optional | Auto-close stale issues configuration |
+
+
+---
+
+## GitHubProvider
+
+GitHub provider type
+
+### Allowed Values
+
+* `github`
+* `github_enterprise`
+
+
+---
+
+## GitHubPullRequestConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **titleTemplate** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | PR title template — supports `{{var}`} interpolation |
+| **bodyTemplate** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | PR body template — supports `{{var}`} interpolation |
+| **defaultReviewers** | `string[]` | optional | Default reviewers (usernames) |
+| **defaultAssignees** | `string[]` | optional | Default assignees (usernames) |
+| **defaultLabels** | `string[]` | optional | Default labels |
+| **draftByDefault** | `boolean` | optional | Create draft PRs by default |
+| **deleteHeadBranch** | `boolean` | optional | Delete head branch after merge |
+
+
+---
+
+## GitHubReleaseConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **tagPattern** | `string` | ✅ | Tag name pattern (e.g., v*, release/*) |
+| **semanticVersioning** | `boolean` | ✅ | Use semantic versioning |
+| **autoReleaseNotes** | `boolean` | ✅ | Generate release notes automatically |
+| **releaseNameTemplate** | `string` | optional | Release name template |
+| **preReleasePattern** | `string` | optional | Pre-release pattern (e.g., *-alpha, *-beta) |
+| **draftByDefault** | `boolean` | ✅ | Create draft releases by default |
+
+
+---
+
+## GitHubRepository
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **owner** | `string` | ✅ | Repository owner (organization or username) |
+| **name** | `string` | ✅ | Repository name |
+| **defaultBranch** | `string` | ✅ | Default branch name |
+| **autoMerge** | `boolean` | ✅ | Enable auto-merge for pull requests |
+| **branchProtection** | `{ requiredReviewers: integer; requireStatusChecks: boolean; enforceAdmins: boolean; allowForcePushes: boolean; … }` | optional | Branch protection configuration |
+| **topics** | `string[]` | optional | Repository topics |
+
+
+---
+

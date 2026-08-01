@@ -29,9 +29,14 @@
     "metadata-loader",
     "metadata-plugin",
     "metadata-protection",
-    "misc",
     "service-registry",
     "startup-orchestrator",
-    "state-machine"
+    "---More---",
+    "events-bus",
+    "events-core",
+    "events-dlq",
+    "events-handlers",
+    "events-integrations",
+    "events-queue"
   ]
 }
