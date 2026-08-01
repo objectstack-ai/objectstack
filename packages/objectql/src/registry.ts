@@ -579,6 +579,25 @@ export class NamespaceConflictError extends Error {
   }
 }
 
+/**
+ * Is this registered item a TENANT-authored overlay rather than a code-shipped
+ * artifact? (ADR-0010 `_provenance`: `'package'` for loader-introduced items,
+ * `'org'` for tenant-authored.)
+ *
+ * `_packageId !== 'sys_metadata'` alone cannot answer it. That sentinel only
+ * holds on the save path; the boot-time rehydration of `sys_metadata` registers
+ * each row under its REAL package id (`app.<slug>`), which is exactly what every
+ * runtime-authored item has carried since packages became mandatory. So a
+ * tenant's own overlay came back from a kernel rebuild looking like a code
+ * artifact, and the protocol's overlay gate refused the next write to it with
+ * `not_overridable` — an app the user had just built through Studio/AI became
+ * permanently un-editable at the first kernel rebuild (cloud#970). Provenance is
+ * the axis that actually distinguishes the two, so ask it.
+ */
+function isTenantAuthored(item: unknown): boolean {
+  return (item as { _provenance?: unknown } | null | undefined)?._provenance === 'org';
+}
+
 export class SchemaRegistry {
   // ==========================================
   // Logging control
@@ -1314,7 +1333,7 @@ export class SchemaRegistry {
   getArtifactItem<T>(type: string, name: string, currentPackageId?: string): T | undefined {
     if (type === 'object' || type === 'objects') {
       const obj = this.getObject(name) as any;
-      return obj && obj._packageId && obj._packageId !== 'sys_metadata'
+      return obj && obj._packageId && obj._packageId !== 'sys_metadata' && !isTenantAuthored(obj)
         ? (obj as T)
         : undefined;
     }
@@ -1326,12 +1345,12 @@ export class SchemaRegistry {
     // iteration order.
     if (currentPackageId) {
       const local = collection.get(`${currentPackageId}:${name}`) as any;
-      if (local && local._packageId && local._packageId !== 'sys_metadata') return local as T;
+      if (local && local._packageId && local._packageId !== 'sys_metadata' && !isTenantAuthored(local)) return local as T;
     }
     for (const [key, item] of collection) {
       if (key !== name && key.endsWith(`:${name}`)) {
         const it = item as any;
-        if (it && it._packageId && it._packageId !== 'sys_metadata') return item as T;
+        if (it && it._packageId && it._packageId !== 'sys_metadata' && !isTenantAuthored(it)) return item as T;
       }
     }
     // Bare-key fallback: a runtime/DB overlay rehydrated under the plain name.
@@ -1344,7 +1363,7 @@ export class SchemaRegistry {
     // the legacy best-effort first-match.
     const direct = collection.get(name) as any;
     if (
-      direct && direct._packageId && direct._packageId !== 'sys_metadata' &&
+      direct && direct._packageId && direct._packageId !== 'sys_metadata' && !isTenantAuthored(direct) &&
       (!currentPackageId || direct._packageId === currentPackageId)
     ) {
       return direct as T;

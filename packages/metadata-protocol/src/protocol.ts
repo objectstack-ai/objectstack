@@ -8163,7 +8163,19 @@ export class ObjectStackProtocolImplementation implements
                         );
                     }
                     if (normalizedType === 'object') {
-                        this.engine.registry.registerObject(data as any, record.packageId || 'sys_metadata');
+                        // Every row here came from `sys_metadata` — a TENANT-authored
+                        // overlay, whatever package it is bound to. Say so (ADR-0010
+                        // `_provenance: 'org'`), because the package id alone reads as
+                        // code provenance: registering under the real `app.<slug>`
+                        // made the registry's artifact lookup claim the row was
+                        // code-shipped, and `saveMetaItem`'s overlay gate then refused
+                        // the very next write with `not_overridable`. An app the user
+                        // had just built became un-editable at the first kernel
+                        // rebuild (cloud#970).
+                        this.engine.registry.registerObject(
+                            { ...(data as Record<string, unknown>), _provenance: 'org' } as any,
+                            record.packageId || 'sys_metadata',
+                        );
                     } else {
                         // Same envelope graft as the getMetaItems hydration:
                         // the plain-key entry shadows any packaged artifact,
