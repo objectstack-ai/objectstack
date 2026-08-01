@@ -87,63 +87,9 @@ Chart over an object’s aggregated data. Bind objectName + aggregate; the axes 
 | `annotations` | `object[]` | data |  | Reference lines/bands drawn over the plot: { type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? } |
 | `interaction` | `object` | data |  | Interaction toggles: { tooltips?, brush? } |
 
-## `<RecordDetails>` — `record:details`
-
-Field-detail panel for the bound record. Config props from the spec RecordDetails schema.
-
-| prop | type | kind | required | description |
-|------|------|------|:--------:|-------------|
-| `objectName` | `string` | binding |  | The record’s object. |
-| `recordId` | `string \| number` | controlled |  | The record to show. |
-| `columns` | `'1' \| '2' \| '3' \| '4'` | data |  | Number of columns for field layout (1-4) |
-| `layout` | `'auto' \| 'custom'` | data |  | Layout mode: auto uses object highlightFields, custom uses explicit sections |
-| `sections` | `string[]` | data |  | Section IDs to show (required when layout is "custom") |
-| `fields` | `string[]` | data |  | Explicit field list to display (optional, overrides highlightFields) |
-
-## `<RecordHighlights>` — `record:highlights`
-
-Highlights panel — a strip of key fields. Config props from the spec RecordHighlights schema.
-
-| prop | type | kind | required | description |
-|------|------|------|:--------:|-------------|
-| `objectName` | `string` | binding |  | The record’s object. |
-| `recordId` | `string \| number` | controlled |  | The record to summarize. |
-| `fields` | `string \| object[]` | data | ✓ | Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or {name, label?, icon?, type?} for inline… |
-| `layout` | `'horizontal' \| 'vertical'` | data |  | Layout orientation for highlight fields |
-
-## `<RecordRelatedList>` — `record:related_list`
-
-Related child records via a lookup. `objectName` is the RELATED (child) object whose records are listed — NOT the parent; the parent record is bound by `recordId`, and `relationshipField` is the child field pointing back at it. Config props from the spec RecordRelatedList schema.
-
-| prop | type | kind | required | description |
-|------|------|------|:--------:|-------------|
-| `objectName` | `string` | binding | ✓ | The RELATED (child) object whose records this list renders — e.g. objectName="invoice" on an account page. NOT the parent object: the parent record is bound by recordId. |
-| `recordId` | `string \| number` | controlled |  | The parent record whose children are listed. |
-| `relationshipField` | `string` | data | ✓ | Field on related object that points to this record (e.g., "account_id") |
-| `relationshipValueField` | `string` | data |  | Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions). |
-| `columns` | `string[]` | data |  | Fields to display in the related list. Optional: when omitted, columns derive from the related object's highlightFields / default list columns (a related list … |
-| `sort` | `string \| object[]` | data |  | Sort order for related records |
-| `limit` | `integer` | data |  | Number of records to display initially |
-| `filter` | `object[]` | data |  | Additional filter criteria for related records |
-| `title` | `string` | data |  | Custom title for the related list |
-| `showViewAll` | `boolean` | data |  | Show "View All" link to see all related records |
-| `actions` | `string[]` | data |  | Action IDs available for related records |
-| `add` | `object` | data |  | Add-existing-via-picker config (generic m2m/junction assignment). |
-
-## `<RecordPath>` — `record:path`
-
-Stage/progress bar driven by a status field. Config props from the spec RecordPath schema.
-
-| prop | type | kind | required | description |
-|------|------|------|:--------:|-------------|
-| `objectName` | `string` | binding |  | The record’s object. |
-| `recordId` | `string \| number` | controlled |  | The record whose stage to show. |
-| `statusField` | `string` | data | ✓ | Field name representing the current status/stage |
-| `stages` | `object[]` | data |  | Explicit stage definitions (if not using field metadata) |
-
 ## `<Block>` — `(any)` *(no spec schema — overlay only)*
 
-Escape hatch — render any registered component by type. <Block type="object-kanban" objectName="task" /> etc.
+Escape hatch — render any registered component by type. <Block type="object-kanban" objectName="task" /> etc. Not a way back to the record:* family: those need a record page's record context and are rejected here too (#4413).
 
 | prop | type | kind | required | description |
 |------|------|------|:--------:|-------------|

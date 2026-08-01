@@ -6,16 +6,16 @@ import { definePage } from '@objectstack/spec/ui';
  * Renewals Pipeline — a `kind:'react'` business scenario (ADR-0081).
  *
  * A renewals manager works a list of accounts by lifecycle stage; selecting one
- * drives a 360° panel (highlights + invoices + a value-by-status chart) and a
- * pre-styled `<ObjectForm formType="drawer">` to update the account in place.
+ * drives a 360° panel (account summary + invoices + a value-by-status chart) and
+ * a pre-styled `<ObjectForm formType="drawer">` to update the account in place.
  * Every block prop is taken straight from the react-tier contract
  * (skills/objectstack-ui/references/react-blocks.md).
  *
  * The 360 panel deliberately shows BOTH rollup styles side by side:
  *   • hand-rolled — a `useAdapter()` effect counts related projects/invoices
  *     into a KPI strip (full control, you own loading/refresh), vs
- *   • framework blocks — `<ObjectChart>`/`<RecordRelatedList>` do the same
- *     cross-object reads declaratively (zero data code).
+ *   • framework blocks — `<ObjectChart>`/`<ListView>` do the same cross-object
+ *     reads declaratively (zero data code).
  * (This comparison absorbed the former Account Cockpit page.)
  *
  * The chart is written in the spec `ChartConfig` shape (#3729) and its axes are
@@ -24,14 +24,20 @@ import { definePage } from '@objectstack/spec/ui';
  * `groupBy`) and `total` (its `field`) — not by a dataset-style measure name.
  * `os validate` checks both halves.
  *
- * `<RecordRelatedList>` binds the CHILD object it lists (`showcase_invoice`),
- * not the parent — the parent is `recordId`, and `relationshipField="account"`
- * is the invoice's lookup back to it. This page used to pass the parent, which
- * is what #4340 found: the react contract had glossed `objectName` as "the
- * parent object" while the schema (and the renderer behind both surfaces) read
- * it as the related one, so the list resolved `total` against an account and
- * came back empty. Every field-bearing prop on the page is now checked against
- * the object it actually names.
+ * The selected account is bound BY REACT STATE, not by a record context: `sel`
+ * is the parent id, so the invoice list is an ordinary `<ListView>` filtered on
+ * the child's lookup (`['account', '=', sel]`) and the summary is an
+ * `<ObjectForm mode="view">`. Both read their binding from their own props,
+ * which is what makes them work on this tier.
+ *
+ * This panel used to be `<RecordHighlights>` + `<RecordRelatedList>`, and both
+ * rendered EMPTY here (#4413): every `record:*` block takes its record from the
+ * context a record page mounts, and a react page mounts none — the
+ * `objectName`/`recordId` the contract published for them were read by no
+ * renderer. They are out of the react tier now, and `os validate` rejects them
+ * on this surface rather than letting the next author rediscover it at runtime.
+ * (#4340's finding still holds where it applies: on a RECORD page
+ * `<RecordRelatedList objectName>` is the CHILD object, never the parent.)
  *
  * Styling (ADR-0065): no Tailwind — inline `style={{}}` with `hsl(var(--token))`;
  * data blocks and the drawer bring their own compiled styling. The drawer sets
@@ -121,7 +127,7 @@ function Page() {
               <button onClick={() => setEditing(true)} style={{ borderRadius: 'var(--radius)', border: '1px solid hsl(var(--border))', background: 'transparent', color: 'hsl(var(--foreground))', padding: '6px 12px', fontSize: 14, cursor: 'pointer' }}>Edit account</button>
             </div>
 
-            <RecordHighlights objectName="showcase_account" recordId={sel} fields={['name', 'status']} layout="horizontal" />
+            <ObjectForm objectName="showcase_account" mode="view" recordId={sel} fields={['name', 'status']} />
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
               <Stat label="Projects" value={related.projects} />
@@ -131,7 +137,8 @@ function Page() {
 
             <ObjectChart objectName="showcase_invoice" type="bar" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} xAxis={{ field: 'status' }} yAxis={[{ field: 'total', format: '$0,0' }]} series={[{ name: 'total', label: 'Invoice value' }]} title="Invoice value by status" showLegend={true} />
 
-            <RecordRelatedList objectName="showcase_invoice" recordId={sel} relationshipField="account" columns={['name', 'status', 'total']} limit={5} showViewAll={true} title="Invoices" />
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'hsl(var(--foreground))' }}>Invoices</h3>
+            <ListView objectName="showcase_invoice" filters={['account', '=', sel]} columns={['name', 'status', 'total']} navigation={{ mode: 'none' }} />
 
             {editing ? (
               <ObjectForm objectName="showcase_account" mode="edit" recordId={sel}
