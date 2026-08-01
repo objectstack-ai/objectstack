@@ -11,14 +11,18 @@
  *
  * `config-schemas.test.ts` in `service-automation` pins the schemaless class
  * with each member's reason: `decision`'s virtual Target column is derived from
- * the out-edges, `script`'s form switches on `actionType`, `subflow` carries a
- * top-level `timeoutMs` — a published partial schema would DROP those editors
- * (the #4210 `connector_action` incident). So the Studio form for these types
- * is objectui's hand-written group, and until #4278 **nothing reconciled that
- * hand-written table against the executors**: `script`'s form offered an
- * `outputVariables` key nothing reads, two `actionType` options that fail every
- * run, a no-op default — and could not author the `function`/`inputs`/
- * `outputVariable` path that works.
+ * the out-edges, `subflow` carries a top-level `timeoutMs` — a published
+ * partial schema would DROP those editors (the #4210 `connector_action`
+ * incident). So the Studio form for these types is objectui's hand-written
+ * group, and until #4278 **nothing reconciled that hand-written table against
+ * the executors**: `script`'s form offered an `outputVariables` key nothing
+ * reads, two `actionType` options that fail every run, a no-op default — and
+ * could not author the `function`/`inputs`/`outputVariable` path that works.
+ *
+ * `script`'s own reason for staying schemaless was that its form switched on
+ * `actionType`. #4343 retired that switch, so the node is now three flat keys
+ * and could graduate to a published descriptor `configSchema` the way `map`
+ * did — a follow-up, deliberately not folded into the retirement.
  *
  * These schemas are the machine-readable half of that reconciliation. They are
  * **written from the executors** (`service-automation/builtin/screen-nodes.ts`
@@ -34,24 +38,37 @@
  * {@link FlowNodeSchema} (`waitEventConfig` / `connectorConfig`), which the
  * same objectui test reconciles directly.
  *
- * ## What these schemas are (and are not) wired to
+ * ## What these schemas are wired to
  *
- * Contract exports only — no engine path `parse()`s a node config with them,
- * so registering a flow behaves exactly as before. This is where they differ
- * from their `builtin-node-config.zod.ts` siblings, which #4277 wired into
- * execute-time parsing (`service-automation`'s `parse-config.ts`) and into the
- * `registerFlow()` unknown-key rejection.
+ * `script` and `subflow` are **parsed at execute time** since #4343, through
+ * the same `parseNodeConfig()` seam #4277 gave the flat builtins
+ * (`service-automation`'s `parse-config.ts`): a config that fails its contract
+ * refuses the node as a GUARD — wrong metadata, so a rerun cannot help and no
+ * `fault` edge may route it (#3863).
  *
- * That difference is deliberate, and it is the same reason these three publish
- * no descriptor `configSchema`: **their key set is not the whole contract.**
- * `script`'s legal keys depend on `actionType` (a built-in side effect reads
- * `template`/`recipients`/`variables`; the function path reads
- * `function`/`inputs`/`outputVariable`), and `decision` may carry no
- * `conditions` at all when it branches purely on edge predicates. A flat parse
- * would either reject those shapes or wave everything through — neither is the
- * contract. Wiring them in needs a discriminated form first; until then the
- * enforcement they DO get is the objectui reconciliation test, which is what
- * #4278 was actually about (a form authoring keys nothing reads).
+ * `script` could not be parsed while its legal key set depended on
+ * `actionType`; #4343 removed that dependence instead of modelling it.
+ * Converging the node to its one real path — call a registered function — left
+ * a flat three-key contract a flat parse fits exactly, and the five keys the
+ * other branches read became {@link retiredKey} tombstones.
+ *
+ * The two halves reach different audiences, which is why they shipped together:
+ *
+ *  - the **tombstones** teach whoever authors the key — `tsc` types it `never`,
+ *    and a direct parse raises the prescription. They do NOT reach a stored
+ *    flow: `FlowNodeSchema.config` is `z.record(z.unknown())`, so no load-path
+ *    parse ever descends into a node's config;
+ *  - the **execute-time parse** is what a stored flow meets. `registerFlow`
+ *    canonicalizes data at rest through the retired conversion too (#3903), so
+ *    a stored `actionType: 'email'` node arrives here stripped of the keys
+ *    nothing read — and then refuses, naming the `function` it does not have,
+ *    instead of logging a line and reporting success as it used to.
+ *
+ * `decision` stays export-only, deliberately: it may carry no `conditions` at
+ * all when it branches purely on edge predicates (a plain BPMN exclusive
+ * gateway), and `conditions` is its only key — so a parse would have nothing
+ * left to check. Its enforcement remains the objectui reconciliation test,
+ * which is what #4278 was actually about (a form authoring keys nothing reads).
  *
  * Undeclared aliases are NOT part of these contracts: `subflow`'s historical
  * `flow` spelling graduated into the ADR-0087 D2 conversion
@@ -61,87 +78,106 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 
 // ─── script ──────────────────────────────────────────────────────────
 
 /**
- * `script` action types with a built-in (logger-backed) side-effect handler.
- * Any other non-marker `actionType` is treated as a registered-function name
- * (#1870). The executor builds its dispatch set from THIS constant, and the
- * designer's `actionType` options must stay within
- * `[SCRIPT_INVOKE_FUNCTION_ACTION_TYPE, ...SCRIPT_BUILTIN_ACTION_TYPES]` —
- * the #4278 drift was the form offering `sms` / `notification`, which are in
- * neither set and so failed every run as unresolvable function names.
- */
-export const SCRIPT_BUILTIN_ACTION_TYPES = ['email', 'slack'] as const;
-export type ScriptBuiltinActionType = (typeof SCRIPT_BUILTIN_ACTION_TYPES)[number];
-
-/**
- * The `actionType` MARKER meaning "call the registered function named by
- * `config.function`" — it is not itself a function name. The executor fails
- * the step with a clear message when this marker is set and `function` is not.
- */
-export const SCRIPT_INVOKE_FUNCTION_ACTION_TYPE = 'invoke_function';
-
-/**
  * `script` node config — what the executor reads (screen-nodes.ts).
  *
- * Dispatch precedence, verbatim from the executor:
- *
- *  1. `function` set → resolve and call that registered function (always wins).
- *  2. `actionType` ∈ {@link SCRIPT_BUILTIN_ACTION_TYPES} → the built-in
- *     logger-backed side effect, fed by `template` / `recipients` / `variables`.
- *  3. `script` set (no `function`) → **recognized but NOT executed**: the
- *     built-in runtime has no server-side JS sandbox, so the node warns loudly
- *     and completes as a no-op. Authoring is steered to a registered function.
- *  4. Anything left in `actionType` (except the
- *     {@link SCRIPT_INVOKE_FUNCTION_ACTION_TYPE} marker) is shorthand for a
- *     function name; a name that resolves to nothing fails the step LOUDLY.
+ * **One shape, one path (#4343):** a `script` node names a registered function
+ * (`defineStack({ functions })`), passes it `inputs`, and binds its return
+ * value to `outputVariable`. `function` is required — a script node that names
+ * no callable has nothing to run, and the execute-time parse refuses it rather
+ * than letting the run discover that halfway through.
  *
  * The invoked function is contractually PURE — it returns its result and the
  * flow graph persists it (`FlowFunctionEffectSchema`, #4396). The descriptor
  * publishes that as `handlerContract: 'pure'`, and it is what lets the node
- * report no record metrics without guessing.
+ * report no record metrics without guessing. A function that legitimately
+ * writes declares `effect: 'writes'` where it is registered, so the run reports
+ * an effect it cannot count instead of reporting none.
+ *
+ * ## What the four other shapes were, and why they are gone
+ *
+ * Until #4343 the legal key set depended on `actionType`, which is why this
+ * contract could not be parsed at all (see the module header). Of the four
+ * dispatch branches only the function path ran real logic:
+ *
+ *  - `actionType: 'email' | 'slack'` were **logger-backed stubs**. They wrote a
+ *    line to the log, reported success, and delivered nothing under any
+ *    configuration — `template` / `recipients` / `variables` fed a message no
+ *    channel ever sent. `notify` (real delivery, via the messaging service) and
+ *    `connector_action` were already the live mechanisms.
+ *  - `script` (inline JS) was **recognized but never executed**: the built-in
+ *    runtime has no server-side JS sandbox, so the node warned and no-op'd.
+ *  - any other `actionType` was **shorthand for a function name** — a second
+ *    spelling of `function`, and the `invoke_function` marker named nothing on
+ *    its own.
+ *
+ * All five keys are tombstoned below; the ADR-0087 D2 conversion
+ * `flow-node-script-branch-keys-removed` rewrites stored sources (moving a
+ * shorthand `actionType` into `function`, where that is what it meant).
  */
 export const ScriptConfigSchema = lazySchema(() => z.object({
-  /** Built-in side-effect id, the `invoke_function` marker, or (shorthand) a registered-function name. */
-  actionType: z.string().optional()
-    .describe("How this step runs: a built-in side effect ('email' | 'slack'), the 'invoke_function' marker, or shorthand for a registered-function name"),
   /**
-   * Registered function to call (`defineStack({ functions })`) — always wins
-   * over `actionType`.
+   * Registered function to call (`defineStack({ functions })`) — required: it
+   * is the whole of what a `script` node does.
    *
    * Contractually pure: it takes `inputs`, RETURNS a value, and does no data
    * I/O of its own. A function that legitimately writes declares
    * `effect: 'writes'` where it is registered, so the run reports an effect it
    * cannot count instead of reporting none (#4396).
    */
-  function: z.string().optional()
-    .describe('Registered function to call (defineStack({ functions })); takes precedence over actionType. Contractually pure — it returns a value a later declarative node persists'),
+  function: z.string().min(1)
+    .describe('Registered function to call (defineStack({ functions })). Contractually pure — it returns a value a later declarative node persists'),
   /** Inputs passed to the function; values interpolate `{token}` templates against the live flow variables. */
   inputs: z.record(z.string(), z.unknown()).optional()
     .describe('Inputs passed to the function (values interpolate {token} templates)'),
   /** Flow variable the function's RETURN value is bound to (pure-function pattern — data I/O stays on the graph). */
   outputVariable: z.string().optional()
     .describe("Flow variable the function's return value is bound to"),
-  /** Built-in side effects only: message template id. */
-  template: z.string().optional()
-    .describe('Built-in side effects only: message template id'),
-  /** Built-in side effects only: recipient list (user ids, field refs, addresses). */
-  recipients: z.array(z.string()).optional()
-    .describe('Built-in side effects only: recipients (user ids, field refs, or addresses)'),
-  /** Built-in side effects only: values injected into the template. */
-  variables: z.record(z.string(), z.unknown()).optional()
-    .describe('Built-in side effects only: values injected into the template'),
-  /**
-   * Inline JS source — recognized but NOT executed by the built-in runtime (no
-   * server-side JS sandbox): the node warns and completes as a no-op. Kept in
-   * the contract because the executor reads it; deliberately NOT offered for
-   * new authoring (the designer renders a stored value read-only-style and
-   * steers authors to `function`).
-   */
-  script: z.string().optional()
-    .describe('Inline JS source — recognized but not executed by the built-in runtime; use a registered function via `function` instead'),
+
+  // The four retired dispatch branches (#4343). Each tombstone carries its own
+  // prescription because the three replacements are different mechanisms, not
+  // one rename: real messaging is `notify`, Slack is a connector, and inline
+  // logic belongs in a registered function.
+  actionType: retiredKey(
+    '`script.config.actionType` was removed in @objectstack/spec 17 (#4343) — none of its values '
+    + 'did what it said. The two built-ins were logger-backed stubs that recorded the intent and '
+    + 'delivered nothing under any configuration, and every other value was a second spelling of '
+    + '`config.function`. Replace it per branch: for `email` use a `notify` node (it delivers '
+    + 'through the messaging service — the in-app inbox by default, real email once '
+    + '`@objectstack/plugin-email` is installed); for `slack` use a `connector_action` node with '
+    + 'the Slack connector, or an `http` node posting to a webhook; for anything else, move the '
+    + 'name into `config.function`. Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
+  template: retiredKey(
+    '`script.config.template` was removed in @objectstack/spec 17 (#4343) — it fed only the '
+    + 'logger-backed `email`/`slack` stubs, which never rendered or sent a message, so no template '
+    + 'id was ever resolved. Delete the key. A `notify` node carries its own `title`/`message`, and '
+    + 'stored templates live in the messaging service (`sys_notification_template`), not on the '
+    + 'node. Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
+  recipients: retiredKey(
+    '`script.config.recipients` was removed in @objectstack/spec 17 (#4343) — the addresses were '
+    + 'logged, never messaged: the `email`/`slack` branches it fed delivered nothing. Use a '
+    + '`notify` node, whose `recipients` (user ids, field refs or addresses) reach the messaging '
+    + 'service for real. Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
+  variables: retiredKey(
+    '`script.config.variables` was removed in @objectstack/spec 17 (#4343) — it injected values '
+    + 'into a template no side effect ever rendered. Delete the key. A `notify` node carries '
+    + 'structured data in `payload`; a registered function takes it in `config.inputs`. '
+    + 'Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
+  script: retiredKey(
+    '`script.config.script` was removed in @objectstack/spec 17 (#4343) — the built-in runtime has '
+    + 'no server-side JS sandbox, so an inline body was recognized and never executed: the node '
+    + 'warned and completed as a no-op. Move the logic into a registered function '
+    + '(`defineStack({ functions })`) and name it in `config.function`. '
+    + 'Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
 }));
 
 export type ScriptConfig = z.input<typeof ScriptConfigSchema>;
@@ -152,8 +188,11 @@ export type ScriptConfigParsed = z.infer<typeof ScriptConfigSchema>;
 /**
  * `subflow` node config — what the executor reads (subflow-node.ts).
  *
- * `flowName` is execute-time required (the step is refused without it). The
- * historical undeclared `flow` alias is NOT part of this contract: the
+ * `flowName` is execute-time required: since #4343 the executor parses this
+ * contract before it runs, so a missing or empty name refuses the node as a
+ * guard (wrong metadata — a rerun cannot supply it) instead of failing through
+ * a hand-written check. The historical undeclared `flow` alias is NOT part of
+ * this contract: the
  * ADR-0087 D2 conversion `flow-node-subflow-flow-alias` rewrites it at load
  * (#4278 — the `map.flow` graduation path), so the executor only ever sees
  * `flowName`. The node-level `timeoutMs` lives on {@link FlowNodeSchema}, not
@@ -161,7 +200,7 @@ export type ScriptConfigParsed = z.infer<typeof ScriptConfigSchema>;
  */
 export const SubflowConfigSchema = lazySchema(() => z.object({
   /** The flow to invoke (execute-time required). */
-  flowName: z.string().describe('Flow invoked as this step (it may pause — approval / screen / wait)'),
+  flowName: z.string().min(1).describe('Flow invoked as this step (it may pause — approval / screen / wait)'),
   /** Values passed to the child's input variables; `{token}` templates resolve against the parent's variables. */
   input: z.record(z.string(), z.unknown()).optional()
     .describe("Values passed to the subflow's input variables (interpolate {token} templates)"),

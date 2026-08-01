@@ -33,12 +33,12 @@ export const FlowNodeAction = z.enum([
   'get_record',         // CRUD: Get/Query
   'http',               // Outbound HTTP callout (ADR-0018 M3) — canonical; outbox-backed when durable
   'notify',             // Outbound notification (ADR-0012) — dispatched via the messaging service
-  'script',             // Custom action: a built-in side-effect (`config.actionType: 'email'|'slack'`)
-                        //   or a registered function (`config.function: 'name'` + `config.inputs`),
-                        //   resolved from `defineStack({ functions })`. (Inline `config.script` JS is
-                        //   recognized but NOT executed by the built-in runtime — no server-side
-                        //   sandbox.) A script node naming none of these is flagged at build and
-                        //   fails loudly at run time (#1870).
+  'script',             // Custom action: call the registered function named by `config.function`
+                        //   (+ `config.inputs`), resolved from `defineStack({ functions })`. The key
+                        //   is REQUIRED — a node naming no callable is flagged at build and refused
+                        //   at execute (#1870). The `actionType` dispatch branches (logger-backed
+                        //   'email'/'slack', inline `config.script`) were retired in 17 (#4343):
+                        //   use `notify` / a connector / a registered function instead.
   'screen',             // Screen / User-Input Element
   'wait',               // Delay/Sleep
   'subflow',            // Call another flow

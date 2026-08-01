@@ -113,7 +113,7 @@ Each node performs a specific action in the flow.
 | `get_record` | Query records |
 | `http` | Make an HTTP API call |
 | `notify` | Send an outbound notification via the messaging service |
-| `script` | Call a named callable — a registered function (`config.function`) or a built-in side-effect marker (`config.actionType`) |
+| `script` | Call a registered function named by `config.function` |
 | `screen` | Display a user form/screen (durable pause) |
 | `wait` | Pause for a timer or named signal (durable pause; timers auto-resume) |
 | `subflow` | Invoke another flow — a pause inside the child suspends both runs as a linked chain |
@@ -214,25 +214,40 @@ or missing-`required` violation (#4277). A node type that publishes no
 **Script:**
 
 The built-in `script` executor never evaluates an arbitrary JavaScript string —
-it **names a callable**. Two forms:
+it **calls a registered function**, and that is the whole of what it does.
 
-- **`config.function`** — a function registered through
-  `defineStack({ functions })`. `config.inputs` is `{var}`-interpolated and
-  handed to it; `config.outputVariable` binds the returned value as a flow
-  variable, so a later declarative node persists it. This is the supported way
-  to run server logic.
-- **`config.actionType`** — one of the two built-in side-effect markers,
-  `'email'` or `'slack'`. These are **logger-backed**: they record the intent
-  and succeed, they do not deliver anything — reach for a `notify` node when you
-  want real delivery. Any other `actionType` value is treated as a
-  registered-function name — except the marker `'invoke_function'`, which means
-  "call the function named in `config.function`" and errors if that key is
-  missing.
+**`config.function`** names a function registered through
+`defineStack({ functions })`, and it is **required**. `config.inputs` is
+`{var}`-interpolated and handed to it; `config.outputVariable` binds the
+returned value as a flow variable, so a later declarative node persists it. A
+node that names no function refuses before it runs; one naming a function
+nothing registered fails the step loudly rather than passing silently.
 
-Inline `config.script` (a JS source body) is *recognized* but **not executed** —
-the built-in runtime has no server-side JS sandbox, so such a node warns and
-no-ops. A script node that names neither a built-in action nor a registered
-function fails the step loudly rather than passing silently.
+<Callout type="warn" title="The other dispatch forms were retired in spec 17">
+
+`config.actionType`, `config.template`, `config.recipients`, `config.variables`
+and inline `config.script` were removed in `@objectstack/spec` 17 ([#4343]).
+None of them ran: the `'email'` / `'slack'` action types were **logger-backed
+stubs** that recorded the intent, reported success and delivered nothing under
+any configuration, and an inline JS body was recognized but never executed (the
+built-in runtime has no server-side sandbox). Every other `actionType` value was
+shorthand for a registered-function name.
+
+Replace them per branch — they are different mechanisms, not one rename:
+
+| Retired shape | Use instead |
+| --- | --- |
+| `actionType: 'email'` (+ `template` / `recipients` / `variables`) | a [`notify` node](#notify) — it delivers through the messaging service: the in-app inbox by default, real email once `@objectstack/plugin-email` is installed |
+| `actionType: 'slack'` | a `connector_action` node with the Slack connector, or an `http` node posting to an incoming webhook |
+| `actionType: 'my_fn'` (shorthand) | `function: 'my_fn'` — the conversion moves it for you |
+| inline `config.script` | move the logic into a registered function and call it via `config.function` |
+
+Stored flows are rewritten by `os migrate meta --from 16`; authoring one of
+these keys in TypeScript is now a compile error carrying the same prescription.
+
+[#4343]: https://github.com/objectstack-ai/objectstack/issues/4343
+
+</Callout>
 
 ```typescript
 {

@@ -1,11 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import {
-    SCRIPT_BUILTIN_ACTION_TYPES,
-    SCRIPT_INVOKE_FUNCTION_ACTION_TYPE,
-    ScriptConfigSchema,
-} from '@objectstack/spec/automation';
+import { ScriptConfigSchema } from '@objectstack/spec/automation';
 import { AutomationEngine, type FlowFunctionHandler } from '../engine.js';
 import { registerScreenNodes } from './screen-nodes.js';
 
@@ -49,12 +45,6 @@ describe('script node (#1870 — callable resolution)', () => {
         registerScreenNodes(engine, createCtx());
     });
 
-    it('runs the built-in email side-effect', async () => {
-        engine.registerFlow('script_flow', scriptFlow({ actionType: 'email', template: 't', recipients: ['a'] }));
-        const result = await engine.execute('script_flow', {} as any);
-        expect(result.success).toBe(true);
-    });
-
     it('invokes a registered function and captures its return value as output', async () => {
         const calls: Array<Record<string, unknown>> = [];
         const fn: FlowFunctionHandler = (c) => {
@@ -73,36 +63,16 @@ describe('script node (#1870 — callable resolution)', () => {
         expect(calls).toEqual([{ ticket: 't_1' }]);
     });
 
-    it('resolves a bare actionType that matches no built-in as a function name', async () => {
-        let called = false;
-        engine.setFunctionResolver((name) => (name === 'pm.aiRiskAssessmentStub' ? (() => { called = true; return 1; }) : undefined));
-        engine.registerFlow('script_flow', scriptFlow({ actionType: 'pm.aiRiskAssessmentStub' }));
-        const result = await engine.execute('script_flow', {} as any);
-        expect(result.success).toBe(true);
-        expect(called).toBe(true);
-    });
-
     it('FAILS LOUDLY for an unregistered function instead of silently no-op (#1870)', async () => {
         // No resolver wired → nothing resolves.
         engine.registerFlow('script_flow', scriptFlow({ function: 'helpdesk.aiTriageStub' }));
         const result = await engine.execute('script_flow', {} as any);
         expect(result.success).toBe(false);
         expect(result.error).toMatch(/aiTriageStub/);
-        expect(result.error).toMatch(/no function named|not a built-in/i);
-    });
-
-    it('recognizes inline config.script as a no-op (not a loud failure) — built-in runtime has no JS sandbox', async () => {
-        engine.registerFlow('script_flow', scriptFlow({ script: 'variables.x = 1;', outputVariables: ['x'] }));
-        const result = await engine.execute('script_flow', {} as any);
-        // Recognized form: succeeds (doesn't fail loud), but is documented as not executed.
-        expect(result.success).toBe(true);
-    });
-
-    it('FAILS LOUDLY when the script node declares no target at all (actionType: undefined repro)', async () => {
-        engine.registerFlow('script_flow', scriptFlow({ actionType: undefined }));
-        const result = await engine.execute('script_flow', {} as any);
-        expect(result.success).toBe(false);
-        expect(result.error).toMatch(/neither .*actionType.* nor .*function|nothing to run/i);
+        expect(result.error).toMatch(/no function named/i);
+        // It stays a ROUTABLE failure, not a guard: the function registry is the
+        // host's, so the same metadata succeeds where the name is registered
+        // (#3863). config-parse.test.ts pins that with a fault edge.
     });
 
     it('surfaces a thrown function as a loud step failure', async () => {
@@ -119,19 +89,10 @@ it('canonicalizes a stored `functionName` key to `function` at load (#1870 DX, #
         let calledWith: any;
         engine.setFunctionResolver((name) =>
             name === 'helpdesk.aiTriageStub' ? ((c: any) => { calledWith = c.input; return { triaged: true }; }) : undefined);
-        engine.registerFlow('script_flow', scriptFlow({ actionType: 'invoke_function', functionName: 'helpdesk.aiTriageStub', inputs: { ticketId: 't1' } }));
+        engine.registerFlow('script_flow', scriptFlow({ functionName: 'helpdesk.aiTriageStub', inputs: { ticketId: 't1' } }));
         const r = await engine.execute('script_flow', {} as any);
         expect(r.success).toBe(true);
         expect(calledWith).toEqual({ ticketId: 't1' });
-    });
-
-    it('treats actionType invoke_function as a marker, not a function name', async () => {
-        // invoke_function alone (no `function`) must NOT try to resolve a
-        // function literally named 'invoke_function'; it fails with a clear message.
-        engine.registerFlow('script_flow', scriptFlow({ actionType: 'invoke_function' }));
-        const r = await engine.execute('script_flow', {} as any);
-        expect(r.success).toBe(false);
-        expect(r.error).toMatch(/invoke_function.*requires.*function/i);
     });
     it('exposes the function result via outputVariable for downstream nodes (pure-function pattern)', async () => {
         const seen: Array<Record<string, unknown>> = [];
@@ -161,61 +122,72 @@ it('canonicalizes a stored `functionName` key to `function` at load (#1870 DX, #
 });
 
 /**
- * #4278 — the script node's contract is the spec-published one. The designer
- * form for `script` is objectui's hand-written group (this node deliberately
- * publishes no descriptor configSchema — config-schemas.test.ts), so the only
- * machine-readable statement of what it accepts is
- * `SCRIPT_BUILTIN_ACTION_TYPES` / `ScriptConfigSchema` in
- * `@objectstack/spec/automation`. These pins are the objectstack half of the
- * cross-repo reconciliation: the executor dispatches exactly the published
- * built-in set (it now builds its dispatch set FROM the constant), and its
- * failure message names that same set — objectui's side reconciles its form
- * options and key set against the same exports.
+ * #4343 — what a STORED flow carrying a retired dispatch branch does now.
+ *
+ * The retirement has two channels and they reach different people. The
+ * `retiredKey()` tombstones teach whoever *authors* the key: `tsc` types it
+ * `never`, and a direct `ScriptConfigSchema` parse raises the prescription.
+ * They never reach a stored flow — `FlowNodeSchema.config` is
+ * `z.record(z.unknown())`, so no load-path parse descends into a node's config.
+ *
+ * A stored flow meets the other channel. `registerFlow` canonicalizes data at
+ * rest through the RETIRED conversion too (#3903 — a row in `sys_metadata` has
+ * no author for a tombstone to teach), so the doomed keys are stripped on
+ * rehydration with a logged notice, and the execute-time parse then judges
+ * what is left. For the branches that never delivered anything, what is left
+ * names no callable — so the node refuses, loudly, where it used to log a line
+ * and report success. That flip is the whole point of the retirement, and it is
+ * what these cases pin.
  */
-describe('script contract ↔ spec-published constants (#4278)', () => {
+describe('script retired branches, as a stored flow meets them (#4343)', () => {
     let engine: AutomationEngine;
 
     beforeEach(() => {
         engine = new AutomationEngine(createTestLogger());
         registerScreenNodes(engine, createCtx());
+        engine.setFunctionResolver((name) => (name === 'score_lead' ? (() => 1) : undefined));
     });
 
-    it.each([...SCRIPT_BUILTIN_ACTION_TYPES])(
-        "every published built-in actionType runs the built-in branch: '%s'",
-        async (actionType) => {
-            engine.registerFlow('script_flow', scriptFlow({ actionType, template: 't', recipients: ['a'] }));
-            const result = await engine.execute('script_flow', {} as any);
-            expect(result.success).toBe(true);
-        },
-    );
-
-    it('an actionType outside the published set fails naming exactly that set (the #4278 sms repro)', async () => {
-        // The old objectui form offered 'sms' / 'notification'; neither is in
-        // the published set, so they resolve as function names and fail. The
-        // error must name the published members — it is the message the #4278
-        // report quoted, and the form's options now come from the same constant.
-        engine.registerFlow('script_flow', scriptFlow({ actionType: 'sms' }));
+    it.each([
+        ['the email stub', { actionType: 'email', template: 't', recipients: ['a'], variables: { x: 1 } }],
+        ['the slack stub', { actionType: 'slack', template: 't', recipients: ['#tasks'] }],
+        ['the example shape, payload in `inputs`', { actionType: 'email', inputs: { to: 'a@b.c' } }],
+        ['an inline body', { script: 'return { ok: true };' }],
+        ['the bare marker', { actionType: 'invoke_function' }],
+    ] as const)('%s no longer succeeds silently — it refuses, naming the callable it lacks', async (_name, config) => {
+        engine.registerFlow('script_flow', scriptFlow({ ...config }));
         const result = await engine.execute('script_flow', {} as any);
         expect(result.success).toBe(false);
-        for (const builtin of SCRIPT_BUILTIN_ACTION_TYPES) {
-            expect(result.error).toContain(builtin);
-        }
-        expect(result.error).toMatch(/'sms' is not a built-in action/);
+        expect(result.error).toContain('does not satisfy the script contract');
+        expect(result.error).toContain('config.function');
     });
 
-    it('the published Zod accepts the canonical authoring shapes (contract sanity)', () => {
-        // Function path — the only shape that does real work.
+    it('converts a shorthand `actionType` into the function it always named, and runs it', async () => {
+        // The one retired value carrying real intent: `actionType` that matched
+        // no built-in was a function name (#1870), so the conversion moves it
+        // rather than dropping it — and the node keeps working.
+        engine.registerFlow('script_flow', scriptFlow({ actionType: 'score_lead' }));
+        const result = await engine.execute('script_flow', {} as any);
+        expect(result.success).toBe(true);
+    });
+
+    it('accepts the converged shape', async () => {
+        engine.registerFlow('script_flow', scriptFlow({ function: 'score_lead' }));
+        const result = await engine.execute('script_flow', {} as any);
+        expect(result.success).toBe(true);
+    });
+
+    it('the tombstones still refuse an AUTHORED key outright, prescription and all', () => {
+        // The other channel: no conversion runs in front of a direct parse, so
+        // this is what `tsc` and `os validate` put in front of an author.
+        const result = ScriptConfigSchema.safeParse({ function: 'score_lead', actionType: 'email' });
+        expect(result.success).toBe(false);
+        expect(result.error!.issues[0]!.message).toMatch(/#4343/);
         expect(ScriptConfigSchema.parse({
-            actionType: SCRIPT_INVOKE_FUNCTION_ACTION_TYPE,
             function: 'score_lead',
             inputs: { leadId: '{record.id}' },
             outputVariable: 'score',
         })).toMatchObject({ function: 'score_lead' });
-        // Built-in side effect.
-        expect(ScriptConfigSchema.parse({ actionType: 'email', template: 't', recipients: ['a'], variables: { x: 1 } }))
-            .toMatchObject({ actionType: 'email' });
-        // Inline script — recognized (and documented as not executed).
-        expect(ScriptConfigSchema.parse({ script: 'return 1;' })).toMatchObject({ script: 'return 1;' });
     });
 });
 

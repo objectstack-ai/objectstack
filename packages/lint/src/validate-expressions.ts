@@ -168,11 +168,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
             found.value,
           );
         }
-        // #1870 — a `script` node must declare a callable target (`actionType` or
-        // `function`). A node with neither is a silent no-op that otherwise passes
-        // build. (Function *existence* isn't checkable here — functions are code,
-        // not serialized into the artifact — so this is a structural check; the
-        // runtime verifies the named function is actually registered.)
+        // #1870 — a `script` node must name a callable, and since #4343 that is
+        // the whole of what the node does: `config.function`. A node without one
+        // is a silent no-op that otherwise passes build. (Function *existence*
+        // isn't checkable here — functions are code, not serialized into the
+        // artifact — so this is a structural check; the runtime verifies the
+        // named function is actually registered.)
         if (node.type === 'script') {
           // `function` is canonical; a pre-parse source may still carry the
           // `functionName` alias during the protocol-17 window, until the
@@ -180,28 +181,34 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
           const fn =
             (typeof cfg.function === 'string' ? cfg.function.trim() : '') ||
             (typeof cfg.functionName === 'string' ? cfg.functionName.trim() : '');
+          // A source that predates #4343 may still carry a retired dispatch key.
+          // Naming it beats the generic "no callable": these ARE what the author
+          // wrote, and each has a different replacement. The schema tombstones
+          // carry the full prescription; this is the one-line version at lint.
           const action = typeof cfg.actionType === 'string' ? cfg.actionType.trim() : '';
-          // Inline `config.script` (a JS body) is also a declared form — the
-          // built-in runtime doesn't execute it (warned at run time), but the node
-          // is not the empty no-op this check targets, so don't flag it.
-          const inline = typeof cfg.script === 'string' ? cfg.script.trim() : '';
-          if (!fn && !action && !inline) {
+          const retired = ['actionType', 'template', 'recipients', 'variables', 'script']
+            .filter((k) => cfg[k] != null);
+          if (retired.length > 0) {
             issues.push({
               where: `${at} · node '${node.id}' (script) callable`,
               message:
-                `script node declares neither \`actionType\` nor \`function\` — it would do nothing at runtime. ` +
-                `Name a built-in action (e.g. \`actionType: 'email'\`) or a registered function ` +
-                `(\`function: 'my_fn'\`, registered via \`defineStack({ functions })\`).`,
+                `script node carries \`${retired.map((k) => `config.${k}`).join('`, `')}\` — retired in ` +
+                `@objectstack/spec 17 (#4343). The built-in 'email'/'slack' actions were logger-backed ` +
+                `stubs that delivered nothing, and inline \`config.script\` was never executed. ` +
+                (action && action !== 'invoke_function' && !['email', 'slack'].includes(action)
+                  ? `\`actionType: '${action}'\` named a registered function — move it to \`function: '${action}'\`. `
+                  : `Use a \`notify\` node for mail, a \`connector_action\` (Slack connector) or \`http\` node ` +
+                    `for Slack, and a registered function for logic. `) +
+                `Run \`os migrate meta --from 16\` to rewrite it automatically.`,
               source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
             });
-          } else if (action === 'invoke_function' && !fn) {
-            // `actionType: 'invoke_function'` is a marker that names no callable on
-            // its own — the function name must be in `function`/`functionName`.
+          } else if (!fn) {
             issues.push({
               where: `${at} · node '${node.id}' (script) callable`,
               message:
-                `script node uses \`actionType: 'invoke_function'\` but no \`function\` (or \`functionName\`) — ` +
-                `it names no callable. Set \`function: 'my_fn'\` and register it via \`defineStack({ functions })\`.`,
+                `script node declares no \`function\` — it would do nothing at runtime. ` +
+                `Name a registered function (\`function: 'my_fn'\`, registered via ` +
+                `\`defineStack({ functions })\`).`,
               source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
             });
           }

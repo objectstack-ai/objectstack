@@ -1,8 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor, ScreenConfigSchema, SCRIPT_BUILTIN_ACTION_TYPES } from '@objectstack/spec/automation';
-import type { ScreenConfigParsed } from '@objectstack/spec/automation';
+import { defineActionDescriptor, ScreenConfigSchema, ScriptConfigSchema } from '@objectstack/spec/automation';
+import type { ScreenConfigParsed, ScriptConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
@@ -19,28 +19,24 @@ import { parseNodeConfig } from './parse-config.js';
  *   as bare flow variables). A field-less screen — or one with
  *   `waitForInput === false` — stays a server pass-through (input vars, if any,
  *   are already injected from `context.params`).
- * - 'script' nodes name a callable to run (#1870):
- *     - `config.actionType` selecting a built-in side-effect ('email', 'slack',
- *       logger-backed), or
- *     - `config.function` (or a bare `actionType` that matches no built-in)
- *       naming a registered function — resolved via `engine.resolveFunction()`,
- *       which the host bridges to `bundle.functions` / `defineStack({ functions })`.
- *   A target that resolves to neither fails the step LOUDLY rather than the old
- *   silent "no-op handler" success, so an unwired callable can't quietly skip.
- *   The named function is contractually PURE — it returns a value and the flow
- *   graph persists it — which the descriptor publishes as
- *   `handlerContract: 'pure'` and a writing function opts out of by declaring
- *   `effect: 'writes'` where it is registered (#4396).
+ * - 'script' nodes call a registered function (#1870): `config.function` names
+ *   it, `engine.resolveFunction()` resolves it, and the host bridges that to
+ *   `bundle.functions` / `defineStack({ functions })`. A name that resolves to
+ *   nothing fails the step LOUDLY rather than the old silent "no-op handler"
+ *   success, so an unwired callable can't quietly skip. The named function is
+ *   contractually PURE — it returns a value and the flow graph persists it —
+ *   which the descriptor publishes as `handlerContract: 'pure'` and a writing
+ *   function opts out of by declaring `effect: 'writes'` where it is registered
+ *   (#4396).
+ *
+ *   #4343 converged this node to that single path. `config.actionType`'s
+ *   built-in side effects ('email' / 'slack') were logger-backed stubs that
+ *   delivered nothing, inline `config.script` was never executed (no
+ *   server-side JS sandbox), and any other `actionType` was a second spelling
+ *   of `config.function`. All five keys are retired in the spec contract, which
+ *   this executor now parses before it runs — see the note in `execute` for why
+ *   that parse is what makes the retirement audible to stored metadata.
  */
-
-/**
- * Built-in `script` side-effect action types with a (logger-backed) handler.
- * Anything else is treated as a registered-function name (#1870). The member
- * list is the spec-published `SCRIPT_BUILTIN_ACTION_TYPES` — the same constant
- * the designer's `actionType` options reconcile against (#4278), so the form,
- * this dispatch set, and the failure message below cannot disagree.
- */
-const SCRIPT_BUILTINS = new Set<string>(SCRIPT_BUILTIN_ACTION_TYPES);
 
 export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext): void {
     // screen — server-side pass-through (input vars already injected by engine).
@@ -201,7 +197,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
       },
     });
 
-    // script — dispatch by actionType.
+    // script — call the registered function named by `config.function`.
     engine.registerNodeExecutor({
       type: 'script',
       descriptor: defineActionDescriptor({
@@ -215,66 +211,41 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         handlerContract: 'pure',
       }),
       async execute(node, variables, context) {
-        const cfg = (node.config ?? {}) as Record<string, unknown>;
-        // The historical aliases (`functionName`/`input`) are canonicalized at
-        // load by the ADR-0087 D2 conversion 'flow-node-script-config-aliases'
-        // (#3796), so only the canonical keys are read here.
-        const fnRaw = cfg.function;
-        const fnName = typeof fnRaw === 'string' && fnRaw.trim() ? fnRaw.trim() : undefined;
-        const actionType = typeof cfg.actionType === 'string' && cfg.actionType.trim() ? cfg.actionType.trim() : undefined;
+        // #4343 — the contract is parsed before anything runs. A `script` node
+        // calls a registered function and nothing else, so `config.function` is
+        // required and a retired dispatch key refuses here with its tombstone
+        // prescription (`notify` for mail, a Slack connector for slack, a
+        // registered function for an inline body).
+        //
+        // A refusal is a GUARD, not a routable failure: a config that fails its
+        // contract is wrong METADATA — re-running it unchanged can never
+        // succeed — so no `fault` edge may silence it (#3863).
+        //
+        // What a STORED flow meets here is the required `function`, not the
+        // tombstones: `registerFlow` canonicalizes data at rest through the
+        // retired conversion as well (#3903), so an old `actionType: 'email'`
+        // node arrives stripped of the keys nothing read, and refuses for
+        // naming no callable. That is the behavioral change the retirement
+        // bought — the same node used to log a line and report success.
+        //
+        // The historical aliases (`functionName`/`input`) are canonicalized on
+        // the same seam by 'flow-node-script-config-aliases' (#3796), so only
+        // the canonical keys reach the parse.
+        const parsed = parseNodeConfig<ScriptConfigParsed>('script', node.id, ScriptConfigSchema, node.config);
+        if (!parsed.ok) return parsed.refusal;
+        const cfg = parsed.config;
+        const target = cfg.function.trim();
 
-        // Built-in side-effect actions keep their logger-backed behavior — but
-        // only when an explicit `function` isn't set (that always wins).
-        if (!fnName && actionType && SCRIPT_BUILTINS.has(actionType)) {
-          ctx.logger.info(
-            `[Script:${actionType}] template=${String(cfg.template)} ` +
-              `recipients=${JSON.stringify(cfg.recipients)} ` +
-              `vars=${JSON.stringify(cfg.variables)}`,
-          );
-          return {
-            success: true,
-            output: { actionType, template: cfg.template, recipients: cfg.recipients },
-          };
-        }
-
-        // Inline `config.script` (a JS source body) is a distinct, recognized
-        // form — but the built-in runtime has no server-side JS sandbox, so it
-        // does not execute it. Warn loudly (not a silent success) and steer the
-        // author to the supported path — a registered function — rather than
-        // failing the flow. Executing inline scripts is a separate capability,
-        // out of #1870's callable-resolution scope.
-        const inlineScript = typeof cfg.script === 'string' && cfg.script.trim() ? cfg.script : undefined;
-        if (!fnName && inlineScript) {
-          ctx.logger.warn(
-            `[Script] node '${node.id}': inline \`config.script\` is not executed by the built-in runtime ` +
-              `(no server-side JS sandbox) — this node is a no-op. To run server logic, move it into a ` +
-              `registered function and call it via \`config.function\` + \`defineStack({ functions })\`.`,
-          );
-          return { success: true, output: { script: 'not-executed' } };
-        }
-
-        // `actionType: 'invoke_function'` is a MARKER meaning "call the named
-        // function" — the name lives in `function`, not in actionType itself. A
-        // bare actionType that matched no built-in is still accepted as a
-        // function name (shorthand).
-        const target = fnName ?? (actionType === 'invoke_function' ? undefined : actionType);
-        if (!target) {
-          return {
-            success: false,
-            error:
-              actionType === 'invoke_function'
-                ? `script node '${node.id}': actionType 'invoke_function' requires \`config.function\` naming the function to call.`
-                : `script node '${node.id}': declares neither \`actionType\` nor \`function\` — nothing to run.`,
-          };
-        }
-
+        // Unresolvable is a RUNTIME failure, deliberately: the function
+        // registry is the host's (`defineStack({ functions })`), so the same
+        // metadata succeeds on a host that registers the name. Only the
+        // metadata itself earns a guard.
         const registration = engine.resolveFunction(target);
         if (!registration) {
           return {
             success: false,
             error:
-              `script node '${node.id}': '${target}' is not a built-in action ` +
-              `(${[...SCRIPT_BUILTINS].join(', ')}) and no function named '${target}' is registered. ` +
+              `script node '${node.id}': no function named '${target}' is registered. ` +
               `Register it via \`defineStack({ functions: { '${target}': fn } })\`, or fix the name (#1870).`,
           };
         }
@@ -283,8 +254,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         // `{var}` references against the live flow variables (so a function can
         // consume a prior node's output, e.g. `{aiResult.id}`).
         const input = interpolate(cfg.inputs ?? {}, variables, context) as Record<string, unknown>;
-        const outputVariable =
-          typeof cfg.outputVariable === 'string' && cfg.outputVariable.trim() ? cfg.outputVariable.trim() : undefined;
+        const outputVariable = cfg.outputVariable?.trim() || undefined;
         // Pure-function pattern: the function RETURNS its result; `outputVariable`
         // exposes it as a flow variable so a later declarative node persists it
         // (e.g. `update_record fields: { ai_category: '{aiResult.ai_category}' }`).

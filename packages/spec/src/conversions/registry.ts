@@ -1510,6 +1510,10 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
  * `connectorConfig.input` (singular) is a *different, canonical* surface and is
  * deliberately not touched here. Both are pure key renames with unchanged
  * values. **Live window**; retires at 18.
+ *
+ * The fixture below carried `actionType: 'invoke_function'` through both sides
+ * until #4343 retired that key — an end state protocol 17 no longer reaches, so
+ * it is gone from both. The rename itself is untouched.
  */
 const flowNodeScriptConfigAliases: MetadataConversion = {
   id: 'flow-node-script-config-aliases',
@@ -1538,7 +1542,6 @@ const flowNodeScriptConfigAliases: MetadataConversion = {
               id: 'n2',
               type: 'script',
               config: {
-                actionType: 'invoke_function',
                 functionName: 'score_lead',
                 input: { leadId: '{record.id}' },
                 outputVariable: 'score',
@@ -1558,7 +1561,6 @@ const flowNodeScriptConfigAliases: MetadataConversion = {
               id: 'n2',
               type: 'script',
               config: {
-                actionType: 'invoke_function',
                 function: 'score_lead',
                 inputs: { leadId: '{record.id}' },
                 outputVariable: 'score',
@@ -2285,6 +2287,165 @@ const datasourceReadReplicasRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * `script` node config — the four retired dispatch branches (protocol 17, #4343).
+ *
+ * A `script` node had four ways to name what it ran and only one of them ran
+ * anything. `actionType: 'email' | 'slack'` were logger-backed stubs: they wrote
+ * a line and reported success, and `template` / `recipients` / `variables` fed a
+ * message no channel ever sent — under any configuration, with or without the
+ * messaging service installed. Inline `config.script` was recognized and never
+ * executed (the built-in runtime has no server-side JS sandbox), so the node
+ * warned and no-op'd. Every remaining `actionType` value was shorthand for a
+ * registered-function name — a second spelling of `config.function` — and the
+ * `invoke_function` marker named nothing on its own.
+ *
+ * So the node converges on its one real path (call the function named by
+ * `config.function`), and the five keys leave the surface. This is what let the
+ * contract be parsed at execute time at all: while the legal key set depended on
+ * `actionType`, a flat parse would either reject valid shapes or wave everything
+ * through — see the module header of `automation/schemaless-node-config.zod.ts`.
+ *
+ * **Retired from the load path**, like every other key retired for lying rather
+ * than for being renamed (see `flow-node-wait-timeout-keys-removed` for the
+ * distinction the registry draws): silently absorbing `actionType: 'email'`
+ * would let an author keep believing the flow sends mail.
+ *
+ * A **shorthand `actionType` moves into `function`** rather than being dropped,
+ * because that is what it meant (#1870) — the same reasoning that moves
+ * `timeoutMs` into `timerDuration`. It moves only when `function` is not already
+ * set: with both present the executor always took `function`, so the shorthand
+ * was already dead metadata. The built-in ids and the `invoke_function` marker
+ * are never function names, so they are dropped, not moved.
+ *
+ * The other four keys are dropped outright: no reader ever consumed them, so
+ * there is no value to preserve. Rebuilding the intent is an authoring decision
+ * the tombstones prescribe per branch (`notify` for mail, a `connector_action`
+ * with the Slack connector — or `http` to a webhook — for Slack, a registered
+ * function for an inline body), not something a mechanical rewrite can guess.
+ *
+ * Ordering note: this runs AFTER `flow-node-script-config-aliases`, so the
+ * `functionName` → `function` rename has already happened when the shorthand
+ * rule asks whether `function` is set.
+ */
+const SCRIPT_RETIRED_BUILTIN_ACTION_TYPES = new Set(['email', 'slack']);
+const SCRIPT_RETIRED_INVOKE_FUNCTION_MARKER = 'invoke_function';
+
+function removeScriptBranchKeys(stack: Dict, emit: Emit): Dict {
+  return mapFlowNodes(stack, (node, path) => {
+    // Filtered to `script`, unlike the wait retirement: these tombstones live on
+    // the script config contract, which no other node type is parsed against.
+    if (node.type !== 'script') return node;
+    const cfg = node.config;
+    if (!isDict(cfg)) return node;
+
+    const next: Dict = { ...cfg };
+    let changed = false;
+
+    if (next.actionType != null) {
+      const actionType = typeof next.actionType === 'string' ? next.actionType.trim() : '';
+      const hasFunction = typeof next.function === 'string' && next.function.trim() !== '';
+      const isShorthand =
+        actionType !== ''
+        && actionType !== SCRIPT_RETIRED_INVOKE_FUNCTION_MARKER
+        && !SCRIPT_RETIRED_BUILTIN_ACTION_TYPES.has(actionType);
+
+      if (isShorthand && !hasFunction) {
+        next.function = actionType;
+        emit({ from: 'config.actionType', to: 'config.function', path: `${path}.config.function` });
+      } else if (isShorthand) {
+        emit({ from: 'config.actionType', to: '(removed — `config.function` already named the callable)', path: `${path}.config` });
+      } else {
+        emit({ from: 'config.actionType', to: '(removed — logger-backed stub or bare marker; nothing was delivered)', path: `${path}.config` });
+      }
+      delete next.actionType;
+      changed = true;
+    }
+
+    for (const key of ['template', 'recipients', 'variables'] as const) {
+      if (next[key] == null) continue;
+      emit({ from: `config.${key}`, to: '(removed — fed a side effect that never delivered)', path: `${path}.config` });
+      delete next[key];
+      changed = true;
+    }
+
+    if (next.script != null) {
+      emit({ from: 'config.script', to: '(removed — inline JS was never executed)', path: `${path}.config` });
+      delete next.script;
+      changed = true;
+    }
+
+    return changed ? { ...node, config: next } : node;
+  });
+}
+
+const flowNodeScriptBranchKeysRemoved: MetadataConversion = {
+  id: 'flow-node-script-branch-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface:
+    'flow.node.script.config.actionType / flow.node.script.config.template / '
+    + 'flow.node.script.config.recipients / flow.node.script.config.variables / '
+    + 'flow.node.script.config.script',
+  summary:
+    "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — "
+    + "'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / "
+    + "'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
+  apply(stack, emit) {
+    return removeScriptBranchKeys(stack, emit);
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'task_lifecycle',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            // The logger-backed stub in full: nothing here was ever delivered.
+            {
+              id: 'n2',
+              type: 'script',
+              config: {
+                actionType: 'email',
+                template: 'task_done',
+                recipients: ['{record.owner}'],
+                variables: { taskName: '{record.name}' },
+              },
+            },
+            // Shorthand for a registered function — the one value that MOVES.
+            { id: 'n3', type: 'script', config: { actionType: 'score_lead', outputVariable: 'score' } },
+            // Inline body: recognized, never executed. Dropped; the node is left
+            // naming no callable, which the execute-time parse now says out loud.
+            { id: 'n4', type: 'script', config: { script: 'return { ok: true };' } },
+            // The marker alongside the canonical key: marker dropped, key kept.
+            { id: 'n5', type: 'script', config: { actionType: 'invoke_function', function: 'score_lead' } },
+            // Already converged — left byte-identical.
+            { id: 'n6', type: 'script', config: { function: 'notify_owner', inputs: { id: '{record.id}' } } },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'task_lifecycle',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'script', config: {} },
+            { id: 'n3', type: 'script', config: { outputVariable: 'score', function: 'score_lead' } },
+            { id: 'n4', type: 'script', config: {} },
+            { id: 'n5', type: 'script', config: { function: 'score_lead' } },
+            { id: 'n6', type: 'script', config: { function: 'notify_owner', inputs: { id: '{record.id}' } } },
+          ],
+        },
+      ],
+    },
+    // n2: actionType + template + recipients + variables. n3: the move.
+    // n4: script. n5: the marker. n6: nothing.
+    expectedNotices: 7,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -2315,6 +2476,9 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     stackApiRequireAuthRemoved,
     flowNodeWaitTimeoutKeysRemoved,
     datasourceReadReplicasRemoved,
+    // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
+    // whether `config.function` is set, and that rename is what sets it.
+    flowNodeScriptBranchKeysRemoved,
   ],
 };
 
