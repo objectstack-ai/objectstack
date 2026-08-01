@@ -120,6 +120,36 @@ const REGISTRY_NAMES = new Set<string>([
   ...REFERENCE_INTEGRITY_RULES.map((r) => r.name),
 ]);
 
+/**
+ * Rules `@objectstack/lint` EXPORTS but that no authoring command runs, each
+ * with the reason it is legitimately unwired (#4449).
+ *
+ * Empty, and that is the healthy state. An entry here is a written claim that
+ * the rule has a consumer OTHER than the three commands (a Studio panel, an MCP
+ * authoring surface) — not a parking space for one nobody got round to wiring.
+ * Under ADR-0049 enforce-or-remove, a rule with no consumer at all is deleted,
+ * not ledgered.
+ */
+const UNWIRED_RULE_LEDGER: Readonly<Record<string, string>> = {};
+
+/**
+ * Every `validate*` / `lint*` symbol the lint package's public barrel exports —
+ * read from source for the same reason the call-site scans are: vitest inlines
+ * imports, so the module namespace object cannot tell an exported RULE from an
+ * exported helper the way the naming convention can.
+ */
+function exportedLintRules(): string[] {
+  const source = readFileSync(join(repoRoot, 'packages/lint/src/index.ts'), 'utf8');
+  const names = new Set<string>();
+  for (const m of source.matchAll(/export\s+(?:type\s+)?\{([^}]*)\}/g)) {
+    for (const raw of m[1].split(',')) {
+      const name = raw.trim().replace(/^type\s+/, '').split(/\s+as\s+/).pop()?.trim();
+      if (name && /^(?:validate|lint)[A-Z]/.test(name)) names.add(name);
+    }
+  }
+  return [...names].sort();
+}
+
 /** Every `lintFoo(`/`validateFoo(` call site in a source file. */
 function ruleCallsIn(source: string): string[] {
   return [...new Set(source.match(/\b(?:lint|validate)[A-Z]\w*(?=\s*\()/g) ?? [])];
@@ -285,6 +315,76 @@ describe('authoring-rule registry wiring (#4409)', () => {
     ).toEqual([]);
   });
 
+  // ── The other direction: a rule wired NOWHERE (#4449) ────────────────
+
+  /**
+   * The invariants above all start FROM a registry and look at the commands.
+   * That view is blind by construction to a rule that never entered a registry:
+   * `validateFormLayout` was implemented, unit-tested, exported and given four
+   * published rule ids, and ran on zero stacks for as long as it existed. The
+   * closure is the reverse subtraction — exported rules MINUS both registries —
+   * which is the shape #4402 (a name list guards only the names on it) and
+   * #4409 (a registry guards only what entered it) each missed one layer down.
+   */
+  it('every rule @objectstack/lint exports is wired into a registry', () => {
+    const unwired = exportedLintRules()
+      .filter((name) => !REGISTRY_NAMES.has(name))
+      .filter((name) => !(name in UNWIRED_RULE_LEDGER));
+
+    expect(
+      unwired,
+      `@objectstack/lint exports ${unwired.length} rule(s) that no authoring command runs: ` +
+        `${unwired.join(', ')}.\n` +
+        `A rule on the public export surface reads — to a human and to an AI author alike — as a ` +
+        `check the platform performs. Either register it in AUTHORING_RULES ` +
+        `(packages/cli/src/lint/authoring-rules.ts) so all three commands run it, or add it to ` +
+        `UNWIRED_RULE_LEDGER in this file WITH the real consumer that justifies it — or delete it ` +
+        `under ADR-0049 enforce-or-remove. Advertising it while running it nowhere is the one option ` +
+        `that is not available (Prime Directive #10).`,
+    ).toEqual([]);
+  });
+
+  it('the form-layout rule really runs, and really finds something', () => {
+    // The wiring assertion above proves membership. This proves the entry is
+    // live end to end: the rule reaches all three commands AND its `run`
+    // adapter returns the finding a broken stack earns. Both halves matter —
+    // #4449 is precisely a rule that existed, passed its own unit tests, and
+    // produced no output on any real stack.
+    for (const command of AUTHORING_COMMANDS) {
+      expect(
+        authoringRulesFor(command).map((r) => r.name),
+        `os ${command} must run validateFormLayout`,
+      ).toContain('validateFormLayout');
+    }
+
+    const entry = AUTHORING_RULES.find((r) => r.name === 'validateFormLayout')!;
+    const findings = entry.run(
+      {
+        objects: [{ name: 'widget', fields: { title: { type: 'text' } } }],
+        views: [
+          {
+            name: 'widget_form',
+            data: { object: 'widget' },
+            sections: [{ fields: [{ field: 'no_such_field', colSpan: 2 }] }],
+          },
+        ],
+      },
+      {},
+    );
+    expect(findings.map((f) => f.rule).sort()).toEqual([
+      'absolute-colspan-discouraged',
+      'form-field-unknown',
+    ]);
+  });
+
+  it('every ledger entry is still an exported rule', () => {
+    // Same anti-rot discipline as the two ratchets: an entry naming a rule that
+    // no longer exists silently widens the allowance for the next one.
+    const exported = new Set(exportedLintRules());
+    const stale = Object.keys(UNWIRED_RULE_LEDGER).filter((n) => !exported.has(n));
+    expect(stale, `UNWIRED_RULE_LEDGER entries no longer exported: ${stale.join(', ')}`).toEqual([]);
+  });
+
   // ── Guards the guard ─────────────────────────────────────────────────
 
   it('the registry is non-empty and still holds the rules that motivated it', () => {
@@ -314,6 +414,12 @@ describe('authoring-rule registry wiring (#4409)', () => {
     expect(emitsError("severity: 'error',")).toBe(true);
     expect(emitsError("severity: 'error' | 'warning';")).toBe(false);
     expect(emitsError("if (f.severity === 'error') return;")).toBe(false);
+    // The export scan feeding the unwired-rule closure: if it stops matching,
+    // that set difference is empty for the wrong reason.
+    const exported = exportedLintRules();
+    expect(exported.length).toBeGreaterThan(20);
+    expect(exported).toContain('validateReferenceIntegrity');
+    expect(exported).toContain('validateFormLayout');
   });
 
   it('every ratchet entry is still load-bearing', () => {
