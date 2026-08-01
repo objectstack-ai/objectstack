@@ -235,6 +235,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "コメント"
       },
+      via_override: {
+        label: "管理者オーバーライド経由",
+        help: "true の場合、実行者は特権オーバーライド経路（#3424）によってのみ許可されたことを示します — 当該リクエストの承認待ちリストには含まれていません。"
+      },
       reassign_from: {
         label: "引き継ぎ元",
         help: "承認待ちスロットを引き渡したユーザー（引き継ぎ操作のみ）"

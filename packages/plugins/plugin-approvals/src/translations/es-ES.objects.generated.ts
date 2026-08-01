@@ -235,6 +235,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "Comentario"
       },
+      via_override: {
+        label: "Mediante anulación de administrador",
+        help: "Verdadero cuando el actor fue admitido en esta acción únicamente por la vía de anulación privilegiada (#3424): no ocupaba ningún puesto en la lista de aprobadores pendientes de la solicitud."
+      },
       reassign_from: {
         label: "Reasignado de",
         help: "Usuario cuyo turno de aprobación pendiente fue traspasado (solo acciones de reasignación)"

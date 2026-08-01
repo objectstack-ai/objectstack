@@ -235,6 +235,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "Comment"
       },
+      via_override: {
+        label: "Via Admin Override",
+        help: "True when the actor was admitted to this action only by the privileged-override path (#3424) — they held no slot in the request’s pending-approver slate."
+      },
       reassign_from: {
         label: "Reassigned From",
         help: "User whose pending-approver slot was handed over (reassign actions only)"

@@ -453,6 +453,11 @@ function rowFromAction(row: any): ApprovalActionRow {
     // Structured reassign hand-off parties (#4365).
     reassign_from: row.reassign_from ?? undefined,
     reassign_to: row.reassign_to ?? undefined,
+    // #4466 — surfaced so a timeline can SAY "overridden the approver slate"
+    // rather than render an override identically to an ordinary approval.
+    // `null` (a row written before the column existed) stays `undefined`:
+    // "not recorded" is not the same claim as "not an override".
+    via_override: row.via_override == null ? undefined : row.via_override === true,
     // Decision attachments (#3266): rich descriptors carrying the display name +
     // download URL, so consumers label/open them without reading `sys_file`.
     attachments: attachments.length ? attachments : undefined,
@@ -1664,6 +1669,11 @@ export class ApprovalService implements IApprovalService {
     if (!isSlotHolder && !isOverride) {
       throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
     }
+    // #4466 — the audit fact this decision would otherwise drop: the actor was
+    // admitted ONLY by the override branch, holding no slot in the staffed
+    // slate. An admin who IS a slot holder is approving normally, so the two
+    // conditions are recorded apart rather than collapsed into "actor is admin".
+    const viaOverride = isOverride && !isSlotHolder;
 
     const config = parseJson<ApprovalNodeConfig>(raw.node_config_json, { approvers: [], behavior: 'first_response' } as any);
     const org = raw.organization_id ?? null;
@@ -1750,6 +1760,10 @@ export class ApprovalService implements IApprovalService {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: input.decision,
       actor_id: actorId, comment: input.comment ?? null,
+      // #4466: the override is recorded on the DECISION, not inferred later.
+      // Written as an explicit `false` for an ordinary decision so a reader can
+      // tell "checked, and it was not an override" from a legacy row's `null`.
+      via_override: viaOverride,
       attachments: input.attachments?.length ? input.attachments : null,
       created_at: now,
     }, { context: SYSTEM_CTX });
@@ -2405,6 +2419,11 @@ export class ApprovalService implements IApprovalService {
     }
     const isOverride = this.isOverrideActor(context, raw.organization_id ?? null);
     const from = String(input.from ?? actorId).trim();
+    // #4466 — same rule as `decideNode`: the marker records that the actor was
+    // admitted only by the privileged branch, holding no slot themselves. A
+    // reassign is the other action #3424 lets an admin take over a slate they
+    // are not on, so it carries the same fact.
+    const viaOverride = isOverride && !pending.includes(actorId);
     let next: string[];
     if (pending.includes(from)) {
       // Normal hand-off: the actor holds the slot being moved (or is a
@@ -2431,6 +2450,7 @@ export class ApprovalService implements IApprovalService {
       // comment (`"<from> → <to>"`) baked raw user ids into user-facing text.
       // `comment` is pure user input: absent unless the actor wrote one.
       actor_id: actorId, reassign_from: from, reassign_to: to,
+      via_override: viaOverride,
       comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
     // per_group / quorum (#3266): carry the delegated slot's group membership to

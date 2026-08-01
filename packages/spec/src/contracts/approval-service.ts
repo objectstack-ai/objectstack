@@ -326,6 +326,25 @@ export interface ApprovalActionRow {
   reassign_from_name?: string;
   /** Display name of `reassign_to` (`sys_user.name`), when resolvable. */
   reassign_to_name?: string;
+  /**
+   * Whether the actor was admitted to this action ONLY by the privileged
+   * admin-override path (#3424) — they held no slot in the request's
+   * pending-approver slate (#4466).
+   *
+   * Before this the two were indistinguishable in the audit trail: an admin
+   * overriding a properly-staffed slate wrote byte-for-byte the same row as the
+   * designated approver approving normally, and the bypassed approver's later
+   * `409 INVALID_STATE` was the only trace — existing only if they happened to
+   * try. The platform knows at decision time (it took the override branch to
+   * admit the call), so this was dropped information, not unavailable
+   * information. Consumers render the distinction; the whole point of an
+   * approval record is to answer "who authorized this, and were they entitled
+   * to?".
+   *
+   * `false` means checked and NOT an override. `undefined` means the row
+   * predates the column — "not recorded", which is not the same claim.
+   */
+  via_override?: boolean;
 }
 
 /** Input for a decision on an approval request. */
