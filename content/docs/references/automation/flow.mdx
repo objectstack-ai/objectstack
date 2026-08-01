@@ -84,7 +84,7 @@ const result = Flow.parse(data);
 | **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) returning boolean used for branching. |
 | **type** | `Enum<'default' \| 'fault' \| 'conditional' \| 'back'>` | optional | Connection type: default (normal flow), fault (error path), conditional (expression-guarded), or back (ADR-0044 declared back-edge — traversed normally at run time, but excluded from DAG cycle validation so a revise/rework loop can re-enter an earlier node) |
 | **label** | `string` | optional | Label on the connector |
-| **isDefault** | `boolean` | optional | Marks this edge as the default path when no other conditions match |
+| **isDefault** | `boolean` | optional | BPMN default flow: traverse this edge only when no sibling conditional edge of the same source node matched. Mutually exclusive with `condition`; at most one per source node. |
 
 
 ---
