@@ -72,8 +72,13 @@ export const ConvertLeadScreenFlow = defineFlow({
       type: 'decision',
       label: 'Already Converted?',
       config: {
+        // Bare CEL, no braces (#4336). `get_record` stores the WHOLE row under
+        // `outputVariable`, so `lead_record` is an object and the status is a
+        // field access on it — something CEL resolves and `{var}` substitution
+        // cannot: it looks for a variable literally named `lead_record.status`,
+        // finds none, and the guard was silently false for every lead.
         conditions: [
-          { label: 'Yes — already converted', expression: "{lead_record.status} == 'converted'" },
+          { label: 'Yes — already converted', expression: "lead_record.status == 'converted'" },
           { label: 'No — proceed',             expression: 'true' },
         ],
       },

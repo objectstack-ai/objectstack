@@ -114,7 +114,8 @@ export const FlowVariableSchema = lazySchema(() => z.object({
  *   label: "Is High Value?",
  *   config: {
  *     conditions: [
- *       { label: "Yes", expression: "{amount} > 10000" },
+ *       // Bare CEL, like every other condition — no `{…}` braces (#4336).
+ *       { label: "Yes", expression: "amount > 10000" },
  *       { label: "No", expression: "true" } // default
  *     ]
  *   },
