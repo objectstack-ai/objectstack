@@ -2,6 +2,8 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
 /**
  * Package Documentation Metadata Protocol (ADR-0046)
@@ -25,7 +27,34 @@ import { lazySchema } from '../shared/lazy-schema';
  * resolve relative links between docs (`[guide](./crm_lead_guide.md)`)
  * by stripping `./` and `.md` to obtain the target doc name.
  */
-export const DocSchema = lazySchema(() => z.object({
+export const DocSchema = lazySchema(() => strictObject({
+  surface: 'this doc',
+  history:
+    'Until #4001 these were dropped silently — the doc still registered, just without '
+    + 'whatever the key was meant to configure.',
+  aliases: {
+    title: 'label',
+    heading: 'label',
+    body: 'content',
+    markdown: 'content',
+    md: 'content',
+    text: 'content',
+    summary: 'description',
+    sort: 'order',
+    sortorder: 'order',
+    position: 'order',
+    category: 'group',
+    section: 'group',
+    i18n: 'translations',
+    locales: 'translations',
+  },
+  guidance: {
+    path:
+      '`path` is not a doc key. A doc\'s identity is its `name` (the source filename stem) — '
+      + 'ADR-0046 keeps `src/docs/` flat precisely so there is no path to record.',
+    slug: '`slug` is not a doc key. Use `name`; it is the filename stem and the resolution key.',
+  },
+}, {
   /**
    * Doc name; equals the source filename stem. Lowercase snake_case. A
    * namespace prefix (e.g. `crm_lead_guide`) is recommended for readable,
@@ -95,6 +124,13 @@ export const DocSchema = lazySchema(() => z.object({
     )
     .optional()
     .describe('Per-locale {label?,description?,content} variants; the base doc is the fallback'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  // See the note on `SeedSchema`: every registered metadata type gets stamped by
+  // `MetadataPlugin`'s artifact loader, and an undeclared envelope is stripped
+  // on every parse — the inverse drift that made `permission` 422 when it went
+  // strict (#4001 findings log, entry 2).
+  ...MetadataProtectionFields,
 }));
 export type Doc = z.infer<typeof DocSchema>;
 export type DocTranslation = NonNullable<Doc['translations']>[string];
