@@ -185,10 +185,10 @@ echo "✓ Bundle canary '${BUNDLE_CANARY}' present — framework client is in th
 BYTES="$(du -sk "$TARGET" 2>/dev/null | awk '{print $1}')"
 echo "✓ @objectstack/console dist ready (${BYTES} KB) from objectui@${PINNED_SHA:0:12}"
 
-# ADR-0080/0081: the public-tier SDUI manifest and the spec↔frontend react-block
-# conformance ratchet are intentionally NOT generated here — they require a real
-# browser (Playwright) to enumerate the console registry, and the console build
-# must not drag in a browser dependency. Regenerate them on demand instead:
+# ADR-0080/0081: the public-tier SDUI manifest and the spec↔registry react-block
+# declaration-parity ratchet are intentionally NOT generated here — they require a
+# real browser (Playwright) to enumerate the console registry, and the console
+# build must not drag in a browser dependency. Regenerate them on demand instead:
 #   pnpm sdui:manifest        (see scripts/gen-sdui-manifest.sh)
-echo "ℹ SDUI manifest + conformance ratchet are decoupled from the console build."
+echo "ℹ SDUI manifest + declaration-parity ratchet are decoupled from the console build."
 echo "  Run 'pnpm sdui:manifest' on demand to regenerate (requires Playwright)."
