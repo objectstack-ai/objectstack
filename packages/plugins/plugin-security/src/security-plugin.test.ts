@@ -140,7 +140,7 @@ describe('SecurityPlugin', () => {
   // wildcard `current_user.organization_id` RLS policies. Otherwise it
   // strips them so single-tenant deployments aren't filtered to nothing.
   // -------------------------------------------------------------------------
-  const makeMiddlewareCtx = (overrides: { permissionSets: PermissionSet[]; objectFields?: string[]; schemaExtra?: Record<string, any>; orgScoping?: boolean; findOneImpl?: (query: any) => any }) => {
+  const makeMiddlewareCtx = (overrides: { permissionSets: PermissionSet[]; objectFields?: string[]; schemaExtra?: Record<string, any>; orgScoping?: boolean; findOneImpl?: (query: any) => any; sharing?: any }) => {
     const fields: Record<string, any> = {};
     for (const f of overrides.objectFields ?? ['id', 'organization_id', 'owner_id', 'name']) {
       fields[f] = { name: f };
@@ -177,6 +177,10 @@ describe('SecurityPlugin', () => {
       // Sentinel object — SecurityPlugin only checks truthiness.
       services['org-scoping'] = { name: 'com.objectstack.org-scoping' };
     }
+    // [#4467] The optional plugin-sharing service. Absent by default, which is
+    // exactly the deployment shape every case above assumes; supply it to
+    // exercise the OWD/sharing half of the read scope.
+    if (overrides.sharing) services['sharing'] = overrides.sharing;
     const ctx: any = {
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       registerService: vi.fn(),
@@ -1354,6 +1358,155 @@ describe('SecurityPlugin', () => {
       };
       const filter = await plugin.getReadFilter('task', { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [] });
       expect(filter).toEqual(RLS_DENY_FILTER);
+    });
+
+    // -----------------------------------------------------------------------
+    // [#4467] The OWD / record-sharing half of the read scope.
+    //
+    // `getReadFilter` promises "the same filter the engine middleware AND-s
+    // into every find". That chain is TWO sibling middlewares — this plugin's
+    // RLS injection and plugin-sharing's owner/share visibility filter — and
+    // only the RLS half was ever computed here. The analytics raw-SQL path has
+    // no other source of scope, so `POST /analytics/query` ran with no owner
+    // predicate at all. Live repro on showcase before the fix, member holding
+    // shares on 2 of an admin's 5 private notes and no `viewAllRecords`:
+    //
+    //   GET  /data/showcase_private_note          member → total 2   correct
+    //   POST /analytics/query {measures:[count]}  member → count 5   LEAK
+    //   ... + dimensions:["title"]                member → all 5 titles
+    //
+    // The dimension case is why this is a disclosure and not just a bad count:
+    // grouping returns the VALUES of a column the caller may not read.
+    // -----------------------------------------------------------------------
+    describe('[#4467] OWD / sharing composition', () => {
+      /** A plugin-sharing double that scopes `task` to owner-or-shared. */
+      const ownerOrShared = {
+        buildReadFilter: vi.fn(async (_object: string, ctx: any) => ({
+          $or: [{ owner_id: ctx.userId }, { id: { $in: ['rec-1', 'rec-2'] } }],
+        })),
+      };
+
+      it('AND-composes the sharing predicate with the RLS filter', async () => {
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+        const harness = makeMiddlewareCtx({
+          permissionSets: [tenantPolicySet],
+          sharing: ownerOrShared,
+        });
+        await plugin.init(harness.ctx);
+        await plugin.start(harness.ctx);
+
+        const filter = await plugin.getReadFilter('task', {
+          userId: 'u1', tenantId: 'org-1', positions: [], permissions: [],
+        });
+
+        // Pre-fix this was `{ organization_id: 'org-1' }` alone — every row of
+        // the tenant, regardless of ownership.
+        expect(filter).toEqual({
+          $and: [
+            { organization_id: 'org-1' },
+            { $or: [{ owner_id: 'u1' }, { id: { $in: ['rec-1', 'rec-2'] } }] },
+          ],
+        });
+      });
+
+      it('returns the sharing predicate alone when RLS contributes nothing', async () => {
+        // An owner-private object in a deployment with no tenant policy: the
+        // sharing half is then the ONLY thing standing between the caller and
+        // every row, so it must survive on its own rather than collapsing to
+        // `undefined` with the empty RLS half.
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+        const harness = makeMiddlewareCtx({
+          permissionSets: [{
+            name: 'member_default',
+            label: 'Member',
+            objects: { '*': { allowRead: true } },
+          } as any],
+          sharing: ownerOrShared,
+        });
+        await plugin.init(harness.ctx);
+        await plugin.start(harness.ctx);
+
+        const filter = await plugin.getReadFilter('task', {
+          userId: 'u1', tenantId: 'org-1', positions: [], permissions: [],
+        });
+
+        expect(filter).toEqual({ $or: [{ owner_id: 'u1' }, { id: { $in: ['rec-1', 'rec-2'] } }] });
+      });
+
+      it('passes the ADR-0057 D1 read DEPTH the middleware would have stashed', async () => {
+        // plugin-sharing widens its owner-match from `__readScope`, which the
+        // engine middleware writes onto the context before the sharing
+        // middleware runs. No middleware runs on this path, so getReadFilter
+        // must compute it — otherwise a caller granted `org` read depth is
+        // silently narrowed to `own` here while `/data` shows them everything.
+        const capture = { buildReadFilter: vi.fn(async () => null) };
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+        const harness = makeMiddlewareCtx({
+          permissionSets: [{
+            name: 'member_default',
+            label: 'Member',
+            objects: { '*': { allowRead: true, readScope: 'unit' } },
+          } as any],
+          sharing: capture,
+        });
+        await plugin.init(harness.ctx);
+        await plugin.start(harness.ctx);
+
+        await plugin.getReadFilter('task', {
+          userId: 'u1', tenantId: 'org-1', positions: [], permissions: [],
+        });
+
+        expect(capture.buildReadFilter).toHaveBeenCalledWith(
+          'task',
+          expect.objectContaining({ __readScope: 'unit', userId: 'u1' }),
+        );
+      });
+
+      it('fail-closed: a sharing-resolution throw denies rather than under-scoping', async () => {
+        // Dropping this predicate is precisely the leak, so an unresolvable
+        // sharing layer must deny — never fall through to the RLS half alone.
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+        const harness = makeMiddlewareCtx({
+          permissionSets: [tenantPolicySet],
+          sharing: { buildReadFilter: async () => { throw new Error('share store unavailable'); } },
+        });
+        await plugin.init(harness.ctx);
+        await plugin.start(harness.ctx);
+
+        const filter = await plugin.getReadFilter('task', {
+          userId: 'u1', tenantId: 'org-1', positions: [], permissions: [],
+        });
+
+        expect(filter).toEqual(RLS_DENY_FILTER);
+      });
+
+      it('a system context still bypasses both halves', async () => {
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+        const sharing = { buildReadFilter: vi.fn(async () => ({ owner_id: 'u1' })) };
+        const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet], sharing });
+        await plugin.init(harness.ctx);
+        await plugin.start(harness.ctx);
+
+        const filter = await plugin.getReadFilter('task', { isSystem: true, userId: 'u1', tenantId: 'org-1' });
+
+        expect(filter).toBeUndefined();
+        expect(sharing.buildReadFilter).not.toHaveBeenCalled();
+      });
+
+      it('a deployment without plugin-sharing is unaffected', async () => {
+        // The service is optional; its absence must not change the RLS answer
+        // (and must not throw on the lookup).
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+        const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });
+        await plugin.init(harness.ctx);
+        await plugin.start(harness.ctx);
+
+        const filter = await plugin.getReadFilter('task', {
+          userId: 'u1', tenantId: 'org-1', positions: [], permissions: [],
+        });
+
+        expect(filter).toEqual({ organization_id: 'org-1' });
+      });
     });
   });
 

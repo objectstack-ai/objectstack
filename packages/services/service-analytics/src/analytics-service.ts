@@ -971,22 +971,41 @@ export class AnalyticsService implements IAnalyticsService {
     const known = new Set<string>([...fieldNames, 'id', 'created_at', 'updated_at']);
 
     const stripPrefix = (m: string) => (m.includes('.') ? m.split('.').slice(1).join('.') : m);
-    for (const measure of measures) {
-      const key = stripPrefix(measure);
-      const metric = cube.measures[key] as { type?: string; sql?: unknown } | undefined;
-      if (!metric) continue;
+    /** The source field a measure aggregates, or null when there is nothing to check. */
+    const sourceFieldOf = (measure: string): string | null => {
+      const metric = cube.measures[stripPrefix(measure)] as { type?: string; sql?: unknown } | undefined;
+      if (!metric) return null;
       // `count(*)` is the one legitimately field-less aggregate.
-      if (metric.type === 'count' && (metric.sql === '*' || metric.sql == null)) continue;
+      if (metric.type === 'count' && (metric.sql === '*' || metric.sql == null)) return null;
       const source = typeof metric.sql === 'string' ? metric.sql.trim() : '';
-      if (!source || source === '*' || !BARE_IDENTIFIER.test(source)) continue;
-      if (known.has(source)) continue;
+      if (!source || source === '*' || !BARE_IDENTIFIER.test(source)) return null;
+      return source;
+    };
+
+    // Two passes so the rejection can suggest the measures that WOULD have
+    // worked. On the auto-inference path `cube.measures` already carries the
+    // caller's own bogus spelling (it was inferred from the query moments ago),
+    // so echoing the cube's measure list verbatim would offer the typo back as
+    // a valid alternative — the one suggestion guaranteed to be wrong.
+    const invalid = new Set<string>();
+    for (const measure of measures) {
+      const source = sourceFieldOf(measure);
+      if (source && !known.has(source)) invalid.add(stripPrefix(measure));
+    }
+    if (invalid.size === 0) return;
+    const usable = declaredMeasures.filter((m) => !invalid.has(m));
+
+    for (const measure of measures) {
+      const source = sourceFieldOf(measure);
+      if (!source || known.has(source)) continue;
 
       const err = new Error(
         `Measure '${measure}' on cube '${cube.name}' aggregates field '${source}', which object ` +
           `'${object}' does not have. ` +
-          `Valid measures: ${declaredMeasures.join(', ') || '(none declared)'}. ` +
-          `A '<field>_sum' / '_avg' / '_min' / '_max' / '_count_distinct' measure is inferred from ` +
-          `the object's own fields, so check the spelling of '${source}'.`,
+          `Valid measures: ${usable.join(', ') || '(none)'}. ` +
+          `Other measures are inferred from the object's OWN fields as ` +
+          `'<field>_sum' / '_avg' / '_min' / '_max' / '_count_distinct', so check the spelling of ` +
+          `'${source}' — known fields: ${[...fieldNames].sort().join(', ')}.`,
       ) as Error & { code?: string; status?: number; field?: string; object?: string; param?: string; measure?: string };
       err.code = 'INVALID_FIELD';
       err.status = 400;
