@@ -773,9 +773,10 @@ edges: [
 The labels must match **exactly**. When no declared condition matches, the node
 reports the branch `default`, claimed by an out-edge labelled `'default'` or by
 the `isDefault` edge. A branch label that no out-edge carries cannot route: the
-engine logs a warning and falls back to considering every out-edge — which is
-how the mismatch above shipped silently. `os validate` reports the same shape as
-`flow-branch-label-unmatched` at build time, along with
+engine logs a warning and falls back to considering every out-edge. That
+fallback used to be silent, and a decision declaring `'Yes — already converted'`
+against an out-edge labelled `'Yes'` is how #4414 shipped. `os validate` reports
+the shape as `flow-branch-label-unmatched` at build time, along with
 `flow-decision-unconditional-branch` (a guarded decision with an unconditional
 sibling), `flow-default-edge-with-condition` and `flow-multiple-default-edges`.
 
