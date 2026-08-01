@@ -24,12 +24,14 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 - ✅ Implemented — the 17 kernel-provided protocol methods (`DataProtocol` 9 + `MetadataProtocol` 8)
 - ⚠️ Framework — the slot is filled by the kernel's in-memory fallback: real reads and
   writes, no persistence (self-declares `degraded`, ADR-0076 D12)
-- ❌ Plugin Required — the remaining 36 methods declared across the other per-domain
+- ❌ Plugin Required — the remaining 33 methods declared across the other per-domain
   contracts (`analytics` 2, `automation` 1, `packages` 6, `views` 5, `permissions` 3,
-  `workflow` 3, `realtime` 6, `notification` 7, `i18n` 3). *Declared* is not *routed*:
+  `realtime` 6, `notification` 7, `i18n` 3). *Declared* is not *routed*:
   `packages` is answered kernel-side by the `/packages` dispatcher domain over the
-  ObjectQL registry, `i18n` has a kernel in-memory fallback, and `views` / `permissions` /
-  `workflow` have no implementation anywhere — the rest wait on whatever fills the slot
+  ObjectQL registry, `i18n` has a kernel in-memory fallback, and `views` /
+  `permissions` have no implementation anywhere — the rest wait on whatever fills
+  the slot. (`workflow`'s 3 methods were the fourth such group; the whole slot
+  retired in v17, [#4451](https://github.com/objectstack-ai/objectstack/issues/4451).)
 </Callout>
 
 ---
@@ -90,10 +92,12 @@ installable optional package, so they need no remedy (`NO_REMEDY_SLOTS` in the
 guard script). And `null` there does **not** always mean "nothing ships" — it
 means "no name belongs in an `Install X` sentence", which covers two cases:
 
-- **Nothing provides the slot at all** — `search`, `workflow` (and the retired
-  `graphql`). Discovery says exactly that rather than naming a plausible
-  package: `No implementation ships for the '<slot>' slot — register a service
-  under it to enable`.
+- **Nothing provides the slot at all** — `search`. Discovery says exactly that
+  rather than naming a plausible package: `No implementation ships for the
+  '<slot>' slot — register a service under it to enable`. (`workflow` and the
+  never-real `graphql` sat here too until both were retired outright in v17,
+  [#4451](https://github.com/objectstack-ai/objectstack/issues/4451) — a slot
+  nothing fills and nothing consumes is better removed than explained.)
 - **A provider exists but cannot be installed** — `ai`. `@objectstack/service-ai`
   registers the slot in `objectstack-ai/cloud` and is `private: true`.
 
@@ -333,13 +337,18 @@ the domain answers **501** with that remedy spelled out, not a generic "install 
 plugin".
 </Callout>
 
-### 6. workflow Service — 3 methods ❌ Nothing ships
-`getWorkflowConfig`, `getWorkflowState`, `workflowTransition`  
-State machine transitions. No package registers the `workflow` slot
-(`CORE_SERVICE_PROVIDER.workflow` is `null`). Approve/reject are not workflow
-methods — per ADR-0019 they moved to the request-id-based approvals API under
-`/api/v1/approvals` (`POST /requests/:id/{approve,reject,recall}`, served by
-`@objectstack/plugin-approvals`).
+### 6. workflow Service — retired in v17
+The slot, its `IWorkflowService` contract and the three `WorkflowProtocol`
+methods (`getWorkflowConfig`, `getWorkflowState`, `workflowTransition`) were
+removed in [#4451](https://github.com/objectstack-ai/objectstack/issues/4451):
+nothing ever registered or resolved the slot (ADR-0115 Evidence 5), no method
+ever had an implementation, and no host ever mounted `/api/v1/workflow`. The
+three capabilities it named are live elsewhere — state-machine transitions are
+an object validation rule of type `state_machine`, approvals are `approval`
+flow nodes on the approvals runtime (ADR-0019 — decisions via
+`POST /api/v1/approvals/requests/:id/{approve,reject,recall}`, served by
+`@objectstack/plugin-approvals`), and record-triggered automation is lifecycle
+hooks + `record_change` flows.
 
 ### 7. automation Service — 1 method ✅ `@objectstack/service-automation`
 `triggerAutomation`  
@@ -502,10 +511,15 @@ a package that cannot be installed is a dead end, which is why
 | Slot | State |
 |:-------|:------------|
 | **ui** | Nothing registers the slot. `ViewProtocol`'s five methods are declared and unrouted; view CRUD runs through `/api/v1/meta`, and `/api/v1/ui/view/:object` is served by the `protocol` service. |
-| **workflow** | Nothing ships. `WorkflowProtocol`'s three methods have no implementation and no consumer. |
 | **search** | Nothing ships. Contract and engine enum exist in `@objectstack/spec` only. |
 | **ai** | Nothing in this repo — `service-ai` (chat, completion, models, conversations) is Cloud/EE. |
 | **realtime transport** | The service exists but no WebSocket/SSE route is mounted, so `routes.realtime` is deliberately never advertised. |
+
+The `workflow` slot used to sit in this table ("nothing ships, no consumer").
+It was retired outright in v17 (#4451, per ADR-0115 Evidence 5): the
+capability lives in `state_machine` validation rules, approval flow nodes
+(ADR-0019) and `record_change` flows, so there is nothing left for a slot to
+promise.
 
 ---
 

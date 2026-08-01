@@ -38,7 +38,13 @@ export const CoreServiceName = z.enum([
   'ai',             // AI Engine (NLQ, Chat, Suggest, Insights)
   'i18n',           // Internationalization Service
   'ui',             // UI Metadata Service (View CRUD)
-  'workflow',       // Workflow State Machine Engine
+  // `workflow` (Workflow State Machine Engine) retired in #4451 (v17):
+  // nothing ever registered or resolved the slot (ADR-0115 Evidence 5), no
+  // provider ships in either repository, and the capability is live elsewhere
+  // — `state_machine` validation rules, approval flow nodes (ADR-0019),
+  // lifecycle hooks + `record_change` flows (service-automation).
+  // (Backticks, not quotes: scripts/check-service-providers.mjs reads every
+  // quoted token in this block as an enum member, comments included.)
 ]);
 
 export type CoreServiceName = z.infer<typeof CoreServiceName>;
@@ -94,10 +100,9 @@ export const CORE_SERVICE_PROVIDER: Readonly<Record<string, string | null>> = {
   // different situations — see REMEDY_DETAIL, which is how the second one still
   // gets an accurate message.
   //
-  //   Nothing provides the slot at all: `search`, `workflow` (no consumer
-  //   either — ADR-0115 Evidence 5) and `graphql` (a surface with no provider).
-  //   Verified across BOTH repositories: nothing in `objectstack-ai/cloud`
-  //   registers them.
+  //   Nothing provides the slot at all: `search` (no consumer either —
+  //   ADR-0115 Evidence 5). Verified across BOTH repositories: nothing in
+  //   `objectstack-ai/cloud` registers it.
   //
   //   A provider exists but cannot be installed: `ai`. `@objectstack/service-ai`
   //   registers this slot in `objectstack-ai/cloud` and is `private: true`, so
@@ -105,10 +110,16 @@ export const CORE_SERVICE_PROVIDER: Readonly<Record<string, string | null>> = {
   //   exact failure this table was written to end. It carries a REMEDY_DETAIL
   //   sentence instead; a bare `null` here would tell a Cloud/Enterprise
   //   deployment that nothing ships, which is false.
+  //
+  // Two entries left in #4451 (v17). `graphql` was never a `CoreServiceName`
+  // — it existed only here and in metadata-protocol's discovery table, naming
+  // a `/graphql` surface the dispatcher had already removed as out of the
+  // product plan (#2462 follow-on); this table's guard
+  // (`scripts/check-service-providers.mjs`) only checks that every SLOT has an
+  // entry, never that every entry is a slot, so the stray sat unchallenged.
+  // `workflow` retired with its slot — see the CoreServiceName note above.
   'ai':           null,
   'search':       null,
-  'workflow':     null,
-  'graphql':      null,
 } as const;
 
 /**
@@ -205,7 +216,6 @@ export const ServiceRequirementDef = {
   notification: 'optional',
   ai: 'optional',
   ui: 'optional',
-  workflow: 'optional',
 } as const;
 
 // ==========================================

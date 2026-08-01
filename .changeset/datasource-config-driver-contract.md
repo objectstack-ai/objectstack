@@ -45,7 +45,7 @@ And the relocations — keys that were never driver config:
 | --- | --- |
 | `min` / `max` / `idleTimeoutMillis` / `connectionTimeoutMillis` | the datasource's own `pool` block |
 | `schemaMode` | next to `driver`, on the datasource |
-| `readOnly` | `capabilities: { readOnly: true }` |
+| `readOnly` | `external: { allowWrites: false }` — the enforced write gate. (This row said `capabilities: { readOnly: true }` until #4487's liveness audit found that key has no reader.) |
 | `ssl: { ca, cert, key, rejectUnauthorized }` | the datasource's own `ssl` block — inside `config`, `ssl` is the on/off boolean shorthand |
 
 Two memory-driver keys are **removed**: `indexes` and `maxRecordsPerObject`.

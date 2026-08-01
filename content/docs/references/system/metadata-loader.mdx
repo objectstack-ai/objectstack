@@ -38,7 +38,7 @@ const result = MetadataFallbackStrategy.parse(data);
 | **tableName** | `string` | ✅ | Database table name for metadata storage |
 | **fallback** | `Enum<'filesystem' \| 'memory' \| 'none'>` | ✅ | Fallback strategy when datasource is unavailable |
 | **rootDir** | `string` | optional | Root directory path |
-| **formats** | `Enum<'json' \| 'yaml' \| 'typescript' \| 'javascript'>[]` | ✅ | Enabled formats |
+| **formats** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>[]` | ✅ | Enabled formats |
 | **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer; databaseLoader?: object }` | optional | Cache settings |
 | **watch** | `boolean` | ✅ | Enable file watching |
 | **watchOptions** | `{ ignored?: string[]; persistent: boolean; ignoreInitial: boolean }` | optional | File watcher options |

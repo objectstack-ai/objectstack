@@ -79,7 +79,41 @@ const ledgerRoot = join(specRoot, 'liveness');
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource'];
+
+// Registered metadata types that are NOT yet governed — the coverage ratchet.
+//
+// WHY THIS EXISTS. `GOVERNED` was hand-maintained and nothing compared it
+// against the registry it claims to cover. So a type could be registered —
+// authorable, served by `/api/v1/meta/types/:type`, editable in Studio — and
+// simply never be asked "who reads this property?". `datasource` was in that
+// state for its whole life: #4410, #4465 and #4481 found SIX inert keys on it
+// BY HAND, two of them security-shaped (`schemaMode` left an external database
+// constructible as `managed`, DDL ungated at the driver; `ssl` configured
+// nothing while looking configured). The gate never had an opinion, because the
+// type was not on the list — and a list that governs 15 of 25 registered types
+// while reporting itself complete is worse than one that admits the gap.
+//
+// So the list is now answerable to the registry: every registered type must be
+// governed OR appear here with a reason. Registering a type and forgetting the
+// ledger fails CI with the entry to write.
+//
+// This is a RATCHET, not an allowlist to grow. An entry is a debt with an issue
+// number and the direction of travel is out of this map into GOVERNED. Do not
+// add one to silence the gate on a type you just registered — that is exactly
+// the failure this map exists to make visible, and an entry with no issue is
+// indistinguishable from never having looked.
+const PENDING_GOVERNANCE: Record<string, string> = {
+  app: 'the #4001 app step retired seven dead keys without seeding a ledger, so the rest of AppSchema is unclassified — #4488',
+  book: 'ADR-0046 documentation spine; no property audit done — #4488',
+  doc: 'ADR-0046 flat Markdown docs; small surface, unaudited — #4488',
+  email_template: 'unaudited — #4488',
+  job: 'unaudited; `job.retryPolicy` IS enforced (runtime/src/app-plugin.ts:791), so this one must not be assumed dead — #4488',
+  mapping: '#2611 reusable import mapping; unaudited — #4488',
+  seed: 'fixture/init data applied on publish; unaudited — #4488',
+  translation: 'unaudited — #4488',
+  validation: 'ValidationRuleSchema carries the ADR-0020 record state machine, so a wrong verdict is expensive; unaudited — #4488',
+};
 
 // Spec-only override: governed types whose canonical schema is NOT (yet) in the
 // metadata-type registry, so they can't be resolved via getMetadataTypeSchema.
@@ -221,6 +255,8 @@ const report: any = {
   proofMissing: [] as string[], // a bound high-risk `live` entry with no proof at all
   orphanProofs: [] as string[], // a dogfood `@proof:` tag not registered in proof-registry.mts
   orphanEntries: [] as string[], // a ledger row whose property is gone from the schema (the reverse direction)
+  ungoverned: [] as string[], // a REGISTERED metadata type absent from both GOVERNED and PENDING_GOVERNANCE
+  stalePending: [] as string[], // a PENDING_GOVERNANCE row for a type that is now governed / no longer registered
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
   evidenceLocal: 0, // repo-rooted evidence paths actually resolved against this checkout
   evidenceForeign: 0, // evidence paths attributed to objectui / cloud — not resolvable here
@@ -348,13 +384,31 @@ const staleDays = Number(staleDaysArg?.split('=')[1]) || DEFAULT_STALE_DAYS;
 const showWorklist = staleDaysArg !== undefined;
 report.verification = buildVerificationReport(verificationEntries, { staleDays });
 
+// ── coverage: is every REGISTERED metadata type accounted for? ──
+// The gate's own blind spot until #4487. Everything above asks "is every
+// property of a governed type classified?" — nothing asked "is every authorable
+// type governed?", so a type absent from GOVERNED was never in the denominator
+// and its silence read as success.
+const governedSet = new Set(GOVERNED);
+report.ungoverned = listMetadataTypeSchemaTypes()
+  .filter((t) => !governedSet.has(t) && !(t in PENDING_GOVERNANCE))
+  .sort();
+// A PENDING_GOVERNANCE row for a type that is now governed (or no longer
+// registered) is the same rot as an orphan ledger row: it claims a debt that
+// does not exist, and it makes the map's length a lie about how much is left.
+report.stalePending = Object.keys(PENDING_GOVERNANCE)
+  .filter((t) => governedSet.has(t) || !listMetadataTypeSchemaTypes().includes(t))
+  .sort();
+
 const totalUnclassified = report.unclassified.length;
 const totalProofFailures = report.proofErrors.length + report.proofMissing.length;
 const failed =
   totalUnclassified > 0 ||
   totalProofFailures > 0 ||
   report.orphanEntries.length > 0 ||
-  report.verification.errors.length > 0;
+  report.verification.errors.length > 0 ||
+  report.ungoverned.length > 0 ||
+  report.stalePending.length > 0;
 if (asJson) {
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 } else {
@@ -389,6 +443,30 @@ if (asJson) {
     console.log(`\n✗ ${totalUnclassified} UNCLASSIFIED — classify in packages/spec/liveness/<type>.json:`);
     report.unclassified.forEach((s: string) => console.log(`    ${s}`));
   }
+  if (report.ungoverned.length) {
+    console.log(`\n✗ ${report.ungoverned.length} REGISTERED metadata type(s) governed by nothing:`);
+    report.ungoverned.forEach((t: string) => console.log(`    ${t}`));
+    console.log(
+      '\n   These are authorable — `/api/v1/meta/types/:type` serves them and Studio edits\n' +
+      '   them — but no ledger asks who reads their properties, so an inert key on one is\n' +
+      '   invisible to CI. `datasource` sat here for its whole life and cost six inert keys\n' +
+      '   found by hand, two of them security-shaped (#4410, #4465, #4481).\n\n' +
+      '   Either govern the type (add it to GOVERNED and seed packages/spec/liveness/<type>.json\n' +
+      '   — see the seeding aid: `tsx check-liveness.mts --dump <type>`), or record the debt in\n' +
+      "   PENDING_GOVERNANCE with a reason AND an issue number. Do not pick the second option\n" +
+      '   just to get green: an entry with no issue behind it is indistinguishable from never\n' +
+      '   having looked, which is the state this gate exists to end.',
+    );
+  }
+  if (report.stalePending.length) {
+    console.log(`\n✗ ${report.stalePending.length} stale PENDING_GOVERNANCE row(s) — the debt is already paid:`);
+    report.stalePending.forEach((t: string) => console.log(`    ${t}`));
+    console.log(
+      '\n   The type is now governed (or no longer registered), so the row claims a debt that\n' +
+      '   no longer exists and overstates how much coverage work is left. Delete it — same\n' +
+      '   rot as an orphan ledger row, opposite direction.',
+    );
+  }
   if (report.orphanEntries.length) {
     console.log(`\n✗ ${report.orphanEntries.length} ORPHAN ledger row(s) — the property is gone from the schema:`);
     report.orphanEntries.forEach((s: string) => console.log(`    ${s}`));
@@ -418,10 +496,17 @@ if (asJson) {
   } else if (v.stale.length || v.unverified.length) {
     console.log('  run with --stale-verification[=days] for the worklist.');
   }
+  const pendingCount = Object.keys(PENDING_GOVERNANCE).length;
+  if (pendingCount) {
+    console.log(
+      `\ncoverage: ${GOVERNED.length} type(s) governed, ${pendingCount} registered type(s) awaiting a ledger ` +
+      `(${Object.keys(PENDING_GOVERNANCE).sort().join(', ')}) — a worklist, not a merge gate.`,
+    );
+  }
   if (!failed) {
     console.log(
-      '\n✓ all governed-type properties are classified, no ledger row outlives its property, ' +
-      'and all bound high-risk proofs resolve.',
+      '\n✓ all governed-type properties are classified, every registered type is governed or ' +
+      'explicitly pending, no ledger row outlives its property, and all bound high-risk proofs resolve.',
     );
   }
 }

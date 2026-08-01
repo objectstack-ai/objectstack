@@ -131,9 +131,18 @@ const externalSettingsUnknownKeyError = strictUnknownKeyError({
     password:
       '`password` must never be inlined. Put the secret in the secrets store and reference '
       + 'it with `credentialsRef` (e.g. `credentialsRef: "secret:warehouse/password"`).',
+    // #4487 corrected the second half of this line. It used to offer
+    // `capabilities.readOnly` as the place to "describe the driver" — a key the
+    // liveness audit found has NO reader (liveness/datasource.json), so an
+    // author who took the advice believed they had marked a datasource
+    // non-writable and had not. Same defect as the pre-#4410 `belongsInConfig`
+    // line documented above, on a property whose whole point is safety: a
+    // prescription must land somewhere enforced, and `allowWrites` is the only
+    // write gate there is.
     readOnly:
-      '`readOnly` is not an external-settings key. Use `allowWrites: false` here for the '
-      + 'datasource-wide gate, or `capabilities.readOnly` to describe the driver.',
+      '`readOnly` is not an external-settings key. Use `allowWrites: false` here — it is the '
+      + 'enforced datasource-wide write gate (checked by the ObjectQL engine before any write '
+      + 'to a federated datasource).',
   },
   history: 'Until #4001 these were dropped silently — federation ran on the defaults instead.',
 });

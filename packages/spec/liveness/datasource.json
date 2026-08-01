@@ -1,0 +1,177 @@
+{
+  "type": "datasource",
+  "_note": "DatasourceSchema. Consumers: @objectstack/service-datasource (DatasourceConnectionService.toSpec → DatasourceConnectionSpec → createDefaultDatasourceDriverFactory), @objectstack/objectql (engine.ts federation write gate), @objectstack/runtime (external-validation-plugin). Seeded 2026-08-01 (#4487) after #4465/#4481 found six inert keys BY HAND on a type no gate governed. Method: the authoritative boundary is what crosses into `ConnectableDatasource` (datasource-connection-service.ts:45-74) and `DatasourceConnectionSpec` (contracts/datasource-driver-factory.ts:25-59) — a block on neither reaches no driver. objectui's DatasourcePreview renders `pool`/`ssl`/`retryPolicy`/`healthCheck` as SideBlocks and is NOT counted as evidence for any entry (see README, 'An authoring/preview renderer is NOT a runtime consumer' — the #4481 precedent was exactly this). Framework provenance/lock fields auto-live.",
+  "props": {
+    "name": {
+      "status": "live",
+      "evidence": "packages/services/service-datasource/src/datasource-connection-service.ts:674",
+      "note": "registry key + the driver name the engine routes on (`driver.name` must equal it)."
+    },
+    "label": {
+      "status": "live",
+      "note": "display metadata (Setup → Datasources list). No runtime consumer by design — ADR-0033 docs-shaped, deliberately kept, not authorWarn'd."
+    },
+    "driver": {
+      "status": "live",
+      "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:334",
+      "note": "factory dispatch; `resolveDriverId` normalizes aliases before the switch."
+    },
+    "config": {
+      "status": "live",
+      "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:129",
+      "note": "per-driver connection config. Validated against the driver contract since #4410 (data/driver/config-registry.zod.ts). NOTE the walk boundary: `config` is a `z.record`, so the gate cannot see inside it — the keys an author actually writes (`host`, `port`, `filename`) are governed by the per-driver zod schemas in data/driver/*.zod.ts, not by this ledger. That is a real gap in coverage, recorded here rather than left implicit."
+    },
+    "pool": {
+      "children": {
+        "min": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:181",
+          "note": "knex pool floor. Live only since #4465 — the factory used to hardcode `{ min: 0, max: 5 }` over the carried value."
+        },
+        "max": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:182",
+          "note": "knex pool ceiling; also mapped onto the Mongo client's maxPoolSize (#4465)."
+        },
+        "idleTimeoutMillis": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:183",
+          "note": "passed through to knex verbatim."
+        },
+        "connectionTimeoutMillis": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:184",
+          "note": "mapped onto knex's `acquireTimeoutMillis` (different name, same meaning)."
+        }
+      }
+    },
+    "capabilities": {
+      "children": {
+        "transactions": { "status": "dead", "authorWarn": true, "authorHint": "Delete it. The engine gates pushdown on the runtime driver's own `supports.*` object (objectql/src/engine.ts:3671, :4529, :4810 — `autonumber`, `queryDateGranularity`, `batchSchemaSync`), which is a different mechanism with a different vocabulary. Nothing reads this block." },
+        "queryFilters": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. Filter support is not negotiated through datasource metadata." },
+        "queryAggregations": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. Whether aggregation runs in SQL or in memory is decided by the driver's own code path, never by this flag." },
+        "querySorting": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`." },
+        "queryPagination": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`." },
+        "queryWindowFunctions": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. Window functions were themselves retired from the query surface in #4286." },
+        "querySubqueries": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`." },
+        "joins": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. `query.joins` was retired in #4286; related-record retrieval is `expand`." },
+        "fullTextSearch": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. Search capability is deployment/locale-gated in the search companion, not declared here." },
+        "readOnly": {
+          "status": "dead",
+          "authorWarn": true,
+          "authorHint": "Delete it. It does NOT make a datasource read-only — no write path consults it. The enforced datasource-wide write gate is `external.allowWrites: false` (objectql/src/engine.ts:620), which requires `schemaMode !== 'managed'`.",
+          "note": "The most dangerous entry in this ledger and the reason it was seeded. `readOnly` reads as a safety property, and until this PR TWO shipped prescriptions pointed authors AT it: the `externalSettingsUnknownKeyError` guidance in datasource.zod.ts and the #4465 changeset's relocation table both offered `capabilities.readOnly` as the place to 'describe the driver'. Both were corrected in #4487. An author following that advice believed they had marked a datasource non-writable and had not."
+        },
+        "dynamicSchema": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. Whether a driver is schemaless is a property of the driver, and the drivers that are (mongo, memory) behave that way unconditionally." }
+      },
+      "note": "All 11 dead, verified 2026-08-01 by closing the call graph in both directions: (1) `capabilities` is absent from ConnectableDatasource AND DatasourceConnectionSpec, so it cannot reach a driver; (2) grepping each flag name across the monorepo returns only packages/spec — the schema's own declaration, its alias table, and the `*DriverSpec` literals in data/driver/*.zod.ts. The engine's real capability seam is `driver.supports?.*` on the runtime driver OBJECT, whose keys (`autonumber`, `batchSchemaSync`, `queryDateGranularity`) do not overlap with this vocabulary at all. `having-filter.ts:13` states the position plainly in a comment: 'SQL pushdown can come later behind a driver capability flag' — i.e. the mechanism this block describes is not built."
+    },
+    "healthCheck": {
+      "children": {
+        "enabled": { "status": "dead", "authorWarn": true, "authorHint": "Delete it. No health-check loop reads this block. Connection liveness is probed on demand via the driver handle's `ping()` / `checkHealth()` (contracts/datasource-driver-factory.ts:88-92), which the admin service calls for `testConnection` — not on any interval this could enable." },
+        "intervalMs": { "status": "dead", "authorWarn": true, "authorHint": "Delete it. Nothing schedules a datasource health check, so there is no interval to set. The only recurring datasource timer is `external.validation.checkIntervalMs` (schema-drift checking, a different concern)." },
+        "timeoutMs": { "status": "dead", "authorWarn": true, "authorHint": "Delete it. See `healthCheck.intervalMs` — there is no probe loop for this to bound." }
+      },
+      "note": "All 3 dead, verified 2026-08-01. `healthCheck` is absent from ConnectableDatasource and DatasourceConnectionSpec. Every `healthCheck` hit in the monorepo belongs to a DIFFERENT surface — the PLUGIN health monitor (core/src/health-monitor.ts, core/src/plugin-loader.ts:316), the AI model registry, the integration connector, `StartupOrchestratorOptions.healthCheck`. Name collision, not a consumer. Easy to mis-verify: a bare grep for 'healthCheck' returns 20 hits and none of them is this block."
+    },
+    "ssl": {
+      "children": {
+        "enabled": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:111",
+          "note": "`enabled: false` short-circuits to `ssl: false`; otherwise the block is assembled into client TLS options."
+        },
+        "rejectUnauthorized": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:114"
+        },
+        "ca": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:115"
+        },
+        "cert": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:116"
+        },
+        "key": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:117"
+        }
+      },
+      "note": "Live only since #4465. Before that the whole block stopped at the record — nothing put it on the connection spec, so a TLS configuration with a CA certificate in it configured nothing while looking identical to one that worked. A security-shaped property that was silently inert; exactly the ADR-0078 class this ledger exists to catch, and it was found by hand rather than by a gate."
+    },
+    "retryPolicy": {
+      "children": {
+        "maxRetries": { "status": "dead", "authorWarn": true, "authorHint": "Delete it. No connect or query path retries on this block. Connection failure handling is the boot policy in datasource-connection-service.ts (degraded boot / `bootCritical` fail-fast), which does not retry on a schedule. Do not confuse this with `hook.retryPolicy` (enforced, objectql/src/hook-wrappers.ts:105) or `job.retryPolicy` (enforced, runtime/src/app-plugin.ts:791) — same key name, different types, different shapes." },
+        "baseDelayMs": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `retryPolicy.maxRetries`. Note this key does not even exist on the two retryPolicy blocks that ARE enforced: `hook.retryPolicy` spells its delay `backoffMs`." },
+        "maxDelayMs": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `retryPolicy.maxRetries`." },
+        "backoffMultiplier": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `retryPolicy.maxRetries`." }
+      },
+      "note": "All 4 dead, verified 2026-08-01. Absent from ConnectableDatasource and DatasourceConnectionSpec. The trap here is the name: `retryPolicy` IS enforced on `hook` and on `job`, so a grep for the key looks alive and a reader who stops there concludes the datasource one works too. The shapes differ — hook uses `{maxRetries, backoffMs}`, this declares `{maxRetries, baseDelayMs, maxDelayMs, backoffMultiplier}` — which is itself the tell that nothing reads both."
+    },
+    "description": {
+      "status": "live",
+      "note": "internal documentation. No runtime consumer by design — ADR-0033 docs-shaped, deliberately kept, not authorWarn'd."
+    },
+    "active": {
+      "status": "live",
+      "evidence": "packages/services/service-datasource/src/datasource-connection-service.ts:296",
+      "note": "`active: false` skips the datasource in the boot auto-connect sweep, and datasource-admin-plugin.ts:424 excludes it from the runtime re-registration set. Genuinely enforced — unlike `flow.active` / `tool.active`, both of which were retired in v17 for claiming this and not delivering it."
+    },
+    "autoConnect": {
+      "status": "live",
+      "evidence": "packages/services/service-datasource/src/datasource-connection-service.ts:233",
+      "note": "ADR-0062 D2(c): opts a managed, unrouted datasource into the boot connect sweep."
+    },
+    "schemaMode": {
+      "status": "live",
+      "evidence": "packages/services/service-datasource/src/datasource-connection-service.ts:679",
+      "note": "carried onto the connection spec (#4410) and gates DDL at the driver; also read by objectql/src/engine.ts:620 for the federation write gate. Live only since #4465 — before that it was dropped between record and spec, so an `external` database ObjectStack must never run DDL against was constructed as `managed`. Security-shaped and silently inert; the second reason this ledger was seeded."
+    },
+    "external": {
+      "children": {
+        "label": {
+          "status": "dead",
+          "authorWarn": true,
+          "authorHint": "Delete it. Nothing reads the federation block's own label — use the datasource's top-level `label`, which the Setup list renders."
+        },
+        "allowedSchemas": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/external-datasource-service.ts:145",
+          "note": "restricts which remote schemas browse/introspect will surface (ADR-0015)."
+        },
+        "allowWrites": {
+          "status": "live",
+          "evidence": "packages/objectql/src/engine.ts:620",
+          "note": "the enforced datasource-wide write gate (Gate 3). This — not `capabilities.readOnly` — is how a federated datasource is made read-only."
+        },
+        "validation": {
+          "status": "live",
+          "evidence": "packages/runtime/src/external-validation-plugin.ts:153, packages/runtime/src/external-validation-plugin.ts:231",
+          "note": "`onMismatch` selects the drift policy (default 'fail'); `checkIntervalMs` schedules the recurring drift check; `checkOnBoot` gates the boot-time one. Also read by the degraded-boot classifier (packages/types/src/degraded-boot.ts:13)."
+        },
+        "credentialsRef": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/datasource-connection-service.ts:457",
+          "note": "dereferenced through the SecretBinder to cleartext for the duration of one connect; never persisted or logged (ADR-0015 Addendum)."
+        },
+        "queryTimeoutMs": {
+          "status": "live",
+          "evidence": "packages/services/service-datasource/src/datasource-admin-service.ts:220",
+          "note": "carried into the external-datasource probe options as `timeoutMs`."
+        },
+        "requirePermission": {
+          "status": "dead",
+          "authorWarn": true,
+          "authorHint": "Delete it. No authorization check consults it — a permission named here gates nothing, and access to a federated datasource's data is governed by the ordinary object permission sets and RLS. Naming a permission that is never required is the same false-compliance shape as the retired `tool.permissions` (#3896)."
+        }
+      },
+      "note": "5 of 7 live. The two dead ones are opposite in risk: `external.label` is cosmetic, `external.requirePermission` is security-shaped — it reads as an access gate and is not one."
+    },
+    "origin": {
+      "status": "live",
+      "evidence": "packages/services/service-datasource/src/datasource-admin-plugin.ts:244",
+      "note": "server-stamped provenance (ADR-0015 Addendum). `code` marks a GitOps-owned datasource read-only in the UI; `runtime` marks one editable and re-registrable (datasource-admin-plugin.ts:424). Never accepted from client input."
+    }
+  }
+}

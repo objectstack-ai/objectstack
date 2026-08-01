@@ -33,10 +33,11 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Capability tokens a script body may request.
 - `node_modules/@objectstack/spec/src/kernel/cluster.zod.ts` — Cluster Protocol
 - `node_modules/@objectstack/spec/src/kernel/metadata-customization.zod.ts` — Metadata Customization Layer Protocol
-- `node_modules/@objectstack/spec/src/kernel/metadata-loader.zod.ts` — Metadata Loader Protocol
+- `node_modules/@objectstack/spec/src/kernel/metadata-loader.zod.ts` — Metadata Manager Configuration
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema
+- `node_modules/@objectstack/spec/src/shared/metadata-types.zod.ts` — Exports: MetadataFormatSchema, BaseMetadataRecordSchema
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
 - `node_modules/@objectstack/spec/src/system/tenant.zod.ts` — Tenant Schema (Multi-Tenant Architecture)

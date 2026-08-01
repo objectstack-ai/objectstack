@@ -23,9 +23,9 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     expect(discovery.services.auth.enabled).toBe(false);
     expect(discovery.services.auth.status).toBe('unavailable');
     expect(discovery.services.auth.message).toContain('plugin-auth');
-    // capabilities removed — derive from services
-    expect(discovery.services.workflow).toBeDefined();
-    expect(discovery.services.workflow.enabled).toBe(false);
+    // capabilities removed — derive from services. (`workflow` was the slot
+    // pinned here until it retired in #4451; it must now be absent entirely.)
+    expect(discovery.services).not.toHaveProperty('workflow');
   });
 
   it('should return available auth service when auth is registered', async () => {
@@ -109,18 +109,20 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
   });
 
   it('should report a __serviceInfo-marked service with its declared status', async () => {
+    // Was pinned on `workflow` until that slot retired (#4451, v17); `auth`
+    // exercises the same marked-service path.
     const mockServices = new Map<string, any>();
-    mockServices.set('workflow', {
+    mockServices.set('auth', {
       __serviceInfo: { status: 'degraded', message: 'partial impl' },
     });
 
     protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
     const discovery = await protocol.getDiscovery();
 
-    expect(discovery.services.workflow.enabled).toBe(true);
-    expect(discovery.services.workflow.status).toBe('degraded');
-    expect(discovery.services.workflow.handlerReady).toBe(true);
-    expect(discovery.services.workflow.message).toBe('partial impl');
+    expect(discovery.services.auth.enabled).toBe(true);
+    expect(discovery.services.auth.status).toBe('degraded');
+    expect(discovery.services.auth.handlerReady).toBe(true);
+    expect(discovery.services.auth.message).toBe('partial impl');
   });
 
   it('should report a registered analytics service with its self-declared status', async () => {
@@ -332,13 +334,14 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     expect(discovery.routes.i18n).toBe('/api/v1/i18n');
   });
 
-  // Not every SERVICE_CONFIG entry is dispatcher-owned: `search` (REST layer),
-  // `workflow` and `graphql` have their routes mounted by the plugin that
-  // registers the service, so `handlerReady` there says nothing about whether
-  // THAT route is mounted and the advertisement stays presence-gated.
-  // Suppressing it would be a guess, not honesty. (cache/queue/job used to be
-  // named here on the same theory, but nothing mounts routes for them at all —
-  // they are route-less kernel-internal slots since #4318.)
+  // Not every SERVICE_CONFIG entry is dispatcher-owned: `search` (REST
+  // layer) has its route mounted by the plugin that registers the service,
+  // so `handlerReady` there says nothing about whether THAT route is mounted
+  // and the advertisement stays presence-gated. Suppressing it would be a
+  // guess, not honesty. (cache/queue/job used to be named here on the same
+  // theory, but nothing mounts routes for them at all — route-less
+  // kernel-internal slots since #4318; `workflow` and `graphql` retired
+  // outright in #4451.)
   it('should leave non-dispatcher-owned routes presence-gated', async () => {
     const mockServices = new Map<string, any>();
     mockServices.set('search', { __serviceInfo: { status: 'stub', message: 'dev fake' } });
@@ -433,17 +436,19 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
   });
 
   it('should return capabilities field populated from registered services', async () => {
+    // Was pinned on `workflow` until that slot retired (#4451, v17); `ui`
+    // is likewise registered without mapping to a well-known capability.
     const mockServices = new Map<string, any>();
-    mockServices.set('workflow', {});
-    
+    mockServices.set('ui', {});
+
     protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
     const discovery = await protocol.getDiscovery();
-    
+
     // capabilities field should now exist in the response
     expect(discovery.capabilities).toBeDefined();
-    // workflow is registered but doesn't map to a well-known capability directly
-    expect(discovery.services.workflow.enabled).toBe(true);
-    // All well-known capabilities should be disabled since workflow doesn't map to any
+    // ui is registered but doesn't map to a well-known capability directly
+    expect(discovery.services.ui.enabled).toBe(true);
+    // All well-known capabilities should be disabled since ui doesn't map to any
     // (comments derives from the sys_comment object, which is not registered here).
     expect(discovery.capabilities!.comments).toEqual({ enabled: false });
     expect(discovery.capabilities!.automation).toEqual({ enabled: false });

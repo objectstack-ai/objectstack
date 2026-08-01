@@ -29,10 +29,11 @@ describe('CoreServiceName → contract map (#4127)', () => {
         // The map's keys are checked against the enum at compile time below;
         // this asserts the same thing at runtime so a rename shows up as a
         // failing test and not only as a type error in an unrelated package.
+        // ('workflow' left both lists with its slot, #4451 v17.)
         const mapped: Array<keyof CoreServiceContracts> = [
             'metadata', 'data', 'auth', 'file-storage', 'search', 'cache', 'queue',
             'automation', 'analytics', 'realtime', 'job', 'notification', 'ai',
-            'i18n', 'workflow',
+            'i18n',
         ];
         const slots = new Set<string>(CoreServiceName.options);
         for (const key of mapped) {
@@ -44,7 +45,7 @@ describe('CoreServiceName → contract map (#4127)', () => {
         const mapped = new Set<string>([
             'metadata', 'data', 'auth', 'file-storage', 'search', 'cache', 'queue',
             'automation', 'analytics', 'realtime', 'job', 'notification', 'ai',
-            'i18n', 'workflow',
+            'i18n',
         ]);
         const unmapped = CoreServiceName.options.filter((s) => !mapped.has(s));
         // `ui` has a slot and a serving domain but no `IUiService` — mapping it

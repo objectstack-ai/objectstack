@@ -37,9 +37,9 @@ import { ActionSchema } from '../ui/action.zod';
  * - **Kubernetes**: API Server + CRD Registry
  *
  * ## References
- * - kernel/metadata-loader.zod.ts — Storage backend protocol
+ * - kernel/metadata-loader.zod.ts — MetadataManager wiring (datasource, cache, write gates)
  * - kernel/metadata-customization.zod.ts — Overlay/merge protocol
- * - system/metadata-persistence.zod.ts — Database record format
+ * - system/metadata-persistence.zod.ts — Database record format + loader/watch envelope types
  * - contracts/metadata-service.ts — Service interface
  */
 

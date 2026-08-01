@@ -10,11 +10,12 @@ import {
 
 describe('CoreServiceName', () => {
   it('should accept all valid service names', () => {
+    // ('workflow' retired with its slot, #4451 v17.)
     const services = [
       'metadata', 'data', 'auth',
       'file-storage', 'search', 'cache', 'queue',
       'automation', 'analytics', 'realtime',
-      'job', 'notification', 'ai', 'i18n', 'ui', 'workflow',
+      'job', 'notification', 'ai', 'i18n', 'ui',
     ];
 
     services.forEach((service) => {
@@ -67,7 +68,8 @@ describe('ServiceRequirementDef', () => {
     expect(ServiceRequirementDef.notification).toBe('optional');
     expect(ServiceRequirementDef.ai).toBe('optional');
     expect(ServiceRequirementDef.ui).toBe('optional');
-    expect(ServiceRequirementDef.workflow).toBe('optional');
+    // `workflow` retired with its slot (#4451, v17).
+    expect(ServiceRequirementDef).not.toHaveProperty('workflow');
   });
 });
 
