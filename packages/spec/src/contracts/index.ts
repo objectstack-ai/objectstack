@@ -31,7 +31,9 @@ export * from './job-service.js';
 export * from './ai-service.js';
 export * from './llm-adapter.js';
 export * from './i18n-service.js';
-export * from './workflow-service.js';
+// './workflow-service.js' removed (#4451, v17): IWorkflowService had no
+// implementation and no `getService('workflow')` call site anywhere
+// (ADR-0115 Evidence 5); the slot retired with it.
 
 // CoreServiceName → contract map (#4127). Lets a slot lookup return the slot's
 // contract instead of `any`, so a call outside it is a compile error.

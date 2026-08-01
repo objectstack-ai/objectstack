@@ -5,13 +5,11 @@ description: Metadata Loader protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# Metadata Loader Protocol
+# Metadata Manager Configuration
 
-Defines the standard interface for loading and saving metadata in ObjectStack.
+How the runtime `MetadataManager` is wired: which datasource backs `sys_metadata`, what to fall back to when that datasource is unreachable, cache / watch / validation settings, and the persistence write gates.
 
-This protocol enables consistent metadata operations across different storage backends
-
-(filesystem, HTTP, S3, databases) and serialization formats (JSON, YAML, TypeScript).
+The loader and watch *envelope* types (`MetadataFormat`, `MetadataStats`, `MetadataLoadOptions`, `MetadataWatchEvent`, `MetadataLoaderContract`, …) are NOT here — they live in `@objectstack/spec/system` (`system/metadata-persistence.zod`), which is their single source.
 
 <Callout type="info">
 **Source:** `packages/spec/src/kernel/metadata-loader.zod.ts`
@@ -50,7 +48,7 @@ const result = MetadataFallbackStrategy.parse(data);
 | **tableName** | `string` | ✅ | Database table name for metadata storage |
 | **fallback** | `Enum<'filesystem' \| 'memory' \| 'none'>` | ✅ | Fallback strategy when datasource is unavailable |
 | **rootDir** | `string` | optional | Root directory path |
-| **formats** | `Enum<'json' \| 'yaml' \| 'typescript' \| 'javascript'>[]` | ✅ | Enabled formats |
+| **formats** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>[]` | ✅ | Enabled formats |
 | **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer; databaseLoader?: object }` | optional | Cache settings |
 | **watch** | `boolean` | ✅ | Enable file watching |
 | **watchOptions** | `{ ignored?: string[]; persistent: boolean; ignoreInitial: boolean }` | optional | File watcher options |

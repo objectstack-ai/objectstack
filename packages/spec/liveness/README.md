@@ -503,9 +503,25 @@ EOF
 | report | 13 | 0 | 0 | – | dataset-bound (ADR-0021); the aria/performance LEDGER entries were stale — the keys left the schema in the report-liveness close-out; deleted 2026-07-30 as hygiene. Audit-era `chart` DEAD superseded (framework#1890 / #3441) |
 | dashboard | 10 | 0 | 2 | – | ADR-0021 dataset widgets (#3251; DashboardWidgetSchema `.strict()`); `aria`/`performance` (and widget `performance` + PerformanceConfigSchema) REMOVED 2026-07-30 (#3896 close-out sweep — no renderer applied any of them); audit-era `globalFilters`/`dateRange` DEAD superseded (framework#2501) |
 | query | 16 | 7 | 4 | – | **not a metadata type** — the REQUEST surface (`QuerySchema`: client SDK QueryBuilder output; the `POST /data/:object/query` body), governed via `SPEC_ONLY_SCHEMAS` (#4286). The 7 experimental resolve from `[EXPERIMENTAL — not enforced]` describe markers, not ledger entries (search `fuzzy`/`operator`/`boost`/`minScore`/`language`/`highlight` + `aggregations[].filter` — declared engine affordances no executor receives). The #4286 sweep closed out same-release: `having` ENFORCED 2026-07-31 (engine-side post-aggregation filter, both paths; was finding 1); dead 4 = the tombstoned removals `joins`/`windowFunctions`/`cursor`/`distinct` — REMOVED 2026-07-31 (retiredKey keeps each in the walked shape so the rows stay; protocol-17 semantic migrations; the JoinNode + WindowFunctionNode clusters and the `QueryBuilder.cursor()`/`.distinct()` producers deleted with their keys; `distinct`'s mis-wired REST count suppression deleted too — finding 2) |
+| datasource | 23 | – | 20 | – | seeded 2026-08-01 (#4487) — the **highest dead ratio of any governed type** (20 of 43), and it was ungoverned until now, which is not a coincidence: #4410/#4465/#4481 found six inert keys here by hand, two security-shaped (`schemaMode` left an external DB constructible as `managed` with DDL ungated; `ssl` configured nothing while looking configured). Dead set = `capabilities.*` (all 11 — the engine gates pushdown on the runtime driver's `supports.*` object, a non-overlapping vocabulary), `healthCheck.*` (3 — nothing schedules a datasource probe; the 20 `healthCheck` hits in the repo all belong to the PLUGIN health monitor and other surfaces), `retryPolicy.*` (4 — `retryPolicy` IS enforced on `hook` and `job`, which is what makes this one read alive; the shapes differ), `external.label`, `external.requirePermission`. **`capabilities.readOnly` is the one to know**: it reads as a safety switch, gates nothing, and two shipped prescriptions pointed authors at it until #4487 — `external.allowWrites: false` is the enforced write gate. `config` is a `z.record`, so its per-driver keys sit outside the walk (recorded in the entry's note, not silently skipped) |
 | webhook | 0 | 1 | 16 | – | **not a registered metadata type** — governed via the gate's spec-only schema override (`SPEC_ONLY_SCHEMAS`), not `getMetadataTypeSchema` (#3461/#3462). The ENTIRE authoring surface is dead: nothing materializes an authored `webhooks:` entry into a `sys_webhook` dispatcher row (#3461, enforce-or-remove pending). `url` carries the single per-webhook `authorWarn` (one no-op heads-up per artifact, not per-prop); `authentication` experimental (HMAC-`secret`-only); `isActive` unmarked (default(true)). Notes cite the sys_webhook column map as the future materializer's mapping table |
 
 The `dead` set across types is the enforce-or-remove worklist (ADR-0049); every
 misleading entry carries `authorWarn` so authors hear about it at compile time.
-Not yet governed (rollout): app, job, datasource,
-translation, email_template, doc, book, validation, seed.
+Not yet governed: app, job, translation, email_template, doc, book, validation,
+seed — now enumerated in `PENDING_GOVERNANCE` in `check-liveness.mts` and
+enforced (#4487; worklist #4488). This paragraph used to be the only record of
+the rollout gap, which is precisely why the gap survived: prose in a README
+cannot fail a build, so a registered type nobody had ever audited looked
+identical to one audited and found clean. The gate now compares `GOVERNED`
+against the metadata-type registry and refuses a type in neither list.
+
+⚠️ **Several count columns above are stale**, and #4487 deliberately did not
+bulk-correct them. Two methods disagree — the python snippet below counts ledger
+JSON entries, while the gate's `--json` report also resolves `describe()` markers
+and drills `children` differently — and the `query` and `webhook` rows are
+annotated beyond either (see their notes). A mechanical rewrite with the wrong
+method silently flattens those annotations; that was attempted while writing
+#4487 and produced two regressions before being caught. Fixing this properly
+means deciding which method the table means and recording it here. Tracked in
+#4488.

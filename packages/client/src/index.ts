@@ -4542,7 +4542,8 @@ export class ObjectStackClient {
       automation: '/api/v1/automation',
       packages: '/api/v1/packages',
       realtime: '/api/v1/realtime',
-      workflow: '/api/v1/workflow',
+      // `workflow` removed (#4451, v17): the slot retired with the ApiRoutes
+      // field — there was never a surface behind the convention.
       approvals: '/api/v1/approvals',
       notifications: '/api/v1/notifications',
       ai: '/api/v1/ai',
@@ -4963,10 +4964,8 @@ export type {
   RealtimeSubscribeRequest,
   RealtimeSubscribeResponse,
   GetPresenceResponse,
-  GetWorkflowConfigResponse,
-  GetWorkflowStateResponse,
-  WorkflowTransitionRequest,
-  WorkflowTransitionResponse,
+  // Workflow re-exports removed (#4451, v17): the types were deleted from
+  // @objectstack/spec/api with the retired workflow slot.
   ListViewsResponse,
   GetViewResponse,
   CreateViewResponse,

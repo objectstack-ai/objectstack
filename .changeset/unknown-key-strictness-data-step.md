@@ -26,8 +26,12 @@ Deliberately still tolerant:
   runtime shape the engine hands a handler. Strictness there would turn an
   engine-internal enrichment (as `provenance` was in #3712) into a breaking
   change for anyone parsing a context they were given.
-- `datasource.config` and `readReplicas` — per-driver by construction; the
-  driver's own `configSchema` validates them.
+- `datasource.config` — per-driver by construction (a sqlite `filename` and a
+  postgres `host`/`port` share no shape). Left open here and closed one level
+  down instead: #4410 parses it against the contract for the declared driver.
+  This bullet used to say "the driver's own `configSchema` validates them",
+  which was not true when it was written — the field existed and nothing read
+  it.
 
 Errors are self-fixing: connection keys written one level too high (`host`,
 `port`, `filename`, `url`, …) are prescribed into `config`; a top-level

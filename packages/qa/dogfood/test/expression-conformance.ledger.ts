@@ -155,7 +155,12 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     covers: [
       'automation/flow.zod.ts:condition',
       'automation/sync.zod.ts:condition',
-      'kernel/metadata-loader.zod.ts:filter',
+      // `kernel/metadata-loader.zod.ts:filter` (on MetadataLoadOptions and
+      // MetadataExportOptions) was removed with the rest of that file's
+      // zero-consumer duplicate envelope family in #4411. The surviving
+      // `system/metadata-persistence.zod` copies of those options never
+      // declared a `filter` — so no loader predicate was ever evaluated
+      // through this surface, and there is nothing to re-point at.
     ],
   },
   {

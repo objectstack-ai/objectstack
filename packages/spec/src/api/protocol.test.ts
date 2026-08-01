@@ -28,12 +28,7 @@ import {
   GetObjectPermissionsRequestSchema,
   GetObjectPermissionsResponseSchema,
   GetEffectivePermissionsResponseSchema,
-  // Workflows
-  GetWorkflowConfigRequestSchema,
-  WorkflowStateSchema,
-  GetWorkflowStateRequestSchema,
-  WorkflowTransitionRequestSchema,
-  WorkflowTransitionResponseSchema,
+  // Workflow schemas removed with the retired slot (#4451, v17)
   // Realtime
   RealtimeConnectRequestSchema,
   RealtimeConnectResponseSchema,
@@ -219,27 +214,9 @@ describe('ObjectStack Protocol', () => {
     }
   });
 
-  it('validates Workflow operations', () => {
-    expect(GetWorkflowConfigRequestSchema.safeParse({ object: 'lead' }).success).toBe(true);
-    const state = {
-      currentState: 'open',
-      availableTransitions: [
-        { name: 'approve', targetState: 'approved', label: 'Approve', requiresApproval: true },
-      ],
-      history: [{
-        fromState: 'draft', toState: 'open', action: 'submit',
-        userId: 'u1', timestamp: '2024-01-15T10:00:00Z',
-      }],
-    };
-    expect(WorkflowStateSchema.safeParse(state).success).toBe(true);
-    expect(GetWorkflowStateRequestSchema.safeParse({ object: 'lead', recordId: 'l1' }).success).toBe(true);
-    expect(WorkflowTransitionRequestSchema.safeParse({
-      object: 'lead', recordId: 'l1', transition: 'approve', comment: 'Looks good',
-    }).success).toBe(true);
-    expect(WorkflowTransitionResponseSchema.safeParse({
-      object: 'lead', recordId: 'l1', success: true, state,
-    }).success).toBe(true);
-  });
+  // 'validates Workflow operations' removed (#4451, v17): the workflow
+  // schemas were deleted with the retired slot — nothing ever implemented
+  // the protocol they described.
 
   it('validates Realtime operations', () => {
     expect(RealtimeConnectRequestSchema.safeParse({

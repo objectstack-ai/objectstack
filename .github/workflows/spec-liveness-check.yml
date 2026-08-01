@@ -24,6 +24,10 @@ on:
       # Same for the strictness ledger — it is a doc, and editing it can break
       # the gate that now holds it to the code.
       - 'docs/audits/**'
+  # Merge queue (see ci.yml for the full note). merge_group has no `paths`
+  # support, so queue builds run this unconditionally — acceptable: the whole
+  # job is ~a minute, and the queue result is the next main.
+  merge_group:
 
 permissions:
   contents: read

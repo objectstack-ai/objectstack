@@ -27,7 +27,6 @@
     "execution-context",
     "metadata-customization",
     "metadata-loader",
-    "metadata-persistence",
     "metadata-plugin",
     "metadata-protection",
     "service-registry",

@@ -37,12 +37,11 @@
 
 import type { MetadataQuery, MetadataQueryResult, MetadataValidationResult, MetadataBulkResult, MetadataDependency } from '../kernel/metadata-plugin.zod';
 // The PERSISTENCE-side watch event (`add`/`added`/`changed`/`deleted`/…, path +
-// file stats) — what `MetadataManager.subscribe` actually relays. NOT the
-// near-namesake in `../kernel/metadata-loader.zod`: spec carries TWO types
-// named `MetadataWatchEvent` with different shapes (reported on #4251; merging
-// them is its own change), and `MetadataManager implements IMetadataService`
-// rejected the first draft of this import — which is exactly the check doing
-// its job.
+// file stats) — what `MetadataManager.subscribe` relays, as opposed to the
+// registration-level events `watch` forwards (`MetadataWatchCallback` below).
+// Spec used to carry a second, differently-shaped `MetadataWatchEvent` on
+// `@objectstack/spec/kernel`; it had no consumers and was removed in #4411, so
+// this is now the only type by that name.
 import type { MetadataWatchEvent } from '../system/metadata-persistence.zod';
 import type { Action } from '../ui/action.zod';
 import type { MetadataOverlay } from '../kernel/metadata-customization.zod';

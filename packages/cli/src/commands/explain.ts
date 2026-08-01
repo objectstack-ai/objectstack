@@ -258,32 +258,23 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
     docsPath: 'ui/action',
   },
 
+  // Kept as a redirect topic (mirroring content/docs/automation/workflows.mdx):
+  // there is NO standalone Workflow authoring type. The shape this entry used
+  // to teach (states[]/transitions[]/approvers) never existed in the spec —
+  // ADR-0019 folded approval processes into Flow, and the workflow service
+  // slot itself retired in #4451 (v17).
   workflow: {
-    name: 'Workflow',
-    description: 'State machine and approval process that governs record lifecycle transitions.',
-    required: [
-      { name: 'name', type: 'string (snake_case)', description: 'Machine name identifier' },
-      { name: 'object', type: 'string', description: 'Target object' },
-    ],
-    optional: [
-      { name: 'label', type: 'string', description: 'Display name' },
-      { name: 'states', type: 'State[]', description: 'Defined workflow states' },
-      { name: 'transitions', type: 'Transition[]', description: 'Allowed state transitions' },
-      { name: 'approvers', type: 'ApproverConfig', description: 'Approval chain configuration' },
-    ],
-    example: `{
-  name: 'task_approval',
-  object: 'project_task',
-  label: 'Task Approval',
-  states: ['draft', 'pending', 'approved', 'rejected'],
-  transitions: [
-    { from: 'draft', to: 'pending', action: 'submit' },
-    { from: 'pending', to: 'approved', action: 'approve' },
-    { from: 'pending', to: 'rejected', action: 'reject' },
-  ],
-}`,
+    name: 'Workflow (no standalone type)',
+    description: 'ObjectStack has no standalone Workflow authoring type. Use Flow for event-triggered or scheduled automation, an object validation rule of type "state_machine" for strict lifecycle transitions, and Approval nodes inside a flow for human approval pauses (ADR-0019).',
+    required: [],
+    optional: [],
+    example: `// No workflow metadata exists. Compose the live mechanisms instead:
+// - Flow (type: 'record_change' | 'schedule' | 'screen') for automation
+// - object validation rule { type: 'state_machine', ... } for transitions
+// - a flow node of type 'approval' for human approval steps
+// See: os explain flow`,
     related: ['object', 'flow', 'action'],
-    docsPath: 'automation/workflow',
+    docsPath: 'automation/workflows',
   },
 
   trigger: {

@@ -36,7 +36,6 @@ const result = Datasource.parse(data);
 | **driver** | `string` | ✅ | Underlying driver type |
 | **config** | `Record<string, any>` | ✅ | Driver specific configuration |
 | **pool** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool settings |
-| **readReplicas** | `Record<string, any>[]` | optional | Read-only replica configurations |
 | **capabilities** | `{ transactions: boolean; queryFilters: boolean; queryAggregations: boolean; querySorting: boolean; … }` | optional | Capability overrides |
 | **healthCheck** | `{ enabled: boolean; intervalMs: number; timeoutMs: number }` | optional | Datasource health check configuration |
 | **ssl** | `{ enabled: boolean; rejectUnauthorized: boolean; ca?: string; cert?: string; … }` | optional | SSL/TLS configuration for secure database connections |

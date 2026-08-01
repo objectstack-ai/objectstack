@@ -13,7 +13,7 @@ package. So `config: { hostname: 'db.internal' }` (the key is `host`) was
 accepted in silence and the datasource connected to `localhost` while the parse,
 the save and the connection probe all reported success.
 
-`DatasourceSchema` now parses `config` — and each `readReplicas` entry — against
+`DatasourceSchema` now parses `config` against
 the contract for the declared driver, and `DatasourceAdminService`
 (create/update/test, the Setup wizard's path) applies the same check. Both read
 one registry in `@objectstack/spec/data`, which also projects each contract to
@@ -45,7 +45,7 @@ And the relocations — keys that were never driver config:
 | --- | --- |
 | `min` / `max` / `idleTimeoutMillis` / `connectionTimeoutMillis` | the datasource's own `pool` block |
 | `schemaMode` | next to `driver`, on the datasource |
-| `readOnly` | `capabilities: { readOnly: true }` |
+| `readOnly` | `external: { allowWrites: false }` — the enforced write gate. (This row said `capabilities: { readOnly: true }` until #4487's liveness audit found that key has no reader.) |
 | `ssl: { ca, cert, key, rejectUnauthorized }` | the datasource's own `ssl` block — inside `config`, `ssl` is the on/off boolean shorthand |
 
 Two memory-driver keys are **removed**: `indexes` and `maxRecordsPerObject`.
