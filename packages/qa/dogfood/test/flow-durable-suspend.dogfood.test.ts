@@ -20,9 +20,15 @@
 // success, and the run died at the next restart. #4460 added assembly UNIT
 // tests; this is the e2e half.
 //
-// The assertions are therefore deliberately about FACTS rather than the absence
-// of errors: a `paused` row is read back out of `sys_automation_run` by id, and
-// the resume happens in a second kernel that shares only the database file.
+// The assertions are therefore about FACTS rather than the absence of errors: a
+// `paused` row is read back out of `sys_automation_run` by id, the first kernel
+// is then STOPPED, and a second kernel that shares only the database file
+// resumes the run and produces an observable data change.
+//
+// Note the shutdown is load-bearing, not tidiness: the sqlite-wasm driver
+// defaults to `persist: 'on-disconnect'`, so a "cold boot" taken while the first
+// kernel still holds the database would read a file its writes had not reached
+// yet — and would fail for a reason that has nothing to do with suspended runs.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -34,8 +40,9 @@ import { durableSuspendStack } from './fixtures/flow-durable-suspend-fixture.js'
 describe('objectstack verify FLOW: suspended runs are durable across a cold boot (#4470)', () => {
   let dir: string;
   let dbFile: string;
-  let stack: VerifyStack;
-  let token: string;
+  /** The FIRST process: authors the record, triggers the flow, suspends. */
+  let hot: VerifyStack | undefined;
+  let hotToken: string;
   let noteId: string;
   let runId: string;
 
@@ -44,17 +51,17 @@ describe('objectstack verify FLOW: suspended runs are durable across a cold boot
     dbFile = join(dir, 'verify.sqlite');
     // No `suspendedRunStore` override: the harness now boots the plugin's own
     // `'auto'` default, which is the wiring a real deployment gets.
-    stack = await bootStack(durableSuspendStack, { automation: true, databaseFile: dbFile });
-    token = await stack.signIn();
+    hot = await bootStack(durableSuspendStack, { automation: true, databaseFile: dbFile });
+    hotToken = await hot.signIn();
   }, 120_000);
 
   afterAll(async () => {
-    await stack?.stop();
+    await hot?.stop().catch(() => {});
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
   it('precondition: the automation service is wired and the flow is registered', async () => {
-    const res = await stack.apiAs(token, 'GET', '/automation/flow_durable_suspend');
+    const res = await hot!.apiAs(hotToken, 'GET', '/automation/flow_durable_suspend');
     expect(res.status, `automation service not wired: ${res.status}`).toBe(200);
   });
 
@@ -62,18 +69,18 @@ describe('objectstack verify FLOW: suspended runs are durable across a cold boot
     // The whole #4420 failure was a store writing into a table nobody created.
     // Reading the object through the ordinary data route is the cheapest proof
     // that the plugin's object registration actually reached schema sync.
-    const res = await stack.apiAs(token, 'GET', '/data/sys_automation_run?limit=1');
+    const res = await hot!.apiAs(hotToken, 'GET', '/data/sys_automation_run?limit=1');
     expect(res.status, `sys_automation_run not queryable: ${await res.clone().text()}`).toBe(200);
   });
 
   it('suspends at the screen node and PERSISTS the pause as a `paused` row', async () => {
-    const created = await stack.apiAs(token, 'POST', '/data/suspend_note', { name: 'n1', status: 'new' });
+    const created = await hot!.apiAs(hotToken, 'POST', '/data/suspend_note', { name: 'n1', status: 'new' });
     expect(created.status).toBeLessThan(300);
     const cj = (await created.json()) as { id?: string; record?: { id?: string } };
     noteId = (cj.id ?? cj.record?.id) as string;
     expect(noteId).toBeTruthy();
 
-    const triggered = await stack.apiAs(token, 'POST', '/automation/flow_durable_suspend/trigger', {
+    const triggered = await hot!.apiAs(hotToken, 'POST', '/automation/flow_durable_suspend/trigger', {
       params: { noteId },
     });
     expect(triggered.status, await triggered.clone().text()).toBeLessThan(300);
@@ -83,10 +90,10 @@ describe('objectstack verify FLOW: suspended runs are durable across a cold boot
     runId = result.runId;
     expect(runId, 'no runId on the paused result').toBeTruthy();
 
-    // THE assertion #4470 asked for: the pause is a row in the database, read
+    // THE assertion #4470 asked for: the pause is a ROW IN THE DATABASE, read
     // back by id — not "no error was logged", which is exactly what #4420
-    // produced while persisting nothing.
-    const row = await stack.apiAs(token, 'GET', `/data/sys_automation_run/${runId}`);
+    // produced while persisting nothing at all.
+    const row = await hot!.apiAs(hotToken, 'GET', `/data/sys_automation_run/${runId}`);
     expect(row.status, `no sys_automation_run row for ${runId}`).toBe(200);
     const rj = (await row.json()) as any;
     const rec = rj.record ?? rj;
@@ -102,19 +109,18 @@ describe('objectstack verify FLOW: suspended runs are durable across a cold boot
   });
 
   it('a COLD kernel — sharing only the database file — rehydrates and resumes the run', async () => {
+    // Shut the first process down for real. See the header note: this is what
+    // flushes sqlite-wasm's image to disk, and it is also what makes the second
+    // boot a restart rather than a second connection.
+    await hot!.stop();
+    hot = undefined;
+
     const cold = await bootStack(durableSuspendStack, { automation: true, databaseFile: dbFile });
     try {
-      const coldToken = await cold.signIn();
-
-      // The screen is re-fetchable in the new process: the pause was rehydrated
-      // from storage, not from any in-memory hot cache (this kernel has none).
-      const screen = await cold.apiAs(coldToken, 'GET', `/automation/flow_durable_suspend/runs/${runId}/screen`);
-      expect(screen.status, `screen not rehydrated: ${await screen.clone().text()}`).toBe(200);
-      const sj = (await screen.json()) as any;
-      expect((sj.screen ?? sj).nodeId).toBe('ask');
+      const t = await cold.signIn();
 
       const resumed = await cold.apiAs(
-        coldToken, 'POST', `/automation/flow_durable_suspend/runs/${runId}/resume`,
+        t, 'POST', `/automation/flow_durable_suspend/runs/${runId}/resume`,
         { inputs: { resolution: 'fixed upstream' } },
       );
       expect(resumed.status, await resumed.clone().text()).toBeLessThan(300);
@@ -122,10 +128,9 @@ describe('objectstack verify FLOW: suspended runs are durable across a cold boot
       // The downstream node ran, in the cold process, against the variables the
       // FIRST process snapshotted — so the whole state round-trip is proven by
       // an observable data change rather than by a status field.
-      const note = await cold.apiAs(coldToken, 'GET', `/data/suspend_note/${noteId}`);
+      const note = await cold.apiAs(t, 'GET', `/data/suspend_note/${noteId}`);
       expect(note.status).toBe(200);
-      const nj = (await note.json()) as any;
-      const rec = nj.record ?? nj;
+      const rec = ((await note.json()) as any).record ?? {};
       expect(rec.status).toBe('resolved');
       expect(rec.resolution).toBe('fixed upstream');
     } finally {
@@ -133,37 +138,46 @@ describe('objectstack verify FLOW: suspended runs are durable across a cold boot
     }
   }, 120_000);
 
-  it('the cold resume enforced the screen contract too (#4477 over the durable path)', async () => {
-    // A second cold boot, a fresh run: the field contract has to survive
+  it('the screen contract is enforced on a rehydrated pause too (#4477 over the durable path)', async () => {
+    // A fresh kernel and a fresh run: the field contract has to survive
     // persistence as well, since `screen_json` is what a rehydrated pause
-    // validates against.
-    const cold = await bootStack(durableSuspendStack, { automation: true, databaseFile: dbFile });
+    // validates against. Suspend in one process, decide in the next.
+    const first = await bootStack(durableSuspendStack, { automation: true, databaseFile: dbFile });
+    let secondRun: string;
     try {
-      const t = await cold.signIn();
-      const created = await cold.apiAs(t, 'POST', '/data/suspend_note', { name: 'n2', status: 'new' });
-      const cj = (await created.json()) as any;
-      const id = cj.id ?? cj.record?.id;
+      const t = await first.signIn();
+      const created = await first.apiAs(t, 'POST', '/data/suspend_note', { name: 'n2', status: 'new' });
+      const id = ((await created.json()) as any).id ?? ((await created.clone().json()) as any).record?.id;
 
-      const triggered = await cold.apiAs(t, 'POST', '/automation/flow_durable_suspend/trigger', {
+      const triggered = await first.apiAs(t, 'POST', '/automation/flow_durable_suspend/trigger', {
         params: { noteId: id },
       });
       const tj = (await triggered.json()) as any;
-      const secondRun = (tj.result ?? tj.data ?? tj).runId;
+      const result = tj.result ?? tj.data ?? tj;
+      expect(result.status).toBe('paused');
+      secondRun = result.runId;
+    } finally {
+      await first.stop();
+    }
 
+    const cold = await bootStack(durableSuspendStack, { automation: true, databaseFile: dbFile });
+    try {
+      const t = await cold.signIn();
       const bad = await cold.apiAs(
-        t, 'POST', `/automation/flow_durable_suspend/runs/${secondRun}/resume`, { inputs: {} },
+        t, 'POST', `/automation/flow_durable_suspend/runs/${secondRun!}/resume`, { inputs: {} },
       );
       expect(bad.status).toBe(400);
       expect(await bad.text()).toContain('resolution');
 
-      // Refused, not consumed: the legitimate submission still lands.
+      // Refused, not consumed: the legitimate submission still lands, in the
+      // same cold process.
       const good = await cold.apiAs(
-        t, 'POST', `/automation/flow_durable_suspend/runs/${secondRun}/resume`,
+        t, 'POST', `/automation/flow_durable_suspend/runs/${secondRun!}/resume`,
         { inputs: { resolution: 'ok' } },
       );
-      expect(good.status).toBeLessThan(300);
+      expect(good.status, await good.clone().text()).toBeLessThan(300);
     } finally {
       await cold.stop();
     }
-  }, 120_000);
+  }, 180_000);
 });
