@@ -19,7 +19,7 @@ import type {
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import {
-    parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES,
+    parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
@@ -3586,7 +3586,11 @@ export class ObjectStackProtocolImplementation implements
      * expansion does. {@link REFERENCE_VALUE_TYPES} is the spec's own list of
      * types whose value "points at another record … the related record object
      * in expanded form" — the same set `engine.expandRelatedRecords` resolves,
-     * so this gate cannot drift from what expansion actually delivers.
+     * so this gate cannot drift from what expansion actually delivers. The
+     * "does it name a target" half reads `referenceTargetOf` for the same
+     * reason: the engine resolves the target through that one function, so a
+     * type whose target is implied (`user` ⇒ `sys_user`) can never be refused
+     * here and expanded there.
      */
     private assertExpandTargetsExist(object: string, names: readonly string[]): void {
         if (names.length === 0) return;
@@ -3600,12 +3604,19 @@ export class ObjectStackProtocolImplementation implements
             const def: any = gate.fields[name.split('.')[0]];
             if (!def) { unknown.push(name); continue; }
             if (!REFERENCE_VALUE_TYPES.has(def.type)) { notRelations.push(name); continue; }
-            // A reference-typed field with no `reference` names no target
-            // object, so `expandRelatedRecords` has nothing to batch-load. That
-            // is an authoring bug on the OBJECT, not on the request, and saying
-            // "not a relationship" about a declared lookup would send the
-            // caller looking in the wrong place.
-            if (!def.reference) targetless.push(name);
+            // A reference-typed field that names no target object leaves
+            // `expandRelatedRecords` nothing to batch-load. That is an
+            // authoring bug on the OBJECT, not on the request, and saying "not
+            // a relationship" about a declared lookup would send the caller
+            // looking in the wrong place.
+            //
+            // `referenceTargetOf` — not a raw `def.reference` read — because
+            // some reference types carry their target in the TYPE (`user` ⇒
+            // `sys_user`) rather than in an author-written `reference`. The
+            // engine's expand loop resolves the target through the same
+            // function, which is what keeps this gate from refusing a field
+            // expansion would have delivered (cloud#983).
+            if (!referenceTargetOf(def)) targetless.push(name);
         }
         const [offenders, reason] =
             unknown.length > 0 ? [unknown, 'unknown' as const]
