@@ -2,6 +2,8 @@
 
 import { z } from 'zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
+import { strictObject } from '../shared/strict-object';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
 /**
  * # ObjectStack Validation Protocol
@@ -91,7 +93,23 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  * not enforcement.
  */
 import { lazySchema } from '../shared/lazy-schema';
-const BaseValidationSchema = z.object({
+/**
+ * Keys every validation-rule variant shares.
+ *
+ * A named SHAPE rather than a schema, because each variant needs its own
+ * `strictObject` call: an error map closes over the key list it was built with,
+ * so closing the shared base alone would leave a variant's own keys
+ * (`condition`, `transitions`, `regex`, …) outside the suggestion set — a typo
+ * of `transitions` would be rejected with no rename offered. The union
+ * discriminates on `type`, so the author is always on exactly one variant and
+ * that variant's full key list is the right candidate set.
+ *
+ * The ADR-0010 protection envelope lives here so all six inherit it in one
+ * place: `validation` is a registered metadata type, the loader stamps
+ * `_packageId` / `_provenance` on it, and whichever branch matches has to
+ * accept them (see `kernel/metadata-type-schemas.test.ts`).
+ */
+const BASE_VALIDATION_SHAPE = {
   // Identification
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique rule name (snake_case)'),
   label: z.string().optional().describe('Human-readable label for the rule listing'),
@@ -108,13 +126,27 @@ const BaseValidationSchema = z.object({
   // Feedback
   severity: z.enum(['error', 'warning', 'info']).default('error'),
   message: z.string().describe('Error message to display to the user'),
-});
+
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  ...MetadataProtectionFields,
+};
+
+// No `BaseValidationSchema` object: nothing parses the base alone. Every
+// instance is one of the six discriminated variants, and each builds its own
+// strict shape from BASE_VALIDATION_SHAPE — see the note above for why the key
+// list has to be per-variant rather than shared.
 
 /**
  * 1. Script/Expression Validation
  * Generic formula-based validation.
  */
-export const ScriptValidationSchema = lazySchema(() => BaseValidationSchema.extend({
+export const ScriptValidationSchema = lazySchema(() => strictObject({
+  surface: 'this script validation rule',
+  history:
+    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+  aliases: { formula: 'condition', expression: 'condition', predicate: 'condition', rule: 'condition' },
+}, {
+  ...BASE_VALIDATION_SHAPE,
   type: z.literal('script'),
   condition: ExpressionInputSchema.describe('Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0`'),
 }));
@@ -123,7 +155,13 @@ export const ScriptValidationSchema = lazySchema(() => BaseValidationSchema.exte
  * 2. State Machine Validation
  * State transition logic.
  */
-export const StateMachineValidationSchema = lazySchema(() => BaseValidationSchema.extend({
+export const StateMachineValidationSchema = lazySchema(() => strictObject({
+  surface: 'this state-machine validation rule',
+  history:
+    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+  aliases: { states: 'transitions', statefield: 'field', from: 'transitions', initial: 'initialStates', initialstate: 'initialStates' },
+}, {
+  ...BASE_VALIDATION_SHAPE,
   type: z.literal('state_machine'),
   field: z.string().describe('State field (e.g. status)'),
   transitions: z.record(z.string(), z.array(z.string())).describe('Map of { OldState: [AllowedNewStates] }'),
@@ -134,7 +172,13 @@ export const StateMachineValidationSchema = lazySchema(() => BaseValidationSchem
  * 3. Value Format Validation
  * Regex or specialized formats.
  */
-export const FormatValidationSchema = lazySchema(() => BaseValidationSchema.extend({
+export const FormatValidationSchema = lazySchema(() => strictObject({
+  surface: 'this format validation rule',
+  history:
+    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+  aliases: { pattern: 'regex', fieldname: 'field' },
+}, {
+  ...BASE_VALIDATION_SHAPE,
   type: z.literal('format'),
   field: z.string(),
   regex: z.string().optional(),
@@ -210,7 +254,13 @@ export const FormatValidationSchema = lazySchema(() => BaseValidationSchema.exte
 // `fields[1..]` are documentation only. Prefer `script` unless you want the error
 // targeted at a specific field. Kept as a distinct variant for that field-targeting
 // affordance and for backward compatibility.
-export const CrossFieldValidationSchema = lazySchema(() => BaseValidationSchema.extend({
+export const CrossFieldValidationSchema = lazySchema(() => strictObject({
+  surface: 'this cross-field validation rule',
+  history:
+    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+  aliases: { formula: 'condition', expression: 'condition' },
+}, {
+  ...BASE_VALIDATION_SHAPE,
   type: z.literal('cross_field'),
   condition: ExpressionInputSchema.describe('Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date`'),
   fields: z.array(z.string()).describe('Fields involved. Only fields[0] is read (labels which field the violation attaches to); the rest are advisory. Shares script’s evaluation path.'),
@@ -225,7 +275,13 @@ export const CrossFieldValidationSchema = lazySchema(() => BaseValidationSchema.
  * - Enforcing API payload structures
  * - Complex nested data validation
  */
-export const JSONValidationSchema = lazySchema(() => BaseValidationSchema.extend({
+export const JSONValidationSchema = lazySchema(() => strictObject({
+  surface: 'this JSON-schema validation rule',
+  history:
+    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+  aliases: { jsonschema: 'schema', fieldname: 'field' },
+}, {
+  ...BASE_VALIDATION_SHAPE,
   type: z.literal('json_schema'),
   field: z.string().describe('JSON field to validate'),
   schema: z.record(z.string(), z.unknown()).describe('JSON Schema object definition'),
@@ -450,7 +506,13 @@ export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape, BaseValida
  * }
  * ```
  */
-export const ConditionalValidationSchema = lazySchema(() => BaseValidationSchema.extend({
+export const ConditionalValidationSchema = lazySchema(() => strictObject({
+  surface: 'this conditional validation rule',
+  history:
+    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+  aliases: { if: 'when', condition: 'when', match: 'when', else: 'otherwise' },
+}, {
+  ...BASE_VALIDATION_SHAPE,
   type: z.literal('conditional'),
   when: ExpressionInputSchema.describe('Predicate (CEL). e.g. P`record.type == \'enterprise\'`'),
   then: ValidationRuleSchema.describe('Validation rule to apply when condition is true'),

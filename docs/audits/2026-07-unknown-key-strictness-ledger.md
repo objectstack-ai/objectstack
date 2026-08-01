@@ -243,7 +243,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `notification.zod.ts` / `offline.zod.ts` / `report.zod.ts` | 3 ea | authorable (p) | |
 | `sharing.zod.ts` | 2 | authorable (p) | public-sharing config |
 
-### `data/` — 160 sites
+### `data/` — 165 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
@@ -262,7 +262,8 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `hook.zod.ts` / `hook-body.zod.ts` | 6+2 | mixed | **strict as of #4001 data step** for the AUTHORING shapes: `HookSchema` (+ `retryPolicy`) and both body branches (`ExpressionBodySchema` / `ScriptBodySchema`). `HookContextSchema` and its `session` / `provenance` / `user` blocks are the RUNTIME shape the engine hands a handler — they stay tolerant, and must: strictness there would make an engine-internal enrichment (as `provenance` was in #3712) a breaking change for anyone parsing a context they were given. The file's old blanket `authorable (p)` was too wide — verification split it |
 | `mapping.zod.ts` | 3 | authorable (p) | |
 | `external-catalog.zod.ts` | 4 | wire (p) | |
-| `field-value.zod.ts` / `seed.zod.ts` / `validation.zod.ts` | 1 ea | mixed (p) | |
+| `validation.zod.ts` | 6 | authorable | **strict as of #4001 batch 3b** — a `z.lazy()` discriminated union, so the one-call conversion does not apply: each of the six variants builds its own `strictObject` from a shared `BASE_VALIDATION_SHAPE`. Closing the base alone would have rejected correctly but suggested from the SHARED keys only, so a typo of a variant's own key (`transtions` → `transitions`) would get no rename. Site count 1 → 6 because the six variants are now object sites in their own right. The ADR-0010 envelope lives in the shared shape, so all six inherit it |
+| `field-value.zod.ts` / `seed.zod.ts` | 1+1 | mixed (p) | `seed` is strict (registered-types batch) |
 
 ### `automation/` — 88 sites
 

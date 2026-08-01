@@ -34,7 +34,7 @@
 //   3. Section totals. `### \`ui/\` — 192 sites` must equal the sum of its rows.
 //      Cheap, and it catches a row edited without updating the header.
 //   4. Strictness claims. A row whose note says "strict as of" must name a file that
-//      actually contains `.strict()`. This is deliberately weak — it proves the claim
+//      actually contains `.strict()` or `strictObject(`. This is deliberately weak — it proves the claim
 //      is not fiction, not that every site in the file is strict. Rows say things like
 //      "partially strict"; encoding which sites those are would need a second ledger,
 //      and the per-schema truth already lives in the code the note points at.
@@ -154,7 +154,13 @@ for (const row of rows) {
   if (/strict as of/i.test(row.note)) {
     const anyStrict = row.files.some((f) => {
       const abs = path.join(SRC, row.dir, f);
-      return fs.existsSync(abs) && /\.strict\(\)/.test(fs.readFileSync(abs, 'utf-8'));
+      if (!fs.existsSync(abs)) return false;
+      // `strictObject(` counts as strictness, same as a literal `.strict()` —
+      // the helper applies it. Matching only `.strict()` made a converted file
+      // read as NOT strict, so this check called a true claim a lie. Same blind
+      // spot as the site count had: the measuring tool has to learn the idiom
+      // whenever the idiom changes.
+      return /\.strict\(\)|(?<![A-Za-z0-9_])strictObject\(/.test(fs.readFileSync(abs, 'utf-8'));
     });
     if (!anyStrict) {
       errors.push(

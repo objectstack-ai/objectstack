@@ -71,10 +71,11 @@ const PROBE: Record<string, unknown> = {
  * it. A NEW registered type belongs in neither list.
  *
  * The structural walk found 8 of these; the probe it replaced had been hiding 7.
- * `job` and `book` were closed in the same pass, leaving 6.
+ * `job` and `book` were closed in the same pass, leaving 6; `validation` came off
+ * when its six union variants were converted, leaving 5.
  */
 const UNDECLARED_ENVELOPE = new Set<string>([
-  'action', 'field', 'mapping', 'page', 'translation', 'validation',
+  'action', 'field', 'mapping', 'page', 'translation',
 ]);
 
 /**
