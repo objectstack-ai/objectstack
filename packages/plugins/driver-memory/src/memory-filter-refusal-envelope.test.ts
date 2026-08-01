@@ -37,14 +37,13 @@ describe('[#4436] InMemoryDriver filter refusals carry INVALID_FILTER and leak n
 
   beforeEach(async () => {
     driver = new InMemoryDriver();
-    await driver.syncSchema?.({
-      name: 'deal',
+    await driver.syncSchema('deal', {
       fields: {
         id: { type: 'text', name: 'id' },
         stage: { type: 'text', name: 'stage' },
         amount: { type: 'number', name: 'amount' },
       },
-    } as any);
+    });
     await driver.create('deal', { id: '1', stage: 'won', amount: 10 });
   });
 
