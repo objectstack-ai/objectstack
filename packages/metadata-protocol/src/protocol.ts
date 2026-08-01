@@ -50,6 +50,7 @@ import {
     type MetadataDiagnostics,
 } from './metadata-diagnostics.js';
 import type {
+    StoredFlowCanonicalization,
     StoredMigrationNotice,
     StoredMigrationReport,
     StoredMigrationRow,
@@ -6447,6 +6448,22 @@ export class ObjectStackProtocolImplementation implements
         types?: string[];
         /** Recorded as the writer on the history + audit rows. */
         actor?: string;
+        /**
+         * Canonicalize a stored `flow` body (#4454).
+         *
+         * Supplied only by a caller that holds a live automation engine —
+         * `AutomationEngine.canonicalizeStoredFlow` is the implementation. Flow
+         * conversions carry ADR-0078's open-namespace conflict guard, which
+         * needs the engine's executor registry to tell a rename from a clobber,
+         * and this layer has no way to obtain one. Omit it and flow rows are
+         * reported `skipped` with that reason rather than quietly counted done.
+         *
+         * Must return the **storable** shape — conversions and the schema's
+         * `condition` envelopes, without schema defaults. Throwing is a valid
+         * answer for a row that cannot canonicalize; the row is reported
+         * `failed` with the message.
+         */
+        canonicalizeFlow?: (name: string, body: unknown) => StoredFlowCanonicalization;
     } = {}): Promise<StoredMigrationReport> {
         const apply = request.apply === true;
         const typeFilter = request.types && request.types.length > 0
@@ -6515,14 +6532,47 @@ export class ObjectStackProtocolImplementation implements
                 continue;
             }
 
+            // Flow rows need the automation engine's live executor registry for
+            // ADR-0078's open-namespace conflict guard, which this layer does
+            // not have — so they are canonicalized through a caller-supplied
+            // hook, or reported `skipped` when no caller can supply one (#4454).
+            let flowResult: StoredFlowCanonicalization | undefined;
             if (singular === 'flow') {
-                record({
-                    ...base,
-                    outcome: 'skipped',
-                    reason: 'flows canonicalize at AutomationEngine.registerFlow — the node-type '
-                        + 'conflict guard needs the live executor registry this layer does not have',
-                });
-                continue;
+                if (!request.canonicalizeFlow) {
+                    record({
+                        ...base,
+                        outcome: 'skipped',
+                        reason: 'flows canonicalize at AutomationEngine.registerFlow — the node-type '
+                            + 'conflict guard needs the live executor registry this caller did not supply',
+                    });
+                    continue;
+                }
+                try {
+                    flowResult = request.canonicalizeFlow(base.name, body);
+                } catch (e: any) {
+                    // `FlowSchema` is strict (#4001) and the region validator
+                    // hard-fails, so this is a row that cannot register at all —
+                    // already broken at runtime. Report it; never persist a guess.
+                    record({
+                        ...base,
+                        outcome: 'failed',
+                        reason: `the flow does not canonicalize: ${e?.message ?? String(e)}`,
+                    });
+                    continue;
+                }
+                if (flowResult.conflicts.length > 0) {
+                    // A rename refused because its old token is a LIVE name owned
+                    // by something else. Rewriting would clobber that owner, and
+                    // skipping quietly would hide it — the guard exists to be loud.
+                    const first = flowResult.conflicts[0]!;
+                    record({
+                        ...base,
+                        outcome: 'failed',
+                        reason: `conversion refused — '${first.token}' at ${first.path} is a live name in `
+                            + `this environment (${flowResult.conflicts.length} conflict(s)). ${first.message}`,
+                    });
+                    continue;
+                }
             }
 
             const overlayAllowed = ObjectStackProtocolImplementation.isOverlayAllowed(singular);
@@ -6537,8 +6587,23 @@ export class ObjectStackProtocolImplementation implements
                 continue;
             }
 
-            const { item, notices } = this.convertStoredItemDetailed(singular, body);
-            if (notices.length === 0) {
+            // A flow's canonical body was already computed above (it needs the
+            // engine); everything else converts here.
+            //
+            // The change signal differs by type, and the difference is real.
+            // For a non-flow item every rewrite comes from a conversion, and a
+            // conversion always emits a notice (ADR-0087 D2 "loud"), so notices
+            // are exact. A flow additionally gains the `{dialect, source}`
+            // envelope the schema derives for edge conditions — that is a
+            // schema transform, not a conversion, so it emits NO notice while
+            // still changing the body. Both passes are copy-on-write, so
+            // identity is the precise test there: `storable === body` exactly
+            // when nothing was rewritten at all.
+            const { item, notices } = flowResult
+                ? { item: flowResult.storable, notices: flowResult.notices }
+                : this.convertStoredItemDetailed(singular, body);
+            const changed = flowResult ? item !== body : notices.length > 0;
+            if (!changed) {
                 record({ ...base, outcome: 'canonical' });
                 continue;
             }

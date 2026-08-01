@@ -27,6 +27,37 @@
  * that reports every row canonical is the evidence, and it costs one command.
  */
 
+/**
+ * What a caller with a live automation engine hands back for a stored `flow`
+ * body (#4454) — structurally `AutomationEngine.canonicalizeStoredFlow`'s
+ * result, declared here so `metadata-protocol` states the contract it consumes
+ * without depending on the automation service.
+ *
+ * `storable` is the shape to PERSIST: conversions plus the `{dialect, source}`
+ * envelopes the flow schema derives for edge conditions, and deliberately not
+ * the schema's defaults — persisting a default the author never wrote would pin
+ * that row to today's value while untouched rows follow tomorrow's.
+ */
+export interface StoredFlowCanonicalization {
+  /** The canonical body to write back. Identical (by reference) to the input when nothing changed. */
+  storable: unknown;
+  /** Conversions that fired, in the spec's notice shape. */
+  notices: Array<{
+    conversionId: string;
+    surface: string;
+    from: string;
+    to: string;
+    path: string;
+    message: string;
+  }>;
+  /**
+   * Renames the guard REFUSED because the old token is a live name owned by
+   * something else. A non-empty list fails the row loudly — rewriting would
+   * clobber that owner, and skipping quietly would hide it.
+   */
+  conflicts: Array<{ conversionId: string; token: string; path: string; message: string }>;
+}
+
 /** What the pass did with (or would do with) one `sys_metadata` row. */
 export type StoredMigrationOutcome =
   /** The chain was a no-op — the row is already on protocol. Not itemised. */
