@@ -32,3 +32,25 @@ export function isIncoherentAggregate(aggregate: string, fieldType: string | und
   if (fieldType === 'percent' && (aggregate === 'sum' || aggregate === 'count_distinct')) return true;
   return false;
 }
+
+/**
+ * What this aggregate evaluates to over an EMPTY set of rows — the identity
+ * element, or `undefined` when the aggregate genuinely has no answer.
+ *
+ * Counting no rows is `0` and summing them is `0`: those are measured facts,
+ * not missing data. Averaging, minimising or maximising no rows is undefined —
+ * there is nothing to average — and must stay null rather than be flattened to
+ * a zero that reads as a real measurement.
+ *
+ * This distinction only surfaces for a measure the runtime evaluates per
+ * GROUP: a measure-scoped filter can exclude every row of a group the grid
+ * still lists, and a database reports that group by omitting the row entirely.
+ * Treating that omission as "no data" reported "0 of 12 paid" as blank and
+ * left any ratio built on it null (objectui#3136) — hiding the very number a
+ * compliance dashboard exists to show.
+ */
+export function emptyGroupValueFor(aggregate: string | undefined): 0 | undefined {
+  return aggregate === 'count' || aggregate === 'count_distinct' || aggregate === 'sum'
+    ? 0
+    : undefined;
+}

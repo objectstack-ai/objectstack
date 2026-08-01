@@ -190,6 +190,36 @@ describe('AnalyticsService.queryDataset', () => {
     expect(r.fields.find((f: any) => f.name === 'base_count')?.percentScale).toBeUndefined();
   });
 
+  it('a measure-scoped COUNT over a group with no matching rows is 0, not blank', async () => {
+    // The supplementary query for `met_count` returns only the groups that had
+    // a matching row; the database reports "none matched" by omitting the group
+    // entirely. That omission is a measured ZERO for a count — reporting it as
+    // missing blanked the cell and left the ratio null, hiding "0% of breached
+    // tickets met the SLA" on the one dashboard that exists to show it.
+    const svc = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      // The base pass sees both groups; the filtered pass only "met".
+      executeRawSql: async (_o, sql) => sql.includes('met_count')
+        ? [{ status: 'met', met_count: 2 }]
+        : [{ status: 'met', base_count: 2 }, { status: 'breached', base_count: 3 }],
+      getReadScope: () => undefined,
+    });
+    const r = await svc.queryDataset(
+      rateDataset([
+        { name: 'base_count', aggregate: 'count', label: 'Applicable' },
+        { name: 'met_count', aggregate: 'count', field: 'met', label: 'Met', filter: { sla_met: true } },
+        { name: 'sla_rate', label: 'SLA rate', derived: { op: 'ratio', of: ['met_count', 'base_count'] }, format: '0.0%' },
+      ]),
+      { dimensions: ['status'], measures: ['base_count', 'met_count', 'sla_rate'] },
+      { tenantId: 'o' } as ExecutionContext,
+    ) as any;
+    const breached = r.rows.find((x: any) => x.status === 'breached');
+    expect(breached.met_count).toBe(0);
+    expect(breached.sla_rate).toBe(0);
+    // The group that DID match is untouched — and is the 1.0 = 100% case.
+    expect(r.rows.find((x: any) => x.status === 'met').sla_rate).toBe(1);
+  });
+
   it('inherits the SOURCE FIELD scale: a `max: 100` percent field is whole-scaled', async () => {
     const svc = pricedSvc([{ status: 'open', allocation: 80 }], (_o, f) => f === 'allocation_percent' ? { type: 'percent', max: 100 } : undefined);
     const r = await svc.queryDataset(

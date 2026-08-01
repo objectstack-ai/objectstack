@@ -7,7 +7,7 @@ import type {
   DatasetSelection,
   DatasetCompareTo,
 } from '@objectstack/spec/contracts';
-import type { FilterCondition } from '@objectstack/spec/data';
+import { emptyGroupValueFor, type FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { filterTokenContextFrom, resolveFilterTokens } from '@objectstack/core';
 import type { CompiledDataset, DerivedMeasureSpec } from './dataset-compiler.js';
@@ -552,6 +552,23 @@ export class DatasetExecutor {
       }), context);
       result.rows = mergeByDimensions(result.rows, sub.rows, dimensions, [m]);
       result.fields.push({ name: m, type: 'number' });
+    }
+
+    // A measure-scoped filter can exclude EVERY row of a group the grid still
+    // lists, and the database reports that by omitting the group from the
+    // sub-result — indistinguishable, after the merge, from "not measured".
+    // For a count or a sum it IS measured: the answer is 0. Fill it in, so a
+    // "0 of 12 paid" group reads as 0 rather than blank and any ratio built on
+    // it computes instead of going null (objectui#3136). avg/min/max keep their
+    // null — there is nothing to average over an empty group.
+    //
+    // Runs after ALL supplementary merges, not inside the loop: a later
+    // measure's merge can append rows for dimension keys no earlier query saw,
+    // and those rows need the same fill.
+    for (const m of filtered) {
+      const empty = emptyGroupValueFor(compiled.cube.measures?.[m]?.type);
+      if (empty === undefined) continue;
+      for (const row of result.rows) if (row[m] == null) row[m] = empty;
     }
 
     // compareTo — run a shifted query over the same base measures and attach.

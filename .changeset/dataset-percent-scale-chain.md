@@ -42,3 +42,17 @@ dimension from a `datetime` one, and the percent chain is its third consumer.
 Renderers that receive `percentScale` must scale by it rather than inferring
 from the value; one that does not receive it (an older server) keeps whatever
 fallback it has, so this is additive on the wire.
+
+**Same widget family, second fix: an empty filtered group is a measured zero.**
+A measure-scoped filter can exclude every row of a group the grid still lists,
+and the database reports that by omitting the group from the supplementary
+result — after the merge, indistinguishable from "not measured". For a COUNT or
+a SUM it *is* measured: the answer is 0. `emptyGroupValueFor(aggregate)`
+(`spec/data/aggregation-policy`) states which aggregates have an identity over
+the empty set, and `queryDataset` fills it in once all supplementary merges are
+done (a later measure's merge can append rows no earlier query saw). So
+"0 of 12 paid" now reports `0` instead of blank, and a ratio built on it
+computes to `0` instead of going null — the difference between a dashboard
+saying "0% met the SLA" and saying nothing at all. `avg`/`min`/`max` keep their
+null: there is nothing to average over an empty group, and flattening that to
+zero would invent a measurement.

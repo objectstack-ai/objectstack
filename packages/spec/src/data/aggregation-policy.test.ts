@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { defaultAggregateFor, isIncoherentAggregate, MEASURE_FIELD_TYPES } from './aggregation-policy';
+import { defaultAggregateFor, emptyGroupValueFor, isIncoherentAggregate, MEASURE_FIELD_TYPES } from './aggregation-policy';
 
 describe('defaultAggregateFor', () => {
   it('SUMs additive amounts', () => {
@@ -20,6 +20,19 @@ describe('defaultAggregateFor', () => {
 });
 
 describe('isIncoherentAggregate', () => {
+  it('counts and sums over an empty group are 0; avg/min/max stay undefined', () => {
+    // A group every row of which a measure filter excluded is a MEASURED zero
+    // for a count or a sum — not missing data. Averaging nothing is genuinely
+    // unanswerable and must not be flattened to a zero that reads as real.
+    expect(emptyGroupValueFor('count')).toBe(0);
+    expect(emptyGroupValueFor('count_distinct')).toBe(0);
+    expect(emptyGroupValueFor('sum')).toBe(0);
+    expect(emptyGroupValueFor('avg')).toBeUndefined();
+    expect(emptyGroupValueFor('min')).toBeUndefined();
+    expect(emptyGroupValueFor('max')).toBeUndefined();
+    expect(emptyGroupValueFor(undefined)).toBeUndefined();
+  });
+
   it('flags SUM and count_distinct of a percentage', () => {
     expect(isIncoherentAggregate('sum', 'percent')).toBe(true);
     expect(isIncoherentAggregate('count_distinct', 'percent')).toBe(true);
