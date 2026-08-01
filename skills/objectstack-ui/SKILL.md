@@ -997,7 +997,19 @@ The source is real React executed at render by the runtime. The injected scope a
   runtime from the public block registry (every non-container public block gets a
   PascalCase wrapper), so blocks like `<ObjectMetric>` / `<ObjectKanban>` exist
   even though the written contract below documents only the curated core set;
-  `<Block type="…" …/>` is the escape hatch for any other registered type
+  `<Block type="…" …/>` is the escape hatch for any other registered type.
+  **Exception — the `record:*` family is NOT usable here** (`<RecordDetails>`,
+  `<RecordHighlights>`, `<RecordRelatedList>`, `<RecordPath>`, `<RecordActivity>`,
+  …): the registry injects a wrapper for each, but every one of them renders from
+  the record context a **record page** mounts, which a react page never does — so
+  they come back empty however you bind them. `os validate` rejects them here
+  (`react-block-needs-record-context`), by tag and via `<Block type="record:…">`.
+  On a react page the parent record is ordinary React state, so use the blocks
+  that read their own props: `<ListView objectName="<child>" filters={['<lookup
+  field>', '=', parentId]}>` for a related list, `<ObjectForm mode="view"
+  recordId={…}>` for a field panel, plain JSX over `useAdapter().findOne` for a
+  highlights strip or a stage bar. Need the family itself? Author the page as
+  `type:'record'`, where the context exists
 - `data` / `variables` / `page`
 
 Compose **layout with inline `style={{…}}`** (real CSS — see *Styling*, below); use the
@@ -1013,10 +1025,11 @@ props/callbacks flow through — e.g. `<ObjectForm>` honors `objectName` / `mode
 > [`contracts/react-blocks.contract.json`](./contracts/react-blocks.contract.json).
 > It is the authoritative answer to "what props does `<ObjectForm>`/`<ListView>`/…
 > take?" — author against it, not from memory. The `data` props are sourced from the platform's spec schemas (FormView,
-> ListView, RecordDetails, Chart, …) — the same protocol the server validates;
+> ListView, Chart, …) — the same protocol the server validates;
 > `binding`/`controlled`/`callback` are the React overlay. The contract covers
 > the **curated core set**; runtime-injected blocks outside it (`<ObjectMetric>`,
-> `<ObjectKanban>`, …) read their props from the block registry at render time.
+> `<ObjectKanban>`, …) read their props from the block registry at render time —
+> except the `record:*` family, which is rejected on this surface (above).
 > (Maintainers: regenerate with `pnpm --filter @objectstack/spec gen:react-blocks`.)
 
 Master/detail (click a row → edit it → save refreshes the list):

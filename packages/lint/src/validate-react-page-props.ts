@@ -22,6 +22,10 @@
 //     metadata rule `searchable-field-unknown`, sharing its core.
 //   - EVERY OTHER field-bearing prop a react block can author (#4340) — see
 //     `REACT_FIELD_SPECS` below and the ledger beside it.
+//   - a `record:*` block on this surface at all (#4413) → error. They render
+//     from a record page's shared record context, which a react page does not
+//     mount, so they come back empty however they are bound. See
+//     `recordContextFinding`.
 //
 // Reading values is opt-in per block and per prop: everything below evaluates
 // only STATIC literals (`objectName="invoice"`, an `aggregate={{…}}` object
@@ -31,7 +35,13 @@
 
 import { createRequire } from 'node:module';
 import type ts from 'typescript';
-import { REACT_BLOCKS, chartAggregateResultKeys } from '@objectstack/spec/ui';
+import {
+  REACT_BLOCKS,
+  RECORD_CONTEXT_BLOCK_TAGS,
+  REACT_RECORD_BLOCK_ALTERNATIVES,
+  chartAggregateResultKeys,
+  isRecordContextBlockType,
+} from '@objectstack/spec/ui';
 import { VALID_AST_OPERATORS } from '@objectstack/spec/data';
 import {
   checkSearchableFieldList,
@@ -39,12 +49,10 @@ import {
 } from './validate-searchable-fields.js';
 import {
   COMPONENT_FIELD_SPECS,
-  RELATED_LIST_TYPE,
   checkFieldRefs,
   componentFieldRefs,
   fieldRefsFrom,
   indexObjectFields,
-  relatedListFieldRefs,
   sortFieldRefs,
   type FieldRef,
   type PageFieldFinding,
@@ -398,28 +406,25 @@ function checkObjectChart(
 //
 // ## Where the answers come from
 //
-// The `record:*` blocks ARE the components that rule already walks — one
-// registry component, two authoring surfaces — so they are not re-described
-// here at all: `componentFieldRefs` / `relatedListFieldRefs` read the SAME
-// `COMPONENT_FIELD_SPECS` table, keyed by the block's own `schemaType`. A prop
-// added there is checked on both surfaces at once, which is the point.
+// `REACT_FIELD_SPECS` below describes the blocks whose metadata twin lives
+// under different prop names — `<ListView>` (twin: a list page's
+// `interfaceConfig`) and `<ObjectForm>` (twin: `element:form` + the
+// form-layout rule) — plus `<ObjectChart>`'s `filter`.
 //
-// `REACT_FIELD_SPECS` below covers only what the shared table cannot: the two
-// blocks whose metadata twin lives under different prop names —
-// `<ListView>` (twin: a list page's `interfaceConfig`) and `<ObjectForm>`
-// (twin: `element:form` + the form-layout rule).
+// `COMPONENT_FIELD_SPECS`, the table `validate-page-field-bindings` walks on
+// the metadata surface, is still read from here, keyed by `schemaType`, so a
+// prop added there is checked on both surfaces at once. What reaches it is now
+// only `<Block type="element:…">`: this rule read that table mainly for the
+// `record:*` blocks, and #4413 withdrew those from the tier entirely (they
+// render from a record context this surface does not mount — see
+// `recordContextFinding` below). The table's `record:*` rows are not dead,
+// they are simply the metadata surface's alone again.
 //
 // ## What is deliberately NOT checked, and why
 //
 //   - Anything non-static (a variable, a call, a value behind a spread) —
 //     ADR-0072 D1: unresolvable is not wrong. `filters` is the one place this
 //     is resolved PER POSITION rather than all-or-nothing; see below.
-//   - `<RecordRelatedList relationshipValueField>`: it names a field on the
-//     PARENT object, and the react surface binds the parent by `recordId`
-//     only — there is no parent OBJECT to resolve against. The metadata twin
-//     has the page's object and checks it there. This is the ONE field-bearing
-//     prop in the index that stays unresolved, and the reason is a missing
-//     binding rather than a missing rule.
 //   - `<ObjectChart>`'s axes: they name the aggregate's RESULT COLUMNS, not
 //     fields, and `checkObjectChart` above already owns them.
 //
@@ -630,8 +635,7 @@ function reactFieldRefs(
  *
  *   1. `REACT_FIELD_SPECS` — the react-only descriptors (`ListView`,
  *      `ObjectForm`, `ObjectChart`'s `filter`).
- *   2. the `record:related_list` split, when the block IS that component.
- *   3. `COMPONENT_FIELD_SPECS`, keyed by the block's `schemaType` — the shared
+ *   2. `COMPONENT_FIELD_SPECS`, keyed by the block's `schemaType` — the shared
  *      table the metadata surface already uses. `<Block type="…">` reaches it
  *      by the type the author wrote, which is what makes the escape hatch
  *      checked rather than a hole.
@@ -667,33 +671,97 @@ function checkBlockFieldProps(
     out.push(...checkFieldRefs(subs.parent, objectName, objectFields, where));
   }
 
-  // `<Block type="record:highlights">` renders the registered component the
-  // author names; every other block's type is fixed by its tag.
+  // `<Block type="element:form">` renders the registered component the author
+  // names; every other block's type is fixed by its tag. A `record:*` type
+  // never arrives here — `recordContextFinding` rejected it upstream.
   const schemaType = tag === 'Block' ? strOf(values.get('type')) : SCHEMA_TYPE_BY_TAG.get(tag);
-  if (schemaType) {
-    const props = readableProps(values);
-    if (schemaType === RELATED_LIST_TYPE) {
-      const split = relatedListFieldRefs(props, path, PATH_SEP);
-      out.push(...checkFieldRefs(split.related, split.relatedObject, objectFields, where));
-      out.push(...checkFieldRefs(split.picker, split.pickerObject, objectFields, where));
-      // `split.parent` (`relationshipValueField`) is deliberately dropped: the
-      // react surface binds the parent RECORD (`recordId`) but never its
-      // object, so there is nothing to resolve it against. See the section note.
-    } else if (COMPONENT_FIELD_SPECS[schemaType]) {
-      out.push(
-        ...checkFieldRefs(
-          componentFieldRefs(schemaType, props, path, PATH_SEP) ?? [],
-          objectName,
-          objectFields,
-          where,
-        ),
-      );
-    }
+  if (schemaType && COMPONENT_FIELD_SPECS[schemaType]) {
+    out.push(
+      ...checkFieldRefs(
+        componentFieldRefs(schemaType, readableProps(values), path, PATH_SEP) ?? [],
+        objectName,
+        objectFields,
+        where,
+      ),
+    );
   }
 
   // The two finding shapes are structurally identical; `where`/`path` are
   // already this surface's, so only the declared type differs.
   return out as ReactPropFinding[];
+}
+
+// ─── The `record:*` family is not of this surface (#4413) ─────────────────
+//
+// Every `record:*` renderer takes its record from the context a RECORD PAGE
+// mounts once (`RecordDetailView` fetches, N blocks render it, and they
+// coordinate through it — highlights dedupe out of the detail grid, one
+// inline-edit save bar commits them all under one version). A `kind:'react'`
+// page mounts no such context: `useRecordContext()` returns null, and each
+// block renders its designer placeholder — or, for `record:related_list`,
+// refuses to fetch because the parent id never arrives.
+//
+// The react tier had published `objectName`/`recordId` on four of them anyway
+// and no renderer read either, so a page authored exactly to contract rendered
+// EMPTY with nothing reported anywhere — including by this file, which
+// cheerfully resolved those props' field names against the object they named.
+// #4413 withdrew the props (see the ledger in `@objectstack/spec/ui`); this
+// turns what was a silent blank into a publish-time error, which is the half
+// that keeps an AI author from writing them again from memory.
+//
+// The check is by TYPE, not by the withdrawn tag list: the scope objectui
+// injects is built from the whole public registry, so every `record:*`
+// component — including the six that were never in the contract
+// (`record:activity`, `record:chatter`, …) — is reachable here and equally
+// empty. `<Block type="record:…">` is the same reach with the type spelled out.
+
+export const REACT_BLOCK_NEEDS_RECORD_CONTEXT = 'react-block-needs-record-context';
+
+const RECORD_BLOCK_GENERIC_FIX =
+  'author the page as `type:\'record\'` — a record page mounts the record context these blocks render from.';
+
+function recordContextFinding(
+  tag: string,
+  schemaType: string,
+  where: string,
+  path: string,
+): ReactPropFinding {
+  return {
+    severity: 'error',
+    rule: REACT_BLOCK_NEEDS_RECORD_CONTEXT,
+    where,
+    path,
+    message:
+      `<${tag}> renders "${schemaType}", which reads its record from the record context a ` +
+      `record page mounts — a kind:'react' page never mounts one, so the block renders empty ` +
+      `no matter how it is bound (its objectName/recordId are not read by the renderer).`,
+    hint:
+      `On a react page bind the record yourself: ` +
+      `${REACT_RECORD_BLOCK_ALTERNATIVES[schemaType] ?? RECORD_BLOCK_GENERIC_FIX}`,
+  };
+}
+
+/**
+ * Names the page source binds itself — every function/variable declaration,
+ * at any depth (a react page declares its helper components INSIDE `Page`).
+ *
+ * A local declaration SHADOWS the injected scope, so `const RecordPath = …`
+ * followed by `<RecordPath/>` is the author's own component and none of this
+ * rule's business. Cheap to honor and it removes the whole false-positive
+ * class from a gate that BLOCKS a publish — the older prop checks above are
+ * left alone deliberately: they only ever warn about a near-miss prop name or
+ * a missing required one, which is survivable advice on a shadowed tag.
+ */
+function localComponentNames(tsc: typeof ts, sf: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  const walk = (node: ts.Node): void => {
+    if (tsc.isFunctionDeclaration(node) && node.name) names.add(node.name.text);
+    else if (tsc.isVariableDeclaration(node) && tsc.isIdentifier(node.name)) names.add(node.name.text);
+    else if (tsc.isImportSpecifier(node)) names.add(node.name.text);
+    tsc.forEachChild(node, walk);
+  };
+  walk(sf);
+  return names;
 }
 
 export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
@@ -723,9 +791,22 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
       continue; // the syntax gate reports unparseable sources
     }
 
+    const locals = localComponentNames(tsc, sf);
+
     const visit = (node: ts.Node): void => {
       if (tsc.isJsxOpeningElement(node) || tsc.isJsxSelfClosingElement(node)) {
         const tag = node.tagName.getText(sf);
+        const where = `page "${name}" › <${tag}>`;
+        const path = `pages[${p}].source`;
+        // A withdrawn `record:*` block, reached by its injected tag. Reported
+        // and then dropped: the prop checks below have nothing useful to add
+        // about a block that cannot render here at all.
+        const recordType = RECORD_CONTEXT_BLOCK_TAGS.get(tag);
+        if (recordType && !locals.has(tag)) {
+          findings.push(recordContextFinding(tag, recordType, where, path));
+          tsc.forEachChild(node, visit);
+          return;
+        }
         const block = BLOCKS.get(tag);
         if (block) {
           let hasSpread = false;
@@ -744,8 +825,19 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
               );
             }
           }
-          const where = `page "${name}" › <${tag}>`;
-          const path = `pages[${p}].source`;
+          // The escape hatch reaches the same withdrawn components by type —
+          // `<Block type="record:highlights">` is `<RecordHighlights>` spelled
+          // out, and just as empty. Checked here rather than by tag because
+          // the type is an attribute VALUE (and a non-static one is
+          // unresolvable, not wrong — ADR-0072 D1).
+          if (tag === 'Block') {
+            const blockType = strOf(values.get('type'));
+            if (blockType && isRecordContextBlockType(blockType)) {
+              findings.push(recordContextFinding(tag, blockType, where, path));
+              tsc.forEachChild(node, visit);
+              return;
+            }
+          }
           if (!hasSpread) {
             for (const req of block.requiredBindings) {
               if (!used.has(req)) {
