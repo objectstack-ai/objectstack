@@ -117,6 +117,31 @@ export const RecalcEstimateAction = defineAction({
   refreshAfter: true,
 });
 
+/**
+ * api, AGGREGATE-dispatched — the `execution: 'aggregate'` specimen
+ * (objectui#3139). The action itself is an ordinary api action; what makes it
+ * aggregate is the VIEW's `bulkActionDefs` entry naming it with
+ * `execution: 'aggregate'` (see `task.view.ts` → `bulk_actions`). The
+ * renderer then dispatches it ONCE for the whole selection, with every
+ * selected id in `params._selectedIds` — the recalc endpoint's batch branch
+ * recomputes all of them in that single call (the "one zip for N devices"
+ * shape, minus the zip). Contrast with RecalcEstimateAction above: same
+ * endpoint, one POST per record.
+ *
+ * No `locations`: like a bulk action named in `bulkActions`, an aggregate
+ * def needs a selection — the view naming it is the whole declaration.
+ */
+export const RecalcSelectionAction = defineAction({
+  name: 'showcase_recalc_selection',
+  label: 'Recalculate Selection',
+  icon: 'calculator',
+  objectName: task,
+  type: 'api',
+  target: '/api/v1/showcase/recalc',
+  successMessage: 'Estimates recalculated for the whole selection.',
+  refreshAfter: true,
+});
+
 /** form — open a parameter form dialog. */
 export const LogTimeAction = defineAction({
   name: 'showcase_log_time',
@@ -335,6 +360,7 @@ export const allActions = [
   BulkReassignAction,
   QuickViewAction,
   RecalcEstimateAction,
+  RecalcSelectionAction,
   LogTimeAction,
   NewTaskAction,
   SubmitForSignoffAction,
