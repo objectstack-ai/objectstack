@@ -207,8 +207,14 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
             component: { type: 'string' },
             visible: { type: 'string' },
             disabled: { type: 'string' },
-            shortcut: { type: 'string' },
-            bulkEnabled: { type: 'boolean', default: false },
+            // No `shortcut` / `bulkEnabled`: spec 17 retired both as
+            // `retiredKey()` tombstones, so authoring either is a hard parse
+            // rejection. This schema is what the Studio designer renders its
+            // fallback form from, so leaving them here handed authors two
+            // inputs that could only ever produce an unsaveable draft
+            // (objectui#3145 removed the matching dedicated controls).
+            // `bulkEnabled`'s replacement is the list view's `bulkActions` /
+            // `bulkActionDefs`; `shortcut` has none.
             aiExposed: { type: 'boolean', default: false },
             recordIdParam: { type: 'string' },
             recordIdField: { type: 'string' },
