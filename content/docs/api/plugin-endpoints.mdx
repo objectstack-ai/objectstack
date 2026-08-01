@@ -26,19 +26,21 @@ Authenticate with email and password (better-auth's email sign-in route, mounted
 
 The following endpoints become available when the corresponding plugin is installed and registered with the kernel. Use the discovery `services` map to check availability.
 
-### Workflow (`/workflow`) — Plugin Required
+### Workflow (`/workflow`) — removed in v17
 
 <Callout type="warn">
-Not yet mounted. These routes are declared in the API protocol but the core dispatcher registers no `/workflow` handler and no bundled plugin provides a `workflow` service (only an in-memory dev stub), so they return **404** today. `discovery.services.workflow` reports `unavailable` in a standard install.
+There is no workflow endpoint, and there is no `workflow` service slot. The
+three routes documented here were declared in the API protocol and served by
+nothing — no dispatcher handler, no plugin — so they 404'd for the whole life
+of the declaration. The slot, the `WorkflowProtocol` methods behind it and the
+discovery fields that reported it were all retired in v17 ([#4451](https://github.com/objectstack-ai/objectstack/issues/4451)).
+Use the live mechanisms instead: an object validation rule of type
+`state_machine` for lifecycle transitions, an `approval` flow node for human
+approval pauses (ADR-0019), and lifecycle hooks / `record_change` flows for
+record-triggered automation.
 </Callout>
 
-| Method | Endpoint | Description |
-|:-------|:---------|:------------|
-| GET | `/workflow/:object/config` | Get workflow configuration |
-| GET | `/workflow/:object/:recordId/state` | Get record's workflow state |
-| POST | `/workflow/:object/:recordId/transition` | Execute state transition |
-
-Approve/reject are **not** workflow routes (ADR-0019): approval is a flow node, and decisions are recorded on the approvals runtime via `POST /approvals/requests/:id/approve` and `POST /approvals/requests/:id/reject`.
+Approve/reject were never workflow routes (ADR-0019): approval is a flow node, and decisions are recorded on the approvals runtime via `POST /approvals/requests/:id/approve` and `POST /approvals/requests/:id/reject`.
 
 ### Automation (`/automation`) — Plugin Required
 
