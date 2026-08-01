@@ -110,6 +110,7 @@ A List View controls how a collection of records is presented. It supports multi
 | `navigation` | `object` | optional | Row click navigation |
 | `rowActions` | `array` | optional | Per-row action buttons, by action name — see [Actions](/docs/ui/actions) |
 | `bulkActions` | `array` | optional | Bulk selection actions, by action name — see [Actions](/docs/ui/actions) |
+| `bulkActionDefs` | `array` | optional | Rich bulk action definitions — mass edits, and the aggregate single-call mode (below) |
 | `inlineEdit` | `boolean` | optional | Enable inline editing |
 | `exportOptions` | `string[]` | optional | Enabled export formats (`csv`, `xlsx`, `pdf`, `json`) |
 
@@ -161,6 +162,44 @@ columns: [
 | `prefix` | `{ field, type?: 'badge' \| 'text' }` | Compound cell — render another field's value inline before this cell's value |
 | `align` | `'left' \| 'center' \| 'right'` | Text alignment |
 | `link` | `boolean` | Cell functions as the primary navigation link |
+
+### Bulk Actions Over a Selection
+
+Two keys drive the multi-select toolbar. `bulkActions` names actions the object
+already declares, and each selected record is dispatched **once** — the action
+runs N times for N rows. `bulkActionDefs` carries richer entries: a mass edit
+through the data API (`operation: 'update'` + a patch), or the **aggregate**
+mode, where the action is called **once for the whole selection**.
+
+```typescript
+bulkActions: ['mark_done'],              // one dispatch per selected record
+bulkActionDefs: [
+  // Mass edit — one bulk write, no action involved.
+  { name: 'archive', operation: 'update', patch: { archived: true } },
+  // Aggregate — ONE call to the declared `export_zip` action, carrying every
+  // selected id. This is the "N devices → one zip download" shape; also batch
+  // print, merged-PDF export.
+  { name: 'export_zip', operation: 'custom', execution: 'aggregate' },
+]
+```
+
+An aggregate dispatch delivers the selection to the handler as
+`params._selectedIds: string[]` — read that, **not** `recordId`. Results are
+all-or-nothing: a handler that cannot cover the whole selection must reject,
+and per-row retry is replaced by re-running the action. `batchSize` does not
+apply (the call is never chunked); set `maxRecords` when the server work is
+expensive. `execution` defaults to `'perRecord'`, so existing views are
+unchanged, and the bare-string `bulkActions` form always dispatches per record
+— aggregate requires the def form, which is where the flag lives.
+
+A url or api action rendered on the list **toolbar** can also read the current
+selection through target interpolation — `${ctx.selection.ids}` (comma-joined)
+and `${ctx.selection.count}` — without any bulk wiring.
+
+<Callout type="warn">
+  `action.bulkEnabled` was retired in spec 17. The multi-select toolbar is
+  driven by these two view keys only.
+</Callout>
 
 ### Data Source
 

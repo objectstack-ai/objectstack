@@ -212,11 +212,29 @@ export class MongoDBDriver implements IDataDriver {
   // CRUD Operations
   // ===========================================================================
 
-  async find(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown>[]> {
-    const collection = this.getCollection(object);
-    const session = this.getSession(options);
-
-    const filter = translateFilter(query.where, this.temporalKindFor(object));
+  /**
+   * The projection / sort / pagination half of a read, shared by {@link find}
+   * and {@link findOne} (objectstack#4419).
+   *
+   * It was inline in `find` only, and `findOne` translated `query.where` and
+   * nothing else — so `orderBy`, `fields` and `offset` were accepted by the
+   * contract and silently dropped on the way to Mongo. `findOne({ orderBy })`
+   * therefore did not return the newest record; it returned whichever document
+   * the collection scan reached first, which is the same
+   * plausible-looking-wrong-record failure #4419 is about, one layer below the
+   * engine.
+   *
+   * `singleRowLookup` marks the caller as `findOne`; see {@link buildSortSpec}.
+   *
+   * Not used by `_findStream`, which deliberately projects the whole document
+   * regardless of `query.fields` — a separate divergence, and one that returns
+   * more data rather than the wrong data, so it is left as-is here.
+   */
+  private buildFindOptions(
+    query: QueryAST,
+    session: FindOptions['session'],
+    opts?: { singleRowLookup?: boolean },
+  ): FindOptions {
     const findOptions: FindOptions = { session };
 
     // Field projection
@@ -238,12 +256,22 @@ export class MongoDBDriver implements IDataDriver {
     }
 
     // Sorting
-    const sort = this.buildSortSpec(query);
+    const sort = this.buildSortSpec(query, opts);
     if (sort) findOptions.sort = sort;
 
     // Pagination
     if (query.offset !== undefined) findOptions.skip = query.offset;
     if (query.limit !== undefined) findOptions.limit = query.limit;
+
+    return findOptions;
+  }
+
+  async find(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    const collection = this.getCollection(object);
+    const session = this.getSession(options);
+
+    const filter = translateFilter(query.where, this.temporalKindFor(object));
+    const findOptions = this.buildFindOptions(query, session);
 
     const cursor = collection.find(filter, findOptions);
     const results = await cursor.toArray();
@@ -255,10 +283,14 @@ export class MongoDBDriver implements IDataDriver {
     const session = this.getSession(options);
 
     const filter = translateFilter(query.where, this.temporalKindFor(object));
-    const result = await collection.findOne(filter, {
-      session,
-      projection: { _id: 0 },
-    });
+    // `singleRowLookup`: honour the caller's ordering, impose none of our own —
+    // the engine sends `limit: 1`, which is indistinguishable from "page one of
+    // a walk with page size 1", and the two want opposite things
+    // (objectstack#4363, and `SqlDriver.findRows` for the measured cost).
+    const result = await collection.findOne(
+      filter,
+      this.buildFindOptions(query, session, { singleRowLookup: true }),
+    );
 
     return result as Record<string, unknown> | null;
   }
@@ -630,8 +662,18 @@ export class MongoDBDriver implements IDataDriver {
    * Returns `undefined` for a read that is neither sorted nor paged — nothing
    * is being sliced there, so a caller who asked for no order keeps none (the
    * contract's explicit carve-out).
+   *
+   * `singleRowLookup` puts {@link findOne} in that carve-out too. It arrives
+   * carrying the engine's `limit: 1`, which the `paged` test below cannot tell
+   * from "page one of a walk with page size 1" — but `findOne` promises *a*
+   * matching record, never a position in a sequence, so there is no partition
+   * to preserve and imposing an order only costs the plan the predicate earned
+   * (objectstack#4363; `SqlDriver.findRows` carries the same flag and the
+   * measured ~100× regression that motivated it). A caller-supplied `orderBy`
+   * is still honoured, tie-breaker and all — that is the half this driver used
+   * to drop entirely (objectstack#4419).
    */
-  private buildSortSpec(query: QueryAST): Document | undefined {
+  private buildSortSpec(query: QueryAST, opts?: { singleRowLookup?: boolean }): Document | undefined {
     const sort: Document = {};
     let lastDirection: 1 | -1 = 1;
     if (Array.isArray(query.orderBy)) {
@@ -644,7 +686,8 @@ export class MongoDBDriver implements IDataDriver {
     }
 
     const requested = Object.keys(sort).length > 0;
-    const paged = query.limit !== undefined || query.offset !== undefined;
+    const paged =
+      !opts?.singleRowLookup && (query.limit !== undefined || query.offset !== undefined);
     if (!requested && !paged) return undefined;
 
     const idKey = this.mapFieldName('id');

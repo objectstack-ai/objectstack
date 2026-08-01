@@ -18,6 +18,13 @@
  * string-target api action, so the body carries `id` + the record fields.
  * We recompute `estimate_hours` from the schedule window (working at 8h/day)
  * and persist it; `refreshAfter: true` on the action repaints the new value.
+ *
+ * Aggregate branch (objectui#3139): an `execution: 'aggregate'` bulk dispatch
+ * (see `showcase_recalc_selection` + task.view's `bulk_actions`) POSTs ONE
+ * request whose body carries `_selectedIds: string[]` instead of a single id.
+ * The handler recomputes every id in that one call and reports the count —
+ * all-or-nothing, per the aggregate contract: a failure rejects the whole
+ * request rather than reporting partial success.
  */
 
 interface RecalcHostContext {
@@ -58,6 +65,30 @@ export function registerRecalcEndpoint(ctx: RecalcHostContext): void {
       };
       try {
         const body = ((req as { body?: Record<string, unknown> })?.body) ?? {};
+        // Aggregate bulk dispatch (objectui#3139): one request, every selected
+        // id in `_selectedIds`. The single-record shape has the record fields
+        // in the body; here only ids arrive, so recompute from a flat 8h
+        // baseline per task — the point of the specimen is the ONE-call shape,
+        // not the estimation model.
+        const selectedIds = Array.isArray(body._selectedIds)
+          ? (body._selectedIds as unknown[]).map(String).filter(Boolean)
+          : undefined;
+        if (selectedIds) {
+          if (selectedIds.length === 0) {
+            r.status(400);
+            r.json({ success: false, error: '_selectedIds is empty' });
+            return;
+          }
+          for (const sid of selectedIds) {
+            await ctx.ql.update(
+              'showcase_task',
+              { id: sid, estimate_hours: 8 },
+              { where: { id: sid } },
+            );
+          }
+          r.json({ success: true, data: { recalculated: selectedIds.length } });
+          return;
+        }
         const id = (body.id ?? body.recordId) as string | undefined;
         if (!id) {
           r.status(400);

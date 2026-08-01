@@ -3244,6 +3244,97 @@ export class ObjectQL implements IObjectQLEngine {
     return resolved === options.where ? options : ({ ...options, where: resolved } as T);
   }
 
+  /**
+   * ADR-0061: expand `search` into a server-resolved cross-field `$or` of
+   * `$contains`, AND it with any caller `where`, then strip the search keys off
+   * the AST.
+   *
+   * Shared by `find` and `findOne` (#4419). It lived inline in `find` and
+   * nowhere else, while `ENGINE_FIND_OPTION_KEYS` — the one legal-key set BOTH
+   * methods are checked against (see {@link ENGINE_OPTION_KEY_SETS}) — declares
+   * `search`/`searchFields` for both. So `findOne({ search })` passed the gate,
+   * rode onto the AST verbatim, and reached a driver: no driver reads
+   * `ast.search` (the expansion is the engine's job by ADR-0061), so the
+   * predicate vanished and the forced `limit: 1` turned it into the first row of
+   * the WHOLE object — a real, plausible-looking record unrelated to the search.
+   * That is #4419's reported failure exactly, under a different key than the
+   * `filter` #4346 closed; one expander, called from both, is what stops the
+   * pair drifting again.
+   *
+   * Field resolution is server-side (declared `searchableFields` →
+   * auto-default); the optional `searchFields` override is intersected with the
+   * allowed set, never widened. All drivers already execute `$or`/`$contains`,
+   * so this needs no driver changes.
+   *
+   * The keys are deleted whether or not anything expanded — leaving them on
+   * would hand the driver a key it does not read, which is the same silent drop
+   * one layer down.
+   */
+  private expandSearchOnAst(ast: QueryAST, schema: ServiceObject | undefined): void {
+    // The `$search`/`$searchFields` OData spellings are NOT read here: the
+    // protocol layer normalizes them to the bare keys before the engine
+    // (protocol.ts findData), and a direct engine call carrying one is an
+    // unknown option — rejected at the entry point, not silently dropped
+    // (#4371).
+    const raw = (ast as any).search;
+    if (raw != null && schema?.fields) {
+      const requestedFields = (ast as any).searchFields
+        ?? (typeof raw === 'object' ? raw?.fields : undefined);
+      const searchFilter = expandSearchToFilter(raw, {
+        fields: schema.fields as any,
+        searchableFields: (schema as any).searchableFields,
+        requestedFields,
+        // [ADR-0079] `nameField` is the canonical primary-title pointer;
+        // `displayNameField` is the deprecated alias (still honored).
+        displayField: (schema as any).nameField ?? (schema as any).displayNameField,
+      });
+      if (searchFilter) {
+        ast.where = ast.where ? { $and: [ast.where, searchFilter] } : searchFilter;
+      }
+    }
+    delete (ast as any).search;
+    delete (ast as any).searchFields;
+  }
+
+  /**
+   * Refuse a `findOne` that selects nothing in particular (#4419).
+   *
+   * The AST reaching here is the CALLER's own intent: aliases folded, unknown
+   * keys refused, `search` expanded — but the security/sharing middlewares have
+   * not run yet, and that ordering is the point. An injected RLS predicate
+   * narrows *which* rows are visible; it does not make "whichever of them comes
+   * first" a thing the caller asked for. Judging the post-middleware AST would
+   * pass every query on a scoped object and leave the hole open where it is
+   * most expensive.
+   *
+   * "Selects nothing" is read the same way #3896 read an empty sharing
+   * criteria: absent, `null`, or `{}` — the three shapes that mean "match every
+   * row". A `where` that is not a plain object (an expression tree) is the
+   * driver's to interpret, and counts as a predicate; this guard closes the one
+   * case that is unambiguously match-everything, not everything it cannot
+   * prove.
+   *
+   * `orderBy` is the other way to be specific, and a legitimate one — "the
+   * newest", "the highest priority". It is honored on this path by every
+   * driver, so it is a real answer and not a second silent drop.
+   */
+  private requireFindOnePredicate(object: string, ast: QueryAST): void {
+    const where = ast.where as unknown;
+    const hasPredicate =
+      where != null &&
+      (typeof where !== 'object' || Array.isArray(where) || Object.keys(where).length > 0);
+    if (hasPredicate) return;
+    if (Array.isArray(ast.orderBy) && ast.orderBy.length > 0) return;
+    throw new Error(
+      `findOne('${object}') selects no particular record: 'where' is absent or empty ` +
+      `and the query carries no 'orderBy'. findOne applies limit: 1, so this would return an ` +
+      `ARBITRARY row — a real, plausible-looking record unrelated to what was asked for, which ` +
+      `no caller's null-check can catch (#4419). Pass 'where' (or a 'search' that resolves to ` +
+      `one) to select the record; pass 'orderBy' if you mean "the first record in THIS order"; ` +
+      `or call find('${object}', { limit: 1 }) if any row will genuinely do.`,
+    );
+  }
+
   async find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     // Normalize the alias spellings (`filter`→`where`, `top`→`limit`) by the
@@ -3271,35 +3362,7 @@ export class ObjectQL implements IObjectQLEngine {
     // fields needed to compute the formulas after fetch.
     const _findSchema = this._registry.getObject(object);
 
-    // ADR-0061: expand `$search` into a server-resolved cross-field `$or`
-    // of `$contains`. Field resolution is server-side (declared
-    // `searchableFields` -> auto-default); the optional `$searchFields` override
-    // is intersected with the allowed set. All drivers already execute
-    // `$or`/`$contains`, so this needs no driver changes.
-    {
-      // The `$search`/`$searchFields` OData spellings are NOT read here: the
-      // protocol layer normalizes them to the bare keys before the engine
-      // (protocol.ts findData), and a direct engine call carrying one is an
-      // unknown option — rejected above, not silently dropped (#4371).
-      const _searchRaw = (ast as any).search;
-      if (_searchRaw != null && _findSchema?.fields) {
-        const _reqFields = (ast as any).searchFields
-          ?? (typeof _searchRaw === 'object' ? _searchRaw?.fields : undefined);
-        const _searchFilter = expandSearchToFilter(_searchRaw, {
-          fields: _findSchema.fields as any,
-          searchableFields: (_findSchema as any).searchableFields,
-          requestedFields: _reqFields,
-          // [ADR-0079] `nameField` is the canonical primary-title pointer;
-          // `displayNameField` is the deprecated alias (still honored).
-          displayField: (_findSchema as any).nameField ?? (_findSchema as any).displayNameField,
-        });
-        if (_searchFilter) {
-          ast.where = ast.where ? { $and: [ast.where, _searchFilter] } : _searchFilter;
-        }
-      }
-      delete (ast as any).search;
-      delete (ast as any).searchFields;
-    }
+    this.expandSearchOnAst(ast, _findSchema);
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
 
@@ -3391,6 +3454,33 @@ export class ObjectQL implements IObjectQLEngine {
     return opCtx.result as any[];
   }
 
+  /**
+   * Read the ONE record the query selects, or `null`.
+   *
+   * `findOne` applies `limit: 1` by contract — so unlike `find`, the query's
+   * predicate is the only thing standing between the caller and *an arbitrary
+   * row*. A query that selects nothing in particular does not return nothing;
+   * it returns the object's first row, which is a real, plausible-looking
+   * record that no caller's `if (!row)` check can catch, and that propagates
+   * into whatever is computed next (#4419). So this method REQUIRES the caller
+   * to say which record it wants:
+   *
+   * - `where` (or the `filter` alias, folded here), or a `search` that expands
+   *   to one — the record is selected by predicate.
+   * - `orderBy` — "the FIRST record in this order" (the newest, the highest
+   *   priority). Deterministic without a predicate, and honored by every
+   *   driver on this path.
+   *
+   * Neither → throws. If any row genuinely will do, that is
+   * `find(object, { limit: 1 })`, which says so at the call site.
+   *
+   * No ordering is IMPOSED when the caller supplies none: `ORDER BY <pk> LIMIT
+   * 1` makes a planner abandon the predicate's own index (objectstack#4363, and
+   * see `SqlDriver.findRows`' `singleRowLookup`). `findOne` promises *a*
+   * matching record, never a position in a sequence.
+   *
+   * Fires the same `beforeFind`/`afterFind` hooks as `find` (#3195).
+   */
   async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any> {
     objectName = this.resolveObjectName(objectName);
     // Same alias fold as find() (#4346). Without it, `findOne({ filter })`
@@ -3412,6 +3502,10 @@ export class ObjectQL implements IObjectQLEngine {
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
     const _findOneSchema = this._registry.getObject(objectName);
+    // Before the guard below, so a `search` that resolves to a real filter
+    // counts as the predicate it is (#4419).
+    this.expandSearchOnAst(ast, _findOneSchema);
+    this.requireFindOnePredicate(objectName, ast);
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
 
