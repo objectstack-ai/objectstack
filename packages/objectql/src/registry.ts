@@ -284,22 +284,19 @@ const AUDIT_FIELD_DEFS = {
  * [#4447] The subset of {@link AUDIT_FIELD_DEFS} that is NOT authorable — the
  * keys that decide who may write an audit column.
  *
- * Derived from the definition table rather than restated, so a change to the
- * canonical defs cannot leave this enforcement describing an older shape. Only
- * governance travels: `label` / `description` and any presentational key an
- * author adds are theirs to set.
+ * Only `readonly` / `system` travel: everything else an author writes —
+ * `label`, `description`, `hidden`, `group`, and even `type` for an
+ * external object mapping a differently-typed remote column — stays theirs.
  */
-const AUDIT_FIELD_GOVERNANCE = Object.fromEntries(
-  AUDIT_PROVENANCE_FIELDS.map((name) => {
-    const def = AUDIT_FIELD_DEFS[name] as Record<string, unknown>;
-    return [name, {
-      type: def.type,
-      readonly: true,
-      system: true,
-      ...(def.reference !== undefined ? { reference: def.reference } : {}),
-    }];
-  }),
-) as unknown as Record<AuditProvenanceField, Record<string, unknown>>;
+const AUDIT_FIELD_GOVERNANCE: Record<AuditProvenanceField, Record<string, unknown>> =
+  Object.fromEntries(
+    // ONLY the keys that decide WHO MAY WRITE the column. `type` and
+    // `reference` are deliberately NOT forced: an external/federated object
+    // legitimately maps its audit column to a differently-typed remote column,
+    // and #4447 is about writability, not storage shape. Narrower is the point
+    // — this overrides an author, so it takes only what the defect requires.
+    AUDIT_PROVENANCE_FIELDS.map((name) => [name, { readonly: true, system: true }]),
+  ) as unknown as Record<AuditProvenanceField, Record<string, unknown>>;
 
 export function applySystemFields(
   schema: ServiceObject,

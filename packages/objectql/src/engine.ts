@@ -585,6 +585,19 @@ interface SummaryDescriptor {
 // on every build, so the seven consumer-local surface declarations the contract
 // replaced can never silently drift from the engine again. IObjectQLEngine
 // extends IDataEngine, so the old claim rides along.
+/**
+ * [#4441] "The caller did not name a record here."
+ *
+ * `null` / `undefined` / `''` mean NO LINK — exactly what
+ * `deleteBehavior: 'set_null'` writes — and an empty array is the multi-value
+ * spelling of the same thing. None of them is an id to resolve.
+ */
+function isEmptyReferenceValue(v: unknown): boolean {
+  if (v === null || v === undefined || v === '') return true;
+  if (Array.isArray(v)) return v.length === 0 || v.every((e) => e === null || e === undefined || e === '');
+  return false;
+}
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -1999,7 +2012,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async assertReferencesResolve(
     schema: any,
     data: Record<string, unknown> | null | undefined,
-    suppliedKeys: ReadonlySet<string>,
+    supplied: Record<string, unknown> | null | undefined,
     context: any,
     msgCtx?: { locale?: string; translate?: any; objectName?: string },
   ): Promise<void> {
@@ -2009,7 +2022,20 @@ export class ObjectQL implements IObjectQLEngine {
 
     const failures: any[] = [];
     for (const name of Object.keys(fields)) {
-      if (!suppliedKeys.has(name)) continue;
+      // Only a value the CALLER actually supplied is theirs to answer for.
+      //
+      // Key presence is not enough: a form serializes an unpicked control as
+      // an explicit `null`, and `applyFieldDefaults` then fills it from
+      // `defaultValue` — including the `current_user` token (#2706). The key is
+      // in the payload, but the ID that lands is the PLATFORM's, so validating
+      // it would report a server-derived value as the caller's bad reference
+      // (and reject a perfectly ordinary insert against a driver that has no
+      // `sys_user` row for the acting principal).
+      //
+      // So the value read for the check comes from the post-normalization
+      // `data` (multi-value strings are already split by then), while WHETHER
+      // to check is decided by the caller's own raw value being non-empty.
+      if (!supplied || isEmptyReferenceValue((supplied as Record<string, unknown>)[name])) continue;
       if (!(name in data)) continue;
       const def = fields[name];
       const target = referenceTargetOf(def);
@@ -3806,13 +3832,15 @@ export class ObjectQL implements IObjectQLEngine {
         // Locale + translation hooks for the rejection messages (#3957) —
         // resolved once for the batch, identical for every row.
         const msgCtx = this.validationMessageContext(object, opCtx.context);
-        // [#4441] The keys the CALLER sent, per row, snapshotted before the
+        // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
+        // resolved any `defaultValue` / `current_user` token and before the
         // beforeInsert hooks stamped `owner_id` / `organization_id` /
-        // `created_by`. The reference check reads only these, so a platform
-        // stamp can never be reported back as a caller's bad reference.
-        const suppliedPerRow: ReadonlySet<string>[] =
+        // `created_by`. The reference check consults it to decide WHAT THE
+        // CALLER ACTUALLY SENT, so neither a platform stamp nor a backfilled
+        // default is ever reported as the caller's bad reference.
+        const suppliedPerRow: Array<Record<string, unknown>> =
           (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
-            (row) => new Set(Object.keys((row ?? {}) as Record<string, unknown>)),
+            (row) => (row ?? {}) as Record<string, unknown>,
           );
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
@@ -3821,8 +3849,7 @@ export class ObjectQL implements IObjectQLEngine {
             validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx });
             await this.assertReferencesResolve(
-              schemaForValidation, rows[i],
-              suppliedPerRow[i] ?? new Set<string>(), opCtx.context, msgCtx,
+              schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
           } catch (e) {
             if (!partialMode) throw e;
@@ -4141,7 +4168,7 @@ export class ObjectQL implements IObjectQLEngine {
                // [#4441] A repoint is as capable of dangling as an initial link.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
-                 suppliedKeys, opCtx.context, updateMsgCtx,
+                 opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                );
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
@@ -4226,7 +4253,7 @@ export class ObjectQL implements IObjectQLEngine {
                // PD #10's own worked example, #3106).
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
-                 suppliedKeys, opCtx.context, updateMsgCtx,
+                 opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                );
                result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else {

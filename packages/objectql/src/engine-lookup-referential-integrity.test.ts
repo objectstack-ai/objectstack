@@ -271,6 +271,44 @@ describe('[#4441] a lookup id that resolves to nothing is refused', () => {
     expect(row.title).toBe('T');
   });
 
+  it('a value the PLATFORM derived is never reported as the caller\'s bad reference', async () => {
+    // A form serializes an unpicked control as an explicit `null`, and
+    // `applyFieldDefaults` then fills it from `defaultValue` — including the
+    // `current_user` token (#2706). The key IS in the payload, but the id that
+    // lands is the platform's, so checking it would reject an ordinary insert
+    // whenever the acting principal has no row in the target (exactly what a
+    // bare-engine / test driver looks like). Whether to check is decided by the
+    // caller's own raw value, not by key presence.
+    engine.registry.registerObject({
+      name: 'ref_defaulted',
+      label: 'Defaulted',
+      fields: {
+        id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+        title: { name: 'title', label: 'Title', type: 'text' as const },
+        owner: {
+          name: 'owner', label: 'Owner', type: 'lookup' as const,
+          reference: 'ref_permission_set', defaultValue: 'ps_not_a_row',
+        },
+      },
+    } as any);
+
+    const explicitNull: any = await engine.insert(
+      'ref_defaulted', { title: 'T', owner: null }, { context: userCtx } as any,
+    );
+    expect(explicitNull.owner).toBe('ps_not_a_row');
+
+    const omitted: any = await engine.insert(
+      'ref_defaulted', { title: 'T2' }, { context: userCtx } as any,
+    );
+    expect(omitted.owner).toBe('ps_not_a_row');
+
+    // …but a value the caller DID name is still checked.
+    const err = await refusalOf(() =>
+      engine.insert('ref_defaulted', { title: 'T3', owner: 'nope' }, { context: userCtx } as any),
+    );
+    expect(err.fields[0]).toMatchObject({ field: 'owner', code: 'reference_not_found', value: 'nope' });
+  });
+
   it('an unresolvable TARGET object fails open rather than blocking every write', async () => {
     // A reference to an object that is not registered (another datasource, a
     // package not installed) cannot be checked. An integrity check that cannot
