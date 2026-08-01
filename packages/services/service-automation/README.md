@@ -175,9 +175,9 @@ The two failure modes to memorize:
 1. **Braces missing in a field value** — `due_date: 'TODAY() + 7'` writes the
    literal text into the field. Write `'{TODAY() + 7}'`.
 2. **Braces put *into* a condition** — `'{record.amount} > 500'`. Since #4336
-   conditions reject this loudly (before that they compared as text and were
-   silently always-true or always-false), so `registerFlow()` / `objectstack
-   validate` refuse the flow with a CEL error naming the reference.
+   conditions reject this loudly: `registerFlow()` / `objectstack validate`
+   refuse the flow with a CEL error naming the reference. Before that they were
+   compared as text and were silently always-true or always-false.
 
 There is no `{!…}` dialect. That is Salesforce syntax; the platform has never
 parsed it.
