@@ -23,8 +23,21 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+
+/**
+ * `SchemaStack.kernel` is untyped, so a type argument is a TS2347 — the slot's
+ * contract is stated on the RESULT instead. Narrowing, not erasing: `: any`
+ * here would switch off checking on every `ql.*` call below while looking
+ * identical to code that has it (the `slot-lookup` rule's whole point).
+ */
+const engineOf = (stack: { kernel: any }): IObjectQLEngine =>
+  stack.kernel.getService('objectql') as IObjectQLEngine;
+
+/** Elevated so the seed write bypasses RLS on a system object. */
+const SYSTEM = { context: { isSystem: true } };
 
 const ARTIFACT = {
   id: 'stored_flow_smoke',
@@ -86,13 +99,13 @@ describe('os migrate meta --stored — the protocol resolves the engine itself (
       extraPlugins: await buildDataMigrationPlugins({ automation: true }),
     });
     try {
-      const ql: any = stack.kernel.getService('objectql');
+      const ql = engineOf(stack);
       await ql.insert('sys_metadata', {
         type: 'flow',
         name: 'sfs_purge',
         state: 'active',
         metadata: JSON.stringify(LEGACY_FLOW),
-      }, { context: { isSystem: true } });
+      }, SYSTEM);
 
       const protocol: any = stack.kernel.getService('protocol');
 
@@ -104,10 +117,9 @@ describe('os migrate meta --stored — the protocol resolves the engine itself (
       });
 
       // Before the resolver this row came back `skipped` with "no automation
-      // service is reachable", and the run still exited 0 on a re-check that
-      // examined nothing.
-      // Reported as the reason, not as a bare count, so a regression here says
-      // what went wrong instead of just "expected 1 to be 0".
+      // service is reachable". Asserted as the REASON rather than as a bare
+      // count, so a regression here says what went wrong instead of just
+      // "expected 1 to be 0".
       expect(
         report.rows
           .filter((r: any) => r.outcome === 'skipped' || r.outcome === 'failed')
@@ -120,7 +132,7 @@ describe('os migrate meta --stored — the protocol resolves the engine itself (
       // …and the bytes on disk actually moved.
       const [row] = await ql.find('sys_metadata', {
         where: { type: 'flow', name: 'sfs_purge', state: 'active' },
-      }, { context: { isSystem: true } });
+      }, SYSTEM);
       const stored = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
       const node = stored.nodes.find((n: any) => n.id === 'n1');
       expect(node.config).toEqual({ objectName: 'sfs_lead', filter: { title: 'stale' } });
@@ -152,13 +164,13 @@ describe('os migrate meta --stored — the protocol resolves the engine itself (
       extraPlugins: await buildDataMigrationPlugins(),
     });
     try {
-      const ql: any = stack.kernel.getService('objectql');
+      const ql = engineOf(stack);
       await ql.insert('sys_metadata', {
         type: 'flow',
         name: 'sfs_purge',
         state: 'active',
         metadata: JSON.stringify(LEGACY_FLOW),
-      }, { context: { isSystem: true } });
+      }, SYSTEM);
 
       const protocol: any = stack.kernel.getService('protocol');
       const report = await protocol.migrateStoredMetadata({ apply: true, types: ['flow'] });
