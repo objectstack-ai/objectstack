@@ -189,4 +189,65 @@ describe('lintLivenessProperties', () => {
     });
     expect(findings).toEqual([]);
   });
+
+  // ── datasource (#4487 — the type was ungoverned until the ledger was seeded) ──
+  // Runs against the REAL datasource.json. These pin the ledger→author loop for
+  // the type that most needed it: 20 of its 43 props have no runtime consumer,
+  // and until #4487 nothing told an author so.
+
+  it('warns on the dead datasource blocks — capabilities / healthCheck / retryPolicy (#4487)', () => {
+    const findings = lintLivenessProperties({
+      datasources: [{
+        name: 'warehouse',
+        driver: 'postgres',
+        config: { host: 'db.internal', database: 'analytics' },
+        capabilities: { transactions: true, queryAggregations: true },
+        healthCheck: { enabled: true, intervalMs: 30000 },
+        retryPolicy: { maxRetries: 5, baseDelayMs: 1000 },
+      }],
+    });
+    const msgs = paths(findings);
+    expect(msgs.some((m) => m.includes('capabilities.transactions'))).toBe(true);
+    expect(msgs.some((m) => m.includes('capabilities.queryAggregations'))).toBe(true);
+    expect(msgs.some((m) => m.includes('healthCheck.enabled'))).toBe(true);
+    expect(msgs.some((m) => m.includes('healthCheck.intervalMs'))).toBe(true);
+    expect(msgs.some((m) => m.includes('retryPolicy.maxRetries'))).toBe(true);
+    expect(msgs.some((m) => m.includes('retryPolicy.baseDelayMs'))).toBe(true);
+  });
+
+  // The entry the whole audit was worth doing for. `capabilities.readOnly` reads
+  // as a safety switch and gates nothing, and two shipped prescriptions pointed
+  // authors AT it until #4487. The hint has to name the gate that IS enforced,
+  // or the warning just relocates the author's confusion.
+  it('warns on capabilities.readOnly and names the real write gate (#4487)', () => {
+    const findings = lintLivenessProperties({
+      datasources: [{
+        name: 'reporting',
+        driver: 'postgres',
+        config: { host: 'ro.internal', database: 'reporting' },
+        capabilities: { readOnly: true },
+      }],
+    });
+    const hit = findings.find((f) => f.message.includes('capabilities.readOnly'));
+    expect(hit).toBeDefined();
+    expect(hit!.hint).toMatch(/allowWrites/);
+  });
+
+  it('stays silent on a datasource that only sets live properties (#4487)', () => {
+    const findings = lintLivenessProperties({
+      datasources: [{
+        name: 'warehouse',
+        label: 'Warehouse',
+        driver: 'postgres',
+        config: { host: 'db.internal', database: 'analytics' },
+        pool: { min: 1, max: 10 },
+        ssl: { enabled: true, rejectUnauthorized: true },
+        active: true,
+        autoConnect: true,
+        schemaMode: 'external',
+        external: { allowWrites: false, allowedSchemas: ['public'] },
+      }],
+    });
+    expect(findings).toEqual([]);
+  });
 });

@@ -424,9 +424,16 @@ schema to the two highest-risk authorable surfaces, per the triage in
   then connected on driver defaults rather than failing. Those keys now
   prescribe the move into `config`; a top-level `password` is instead pointed at
   `external.credentialsRef`, because relocating an inlined secret is not the fix.
-  A dropped key in `capabilities` was quieter still: an unregistered capability
-  reads as `false`, so the engine stopped pushing that work down to the driver
-  and recomputed it in memory.
+  A dropped key in `capabilities` was quieter still — though not for the reason
+  this note used to give. It claimed an unregistered capability "reads as
+  `false`, so the engine stopped pushing that work down to the driver and
+  recomputed it in memory", which was never true: the #4487 liveness audit
+  found the whole `capabilities` block has no reader at all. The engine gates
+  pushdown on the runtime driver's own `supports.*` object, a different
+  mechanism with a non-overlapping vocabulary. Every key in the block is `dead`
+  in `liveness/datasource.json`, and `capabilities.readOnly` is the one to know
+  about: it reads as a safety switch and gates nothing — `external.allowWrites:
+  false` is the enforced write gate.
 
 One clarification, since these flips are easy to over-read: making a schema
 strict does **not** change its published JSON Schema. `build-schemas.ts`
