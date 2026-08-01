@@ -11,6 +11,8 @@ import { HookBodySchema } from '../data/hook-body.zod';
 // deliberately import-free, so this cannot introduce a cycle.
 import { PUBLIC_AUTH_FEATURE_NAMES, lowerRequiresFeature } from '../kernel/public-auth-features';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
 /**
  * Action Parameter Schema
@@ -325,7 +327,45 @@ const ActionAiCategorySchema = z.enum([
  * UI `label`. The bridge in `@objectstack/service-ai` translates this block
  * into an `AIToolDefinition`.
  */
-export const ActionAiSchema = z.object({
+/**
+ * Shared history for this file (#4001).
+ *
+ * `ActionParamSchema` has been strict since #3746 — the campaign's own template,
+ * where `visibleWhen` → `visible` proved that the most valuable alias entry is
+ * rarely a typo but a key that reads as a control and silently is not one. The
+ * action AROUND the param stayed open for three more releases.
+ */
+const ACTION_HISTORY =
+  'Until #4001 closed this shape these were dropped silently — the action still registered '
+  + 'and still ran, without whatever the key was meant to configure or gate.';
+
+export const ActionAiSchema = strictObject({
+  surface: "this action's AI exposure block",
+  history: ACTION_HISTORY,
+  aliases: {
+    enabled: 'exposed', enable: 'exposed', aiEnabled: 'exposed', expose: 'exposed', visible: 'exposed',
+    prompt: 'description', toolDescription: 'description', summary: 'description',
+    type: 'category', kind: 'category', toolCategory: 'category',
+    hints: 'paramHints', parameterHints: 'paramHints', params: 'paramHints',
+    returns: 'outputSchema', responseSchema: 'outputSchema', output: 'outputSchema',
+    confirm: 'requiresConfirmation', requireConfirmation: 'requiresConfirmation', hitl: 'requiresConfirmation', humanInTheLoop: 'requiresConfirmation',
+  },
+  guidance: {
+    // This block IS the governance gate — the doc above says a half-finished or
+    // unreviewed action must never be silently armed. A near-miss here is
+    // therefore the worst kind on this surface: the author believes they set a
+    // gate, and the gate does not exist. Name the two people reach for.
+    permissions:
+      'AI invocation is not gated by a key here — an agent reaches this action only if a '
+      + "surface-compatible SKILL declares it (ADR-0064), and who may talk to that agent is "
+      + "gated by the agent's `access` / `permissions` (enforced at the chat route since #1884). "
+      + 'For a human-approval step on the call itself, use `requiresConfirmation: true`.',
+    approval:
+      'there is no approval workflow key here — `requiresConfirmation: true` forces a '
+      + 'human-in-the-loop gate on the AI call. A multi-step business approval is an `approval` '
+      + 'metadata item, not an action field.',
+  },
+}, {
   /**
    * Expose this action to AI agents as a callable tool. Default `false`.
    * Setting `true` REQUIRES `description`.
@@ -351,7 +391,11 @@ export const ActionAiSchema = z.object({
    * `description`, supply `examples`) WITHOUT changing the UI-facing field
    * metadata. Keys must match a declared `params[].name` (or `recordId`).
    */
-  paramHints: z.record(z.string(), z.object({
+  paramHints: z.record(z.string(), strictObject({
+    surface: 'this AI parameter hint',
+    history: ACTION_HISTORY,
+    aliases: { desc: 'description', hint: 'description', values: 'enum', options: 'enum', choices: 'enum', allowed: 'enum', example: 'examples', sample: 'examples' },
+  }, {
     description: z.string().optional(),
     enum: z.array(z.union([z.string(), z.number()])).optional(),
     examples: z.array(z.unknown()).optional(),
@@ -390,7 +434,50 @@ export type ActionAi = z.infer<typeof ActionAiSchema>;
  * restating a dozen field definitions and their `describe()` text, which is how
  * a second action vocabulary would start.
  */
-const actionObject = () => z.object({
+const actionObject = () => strictObject({
+  surface: 'this action',
+  history: ACTION_HISTORY,
+  aliases: {
+    title: 'label', displayName: 'label', text: 'label',
+    object: 'objectName', entity: 'objectName',
+    actionType: 'type',
+    url: 'target', endpoint: 'target', path: 'target', href: 'target',
+    parameters: 'params', args: 'params', inputs: 'params', fields: 'params',
+    confirm: 'confirmText', confirmation: 'confirmText', confirmMessage: 'confirmText',
+    success: 'successMessage', successText: 'successMessage', toast: 'successMessage',
+    visibleWhen: 'visible', showWhen: 'visible',
+    disabledWhen: 'disabled',
+    style: 'variant', color: 'variant', appearance: 'variant',
+    placement: 'location', locations: 'location', position: 'location',
+    verb: 'method', httpMethod: 'method',
+    body: 'bodyExtra', payload: 'bodyExtra',
+    llm: 'ai', tool: 'ai',
+    dialog: 'resultDialog', result: 'resultDialog',
+    refresh: 'refreshAfter', reload: 'refreshAfter',
+  },
+  guidance: {
+    // The one that reads as a security control and is not one — the class this
+    // campaign exists for, and the reason `visible` / `disabled` are named here:
+    // they hide or grey a button, they do not stop a request.
+    permissions:
+      'an action is not permission-gated by a key here. Authorization comes from the OBJECT\'s '
+      + 'permission sets (what the caller may read/write) and, on the AI surface, from the agent\'s '
+      + '`access` / `permissions` (enforced at the chat route since #1884). `visible` and `disabled` '
+      + 'are UI predicates — they hide or grey a button, they do not stop a request.',
+    requiredPermissions:
+      'an action is not permission-gated by a key here — see `permissions`. To gate a FIELD, '
+      + 'declare `requiredPermissions` on that field (ADR-0066 D3); to gate the operation itself, '
+      + 'use the object\'s permission sets.',
+    // Two AI-block keys authors reach for at the top level. Silently stripping
+    // either meant an action was armed for agents, or left ungated, in silence.
+    exposed:
+      'AI exposure lives under `ai` — write `ai: { exposed: true, description: … }`. The '
+      + 'description is the LLM-facing contract and is REQUIRED (≥40 chars) whenever exposed.',
+    requiresConfirmation:
+      'the AI human-in-the-loop override lives under `ai` — write '
+      + '`ai: { requiresConfirmation: true }`. `confirmText` is the separate UI confirm prompt.',
+  },
+}, {
   /** Machine name of the action */
   name: SnakeCaseIdentifierSchema.describe('Machine name (lowercase snake_case)'),
   
@@ -578,12 +665,20 @@ const actionObject = () => z.object({
    * The dialog SHOULD set `refreshAfter` to true on close (separate from
    * the existing `refreshAfter` flag, which fires immediately on success).
    */
-  resultDialog: z.object({
+  resultDialog: strictObject({
+    surface: 'this result dialog',
+    history: ACTION_HISTORY,
+    aliases: { label: 'title', heading: 'title', message: 'description', body: 'description', ok: 'acknowledge', confirm: 'acknowledge', button: 'acknowledge', display: 'format', render: 'format', show: 'fields', reveal: 'fields' },
+  }, {
     title: I18nLabelSchema.optional(),
     description: I18nLabelSchema.optional(),
     acknowledge: I18nLabelSchema.optional().describe('Acknowledge button label, e.g. "I have saved this"'),
     format: z.enum(['qrcode', 'code-list', 'secret', 'text', 'json']).optional().describe('Default format for fields without their own format. Defaults to json when omitted.'),
-    fields: z.array(z.object({
+    fields: z.array(strictObject({
+      surface: 'this result dialog field',
+      history: ACTION_HISTORY,
+      aliases: { key: 'path', field: 'path', name: 'path', title: 'label', display: 'format', render: 'format' },
+    }, {
       path: z.string().describe('Dot path into result.data (e.g. "totpURI", "client.client_secret").'),
       label: I18nLabelSchema.optional(),
       format: z.enum(['qrcode', 'code-list', 'secret', 'text', 'json']).optional().describe('Per-field format override.'),
@@ -669,7 +764,11 @@ const actionObject = () => z.object({
    */
   bodyShape: z.union([
     z.literal('flat'),
-    z.object({ wrap: z.string() }),
+    strictObject({
+      surface: 'this body shape',
+      history: ACTION_HISTORY,
+      aliases: { key: 'wrap', under: 'wrap', nest: 'wrap', root: 'wrap' },
+    }, { wrap: z.string() }),
   ]).optional().describe('Body wrapping: flat (default) or { wrap: key } to nest user-collected params under a key.'),
   /**
    * HTTP method to use when `type: 'api'`. Defaults to `POST`. Use `PATCH` to
@@ -712,6 +811,13 @@ const actionObject = () => z.object({
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  // `action` is a registered metadata type, so `MetadataPlugin`'s loader stamps
+  // `_packageId` / `_provenance` on it. Undeclared, they were dropped on every
+  // parse. This is the LAST name on the undeclared-envelope debt list the
+  // structural walk opened with eight of.
+  ...MetadataProtectionFields,
 });
 
 export const ActionSchema = lazySchema(() => actionObject().refine((data) => {

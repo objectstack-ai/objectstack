@@ -54,17 +54,20 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // `page.regions[0].zzz` all `safeParse` to failure — and the check is worth
     // repeating on the next one, because a broken walk and a successful
     // graduation shrink this count identically.
-    // 3 → 2 when `dashboard` closed; `dashboard.zzz` was confirmed rejected by
-    // the parse first, same as the batch before it.
-    expect(lintables.length).toBeGreaterThanOrEqual(2);
-    // `view` matters doubly: it is a UNION (container | ViewItem | overlay), so
-    // its presence pins the union half of the posture logic — a regression that
-    // silently dropped unions would shrink coverage without failing the count.
-    // When `view` and `action` close, this whole layer has nothing left to warn
-    // about at a ROOT, which is the campaign finishing rather than the lint
-    // breaking — at that point assert the empty set deliberately, do not delete
-    // the test.
-    for (const expected of ['action', 'view']) {
+    // 3 → 2 when `dashboard` closed, 2 → 1 when `action` did; in each case the
+    // departed root was confirmed rejected by the parse before the number moved.
+    expect(lintables.length).toBeGreaterThanOrEqual(1);
+    // `view` is the LAST open root, and it matters doubly: it is a UNION
+    // (container | ViewItem | overlay), so its presence pins the union half of
+    // the posture logic — a regression that silently dropped unions would shrink
+    // coverage without failing the count.
+    //
+    // When `view` closes, this layer has nothing left to warn about at a ROOT.
+    // That is the campaign finishing, not the lint breaking. At that point change
+    // the floor to 0 and assert the empty set DELIBERATELY — do not delete this
+    // test, because an empty result that nobody chose is indistinguishable from
+    // a derivation that broke.
+    for (const expected of ['view']) {
       expect(lintableTypes, `expected '${expected}' to be lint-covered`).toContain(expected);
     }
   });
@@ -177,7 +180,7 @@ describe('the #4148 behaviours survive the generalization', () => {
     // strip site under a CLOSED root (the #4522 behaviour), and `view` — the
     // last open root, and the union case — reports at its own.
     const findings = lintUnknownAuthoringKeys({
-      objects: [{ name: 'a', label: 'A', actions: [{ name: 'act', zzz: 1 }] }],
+      objects: [{ name: 'a', label: 'A', userActions: { zzz: 1 } }],
       views: [{ name: 'v', object: 'a', zzz: 1 }],
     });
     // Deduped deliberately: `view` is a union (container | ViewItem | overlay)
@@ -187,7 +190,7 @@ describe('the #4148 behaviours survive the generalization', () => {
     // and it becomes moot when `view` closes. Left recorded rather than papered
     // over by picking a non-union collection.
     expect([...new Set(findings.map((f) => `${f.surface}:${f.path}`))].sort()).toEqual([
-      'object:objects.a.actions.0.zzz',
+      'object:objects.a.userActions.zzz',
       'view:views.v.zzz',
     ]);
   });
@@ -241,17 +244,29 @@ describe('nested descent (#4001 evidence phase)', () => {
   });
 
   it('reports inside an array element, indexed by position', () => {
-    // Was `pages[].regions[]` until `page` closed (#4001 batch 6a) — the parse
-    // rejects that key now. `object.actions[]` is the same structural case and
-    // carries a second property worth pinning: `object` itself is CLOSED, and
-    // its nested strip sites still report. That is the #4522 fix — the walk
-    // descends per node instead of gating a whole collection on its root's
-    // posture — so this test now covers the array index and that regression at
-    // once.
-    const [finding] = lintUnknownAuthoringKeys({
+    // This test has now run out of subject, and that is worth saying plainly
+    // rather than deleting it or inventing a fixture.
+    //
+    // It was `pages[].regions[]`, then `objects[].actions[]` when `page` closed
+    // (6a), and with `action` closed (6d) there is no declared ARRAY OF OBJECTS
+    // left anywhere in the registered surface that is still strip-mode. The
+    // walker's array-index handling is unchanged and still correct; what is gone
+    // is any metadata type that exercises it. That is the ratchet finishing, not
+    // the walk regressing.
+    //
+    // So: assert the hand-off, and assert what still holds — the per-node
+    // descent under a CLOSED root, which is the #4522 fix and the reason the
+    // walk no longer gates a whole collection on its root's posture. If a new
+    // strip surface with a nested array ever appears, restore the indexed
+    // assertion here; do not let it go untested a second time.
+    expect(lintUnknownAuthoringKeys({
       objects: [{ name: 'o1', actions: [{ name: 'a', zzz_nested: 1 }] }],
+    })).toEqual([]);
+
+    const [nested] = lintUnknownAuthoringKeys({
+      objects: [{ name: 'o1', userActions: { zzz_nested: 1 } }],
     });
-    expect(finding).toMatchObject({ path: 'objects.o1.actions.0.zzz_nested', surface: 'object' });
+    expect(nested).toMatchObject({ path: 'objects.o1.userActions.zzz_nested', surface: 'object' });
   });
 
   it('hands the field record and its nested array to the parse', () => {

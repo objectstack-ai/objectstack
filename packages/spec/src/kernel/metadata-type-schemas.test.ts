@@ -80,10 +80,16 @@ const PROBE: Record<string, unknown> = {
  * actually checked (the other 24 took an early return), so it was the only
  * envelope gap anyone could see for as long as that probe was green — and it
  * outlasted every gap the probe was hiding.
+ *
+ * **This list is now EMPTY, and that is the end state — not a reason to delete
+ * it.** Every registered type declares the envelope its loader stamps. Keeping
+ * the empty set means the `DECLARES the protection envelope` case below runs
+ * over ALL types with no exemptions, so the day a new registered type ships
+ * without the spread it fails immediately rather than being quietly added here.
+ * If you find yourself adding a name back, that is a bug being filed, not an
+ * exemption being granted.
  */
-const UNDECLARED_ENVELOPE = new Set<string>([
-  'action',
-]);
+const UNDECLARED_ENVELOPE = new Set<string>([]);
 
 /**
  * Every object shape reachable from `schema`, unwrapping the wrappers the
@@ -218,7 +224,7 @@ describe('registered metadata types', () => {
  * type fails this suite until the list shrinks, so the list cannot outlive the
  * debt and start exempting types that no longer need exempting.
  */
-const STILL_STRIP = new Set<string>(['action', 'view']);
+const STILL_STRIP = new Set<string>(['view']);
 
 /** The registered schema's own top-level posture: `.strict()` sets a `never` catchall. */
 function topLevelPosture(schema: unknown, depth = 0): 'strict' | 'strip' | null {
@@ -285,7 +291,7 @@ describe('#4001 — registered-type closure is derived, not tallied', () => {
   it('reports the campaign number so a reader never has to count', () => {
     const closed = types.filter((t) => !STILL_STRIP.has(t));
     expect(closed.length + STILL_STRIP.size).toBe(types.length);
-    expect(closed.length).toBe(23);
+    expect(closed.length).toBe(24);
     expect(types.length).toBe(25);
   });
 });
