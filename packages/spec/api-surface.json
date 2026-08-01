@@ -1541,6 +1541,7 @@
     "ListPackagesRequestSchema (const)",
     "ListPackagesResponse (type)",
     "ListPackagesResponseSchema (const)",
+    "METADATA_READ_DECORATIONS (const)",
     "ManifestPermissions (type)",
     "ManifestPermissionsSchema (const)",
     "ManifestSchema (const)",
@@ -1603,6 +1604,7 @@
     "MetadataQueryResult (type)",
     "MetadataQueryResultSchema (const)",
     "MetadataQuerySchema (const)",
+    "MetadataReadDecoration (type)",
     "MetadataSaveOptions (type)",
     "MetadataSaveOptionsSchema (const)",
     "MetadataSaveResult (type)",
@@ -1870,6 +1872,7 @@
     "registerMetadataTypeActions (function)",
     "registerMetadataTypeSchema (function)",
     "resolveLockState (function)",
+    "stripReadDecorations (function)",
     "validateObjectNamespacePrefix (function)"
   ],
   "./ai": [
