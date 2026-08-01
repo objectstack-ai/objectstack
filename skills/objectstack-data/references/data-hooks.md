@@ -324,7 +324,7 @@ org / user / transaction. Methods:
 | Method | Capability | Call |
 |:--|:--|:--|
 | `find(opts)` | `api.read` | `find({ where: { … }, fields, sort, limit })` → array |
-| `findOne(opts)` | `api.read` | `findOne({ where: { id } })` → record \| `null` |
+| `findOne(opts)` | `api.read` | `findOne({ where: { id } })` → record \| `null` — needs a predicate or an `orderBy`, see below |
 | `count(opts)` | `api.read` | `count({ where: { … } })` → number |
 | `insert(data)` | `api.write` | `insert({ … })` |
 | `update(data, opts?)` | `api.write` | **`update({ id, ...fields })`** — put the id **inside** `data` |
@@ -345,6 +345,25 @@ await ctx.api.object('task').find({ where: { $and: [{ done: false }, { owner: ui
 > but prefer `where`. Do **not** pass an array-of-triples such as
 > `[['id', '=', x]]` — that is not a supported value shape and silently matches
 > nothing.
+
+**`findOne` must say which record it wants.** It reads a single row, so an
+absent or empty predicate does not come back as `null` — it comes back as the
+object's **first row**: a real, plausible-looking record with nothing to do with
+what you asked for, which your `if (!row)` cannot catch. So `findOne()`,
+`findOne({})` and `findOne({ where: {} })` **throw** (#4419). Be specific in one
+of three ways:
+
+```js
+await ctx.api.object('candidate').findOne({ where: { id } });    // by predicate
+await ctx.api.object('candidate').findOne({ search: 'Acme' });   // by search
+await ctx.api.object('audit')
+  .findOne({ orderBy: [{ field: 'created_at', order: 'desc' }] });// "the newest one"
+await ctx.api.object('candidate').find({ limit: 1 });            // any row will do
+```
+
+An unpredicated `find` / `count` is fine — returning or counting every row is an
+honest answer. It is `findOne`'s implicit "just one of them" that turns a missing
+predicate into a confidently wrong record.
 
 **Update by id.** `update` reads the primary key out of `data`, so the
 single-record form is `update({ id, ...fieldsToChange })` — e.g.

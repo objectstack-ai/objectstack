@@ -31,7 +31,8 @@ const approvalFlow = {
       type: 'decision',
       label: 'Check Amount',
       config: {
-        // decision expressions are bare CEL — no {braces}; see Expressions in flows
+        // decision expressions are bare CEL, like every other condition — no
+        // braces; see Expressions in flows
         conditions: [
           { label: 'High Value', expression: 'order_amount > 10000' },
           { label: 'Standard', expression: 'order_amount <= 10000' },
@@ -980,9 +981,8 @@ failures so one broken flow does not abort startup.
 
 ## Expressions in flows
 
-A flow mixes **two expression dialects**, and using the wrong one is the single
-most common way a flow silently misbehaves. Which dialect applies is decided by
-*where* the expression sits — not by what it looks like:
+A flow mixes **two expression dialects**, and the rule is short: **every
+condition is CEL; braces are for values.**
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
@@ -992,22 +992,37 @@ most common way a flow silently misbehaves. Which dialect applies is decided by
 | Field values in `create_record` / `update_record` | **Interpolation** (braces required) | `'Follow up on {record.name}'`, `'{TODAY() + 7}'` | `{var}`, `{var.path}`, `{$User.Id}`, `{$User.Email}`, `{NOW()}`, `{TODAY()}`, `{TODAY() + 90}` (whole days) |
 
 <Callout type="warn">
-**The rule: predicates never take braces; values always do.**
+**The failure modes to memorize:**
 
-1. **Braces in a predicate** — `'{order_amount} > 10000'` in a decision, edge or
-   start condition is rejected at `os build` / `registerFlow` with an error that
-   names the slot and tells you to drop the braces. Write
-   `'order_amount > 10000'`.
-2. **Braces missing in a field value** — `due_date: 'TODAY() + 7'` writes the
+1. **Braces missing in a field value** — `due_date: 'TODAY() + 7'` writes the
    literal text `TODAY() + 7` into the field. Write `'{TODAY() + 7}'`.
+2. **Braces put *into* a condition** — `'{record.amount} > 500'`. Conditions
+   fail loudly rather than silently, with an error that tells you to drop the
+   braces.
+</Callout>
 
-Decision expressions were the exception until v17: they were evaluated on the
-legacy template path, so `'{order_amount} > 10000'` was the documented spelling
-and a bare `order_amount > 10000` compared the *string* `"order_amount"` against
-`"10000"` — always true, always the first branch, never a word about it. Both
-halves are gone: the slot is evaluated as the bare CEL it was always declared to
-be (#4414), and the brace spelling now fails the build (#4439). If you have a
-braced decision predicate, drop the braces.
+<Callout type="info">
+**Decision-node expressions used to be compared as text** (#4414, #4336), so
+`'order_amount > 10000'` compared the string `"order_amount"` against `"10000"`
+and was **always true**, while `'{lead_record.status} == "converted"'` was
+**always false** — the brace form substitutes a whole flow variable by name, and
+a field access on an object variable is not one. Both reported `success`. They
+are bare CEL now, so the spellings in the table above are the correct ones and
+`lead_record.status == 'converted'` resolves the field.
+
+The `{var}` form still works where a condition is a plain authored string — a
+start node's `config.condition`: `{amount} > 100`, `{status} == 'active'`. The
+two ways it used to answer `false` without saying so are now **loud errors**
+naming the reference: a `{…}` hole that matches no flow variable, and a
+substituted value that is neither a boolean, a number, nor part of a comparison
+(#4336).
+
+**A decision's `conditions[].expression` is the exception — it is always CEL.**
+The slot is declared bare CEL and is on the expression ledger as a predicate
+(#4439), so a braced spelling there is not the `{var}` dialect but a build
+failure: `os build` and `registerFlow` reject it, naming
+`config.conditions[N].expression`. That is deliberate — the alternative is a
+build that refuses what run time would happily execute.
 </Callout>
 
 CEL conditions that fail to evaluate raise an error and stop the run — they

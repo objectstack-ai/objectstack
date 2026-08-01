@@ -1,0 +1,61 @@
+---
+title: Driver Mongo
+description: Driver Mongo protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+MongoDB Standard Driver Protocol
+
+Describes the MongoDB connection settings and capabilities.
+
+ENFORCED as of #4410. This block used to claim it was "used by the Platform
+
+to validate `datasource.config` when `driver: 'mongo'`", which was false: the
+
+config slot was a bare `z.record` and this schema had no consumer at all —
+
+not even an export, since `data/driver/` was reachable only from its own
+
+tests. It is now what `DatasourceSchema` parses `config` against for a mongo
+
+datasource, and the same schema is projected onto
+
+`MongoDriverSpec`.configSchema for the connection form.
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/driver/mongo.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { MongoConfig } from '@objectstack/spec/data';
+import type { MongoConfig } from '@objectstack/spec/data';
+
+// Validate data
+const result = MongoConfig.parse(data);
+```
+
+---
+
+## MongoConfig
+
+MongoDB Connection Configuration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | optional | Connection URI (supersedes the discrete fields) |
+| **database** | `string` | optional | Database name |
+| **host** | `string` | ✅ | Host address |
+| **port** | `integer` | ✅ | Port number |
+| **username** | `string` | optional | Authentication user |
+| **password** | `string` | optional | Authentication password (prefer external.credentialsRef) |
+| **authSource** | `string` | optional | Authentication database |
+| **options** | `Record<string, any>` | optional | Extra MongoClient options (replicaSet, tls, timeouts, …) |
+
+
+---
+

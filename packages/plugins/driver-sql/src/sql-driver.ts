@@ -1349,9 +1349,12 @@ export class SqlDriver implements IDataDriver {
    *   bought for that: `findOne` promises *a* matching record, never a position
    *   in a sequence, so there is no partition to preserve.
    *
-   * That also puts this driver back in step with `MongoDBDriver.findOne`, which
-   * issues `collection.findOne` and has never sorted. The obligation the
-   * contract states is on `find`, and this keeps it there.
+   * `MongoDBDriver.findOne` carries the same flag into its own `buildSortSpec`,
+   * so both drivers now read a `findOne` the same way: honour the caller's
+   * `orderBy`, impose nothing when there is none. (Mongo used to translate
+   * `where` and drop `orderBy` outright — an earlier version of this comment
+   * cited that as agreement, which it was not; objectstack#4419.) The
+   * obligation the contract states is on `find`, and this keeps it there.
    */
   private async findRows(
     object: string,

@@ -116,18 +116,26 @@ export const TaskViews = defineView({
     //
     // Complements `project.view.ts`'s `bulkActionDefs`, which is the OTHER
     // bulk vocabulary: inline defs that mass-EDIT records through the data
-    // API (`operation: 'update'` + a patch). Here the selected records are
-    // instead fanned out through the action runner, one dispatch each, so an
-    // action that is not a field patch at all — a script, a custom endpoint —
-    // works over a selection. Both names are already declared on the object:
+    // API (`operation: 'update'` + a patch). Here the selected records go
+    // through the action runner instead, so an action that is not a field
+    // patch at all — a script, a custom endpoint — works over a selection.
+    // Runner-dispatched bulk actions come in TWO execution modes:
     //
+    //   Per-record (default) — each selected record is one dispatch:
     //   `showcase_mark_done`       — type `script`; its sandboxed body flips
     //     `done`/`progress` per record via the platform action route.
     //   `showcase_recalc_estimate` — type `api`; POSTs the showcase's own
     //     `/api/v1/showcase/recalc`, with `recordIdParam: 'recordId'` (already
     //     declared for the row surface) carrying each record's id.
     //
-    // Neither declares `list_toolbar`: a bulk action is not a toolbar action,
+    //   Aggregate (objectui#3139) — the whole selection in ONE dispatch:
+    //   `showcase_recalc_selection` — the `bulkActionDefs` entry below opts in
+    //     with `execution: 'aggregate'`, so the renderer POSTs the SAME recalc
+    //     endpoint once, carrying every selected id in `params._selectedIds`
+    //     (the endpoint's batch branch). This is the "one zip for N devices"
+    //     dispatch shape; results are all-or-nothing, no per-row retry.
+    //
+    // None declares `list_toolbar`: a bulk action is not a toolbar action,
     // it needs a selection. Naming it here is the whole declaration.
     bulk_actions: {
       label: 'Bulk Actions',
@@ -141,6 +149,9 @@ export const TaskViews = defineView({
         { field: 'done' },
       ],
       bulkActions: ['showcase_mark_done', 'showcase_recalc_estimate'],
+      bulkActionDefs: [
+        { name: 'showcase_recalc_selection', operation: 'custom', execution: 'aggregate' },
+      ],
     },
 
     // 0 ── Tabular ───────────────────────────────────────────────────────

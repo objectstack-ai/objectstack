@@ -61,6 +61,41 @@ const schemaZodFileMap = new Map<string, string>();
 const categoryZodFiles = new Map<string, Set<string>>();
 // Track Zod File collisions
 const zodFileCounts = new Map<string, number>();
+/**
+ * Page slug -> its real path under `packages/spec/src/<category>/`.
+ *
+ * A page named after a NESTED file (`driver-postgres`) does not sit at
+ * `<category>/driver-postgres.zod.ts`, so the "Source:" line has to be looked up
+ * rather than reassembled from the slug. Naming a file that does not exist is
+ * the same defect as a schema that does not validate: a reader following it
+ * finds nothing and has no way to tell the pointer was invented.
+ */
+const zodFileSourceRel = new Map<string, string>();
+
+/**
+ * `.zod.ts` files under a category, RECURSIVELY, keyed by the slug their page
+ * takes (`driver/postgres.zod.ts` → `driver-postgres`).
+ *
+ * The walk used to be one level deep, which made every schema under
+ * `data/driver/` invisible: those twelve landed in the catch-all `misc` bucket
+ * the moment they were exported (#4410), on a page whose "Source" line named
+ * `data/misc.zod.ts` — a file that does not exist. Same one-level-deep bug the
+ * strictness ledger's own coverage gate had, and the same lesson: a generator
+ * that under-reports produces confident output about surface it never saw.
+ */
+function collectZodFiles(dir: string, prefix = ''): Array<{ slug: string; rel: string }> {
+  const out: Array<{ slug: string; rel: string }> = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      out.push(...collectZodFiles(path.join(dir, entry.name), `${prefix}${entry.name}/`));
+      continue;
+    }
+    if (!entry.name.endsWith('.zod.ts')) continue;
+    const rel = `${prefix}${entry.name}`;
+    out.push({ slug: rel.replace(/\.zod\.ts$/, '').replace(/\//g, '-'), rel });
+  }
+  return out;
+}
 
 // Scan source files to build maps
 function scanCategories() {
@@ -69,31 +104,40 @@ function scanCategories() {
     if (!fs.existsSync(dir)) return;
 
     const zodFiles = new Set<string>();
-    const files = fs.readdirSync(dir).filter(f => f.endsWith('.zod.ts'));
-    
-    for (const file of files) {
-      const zodFileName = file.replace('.zod.ts', '');
-      zodFiles.add(zodFileName);
-      
-      const count = zodFileCounts.get(zodFileName) || 0;
-      zodFileCounts.set(zodFileName, count + 1);
-      
-      const content = fs.readFileSync(path.join(dir, file), 'utf-8');
-      
+
+    for (const { slug, rel } of collectZodFiles(dir)) {
+      zodFiles.add(slug);
+      zodFileSourceRel.set(`${category}/${slug}`, rel);
+
+      const count = zodFileCounts.get(slug) || 0;
+      zodFileCounts.set(slug, count + 1);
+
+      const content = fs.readFileSync(path.join(dir, rel), 'utf-8');
+
       // Match export const Name = ... OR export const Name: Type = ...
       const regex = /export const (\w+)\s*(?:[:=])/g;
-      
+
       let match;
       while ((match = regex.exec(content)) !== null) {
         const rawName = match[1];
         const finalName = rawName.endsWith('Schema') ? rawName.replace('Schema', '') : rawName;
         schemaCategoryMap.set(finalName, category);
-        schemaZodFileMap.set(finalName, zodFileName);
+        schemaZodFileMap.set(finalName, slug);
       }
     }
-    
+
     categoryZodFiles.set(category, zodFiles);
   });
+}
+
+/**
+ * Repo-relative source path for a page slug, or `undefined` when the slug has
+ * no file behind it (the `misc` catch-all bucket). Callers must omit the
+ * "Source:" pointer in that case rather than print a plausible-looking path.
+ */
+function sourcePathFor(category: string, zodFile: string): string | undefined {
+  const rel = zodFileSourceRel.get(`${category}/${zodFile}`);
+  return rel ? `packages/spec/src/${category}/${rel}` : undefined;
 }
 
 scanCategories();
@@ -387,9 +431,10 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
   const zodTitle = zodFile.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   
   // Get source description
-  const sourcePath = path.join(SRC_DIR, category, `${zodFile}.zod.ts`);
+  const sourceRel = sourcePathFor(category, zodFile);
+  const sourcePath = sourceRel ? path.join(REPO_ROOT, sourceRel) : undefined;
   let fileDesc = '';
-  if (fs.existsSync(sourcePath)) {
+  if (sourcePath && fs.existsSync(sourcePath)) {
       fileDesc = getFileDescription(fs.readFileSync(sourcePath, 'utf-8'));
   }
 
@@ -403,9 +448,13 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
       md += `${fileDesc}\n\n`;
   }
   
-  md += `<Callout type="info">\n`;
-  md += `**Source:** \`packages/spec/src/${category}/${zodFile}.zod.ts\`\n`;
-  md += `</Callout>\n\n`;
+  // Only when there IS one — the `misc` catch-all has no file behind it, and a
+  // reassembled `packages/spec/src/<category>/misc.zod.ts` points at nothing.
+  if (sourceRel) {
+    md += `<Callout type="info">\n`;
+    md += `**Source:** \`${sourceRel}\`\n`;
+    md += `</Callout>\n\n`;
+  }
   
   // Add TypeScript usage example
   const schemaNames = schemas.map(s => s.name).join(', ');
@@ -634,8 +683,9 @@ Object.entries(CATEGORIES).forEach(([category, title]) => {
       // written and the stale files are still lying around.)
       if (!wasEmitted(path.join(DOCS_ROOT, category, `${zodFile}.mdx`))) return;
       const fileTitle = zodFile.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      const cardSource = sourcePathFor(category, zodFile);
       // Link relative to the category folder (where index.mdx lives)
-      mdx += `  <Card href="/docs/references/${category}/${zodFile}" title="${fileTitle}" description="Source: packages/spec/src/${category}/${zodFile}.zod.ts" />\n`;
+      mdx += `  <Card href="/docs/references/${category}/${zodFile}" title="${fileTitle}"${cardSource ? ` description="Source: ${cardSource}"` : ''} />\n`;
   });
   mdx += `</Cards>\n`;
 

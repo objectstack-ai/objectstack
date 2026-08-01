@@ -117,7 +117,8 @@ export const FlowVariableSchema = lazySchema(() => z.object({
  *     // Each `label` must match an out-edge's `label` to route anywhere;
  *     // when nothing matches, the `isDefault` out-edge is the fallback.
  *     conditions: [
- *       { label: "Yes", expression: "amount > 10000" }
+ *       { label: "Yes", expression: "amount > 10000" },
+ *       { label: "No", expression: "true" }   // catch-all, NOT the default path
  *     ]
  *   },
  *   position: { x: 300, y: 200 }

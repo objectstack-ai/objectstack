@@ -421,3 +421,39 @@ diverged (#3903). This addendum extends the contract to data at rest:
   at boot would unhook live tables and make the row unfixable in Studio
   (availability over purity for data at rest; the same verdict reaches Studio
   as `_diagnostics` on every read).
+
+## Addendum (2026-08-01) — the stored chain gets a finish line (#4327)
+
+The addendum above makes a legacy row read canonical *forever*, which is the
+correctness guarantee — and, read literally, also a promise that the chain runs
+on that row forever. `os migrate meta --stored`
+(`ObjectStackProtocolImplementation.migrateStoredMetadata`) lets a deployment
+end that for itself: it walks `sys_metadata` (active + draft, all orgs), replays
+the same `applyConversionsToStoredItem` pass, and re-saves each changed body
+through `saveMetaItem` with `source: 'migrate-stored'` — history row, checksum,
+mutation projectors and all. Preview is the default; `--apply` is the only
+writing mode.
+
+- **Not load-bearing, and no flag.** #3855's conclusion stands: an operator-run
+  migration cannot be relied on, so the read path — not this — remains the
+  guarantee, and nothing gates on it having run. Deliberately no `sys_migration`
+  row either: unlike ADR-0104's two gates, a flag here would advertise
+  enforcement that does not exist. The verifiable statement operators wanted is
+  the **re-run** — a second pass reporting every row canonical exits 0, so "my
+  metadata is on protocol N" is a check rather than a belief.
+- **The write path's gate is not bypassed.** A body that still fails the current
+  schema after conversion is refused (422) and reported, exactly as the bullet
+  above describes for reads: it is a genuine contract violation, and the pass
+  has no more standing to persist it than an author does. It keeps reading
+  through the chain and stays fixable in Studio.
+- **The version layer stays verbatim.** `sys_metadata_history` is appended to,
+  never rewritten. Canonicalizing a past version's body would break the
+  checksum↔body pairing this contract depends on — the migration is a new
+  commit, not a rewrite of history.
+- **What the pass does not cover, it names.** Flows (their seam is
+  `AutomationEngine.registerFlow`, which holds the executor registry the
+  conflict guard needs) and types with no repository write path are reported as
+  `skipped` with the reason, never counted as done. Giving flows the same finish
+  line needs a canonicalization entry point on the automation engine — tracked
+  as #4454, and worth doing precisely because the graduated flow-node
+  conversions are where the most stored dialect lives.

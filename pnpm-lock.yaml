@@ -402,6 +402,9 @@ importers:
       '@objectstack/metadata':
         specifier: workspace:*
         version: link:../metadata
+      '@objectstack/metadata-protocol':
+        specifier: workspace:*
+        version: link:../metadata-protocol
       '@objectstack/objectql':
         specifier: workspace:^
         version: link:../objectql

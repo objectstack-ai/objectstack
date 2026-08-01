@@ -1,0 +1,90 @@
+---
+title: Events Core
+description: Events Core protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Event Priority Enum
+
+Priority levels for event processing
+
+Lower numbers = higher priority
+
+<Callout type="info">
+**Source:** `packages/spec/src/kernel/events/core.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { Event, EventMetadata, EventPriority, EventTypeDefinition } from '@objectstack/spec/kernel';
+import type { Event, EventMetadata, EventPriority, EventTypeDefinition } from '@objectstack/spec/kernel';
+
+// Validate data
+const result = Event.parse(data);
+```
+
+---
+
+## Event
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | Unique event identifier |
+| **name** | `string` | ✅ | Event name (lowercase with dots, e.g., user.created, order.paid) |
+| **payload** | `any` | ✅ | Event payload schema |
+| **metadata** | `{ source: string; timestamp: string; userId?: string; tenantId?: string; … }` | ✅ | Event metadata |
+
+
+---
+
+## EventMetadata
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **source** | `string` | ✅ | Event source (e.g., plugin name, system component) |
+| **timestamp** | `string` | ✅ | ISO 8601 datetime when event was created |
+| **userId** | `string` | optional | User who triggered the event |
+| **tenantId** | `string` | optional | Tenant identifier for multi-tenant systems |
+| **correlationId** | `string` | optional | Correlation ID for event tracing |
+| **causationId** | `string` | optional | ID of the event that caused this event |
+| **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | ✅ | Event priority |
+| **cluster** | `{ scope: Enum<'local' \| 'cluster' \| 'tenant'>; deliverySemantics?: Enum<'best-effort' \| 'at-least-once' \| 'exactly-once'>; partitionKey?: string }` | optional | Per-emit cluster routing & delivery options. See cluster-semantics.mdx §4. |
+
+
+---
+
+## EventPriority
+
+### Allowed Values
+
+* `critical`
+* `high`
+* `normal`
+* `low`
+* `background`
+
+
+---
+
+## EventTypeDefinition
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Event type name (lowercase with dots) |
+| **version** | `string` | ✅ | Event schema version |
+| **schema** | `any` | optional | JSON Schema for event payload validation |
+| **description** | `string` | optional | Event type description |
+| **deprecated** | `boolean` | ✅ | Whether this event type is deprecated |
+| **tags** | `string[]` | optional | Event type tags |
+
+
+---
+

@@ -135,7 +135,7 @@
         },
         "bulkActionDefs": {
           "status": "live",
-          "note": "objectui: ListView.tsx:1343 forwards rich defs to ObjectGrid (BulkActionDialog). Post-audit key, verified objectui@fb35e48."
+          "note": "objectui: ListView.tsx:1343 forwards rich defs to ObjectGrid (BulkActionDialog). Dispatch: useBulkExecutor.ts run() — per-record fan-out by default; execution:'aggregate' defs go through the ONE-call bulkCall branch injecting params._selectedIds (ObjectGrid.runBulkActionAggregate, objectui#3139). Verified objectui@4bf612c."
         },
         "virtualScroll": {
           "status": "live",

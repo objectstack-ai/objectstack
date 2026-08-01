@@ -1,0 +1,31 @@
+---
+title: Events Core
+description: Events Core protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+## TypeScript Usage
+
+```typescript
+import { Event } from '@objectstack/spec/automation';
+import type { Event } from '@objectstack/spec/automation';
+
+// Validate data
+const result = Event.parse(data);
+```
+
+---
+
+## Event
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Event Type (e.g. "APPROVE", "REJECT", "Submit") |
+| **schema** | `Record<string, any>` | optional | Expected event payload structure |
+
+
+---
+

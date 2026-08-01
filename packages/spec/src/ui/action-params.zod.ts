@@ -59,8 +59,15 @@ export interface ActionParamIssue {
 /**
  * Keys the dispatcher merges into the params bag itself (never authored by the
  * caller) — always permitted, never flagged as unknown.
+ *
+ * `_selectedIds` is injected by the renderer's aggregate bulk dispatch
+ * (objectui#3139): a `bulkActionDefs` entry with `execution: 'aggregate'`
+ * calls the action ONCE for the whole selection, carrying every selected
+ * record id in this key so the handler can produce a single aggregate
+ * artifact (zip of QR codes, merged PDF…). Server handlers read it from
+ * `ctx.params._selectedIds`; it is never authored as a declared param.
  */
-export const ACTION_PARAM_BUILTIN_KEYS: readonly string[] = ['recordId', 'objectName'];
+export const ACTION_PARAM_BUILTIN_KEYS: readonly string[] = ['recordId', 'objectName', '_selectedIds'];
 
 function isPresent(v: unknown): boolean {
   return v !== undefined && v !== null && !(typeof v === 'string' && v.trim() === '');

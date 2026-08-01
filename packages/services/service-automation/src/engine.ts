@@ -42,6 +42,52 @@ import { ExpressionEngine, validateExpression, nearestName } from '@objectstack/
 const UNRESOLVED_CEL_REFERENCE = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/;
 
 /**
+ * A legacy single-brace **template hole** — `{amount}`, `{get_lead.id}`. This is
+ * the exact shape `{var}` substitution can consume (it splits on the literal
+ * `{<key>}` text for each variable key), which is what makes it a sound dialect
+ * discriminator in {@link AutomationEngine.evaluateCondition}: a condition
+ * containing one was written in the template dialect, and a condition containing
+ * none was written as CEL (#4336).
+ *
+ * No whitespace is tolerated inside the braces, deliberately — `{ amount }`
+ * is not a token substitution can resolve, so treating it as a hole would only
+ * move the failure. It is not valid CEL either (a map literal needs `key: value`
+ * pairs), so it lands on the CEL path and gets the brace-trap diagnostic.
+ */
+const TEMPLATE_HOLE = /\{[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\}/g;
+
+/** A quoted string literal, anywhere in a condition. */
+const QUOTED_SEGMENT = /'[^']*'|"[^"]*"/g;
+
+/** A single-quoted or double-quoted string literal, whole-operand. */
+const QUOTED_LITERAL = /^'([^']*)'$|^"([^"]*)"$/;
+
+/**
+ * Every legacy `{var}` hole in `source`, ignoring any that sits **inside a
+ * string literal** — `record.name == '{unresolved}'` is a CEL predicate
+ * comparing against text that happens to contain braces, not a template.
+ *
+ * This is both the dialect discriminator and the unresolved-hole report, so the
+ * two can never disagree about what counts as a hole. It reads the AUTHORED
+ * source rather than the substituted result, so a variable whose *value*
+ * contains braces cannot masquerade as an unresolved reference.
+ */
+function templateHoles(source: string): string[] {
+    return source.replace(QUOTED_SEGMENT, '').match(TEMPLATE_HOLE) ?? [];
+}
+
+/**
+ * Strip one layer of matching quotes from a template-dialect operand, so a
+ * quoted string literal compares as its contents (#4336). Anything that is not
+ * a whole quoted literal is returned untouched — including a value that merely
+ * contains a quote.
+ */
+function unquoteLiteral(operand: string): string {
+    const m = QUOTED_LITERAL.exec(operand);
+    return m ? (m[1] ?? m[2] ?? '') : operand;
+}
+
+/**
  * The branch a `decision` node reports when it DECLARED `config.conditions` and
  * none of them matched — "fall through to the declared fallback".
  *
@@ -3864,15 +3910,42 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * Safe expression evaluator.
-     * Uses simple operator-based parsing without `new Function`.
-     * Supports: comparisons (>, <, >=, <=, ==, !=, ===, !==),
-     * boolean literals (true, false), and basic arithmetic.
+     * Evaluate a flow condition to a boolean.
+     *
+     * ## Which dialect a condition is in
+     *
+     * A condition is **CEL** unless it is written in the legacy single-brace
+     * `{var}` template dialect — and that is decided by looking at the *source*,
+     * not at whether an envelope happens to be present (#4336).
+     *
+     * It used to be decided by the envelope, and that was the bug: only an
+     * `{ dialect, source }` envelope reached the CEL engine, so a condition
+     * authored as a plain string — the shape `ExpressionInput` accepts by design,
+     * and the shape every node `config` still holds, since `FlowNodeSchema.config`
+     * is an open `z.record` no transform can reach — fell through to the template
+     * path and was compared **as text**. The failure direction depended on the
+     * predicate, which is what made it dangerous:
+     *
+     *     'existingTask == null'  →  'existingTask' === 'null'   →  always FALSE
+     *     'record.rating >= 4'    →  'record.rating' >= '4'      →  always TRUE
+     *
+     * — one gate that never opens, one branch pinned open, both reporting
+     * `success`. Reading the source instead means the same predicate evaluates
+     * the same way wherever it is authored: an edge (parsed into an envelope by
+     * `FlowEdgeSchema`), a start-node gate, or a `decision` node's
+     * `config.conditions[].expression`, which no schema normalizes.
+     *
+     * The `{var}` dialect stays supported for the flows that use it — but it no
+     * longer answers `false` when it could not resolve something. Per ADR-0032
+     * §1c a predicate that cannot be evaluated is a **fault**, never a quiet
+     * branch decision, so an unresolved hole is refused with the source attached.
+     *
+     * Braces inside a **CEL envelope** remain the #1491 brace-trap and still
+     * throw: an explicit `dialect: 'cel'` is the author saying "this is CEL", and
+     * `{…}` is a map literal there. The sniff only applies where the dialect was
+     * never stated.
      */
     evaluateCondition(expression: string | { dialect?: string; source?: string; ast?: unknown }, variables: Map<string, unknown>): boolean {
-        // M9.5+ wiring: route Expression envelopes through @objectstack/formula
-        // ExpressionEngine. CEL is the default; legacy `{var}` template syntax
-        // is preserved as a fallback for back-compat.
         const isEnvelope = typeof expression === 'object' && expression != null && 'dialect' in expression;
         const dialect = isEnvelope ? (expression as { dialect?: string }).dialect : undefined;
         const exprStr = typeof expression === 'string' ? expression : ((expression as { source?: string })?.source ?? '');
@@ -3882,9 +3955,23 @@ export class AutomationEngine implements IAutomationService {
             return false;
         }
 
+        // An absent / empty condition is not a predicate to evaluate. Callers that
+        // mean "unconditional" guard before calling; this is the one that does not
+        // (a `decision` node whose `conditions[]` entry has no `expression`), and
+        // an unauthored branch must not open.
+        if (exprStr.trim() === '') return false;
+
+        // The dialect decision (see the doc comment). An explicit `template`/`flow`
+        // envelope takes the author at their word; a bare string is sniffed for a
+        // `{var}` hole; everything else — including an envelope with no dialect —
+        // is CEL.
+        const holes = templateHoles(exprStr);
+        const declaredTemplate = isEnvelope && (dialect === 'template' || dialect === 'flow');
+        const useTemplateDialect = declaredTemplate || (!isEnvelope && holes.length > 0);
+
         // CEL path — bind `vars` scope for `{step.result}` style references via
         // the equivalent `vars.step.result` CEL identifier path.
-        if (dialect === 'cel' || (isEnvelope && !dialect)) {
+        if (!useTemplateDialect) {
             try {
                 const vars: Record<string, unknown> = {};
                 for (const [key, value] of variables) {
@@ -3940,10 +4027,14 @@ export class AutomationEngine implements IAutomationService {
 
         // No `try { … } catch { return false }` around this block (#4347). Nothing
         // in it throws — `indexOf` / `slice` / `Number` / `compareValues` are all
-        // total — so the catch guarded nothing, and the one thing that CAN throw
-        // here now is the deliberate refusal below, which a swallow-to-`false`
-        // would turn straight back into the silent wrong answer it exists to
+        // total — so the catch guarded nothing, and the things that CAN throw
+        // here now are the deliberate refusals below, which a swallow-to-`false`
+        // would turn straight back into the silent wrong answer they exist to
         // prevent (ADR-0032 §1c, same rule as the CEL path above).
+
+        // A hole naming nothing in the variable map is unresolvable (#4336).
+        // Refuse — see the helper for why `false` was the wrong answer.
+        this.refuseUnresolvedTemplateHole(exprStr, holes.filter(h => !variables.has(h.slice(1, -1))));
 
         // Boolean literals
         if (resolved === 'true') return true;
@@ -3965,7 +4056,57 @@ export class AutomationEngine implements IAutomationService {
         const numVal = Number(resolved);
         if (!isNaN(numVal)) return numVal !== 0;
 
-        return false;
+        // No operator, not a boolean, not a number — this path has no way to
+        // decide the branch, and `false` used to be its answer (#4336). That made
+        // a truthy gate on a non-boolean variable — `'{record.status}'`, where
+        // the value is `'open'` — read as "condition not met" forever, with the
+        // run still recorded as `success`. Refuse instead, same rule as above.
+        throw new Error(
+            `condition evaluation error: \`${resolved}\` is not a predicate — source: \`${exprStr}\`. ` +
+            `The legacy \`{var}\` template dialect decides a branch by comparing the substituted ` +
+            `text, so it needs a comparison (\`{status} == 'open'\`) or a value that reads as a ` +
+            `boolean or number; a bare non-boolean value gives it nothing to compare and used to ` +
+            `answer \`false\` regardless of the value. Write the predicate as CEL — a condition ` +
+            `without \`{…}\` braces is evaluated by the CEL engine, where \`record.isActive\` is a ` +
+            `truthy gate and \`record.status == 'open'\` resolves the field.`,
+        );
+    }
+
+    /**
+     * Refuse a legacy-dialect condition whose `{…}` holes name no variable
+     * (#4336).
+     *
+     * Substitution replaces the literal text `{<key>}` for each key in the
+     * variable map, so an unmatched hole survives into the comparison — and the
+     * template path would then compare the *brace text itself*:
+     *
+     *     '{lead_record.status} == \'converted\''
+     *         →  '{lead_record.status}' === "'converted'"  →  always FALSE
+     *
+     * The gate never opens, for any record, and the run still reports `success`.
+     *
+     * The common way to land here is a **field access on an object variable**:
+     * `get_record`'s `outputVariable` stores the whole record under one name
+     * (`lead_record`), so `{lead_record.status}` asks for a key that was never
+     * written. Note the asymmetry that let this survive — a node's outputs ARE
+     * flattened into dotted keys (`${node.id}.${key}`), so `{get_lead.id}`
+     * resolves and looks like proof the spelling works.
+     *
+     * CEL resolves that access properly, which is why the prescription is to drop
+     * the braces rather than to spell the hole differently.
+     */
+    private refuseUnresolvedTemplateHole(source: string, unresolved: readonly string[]): void {
+        if (unresolved.length === 0) return;
+        const names = [...new Set(unresolved)];
+        throw new Error(
+            `condition evaluation error: ${names.map(h => `\`${h}\``).join(', ')} did not resolve — ` +
+            `source: \`${source}\`. The legacy \`{var}\` template dialect substitutes a WHOLE flow ` +
+            `variable by name, and no variable is named ${names.map(h => `\`${h.slice(1, -1)}\``).join(', ')}. ` +
+            `Leaving it in place would compare the brace text as a STRING — a branch that is silently ` +
+            `wrong rather than merely unevaluated — so this is refused. Drop the braces: a condition ` +
+            `without them is evaluated as CEL, which resolves field access on an object variable ` +
+            `(\`lead_record.status == 'converted'\`) instead of looking for a variable spelled that way.`,
+        );
     }
 
     /**
@@ -3986,6 +4127,12 @@ export class AutomationEngine implements IAutomationService {
      * rather than warns, the same rule ADR-0032 §1c set for the CEL path: a
      * predicate that cannot be evaluated is a fault, never a quiet `false` (or,
      * here, a quiet `true`).
+     *
+     * Since #4336 a *wholly* brace-free condition no longer arrives here at all —
+     * it is CEL, and `oppRecord.amount > 500000` simply evaluates. What still
+     * reaches this guard is a dotted reference **mixed into** a template-dialect
+     * condition (`'{limit} > record.amount'`), where the author is one operand
+     * away from the right dialect and the string compare would answer anyway.
      *
      * Only *dotted* references are refused. A bare word compares as a string on
      * purpose — `'{status} == active'` is the documented legacy spelling, and
@@ -4008,8 +4155,19 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * Compare two string-represented values with an operator.
+     *
+     * Quoted operands are unquoted first (#4336). The template dialect compares
+     * text, so `'{status} == \'active\''` used to substitute to `active ==
+     * 'active'` and compare `active` against `'active'` **with the quotes** —
+     * never equal, for any value of `status`. That spelling is not exotic: it is
+     * what the flow docs show for a decision node, and quoting a string literal
+     * is what every other predicate surface on the platform requires. So the
+     * quotes are stripped and both the quoted and the bare form (`{status} ==
+     * active`, the older documented spelling) compare the same way.
      */
     private compareValues(left: string, op: string, right: string): boolean {
+        left = unquoteLiteral(left);
+        right = unquoteLiteral(right);
         const lNum = Number(left);
         const rNum = Number(right);
         const bothNumeric = !isNaN(lNum) && !isNaN(rNum) && left !== '' && right !== '';

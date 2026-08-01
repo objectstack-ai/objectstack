@@ -50,14 +50,26 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
 
                 for (const cond of conditions) {
                     // `DecisionConditionSchema.expression` is declared BARE CEL
-                    // (ADR-0032) — evaluate it as such. Handing the raw string to
-                    // `evaluateCondition` routed it to the legacy `{var}` template
-                    // path instead, which reads a declared-CEL field in a second
-                    // dialect: `lead.status == 'converted'` never resolves there,
-                    // so the branch it decides is decided by string comparison.
+                    // (ADR-0032), so pin the dialect rather than let it be
+                    // inferred. #4453 made `evaluateCondition` sniff a bare
+                    // string — CEL unless it contains a `{var}` hole — which
+                    // already fixes the #4414 case this wrap was added for.
+                    //
+                    // The wrap still earns its place, for a different reason: the
+                    // sniff would route a BRACED predicate to the template
+                    // dialect and happily run it, while #4439 put this slot on
+                    // the expression ledger as a `predicate`, so `registerFlow`
+                    // and `objectstack validate` reject exactly that spelling.
+                    // Without the explicit envelope the two would disagree —
+                    // build refuses what run time accepts, the worst of both.
+                    // An explicit `dialect: 'cel'` keeps braces the #1491 trap
+                    // here, which is what the contract says and what the
+                    // validators enforce.
+                    //
                     // Unlike `edge.condition` this slot has no `ExpressionInput`
-                    // envelope to carry the dialect — the decision descriptor is
-                    // deliberately schemaless — so the executor supplies it.
+                    // envelope of its own to carry the dialect — the decision
+                    // descriptor is deliberately schemaless — so the executor
+                    // supplies it.
                     if (engine.evaluateCondition({ dialect: 'cel', source: cond.expression }, variables)) {
                         return { success: true, branchLabel: cond.label };
                     }

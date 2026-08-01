@@ -146,7 +146,7 @@ where: {
 
 ### findOne
 
-Convenience method that returns the first record matching a query, or `null`.
+Returns the ONE record the query selects, or `null`.
 
 ```typescript
 const task = await engine.findOne('task', {
@@ -154,6 +154,24 @@ const task = await engine.findOne('task', {
   fields: ['id', 'title', 'status'],
 });
 ```
+
+The query must say **which** record it wants — a `where` (or a `search` that
+expands to one), or an `orderBy` meaning "the first record in this order". A
+query with neither is rejected (#4419):
+
+```typescript
+await engine.findOne('task', {});                    // throws
+await engine.findOne('task', {                       // the newest task
+  orderBy: [{ field: 'created_at', order: 'desc' }],
+});
+await engine.find('task', { limit: 1 });             // any task will do
+```
+
+`findOne` reads a single row, so a missing predicate does not come back as
+`null` — it comes back as the object's **first row**, a real record unrelated to
+the request that no `if (!task)` check can catch. No ordering is imposed when
+you supply none: `findOne` promises *a* matching record, never a position in a
+sequence.
 
 ### count
 

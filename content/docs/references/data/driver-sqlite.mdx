@@ -1,0 +1,106 @@
+---
+title: Driver Sqlite
+description: Driver Sqlite protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+SQLite driver configuration — the `config` slot of a `datasource` whose
+
+`driver` resolves to `sqlite` (native `better-sqlite3`, with the dev-only
+
+step-down to wasm then in-memory, #2229) or to `sqlite-wasm` (pure-JS).
+
+The one key that matters is `filename`, and it is exactly the key the silent
+
+strip used to hide: an author who wrote `path:` got no error, the connection
+
+fell back to `:memory:`, and their data vanished on restart with every signal
+
+saying the datasource was configured.
+
+`file` and `database` are a different case — the factory reads them as
+
+undeclared `??` fallbacks, so they happened to work while being documented
+
+nowhere. They are named as renames here rather than blessed: one strict
+
+contract beats a spelling that works only because a reader is lenient
+
+(AGENTS.md Prime Directive #12). The factory keeps its tolerance for records
+
+already persisted that way; no new one can be authored.
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/driver/sqlite.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { SqliteConfig, SqliteWasmConfig, SqliteWasmPersistMode } from '@objectstack/spec/data';
+import type { SqliteConfig, SqliteWasmConfig, SqliteWasmPersistMode } from '@objectstack/spec/data';
+
+// Validate data
+const result = SqliteConfig.parse(data);
+```
+
+---
+
+## SqliteConfig
+
+SQLite connection configuration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **filename** | `string` | ✅ | Database file path, or ":memory:" for an ephemeral database |
+| **autoMigrate** | `Enum<'off' \| 'safe'>` | optional | Dev-only non-destructive schema self-heal (#2186) |
+
+
+---
+
+## SqliteWasmConfig
+
+SQLite (WASM) connection configuration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **filename** | `string` | ✅ | Database file path, or ":memory:" for an ephemeral database |
+| **persist** | `'on-disconnect' \| 'on-write' \| string` | optional | When to flush a file-backed wasm database to disk |
+
+
+---
+
+## SqliteWasmPersistMode
+
+When to flush a file-backed wasm database to disk
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Type: `'on-disconnect'`
+
+---
+
+#### Option 2
+
+Type: `'on-write'`
+
+---
+
+#### Option 3
+
+Type: `string`
+
+---
+
+
+---
+

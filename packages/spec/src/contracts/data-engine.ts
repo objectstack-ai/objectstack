@@ -68,6 +68,20 @@ export interface IDataEngine {
    * supported; when both are given, `options.context` wins.
    */
   find(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any[]>;
+  /**
+   * Read the ONE record the query selects, or `null`.
+   *
+   * The query MUST say which record it wants: a `where` (or a `search` that
+   * expands to one), or an `orderBy` meaning "the FIRST record in this order".
+   * A query with neither is REJECTED (#4419) — `findOne` reads a single row, so
+   * an empty predicate does not return nothing, it returns the object's first
+   * row: a real, plausible-looking record unrelated to the request, which no
+   * caller's `if (!row)` can catch. When any row genuinely will do, that is
+   * `find(objectName, { limit: 1 })`, which says so at the call site.
+   *
+   * No ordering is imposed when the caller supplies none: `findOne` promises
+   * *a* matching record, never a position in a sequence (#4363).
+   */
   findOne(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any>;
   insert(objectName: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any>;
   update(objectName: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<any>;
