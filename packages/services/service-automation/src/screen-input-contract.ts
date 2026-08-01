@@ -22,17 +22,24 @@
  */
 
 import type { ScreenFieldSpec, ScreenSpec } from '@objectstack/spec/contracts';
+import type { FieldErrorCode } from '@objectstack/spec/api';
 
 /** One violation of a screen's declared field contract. */
 export interface ScreenInputIssue {
   /** The offending key — a declared field name, or the undeclared key sent. */
   field: string;
   /**
-   * Which constraint the bag violated. Same two names the action-param
-   * contract uses (`required` / `unknown_field`, ADR-0114) so a client does not
-   * learn a second vocabulary for the same two conditions.
+   * Which constraint the bag violated, from the field-level catalog
+   * (ADR-0114 D2) — `required` and `unknown_field`. Typed as `FieldErrorCode`
+   * rather than a local literal union for the reason `ActionParamIssue` gives:
+   * a screen field, an action param and a record column must not drift into
+   * three vocabularies for the same two conditions.
+   *
+   * NOT an `error.code` (ADR-0112 D1). These are FIELD-ADDRESSED validator
+   * codes that ride inside the refusal's message; the refusal's own machine
+   * code is the SCREAMING `INVALID_SCREEN_INPUT` the engine returns.
    */
-  code: 'required' | 'unknown_field';
+  code: FieldErrorCode;
   message: string;
 }
 

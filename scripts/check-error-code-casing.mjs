@@ -69,6 +69,7 @@ const EXEMPT_FILES = new Map([
   ['packages/rest/src/import-runner.ts', 'D6 field-level import row codes'],
   ['packages/plugins/plugin-sharing/src/rule-criteria.ts', 'D6 field-level; top-level code is VALIDATION_FAILED'],
   ['packages/spec/src/ui/action-params.zod.ts', 'D6/ADR-0114 param-addressed issues'],
+  ['packages/services/service-automation/src/screen-input-contract.ts', 'D6/ADR-0114 screen-field-addressed issues; the refusal code is INVALID_SCREEN_INPUT'],
   // D6b — persisted audit column
   ['packages/metadata-core/src/objects/sys-metadata-audit.object.ts', 'D6b persisted audit vocabulary'],
   ['packages/spec/src/api/errors.test.ts', 'D6 FieldError tests spell field-level codes'],
