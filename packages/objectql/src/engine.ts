@@ -2022,6 +2022,29 @@ export class ObjectQL implements IObjectQLEngine {
 
     const failures: any[] = [];
     for (const name of Object.keys(fields)) {
+      // A `readonly` field is never the caller's to answer for — BY
+      // CONSTRUCTION, not by exemption.
+      //
+      // `stripReadonlyFields` removes a non-system caller's value from a
+      // readonly field before the write, and the create ingress does the same
+      // (`stripReadonlyForInsert`, #3043). So any value still sitting in one at
+      // this point was written by the PLATFORM, which puts it outside this
+      // check's own stated scope ("the reference the caller named").
+      //
+      // Found by the dogfood gate rather than by reasoning: `sys_metadata_history.
+      // recorded_by` is `Field.lookup('sys_user', { readonly: true })` that the
+      // metadata repository fills with `actor ?? 'system'` — a SENTINEL STRING,
+      // not a user id, on a write that does not carry `isSystem`. Checking it
+      // rejected ordinary metadata authoring (package create / publish / clone).
+      // The sentinel-in-a-lookup is a real modelling wart and is filed
+      // separately; it is not this change's to fix, and rejecting the
+      // platform's own write is not the way to report it.
+      //
+      // This does NOT weaken #4441: the fields the issue names —
+      // `sys_position_permission_set.permission_set_id` and
+      // `showcase_task.project` — are ordinary author-facing lookups with no
+      // `readonly`, and both stay enforced (pinned in the unit suite).
+      if (fields[name]?.readonly === true) continue;
       // Only a value the CALLER actually supplied is theirs to answer for.
       //
       // Key presence is not enough: a form serializes an unpicked control as

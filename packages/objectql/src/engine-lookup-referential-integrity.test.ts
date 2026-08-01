@@ -309,6 +309,47 @@ describe('[#4441] a lookup id that resolves to nothing is refused', () => {
     expect(err.fields[0]).toMatchObject({ field: 'owner', code: 'reference_not_found', value: 'nope' });
   });
 
+  it('a READONLY lookup is not the caller\'s to answer for', async () => {
+    // By construction, not by exemption: `stripReadonlyFields` /
+    // `stripReadonlyForInsert` remove a non-system caller's value from a
+    // readonly field before the write, so anything still there was written by
+    // the PLATFORM — outside this check's stated scope.
+    //
+    // The real case that found this: `sys_metadata_history.recorded_by` is a
+    // `lookup('sys_user', { readonly: true })` the metadata repository fills
+    // with `actor ?? 'system'` — a SENTINEL STRING, not a user id — on a write
+    // that carries no `isSystem`. Checking it rejected ordinary metadata
+    // authoring (package create / publish / clone) in the dogfood gate.
+    engine.registry.registerObject({
+      name: 'ref_history',
+      label: 'History',
+      fields: {
+        id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+        note: { name: 'note', label: 'Note', type: 'text' as const },
+        recorded_by: {
+          name: 'recorded_by', label: 'Recorded By',
+          type: 'lookup' as const, reference: 'ref_permission_set', readonly: true,
+        },
+      },
+    } as any);
+
+    const row: any = await engine.insert(
+      'ref_history', { note: 'n', recorded_by: 'system' }, { context: userCtx } as any,
+    );
+    expect(row.recorded_by).toBe('system');
+  });
+
+  it('…and the issue\'s own fields are NOT readonly, so they stay enforced', () => {
+    // The narrowing above must not quietly cover the two fields #4441 names.
+    for (const [obj, field] of [
+      ['ref_position_permission_set', 'permission_set_id'],
+      ['ref_task', 'project'],
+    ] as const) {
+      const def: any = (engine.registry.getObject(obj) as any).fields[field];
+      expect(def.readonly, `${obj}.${field} must not be readonly`).not.toBe(true);
+    }
+  });
+
   it('an unresolvable TARGET object fails open rather than blocking every write', async () => {
     // A reference to an object that is not registered (another datasource, a
     // package not installed) cannot be checked. An integrity check that cannot
