@@ -546,6 +546,18 @@ export class AnalyticsServicePlugin implements Plugin {
         if (!engine) return true;
         return engine.getObject?.(name) != null;
       },
+      // [#4437] Field names for the measure source-field gate. Read from the
+      // SAME schema registry `isRegisteredObject` above consults (and the data
+      // path's #4315 gate reads), so "which fields exist" has one answer across
+      // /data and /analytics. `undefined` — no engine, unknown object, or an
+      // object with no field map (an external datasource whose columns are not
+      // mirrored locally) — means "cannot answer", and the gate stands down.
+      getObjectFieldNames: (objectName: string) => {
+        const fields = dataEngine()?.getObject?.(objectName)?.fields;
+        if (!fields || typeof fields !== 'object') return undefined;
+        const names = Object.keys(fields);
+        return names.length > 0 ? names : undefined;
+      },
       draftRowsResolver,
     };
 

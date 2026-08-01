@@ -2254,6 +2254,68 @@ export class SecurityPlugin implements Plugin {
     );
   }
 
+  /**
+   * [#4467] The OWD / record-sharing half of the read scope — plugin-sharing's
+   * `buildReadFilter` for `object` under `context`, resolved through the
+   * late-bound `sharing` service.
+   *
+   * `getReadFilter` promises "the same filter the engine middleware AND-s into
+   * every find". That chain is TWO sibling middlewares: this plugin's RLS
+   * injection and plugin-sharing's owner/share visibility filter. Only the RLS
+   * half was ever computed here, so the analytics raw-SQL path — which bypasses
+   * the engine and has no other source of scope — ran with no owner predicate at
+   * all: a member could `COUNT(*)` an owner-private object they hold no share on,
+   * and `GROUP BY title` read the values themselves out of rows `/data` correctly
+   * refused them.
+   *
+   * The DEPTH the owner-match widens to (ADR-0057 D1) is stashed on the context
+   * by the middleware as `__readScope` before plugin-sharing reads it; no
+   * middleware runs on this path, so it is computed here from the SAME evaluator
+   * call the middleware makes. Without it a caller granted `unit`/`org` read
+   * depth would be scoped to `own` — safe, but a silent disagreement between
+   * `/data` and `/analytics` in the other direction.
+   *
+   * Returns `null` when the sharing layer imposes nothing (no plugin-sharing, a
+   * public object, an object with no owner field, a bypass object). THROWS on a
+   * resolution failure so the caller can fail closed — a dropped sharing
+   * predicate is exactly the leak this fixes.
+   */
+  private async resolveSharingReadFilter(
+    object: string,
+    context: any,
+  ): Promise<Record<string, unknown> | null> {
+    const sharing = this.resolveKernelService?.('sharing') as
+      | { buildReadFilter?: (o: string, c: any) => Promise<unknown | null> }
+      | undefined;
+    if (!sharing || typeof sharing.buildReadFilter !== 'function') return null;
+    // Mirror the middleware's ADR-0057 D1 depth stash. `getEffectiveScope`
+    // needs the resolved sets and the object's posture — the same two inputs
+    // the middleware feeds it — so the owner-match widens identically here.
+    let readScope: string | undefined;
+    try {
+      const permissionSets = await this.resolvePermissionSetsForContext(context);
+      if (permissionSets.length > 0) {
+        const meta = await this.getObjectSecurityMeta(object);
+        readScope = this.permissionEvaluator.getEffectiveScope(
+          'read',
+          object,
+          permissionSets,
+          { isPrivate: meta.isPrivate },
+        );
+      }
+    } catch {
+      // Depth is a WIDENING input: failing to resolve it leaves the owner-match
+      // at its narrowest ('own'), which is the safe direction. The sharing call
+      // below still runs — and its own failure still denies.
+      readScope = undefined;
+    }
+    const filter = await sharing.buildReadFilter(object, {
+      ...context,
+      ...(readScope ? { __readScope: readScope } : {}),
+    });
+    return (filter ?? null) as Record<string, unknown> | null;
+  }
+
   async getReadFilter(
     object: string,
     context?: any,
@@ -2262,11 +2324,29 @@ export class SecurityPlugin implements Plugin {
     if (context?.isSystem) return undefined;
     const positions = context?.positions ?? [];
     const explicit = context?.permissions ?? [];
-    // Unauthenticated + position-less + permission-less → no scope (the auth
+    // [#4467] The OWD/sharing predicate is resolved for EVERY non-system caller,
+    // ahead of the RLS branches below, because it is a SEPARATE middleware in
+    // the chain this method mirrors: none of the RLS stand-downs below is a
+    // reason to drop it. A resolution failure denies outright — running the
+    // analytics raw-SQL path with a dropped owner predicate is the leak.
+    let sharingFilter: Record<string, unknown> | null;
+    try {
+      sharingFilter = await this.resolveSharingReadFilter(object, context);
+    } catch (e) {
+      this.logger.error?.(
+        `[security] getReadFilter could not resolve the sharing (OWD) read scope for object ` +
+          `'${object}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed, #4467)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return { ...RLS_DENY_FILTER };
+    }
+    // Unauthenticated + position-less + permission-less → no RLS scope (the auth
     // layer, not RLS, gates anonymous access; the analytics REST endpoint
-    // already 401s without a token). Mirrors the middleware's early `return next()`.
+    // already 401s without a token). Mirrors the middleware's early `return next()`
+    // — which is the RLS middleware's early exit only, so the sharing predicate
+    // resolved above still applies.
     if (positions.length === 0 && explicit.length === 0 && !context?.userId) {
-      return undefined;
+      return sharingFilter ?? undefined;
     }
     // [#2852] D10 delegator intersection is NOT implemented on this path.
     // The engine middleware (find/count/aggregate) intersects an on-behalf-of
@@ -2292,7 +2372,10 @@ export class SecurityPlugin implements Plugin {
     try {
       const permissionSets = await this.resolvePermissionSetsForContext(context);
       const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
-      return filter ?? undefined;
+      // [#4467] RLS AND sharing — the same AND-composition the two middlewares
+      // achieve by both writing into `ast.where`. Either half may be absent;
+      // `andComposeLayers` returns the other, or null when neither constrains.
+      return andComposeLayers(filter, sharingFilter) ?? undefined;
     } catch (e) {
       // Fail CLOSED — a resolution failure must deny (zero rows), never expose
       // every tenant's data through the raw-SQL analytics path.
