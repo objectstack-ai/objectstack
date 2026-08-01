@@ -281,8 +281,8 @@ export class QuickJSScriptRunner implements ScriptRunner {
         `function(e){
               globalThis.__error = (e && e.message) ? (e.name + ': ' + e.message) : String(e);
               try {
-                globalThis.__errorInfo = (e && (e.code || e.fields))
-                  ? JSON.stringify({ code: e.code, fields: e.fields })
+                globalThis.__errorInfo = (e && (e.code || e.fields || e['${SANDBOX_FAULT_PROP}']))
+                  ? JSON.stringify({ code: e.code, fields: e.fields, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true })
                   : undefined;
               } catch (_) { globalThis.__errorInfo = undefined; }
             }`;
@@ -379,10 +379,25 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // "InternalError: interrupted".
           const budget = budgetError(pumps);
           if (budget) throw budget;
+          const info = readErrorInfo(vm);
+          // [#4431] A SANDBOX fault that crossed `__error` — a capability
+          // denial thrown synchronously inside a host function, an unavailable
+          // `ctx.api`, a marshalling failure. It is not an outcome the body
+          // chose to report, so it gets neither the `<kind> '<name>' threw:`
+          // wrapper (nothing threw — the sandbox refused) nor an
+          // `innerMessage` (there is no business message; `SandboxError`'s own
+          // contract says so). Leaving `innerMessage` unset is what makes the
+          // #3951 contract hold: the dispatcher's classifier reads its absence
+          // as a CRASH and answers 500 through `errorFromThrown`, instead of
+          // the 400 a denial used to get — and the client sees the capability
+          // text without the `SandboxError: ` debug prefix.
+          if (info?.sandboxFault) {
+            throw new SandboxError(sandboxFaultMessage(String(errStr)));
+          }
           throw new SandboxError(
             `${args.origin.kind} '${args.origin.name}' threw: ${errStr}`,
             userFacingMessage(String(errStr)),
-            readErrorInfo(vm),
+            info,
           );
         }
 
@@ -523,7 +538,8 @@ export class QuickJSScriptRunner implements ScriptRunner {
     const installTxLeaf = (name: string, run: () => Promise<void>): void => {
       const fn = vm.newFunction(name, () => {
         if (!caps.has('api.transaction')) {
-          throw new SandboxError(
+          throwSandboxFault(
+            vm,
             `capability 'api.transaction' not granted to ${origin.kind} '${origin.name}' (called ctx.api.transaction)`,
           );
         }
@@ -591,7 +607,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     for (const level of ['info', 'warn', 'error'] as const) {
       const fn = vm.newFunction(level, (msgH, dataH) => {
         if (!caps.has('log')) {
-          throw new SandboxError(`capability 'log' not granted to ${origin.kind} '${origin.name}'`);
+          throwSandboxFault(vm, `capability 'log' not granted to ${origin.kind} '${origin.name}'`);
         }
         const msg = vm.getString(msgH);
         const data = dataH ? safeJsonParse(vm.getString(dataH)) : undefined;
@@ -607,7 +623,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     const cryptoObj = vm.newObject();
     const uuidFn = vm.newFunction('randomUUID', () => {
       if (!caps.has('crypto.uuid')) {
-        throw new SandboxError(`capability 'crypto.uuid' not granted to ${origin.kind} '${origin.name}'`);
+        throwSandboxFault(vm, `capability 'crypto.uuid' not granted to ${origin.kind} '${origin.name}'`);
       }
       const v = ctx.crypto?.randomUUID?.() ?? cryptoRandomUUID();
       return vm.newString(v);
@@ -776,13 +792,14 @@ function installApiMethod(
     // Capability gate — throw synchronously so the VM sees a normal exception at
     // the call site (mirrors ctx.log / ctx.crypto gating).
     if (!caps.has(required)) {
-      throw new SandboxError(
+      throwSandboxFault(
+        vm,
         `capability '${required}' not granted to ${origin.kind} '${origin.name}' (called ctx.api.object('${objectName}').${method})`,
       );
     }
     const apiAny = ctx.api as Record<string, unknown> | undefined;
     if (!apiAny || typeof apiAny.object !== 'function') {
-      throw new SandboxError(`ctx.api unavailable in ${origin.kind} '${origin.name}'`);
+      throwSandboxFault(vm, `ctx.api unavailable in ${origin.kind} '${origin.name}'`);
     }
     // Dump args now, while the handles are alive — they are freed when this
     // function returns, long before the async work below runs.
@@ -901,10 +918,91 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
       vm.setProp(errH, 'fields', h);
       h.dispose();
     }
+    // [#4431] Mark the sandbox's OWN faults so the pump loop can tell them
+    // apart from a user throw after the VM has flattened both to a string.
+    if (err instanceof SandboxError) {
+      const h = vm.true;
+      vm.setProp(errH, SANDBOX_FAULT_PROP, h);
+    }
   } catch {
     /* keep the bare name/message error */
   }
   return errH;
+}
+
+/**
+ * [#4431] The marker a sandbox-internal fault carries THROUGH the VM.
+ *
+ * ## The problem it solves
+ *
+ * A capability gate throws `SandboxError` **synchronously inside a QuickJS host
+ * function**. That rejects the async IIFE *inside* the VM, so it comes back
+ * through the `__error` side-channel — and the pump loop presumed that anything
+ * arriving there was user code throwing deliberately:
+ *
+ * ```ts
+ * throw new SandboxError(
+ *   `${kind} '${name}' threw: ${errStr}`,
+ *   userFacingMessage(String(errStr)),   // ← innerMessage SET
+ * );
+ * ```
+ *
+ * `SandboxError`'s own contract says the opposite — `innerMessage` is
+ * "undefined for the sandbox's own internal errors (capability denials,
+ * timeouts, marshalling failures), which have no user-meaningful inner
+ * message" — and the #3951 crash contract pins the consequence: *"`SandboxError`
+ * with no `innerMessage` — timeout, **capability denial** → crash → 500"*.
+ * With `innerMessage` set, `domains/actions.ts`'s classifier read the denial as
+ * a deliberate rejection and answered **400**, leaving every capability denial
+ * invisible to gateway error rates, APM and alerting. The client also received
+ * the `SandboxError: ` debug prefix, which only ever belonged in server logs.
+ *
+ * The jsdoc's claim only held for denials detected OUTSIDE evaluation (a
+ * timeout, which takes the separate `budgetError` path). In-VM host-call
+ * denials — `ctx.api.*`, `ctx.log`, `ctx.crypto`, `ctx.api.transaction` — were
+ * misclassified.
+ *
+ * ## Why a marker and not the name
+ *
+ * `__error` is a FLATTENED `<name>: <message>` string by design (every existing
+ * consumer reads it that way), and quickjs-emscripten's host-throw conversion
+ * copies only `name` and `message` onto the VM error — which is exactly why the
+ * denial's identity was lost. Matching on the `SandboxError:` text would be
+ * matching on a string user code can produce. The marker is a real property set
+ * on the VM error object and read back through the additive `__errorInfo`
+ * channel, so the classification survives the flattening it is meant to outlive.
+ */
+const SANDBOX_FAULT_PROP = '__objectstackSandboxFault';
+
+/**
+ * [#4431] Throw a sandbox-internal fault OUT OF a host function so it reaches
+ * the VM carrying {@link SANDBOX_FAULT_PROP}.
+ *
+ * quickjs-emscripten's `errorToHandle` passes a thrown HANDLE through as the VM
+ * exception verbatim (`error instanceof Lifetime ? error : this.newError(error)`),
+ * and it is `newError` — the non-handle path — that drops everything but
+ * `name`/`message`. Building the handle here is therefore what preserves the
+ * marker. The handle is consumed by `QTS_Throw`, so it must NOT be disposed
+ * here.
+ *
+ * The host-side `SandboxError` is still constructed: it is what carries the
+ * message, and it keeps this helper's call sites reading like the plain
+ * `throw new SandboxError(...)` they replaced.
+ */
+function throwSandboxFault(vm: QuickJSContext, message: string): never {
+  throw hostErrorToVm(vm, new SandboxError(message));
+}
+
+/**
+ * Strip the `SandboxError: ` name prefix the VM's flattening prepends.
+ *
+ * The runner's own doc says only the business message should reach a client;
+ * for a sandbox fault there is no business message at all, so what reaches the
+ * client is this text — the capability, the origin and the call that tripped
+ * the gate — with the debug prefix removed.
+ */
+function sandboxFaultMessage(raw: string): string {
+  return raw.startsWith('SandboxError: ') ? raw.slice('SandboxError: '.length) : raw;
 }
 
 /** Marshal a host JSON-serializable value into a QuickJS handle. */
@@ -1057,6 +1155,14 @@ export class SandboxError extends Error {
 export interface SandboxErrorInfo {
   code?: string;
   fields?: unknown[];
+  /**
+   * [#4431] The error that crossed `__error` was the SANDBOX's own fault — a
+   * denied capability, an unavailable `ctx.api`, a marshalling failure — not
+   * user code rejecting. Read by the pump loop, which then leaves
+   * `innerMessage` undefined so the #3951 crash contract's "SandboxError with
+   * no innerMessage → 500" holds for in-VM host-call denials too.
+   */
+  sandboxFault?: boolean;
 }
 
 /**
@@ -1080,11 +1186,12 @@ function readErrorInfo(vm: QuickJSContext): SandboxErrorInfo | undefined {
   } catch {
     return undefined;
   }
-  const p = parsed as { code?: unknown; fields?: unknown };
+  const p = parsed as { code?: unknown; fields?: unknown; sandboxFault?: unknown };
   const info: SandboxErrorInfo = {};
   if (typeof p?.code === 'string' && p.code) info.code = p.code;
   if (Array.isArray(p?.fields)) info.fields = p.fields;
-  return info.code || info.fields ? info : undefined;
+  if (p?.sandboxFault === true) info.sandboxFault = true;
+  return info.code || info.fields || info.sandboxFault ? info : undefined;
 }
 
 /**
