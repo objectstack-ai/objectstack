@@ -7,75 +7,129 @@ import { join } from 'node:path';
 /**
  * `os validate` is documented — and relied on by CI setups — as the READ-ONLY
  * SUPERSET of the gates `os build` runs: same checks, no artifact emitted. That
- * contract has no enforcement, so it drifted (#3782): four authoring lints
- * (`lintFlowPatterns`, `lintLivenessProperties`, `lintAutonumberFormats`,
- * `lintViewRefs`) were wired into `compile.ts` only. Two of them already emitted
- * `severity: 'error'`, so `os validate` reported a clean stack that `os build`
- * then rejected — the precise failure the contract exists to prevent.
+ * contract had no enforcement, so it drifted (#3782): four authoring lints were
+ * wired into `compile.ts` only, two of them already emitting `severity: 'error'`,
+ * so `os validate` reported a clean stack that `os build` then rejected.
  *
- * The drift was invisible because every OTHER gate is a `@objectstack/lint`
- * import shared by both files, while these four are CLI-local `../utils/lint-*`
- * modules that only `compile.ts` ever imported.
+ * ## What changed, and what this file still guards
  *
- * This is a source-level gate rather than a behavioural one on purpose: it fails
- * when a gate is ADDED to the build without being added to validate, which is
- * the moment the mistake is cheap to fix — not later, when some app trips it.
+ * The metadata rules the two commands share now come from ONE table
+ * (`src/lint/authoring-rules.ts`, #4409), and its own ratchet —
+ * `src/commands/authoring-rule-wiring.test.ts` — proves all three authoring
+ * commands run the identical gating set. That is a stronger guarantee than the
+ * source diff this file used to do, and it covers `os lint` too.
+ *
+ * What the registry CANNOT cover is the gates that are not pure functions of the
+ * stack: the capability-provider preflight reads `node_modules`, the docs lint
+ * reads `src/docs/`, the access-matrix snapshot reads a file next to the config.
+ * Those are still hand-wired per command, so they can still drift — and one of
+ * them already had. `collectAndLintDocs` gated `os build` and never ran on
+ * `os validate`, invisible for the same reason the #3782 four were: the old
+ * scan keyed on the `lint*`/`validate*` naming convention, and this gate is
+ * named `collect*`. This file now names each shared gate explicitly instead of
+ * pattern-matching for them.
+ *
+ * Source-level rather than behavioural on purpose: it fails when a gate is ADDED
+ * to the build without being added to validate, which is the moment the mistake
+ * is cheap to fix — not later, when some app trips it.
  */
 
 const COMMANDS_DIR = join(__dirname, '..', 'src', 'commands');
 
 /**
+ * Gates that are NOT registry rules (they need the filesystem or the emitted
+ * artifact) and that both commands must therefore wire by hand.
+ *
+ * Adding a gate to `compile.ts` means adding it here and to `validate.ts`, or
+ * to `BUILD_ONLY_GATES` below with a reason. There is no third option — that is
+ * the whole point of the file.
+ */
+const SHARED_NON_REGISTRY_GATES: readonly string[] = [
+  // [#3366] Resolves each `requires` token's provider in the active edition.
+  'preflightRequiredCapabilities',
+  // [#3786] The pre-parse undeclared-key diff, both halves.
+  'lintUnknownStackKeys',
+  'lintUnknownAuthoringKeys',
+  // [ADR-0046] Package docs: flatness, prefixed names, MDX/image ban, links.
+  'collectAndLintDocs',
+];
+
+/**
  * Gates `os build` may legitimately run that `os validate` does not.
  *
- * Adding an entry here is a deliberate assertion that the check CANNOT be made
- * read-only (it needs the emitted artifact, the bundler, the filesystem output).
- * A gate that merely *reads* the parsed stack does not belong here — wire it
- * into `validate.ts` instead. Empty today, and that is the healthy state.
+ * Each entry is a deliberate assertion that the check CANNOT be made read-only
+ * — it needs the emitted artifact, the bundler, or filesystem output. A gate
+ * that merely *reads* the parsed stack does not belong here; wire it into
+ * `validate.ts`, or better, register it in `src/lint/authoring-rules.ts` so all
+ * three authoring commands get it at once.
  */
-const BUILD_ONLY_GATES: readonly string[] = [];
+const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
+  buildAccessMatrix:
+    '[ADR-0090 D6] The snapshot gate reads (and with --update-access-matrix WRITES) access-matrix.json ' +
+    'next to the config. Rewriting a committed snapshot is not a read-only operation.',
+  diffAccessMatrix: 'The comparison half of the same D6 snapshot gate.',
+  lowerCallables:
+    'Lowers inline `function` handlers to string refs so they survive JSON.stringify. It exists to ' +
+    'produce the artifact; there is nothing to lower when nothing is emitted.',
+  buildRuntimeBundle: 'Emits the objectstack-runtime.{hash}.mjs sibling module. Artifact output by definition.',
+};
+
+const sourceOf = (file: string) => readFileSync(join(COMMANDS_DIR, file), 'utf8');
 
 /** Every `lintFoo(`/`validateFoo(` call site in a command's source. */
 function gateCallsIn(file: string): Set<string> {
-  const src = readFileSync(join(COMMANDS_DIR, file), 'utf8');
-  const calls = src.match(/\b(?:lint|validate)[A-Z]\w*(?=\s*\()/g) ?? [];
+  const calls = sourceOf(file).match(/\b(?:lint|validate)[A-Z]\w*(?=\s*\()/g) ?? [];
   return new Set(calls);
 }
 
-describe('os validate is the read-only superset of os build (#3782)', () => {
-  it('runs every gate compile.ts runs', () => {
+/** Is `name` invoked anywhere in this command's source? */
+const calls = (file: string, name: string) => new RegExp(String.raw`\b${name}\s*\(`).test(sourceOf(file));
+
+describe('os validate is the read-only superset of os build (#3782, #4409)', () => {
+  it('both commands run the shared authoring-rule registry', () => {
+    for (const file of ['compile.ts', 'validate.ts']) {
+      expect(calls(file, 'runAuthoringRules'), `${file} must run the authoring-rule registry`).toBe(true);
+    }
+  });
+
+  it.each(SHARED_NON_REGISTRY_GATES)('both commands run %s', (gate) => {
+    // Guard the guard: a gate that has been renamed or deleted must fail here
+    // rather than pass vacuously on both sides.
+    expect(calls('compile.ts', gate), `compile.ts no longer calls ${gate} — is this list stale?`).toBe(true);
+    expect(
+      calls('validate.ts', gate),
+      `os build runs ${gate} and os validate does not, so a stack can pass 'os validate' and fail ` +
+        `'os build'. Wire it into packages/cli/src/commands/validate.ts (mirroring compile.ts's severity ` +
+        `handling), or — only if it genuinely cannot run without emitting an artifact — move it to ` +
+        `BUILD_ONLY_GATES in this file with a reason.`,
+    ).toBe(true);
+  });
+
+  it('compile.ts hand-wires no gate validate.ts is missing', () => {
     const compileGates = gateCallsIn('compile.ts');
     const validateGates = gateCallsIn('validate.ts');
 
-    // Guard the guard: if the extraction regex silently stops matching, the
-    // set-difference below passes vacuously and the gate goes quietly dead.
-    expect(compileGates.size).toBeGreaterThan(10);
+    // Non-vacuity: the extraction must still find the pre-parse key lints.
+    expect(compileGates.size).toBeGreaterThan(0);
 
     const missing = [...compileGates]
       .filter((g) => !validateGates.has(g))
-      .filter((g) => !BUILD_ONLY_GATES.includes(g))
+      .filter((g) => !(g in BUILD_ONLY_GATES))
       .sort();
 
     expect(
       missing,
-      `os build runs ${missing.length} gate(s) that os validate does not, so a stack ` +
-        `can pass 'os validate' and fail 'os build': ${missing.join(', ')}.\n` +
-        `Wire each into packages/cli/src/commands/validate.ts (mirroring the severity ` +
-        `handling in compile.ts), or — only if it genuinely cannot run without emitting ` +
-        `an artifact — add it to BUILD_ONLY_GATES in this file with a reason.`,
+      `os build runs ${missing.length} gate(s) that os validate does not: ${missing.join(', ')}.\n` +
+        `Register it in packages/cli/src/lint/authoring-rules.ts so all three authoring commands run ` +
+        `it, wire it into validate.ts by hand and add it to SHARED_NON_REGISTRY_GATES, or add it to ` +
+        `BUILD_ONLY_GATES with a reason.`,
     ).toEqual([]);
   });
 
-  it('runs the four CLI-local authoring lints that regressed in #3782', () => {
-    const validateGates = gateCallsIn('validate.ts');
-
-    for (const gate of [
-      'lintFlowPatterns',
-      'lintLivenessProperties',
-      'lintAutonumberFormats',
-      'lintViewRefs',
-    ]) {
-      expect(validateGates.has(gate), `validate.ts must call ${gate}`).toBe(true);
-    }
+  it('every BUILD_ONLY_GATES entry is still called by the build', () => {
+    // A ratchet nobody prunes rots into a permission slip.
+    const stale = Object.keys(BUILD_ONLY_GATES).filter((g) => !calls('compile.ts', g));
+    expect(stale, `BUILD_ONLY_GATES entries compile.ts no longer calls: ${stale.join(', ')}`).toEqual([]);
   });
 
   /**
@@ -92,7 +146,7 @@ describe('os validate is the read-only superset of os build (#3782)', () => {
    */
   it('both commands pass a conversion-notice sink to normalizeStackInput', () => {
     for (const file of ['compile.ts', 'validate.ts']) {
-      const src = readFileSync(join(COMMANDS_DIR, file), 'utf8');
+      const src = sourceOf(file);
       const call = src.match(/normalizeStackInput\([\s\S]{0,400}?\)\s*;/);
       expect(call, `${file} must call normalizeStackInput`).not.toBeNull();
       expect(

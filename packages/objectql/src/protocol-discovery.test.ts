@@ -333,10 +333,12 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
   });
 
   // Not every SERVICE_CONFIG entry is dispatcher-owned: `search` (REST layer),
-  // `workflow`, `graphql` and the queue/job/cache families have their routes
-  // mounted by the plugin that registers the service, so `handlerReady` there
-  // says nothing about whether THAT route is mounted and the advertisement
-  // stays presence-gated. Suppressing it would be a guess, not honesty.
+  // `workflow` and `graphql` have their routes mounted by the plugin that
+  // registers the service, so `handlerReady` there says nothing about whether
+  // THAT route is mounted and the advertisement stays presence-gated.
+  // Suppressing it would be a guess, not honesty. (cache/queue/job used to be
+  // named here on the same theory, but nothing mounts routes for them at all —
+  // they are route-less kernel-internal slots since #4318.)
   it('should leave non-dispatcher-owned routes presence-gated', async () => {
     const mockServices = new Map<string, any>();
     mockServices.set('search', { __serviceInfo: { status: 'stub', message: 'dev fake' } });
@@ -346,6 +348,49 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
 
     expect(discovery.services.search.status).toBe('stub');
     expect(discovery.services.search.route).toBe('/api/v1/search');
+  });
+
+  // ── Kernel-internal slots advertise no route, ever (#4318) ────────────────
+  // SERVICE_CONFIG used to declare /api/v1/cache, /api/v1/queue and
+  // /api/v1/jobs — three paths that existed nowhere else in the repository:
+  // no dispatcher domain, no adapter mount, no plugin registration, and the
+  // shipped providers (service-cache/-queue/-job) are in-process contracts
+  // that will never mount one. Every default boot therefore advertised a
+  // route inside the same ServiceInfo whose `handlerReady: false` said the
+  // opposite. The slots are route-less now, like realtime — but unlike
+  // realtime an unmarked real implementation stays `available`, because the
+  // slot's contract is in-process and "no HTTP surface" is not reduced
+  // capability for it.
+  it('reports an unmarked cache/queue/job occupant available with no route and handlerReady false (#4318)', async () => {
+    const mockServices = new Map<string, any>();
+    for (const slot of ['cache', 'queue', 'job']) mockServices.set(slot, { /* real, unmarked */ });
+
+    protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+    const discovery = await protocol.getDiscovery();
+
+    for (const slot of ['cache', 'queue', 'job']) {
+      const reported = discovery.services[slot];
+      expect(reported.enabled, `${slot}.enabled`).toBe(true);
+      expect(reported.status, `${slot}.status`).toBe('available');
+      expect(reported.handlerReady, `${slot}.handlerReady`).toBe(false);
+      expect(reported.route, `${slot}.route`).toBeUndefined();
+      expect(reported.message, `${slot}.message`).toContain('no HTTP surface');
+    }
+  });
+
+  it('never advertises a route for a cache/queue/job fallback either (#4318)', async () => {
+    for (const slot of ['cache', 'queue', 'job']) {
+      const mockServices = new Map<string, any>();
+      mockServices.set(slot, CORE_FALLBACK_FACTORIES[slot]());
+
+      protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+      const reported = (await protocol.getDiscovery()).services[slot];
+
+      // Self-description wins for status/message (the class-wide #3898 gate
+      // pins `degraded`); the route stays gone and handlerReady stays false.
+      expect(reported.route, `${slot}.route`).toBeUndefined();
+      expect(reported.handlerReady, `${slot}.handlerReady`).toBe(false);
+    }
   });
 
   it('should map file-storage service to storage route', async () => {

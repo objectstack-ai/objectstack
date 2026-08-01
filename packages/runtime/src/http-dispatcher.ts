@@ -5,7 +5,7 @@ import {
 } from '@objectstack/core';
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
-import { CoreServiceName, serviceUnavailableMessage } from '@objectstack/spec/system';
+import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { readServiceSelfInfo, DispatcherErrorCode } from '@objectstack/spec/api';
 import { apiErrorResponse } from './error-envelope.js';
@@ -1037,6 +1037,23 @@ export class HttpDispatcher {
             enabled: false, status: 'unavailable' as const, handlerReady: false,
             message: serviceUnavailableMessage(name),
         });
+        // [#4318] Kernel-internal slots (cache/queue/job): their providers
+        // mount no HTTP routes, so no route is advertised and `handlerReady`
+        // is `false` as a fact, not a proxy — `svcAvailable` would claim a
+        // handler that does not exist. An unmarked occupant stays `available`:
+        // the slot's contract is in-process, so "no HTTP surface" is not
+        // reduced capability (contrast `realtime` below, whose advertised
+        // capability IS the missing surface). Message written once in
+        // `@objectstack/spec/system` so both discovery builders agree.
+        const svcInProcess = (name: string, svc: unknown) => {
+            const self = svc ? readServiceSelfInfo(svc) : undefined;
+            return {
+                enabled: true,
+                status: self?.status ?? ('available' as const),
+                handlerReady: false,
+                message: self?.message ?? inProcessServiceMessage(name),
+            };
+        };
 
         // Self-description of the registered realtime service, if any (D12).
         const realtimeSelf = realtimeSvc ? readServiceSelfInfo(realtimeSvc) : undefined;
@@ -1148,9 +1165,9 @@ export class HttpDispatcher {
                 // "install a plugin" would say strictly less.
                 automation:     automationRegistered ? svcAvailable(routes.automation, undefined, automationSvc) : svcUnavailable('automation'),
                 analytics:      analyticsRegistered ? svcAvailable(routes.analytics, undefined, analyticsSvc) : svcUnavailable('analytics'),
-                cache:          hasCache ? svcAvailable(undefined, undefined, cacheSvc) : svcUnavailable('cache'),
-                queue:          hasQueue ? svcAvailable(undefined, undefined, queueSvc) : svcUnavailable('queue'),
-                job:            hasJob ? svcAvailable(undefined, undefined, jobSvc) : svcUnavailable('job'),
+                cache:          hasCache ? svcInProcess('cache', cacheSvc) : svcUnavailable('cache'),
+                queue:          hasQueue ? svcInProcess('queue', queueSvc) : svcUnavailable('queue'),
+                job:            hasJob ? svcInProcess('job', jobSvc) : svcUnavailable('job'),
                 // [#4093] Reported from what serves it, like the route above:
                 // `/ui` is a dispatcher domain answered by the `protocol`
                 // service, so its self-description (none today — MetadataPlugin

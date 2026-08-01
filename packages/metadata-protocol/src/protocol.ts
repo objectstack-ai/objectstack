@@ -29,7 +29,7 @@ import {
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
-import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
+import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed } from '@objectstack/spec/kernel';
 import {
     extractProtection,
@@ -1194,9 +1194,16 @@ function suggestFieldName(name: string, knownFields: readonly string[]): string 
  * Service Configuration for Discovery
  * Maps service names to their routes and plugin providers.
  *
- * `route: undefined` means the service has NO HTTP surface — discovery must
+ * A missing `route` means the service has NO HTTP surface — discovery must
  * not advertise a route for it (ADR-0076 D12, #2462: an advertised route
- * with no mounted handler 404s and misleads consumers).
+ * with no mounted handler 404s and misleads consumers). Such entries carry
+ * `noHttpSurface` instead, stating how to report an occupant that does not
+ * self-describe: `realtime`'s advertised capability IS the missing HTTP/WS
+ * surface, so an in-process bus is `degraded`; `cache`/`queue`/`job` are
+ * kernel-internal contracts fully served in-process (#4318), so an unmarked
+ * real implementation stays `available`. Either way `handlerReady` is
+ * reported `false` — for a route-less slot it is not a proxy for anything,
+ * it is the fact itself.
  */
 /**
  * [#4093 follow-up] `plugin` is no longer written here. It named the package a
@@ -1212,7 +1219,11 @@ function suggestFieldName(name: string, knownFields: readonly string[]): string 
  * registers each slot and guarded by `scripts/check-service-providers.mjs`.
  * Only the ROUTE stays local — that is this builder's own knowledge.
  */
-const SERVICE_CONFIG: Record<string, { route?: string }> = {
+const SERVICE_CONFIG: Record<string, {
+    route?: string;
+    /** Route-less slots only: status + message for an occupant with no self-description. */
+    noHttpSurface?: { statusWhenUnmarked: 'available' | 'degraded'; message: string };
+}> = {
     // Plugin-provided like every other optional service since the degraded
     // ObjectQL fallback was retired (#3891): advertised iff the real engine
     // is registered — never hardcoded 'available' (the pre-#2462 lie the
@@ -1220,14 +1231,24 @@ const SERVICE_CONFIG: Record<string, { route?: string }> = {
     analytics:    { route: '/api/v1/analytics' },
     auth:         { route: '/api/v1/auth' },
     automation:   { route: '/api/v1/automation' },
-    cache:        { route: '/api/v1/cache' },
-    queue:        { route: '/api/v1/queue' },
-    job:          { route: '/api/v1/jobs' },
+    // Kernel-internal slots (#4318): their providers (service-cache/-queue/
+    // -job) mount no HTTP routes — these are in-process contracts, not HTTP
+    // capabilities, so there is no route to advertise and never will be. The
+    // /api/v1/cache|queue|jobs paths this table used to declare existed
+    // nowhere else in the repository; every default boot advertised them next
+    // to the fallbacks' own `handlerReady: false` — a single ServiceInfo
+    // contradicting itself.
+    cache:        { noHttpSurface: { statusWhenUnmarked: 'available', message: inProcessServiceMessage('cache') } },
+    queue:        { noHttpSurface: { statusWhenUnmarked: 'available', message: inProcessServiceMessage('queue') } },
+    job:          { noHttpSurface: { statusWhenUnmarked: 'available', message: inProcessServiceMessage('job') } },
     ui:           { route: '/api/v1/ui' },
     workflow:     { route: '/api/v1/workflow' },
     // service-realtime is an in-process pub/sub bus; nothing mounts
-    // /api/v1/realtime, so no route is advertised (D12, #2462).
-    realtime:     {},
+    // /api/v1/realtime, so no route is advertised (D12, #2462). Unlike the
+    // kernel-internal slots above, the capability this slot advertises is
+    // realtime push to clients — without a surface that IS reduced, so an
+    // unmarked bus reports degraded. Message matches the dispatcher builder.
+    realtime:     { noHttpSurface: { statusWhenUnmarked: 'degraded', message: 'In-process event bus only — no HTTP/WS realtime surface is mounted' } },
     notification: { route: '/api/v1/notifications' },
     ai:           { route: '/api/v1/ai' },
     i18n:         { route: '/api/v1/i18n' },
@@ -2077,12 +2098,14 @@ export class ObjectStackProtocolImplementation implements
                 // Registered — but honor a stub/dev/fallback self-description
                 // instead of blindly reporting 'available' (ADR-0076 D12).
                 const self = readServiceSelfInfo(registeredServices.get(serviceName));
-                // No HTTP surface at all (e.g. realtime): the handler can never
-                // be ready and 'available' would overstate it — report degraded.
+                // No HTTP surface at all: the handler can never be ready, and
+                // the entry's own `noHttpSurface` declaration says whether that
+                // also degrades the slot (realtime) or not (cache/queue/job —
+                // in-process contracts, #4318).
                 const noHttpSurface = !config.route;
                 services[serviceName] = {
                     enabled: true,
-                    status: self?.status ?? (noHttpSurface ? ('degraded' as const) : ('available' as const)),
+                    status: self?.status ?? (config.noHttpSurface?.statusWhenUnmarked ?? ('available' as const)),
                     route: advertisedRoute(serviceName, config.route),
                     provider: CORE_SERVICE_PROVIDER[serviceName] ?? undefined,
                     ...(noHttpSurface || self?.handlerReady !== undefined
@@ -2090,8 +2113,8 @@ export class ObjectStackProtocolImplementation implements
                         : {}),
                     ...(self?.message
                         ? { message: self.message }
-                        : noHttpSurface
-                            ? { message: 'In-process service only — no HTTP surface is mounted' }
+                        : config.noHttpSurface
+                            ? { message: config.noHttpSurface.message }
                             : {}),
                 };
             } else {
