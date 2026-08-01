@@ -21,6 +21,7 @@ The canonical `IDataEngine` interface uses **QueryAST-aligned parameter names** 
 
 ```typescript
 import type {
+  BaseEngineOptions,
   EngineQueryOptions,
   DataEngineInsertOptions,
   EngineUpdateOptions,
@@ -31,11 +32,12 @@ import type {
 } from '@objectstack/spec/data';
 
 export interface IDataEngine {
-  // Query
-  find(objectName: string, query?: EngineQueryOptions): Promise<any[]>;
-  findOne(objectName: string, query?: EngineQueryOptions): Promise<any>;
-  count(objectName: string, query?: EngineCountOptions): Promise<number>;
-  aggregate(objectName: string, query: EngineAggregateOptions): Promise<any[]>;
+  // Query (reads take the execution context in a TRAILING options argument —
+  // the same position the write methods take theirs)
+  find(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any[]>;
+  findOne(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any>;
+  count(objectName: string, query?: EngineCountOptions, options?: BaseEngineOptions): Promise<number>;
+  aggregate(objectName: string, query: EngineAggregateOptions, options?: BaseEngineOptions): Promise<any[]>;
 
   // Mutation (write ops also accept in-process WriteObservabilityOptions — see `update`)
   insert(objectName: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any>;
@@ -64,6 +66,20 @@ export interface IDataEngine {
 ## Query Operations
 
 All query methods use canonical **QueryAST parameter names**: `where`, `fields`, `orderBy`, `limit`, `offset`, `expand`.
+
+<Callout type="warn">
+**Reads take the execution context in the trailing `options` argument**, the same
+position the write methods take theirs — `find`, `findOne`, `count` and `aggregate`
+all accept `options?: BaseEngineOptions`.
+
+This matters because the mistake it prevents is silent. The same `{ context }` object
+is correct as the third argument to `insert`, and passing it as the third argument to
+`find` used to be **dropped without error** — so an intended `isSystem` bypass simply
+vanished, and control-plane reads started coming back empty once org-scoping hooks
+landed (#4251).
+
+`query.context` remains supported. When **both** are given, `options.context` wins.
+</Callout>
 
 ### find
 
