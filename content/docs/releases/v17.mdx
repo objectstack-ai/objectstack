@@ -412,12 +412,13 @@ schema to the two highest-risk authorable surfaces, per the triage in
 - **Datasources** — `DatasourceSchema` with its `pool` / `healthCheck` / `ssl` /
   `retryPolicy` blocks, the ADR-0015 `external` federation settings and their
   `validation` policy, `DatasourceCapabilities`, and `DriverDefinitionSchema`.
-  `config` and `readReplicas` stay **open** records: their shape is per-driver.
-  Nothing validates *inside* them — an earlier version of this note said the
-  driver's own `configSchema` did, which was wrong; the per-driver schemas exist
-  (`PostgresConfigSchema` and siblings) but nothing parses `config` against
-  them, tracked as #4410. So a misspelling one level *down* is still silent
-  today. That openness is why the
+  `config` stays an **open** record: its shape is per-driver. What it no longer
+  is, is unvalidated — #4410 wired the per-driver schemas
+  (`PostgresConfigSchema` and siblings) into `DatasourceSchema`'s refinement, so
+  a misspelling one level *down* is now rejected with the canonical key named.
+  An earlier version of this note said the driver's own `configSchema` did that,
+  which was wrong for two releases: the field existed, nothing read it. That
+  openness is why the
   top level had to close — a connection key written one level too high (`host`
   next to `driver` instead of inside `config`) was stripped, and the datasource
   then connected on driver defaults rather than failing. Those keys now
@@ -970,6 +971,7 @@ import or the authored key.
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
 | `ChartInteraction.zoom` / `.clickAction` | never implemented (#3752) |
+| `datasource.readReplicas` | replica connections nothing ever opened — no driver reads the key and no query path splits reads from writes, so every statement went to the primary. #4410 had just taught the schema to validate each entry against the declared driver's contract, which made a dead slot look rigorously alive (#4468) |
 
 The Console side follows: `@object-ui/types` drops its
 `ObjectStack`/`ObjectOS`/`ObjectQL`/`ObjectUI` Capabilities re-exports, which
@@ -1979,7 +1981,13 @@ covers are folded into the list below rather than left to the changelog.)
   an object fails the gate even at zero violations.
 - **Datasources:** verify every declared datasource connects in every
   environment — a bound datasource that cannot connect now fails the boot
-  instead of failing every later query.
+  instead of failing every later query. Delete `readReplicas` (`os migrate meta`
+  does it). Nothing ever opened those connections, so read throughput is
+  unchanged by removing them; if you need replica reads, front them behind one
+  endpoint (pgpool, ProxySQL, an RDS reader endpoint) and point `config` there.
+  Also re-check what you wrote under `config`: it is parsed against the driver's
+  contract now, so a key that used to be ignored — and left the datasource on
+  driver defaults — is rejected by name.
 - **Sharing rules:** rewrite `sharedWith.type: 'group'` → `'team'`; drop `guest`
   and owner-type rules; expect `accessLevel: 'full'` to convert to `'edit'`.
   **A rule must state its criteria** — authoring one without is rejected, and a

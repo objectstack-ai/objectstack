@@ -29,7 +29,14 @@ import {
  *
  * This registry closes that: it maps every driver id the platform can actually
  * BUILD onto the schema for that driver's config, and `DatasourceSchema` parses
- * `config` (and each `readReplicas` entry) against it.
+ * `config` against it.
+ *
+ * #4410 ran the same parse over each `readReplicas` entry. #4468 retired that
+ * key: no driver ever opened a replica connection, so the entries were being
+ * checked against a contract nothing would ever apply them to. Worth keeping in
+ * view here — "we validate what we can construct" is a claim about drivers we
+ * build, and a slot the platform never connects is outside it in the other
+ * direction.
  *
  * ## Where the boundary is
  *
