@@ -85,10 +85,15 @@ const legacyObjectRow = {
 };
 
 // A pre-17 standalone action row still carrying the removed `execute` alias.
+// NOTE: this once wrote `object: 'crm_invoice'`. `ActionSchema` has never
+// declared `object` — the key is `objectName` — and `.strip` ate it, so the
+// fixture read as a claim about real legacy data while being a typo. Closing
+// the shape (#4001) made it a diagnostic. Sixth strip-era fiction this campaign
+// has found in a test, and the first one dressed as a stored ROW.
 const legacyActionRow = {
     type: 'action',
     name: 'convert',
-    metadata: { name: 'convert', label: 'Convert', type: 'script', object: 'crm_invoice', execute: 'convertHandler' },
+    metadata: { name: 'convert', label: 'Convert', type: 'script', objectName: 'crm_invoice', execute: 'convertHandler' },
 };
 
 describe('getMetaItems — stored rows are served canonical (#3903)', () => {

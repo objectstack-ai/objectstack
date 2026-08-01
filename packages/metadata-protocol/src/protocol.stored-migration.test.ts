@@ -139,7 +139,7 @@ const canonicalObjectRow = {
 const legacyActionRow = {
     type: 'action',
     name: 'convert',
-    metadata: { name: 'convert', label: 'Convert', type: 'script', object: 'crm_invoice', execute: 'convertHandler' },
+    metadata: { name: 'convert', label: 'Convert', type: 'script', objectName: 'crm_invoice', execute: 'convertHandler' },
 };
 
 describe('migrateStoredMetadata — preview (#4327)', () => {
