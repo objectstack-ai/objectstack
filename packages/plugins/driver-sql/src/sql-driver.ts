@@ -5115,8 +5115,8 @@ export class SqlDriver implements IDataDriver {
         // never converted it and the raw array arrived as `where`. Skipping it
         // (the old behaviour) emitted NO predicate at all: the caller asked to
         // filter and silently got every row. Fail loudly instead. #3948.
-        throw new Error(
-          `[sql-driver] Unrecognized filter operator "${item}" in a comparison triple. ` +
+        throw unsupportedFilterError(
+          `Unrecognized filter operator "${item}" in a comparison triple. ` +
             `A filter array is either a logical node (["and"|"or", …]) or nested ` +
             `conditions ([[field, op, value], …]); a bare [field, op, value] only ` +
             `reaches the driver when its operator is outside @objectstack/spec ` +
@@ -5171,8 +5171,8 @@ export class SqlDriver implements IDataDriver {
       // branches and was dropped, so a malformed element silently narrowed
       // nothing. Same reasoning as above: an unapplied filter must not look
       // like a satisfied one. #3948.
-      throw new Error(
-        `[sql-driver] Unrecognized filter element of type "${item === null ? 'null' : typeof item}" — ` +
+      throw unsupportedFilterError(
+        `Unrecognized filter element of type "${item === null ? 'null' : typeof item}" — ` +
           `expected a logical keyword ("and"/"or") or a condition array. ` +
           `Filter was: ${JSON.stringify(filters)}`,
       );
@@ -5485,7 +5485,7 @@ export class SqlDriver implements IDataDriver {
             case '$between': {
               const arr = Array.isArray(coerced) ? coerced : [];
               if (arr.length !== 2) {
-                throw new Error(`[sql-driver] operator "$between" on field "${field}" requires a [min, max] value array.`);
+                throw unsupportedFilterError(`Operator "$between" on field "${field}" requires a [min, max] value array.`);
               }
               (builder as any)[logicalOp === 'or' ? 'orWhereBetween' : 'whereBetween'](field, arr as [any, any]);
               break;
