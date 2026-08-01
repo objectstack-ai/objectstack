@@ -157,7 +157,7 @@ const [active] = await engine.aggregate('user', {
 
 ## Window Functions
 
-> ⛔ **REMOVED in `@objectstack/spec` 18 (#4286, ADR-0049).** The `QueryAST`
+> ⛔ **REMOVED in `@objectstack/spec` 17 (#4286, ADR-0049).** The `QueryAST`
 > schema no longer declares `windowFunctions` — the engine never routed the
 > property to any driver, so it was silently dropped. The key is tombstoned:
 > a query carrying it fails to parse with the upgrade prescription. The one

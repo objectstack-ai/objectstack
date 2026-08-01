@@ -280,7 +280,7 @@ console.log(field.maxLength?.toString() ?? 'no limit');
 4. **Avoid deep nesting** — Limit nested `$and`/`$or` depth
 5. **Use keyset pagination** — For large datasets, seeking past the last row is
    faster than a deep `offset`. Express the keyset as a `where` predicate on the
-   sort key (the `cursor` query property was removed in `@objectstack/spec` 18,
+   sort key (the `cursor` query property was removed in `@objectstack/spec` 17,
    #4286 — nothing ever read it)
 
 ```typescript

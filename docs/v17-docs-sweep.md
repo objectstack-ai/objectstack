@@ -58,6 +58,7 @@ merely *references* changed code, use the `docs-accuracy-audit` workflow the
 | Node `18` as a floor | states an out-of-date prerequisite | engines-node-22 |
 | `PortalSchema`, `AuditConfig`, Capabilities-descriptor cluster, `FeatureFlagSchema`, `DEFAULT_*_ROUTES`, report `aria`/`performance`, `ReportColumn/GroupingSchema` | teaches a pruned cluster | prune-* family |
 | `GetTranslationsRequest` `namespace`/`keys` filters | teaches the dropped filters | i18n-translations-request-drop-phantom-filters |
+| `` `@objectstack/spec` 18 `` (any v17 removal dated to **18**) | dates a removal that ships in **17** to the next major — the reader plans for it a release late and their upgrade breaks. Check the *number*, not just the surface name: `spec-changes.json` `toMajor` is the arbiter | #4286, #3963 |
 
 ## Run log
 
@@ -107,5 +108,28 @@ merely *references* changed code, use the `docs-accuracy-audit` workflow the
     rather than spot fixes.
 - **Not yet swept:** `examples/**` inline prose and `docs/**` (internal);
   lower-priority — user-facing `content/docs` + `skills` covered first.
+
+### 2026-08-01 — run 3 (version-number pass, #4476)
+
+- **Watermark:** framework `0f9faa2` (origin/main, post-#4489).
+- **Fingerprint added:** the `@objectstack/spec` 18 row above. Runs 1-2 matched on
+  *surface names* and so read straight past a passage that named the right surface
+  and the wrong release. The number is the actionable half of a removal notice.
+- **Fixed (drift → corrected):** 17 passages dating v17 removals to 18 → 17.
+  `spec-changes.json` gives `toMajor: 17` for all five surfaces involved, and this
+  tree is `17.0.0-rc.1` / `PROTOCOL_VERSION = '17.0.0'` with the keys already
+  `[RETIRED]` in `authorable-surface.json` — a removal cannot already be retired in
+  a 17 build and also ship in 18.
+  - `protocol/objectql/query-syntax.mdx` (5) · `data-modeling/queries.mdx` (4) ·
+    `deployment/troubleshooting.mdx` (1) — the #4286 query surfaces.
+  - `skills/objectstack-query/SKILL.md` (3), `rules/aggregation.md` (1),
+    `rules/pagination.md` (1) — same wrong number in the **agent-facing** skill,
+    which #4476's fingerprint list did not cover. Highest-leverage of the set: an
+    agent authoring queries reads these as ground truth.
+  - `releases/implementation-status.mdx` (2) — same error shape on a *different*
+    change, `api.requireAuth` (#3963), also `toMajor: 17`.
+- **Method note for the next run:** #4476 listed nine locations; a bare-pattern grep
+  found seventeen. Grep the pattern repo-wide (including `skills/`), do not work a
+  fingerprint list file-by-file.
 
 <!-- Append the next run above this line, newest last. -->

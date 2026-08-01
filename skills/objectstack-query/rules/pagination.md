@@ -9,7 +9,7 @@ Guide for implementing pagination in ObjectStack queries.
 | Offset | UI page navigation, small datasets | Simple, random page access | Slow on large offsets, drift on inserts |
 | Keyset (manual `where`) | Infinite scroll, real-time feeds | Consistent results, O(1) performance | No random page access |
 
-> ⛔ **The `cursor` query property was REMOVED in `@objectstack/spec` 18
+> ⛔ **The `cursor` query property was REMOVED in `@objectstack/spec` 17
 > (#4286).** No engine or driver ever read it: a query carrying `cursor`
 > silently returned **page 1 forever**. The key is tombstoned — a query
 > carrying it fails to parse with the prescription — and
