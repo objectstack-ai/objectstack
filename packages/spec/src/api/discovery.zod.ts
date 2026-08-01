@@ -178,8 +178,10 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
   /** Base URL for Package Management */
   packages: z.string().optional().describe('e.g. /api/v1/packages'),
 
-  /** Base URL for Workflow Engine */
-  workflow: z.string().optional().describe('e.g. /api/v1/workflow'),
+  // `workflow` was removed here (#4451, v17): no host ever mounted a workflow
+  // surface and nothing ever registered the slot (ADR-0115 Evidence 5), so no
+  // builder could truthfully populate the field. State machines are enforced
+  // by the `state_machine` validation rule; approvals live below.
 
   /** Base URL for Approvals (ADR-0019: approval as a flow node) */
   approvals: z.string().optional().describe('e.g. /api/v1/approvals'),

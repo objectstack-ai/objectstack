@@ -339,6 +339,23 @@ export class AutomationServicePlugin implements Plugin {
     // Do NOT declare a hard kernel dependency, so this plugin works in environments
     // where MetadataPlugin is not registered.
     dependencies: string[] = [];
+    /**
+     * ObjectQL provides both the `manifest` service that `init()` registers
+     * {@link SysAutomationRun} with and the data engine the durable
+     * suspended-run store writes through — so it must init first (ADR-0116).
+     *
+     * Order-if-present, not hard: this plugin genuinely runs without an engine
+     * (pauses stay in-memory), so `dependencies` would break every engine-less
+     * composition — the unit suites, the connector plugins, and
+     * `suspendedRunStore: 'memory'`.
+     *
+     * Declared because registration order is not a contract (#4131). Composed
+     * ahead of ObjectQL, `init()` found no `manifest`, the object was never
+     * registered and its table never created — while `start()` still enabled a
+     * durable store that then failed every write into a warn nobody read. The
+     * pauses looked healthy and died at the next restart (#4420).
+     */
+    optionalDependencies: string[] = ['com.objectstack.engine.objectql'];
 
     private engine?: AutomationEngine;
     private readonly options: AutomationServicePluginOptions;
@@ -375,9 +392,46 @@ export class AutomationServicePlugin implements Plugin {
     /** Serializes reconcile runs — see {@link materializeDeclaredConnectors}. */
     private reconcileQueue: Promise<void> = Promise.resolve();
     private destroyed = false;
+    /**
+     * Whether {@link SysAutomationRun} actually reached the `manifest` service,
+     * so `start()` can refuse to enable a durable store whose table nobody will
+     * create. Registration and activation resolve DIFFERENT services in
+     * DIFFERENT phases (`manifest` at init, `objectql` at start), and #4420 is
+     * what their disagreement looks like in production.
+     */
+    private runObjectRegistered = false;
 
     constructor(options: AutomationServicePluginOptions = {}) {
         this.options = options;
+    }
+
+    /**
+     * Register {@link SysAutomationRun} with the `manifest` service so the
+     * suspended-run table migrates like every other `sys_*` object (ADR-0019).
+     *
+     * Returns whether it landed. Callers must honour a `false` — a durable
+     * store attached over an unregistered object writes to a table that does
+     * not exist (#4420).
+     */
+    private registerRunObject(ctx: PluginContext): boolean {
+        try {
+            ctx.getService<{ register(m: unknown): void }>('manifest').register({
+                id: 'com.objectstack.service-automation',
+                name: 'Automation Service',
+                version: '1.0.0',
+                type: 'plugin',
+                scope: 'system',
+                defaultDatasource: 'cloud',
+                namespace: 'sys',
+                objects: [SysAutomationRun],
+            });
+            return true;
+        } catch (err) {
+            ctx.logger.warn(
+                `[Automation] manifest service unavailable; sys_automation_run not registered yet: ${(err as Error).message}`,
+            );
+            return false;
+        }
     }
 
     async init(ctx: PluginContext): Promise<void> {
@@ -393,22 +447,7 @@ export class AutomationServicePlugin implements Plugin {
         // like other sys_* tables (ADR-0019). Best-effort: a host without the
         // manifest service still runs in-memory. Skipped when persistence is off.
         if ((this.options.suspendedRunStore ?? 'auto') !== 'memory') {
-            try {
-                ctx.getService<{ register(m: unknown): void }>('manifest').register({
-                    id: 'com.objectstack.service-automation',
-                    name: 'Automation Service',
-                    version: '1.0.0',
-                    type: 'plugin',
-                    scope: 'system',
-                    defaultDatasource: 'cloud',
-                    namespace: 'sys',
-                    objects: [SysAutomationRun],
-                });
-            } catch (err) {
-                ctx.logger.warn(
-                    `[Automation] manifest service unavailable; sys_automation_run not registered (suspended runs stay in-memory): ${(err as Error).message}`,
-                );
-            }
+            this.runObjectRegistered = this.registerRunObject(ctx);
         }
 
         // Seed the platform's built-in node executors. A bare
@@ -444,18 +483,66 @@ export class AutomationServicePlugin implements Plugin {
         // services were wired, so we attach the DB-backed store here. Without an
         // engine (or with `suspendedRunStore: 'memory'`) the in-memory default
         // stands — suspended runs simply don't survive a restart.
+        //
+        // A store is only attached once its table is known to exist. #4420:
+        // enabling it on the strength of `objectql` alone gave a store whose
+        // object was never registered, so every write failed and every pause
+        // was silently ephemeral. Degrading to memory is a legitimate mode;
+        // degrading to memory while REPORTING persistence is not.
         let durableStore: ObjectStoreSuspendedRunStore | null = null;
         if ((this.options.suspendedRunStore ?? 'auto') !== 'memory') {
             let dataEngine: SuspendedRunStoreEngine | null = null;
             try { dataEngine = ctx.getService<SuspendedRunStoreEngine>('objectql'); }
             catch { try { dataEngine = ctx.getService<SuspendedRunStoreEngine>('data'); } catch { /* none */ } }
             if (dataEngine && typeof dataEngine.find === 'function' && typeof dataEngine.insert === 'function') {
-                durableStore = new ObjectStoreSuspendedRunStore(dataEngine, ctx.logger, {
+                // A late `manifest` still counts: ObjectQL syncs schemas in its
+                // own start(), so an object registered here — before that runs —
+                // is created normally. Only worth an info line as a composition
+                // smell (`optionalDependencies` should have ordered us after it).
+                if (!this.runObjectRegistered) {
+                    this.runObjectRegistered = this.registerRunObject(ctx);
+                    if (this.runObjectRegistered) {
+                        ctx.logger.info(
+                            '[Automation] sys_automation_run registered at start() — the manifest service was not available during init()',
+                        );
+                    }
+                }
+                const candidate = new ObjectStoreSuspendedRunStore(dataEngine, ctx.logger, {
                     maxTerminalRunsPerFlow:
                         this.options.runHistoryMaxPerFlow ?? DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW,
                 });
-                this.engine.setSuspendedRunStore(durableStore);
-                ctx.logger.info('[Automation] Suspended-run persistence enabled (sys_automation_run)');
+                if (!this.runObjectRegistered) {
+                    // Authoritative: an object that reached no manifest is in no
+                    // SchemaRegistry, so nothing will ever create its table. A
+                    // store here could only fail every write.
+                    ctx.logger.error(
+                        '[Automation] durable suspended-run persistence was requested but sys_automation_run was never registered ' +
+                        '(no manifest service at init() or start()) — suspended runs are kept IN MEMORY and will NOT survive a restart. ' +
+                        'Compose ObjectQLPlugin before AutomationServicePlugin, or set `suspendedRunStore: \'memory\'` to make this explicit.',
+                    );
+                } else {
+                    // Advisory only — read the table once so a broken setup is
+                    // visible at BOOT instead of one failed write at a time.
+                    //
+                    // It does NOT gate the store: a probe this early can fail
+                    // for reasons that resolve before the first suspend (a
+                    // driver registered after bootstrap, a datasource still
+                    // connecting). Disabling persistence on that would cause
+                    // the very data loss this guards against, so a failure here
+                    // is reported and the store attached anyway — every
+                    // subsequent write failure is logged at error too.
+                    try {
+                        await candidate.probe();
+                    } catch (err) {
+                        ctx.logger.error(
+                            `[Automation] sys_automation_run could not be read at startup — if this persists, suspended runs will NOT ` +
+                            `survive a restart. Check that schema sync ran for this datasource: ${(err as Error).message}`,
+                        );
+                    }
+                    durableStore = candidate;
+                    this.engine.setSuspendedRunStore(durableStore);
+                    ctx.logger.info('[Automation] Suspended-run persistence enabled (sys_automation_run)');
+                }
             } else {
                 ctx.logger.info('[Automation] No ObjectQL engine — suspended runs kept in-memory only');
             }

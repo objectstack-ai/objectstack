@@ -106,6 +106,21 @@ export interface ApprovalResumeSurface {
    * as "still alive".
    */
   getRun?(runId: string): Promise<{ status?: string } | null>;
+  /**
+   * Whether a suspension still exists for `runId` — the pre-flight that keeps
+   * a decision from being recorded against a run that can never advance
+   * (#4420). Read-only; it never consumes the suspension.
+   *
+   * Distinct from {@link getRun}, which reports on the execution LOG: a run
+   * suspended by a PREVIOUS process resolves to `null` there even when its
+   * state is durable, so it cannot tell "waiting for a human" from "dead".
+   * This asks the suspension store itself.
+   *
+   * Rejects when the durable store cannot be read — existence is then
+   * unknown, and callers must not read an outage as a dead run. Optional: an
+   * engine that does not implement it simply gets no pre-flight.
+   */
+  hasSuspendedRun?(runId: string): Promise<boolean>;
 }
 
 /**
@@ -1721,6 +1736,15 @@ export class ApprovalService implements IApprovalService {
       }
     }
 
+    // The run behind this request must still be resumable before ANY of it is
+    // written down (#4420). Last of the refusals, first before the writes: a
+    // decision recorded against a dead run is a zombie nothing later can undo,
+    // and the approver is told it succeeded.
+    //
+    // Non-finalizing votes are checked too — a co-sign that can never reach a
+    // resume is just as stuck, and catching it here keeps the tally honest.
+    await this.assertRunResumable(runId, requestId);
+
     // Audit the decision first so the quorum/per_group tally below sees it.
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
@@ -1824,18 +1848,130 @@ export class ApprovalService implements IApprovalService {
    * Callers still guard on `typeof this.automation?.resume === 'function'`
    * (approvals runs fine with no automation attached) and keep their own
    * try/catch, because what a failed resume means differs per path.
+   *
+   * Throws when the engine REPORTS failure, not only when it throws one. The
+   * engine answers a lost run with `{ success: false, code: 'RUN_NOT_FOUND' }`
+   * — a plain return value that every caller here used to discard, which is
+   * how an approval could be recorded, reported as resumed, and leave its flow
+   * stranded forever (#4420). The thrown error carries {@link resumeCodeOf}'s
+   * `resumeCode` so callers can tell a benign duplicate from a dead run.
    */
   private async serviceResume(
     runId: string,
     signal: { output?: Record<string, unknown>; branchLabel?: string },
   ): Promise<void> {
-    await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
+    const result = await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
+    const reported = result as { success?: boolean; code?: string; error?: string } | undefined;
+    // Only an explicit `success: false` is a failure. An engine (or a test
+    // double) that returns nothing is reporting nothing, and has always meant
+    // "it ran".
+    if (reported && typeof reported === 'object' && reported.success === false) {
+      const err = new Error(
+        `resume of run '${runId}' failed${reported.code ? ` [${reported.code}]` : ''}: ${reported.error ?? 'unknown error'}`,
+      ) as Error & { resumeCode?: string };
+      err.resumeCode = reported.code;
+      throw err;
+    }
+  }
+
+  /** The engine failure code behind a {@link serviceResume} rejection, if any. */
+  private static resumeCodeOf(err: unknown): string | undefined {
+    return (err as { resumeCode?: string } | undefined)?.resumeCode;
+  }
+
+  /**
+   * Refuse an operation whose whole point is to advance a flow run when that
+   * run no longer exists — BEFORE anything is written down (#4420).
+   *
+   * The half-state this prevents is the one the issue reported: a request
+   * flipped to `approved`, a success toast, and a flow that never moves. Once
+   * the decision row is written there is nothing left to fail cleanly.
+   *
+   * Deliberately permissive at the edges:
+   *  - no automation attached, or an engine without `hasSuspendedRun` → no
+   *    pre-flight at all (standalone approvals compositions are unaffected);
+   *  - the store cannot be READ → fail OPEN. A transient outage must not block
+   *    every decision in the tenant; the post-resume check still catches a real
+   *    failure and reports it loudly.
+   */
+  private async assertRunResumable(runId: string | null | undefined, requestId: string): Promise<void> {
+    if (!runId) return;
+    if (typeof this.automation?.resume !== 'function') return;
+    if (typeof this.automation?.hasSuspendedRun !== 'function') return;
+    let alive: boolean;
+    try {
+      alive = await this.automation.hasSuspendedRun(runId);
+    } catch (err: any) {
+      this.logger?.warn?.('[approvals] could not verify the flow run is resumable — proceeding', {
+        request: requestId, run: runId, error: err?.message ?? String(err),
+      });
+      return;
+    }
+    if (!alive) {
+      throw new Error(
+        `RESUME_TARGET_LOST: the flow run '${runId}' behind request ${requestId} no longer exists ` +
+        `(it was cancelled, or it paused in a process that did not persist suspended runs). ` +
+        `Nothing was recorded. An administrator can recall the request to release the record.`,
+      );
+    }
+  }
+
+  /**
+   * Resume the run behind an outcome that has ALREADY been written down, and
+   * fail loudly when it cannot be (#4420).
+   *
+   * For the operations whose product is the resume — a finalised decision, a
+   * send-back, a resubmit. Their rows are durable by the time this runs, so a
+   * failure here cannot be undone; the one thing left worth doing is refusing
+   * to call it success. {@link assertRunResumable} is what keeps this rare:
+   * everything it catches never reaches a write.
+   *
+   * `RESUME_IN_PROGRESS` is the exception — a concurrent resume is already
+   * advancing the run, so the outcome stands and only `resumed` is false.
+   *
+   * @param what - how the recorded outcome reads in the error, e.g.
+   *   `"the approve decision"`.
+   */
+  private async resumeRecordedOutcome(
+    runId: string,
+    requestId: string,
+    what: string,
+    signal: { output?: Record<string, unknown>; branchLabel?: string },
+  ): Promise<{ resumed: boolean; resumeError?: string }> {
+    try {
+      await this.serviceResume(runId, signal);
+      return { resumed: true };
+    } catch (err: any) {
+      const reason = err?.message ?? String(err);
+      if (ApprovalService.resumeCodeOf(err) === 'RESUME_IN_PROGRESS') {
+        this.logger?.warn?.('[approvals] resume skipped — already in progress', {
+          request: requestId, run: runId, outcome: what,
+        });
+        return { resumed: false, resumeError: reason };
+      }
+      this.logger?.error?.('[approvals] resume failed — the run is stranded', {
+        request: requestId, run: runId, outcome: what, error: reason,
+      });
+      throw new Error(
+        `RESUME_FAILED: ${what} was recorded on request ${requestId}, but its flow run '${runId}' ` +
+        `could not be resumed and is now stranded: ${reason}`,
+      );
+    }
   }
 
   /**
    * Public contract entrypoint (ADR-0019). Records a decision on a node-driven
    * request via {@link ApprovalService.decideNode} and, when it finalizes,
    * resumes the owning flow run down the matching `approve` / `reject` edge.
+   *
+   * A finalising decision whose run cannot be resumed FAILS (#4420). The
+   * decision is already durable by then, so the failure cannot be rolled back
+   * — but it must not be reported as success either: this used to answer HTTP
+   * 200 with `resumed: true` while the flow stayed parked forever, which left
+   * the approver with no signal and the record mirroring a stage it never
+   * reached. `decideNode`'s pre-flight means the common case (the run died
+   * before the decision) never gets this far; what survives here is a genuine
+   * race, and it names the stranded run.
    */
   async decide(
     requestId: string,
@@ -1845,12 +1981,14 @@ export class ApprovalService implements IApprovalService {
     const result = await this.decideNode(requestId, input, context);
 
     let resumed = false;
+    let resumeError: string | undefined;
     if (result.finalized && result.runId && typeof this.automation?.resume === 'function') {
       const branchLabel = result.decision === 'approve'
         ? APPROVAL_BRANCH_LABELS.approve
         : APPROVAL_BRANCH_LABELS.reject;
-      try {
-        await this.serviceResume(result.runId, {
+      const outcome = await this.resumeRecordedOutcome(
+        result.runId, requestId, `the ${result.decision} decision`,
+        {
           branchLabel,
           // #3447 P2: accepted decision outputs ride the resume envelope and
           // land as `<nodeId>.<key>` flow variables — a later approval node's
@@ -1858,13 +1996,10 @@ export class ApprovalService implements IApprovalService {
           // Reserved keys are spread LAST so no output can shadow them (the
           // whitelist already rejects them; this is defense in depth).
           output: { ...(result.outputs ?? {}), decision: result.decision, requestId },
-        });
-        resumed = true;
-      } catch (err: any) {
-        this.logger?.warn?.('[approvals] resume after decision failed', {
-          request: requestId, run: result.runId, error: err?.message ?? String(err),
-        });
-      }
+        },
+      );
+      resumed = outcome.resumed;
+      resumeError = outcome.resumeError;
     }
 
     return {
@@ -1873,6 +2008,7 @@ export class ApprovalService implements IApprovalService {
       decision: result.decision,
       runId: result.runId,
       resumed,
+      ...(resumeError ? { resumeError } : {}),
     };
   }
 
@@ -1939,7 +2075,12 @@ export class ApprovalService implements IApprovalService {
       );
     }
 
+    // A recall ABANDONS the request, so a run that cannot be resumed must not
+    // fail the call — the withdrawal and the record-lock release are the point,
+    // and they have already happened. It is still reported rather than
+    // swallowed: `resumed: false` plus a reason, logged at error (#4420).
     let resumed = false;
+    let resumeError: string | undefined;
     if (inReviseWindow) {
       // ADR-0044: the run is paused at the revise wait node, which has no
       // reject out-edge to resume down — terminally cancel it instead.
@@ -1947,8 +2088,9 @@ export class ApprovalService implements IApprovalService {
         try {
           await this.automation.cancelRun(runId, `approval request ${requestId} recalled during revision`);
         } catch (err: any) {
-          this.logger?.warn?.('[approvals] cancelRun after revise-window recall failed', {
-            request: requestId, run: runId, error: err?.message ?? String(err),
+          resumeError = err?.message ?? String(err);
+          this.logger?.error?.('[approvals] cancelRun after revise-window recall failed — the run may be stranded', {
+            request: requestId, run: runId, error: resumeError,
           });
         }
       }
@@ -1960,14 +2102,15 @@ export class ApprovalService implements IApprovalService {
         });
         resumed = true;
       } catch (err: any) {
-        this.logger?.warn?.('[approvals] resume after recall failed', {
-          request: requestId, run: runId, error: err?.message ?? String(err),
+        resumeError = err?.message ?? String(err);
+        this.logger?.error?.('[approvals] resume after recall failed — the run may be stranded', {
+          request: requestId, run: runId, error: resumeError,
         });
       }
     }
 
     const fresh = await this.readBackRequest(requestId, context);
-    return { request: fresh!, runId, resumed };
+    return { request: fresh!, runId, resumed, ...(resumeError ? { resumeError } : {}) };
   }
 
   // ── Send back for revision / resubmit (ADR-0044) ─────────────
@@ -2003,6 +2146,10 @@ export class ApprovalService implements IApprovalService {
     const runId: string | null = raw.flow_run_id ?? null;
 
     await this.assertReviseEdge(raw, nodeId);
+    // A send-back exists to move the run to its revise wait point. If the run
+    // is gone there is nothing to send back TO, so refuse before writing —
+    // same reasoning as decideNode's pre-flight (#4420).
+    await this.assertRunResumable(runId, requestId);
 
     const now = this.clock.now().toISOString();
     const maxRevisions = typeof (config as any).maxRevisions === 'number' ? (config as any).maxRevisions : 3;
@@ -2042,18 +2189,17 @@ export class ApprovalService implements IApprovalService {
         );
       }
       let resumed = false;
+      let resumeError: string | undefined;
       if (runId && typeof this.automation?.resume === 'function') {
-        try {
-          await this.serviceResume(runId, {
+        const outcome = await this.resumeRecordedOutcome(
+          runId, requestId, 'the auto-rejection',
+          {
             branchLabel: APPROVAL_BRANCH_LABELS.reject,
             output: { decision: 'reject', autoRejected: true, requestId },
-          });
-          resumed = true;
-        } catch (err: any) {
-          this.logger?.warn?.('[approvals] resume after auto-reject failed', {
-            request: requestId, run: runId, error: err?.message ?? String(err),
-          });
-        }
+          },
+        );
+        resumed = outcome.resumed;
+        resumeError = outcome.resumeError;
       }
       if (raw.submitter_id) {
         await this.notify({
@@ -2069,7 +2215,7 @@ export class ApprovalService implements IApprovalService {
         });
       }
       const fresh = await this.readBackRequest(requestId, context);
-      return { request: fresh!, runId, resumed, autoRejected: true };
+      return { request: fresh!, runId, resumed, autoRejected: true, ...(resumeError ? { resumeError } : {}) };
     }
 
     await this.engine.update('sys_approval_request', {
@@ -2084,18 +2230,17 @@ export class ApprovalService implements IApprovalService {
     }
 
     let resumed = false;
+    let resumeError: string | undefined;
     if (runId && typeof this.automation?.resume === 'function') {
-      try {
-        await this.serviceResume(runId, {
+      const outcome = await this.resumeRecordedOutcome(
+        runId, requestId, 'the send-back',
+        {
           branchLabel: APPROVAL_BRANCH_LABELS.revise,
           output: { decision: 'revise', requestId },
-        });
-        resumed = true;
-      } catch (err: any) {
-        this.logger?.warn?.('[approvals] resume after send-back failed', {
-          request: requestId, run: runId, error: err?.message ?? String(err),
-        });
-      }
+        },
+      );
+      resumed = outcome.resumed;
+      resumeError = outcome.resumeError;
     }
 
     if (raw.submitter_id) {
@@ -2113,7 +2258,7 @@ export class ApprovalService implements IApprovalService {
     }
 
     const fresh = await this.readBackRequest(requestId, context);
-    return { request: fresh!, runId, resumed };
+    return { request: fresh!, runId, resumed, ...(resumeError ? { resumeError } : {}) };
   }
 
   /**
@@ -2162,31 +2307,33 @@ export class ApprovalService implements IApprovalService {
     const runId: string | null = raw.flow_run_id ?? null;
     const now = this.clock.now().toISOString();
 
+    // The next round only exists if the resume lands, so a run that is already
+    // gone fails the resubmit outright rather than recording a round that can
+    // never open (#4420).
+    await this.assertRunResumable(runId, requestId);
+
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'resubmit',
       actor_id: actorId, comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
 
-    // The next round only exists if this resume lands — surface `resumed`
-    // honestly so a stuck run is visible instead of silently swallowed.
     let resumed = false;
+    let resumeError: string | undefined;
     if (runId && typeof this.automation?.resume === 'function') {
-      try {
-        await this.serviceResume(runId, {
+      const outcome = await this.resumeRecordedOutcome(
+        runId, requestId, 'the resubmit',
+        {
           branchLabel: APPROVAL_BRANCH_LABELS.resubmit,
           output: { resubmitted: true, requestId },
-        });
-        resumed = true;
-      } catch (err: any) {
-        this.logger?.warn?.('[approvals] resume after resubmit failed', {
-          request: requestId, run: runId, error: err?.message ?? String(err),
-        });
-      }
+        },
+      );
+      resumed = outcome.resumed;
+      resumeError = outcome.resumeError;
     }
 
     const fresh = await this.readBackRequest(requestId, context);
-    return { request: fresh!, runId, resumed };
+    return { request: fresh!, runId, resumed, ...(resumeError ? { resumeError } : {}) };
   }
 
   /**

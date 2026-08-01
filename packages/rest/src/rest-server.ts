@@ -6731,6 +6731,14 @@ export class RestServer {
                 [/^THROTTLED/, 429, 'THROTTLED'],
                 [/^FORBIDDEN/, 403, 'FORBIDDEN'],
                 [/^REQUEST_NOT_FOUND/, 404, 'REQUEST_NOT_FOUND'],
+                // #4420 — the request and its flow run disagree about whether
+                // the work can still proceed. A conflict, like INVALID_STATE:
+                // the row is fine, the run behind it is not.
+                [/^RESUME_TARGET_LOST/, 409, 'RESUME_TARGET_LOST'],
+                // The outcome IS recorded and its run is stranded — a genuine
+                // server-side inconsistency, but named, so the client can say
+                // which run needs an operator instead of showing a bare 500.
+                [/^RESUME_FAILED/, 500, 'RESUME_FAILED'],
             ];
             for (const [re, status, code] of mapping) {
                 if (re.test(msg)) {

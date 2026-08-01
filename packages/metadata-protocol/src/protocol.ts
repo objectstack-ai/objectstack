@@ -1247,7 +1247,10 @@ const SERVICE_CONFIG: Record<string, {
     queue:        { noHttpSurface: { statusWhenUnmarked: 'available', message: inProcessServiceMessage('queue') } },
     job:          { noHttpSurface: { statusWhenUnmarked: 'available', message: inProcessServiceMessage('job') } },
     ui:           { route: '/api/v1/ui' },
-    workflow:     { route: '/api/v1/workflow' },
+    // `workflow: { route: '/api/v1/workflow' }` retired with the slot (#4451,
+    // v17): nothing ever registered or resolved it (ADR-0115 Evidence 5) and
+    // no host ever mounted the path. State machines are `state_machine`
+    // validation rules; approvals are flow nodes (ADR-0019).
     // service-realtime is an in-process pub/sub bus; nothing mounts
     // /api/v1/realtime, so no route is advertised (D12, #2462). Unlike the
     // kernel-internal slots above, the capability this slot advertises is
@@ -1257,7 +1260,13 @@ const SERVICE_CONFIG: Record<string, {
     notification: { route: '/api/v1/notifications' },
     ai:           { route: '/api/v1/ai' },
     i18n:         { route: '/api/v1/i18n' },
-    graphql:      { route: '/graphql' },  // GraphQL uses /graphql by convention (not versioned REST)
+    // `graphql: { route: '/graphql' }` was here until #4451. It was never a
+    // `CoreServiceName`, so nothing could ever occupy the slot and the entry
+    // was unreachable — but it declared a path the dispatcher had already
+    // removed as out of the product plan (`http-dispatcher.ts`: "/graphql
+    // removed — GraphQL is not in the product plan", #2462 follow-on). A
+    // route nobody serves, for a slot that does not exist, in the table SDKs
+    // and AI clients read.
     'file-storage': { route: '/api/v1/storage' },
     search:       { route: '/api/v1/search' },
 };
@@ -1286,7 +1295,8 @@ const REFERENCE_PATHS: Record<string, Array<{ fromType: string; paths: string[];
         { fromType: 'view', paths: ['object', 'objectName'], kind: 'view' },
         { fromType: 'dashboard', paths: ['widgets[].object', 'widgets[].objectName'], kind: 'dashboard widget' },
         { fromType: 'flow', paths: ['object', 'context.object', 'trigger.object', 'targetObject'], kind: 'flow' },
-        { fromType: 'workflow', paths: ['object', 'targetObject'], kind: 'workflow' },
+        // fromType 'workflow' removed (#4451): no such metadata type is
+        // registered, so the row scanned nothing.
         { fromType: 'permission', paths: ['objects[].name', 'objects[].object'], kind: 'permission' },
         { fromType: 'app', paths: ['navItems[].objectName', 'navItems[].object', 'tabs[].objectName', 'tabs[].object'], kind: 'app nav' },
         { fromType: 'page', paths: ['object', 'objectName'], kind: 'page' },
@@ -2164,7 +2174,6 @@ export class ObjectStackProtocolImplementation implements
             auth: 'auth',
             automation: 'automation',
             ui: 'ui',
-            workflow: 'workflow',
             realtime: 'realtime',
             notification: 'notifications',
             ai: 'ai',

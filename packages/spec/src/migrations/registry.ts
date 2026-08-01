@@ -528,7 +528,20 @@ const step17: MigrationStep = {
     + 'with `timerDuration` already set it is dropped, having been dead metadata. Like the other '
     + 'keys retired for MISDESCRIBING themselves rather than for being renamed, both leave the '
     + 'load path: absorbing them silently would let an author keep believing they configured a '
-    + 'timeout.',
+    + 'timeout.\n\n'
+    + 'Closing the same audit on the data side, `datasource.readReplicas` is removed (#4468). '
+    + 'It described replica connections nothing ever opened: `ConnectableDatasource` and '
+    + '`DatasourceConnectionSpec` carry no replicas field, the driver factory never reads the '
+    + 'key, and no query path distinguishes a read from a write — read/write splitting does not '
+    + 'exist in the platform, so every statement always went to the primary. A lossless delete '
+    + 'with no target to move to; front replicas behind one endpoint (pgpool, ProxySQL, an RDS '
+    + 'reader endpoint) and point `config` at it. Notable as the case that shows how a key gets '
+    + 'MORE convincing as it stays dead: #4410, closing the datasource-config gap, taught the '
+    + 'schema to validate each replica entry against the declared driver\'s config contract, so '
+    + 'sources written in between carry replica blocks that were genuinely checked — precise '
+    + 'hosts, correct port types, typos rejected. Precision applied to an inert slot reads as '
+    + 'evidence the slot is live, which is why ADR-0049 asks for a consumer rather than for '
+    + 'rigor. Retired from the load path with the rest of the keys that misdescribed themselves.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -553,6 +566,7 @@ const step17: MigrationStep = {
     'skill-trigger-phrases-removed',
     'stack-api-require-auth-removed',
     'flow-node-wait-timeout-keys-removed',
+    'datasource-read-replicas-removed',
   ],
   semantic: [
     {
@@ -737,6 +751,36 @@ const step17: MigrationStep = {
         + 'deduplication goes through `groupBy` / `count_distinct` / the drivers\' `distinct()` '
         + 'door. A query still carrying the key fails to parse with the removal prescription, '
         + 'and the REST list response reports a real `total` for queries that used to send it.',
+    },
+    {
+      id: 'workflow-service-slot-retired',
+      surface:
+        "CoreServiceName 'workflow' / IWorkflowService / WorkflowProtocol / "
+        + 'discovery routes.workflow / RestApiRouteCategory workflow',
+      replacement:
+        'the live mechanisms the slot only ever pointed at: `state_machine` validation rules '
+        + 'for record state machines, approval flow nodes on the approvals runtime (ADR-0019) '
+        + 'for approvals, lifecycle hooks + `record_change` flows (service-automation) for '
+        + 'record-triggered automation',
+      reason:
+        'The workflow slot was declared end to end and implemented nowhere: no code in either '
+        + 'repository ever registered or resolved it (ADR-0115 Evidence 5 — the only touches '
+        + 'were plugin-dev\'s retired stub probe and the generic discovery walk), no '
+        + 'implementation of any WorkflowProtocol method ever existed, and no host ever '
+        + 'mounted `/api/v1/workflow` (the pre-#3586 DEFAULT_DISPATCHER_ROUTES listed it among '
+        + 'routes that never existed). Every part of it was ADR-0078\'s silently-inert '
+        + 'declaration: a CoreServiceName nothing filled, a contract nothing implemented, a '
+        + 'protocol nothing served, a discovery route field no builder could truthfully '
+        + 'populate. These are TS/API surfaces and a discovery RESPONSE field — never stored '
+        + 'in stack metadata, so there is no source for the chain to rewrite; consumers of the '
+        + 'deleted types move their imports themselves. ADR-0049 / ADR-0078, #4451.',
+      acceptanceCriteria:
+        'No import of IWorkflowService, WorkflowProtocol or the Get/WorkflowState/Config/'
+        + 'Transition types resolves; no code calls getService(\'workflow\') or reads '
+        + 'discovery `routes.workflow` / `services.workflow`; record state machines, '
+        + 'approvals and record-triggered automation go through the replacement mechanisms. '
+        + 'Discovery output on a default boot is unchanged (the slot was always reported '
+        + 'unavailable; now it is simply absent).',
     },
   ],
 };

@@ -1032,9 +1032,13 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * Persist a suspended run to the in-memory cache and (best-effort) the
-     * durable store. A store failure is logged but does not fail the run — the
-     * in-memory copy still allows in-process resume; only cross-restart
-     * durability is lost.
+     * durable store. A store failure does not fail the run — the in-memory copy
+     * still allows in-process resume; only cross-restart durability is lost.
+     *
+     * Logged at ERROR, not warn: a durable pause that silently stayed
+     * in-memory is data-loss-in-waiting. #4420 was exactly this — a store
+     * pointed at a table that was never created, every save failing into a warn
+     * nobody read, and every in-flight approval zombified by the next restart.
      */
     private async persistSuspendedRun(run: SuspendedRun): Promise<void> {
         this.suspendedRuns.set(run.runId, run);
@@ -1042,8 +1046,8 @@ export class AutomationEngine implements IAutomationService {
             try {
                 await this.store.save(run);
             } catch (err) {
-                this.logger.warn(
-                    `[automation] failed to persist suspended run '${run.runId}' to durable store (kept in memory only): ${(err as Error).message}`,
+                this.logger.error(
+                    `[automation] failed to persist suspended run '${run.runId}' to the durable store — it is kept in memory only and will NOT be resumable after a restart: ${(err as Error).message}`,
                 );
             }
         }
@@ -2433,19 +2437,48 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /** Read a suspended run from the hot cache, falling back to the durable
-     *  store. Read-only — never consumes the suspension. */
+     *  store. Read-only — never consumes the suspension.
+     *
+     *  Degrading form: a store read failure becomes `null`, i.e. "no such run".
+     *  Correct for the incidental readers (a gate lookup, a screen fetch) that
+     *  only need a best-effort answer. NOT correct for {@link resumeInternal},
+     *  which must tell a dead run from an unreachable store — it uses
+     *  {@link loadSuspendedRunStrict}. */
     private async loadSuspendedRun(runId: string): Promise<SuspendedRun | null> {
-        const cached = this.suspendedRuns.get(runId);
-        if (cached) return cached;
-        if (!this.store) return null;
         try {
-            return await this.store.load(runId);
+            return await this.loadSuspendedRunStrict(runId);
         } catch (err) {
             this.logger.warn(
                 `[automation] failed to load suspended run '${runId}' from durable store: ${(err as Error).message}`,
             );
             return null;
         }
+    }
+
+    /** {@link loadSuspendedRun} without the degradation: a store read failure
+     *  THROWS instead of reading as "no such run". */
+    private async loadSuspendedRunStrict(runId: string): Promise<SuspendedRun | null> {
+        const cached = this.suspendedRuns.get(runId);
+        if (cached) return cached;
+        if (!this.store) return null;
+        return await this.store.load(runId);
+    }
+
+    /**
+     * Whether a suspension exists for `runId`, in the hot cache or the durable
+     * store. Read-only — never consumes the suspension.
+     *
+     * For callers that must know a run is resumable BEFORE they write anything
+     * of their own: approvals pre-flights this so a decision is never recorded
+     * against a run that can no longer advance (#4420).
+     *
+     * THROWS when the durable store cannot be read — an outage means "unknown",
+     * and a caller must not act on it as if the run were gone. Contrast
+     * {@link getRun}, which reports on the execution LOG and returns null for a
+     * run suspended by a previous process even when its state is durable.
+     */
+    async hasSuspendedRun(runId: string): Promise<boolean> {
+        return (await this.loadSuspendedRunStrict(runId)) !== null;
     }
 
     /**
@@ -2503,15 +2536,33 @@ export class AutomationEngine implements IAutomationService {
         // twice. A duplicate that arrives *after* this one finishes finds no
         // suspended run and returns the "no suspended run" error below.
         if (this.resuming.has(runId)) {
-            return { success: false, error: `Run '${runId}' is already being resumed` };
+            return { success: false, code: 'RESUME_IN_PROGRESS', error: `Run '${runId}' is already being resumed` };
         }
         this.resuming.add(runId);
         try {
             // Hot path: suspended in this process. Cold path: rehydrate from the
             // durable store (e.g. the process restarted since the pause, ADR-0019).
-            const run = await this.loadSuspendedRun(runId);
+            //
+            // Strict load: a store that cannot be READ must not report as
+            // "no such run" (#4420). A caller that already persisted a decision
+            // needs "retry when the store is back" to be distinguishable from
+            // "this run is gone for good" — same failure, opposite remedy.
+            let run: SuspendedRun | null;
+            try {
+                run = await this.loadSuspendedRunStrict(runId);
+            } catch (err) {
+                const message = (err as Error).message;
+                this.logger.error(
+                    `[automation] durable suspended-run store unreachable while resuming '${runId}': ${message}`,
+                );
+                return {
+                    success: false,
+                    code: 'STORE_UNAVAILABLE',
+                    error: `Durable suspended-run store unreachable for run '${runId}' — retry once the store is available: ${message}`,
+                };
+            }
             if (!run) {
-                return { success: false, error: `No suspended run '${runId}'` };
+                return { success: false, code: 'RUN_NOT_FOUND', error: `No suspended run '${runId}'` };
             }
             const flow = this.flows.get(run.flowName);
             if (!flow) {
