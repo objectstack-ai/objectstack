@@ -12,6 +12,7 @@ import { I18nLabelSchema } from './i18n.zod';
  * Report Type Enum
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 export const ReportType = z.enum([
   'tabular',   // Simple list
   'summary',   // Grouped by row
@@ -166,7 +167,12 @@ export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => z.object({
  * Report Schema
  * Deep data analysis definition.
  */
-export const ReportSchema = lazySchema(() => z.object({
+export const ReportSchema = lazySchema(() => strictObject({
+  surface: 'this report',
+  history:
+    'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
+  aliases: { dataSet: 'dataset', source: 'dataset', fields: 'values', columns: 'values', chart: 'chartConfig', filter: 'filters' },
+}, {
   /** Identity */
   name: SnakeCaseIdentifierSchema.describe('Report unique name'),
   label: I18nLabelSchema.describe('Report label'),

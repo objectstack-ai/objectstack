@@ -8,6 +8,7 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
  * Schedule jobs using cron expressions
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const CronScheduleSchema = lazySchema(() => z.object({
   type: z.literal('cron'),
@@ -81,7 +82,12 @@ export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
  *   }
  * }
  */
-export const JobSchema = lazySchema(() => z.object({
+export const JobSchema = lazySchema(() => strictObject({
+  surface: 'this job',
+  history:
+    'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
+  aliases: { cron: 'schedule', interval: 'schedule', fn: 'handler', function: 'handler', retry: 'retryPolicy', enabled_: 'enabled', timeoutMs: 'timeout' },
+}, {
   id: z.string().optional().describe('Unique job identifier (defaults to `name` when omitted)'),
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Job name (snake_case)'),
   label: z.string().optional().describe('Human-readable label'),

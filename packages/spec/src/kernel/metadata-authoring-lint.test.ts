@@ -38,14 +38,16 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // coverage rotting. Lower it only after confirming the shrink against the
     // list below; that confirmation is the whole point of pinning a number here.
     // 15 → 13 when `seed` + `doc` graduated (#4001 registered-types batch);
-    // 13 → 12 when `object` closed on the parse path. Note what did NOT shrink
-    // with it: `object`'s 71 NESTED strip sites still report, because the walk
-    // no longer gates a whole collection on its root's posture.
-    expect(lintables.length).toBeGreaterThanOrEqual(12);
+    // 13 → 12 when `object` closed on the parse path; 12 → 6 when the seven
+    // small registered types closed in one batch. Note what did NOT shrink with
+    // `object`: its 71 NESTED strip sites still report, because the walk no
+    // longer gates a whole collection on its root's posture — so this number
+    // tracks ROOTS that graduated, not coverage lost.
+    expect(lintables.length).toBeGreaterThanOrEqual(6);
     // `view` matters doubly: it is a UNION (container | ViewItem | overlay), so
     // its presence pins the union half of the posture logic — a regression that
     // silently dropped unions would shrink coverage without failing the count.
-    for (const expected of ['page', 'agent', 'dashboard', 'action', 'report', 'view']) {
+    for (const expected of ['page', 'agent', 'dashboard', 'action', 'view']) {
       expect(lintableTypes, `expected '${expected}' to be lint-covered`).toContain(expected);
     }
   });
@@ -65,6 +67,7 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // helper-built `.strict()` exactly like a hand-wired one.
     for (const strict of [
       'flow', 'permission', 'position', 'tool', 'app', 'hook', 'datasource', 'seed', 'doc',
+      'report', 'dataset', 'email_template', 'skill', 'job', 'book',
       // `object` graduated by closing its PARSE path — #1535 had only ever
       // guarded `create()`. Its nested strip sites still report; only the root
       // moved from warn to reject.

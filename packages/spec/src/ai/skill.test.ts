@@ -72,18 +72,23 @@ describe('SkillSchema', () => {
     expect(result.triggerConditions).toHaveLength(2);
   });
 
-  it('drops a `permissions` key — skill invocation was never permission-gated (pruned)', () => {
-    const parsed = SkillSchema.parse({
+  it('REJECTS a `permissions` key and points at the agent-level gate', () => {
+    // This used to be stripped, so an author who wrote it believed they had
+    // gated skill invocation and had not — a silent permission hole, which is
+    // the worst thing for this key in particular to be quiet about. The
+    // rejection now carries the prescription the old comment only told readers
+    // of this file (#4001).
+    const result = SkillSchema.safeParse({
       name: 'order_management',
       label: 'Order Management',
       instructions: 'x',
       tools: ['create_order'],
-      // Authored against the retired key: the schema is non-strict, so it is
-      // stripped rather than rejected. Gate at the AGENT (`access`/`permissions`,
-      // enforced #1884) or on the underlying tools' actions instead.
       permissions: ['order.manage'],
     } as Record<string, unknown>);
-    expect('permissions' in parsed).toBe(false);
+    expect(result.success).toBe(false);
+    const message = result.success ? '' : result.error.issues[0].message;
+    expect(message).toContain('`permissions` is not a skill key');
+    expect(message).toContain('Gate at the AGENT');
   });
 
   it('should enforce snake_case for skill name', () => {

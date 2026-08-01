@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
 /**
@@ -101,7 +102,17 @@ export const BookAudienceSchema = lazySchema(() =>
 export type BookAudience = 'org' | 'public' | { permissionSet: string };
 
 export const BookSchema = lazySchema(() =>
-  z.object({
+  strictObject({
+    surface: 'this book',
+    history:
+      'Until #4001 closed this shape these were dropped silently — the book still '
+      + 'registered, minus whatever the key was meant to configure.',
+    aliases: {
+      title: 'label', sections: 'groups', chapters: 'groups', toc: 'groups',
+      access: 'audience', visibility: 'audience', sort: 'order', position: 'order',
+      url: 'slug', path: 'slug', i18n: 'translations',
+    },
+  }, {
     name: z
       .string()
       .regex(/^[a-z][a-z0-9_]*$/, 'name must be lowercase snake_case')

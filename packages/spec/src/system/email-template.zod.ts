@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * Email Template Metadata Protocol
@@ -41,7 +42,12 @@ export const EmailTemplateDefinitionVariableSchema = lazySchema(() => z.object({
 }));
 export type EmailTemplateDefinitionVariable = z.infer<typeof EmailTemplateDefinitionVariableSchema>;
 
-export const EmailTemplateDefinitionSchema = lazySchema(() => z.object({
+export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
+  surface: 'this email template',
+  history:
+    'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
+  aliases: { title: 'subject', content: 'body', html: 'body', text: 'body', from: 'fromAddress', sender: 'fromAddress' },
+}, {
   /**
    * Stable identifier; used as the `template` key in
    * `IEmailService.sendTemplate({ template, ... })`. Convention:

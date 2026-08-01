@@ -15,6 +15,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  * Allows context-aware activation based on object type, user role, etc.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 import { retiredKey } from '../shared/retired-key';
 export const SkillTriggerConditionSchema = lazySchema(() => z.object({
   /** Condition field (e.g. 'objectName', 'userRole', 'channel') */
@@ -62,7 +63,19 @@ export type SkillTriggerCondition = z.infer<typeof SkillTriggerConditionSchema>;
  * });
  * ```
  */
-export const SkillSchema = lazySchema(() => z.object({
+export const SkillSchema = lazySchema(() => strictObject({
+  surface: 'this skill',
+  history:
+    'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
+  aliases: { prompt: 'instructions', content: 'instructions', body: 'instructions', trigger: 'triggers', tool: 'tools' },
+  guidance: {
+    permissions:
+      '`permissions` is not a skill key — skill invocation was never permission-gated, '
+      + 'so this was stripped in silence and the author believed they had a gate. Gate at '
+      + 'the AGENT instead (`access` / `permissions` on the agent, enforced since #1884), '
+      + "or on the underlying tools' actions.",
+  },
+}, {
   /** Machine name (snake_case, globally unique) */
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Skill unique identifier (snake_case)'),
 

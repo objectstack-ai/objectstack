@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
@@ -96,7 +97,12 @@ export const DatasetMeasureSchema = lazySchema(() => z.object({
 /**
  * Dataset — the single analytical source of truth (ADR-0021 D1).
  */
-export const DatasetSchema = lazySchema(() => z.object({
+export const DatasetSchema = lazySchema(() => strictObject({
+  surface: 'this dataset',
+  history:
+    'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
+  aliases: { source: 'object', objectName: 'object', measures: 'metrics', dimension: 'dimensions', filter: 'filters' },
+}, {
   /** Identity. */
   name: SnakeCaseIdentifierSchema.describe('Dataset unique name'),
   label: I18nLabelSchema.describe('Dataset label'),
