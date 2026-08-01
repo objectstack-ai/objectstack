@@ -1997,7 +1997,6 @@ export class ObjectQL implements IObjectQLEngine {
    * problem into data loss.
    */
   private async assertReferencesResolve(
-    object: string,
     schema: any,
     data: Record<string, unknown> | null | undefined,
     suppliedKeys: ReadonlySet<string>,
@@ -3822,7 +3821,7 @@ export class ObjectQL implements IObjectQLEngine {
             validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx });
             await this.assertReferencesResolve(
-              object, schemaForValidation, rows[i],
+              schemaForValidation, rows[i],
               suppliedPerRow[i] ?? new Set<string>(), opCtx.context, msgCtx,
             );
           } catch (e) {
@@ -4141,7 +4140,7 @@ export class ObjectQL implements IObjectQLEngine {
                evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
                // [#4441] A repoint is as capable of dangling as an initial link.
                await this.assertReferencesResolve(
-                 object, updateSchema, hookContext.input.data as Record<string, unknown>,
+                 updateSchema, hookContext.input.data as Record<string, unknown>,
                  suppliedKeys, opCtx.context, updateMsgCtx,
                );
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
@@ -4226,7 +4225,7 @@ export class ObjectQL implements IObjectQLEngine {
                // writes only is still a hole one call site over (AGENTS.md
                // PD #10's own worked example, #3106).
                await this.assertReferencesResolve(
-                 object, updateSchema, hookContext.input.data as Record<string, unknown>,
+                 updateSchema, hookContext.input.data as Record<string, unknown>,
                  suppliedKeys, opCtx.context, updateMsgCtx,
                );
                result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);

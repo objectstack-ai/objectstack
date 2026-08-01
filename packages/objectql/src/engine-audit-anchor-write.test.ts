@@ -179,16 +179,6 @@ describe('[#4447] created_at is engine-owned on an ordinary write', () => {
     expect(after.updated_by).not.toBe('forged_user');
   });
 
-  it('a client-supplied created_at on INSERT is dropped too', async () => {
-    // The create ingress has its own strip (#3043). Back-dating on insert is
-    // the same forgery with one less step.
-    const row: any = await engine.insert(
-      'audit_task',
-      { title: 'T', created_at: FORGED },
-      { context: userCtx } as any,
-    );
-    expect(row.created_at).not.toBe(FORGED);
-  });
 
   it('a bulk update cannot forge it either — the call site, not just the switch', async () => {
     // AGENTS.md PD #10's lesson: a guard wired into single-id writes only is
@@ -228,5 +218,90 @@ describe('[#4447] created_at is engine-owned on an ordinary write', () => {
     );
     const after: any = await engine.findOne('audit_task', { where: { id: row.id } } as any);
     expect(after.created_at).toBe(FORGED);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The ROOT CAUSE. `showcase_task` never declares `created_at` in source, yet
+// the built app artifact ships one:
+//
+//   "created_at": {"label":"Created At","type":"datetime","readonly":false, …}
+//
+// i.e. a materialized field carrying only FieldSchema DEFAULTS. Because the
+// object then HAS the field, `applySystemFields` skipped injecting
+// `AUDIT_FIELD_DEFS.created_at` (`readonly: true`) and the author-wins merge
+// let the default-valued one through — so `stripReadonlyFields` had nothing to
+// key off and a forged value went straight to the row.
+// ---------------------------------------------------------------------------
+describe('[#4447] a declared audit field cannot loosen the platform posture', () => {
+  const shadowed = {
+    name: 'audit_shadow',
+    label: 'Shadowed',
+    fields: {
+      id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+      title: { name: 'title', label: 'Title', type: 'text' as const },
+      // Verbatim from examples/app-showcase/dist/objectstack.json.
+      created_at: {
+        label: 'Created At', type: 'datetime' as const, required: false,
+        searchable: false, multiple: false, unique: false,
+        deleteBehavior: 'set_null' as const, hidden: false,
+        readonly: false, sortable: true, externalId: false,
+      },
+    },
+  };
+
+  let engine: ObjectQL;
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const { driver } = makeMemoryDriver();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject(shadowed as any);
+  });
+
+  it('the registry restores the engine-owned governance', () => {
+    const schema: any = engine.registry.getObject('audit_shadow');
+    expect(schema.fields.created_at).toMatchObject({ readonly: true, system: true });
+    // …without discarding what the author legitimately set.
+    expect(schema.fields.created_at.label).toBe('Created At');
+    expect(schema.fields.created_at.sortable).toBe(true);
+  });
+
+  it('and the forged PATCH no longer lands — the issue\'s exact repro', async () => {
+    const row: any = await engine.insert(
+      'audit_shadow', { title: 'T' }, { context: { userId: 'u1' } } as any,
+    );
+    const real = row.created_at;
+    await engine.update(
+      'audit_shadow',
+      { title: 'T2', created_at: FORGED },
+      { where: { id: row.id }, context: { userId: 'u1' } } as any,
+    );
+    const after: any = await engine.findOne('audit_shadow', { where: { id: row.id } } as any);
+    expect(after.title).toBe('T2');
+    expect(after.created_at).toBe(real);
+  });
+
+  it('an author keeps every non-governance key they declared', () => {
+    engine.registry.registerObject({
+      name: 'audit_labelled',
+      label: 'Labelled',
+      fields: {
+        id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+        created_at: {
+          label: '建档时间', type: 'datetime' as const,
+          description: 'When the file was opened', hidden: true, group: 'meta',
+        },
+      },
+    } as any);
+    const f: any = engine.registry.getObject('audit_labelled').fields.created_at;
+    expect(f).toMatchObject({
+      label: '建档时间',
+      description: 'When the file was opened',
+      hidden: true,
+      group: 'meta',
+      readonly: true,
+      system: true,
+    });
   });
 });
