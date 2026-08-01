@@ -69,34 +69,33 @@ describe('PostgresConfigSchema', () => {
     expect(config.ssl).toBe(false);
   });
 
-  it('should accept ssl as detailed object', () => {
-    const config = PostgresConfigSchema.parse({
+  // `config.ssl` is the on/off shorthand; certificates live in the
+  // datasource-level `ssl` block, which #4410 wired through to the client (it
+  // was declared, strict and read by nobody before that). The narrowing is
+  // forced by the connection form: it renders anything that is not
+  // boolean/enum/number as a text input, so a `boolean | object` union here
+  // would produce a wizard whose every `ssl` value the gate rejects.
+  it('rejects the certificate-bearing object form, naming where it belongs', () => {
+    const result = PostgresConfigSchema.safeParse({
       database: 'mydb',
       ssl: {
         rejectUnauthorized: false,
         ca: '-----BEGIN CERTIFICATE-----\nMIIB...',
-        key: '-----BEGIN PRIVATE KEY-----\nMIIE...',
-        cert: '-----BEGIN CERTIFICATE-----\nMIIC...',
       },
     });
 
-    expect(config.ssl).toBeDefined();
-    expect(typeof config.ssl).toBe('object');
-    const sslObj = config.ssl as { rejectUnauthorized?: boolean; ca?: string };
-    expect(sslObj.rejectUnauthorized).toBe(false);
-    expect(sslObj.ca).toBeDefined();
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.some((i) => i.path.join('.') === 'ssl')).toBe(true);
   });
 
-  it('should accept ssl object with partial fields', () => {
-    const config = PostgresConfigSchema.parse({
+  it('points a misplaced certificate key at the datasource-level block', () => {
+    const result = PostgresConfigSchema.safeParse({
       database: 'mydb',
-      ssl: {
-        rejectUnauthorized: true,
-      },
+      ca: '-----BEGIN CERTIFICATE-----\nMIIB...',
     });
 
-    const sslObj = config.ssl as { rejectUnauthorized?: boolean };
-    expect(sslObj.rejectUnauthorized).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain('datasource-level `ssl` block');
   });
 
   it('should reject a config with no connection target at all', () => {

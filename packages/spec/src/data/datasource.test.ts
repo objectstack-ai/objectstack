@@ -402,20 +402,25 @@ describe('DatasourceSchema', () => {
         host: 'localhost',
         port: 5432,
         database: 'mydb',
-        ssl: {
-          rejectUnauthorized: false,
-          ca: 'certificate_content',
-        },
+        ssl: true,
       },
       pool: {
         min: 2,
         max: 10,
         idleTimeoutMillis: 30000,
       },
+      ssl: {
+        enabled: true,
+        rejectUnauthorized: false,
+        ca: 'certificate_content',
+      },
     });
 
     expect(datasource.pool).toBeDefined();
-    expect(datasource.config.ssl).toBeDefined();
+    expect(datasource.config.ssl).toBe(true);
+    // Certificates belong to the datasource-level block, which the factory now
+    // carries down to the client (#4410). Inside `config`, `ssl` is on/off.
+    expect(datasource.ssl?.ca).toBe('certificate_content');
   });
 
   // The fixture above used to nest `pool` INSIDE `config`, where no driver
