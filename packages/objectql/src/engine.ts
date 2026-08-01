@@ -2205,13 +2205,45 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     // 2. Check datasourceMapping rules
+    //
+    // A rule that MATCHES is a routing decision, not a hint (#4462). It used to
+    // fall through to steps 3-5 whenever the named datasource had no live
+    // driver, which put an object's rows in the DEFAULT store while every
+    // signal said otherwise: boot succeeded, `/ready` answered 200, the
+    // datasource name appeared nowhere in the log, and the write returned 201.
+    // An operator who routes an object to Postgres and gets the URL wrong finds
+    // out by going to look in Postgres and finding it empty.
+    //
+    // `default` is the one name that legitimately resolves onward: the default
+    // driver keeps its NATURAL name (#3826), so `drivers.has('default')` is
+    // false by construction and step 5 is how routing to it works.
     const mappedDatasource = this.resolveDatasourceFromMapping(objectName, object);
-    if (mappedDatasource && this.drivers.has(mappedDatasource)) {
-      this.logger.debug('Resolved datasource from mapping', {
-        object: objectName,
-        datasource: mappedDatasource
-      });
-      return this.drivers.get(mappedDatasource)!;
+    if (mappedDatasource && mappedDatasource !== 'default') {
+      if (this.drivers.has(mappedDatasource)) {
+        this.logger.debug('Resolved datasource from mapping', {
+          object: objectName,
+          datasource: mappedDatasource
+        });
+        return this.drivers.get(mappedDatasource)!;
+      }
+      // Same three-way diagnosis as an explicit `object.datasource` binding —
+      // the two are the same promise made in two places, so they owe the reader
+      // the same answer.
+      const unavailable = this.unavailableDatasources.get(mappedDatasource);
+      if (unavailable) {
+        throw new DatasourceUnavailableError(
+          mappedDatasource,
+          objectName,
+          unavailable.kind,
+          unavailable.publicDetail,
+        );
+      }
+      throw new Error(
+        `[ObjectQL] Datasource '${mappedDatasource}' mapped for object '${objectName}' is not registered. ` +
+        `A datasourceMapping rule routes this object to it, so falling back to the default store would ` +
+        `write the object's data to a different database than the one it declares. Fix the datasource ` +
+        `configuration, or remove the mapping rule.`,
+      );
     }
 
     // 3. Lifecycle-class separation (ADR-0057 §3.6): high-frequency
@@ -2253,6 +2285,26 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     throw new Error(`[ObjectQL] No driver available for object '${objectName}'`);
+  }
+
+  /**
+   * Which datasource do the mapping rules route `objectName` to, if any?
+   *
+   * The PUBLIC face of {@link resolveDatasourceFromMapping}, added for the boot
+   * path (#4462): the datasource-connection service must connect the
+   * datasources a mapping actually routes objects to, and it must learn which
+   * those are from the same resolver the query path uses. A second
+   * implementation of "does this rule match?" living in the connection service
+   * would drift by one clause and produce the worst of both postures — a
+   * datasource connected that routing does not use, or routed to and never
+   * connected, which is the defect itself.
+   *
+   * Returns `null` when no rule matches, and the datasource name (including
+   * `'default'`) when one does. Rule matching only — an explicit
+   * `object.datasource` binding outranks this and is not consulted here.
+   */
+  resolveMappedDatasource(objectName: string): string | null {
+    return this.resolveDatasourceFromMapping(objectName, this._registry.getObject(objectName));
   }
 
   /**

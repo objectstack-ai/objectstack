@@ -108,12 +108,22 @@ A declared datasource auto-connects when it is **meaningfully addressed**:
 
 1. it is **external** (`schemaMode !== 'managed'`), **or**
 2. an object **explicitly** binds to it via `object.datasource === <name>`, **or**
-3. it sets **`autoConnect: true`**.
+3. it sets **`autoConnect: true`**, **or**
+4. a **`datasourceMapping` rule routes at least one object to it**.
 
-A `managed` datasource that nothing explicitly binds to (for example one that is
-only referenced by a `datasourceMapping` rule) stays *metadata-only* — visible in
-Setup, but not connected — so existing apps are unchanged. Use `autoConnect: true`
-to opt such a datasource into a live connection at boot.
+A `managed` datasource that nothing routes to stays *metadata-only* — visible in
+Setup, but not connected. Use `autoConnect: true` to opt such a datasource into a
+live connection at boot.
+
+<Callout type="warn">
+**A mapping rule is routing, not a hint.** If a `datasourceMapping` rule routes an
+object to a datasource that cannot be connected, the boot **fails** with the
+connect error, and a query against that object throws rather than resolving the
+default store. Before v17 it fell through silently: the app booted clean, `/ready`
+answered `200`, and the object's rows were written to the *default* database
+instead of the one it declared. If you want a declared datasource that routes
+nothing, remove the mapping rule rather than relying on the fall-through.
+</Callout>
 
 <Callout type="info">
 **Escape hatch.** An `onEnable` hook calling `ctx.drivers.register(driver)` is
