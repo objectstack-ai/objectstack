@@ -1770,6 +1770,46 @@ export class ObjectStackProtocolImplementation implements
         return { item, notices };
     }
 
+    /**
+     * Resolve a flow canonicalizer from the live services registry (#4498).
+     *
+     * `convertStoredItem` skips `flow` because flow-node conversions carry
+     * ADR-0078's open-namespace conflict guard, which needs the automation
+     * engine's executor registry to tell a rename from a clobber. #4454 built
+     * that capability as `AutomationEngine.canonicalizeStoredFlow` and handed
+     * it to `migrateStoredMetadata` as an explicit hook, because the CLI has
+     * to boot an engine of its own to hold one.
+     *
+     * Inside a server there is nothing to thread: this protocol is constructed
+     * with an accessor for the kernel's service table (the same one
+     * `analytics` and `package` are read from), and the automation service
+     * registers itself under `automation`. So every caller running next to a
+     * live engine can have the capability for free — which is what makes the
+     * flow-skip fixable at `duplicatePackage` (a WRITE that was minting new
+     * pre-protocol rows) rather than only at the CLI.
+     *
+     * Resolution is deliberately **lazy** — per call, never cached at
+     * construction. Plugin init order is not guaranteed to put `automation`
+     * in the table before the protocol is assembled (the CLI's
+     * `buildDataMigrationPlugins` adds it after ObjectQL by design), and
+     * caching `undefined` from a too-early read would silently disable flow
+     * canonicalization for the life of the process.
+     *
+     * Returns `undefined` when no engine is reachable. That is a real state —
+     * a control-plane or metadata-only host has no automation service — and
+     * every caller must decide what it means for them rather than assume a
+     * flow was handled.
+     */
+    private resolveFlowCanonicalizer():
+        ((name: string, body: unknown) => StoredFlowCanonicalization) | undefined {
+        const automation = this.getServicesRegistry?.().get('automation') as
+            | { canonicalizeStoredFlow?: (name: string, definition: unknown) => StoredFlowCanonicalization }
+            | undefined;
+        const canonicalize = automation?.canonicalizeStoredFlow;
+        if (typeof canonicalize !== 'function') return undefined;
+        return (name, body) => canonicalize.call(automation, name, body);
+    }
+
     constructor(
         engine: IDataEngine,
         getServicesRegistry?: () => Map<string, any>,
@@ -6441,10 +6481,12 @@ export class ObjectStackProtocolImplementation implements
      *
      * ## What it declines to touch, and says so
      *
-     * - **`flow` rows.** Flow-node conversions carry ADR-0078's open-namespace
-     *   conflict guard, which needs the automation engine's live executor
-     *   registry; this layer does not have it, so flows canonicalize at
-     *   `AutomationEngine.registerFlow` and are reported `skipped` here.
+     * - **`flow` rows with no reachable automation engine.** Flow-node
+     *   conversions carry ADR-0078's open-namespace conflict guard, which
+     *   needs the engine's live executor registry. When one is reachable —
+     *   passed as `canonicalizeFlow`, or resolved from the services registry
+     *   (#4498) — flows are migrated like anything else (#4454); when none is,
+     *   they are reported `skipped` with that reason, never counted done.
      * - **Types with no repository write path** (neither `allowOrgOverride` nor
      *   `allowRuntimeCreate`). `saveMetaItem` routes those down the legacy
      *   raw-engine branch, which records no history and forces `state:
@@ -6464,14 +6506,21 @@ export class ObjectStackProtocolImplementation implements
         /** Recorded as the writer on the history + audit rows. */
         actor?: string;
         /**
-         * Canonicalize a stored `flow` body (#4454).
+         * Canonicalize a stored `flow` body (#4454). **Optional override** —
+         * when omitted, the automation engine is resolved from the live
+         * services registry (#4498, {@link resolveFlowCanonicalizer}).
          *
-         * Supplied only by a caller that holds a live automation engine —
-         * `AutomationEngine.canonicalizeStoredFlow` is the implementation. Flow
-         * conversions carry ADR-0078's open-namespace conflict guard, which
-         * needs the engine's executor registry to tell a rename from a clobber,
-         * and this layer has no way to obtain one. Omit it and flow rows are
-         * reported `skipped` with that reason rather than quietly counted done.
+         * `AutomationEngine.canonicalizeStoredFlow` is the implementation.
+         * Flow conversions carry ADR-0078's open-namespace conflict guard,
+         * which needs the engine's executor registry to tell a rename from a
+         * clobber. A caller running next to a live engine (an admin route, a
+         * server task) needs to pass nothing; the CLI passes its own because
+         * it boots an inert engine specifically to hold one, and an explicit
+         * hook is also what makes the flow branch testable without an engine.
+         *
+         * When neither is available — a control-plane or metadata-only host —
+         * flow rows are reported `skipped` with that reason rather than
+         * quietly counted done.
          *
          * Must return the **storable** shape — conversions and the schema's
          * `condition` envelopes, without schema defaults. Throwing is a valid
@@ -6480,6 +6529,7 @@ export class ObjectStackProtocolImplementation implements
          */
         canonicalizeFlow?: (name: string, body: unknown) => StoredFlowCanonicalization;
     } = {}): Promise<StoredMigrationReport> {
+        const canonicalizeFlow = request.canonicalizeFlow ?? this.resolveFlowCanonicalizer();
         const apply = request.apply === true;
         const typeFilter = request.types && request.types.length > 0
             ? new Set(request.types.map((t) => PLURAL_TO_SINGULAR[t] ?? t))
@@ -6548,22 +6598,23 @@ export class ObjectStackProtocolImplementation implements
             }
 
             // Flow rows need the automation engine's live executor registry for
-            // ADR-0078's open-namespace conflict guard, which this layer does
-            // not have — so they are canonicalized through a caller-supplied
-            // hook, or reported `skipped` when no caller can supply one (#4454).
+            // ADR-0078's open-namespace conflict guard — supplied by the caller
+            // (#4454) or resolved from the services registry (#4498), and
+            // reported `skipped` when neither can reach one.
             let flowResult: StoredFlowCanonicalization | undefined;
             if (singular === 'flow') {
-                if (!request.canonicalizeFlow) {
+                if (!canonicalizeFlow) {
                     record({
                         ...base,
                         outcome: 'skipped',
                         reason: 'flows canonicalize at AutomationEngine.registerFlow — the node-type '
-                            + 'conflict guard needs the live executor registry this caller did not supply',
+                            + 'conflict guard needs the live executor registry, and no automation service '
+                            + 'is reachable from this caller',
                     });
                     continue;
                 }
                 try {
-                    flowResult = request.canonicalizeFlow(base.name, body);
+                    flowResult = canonicalizeFlow(base.name, body);
                 } catch (e: any) {
                     // `FlowSchema` is strict (#4001) and the region validator
                     // hard-fails, so this is a row that cannot register at all —
@@ -7662,21 +7713,90 @@ export class ObjectStackProtocolImplementation implements
 
         const copied: Array<{ type: string; name: string }> = [];
         const failed: Array<{ type: string; name: string; error: string }> = [];
+        // Resolved once for the whole copy: every flow row in this package needs
+        // the same engine, and a package with fifty flows should not walk the
+        // service table fifty times.
+        const canonicalizeFlow = this.resolveFlowCanonicalizer();
+
         for (const row of rows) {
             const newName = renameName(row.name);
-            let item: any;
+            const rawType = String(row.type);
+            const singular = PLURAL_TO_SINGULAR[rawType] ?? rawType;
+            let body: unknown;
             try {
-                // Canonicalize the source row before re-saving (#3903): the copy
-                // is a NEW write and must pass today's schema gate, so a legacy
-                // shape the chain owns is lifted rather than failing the copy —
-                // duplication never mints new rows in a pre-protocol dialect.
-                item = this.convertStoredItem(
-                    String(row.type),
-                    typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {}),
-                );
+                body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {});
             } catch {
                 failed.push({ type: row.type, name: row.name, error: 'unparseable metadata' });
                 continue;
+            }
+
+            // Canonicalize the source row before re-saving (#3903): the copy is
+            // a NEW write and must pass today's schema gate, so a legacy shape
+            // the chain owns is lifted rather than failing the copy —
+            // duplication never mints new rows in a pre-protocol dialect.
+            //
+            // For `flow` that guarantee was false until #4498: `convertStoredItem`
+            // returns flows untouched, and `FlowNodeSchema.config` is an open
+            // `z.record`, so a pre-17 body (`delete_record` with `config.filters`)
+            // sailed through `saveMetaItem` and landed verbatim in a brand-new
+            // row. ADR-0087 justifies the whole stored-metadata design on new
+            // writes being canonical — "a strictly shrinking concern" — and this
+            // was the one live producer contradicting it.
+            let item: any;
+            if (singular === 'flow') {
+                if (!canonicalizeFlow) {
+                    // No engine in this process (control-plane / metadata-only
+                    // host). Copy the source body as-is — the honest behaviour,
+                    // and no worse than the source row already is — rather than
+                    // failing a duplication that has nothing to do with flows.
+                    // `os migrate meta --stored --apply` is the finish line for
+                    // both rows, and it reports what it could not canonicalize.
+                    item = body;
+                } else {
+                    try {
+                        const result = canonicalizeFlow(String(row.name ?? ''), body);
+                        if (result.conflicts.length > 0) {
+                            // ADR-0078's guard refused a node-type rename because
+                            // the old token is a LIVE name owned by something
+                            // else here. Copying the un-renamed body anyway would
+                            // mint exactly the row this fix exists to prevent, so
+                            // the item fails and names the token (same posture as
+                            // #4454's `failed` outcome).
+                            const first = result.conflicts[0]!;
+                            failed.push({
+                                type: row.type,
+                                name: row.name,
+                                error: `conversion refused — '${first.token}' at ${first.path} is a live name in `
+                                    + `this environment (${result.conflicts.length} conflict(s)). ${first.message}`,
+                            });
+                            continue;
+                        }
+                        item = result.storable;
+                    } catch (e: any) {
+                        // `FlowSchema` is strict (#4001) and the region validator
+                        // hard-fails: this source row cannot register at all, so
+                        // the copy would be broken the same way. Report it.
+                        failed.push({
+                            type: row.type,
+                            name: row.name,
+                            error: `the flow does not canonicalize: ${e?.message ?? String(e)}`,
+                        });
+                        continue;
+                    }
+                }
+            } else {
+                try {
+                    item = this.convertStoredItem(rawType, body);
+                } catch (e: any) {
+                    // A tombstoned key throws here (ADR-0087 D2) — a genuine
+                    // contract violation in the source, not a parse failure.
+                    failed.push({
+                        type: row.type,
+                        name: row.name,
+                        error: `the source item does not convert: ${e?.message ?? String(e)}`,
+                    });
+                    continue;
+                }
             }
             const rewritten = deepRewrite(item);
             if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) rewritten.name = newName;

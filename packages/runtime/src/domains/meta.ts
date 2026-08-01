@@ -294,6 +294,62 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         return { handled: true, response: deps.error('Draft listing not supported', 501) };
     }
 
+    // POST /metadata/_migrate-stored  (#4327 / #4454 / #4498)
+    //
+    // The server-side entry point to the same canonicalization pass
+    // `os migrate meta --stored` runs. It exists because the CLI form requires
+    // shell access to the deployment's database, which a hosted operator does
+    // not have — so on a managed deployment ADR-0087's stored-metadata chain
+    // had no finish line at all, only the per-read conversion that never ends.
+    //
+    // Nothing about flows is threaded through here: `migrateStoredMetadata`
+    // resolves the automation engine from the services registry (#4498), and a
+    // server always has a live one — so this route covers flow rows by simply
+    // running in the process that owns them.
+    //
+    // Body: `{ apply?: boolean, types?: string[] }`. **Preview by default** —
+    // the same posture as the CLI: `apply` must be explicitly `true`, and a
+    // caller who sends nothing gets a report and no writes.
+    if (parts.length === 1 && parts[0] === '_migrate-stored' && method?.toUpperCase() === 'POST') {
+        // This rewrites every eligible `sys_metadata` row in the deployment, so
+        // unlike the single-item `PUT /metadata/:type/:name` next door it is
+        // gated on an explicit capability rather than on being authenticated.
+        // `manage_metadata` is the ADR-0066 D1 capability for authoring and
+        // publishing metadata, which is exactly what a rewrite is; engine
+        // self-invocation (`isSystem`) bypasses, matching `actionPermissionError`.
+        const ec: any = _context.executionContext;
+        if (!ec?.isSystem && !new Set<string>(ec?.systemPermissions ?? []).has('manage_metadata')) {
+            return {
+                handled: true,
+                response: deps.error(
+                    'Rewriting stored metadata requires the `manage_metadata` capability.',
+                    403,
+                ),
+            };
+        }
+
+        const protocol = await deps.resolveService('protocol');
+        if (!protocol || typeof (protocol as any).migrateStoredMetadata !== 'function') {
+            return { handled: true, response: deps.error('Stored-metadata migration not supported', 501) };
+        }
+        const types = Array.isArray(body?.types)
+            ? body.types.filter((t: unknown): t is string => typeof t === 'string' && t.length > 0)
+            : undefined;
+        try {
+            const report = await (protocol as any).migrateStoredMetadata({
+                apply: body?.apply === true,
+                ...(types && types.length > 0 ? { types } : {}),
+                // Attributed to the caller, not to the route: this writes
+                // history + audit rows, and "who ran the migration" is the
+                // question those rows exist to answer.
+                actor: ec?.userId ? `${ec.userId} (POST /metadata/_migrate-stored)` : 'POST /metadata/_migrate-stored',
+            });
+            return { handled: true, response: deps.success(report) };
+        } catch (e: any) {
+            return { handled: true, response: deps.errorFromThrown(e, 500) };
+        }
+    }
+
     // GET /metadata/:type (List items of type) OR /metadata/:objectName (Legacy)
     if (parts.length === 1) {
         const typeOrName = parts[0];

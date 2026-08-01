@@ -846,6 +846,31 @@ rewrites an **author's source** and reads no database; `--stored` rewrites **one
 deployment's rows** and reads no config. Same chain, opposite ends of the
 contract — which is why the two modes are mutually exclusive.
 
+**Without shell access, use the route.** This command needs to reach the
+deployment's database directly, which a hosted operator cannot do. The same pass
+is exposed over HTTP:
+
+```http
+POST /api/v1/meta/_migrate-stored
+Content-Type: application/json
+
+{ "apply": true, "types": ["flow"] }
+```
+
+or from the SDK:
+
+```ts
+const preview = await client.meta.migrateStored();              // writes nothing
+const result  = await client.meta.migrateStored({ apply: true });
+```
+
+It returns the same report the CLI renders, and takes the same posture:
+**preview unless `apply` is literally `true`**, `types` optional. It requires the
+`manage_metadata` capability — it rewrites every eligible row in the deployment,
+not one item — and answers `403` otherwise. Flows need no extra setup on this
+path: the server already holds a live automation engine, so the run resolves the
+executor registry the conflict guard needs from the process it is running in.
+
 ### Scaffolding
 
 | Command | Alias | Description |
