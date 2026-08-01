@@ -322,6 +322,34 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
 }
 
 /**
+ * [#4435] The 404 a single-record operation answers when the id names no row.
+ *
+ * Extracted so the READ and the two WRITE paths cannot disagree about it. They
+ * did: `getData` answered `404 RECORD_NOT_FOUND` while `updateData` returned
+ * `200 { record: null }` and `deleteData` returned `200 { success: true }` for
+ * any string in the path — so a typo'd id, an already-deleted row and a real
+ * deletion were indistinguishable, and a client PATCHing a concurrently deleted
+ * record was told its write had landed.
+ *
+ * That is the same silent-no-op shape the v17 train removed everywhere else
+ * this window (#4240/#4303/#4315 refuse missing fields, #4169 refuses unknown
+ * params, #4190 stopped dropping filters) — a write that touched zero rows
+ * reporting 200 is that shape one level up, on the verb where it costs the
+ * most.
+ */
+function recordNotFoundError(object: string, id: string | number): Error {
+    const err = new Error(`Record ${id} not found in ${object}`) as Error & {
+        code?: string;
+        status?: number;
+        object?: string;
+    };
+    err.code = 'RECORD_NOT_FOUND';
+    err.status = 404;
+    err.object = object;
+    return err;
+}
+
+/**
  * A 400 for a `$filter` ARRAY that looks like a filter AST but is not one.
  *
  * The message has to be *actionable from the request*, which is the whole point
@@ -1768,6 +1796,46 @@ export class ObjectStackProtocolImplementation implements
             },
         });
         return { item, notices };
+    }
+
+    /**
+     * Resolve a flow canonicalizer from the live services registry (#4498).
+     *
+     * `convertStoredItem` skips `flow` because flow-node conversions carry
+     * ADR-0078's open-namespace conflict guard, which needs the automation
+     * engine's executor registry to tell a rename from a clobber. #4454 built
+     * that capability as `AutomationEngine.canonicalizeStoredFlow` and handed
+     * it to `migrateStoredMetadata` as an explicit hook, because the CLI has
+     * to boot an engine of its own to hold one.
+     *
+     * Inside a server there is nothing to thread: this protocol is constructed
+     * with an accessor for the kernel's service table (the same one
+     * `analytics` and `package` are read from), and the automation service
+     * registers itself under `automation`. So every caller running next to a
+     * live engine can have the capability for free — which is what makes the
+     * flow-skip fixable at `duplicatePackage` (a WRITE that was minting new
+     * pre-protocol rows) rather than only at the CLI.
+     *
+     * Resolution is deliberately **lazy** — per call, never cached at
+     * construction. Plugin init order is not guaranteed to put `automation`
+     * in the table before the protocol is assembled (the CLI's
+     * `buildDataMigrationPlugins` adds it after ObjectQL by design), and
+     * caching `undefined` from a too-early read would silently disable flow
+     * canonicalization for the life of the process.
+     *
+     * Returns `undefined` when no engine is reachable. That is a real state —
+     * a control-plane or metadata-only host has no automation service — and
+     * every caller must decide what it means for them rather than assume a
+     * flow was handled.
+     */
+    private resolveFlowCanonicalizer():
+        ((name: string, body: unknown) => StoredFlowCanonicalization) | undefined {
+        const automation = this.getServicesRegistry?.().get('automation') as
+            | { canonicalizeStoredFlow?: (name: string, definition: unknown) => StoredFlowCanonicalization }
+            | undefined;
+        const canonicalize = automation?.canonicalizeStoredFlow;
+        if (typeof canonicalize !== 'function') return undefined;
+        return (name, body) => canonicalize.call(automation, name, body);
     }
 
     constructor(
@@ -4609,15 +4677,7 @@ export class ObjectStackProtocolImplementation implements
                 record: result
             };
         }
-        const err = new Error(`Record ${request.id} not found in ${request.object}`) as Error & {
-            code?: string;
-            status?: number;
-            object?: string;
-        };
-        err.code = 'RECORD_NOT_FOUND';
-        err.status = 404;
-        err.object = request.object;
-        throw err;
+        throw recordNotFoundError(request.object, request.id);
     }
 
     async createData(request: { object: string, data: any, context?: any }) {
@@ -4686,13 +4746,7 @@ export class ObjectStackProtocolImplementation implements
             request.object,
             { where: { id: request.id }, ...(ctxOpt as any) } as any,
         );
-        if (!source) {
-            const err: any = new Error(`Record ${request.id} not found in ${request.object}`);
-            err.code = 'RECORD_NOT_FOUND';
-            err.status = 404;
-            err.object = request.object;
-            throw err;
-        }
+        if (!source) throw recordNotFoundError(request.object, request.id);
 
         // Copy the source, then strip the columns the engine owns so the insert
         // path re-derives them rather than carrying the source's values over.
@@ -4732,7 +4786,35 @@ export class ObjectStackProtocolImplementation implements
 
     async updateData(request: { object: string, id: string, data: any, expectedVersion?: string, context?: any }) {
         this.assertObjectRegistered(request.object); // [#3770]
-        await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
+        // [#4435] ONE probe serves both gates.
+        //
+        // A PATCH of an id that names no row answered `200 { record: null }` —
+        // the caller had to null-check a SUCCESS payload to discover its write
+        // never landed, which is exactly what a client that PATCHes a
+        // concurrently deleted record does not do. `getData` has always
+        // answered 404 for the same id; the two verbs now agree.
+        //
+        // Existence is asked BEFORE the write rather than read off what comes
+        // back: the engine's update returns the post-write READBACK, which is
+        // also `null` when the row still exists but the write moved it out of
+        // the caller's row scope (reassigning `owner_id` away from yourself
+        // under an owner-scoped RLS policy). Reading that as "not found" would
+        // answer 404 to a write that succeeded. So ask existence directly.
+        //
+        // The probe asks EXISTENCE, not visibility — see `probeRecord` for why
+        // that distinction is load-bearing (it keeps this fix out of the RLS
+        // model and keeps the #1994 by-id-write proof able to go red).
+        //
+        // OCC already had to read the same row for its `updated_at`, so the two
+        // gates share this single read instead of issuing a probe each. Two
+        // round-trips per PATCH would have been a performance regression no
+        // gate reports, and the second read could even disagree with the first.
+        const current = await this.probeRecord(request.object, request.id);
+        if (!current) throw recordNotFoundError(request.object, request.id);
+        // 404 wins over 409 when both could apply: OCC has always declined to
+        // treat a missing record as a concurrency conflict, and "this record
+        // does not exist" is the more specific answer.
+        this.assertVersionOf(request.object, request.id, current, request.expectedVersion);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
         // [#3407/#3431] Capture the engine's LEGAL write strips (static `readonly`
@@ -4754,10 +4836,24 @@ export class ObjectStackProtocolImplementation implements
 
     async deleteData(request: { object: string, id: string, expectedVersion?: string, context?: any }) {
         this.assertObjectRegistered(request.object); // [#3770]
-        await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
+        await this.assertVersionMatch(request.object, request.id, request.expectedVersion);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
-        await this.engine.delete(request.object, opts);
+        const deleted = await this.engine.delete(request.object, opts);
+        // [#4435] `success: true` used to be a LITERAL — the response said the
+        // same thing for a real deletion, an already-deleted row and a typo'd
+        // id, so nothing on the wire could tell them apart. The driver contract
+        // (`IDataDriver.delete` — "True if deleted, false if not found") already
+        // carries the answer; it was simply discarded here. Now it decides:
+        // `false` is a 404, matching `getData` on the same id, and `success` on
+        // the 200 finally means what it says.
+        //
+        // Read as `=== false` on purpose. That is the contract's own value for
+        // "no row matched"; anything else — a driver returning the deleted row,
+        // an `undefined` from an off-contract implementation — is not a
+        // POSITIVE not-found signal, and inventing a 404 out of it would break
+        // deletes against third-party drivers rather than report honestly.
+        if (deleted === false) throw recordNotFoundError(request.object, request.id);
         return {
             object: request.object,
             id: request.id,
@@ -4766,35 +4862,72 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Optimistic Concurrency Control gate shared by updateData/deleteData.
+     * [#4435] Does this row EXIST? A fact about the database — deliberately
+     * NOT "may this caller see it".
      *
-     * When the caller passes a non-empty `expectedVersion` token (typically
-     * the `updated_at` value they read), this fetches the current record
-     * and compares its `updated_at` against the token. Mismatch → throw
-     * `ConcurrentUpdateError` which the REST layer maps to 409.
+     * Read with a system context so no row-level policy narrows it. That is
+     * load-bearing, and the first version of this fix got it wrong: probing
+     * with the CALLER's context turns the existence gate into an authorization
+     * gate, because a row the caller cannot read comes back `null` and the
+     * PATCH answers 404. Two things break when it does.
+     *
+     * 1. It silently changes RLS semantics. Whether an unreadable row may be
+     *    written by id is the #1994 pre-image check's decision, made inside
+     *    `engine.update` where the write policy lives. A probe in front of it
+     *    quietly adds a second, different rule — scope creep into the security
+     *    model, from a bug fix about missing records.
+     *
+     * 2. It disarms a revert-provable security proof. `@proof: rls-by-id-write`
+     *    (`packages/qa/dogfood/test/rls-fixture.dogfood.test.ts`, referenced by
+     *    the `permission.rowLevelSecurity.using` liveness ledger entry) boots a
+     *    fixture whose member can read nothing but has no write policy, and
+     *    asserts the runner reports `rls-hole`. A caller-scoped probe 404s that
+     *    PATCH, so the RED half goes green — and the gate can no longer prove
+     *    it is able to go red. If the #1994 fix were ever reverted, this probe
+     *    would MASK it. Accidentally hardening one path is not worth
+     *    permanently blinding the gate that watches the whole class.
+     *
+     * So the probe answers existence only, and authorization stays exactly
+     * where it was. The one behaviour this adds is the 404 the issue asked for:
+     * an id that names no row at all.
+     *
+     * One place, because two gates need this row — the existence gate and OCC's
+     * `updated_at` comparison — and issuing a probe each would put two
+     * round-trips on every PATCH.
+     */
+    private async probeRecord(object: string, id: string): Promise<any> {
+        return this.engine.findOne(object, { where: { id }, context: { isSystem: true } } as any);
+    }
+
+    /**
+     * Optimistic Concurrency Control — the COMPARISON half, over a row the
+     * caller has already read. Pure: it issues no query of its own, which is
+     * what lets `updateData` run the gate on its existence probe's result
+     * rather than re-reading the record (#4435).
+     *
+     * When the caller passes a non-empty `expectedVersion` token (typically the
+     * `updated_at` value they read), a mismatch throws `ConcurrentUpdateError`,
+     * which the REST layer maps to 409.
      *
      * Behaviour:
      *  - Empty/missing token → no check (opt-in semantics; existing callers
      *    that haven't yet adopted OCC are unaffected).
-     *  - Record not found → no check; downstream `engine.update` will
-     *    surface the usual `RECORD_NOT_FOUND` 404. We intentionally do not
-     *    treat "missing record" as a concurrency conflict.
+     *  - Record not found → no check. We intentionally do not treat "missing
+     *    record" as a concurrency conflict; `updateData` has already answered
+     *    404 by this point, and `deleteData` lets the driver report it.
      *  - Record has no `updated_at` field (timestamps disabled) → no check.
      *    Logging would be noisy here; OCC is opt-in and the absence of a
      *    version column is an explicit "this object doesn't support OCC"
      *    signal.
      */
-    private async assertVersionMatch(
+    private assertVersionOf(
         object: string,
         id: string,
+        current: any,
         expectedVersion: string | undefined,
-        context: any
-    ): Promise<void> {
+    ): void {
         const expected = normaliseVersionToken(expectedVersion);
         if (!expected) return;
-        const findOpts: any = { where: { id } };
-        if (context !== undefined) findOpts.context = context;
-        const current = await this.engine.findOne(object, findOpts);
         if (!current) return;
         const currentVersion = normaliseVersionToken((current as any).updated_at);
         if (!currentVersion) return;
@@ -4805,6 +4938,22 @@ export class ObjectStackProtocolImplementation implements
                 message: `Record ${object}/${id} was modified by another user (current version ${currentVersion}, expected ${expected})`,
             });
         }
+    }
+
+    /**
+     * OCC gate for `deleteData`, which — unlike `updateData` — needs no
+     * existence probe of its own: the driver's own `delete` return reports
+     * whether a row matched (#4435). So this still probes ONLY when the caller
+     * actually opted into OCC, keeping a plain DELETE at zero extra reads.
+     */
+    private async assertVersionMatch(
+        object: string,
+        id: string,
+        expectedVersion: string | undefined,
+    ): Promise<void> {
+        if (!normaliseVersionToken(expectedVersion)) return;
+        const current = await this.probeRecord(object, id);
+        this.assertVersionOf(object, id, current, expectedVersion);
     }
 
     // ==========================================
@@ -5366,7 +5515,16 @@ export class ObjectStackProtocolImplementation implements
 
         for (const id of ids) {
             try {
-                await this.engine.delete(object, { where: { id }, ...ctxOpt } as any);
+                // [#4435] Per-row honesty on the bulk path. This discarded the
+                // driver's return and pushed `success: true` unconditionally, so
+                // `{"ids":["nonexistent_1"]}` answered `succeeded: 1` — a batch
+                // of typo'd ids reported every one of them deleted. A caller
+                // reconciling "which of my 200 ids were real" got a list that
+                // agreed with whatever it sent. Same `=== false` reading as the
+                // single-record path: the contract's positive not-found value,
+                // never an inference from a falsy return.
+                const deleted = await this.engine.delete(object, { where: { id }, ...ctxOpt } as any);
+                if (deleted === false) throw recordNotFoundError(object, id);
                 results.push({ id: String(id), success: true });
                 succeeded++;
             } catch (err: any) {
@@ -6441,10 +6599,12 @@ export class ObjectStackProtocolImplementation implements
      *
      * ## What it declines to touch, and says so
      *
-     * - **`flow` rows.** Flow-node conversions carry ADR-0078's open-namespace
-     *   conflict guard, which needs the automation engine's live executor
-     *   registry; this layer does not have it, so flows canonicalize at
-     *   `AutomationEngine.registerFlow` and are reported `skipped` here.
+     * - **`flow` rows with no reachable automation engine.** Flow-node
+     *   conversions carry ADR-0078's open-namespace conflict guard, which
+     *   needs the engine's live executor registry. When one is reachable —
+     *   passed as `canonicalizeFlow`, or resolved from the services registry
+     *   (#4498) — flows are migrated like anything else (#4454); when none is,
+     *   they are reported `skipped` with that reason, never counted done.
      * - **Types with no repository write path** (neither `allowOrgOverride` nor
      *   `allowRuntimeCreate`). `saveMetaItem` routes those down the legacy
      *   raw-engine branch, which records no history and forces `state:
@@ -6464,14 +6624,21 @@ export class ObjectStackProtocolImplementation implements
         /** Recorded as the writer on the history + audit rows. */
         actor?: string;
         /**
-         * Canonicalize a stored `flow` body (#4454).
+         * Canonicalize a stored `flow` body (#4454). **Optional override** —
+         * when omitted, the automation engine is resolved from the live
+         * services registry (#4498, {@link resolveFlowCanonicalizer}).
          *
-         * Supplied only by a caller that holds a live automation engine —
-         * `AutomationEngine.canonicalizeStoredFlow` is the implementation. Flow
-         * conversions carry ADR-0078's open-namespace conflict guard, which
-         * needs the engine's executor registry to tell a rename from a clobber,
-         * and this layer has no way to obtain one. Omit it and flow rows are
-         * reported `skipped` with that reason rather than quietly counted done.
+         * `AutomationEngine.canonicalizeStoredFlow` is the implementation.
+         * Flow conversions carry ADR-0078's open-namespace conflict guard,
+         * which needs the engine's executor registry to tell a rename from a
+         * clobber. A caller running next to a live engine (an admin route, a
+         * server task) needs to pass nothing; the CLI passes its own because
+         * it boots an inert engine specifically to hold one, and an explicit
+         * hook is also what makes the flow branch testable without an engine.
+         *
+         * When neither is available — a control-plane or metadata-only host —
+         * flow rows are reported `skipped` with that reason rather than
+         * quietly counted done.
          *
          * Must return the **storable** shape — conversions and the schema's
          * `condition` envelopes, without schema defaults. Throwing is a valid
@@ -6480,6 +6647,7 @@ export class ObjectStackProtocolImplementation implements
          */
         canonicalizeFlow?: (name: string, body: unknown) => StoredFlowCanonicalization;
     } = {}): Promise<StoredMigrationReport> {
+        const canonicalizeFlow = request.canonicalizeFlow ?? this.resolveFlowCanonicalizer();
         const apply = request.apply === true;
         const typeFilter = request.types && request.types.length > 0
             ? new Set(request.types.map((t) => PLURAL_TO_SINGULAR[t] ?? t))
@@ -6548,22 +6716,23 @@ export class ObjectStackProtocolImplementation implements
             }
 
             // Flow rows need the automation engine's live executor registry for
-            // ADR-0078's open-namespace conflict guard, which this layer does
-            // not have — so they are canonicalized through a caller-supplied
-            // hook, or reported `skipped` when no caller can supply one (#4454).
+            // ADR-0078's open-namespace conflict guard — supplied by the caller
+            // (#4454) or resolved from the services registry (#4498), and
+            // reported `skipped` when neither can reach one.
             let flowResult: StoredFlowCanonicalization | undefined;
             if (singular === 'flow') {
-                if (!request.canonicalizeFlow) {
+                if (!canonicalizeFlow) {
                     record({
                         ...base,
                         outcome: 'skipped',
                         reason: 'flows canonicalize at AutomationEngine.registerFlow — the node-type '
-                            + 'conflict guard needs the live executor registry this caller did not supply',
+                            + 'conflict guard needs the live executor registry, and no automation service '
+                            + 'is reachable from this caller',
                     });
                     continue;
                 }
                 try {
-                    flowResult = request.canonicalizeFlow(base.name, body);
+                    flowResult = canonicalizeFlow(base.name, body);
                 } catch (e: any) {
                     // `FlowSchema` is strict (#4001) and the region validator
                     // hard-fails, so this is a row that cannot register at all —
@@ -7662,21 +7831,90 @@ export class ObjectStackProtocolImplementation implements
 
         const copied: Array<{ type: string; name: string }> = [];
         const failed: Array<{ type: string; name: string; error: string }> = [];
+        // Resolved once for the whole copy: every flow row in this package needs
+        // the same engine, and a package with fifty flows should not walk the
+        // service table fifty times.
+        const canonicalizeFlow = this.resolveFlowCanonicalizer();
+
         for (const row of rows) {
             const newName = renameName(row.name);
-            let item: any;
+            const rawType = String(row.type);
+            const singular = PLURAL_TO_SINGULAR[rawType] ?? rawType;
+            let body: unknown;
             try {
-                // Canonicalize the source row before re-saving (#3903): the copy
-                // is a NEW write and must pass today's schema gate, so a legacy
-                // shape the chain owns is lifted rather than failing the copy —
-                // duplication never mints new rows in a pre-protocol dialect.
-                item = this.convertStoredItem(
-                    String(row.type),
-                    typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {}),
-                );
+                body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {});
             } catch {
                 failed.push({ type: row.type, name: row.name, error: 'unparseable metadata' });
                 continue;
+            }
+
+            // Canonicalize the source row before re-saving (#3903): the copy is
+            // a NEW write and must pass today's schema gate, so a legacy shape
+            // the chain owns is lifted rather than failing the copy —
+            // duplication never mints new rows in a pre-protocol dialect.
+            //
+            // For `flow` that guarantee was false until #4498: `convertStoredItem`
+            // returns flows untouched, and `FlowNodeSchema.config` is an open
+            // `z.record`, so a pre-17 body (`delete_record` with `config.filters`)
+            // sailed through `saveMetaItem` and landed verbatim in a brand-new
+            // row. ADR-0087 justifies the whole stored-metadata design on new
+            // writes being canonical — "a strictly shrinking concern" — and this
+            // was the one live producer contradicting it.
+            let item: any;
+            if (singular === 'flow') {
+                if (!canonicalizeFlow) {
+                    // No engine in this process (control-plane / metadata-only
+                    // host). Copy the source body as-is — the honest behaviour,
+                    // and no worse than the source row already is — rather than
+                    // failing a duplication that has nothing to do with flows.
+                    // `os migrate meta --stored --apply` is the finish line for
+                    // both rows, and it reports what it could not canonicalize.
+                    item = body;
+                } else {
+                    try {
+                        const result = canonicalizeFlow(String(row.name ?? ''), body);
+                        if (result.conflicts.length > 0) {
+                            // ADR-0078's guard refused a node-type rename because
+                            // the old token is a LIVE name owned by something
+                            // else here. Copying the un-renamed body anyway would
+                            // mint exactly the row this fix exists to prevent, so
+                            // the item fails and names the token (same posture as
+                            // #4454's `failed` outcome).
+                            const first = result.conflicts[0]!;
+                            failed.push({
+                                type: row.type,
+                                name: row.name,
+                                error: `conversion refused — '${first.token}' at ${first.path} is a live name in `
+                                    + `this environment (${result.conflicts.length} conflict(s)). ${first.message}`,
+                            });
+                            continue;
+                        }
+                        item = result.storable;
+                    } catch (e: any) {
+                        // `FlowSchema` is strict (#4001) and the region validator
+                        // hard-fails: this source row cannot register at all, so
+                        // the copy would be broken the same way. Report it.
+                        failed.push({
+                            type: row.type,
+                            name: row.name,
+                            error: `the flow does not canonicalize: ${e?.message ?? String(e)}`,
+                        });
+                        continue;
+                    }
+                }
+            } else {
+                try {
+                    item = this.convertStoredItem(rawType, body);
+                } catch (e: any) {
+                    // A tombstoned key throws here (ADR-0087 D2) — a genuine
+                    // contract violation in the source, not a parse failure.
+                    failed.push({
+                        type: row.type,
+                        name: row.name,
+                        error: `the source item does not convert: ${e?.message ?? String(e)}`,
+                    });
+                    continue;
+                }
             }
             const rewritten = deepRewrite(item);
             if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) rewritten.name = newName;

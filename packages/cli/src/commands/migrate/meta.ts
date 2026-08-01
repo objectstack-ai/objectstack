@@ -30,7 +30,6 @@ import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
-import type { IAutomationService } from '@objectstack/spec/contracts';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -545,23 +544,18 @@ export default class MigrateMeta extends Command {
       const { formatStoredMigrationReport, storedMigrationClean } =
         await import('@objectstack/metadata-protocol');
 
-      // The automation engine canonicalizes `flow` rows — it holds the executor
-      // registry ADR-0078's conflict guard needs (#4454). It is booted inert, so
-      // this is the only thing it does in this process. Absent (an older stack,
-      // or a boot that skipped it), flow rows keep reporting `skipped` with the
-      // reason rather than being silently counted done.
-      // `SchemaStack.kernel` is untyped, so the slot's contract is stated on the
-      // result rather than as a type argument — narrowing, not erasing.
-      let automation: IAutomationService | undefined;
-      try { automation = stack.kernel.getService('automation') as IAutomationService | undefined; }
-      catch { /* not registered — flows stay reported as skipped */ }
-      const canonicalize = automation?.canonicalizeStoredFlow?.bind(automation);
-
+      // No `canonicalizeFlow` is threaded from here. The automation engine
+      // canonicalizes `flow` rows — it holds the executor registry ADR-0078's
+      // conflict guard needs (#4454) — and the protocol resolves it from the
+      // kernel's service table itself (#4498), which is the same table the
+      // inert engine this command boots registers into. Passing it again would
+      // be a second route to one capability, and the two would drift.
+      // Absent (an older stack, or a boot that skipped it), flow rows keep
+      // reporting `skipped` with the reason rather than being counted done.
       const report = await protocol.migrateStoredMetadata({
         apply,
         ...(flags.type && flags.type.length > 0 ? { types: flags.type } : {}),
         actor: 'os migrate meta --stored',
-        ...(canonicalize ? { canonicalizeFlow: canonicalize } : {}),
       });
       const clean = storedMigrationClean(report);
       if (!clean) exitCode = 1;

@@ -506,7 +506,7 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
     { section: 'Service APIs', pages: ['core-services', 'auth', 'auth-endpoints', 'identity', 'metadata', 'metadata-plugin', 'automation-api', 'analytics', 'export', 'storage', 'notification', 'events', 'connector', 'package-api', 'package-registry', 'plugin-rest-api'] },
   ],
   automation: [
-    { section: 'Flow & Execution', pages: ['flow', 'control-flow', 'execution', 'node-executor', 'state-machine', 'trigger-registry', 'time-relative-trigger'] },
+    { section: 'Flow & Execution', pages: ['flow', 'control-flow', 'execution', 'node-executor', 'state-machine', 'time-relative-trigger'] },
     { section: 'Integration & Data', pages: ['sync', 'etl', 'connector', 'webhook', 'bpmn-interop', 'offline'] },
     { section: 'Approvals & Jobs', pages: ['approval', 'job'] },
   ],

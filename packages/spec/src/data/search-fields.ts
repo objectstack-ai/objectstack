@@ -72,10 +72,32 @@ function autoDefaultFields(fields: Record<string, SearchFieldMeta>, displayField
     if (SEARCH_AUTO_EXCLUDED_TYPES.has(t)) return false;
     return SEARCHABLE_TEXTUAL_TYPES.has(t) || SEARCHABLE_ENUM_TYPES.has(t);
   });
-  // Lead with the display/name field when present.
-  const lead = displayField && fields[displayField] ? displayField
-    : fields.name ? 'name'
-    : fields.title ? 'title'
+  // Lead with the display/name field — ORDERING ONLY (#4483).
+  //
+  // `lead` used to be picked by EXISTENCE (`fields[displayField]`), then
+  // prepended unconditionally, so it re-entered the set after the three
+  // exclusions above had already rejected it. That made
+  // `SEARCH_AUTO_EXCLUDED_FIELDS` — whose contract is "never auto-included" —
+  // untrue for whichever field happened to be the display field, and the case
+  // is not contrived: ADR-0079's `provisionPrimary(schema, { synthesize: false })`
+  // designates `nameField` at registration, and on a table whose only textual
+  // column IS the primary key (system tables, junction tables, append-only
+  // logs) it designates `id`. `$search` then expanded to
+  // `{ id: { $contains: <term> } }` — a substring scan over the primary key.
+  //
+  // It also loosened the #4254 REST ingress gate one layer up, which asks this
+  // same resolution whether a `$searchFields` override names a field the engine
+  // would actually scan: with `id` in `allowed`, `$searchFields=id` was
+  // ACCEPTED instead of refused.
+  //
+  // The lead's job is to put the primary title FIRST, never to admit it, so it
+  // is now chosen from `names` — the already-filtered set. A display field that
+  // is excluded, hidden or of an unsearchable type simply does not lead, and
+  // the set is unchanged.
+  const eligible = (f: string | undefined): f is string => !!f && names.includes(f);
+  const lead = eligible(displayField) ? displayField
+    : eligible('name') ? 'name'
+    : eligible('title') ? 'title'
     : undefined;
   if (!lead) return names;
   return [lead, ...names.filter((f) => f !== lead)];

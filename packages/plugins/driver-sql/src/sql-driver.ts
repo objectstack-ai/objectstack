@@ -12,6 +12,7 @@ import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyD
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
 import { resolveMultiOrgEnabled } from '@objectstack/types';
@@ -377,6 +378,40 @@ function canonicalTimeOfDay(value: unknown): unknown {
  * (1 `typeof` + 3 per `strftime` CASE branch pair × 2 + 1 `coalesce` fallback.)
  */
 const SQLITE_TIME_EXPR_REFS = 8;
+
+/**
+ * [#4436] A filter this driver cannot COMPILE — the caller sent an operator (or
+ * an operand shape) outside what the backend can express.
+ *
+ * This is a refusal the request caused, and #4209/#4029 already made it a
+ * refusal rather than a silent match-everything. What was missing is the wire
+ * IDENTITY of that refusal: the thrown `Error` carried no `code`, so
+ * `mapDataError`'s default branch served `{ "error": "<message>" }` with no
+ * `code` at all — breaking the ADR-0112 contract that `error.code` is the
+ * schema-enforced SCREAMING_SNAKE vocabulary every sibling rejection on this
+ * route already speaks (`INVALID_FIELD`, `INVALID_FILTER`, `RECORD_NOT_FOUND`).
+ *
+ * `INVALID_FILTER` is the catalogued code for the condition, and the SAME one
+ * `metadata-protocol` emits for a filter that fails to parse upstream
+ * (`malformedFilterArrayError` / `unusableFilterError`): one condition — "this
+ * filter cannot run" — has one wire code however the caller reached it.
+ *
+ * `status: 400` makes `@objectstack/rest`'s `sendError` pass the message
+ * through instead of routing it to the SQL-leak heuristic, and puts the
+ * rejection on the `isExpectedQueryRejection` list so a client mistake stops
+ * being logged as an unhandled server error.
+ *
+ * The `[sql-driver]` prefix these messages used to carry is GONE from the text:
+ * it is driver-internal wording, and shipping it to clients is exactly what the
+ * #3867 sanitiser exists to stop. The operator/field/vocabulary detail — the
+ * part a caller can act on — stays.
+ */
+function unsupportedFilterError(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  return err;
+}
 
 // ── Introspection Types ──────────────────────────────────────────────────────
 
@@ -5080,8 +5115,8 @@ export class SqlDriver implements IDataDriver {
         // never converted it and the raw array arrived as `where`. Skipping it
         // (the old behaviour) emitted NO predicate at all: the caller asked to
         // filter and silently got every row. Fail loudly instead. #3948.
-        throw new Error(
-          `[sql-driver] Unrecognized filter operator "${item}" in a comparison triple. ` +
+        throw unsupportedFilterError(
+          `Unrecognized filter operator "${item}" in a comparison triple. ` +
             `A filter array is either a logical node (["and"|"or", …]) or nested ` +
             `conditions ([[field, op, value], …]); a bare [field, op, value] only ` +
             `reaches the driver when its operator is outside @objectstack/spec ` +
@@ -5136,8 +5171,8 @@ export class SqlDriver implements IDataDriver {
       // branches and was dropped, so a malformed element silently narrowed
       // nothing. Same reasoning as above: an unapplied filter must not look
       // like a satisfied one. #3948.
-      throw new Error(
-        `[sql-driver] Unrecognized filter element of type "${item === null ? 'null' : typeof item}" — ` +
+      throw unsupportedFilterError(
+        `Unrecognized filter element of type "${item === null ? 'null' : typeof item}" — ` +
           `expected a logical keyword ("and"/"or") or a condition array. ` +
           `Filter was: ${JSON.stringify(filters)}`,
       );
@@ -5259,7 +5294,7 @@ export class SqlDriver implements IDataDriver {
       case 'between': {
         const arr = Array.isArray(coerced) ? coerced : [];
         if (arr.length !== 2) {
-          throw new Error(`[sql-driver] operator "between" on field "${field}" requires a [min, max] value array.`);
+          throw unsupportedFilterError(`Operator "between" on field "${field}" requires a [min, max] value array.`);
         }
         builder[join === 'or' ? 'orWhereBetween' : 'whereBetween'](field, arr as [any, any]);
         return;
@@ -5298,8 +5333,8 @@ export class SqlDriver implements IDataDriver {
         builder[whereNotNull](field);
         return;
       default:
-        throw new Error(
-          `[sql-driver] Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
+        throw unsupportedFilterError(
+          `Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
             `=, !=, <, <=, >, >=, in, nin, between, contains, not_contains, starts_with, ends_with, ` +
             `is_null, is_not_null (see @objectstack/spec VALID_AST_OPERATORS).`,
         );
@@ -5450,7 +5485,7 @@ export class SqlDriver implements IDataDriver {
             case '$between': {
               const arr = Array.isArray(coerced) ? coerced : [];
               if (arr.length !== 2) {
-                throw new Error(`[sql-driver] operator "$between" on field "${field}" requires a [min, max] value array.`);
+                throw unsupportedFilterError(`Operator "$between" on field "${field}" requires a [min, max] value array.`);
               }
               (builder as any)[logicalOp === 'or' ? 'orWhereBetween' : 'whereBetween'](field, arr as [any, any]);
               break;
@@ -5472,8 +5507,8 @@ export class SqlDriver implements IDataDriver {
                 : (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')](field);
               break;
             default:
-              throw new Error(
-                `[sql-driver] Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
+              throw unsupportedFilterError(
+                `Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
                   `$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $between, $contains, $notContains, ` +
                   `$startsWith, $endsWith, $regex, $null, $exists.`,
               );

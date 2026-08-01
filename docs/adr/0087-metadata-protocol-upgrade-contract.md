@@ -487,3 +487,48 @@ Closing it needed three decisions.
 A refused rename — the guard firing because the old token is a live name owned
 by something else — fails that row loudly with the token and its owner. Never a
 silent skip, never a clobber; that is the whole reason the guard exists.
+
+## Addendum (2026-08-01c) — "strictly shrinking" was false for flows (#4498)
+
+The bullet above claims new rows are always canonical, *therefore* the stored
+pass is a strictly shrinking concern. `duplicatePackage` was a live producer
+contradicting it: it canonicalizes each source row before re-saving, but through
+`convertStoredItem`, which returns `flow` bodies untouched. `FlowNodeSchema.config`
+is an open `z.record`, so a pre-17 body sailed through `saveMetaItem`'s gate and
+landed verbatim in a brand-new row. An operator could run the migration, get a
+clean report, duplicate a package, and be back to pre-protocol rows — with the
+report still saying protocol N until the next run.
+
+- **The capability was already reachable; only the wiring was missing.** The
+  protocol is constructed with an accessor for the kernel's service table (the
+  same one `analytics` and `package` are read from), and the automation service
+  registers under `automation`. `resolveFlowCanonicalizer` reads
+  `canonicalizeStoredFlow` off it. So the fix is not new plumbing per call site
+  — it is one private resolver that every caller running next to a live engine
+  shares.
+- **The explicit hook becomes an override, not a requirement.**
+  `migrateStoredMetadata`'s `canonicalizeFlow` defaults to the resolver, so the
+  CLI stopped passing one (it boots the inert engine into the same kernel, so
+  both routes reached the same instance — two routes to one capability is how
+  they drift). The parameter stays for callers with no registry and for testing
+  the flow branch without an engine.
+- **Resolution is lazy, per call.** Plugin init order does not guarantee
+  `automation` is in the table when the protocol is assembled — the CLI adds it
+  after ObjectQL by design — so caching `undefined` from a too-early read would
+  disable flow canonicalization for the life of the process.
+- **The failure posture matches #4454's.** A refused rename fails that item into
+  `duplicatePackage`'s existing `failed[]` naming the token, rather than copying
+  the un-renamed body: producing exactly the row this fix exists to prevent is
+  the one outcome worse than failing the copy. A flow that cannot canonicalize
+  at all fails the same way. With **no** engine reachable (a control-plane or
+  metadata-only host) the source body is copied as-is — no worse than the source
+  row already is, and failing an unrelated duplication over it would be its own
+  regression.
+- **Reads were not changed.** `getMetaItems` / `getMetaItem` /
+  `getMetaItemLayered` / `loadMetaFromDb` still skip flows; they are reads,
+  covered by `registerFlow` canonicalizing at execution, and are not producing
+  bad data. Duplication was the one that *writes*. The resolver is the seam they
+  would adopt if that changes.
+
+The premise is restored rather than restated: the stored pass shrinks because
+every write path now canonicalizes, not because the sentence says so.

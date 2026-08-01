@@ -219,6 +219,8 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'PUT /meta/:type/:name', domain: '/meta', disposition: 'sdk', client: 'meta.saveItem' },
   { route: 'GET /meta/:type/:name/published', domain: '/meta', disposition: 'sdk', client: 'meta.getPublished' },
   { route: 'GET /meta/_drafts', domain: '/meta', disposition: 'sdk', client: 'meta.listDrafts' },
+  { route: 'POST /meta/_migrate-stored', domain: '/meta', disposition: 'sdk', client: 'meta.migrateStored',
+    note: 'ADR-0087 stored-row canonicalization (#4327); gated on `manage_metadata`, preview unless { apply: true }' },
   { route: 'GET /meta/objects/:name/state/:field', domain: '/meta', disposition: 'sdk', client: 'meta.getLegalNextStates' },
 
   // ── data (legacy chain) ───────────────────────────────────────────────────

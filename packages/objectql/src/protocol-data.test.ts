@@ -403,16 +403,26 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
     // ═══════════════════════════════════════════════════════════════
     describe('Optimistic Concurrency Control', () => {
         beforeEach(() => {
-            // Both update and delete need `update` / `delete` on the
-            // engine, plus `findOne` for the version probe.
+            // Both update and delete need `update` / `delete` on the engine,
+            // plus `findOne` for the record probe.
+            //
+            // [#4435] The record now has to EXIST for a PATCH to proceed at
+            // all: `updateData` refuses an id that names no row instead of
+            // answering `200 { record: null }`. The default probe result is
+            // therefore a real row — these cases are about OCC, not about
+            // missing records (which `updateData refuses an id …` covers).
+            mockEngine.findOne.mockResolvedValue({ id: 'r1', updated_at: '2026-05-22T07:14:00.000Z' });
             mockEngine.update = vi.fn().mockResolvedValue({ id: 'r1', updated_at: '2026-05-22T07:14:33.000Z' });
             mockEngine.delete = vi.fn().mockResolvedValue(true);
         });
 
         it('updateData proceeds when no expectedVersion is supplied (legacy callers)', async () => {
             await protocol.updateData({ object: 'task', id: 'r1', data: { name: 'New' } });
-            // No version probe was issued
-            expect(mockEngine.findOne).not.toHaveBeenCalled();
+            // [#4435] One probe — the EXISTENCE probe, which every PATCH now
+            // makes. No OCC comparison happens (no token was supplied), which
+            // is what "legacy callers are unaffected" means: they are not
+            // subject to 409, only to the 404 that GET already answered.
+            expect(mockEngine.findOne).toHaveBeenCalledOnce();
             expect(mockEngine.update).toHaveBeenCalledOnce();
         });
 
@@ -424,8 +434,29 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
                 data: { name: 'New' },
                 expectedVersion: '2026-05-22T07:14:00.000Z',
             });
+            // [#4435] Still exactly ONE read. The existence gate and OCC both
+            // need this row, so they share the probe rather than issuing one
+            // each — two round-trips per PATCH would be a performance
+            // regression no gate reports, and the second read could disagree
+            // with the first.
             expect(mockEngine.findOne).toHaveBeenCalledOnce();
             expect(mockEngine.update).toHaveBeenCalledOnce();
+        });
+
+        it('updateData refuses an id that names no row, before any OCC verdict', async () => {
+            // [#4435] 404 wins over 409 when both could apply: OCC has always
+            // declined to treat a missing record as a concurrency conflict, and
+            // "this record does not exist" is the more specific answer.
+            mockEngine.findOne.mockResolvedValue(null);
+            await expect(
+                protocol.updateData({
+                    object: 'task',
+                    id: 'gone',
+                    data: { name: 'New' },
+                    expectedVersion: '2026-05-22T07:14:00.000Z',
+                })
+            ).rejects.toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
+            expect(mockEngine.update).not.toHaveBeenCalled();
         });
 
         it('updateData strips RFC-7232 quotes from the If-Match token', async () => {
@@ -475,14 +506,27 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
         });
 
         it('updateData skips the check when expectedVersion is empty string', async () => {
+            // A blank token opts OUT of OCC — the record still has to exist
+            // (#4435), so the probe happens; what must NOT happen is a 409.
             await protocol.updateData({
                 object: 'task',
                 id: 'r1',
                 data: { name: 'New' },
                 expectedVersion: '   ',
             });
-            expect(mockEngine.findOne).not.toHaveBeenCalled();
+            expect(mockEngine.findOne).toHaveBeenCalledOnce();
             expect(mockEngine.update).toHaveBeenCalledOnce();
+        });
+
+        it('deleteData without a token issues NO probe at all', async () => {
+            // [#4435] DELETE needs no existence probe: the driver's own return
+            // ("True if deleted, false if not found") reports whether a row
+            // matched, so a plain DELETE stays at zero extra reads and only an
+            // OCC token buys one.
+            mockEngine.findOne.mockClear();
+            await protocol.deleteData({ object: 'task', id: 'r1' });
+            expect(mockEngine.findOne).not.toHaveBeenCalled();
+            expect(mockEngine.delete).toHaveBeenCalledOnce();
         });
 
         it('deleteData throws ConcurrentUpdateError on version mismatch', async () => {

@@ -8,57 +8,12 @@ description: Connector protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { Connector, ConnectorTrigger, DataSyncConfig } from '@objectstack/spec/automation';
-import type { Connector, ConnectorTrigger, DataSyncConfig } from '@objectstack/spec/automation';
+import { DataSyncConfig } from '@objectstack/spec/automation';
+import type { DataSyncConfig } from '@objectstack/spec/automation';
 
 // Validate data
-const result = Connector.parse(data);
+const result = DataSyncConfig.parse(data);
 ```
-
----
-
-## Connector
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Connector ID (snake_case) |
-| **name** | `string` | ✅ | Connector name |
-| **description** | `string` | optional | Connector description |
-| **version** | `string` | optional | Connector version |
-| **icon** | `string` | optional | Connector icon |
-| **category** | `Enum<'crm' \| 'payment' \| 'communication' \| 'storage' \| 'analytics' \| 'database' \| 'marketing' \| 'accounting' \| 'hr' \| 'productivity' \| 'ecommerce' \| 'support' \| 'devtools' \| 'social' \| 'other'>` | ✅ | Connector category |
-| **baseUrl** | `string` | optional | API base URL |
-| **authentication** | `{ type: Enum<'none' \| 'apiKey' \| 'basic' \| 'bearer' \| 'oauth1' \| 'oauth2' \| 'custom'>; fields?: { name: string; label: string; type: Enum<'text' \| 'password' \| 'url' \| 'select'>; description?: string; … }[]; oauth2?: object; test?: object }` | ✅ | Authentication config |
-| **operations** | `{ id: string; name: string; description?: string; type: Enum<'read' \| 'write' \| 'delete' \| 'search' \| 'trigger' \| 'action'>; … }[]` | optional | Connector operations |
-| **triggers** | `{ id: string; name: string; description?: string; type: Enum<'webhook' \| 'polling' \| 'stream'>; … }[]` | optional | Connector triggers |
-| **rateLimit** | `{ requestsPerSecond?: number; requestsPerMinute?: number; requestsPerHour?: number }` | optional | Rate limiting |
-| **author** | `string` | optional | Connector author |
-| **documentation** | `string` | optional | Documentation URL |
-| **homepage** | `string` | optional | Homepage URL |
-| **license** | `string` | optional | License (SPDX identifier) |
-| **tags** | `string[]` | optional | Connector tags |
-| **verified** | `boolean` | ✅ | Verified connector |
-| **metadata** | `Record<string, any>` | optional | Custom metadata |
-
-
----
-
-## ConnectorTrigger
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Trigger ID (snake_case) |
-| **name** | `string` | ✅ | Trigger name |
-| **description** | `string` | optional | Trigger description |
-| **type** | `Enum<'webhook' \| 'polling' \| 'stream'>` | ✅ | Trigger mechanism |
-| **config** | `Record<string, any>` | optional | Trigger configuration |
-| **outputSchema** | `Record<string, any>` | optional | Event payload schema |
-| **pollingIntervalMs** | `integer` | optional | Polling interval in ms |
-
 
 ---
 

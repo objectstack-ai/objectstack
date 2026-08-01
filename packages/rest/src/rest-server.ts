@@ -2808,6 +2808,90 @@ export class RestServer {
             });
         }
 
+        // POST /meta/_migrate-stored — rewrite stored sys_metadata rows into
+        // today's canonical shape (ADR-0087; #4327 / #4454 / #4498).
+        //
+        // The server-side form of `os migrate meta --stored`. The CLI form
+        // needs shell access to the deployment's database, which a hosted
+        // operator does not have — so without this route the stored-metadata
+        // chain has no finish line on a managed deployment, only the per-read
+        // conversion that runs forever. Flow rows are covered here for free:
+        // `migrateStoredMetadata` resolves the automation engine from the
+        // services registry (#4498), and a server always has a live one.
+        //
+        // Registered BEFORE `/meta/:type` so the leading-underscore segment is
+        // not captured as a `:type` parameter (same reason as `_drafts`).
+        if (metadata.endpoints.items !== false) {
+            this.routeManager.register({
+                method: 'POST',
+                path: `${metaPath}/_migrate-stored`,
+                handler: async (req: any, res: any) => {
+                    try {
+                        const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        // Gate FIRST — before resolving the protocol — so an
+                        // unauthorized caller cannot use the 501 vs 200 answer
+                        // to probe which kernels can be migrated.
+                        //
+                        // This rewrites every eligible row in the deployment,
+                        // so unlike the single-item `PUT /meta/:type/:name` it
+                        // demands an explicit capability rather than only a
+                        // session. `manage_metadata` is ADR-0066 D1's authoring
+                        // capability, and a canonicalization rewrite is
+                        // authoring; `isSystem` bypasses, matching every other
+                        // capability gate on the platform.
+                        const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                        const held = new Set<string>(
+                            Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                        );
+                        if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: 'Rewriting stored metadata requires the `manage_metadata` capability.',
+                                },
+                            });
+                            return;
+                        }
+                        const p = await this.resolveProtocol(environmentId, req);
+                        if (typeof (p as any).migrateStoredMetadata !== 'function') {
+                            res.status(501).json({
+                                error: {
+                                    code: 'NOT_IMPLEMENTED',
+                                    message: 'protocol.migrateStoredMetadata() is not available in this kernel',
+                                },
+                            });
+                            return;
+                        }
+                        const rawTypes = (req.body as any)?.types;
+                        const types = Array.isArray(rawTypes)
+                            ? rawTypes.filter((t: unknown): t is string => typeof t === 'string' && t.length > 0)
+                            : [];
+                        // Preview by default — `apply` must be explicitly true,
+                        // the same posture the CLI takes. A caller who sends an
+                        // empty body gets a report and no writes.
+                        const report = await (p as any).migrateStoredMetadata({
+                            apply: (req.body as any)?.apply === true,
+                            ...(types.length > 0 ? { types } : {}),
+                            // Attributed to the caller: this writes history +
+                            // audit rows, and "who ran the migration" is the
+                            // question those rows exist to answer.
+                            actor: ctx?.userId
+                                ? `${ctx.userId} (POST ${metadata.prefix}/_migrate-stored)`
+                                : `POST ${metadata.prefix}/_migrate-stored`,
+                        });
+                        res.json(report);
+                    } catch (error: any) {
+                        logError("[REST] Unhandled error:", error);
+                        sendError(res, error);
+                    }
+                },
+                metadata: {
+                    summary: 'Rewrite stored metadata rows into the canonical protocol shape',
+                    tags: ['metadata'],
+                },
+            });
+        }
+
         // GET /meta/:type - List items of a type
         if (metadata.endpoints.items !== false) {
             this.routeManager.register({

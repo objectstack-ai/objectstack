@@ -654,6 +654,32 @@ export class ObjectStackClient {
     },
 
     /**
+     * ADR-0087: rewrite stored `sys_metadata` rows into today's canonical
+     * shape — the server-side form of `os migrate meta --stored` (#4327),
+     * for operators who cannot reach the deployment's database from a shell.
+     *
+     * **Preview by default.** Without `apply: true` this reports what it
+     * would do and writes nothing; the report is the same
+     * `StoredMigrationReport` the CLI renders (`scanned` / `canonical` /
+     * `pending` / `rewritten` / `skipped` / `failed`, plus a `rows` list of
+     * everything that is not already canonical).
+     *
+     * Requires the `manage_metadata` capability (403 otherwise) — it rewrites
+     * every eligible row in the deployment, not one item.
+     */
+    migrateStored: async (opts?: { apply?: boolean; types?: string[] }) => {
+        const route = this.getRoute('metadata');
+        const res = await this.fetch(`${this.baseUrl}${route}/_migrate-stored`, {
+            method: 'POST',
+            body: JSON.stringify({
+                ...(opts?.apply === true ? { apply: true } : {}),
+                ...(opts?.types && opts.types.length > 0 ? { types: opts.types } : {}),
+            }),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
      * ADR-0020 D3.3 FSM introspection: the legal next states for `field`
      * from state `from`, per the object's `state_machine` validation rule.
      * `next` is `null` when no FSM governs the field (or `from` is omitted),
