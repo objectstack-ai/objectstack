@@ -342,10 +342,15 @@ removals" this way while writing this section; `check:generated` now prints this
 inline when that gate is the one failing.)
 
 `check:liveness`, `check:empty-state`, `check:skill-examples`,
-`check:react-declaration-parity` and `check:exported-any` are pure checks with no
-generator — a failure there is a real finding to fix, not an artifact to regenerate.
-`check:generated` names them as deliberately not run, so its "all up to date" never reads
-as "everything passed".
+`check:react-declaration-parity`, `check:exported-any` and `check:dual-source-exports` are
+pure checks with no generator — a failure there is a real finding to fix, not an artifact
+to regenerate. `check:generated` names them as deliberately not run, so its "all up to
+date" never reads as "everything passed". The last one asks the third question about the
+export surface (#4446): `api-surface.json` shows a name on two entries but not whether
+that is one declaration re-exported (fine) or two declarations sharing a name — the #4411
+trap, judged by symbol identity against the built dist, with the accepted cases in the
+shrink-only `dual-source-exports.baseline.json` (hand-edited under review, never
+generated: a `gen:` would admit a new dual-source via "run the fix command").
 
 ⚠️ **`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against
 an implementation.** Left: the props a block's spec zod schema declares. Right: the inputs

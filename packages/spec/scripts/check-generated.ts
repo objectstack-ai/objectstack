@@ -88,6 +88,15 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
     check: 'check:exported-any',
     why: 'audits the built .d.ts for exported types/schemas that resolve to `any` — no artifact (needs a fresh `pnpm build`)',
   },
+  // Reads the built dist like exported-any. Its baseline
+  // (dual-source-exports.baseline.json) is a shrink-only ledger edited by hand
+  // under review — deliberately NOT a generated artifact, because a `gen:` that
+  // rewrites it would admit a new dual-source via "run the fix command" instead
+  // of via a maintainer decision (#4446).
+  {
+    check: 'check:dual-source-exports',
+    why: 'audits the built .d.ts for same-name exports resolving to DIFFERENT declarations across entry points — baseline is hand-ratcheted, not generated (needs a fresh `pnpm build`)',
+  },
 ];
 
 /**

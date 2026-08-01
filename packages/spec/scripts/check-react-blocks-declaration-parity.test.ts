@@ -46,6 +46,16 @@ const manifestFor = (type: string, inputs: string[]): Manifest => ({
   components: { [type]: { type, inputs: inputs.map((name) => ({ name })) } },
 });
 
+/**
+ * Every `run()` spawns a fresh tsx process that loads the whole spec schema
+ * surface — ~4.5s alone and 5–7s under turbo's parallel test load, which is
+ * ON the 5s vitest default. Which test crossed the line varied run to run:
+ * three consecutive `pnpm test` sweeps failed a different `it` of this file
+ * each time, every one a timeout, while the file alone stayed green. A
+ * timeout here should mean "the script hung", not "the runner was busy".
+ */
+const SPAWN_TIMEOUT_MS = 60_000;
+
 /** Run the real script against a synthetic manifest; return stdout+stderr. */
 function run(manifest: Manifest, args: string[] = []): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'react-parity-'));
@@ -73,17 +83,17 @@ const SCHEMA_PROP = 'layout';
 const NOT_A_SCHEMA_PROP = 'zzzNotInTheFormViewSchema';
 
 describe('check:react-declaration-parity — the signals it can see', () => {
-  it('reports a registry-declared input the spec does not declare as registry-only', () => {
+  it('reports a registry-declared input the spec does not declare as registry-only', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const out = run(manifestFor('object-form', [SCHEMA_PROP, NOT_A_SCHEMA_PROP]));
     expect(out).toMatch(/registry declares, spec does not: .*zzzNotInTheFormViewSchema/);
   });
 
-  it('reports a spec-declared prop the registry does not declare as spec-only', () => {
+  it('reports a spec-declared prop the registry does not declare as spec-only', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const out = run(manifestFor('object-form', []));
     expect(out).toMatch(new RegExp(`spec declares, registry does not: .*${SCHEMA_PROP}`));
   });
 
-  it('reports a block absent from the manifest as missing', () => {
+  it('reports a block absent from the manifest as missing', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const out = run(manifestFor('something-else', []));
     expect(out).toMatch(/<ObjectForm> \(object-form\): NO component in the manifest/);
   });
@@ -100,7 +110,7 @@ describe('check:react-declaration-parity — the blind spot is stated, every run
    * The assertion is therefore not "it catches this" (it cannot) but "it says so
    * while reporting the agreement".
    */
-  it('calls agreeing declarations agreement — and prints the caveat alongside it', () => {
+  it('calls agreeing declarations agreement — and prints the caveat alongside it', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const out = run(manifestFor('object-form', [SCHEMA_PROP]));
     expect(out).toMatch(/declared by both/);
     expect(out).not.toMatch(/registry declares, spec does not/);
@@ -109,7 +119,7 @@ describe('check:react-declaration-parity — the blind spot is stated, every run
     expect(out).toMatch(/#4413/);
   });
 
-  it('carries the caveat on a clean baseline ratchet too, where it is easiest to over-read', () => {
+  it('carries the caveat on a clean baseline ratchet too, where it is easiest to over-read', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const baseline = path.join(PKG, 'react-declaration-parity.baseline.json');
     // Every baselined block must be present, or the run reports them vanished
     // instead of clean. Each declares only spec props, so registry-only is empty
@@ -141,7 +151,7 @@ describe('check:react-declaration-parity — the retired claim stays retired (Pr
    */
   const CLAIM_WORDS = /\b(actually implements?|conforms? to|conformance)\b/i;
 
-  it('the report never claims the frontend implements anything', () => {
+  it('the report never claims the frontend implements anything', { timeout: SPAWN_TIMEOUT_MS }, () => {
     const out = run(manifestFor('object-form', [SCHEMA_PROP, NOT_A_SCHEMA_PROP]));
     expect(out).not.toMatch(CLAIM_WORDS);
   });
