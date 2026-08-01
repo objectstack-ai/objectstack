@@ -930,6 +930,50 @@ honoured — `updateManyData`, `deleteManyData` and `batchData` persisted
 regardless, so a caller sending it to *preview* a mutation got it executed. It
 is HTTP-only; stop sending it.
 
+### `findOne` must say which record it wants (#4419)
+
+`findOne` reads a single row. That makes its predicate the only thing standing
+between the caller and *an arbitrary record* — and when the predicate is missing
+the result is not `null`, it is the object's **first row**: a real,
+plausible-looking record with nothing to do with the request, which the
+`if (!row)` check every call site already has cannot catch, and which then
+propagates into whatever is computed next. Downstream of one such call, line
+items defaulted their price from the first product in the catalog, and
+"is this deal already closed?" was answered against an unrelated record while
+the write that followed correctly targeted the intended id.
+
+So a query that selects nothing in particular is now **refused** rather than
+answered. Say which record you want in one of three ways:
+
+| Instead of | Write | Meaning |
+|---|---|---|
+| `findOne(o)` / `findOne(o, {})` / `findOne(o, { where: {} })` | `findOne(o, { where: … })` | the record matching this predicate |
+| | `findOne(o, { search: 'Acme' })` | the record this search finds |
+| | `findOne(o, { orderBy: [{ field: 'created_at', order: 'desc' }] })` | the FIRST record in this order — the newest |
+| | `find(o, { limit: 1 })` | any row will genuinely do — and the call site says so |
+
+The error names all four. `find` and `count` are unchanged: returning or counting
+every row is an honest answer, and only `findOne`'s implicit "just one of them"
+turns a missing predicate into a confidently wrong record.
+
+Two silent drops that produced the same wrong record are fixed with it:
+
+- **`findOne({ search })` now applies the search.** The ADR-0061 `search` →
+  cross-field `$contains` expansion ran in `find` only, while both methods are
+  checked against the same legal-key set — so `search` passed the gate, reached a
+  driver that does not read it, and the read came back unpredicated. The
+  expansion is now one function both call, and a drift pin requires every option
+  `findOne` declares to have an observable effect.
+- **`MongoDBDriver.findOne` now applies `orderBy`, `fields` and `offset`.** It
+  translated `where` and dropped the rest, so "the newest record" returned
+  whichever document the scan reached first. No ordering is imposed when the
+  caller supplies none (#4363) — that part is unchanged, on both drivers.
+
+Together with the `filter` → `where` fold on every entry point and the
+unknown-key rejection (both already in this release), a read parameter the engine
+does not execute now fails at the call site instead of quietly changing the
+answer.
+
 ### Dead spec clusters removed
 
 **App shell (2026-06 liveness audit, #4001 app step).** `App.version`,
