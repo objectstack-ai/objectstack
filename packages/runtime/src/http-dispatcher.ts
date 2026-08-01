@@ -876,7 +876,7 @@ export class HttpDispatcher {
         // that request handlers (handleI18n, handleAuth, …) use.
         const [
             authSvc, searchSvc, realtimeSvc, filesSvc,
-            analyticsSvc, workflowSvc, aiSvc, notificationSvc, i18nSvc,
+            analyticsSvc, aiSvc, notificationSvc, i18nSvc,
             protocolSvc, automationSvc, cacheSvc, queueSvc, jobSvc, mcpSvc,
             metadataSvc, dataSvc,
         ] = await Promise.all([
@@ -885,7 +885,6 @@ export class HttpDispatcher {
             this.resolveService(CoreServiceName.enum.realtime),
             this.resolveService(CoreServiceName.enum['file-storage']),
             this.resolveService(CoreServiceName.enum.analytics),
-            this.resolveService(CoreServiceName.enum.workflow),
             this.resolveService(CoreServiceName.enum.ai),
             this.resolveService(CoreServiceName.enum.notification),
             this.resolveService(CoreServiceName.enum.i18n),
@@ -943,7 +942,6 @@ export class HttpDispatcher {
         const automationRegistered   = !!automationSvc;
         const hasFiles        = isServiceServeable(filesSvc);
         const hasAnalytics    = isServiceServeable(analyticsSvc);
-        const hasWorkflow     = !!workflowSvc;
         const hasAi           = isServiceServeable(aiSvc);
         const hasNotification = isServiceServeable(notificationSvc);
         const hasI18n         = isServiceServeable(i18nSvc);
@@ -977,7 +975,9 @@ export class HttpDispatcher {
                 storage:       hasFiles ? `${prefix}/storage` : undefined,
                 analytics:     hasAnalytics ? `${prefix}/analytics` : undefined,
                 automation:    hasAutomation ? `${prefix}/automation` : undefined,
-                workflow:      hasWorkflow ? `${prefix}/workflow` : undefined,
+                // `workflow` removed (#4451, v17): the slot retired — nothing
+                // ever registered it and this dispatcher never had a /workflow
+                // branch, so the advertisement could never come true.
                 // Never advertised (ADR-0076 D12, #2462): service-realtime is an
                 // in-process pub/sub bus — the dispatcher has no /realtime branch
                 // and no plugin mounts one, so an advertised route would 404.
@@ -1090,7 +1090,6 @@ export class HttpDispatcher {
                 files: hasFiles,
                 analytics: hasAnalytics,
                 ai: hasAi,
-                workflow: hasWorkflow,
                 notifications: hasNotification,
                 i18n: hasI18n,
             },
@@ -1181,7 +1180,8 @@ export class HttpDispatcher {
                                         enabled: false, status: 'unavailable' as const, handlerReady: false,
                                         message: serviceUnavailableMessage('ui'),
                                     },
-                workflow:       hasWorkflow ? svcAvailable(routes.workflow, undefined, workflowSvc) : svcUnavailable('workflow'),
+                // `workflow` entry removed (#4451, v17) with the slot itself —
+                // it could only ever report `unavailable`.
                 // Honest entry (ADR-0076 D12, #2462): the registered realtime
                 // service is an in-process event bus with NO mounted HTTP/WS
                 // surface — report it degraded with handlerReady:false (or as

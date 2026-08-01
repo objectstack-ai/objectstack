@@ -37,7 +37,6 @@ import type { IJobService } from './job-service';
 import type { INotificationService } from './notification-service';
 import type { IAIService } from './ai-service';
 import type { II18nService } from './i18n-service';
-import type { IWorkflowService } from './workflow-service';
 import type { ISecurityService } from './security-service';
 import type { IShareLinkService } from './share-link-service';
 import type { IHttpServer } from './http-server';
@@ -79,7 +78,8 @@ export interface CoreServiceContracts {
     ai: IAIService;
     /** `service-i18n`, or the `app-plugin` in-memory fallback (#4143). */
     i18n: II18nService;
-    workflow: IWorkflowService;
+    // `workflow: IWorkflowService` removed with the slot (#4451, v17) — no
+    // implementation ever existed, so there was no evidenced binding here.
 }
 
 /**

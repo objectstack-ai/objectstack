@@ -1,5 +1,5 @@
 {
-  "description": "Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. Auto-appended when new schemas are added (commit the change). A listed schema that a build no longer emits fails gen:schema — remove a key ONLY for a deliberate retirement. See #2978.",
+  "description": "Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. Auto-appended when new schemas are added (commit the change). A listed schema that a build no longer emits fails gen:schema \u2014 remove a key ONLY for a deliberate retirement. See #2978.",
   "schemas": [
     "ai/AIModelConfig",
     "ai/AIUsageRecord",
@@ -272,10 +272,6 @@
     "api/GetUiViewResponse",
     "api/GetViewRequest",
     "api/GetViewResponse",
-    "api/GetWorkflowConfigRequest",
-    "api/GetWorkflowConfigResponse",
-    "api/GetWorkflowStateRequest",
-    "api/GetWorkflowStateResponse",
     "api/HandlerStatus",
     "api/HttpFindQueryParams",
     "api/HttpMethod",
@@ -499,9 +495,6 @@
     "api/WebhookConfig",
     "api/WebhookEvent",
     "api/WellKnownCapabilities",
-    "api/WorkflowState",
-    "api/WorkflowTransitionRequest",
-    "api/WorkflowTransitionResponse",
     "automation/ActionCategory",
     "automation/ActionDescriptor",
     "automation/ActionParadigm",

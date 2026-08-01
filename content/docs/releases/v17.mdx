@@ -970,6 +970,7 @@ import or the authored key.
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
 | `ChartInteraction.zoom` / `.clickAction` | never implemented (#3752) |
+| The `workflow` service slot — `CoreServiceName 'workflow'`, `IWorkflowService`, `WorkflowProtocol`, the `Get/WorkflowState/Config/Transition` schema cluster, discovery `routes.workflow` / `services.workflow` / `features.workflow`, the `RestApiRouteCategory 'workflow'` member and the stray `graphql` provider entry | declared end to end and implemented nowhere: nothing ever registered or resolved the slot (ADR-0115 Evidence 5), no method of `WorkflowProtocol` was ever implemented, no host ever mounted `/api/v1/workflow`. State machines are `state_machine` validation rules; approvals are flow nodes (ADR-0019); record-triggered automation is hooks + `record_change` flows (#4451) |
 
 The Console side follows: `@object-ui/types` drops its
 `ObjectStack`/`ObjectOS`/`ObjectQL`/`ObjectUI` Capabilities re-exports, which
@@ -2025,6 +2026,13 @@ covers are folded into the list below rather than left to the changelog.)
   device/preference helpers, `client.ai.{nlq,suggest,insights}` and
   `projects.listTemplates()`; repoint marketplace publish to
   `POST /api/v1/packages/publish`; drop `os environments create --template`.
+  Imports of `IWorkflowService`, `WorkflowProtocol` or the
+  `Get/WorkflowState/Config/Transition` types no longer resolve — the
+  `workflow` slot retired with them (#4451); use `state_machine` validation
+  rules, approval flow nodes and `record_change` flows instead. Discovery
+  responses no longer carry `services.workflow` / `routes.workflow` /
+  `features.workflow` — a reader keying on them saw only `unavailable`/`false`
+  before, so delete the read.
 - **Console hosts:** the same removals land in objectui — drop the
   `useClientNotifications` device/preference delegates (`@object-ui/react`) and
   replace the retired `@object-ui/types` Capabilities re-exports with imports

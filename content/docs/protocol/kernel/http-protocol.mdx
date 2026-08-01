@@ -47,14 +47,13 @@ GET /api/v1/discovery HTTP/1.1
     "packages": "/api/v1/packages",
     "auth": "/api/v1/auth",
     "ui": "/api/v1/ui",
-    "storage": "/api/v1/storage",
-    "graphql": "/api/v1/graphql"
+    "storage": "/api/v1/storage"
   },
   "services": {
     "data": { "enabled": true, "status": "available", "route": "/api/v1/data", "provider": "objectql" },
     "metadata": { "enabled": true, "status": "available", "route": "/api/v1/meta", "provider": "objectql" },
     "auth": { "enabled": true, "status": "available", "route": "/api/v1/auth", "provider": "@objectstack/plugin-auth" },
-    "workflow": { "enabled": false, "status": "unavailable", "message": "No implementation ships for the 'workflow' slot — register a service under it to enable" },
+    "search": { "enabled": false, "status": "unavailable", "message": "No implementation ships for the 'search' slot — register a service under it to enable" },
     "ai": { "enabled": false, "status": "unavailable", "message": "Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation ships in the open framework" }
   },
   "locale": {

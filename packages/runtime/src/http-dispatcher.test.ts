@@ -2326,10 +2326,18 @@ describe('HttpDispatcher', () => {
 
             it('says nothing ships rather than naming a package that does not exist', async () => {
                 const info = await dispatcher.getDiscoveryInfo('/api/v1');
-                for (const slot of ['ai', 'search', 'workflow'] as const) {
+                // `workflow` left this list with its slot (#4451, v17).
+                for (const slot of ['ai', 'search'] as const) {
                     expect(info.services[slot].message, `services.${slot}.message`).not.toMatch(/Install/);
                     expect(info.services[slot].message, `services.${slot}.message`).toContain(slot);
                 }
+            });
+
+            it('reports no entry at all for the retired workflow slot (#4451)', async () => {
+                const info = await dispatcher.getDiscoveryInfo('/api/v1');
+                expect(info.services).not.toHaveProperty('workflow');
+                expect(info.routes).not.toHaveProperty('workflow');
+                expect(info.features).not.toHaveProperty('workflow');
             });
 
             it('never emits the old slot-name-derived template', async () => {
@@ -2520,15 +2528,17 @@ describe('HttpDispatcher', () => {
         });
 
         it('keeps reporting unmarked services as available', async () => {
+            // Was pinned on `workflow` until that slot retired (#4451, v17);
+            // `auth` exercises the same unmarked-service path.
             (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
-                if (name === 'workflow') return { getConfig: vi.fn() };
+                if (name === 'auth') return { validateToken: vi.fn() };
                 return null;
             });
 
             const info = await dispatcher.getDiscoveryInfo('/api/v1');
-            expect(info.services.workflow.enabled).toBe(true);
-            expect(info.services.workflow.status).toBe('available');
-            expect(info.services.workflow.handlerReady).toBe(true);
+            expect(info.services.auth.enabled).toBe(true);
+            expect(info.services.auth.status).toBe('available');
+            expect(info.services.auth.handlerReady).toBe(true);
         });
 
         // ── The `metadata` slot: computed, not hardcoded (#4089) ──────────────

@@ -502,10 +502,15 @@ a package that cannot be installed is a dead end, which is why
 | Slot | State |
 |:-------|:------------|
 | **ui** | Nothing registers the slot. `ViewProtocol`'s five methods are declared and unrouted; view CRUD runs through `/api/v1/meta`, and `/api/v1/ui/view/:object` is served by the `protocol` service. |
-| **workflow** | Nothing ships. `WorkflowProtocol`'s three methods have no implementation and no consumer. |
 | **search** | Nothing ships. Contract and engine enum exist in `@objectstack/spec` only. |
 | **ai** | Nothing in this repo — `service-ai` (chat, completion, models, conversations) is Cloud/EE. |
 | **realtime transport** | The service exists but no WebSocket/SSE route is mounted, so `routes.realtime` is deliberately never advertised. |
+
+The `workflow` slot used to sit in this table ("nothing ships, no consumer").
+It was retired outright in v17 (#4451, per ADR-0115 Evidence 5): the
+capability lives in `state_machine` validation rules, approval flow nodes
+(ADR-0019) and `record_change` flows, so there is nothing left for a slot to
+promise.
 
 ---
 
