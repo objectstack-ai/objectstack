@@ -342,10 +342,20 @@ removals" this way while writing this section; `check:generated` now prints this
 inline when that gate is the one failing.)
 
 `check:liveness`, `check:empty-state`, `check:skill-examples`,
-`check:react-conformance` and `check:exported-any` are pure checks with no generator — a
-failure there is a real finding to fix, not an artifact to regenerate. `check:generated`
-names them as deliberately not run, so its "all up to date" never reads as "everything
-passed".
+`check:react-declaration-parity` and `check:exported-any` are pure checks with no
+generator — a failure there is a real finding to fix, not an artifact to regenerate.
+`check:generated` names them as deliberately not run, so its "all up to date" never reads
+as "everything passed".
+
+⚠️ **`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against
+an implementation.** Left: the props a block's spec zod schema declares. Right: the inputs
+the objectui *registry config* declares. Both are declarations — `manifestFromConfigs`
+copies `config.inputs` verbatim — so a prop **both sides declare and no renderer reads**
+is, to this gate, perfect agreement. It was named `check:react-conformance` and opened by
+claiming it confirmed the components "ACTUALLY implement" the spec props; it never could,
+and #4413 shipped four dead blocks straight through a green run of it. Renamed and
+re-scoped in #4472. The gate is still worth having (`spec-only`, `registry-only` and
+`missing` are real signals) — just don't read it as proof anything renders.
 
 `check:exported-any` is the one of those that also reads the built `dist/*.d.ts`, so the
 stale-`dist` caveat above applies to it too. It asks the other half of the
