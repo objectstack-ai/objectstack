@@ -76,7 +76,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
+import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import { applyHaving } from './having-filter.js';
@@ -1947,6 +1947,118 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#4441] Referential integrity on the WRITE path: a `lookup` (or any
+   * reference-typed field) may not be given an id that exists in no row of the
+   * object it declares.
+   *
+   * The field metadata is unambiguous — `{"type":"lookup","required":true,
+   * "reference":"sys_permission_set"}` — and the DELETE side already reasons
+   * about the edge (`deleteBehavior: 'set_null'`). Only the insert side never
+   * checked, so `POST /data/sys_position_permission_set
+   * {"permission_set_id":"ps_does_not_exist_at_all"}` created the row.
+   *
+   * On the RBAC link tables that is a security-surface record that resolves to
+   * nothing: an administrator auditing permissions sees a binding whose target
+   * cannot be inspected, and the audience-anchor gate has to resolve that very
+   * set to evaluate the grant — so a dangling row is an unevaluable gate input,
+   * not merely an untidy one.
+   *
+   * ## Scope, deliberately narrow
+   *
+   * - **Caller-supplied keys only.** Server stamps (`owner_id`,
+   *   `organization_id`, `created_by`/`updated_by`) are lookups too; they are
+   *   written by hooks and middleware, not by the request, and re-validating
+   *   them here would turn a platform stamp into a caller-facing rejection.
+   * - **Non-system writes only**, like every other write-path guard in this
+   *   engine (`stripReadonlyFields`, `stripReadonlyForInsert`). Seed replay,
+   *   package install and boot-time provisioning legitimately write rows in an
+   *   order that resolves only once the batch completes; failing them closed
+   *   would turn an ordering detail into a boot failure. This leaves a real
+   *   residual — an `isSystem` caller can still write a dangling reference —
+   *   which is recorded on the issue rather than silently accepted.
+   * - **Empty values are not references.** `null` / `undefined` / `''` mean
+   *   "no link", which is what `deleteBehavior: 'set_null'` produces.
+   * - **Already-expanded objects are skipped.** A read round-trip can hand back
+   *   `{id, name, …}` in the slot; that is not an id write.
+   *
+   * ## Why the probe is unscoped
+   *
+   * Existence is a fact about the database, not about the caller's visibility —
+   * the same distinction the #4435 existence probe turns on. A scoped probe
+   * would refuse a link to a permission set the caller cannot READ, which is
+   * ordinary in an RLS-scoped deployment and would make the platform's own
+   * admin flows fail. Whether the caller may create the binding at all is the
+   * RBAC/RLS layer's decision, made where it already is.
+   *
+   * Fails OPEN when the target cannot be checked (unregistered object, no
+   * driver, a probe that throws): an integrity check that cannot run must not
+   * invent a rejection, and the alternative — refusing every write to an object
+   * whose target lives on an unreachable datasource — converts a connectivity
+   * problem into data loss.
+   */
+  private async assertReferencesResolve(
+    object: string,
+    schema: any,
+    data: Record<string, unknown> | null | undefined,
+    suppliedKeys: ReadonlySet<string>,
+    context: any,
+    msgCtx?: { locale?: string; translate?: any; objectName?: string },
+  ): Promise<void> {
+    if (context?.isSystem) return;
+    const fields = schema?.fields;
+    if (!fields || !data) return;
+
+    const failures: any[] = [];
+    for (const name of Object.keys(fields)) {
+      if (!suppliedKeys.has(name)) continue;
+      if (!(name in data)) continue;
+      const def = fields[name];
+      const target = referenceTargetOf(def);
+      if (!target) continue;
+      const raw = (data as Record<string, unknown>)[name];
+      const values = Array.isArray(raw) ? raw : [raw];
+      for (const v of values) {
+        if (v === null || v === undefined || v === '') continue;
+        if (typeof v === 'object') continue;
+        const resolved = await this.referenceExists(target, v);
+        if (resolved === false) {
+          failures.push(buildFieldError(
+            {
+              field: name,
+              code: 'reference_not_found',
+              def,
+              value: String(v),
+              constraint: { target },
+            },
+            msgCtx as any,
+          ));
+        }
+      }
+    }
+    if (failures.length > 0) throw new ValidationError(failures);
+  }
+
+  /**
+   * Does `id` name a row in `target`? `false` only when the probe RAN and found
+   * nothing; `null` when it could not run at all (see the fail-open note on
+   * {@link assertReferencesResolve}).
+   */
+  private async referenceExists(target: string, id: unknown): Promise<boolean | null> {
+    try {
+      const resolved = this.resolveObjectName(target);
+      if (!this._registry.getObject(resolved)) return null;
+      const row = await this.findOne(resolved, {
+        where: { id },
+        fields: ['id'],
+        context: { isSystem: true },
+      } as any);
+      return !!row;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Register the crypto provider that backs `secret`-typed fields.
    *
    * When set, the engine encrypts secret fields on write (storing ciphertext in
@@ -3695,12 +3807,24 @@ export class ObjectQL implements IObjectQLEngine {
         // Locale + translation hooks for the rejection messages (#3957) —
         // resolved once for the batch, identical for every row.
         const msgCtx = this.validationMessageContext(object, opCtx.context);
+        // [#4441] The keys the CALLER sent, per row, snapshotted before the
+        // beforeInsert hooks stamped `owner_id` / `organization_id` /
+        // `created_by`. The reference check reads only these, so a platform
+        // stamp can never be reported back as a caller's bad reference.
+        const suppliedPerRow: ReadonlySet<string>[] =
+          (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
+            (row) => new Set(Object.keys((row ?? {}) as Record<string, unknown>)),
+          );
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
             validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx });
+            await this.assertReferencesResolve(
+              object, schemaForValidation, rows[i],
+              suppliedPerRow[i] ?? new Set<string>(), opCtx.context, msgCtx,
+            );
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
@@ -4015,6 +4139,11 @@ export class ObjectQL implements IObjectQLEngine {
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
+               // [#4441] A repoint is as capable of dangling as an initial link.
+               await this.assertReferencesResolve(
+                 object, updateSchema, hookContext.input.data as Record<string, unknown>,
+                 suppliedKeys, opCtx.context, updateMsgCtx,
+               );
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
@@ -4093,6 +4222,13 @@ export class ObjectQL implements IObjectQLEngine {
                } else {
                    evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
                }
+               // [#4441] The bulk call site too — a guard wired into single-id
+               // writes only is still a hole one call site over (AGENTS.md
+               // PD #10's own worked example, #3106).
+               await this.assertReferencesResolve(
+                 object, updateSchema, hookContext.input.data as Record<string, unknown>,
+                 suppliedKeys, opCtx.context, updateMsgCtx,
+               );
                result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else {
                throw new Error('Update requires an ID or options.multi=true');
