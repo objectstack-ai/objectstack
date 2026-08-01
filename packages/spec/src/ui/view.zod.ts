@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { strictObject } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, strictVisibilityError } from '../shared/visibility';
@@ -19,6 +20,20 @@ import { BulkActionDefSchema } from './bulk-action.zod';
  */
 import { HttpMethodSchema, HttpRequestSchema } from '../shared/http.zod';
 import { lazySchema } from '../shared/lazy-schema';
+
+/**
+ * Shared history for this file (#4001).
+ *
+ * Views are the surface an author iterates on visually, which is exactly why a
+ * dropped key hides here: the view still renders, just not the way it was
+ * described. `FormFieldBaseSchema` / `FormSectionSchema` / `FormButtonConfig`
+ * were closed years ago (ADR-0089 D3a); the other forty-odd shapes in this file
+ * kept the posture those three were rescued from.
+ */
+const VIEW_HISTORY =
+  'Until #4001 closed these shapes an unknown key was dropped silently — the view still '
+  + 'rendered, without whatever the key was meant to configure.';
+
 export { HttpMethodSchema, HttpRequestSchema };
 
 /**
@@ -143,7 +158,10 @@ export function normalizeFilterOperator(op: unknown): string {
  * ]
  * ```
  */
-export const ViewFilterRuleSchema = lazySchema(() => z.object({
+export const ViewFilterRuleSchema = lazySchema(() => strictObject({
+  surface: 'this view filter rule',
+  history: VIEW_HISTORY,
+}, {
   /** Field name to filter on */
   field: z.string().describe('Field name to filter on'),
   /**
@@ -189,7 +207,10 @@ export const ColumnSummarySchema = lazySchema(() => z.enum([
  * `type` reuses `ColumnSummarySchema`, so both forms share one aggregation
  * vocabulary and cannot drift apart.
  */
-export const ColumnSummaryConfigSchema = lazySchema(() => z.object({
+export const ColumnSummaryConfigSchema = lazySchema(() => strictObject({
+  surface: 'this column summary configuration',
+  history: VIEW_HISTORY,
+}, {
   type: ColumnSummarySchema.describe('Aggregation function'),
   field: z.string().optional().describe('Field to aggregate (defaults to the column field)'),
 }).describe('Column footer summary configuration'));
@@ -201,7 +222,10 @@ export const ColumnSummaryConfigSchema = lazySchema(() => z.object({
  * badge in front of the record name — so a list can carry two signals in one
  * column without spending a second column on it.
  */
-export const ColumnPrefixSchema = lazySchema(() => z.object({
+export const ColumnPrefixSchema = lazySchema(() => strictObject({
+  surface: 'this column prefix',
+  history: VIEW_HISTORY,
+}, {
   field: z.string().describe('Field whose value renders before the cell value'),
   type: z.enum(['badge', 'text']).default('text').describe('How the prefix value is rendered'),
 }).describe('Compound-cell prefix configuration'));
@@ -210,7 +234,10 @@ export const ColumnPrefixSchema = lazySchema(() => z.object({
  * List Column Configuration Schema
  * Detailed configuration for individual list view columns
  */
-export const ListColumnSchema = lazySchema(() => z.object({
+export const ListColumnSchema = lazySchema(() => strictObject({
+  surface: 'this list column',
+  history: VIEW_HISTORY,
+}, {
   field: z.string().describe('Field name (snake_case)'),
   label: I18nLabelSchema.optional().describe('Display label override'),
   width: z.number().positive().optional().describe('Column width in pixels'),
@@ -239,14 +266,20 @@ export const ListColumnSchema = lazySchema(() => z.object({
 /**
  * List View Selection Configuration
  */
-export const SelectionConfigSchema = lazySchema(() => z.object({
+export const SelectionConfigSchema = lazySchema(() => strictObject({
+  surface: 'this selection configuration',
+  history: VIEW_HISTORY,
+}, {
   type: z.enum(['none', 'single', 'multiple']).default('none').describe('Selection mode'),
 }));
 
 /**
  * List View Pagination Configuration
  */
-export const PaginationConfigSchema = lazySchema(() => z.object({
+export const PaginationConfigSchema = lazySchema(() => strictObject({
+  surface: 'this pagination configuration',
+  history: VIEW_HISTORY,
+}, {
   pageSize: z.number().int().positive().default(25).describe('Number of records per page'),
   pageSizeOptions: z.array(z.number().int().positive()).optional().describe('Available page size options'),
 }));
@@ -267,7 +300,10 @@ export const RowHeightSchema = lazySchema(() => z.enum([
  * Grouping Field Configuration
  * Defines a single grouping level for record grouping.
  */
-export const GroupingFieldSchema = lazySchema(() => z.object({
+export const GroupingFieldSchema = lazySchema(() => strictObject({
+  surface: 'this grouping field',
+  history: VIEW_HISTORY,
+}, {
   field: z.string().describe('Field name to group by'),
   order: z.enum(['asc', 'desc']).default('asc').describe('Group sort order'),
   collapsed: z.boolean().default(false).describe('Collapse groups by default'),
@@ -277,7 +313,10 @@ export const GroupingFieldSchema = lazySchema(() => z.object({
  * Grouping Configuration Schema (Airtable-style)
  * Supports multi-level grouping for grid/gallery views.
  */
-export const GroupingConfigSchema = lazySchema(() => z.object({
+export const GroupingConfigSchema = lazySchema(() => strictObject({
+  surface: 'this grouping configuration',
+  history: VIEW_HISTORY,
+}, {
   fields: z.array(GroupingFieldSchema).min(1).describe('Fields to group by (supports up to 3 levels)'),
 }).describe('Record grouping configuration'));
 
@@ -285,7 +324,10 @@ export const GroupingConfigSchema = lazySchema(() => z.object({
  * Gallery View Configuration (Airtable-style)
  * Configures card layout for gallery/card views.
  */
-export const GalleryConfigSchema = lazySchema(() => z.object({
+export const GalleryConfigSchema = lazySchema(() => strictObject({
+  surface: 'this gallery configuration',
+  history: VIEW_HISTORY,
+}, {
   coverField: z.string().optional().describe('Attachment/image field to display as card cover'),
   coverFit: z.enum(['cover', 'contain']).default('cover').describe('Image fit mode for card cover'),
   cardSize: z.enum(['small', 'medium', 'large']).default('medium').describe('Card size in gallery view'),
@@ -297,7 +339,10 @@ export const GalleryConfigSchema = lazySchema(() => z.object({
  * Timeline View Configuration (Airtable-style)
  * Configures timeline/chronological views.
  */
-export const TimelineConfigSchema = lazySchema(() => z.object({
+export const TimelineConfigSchema = lazySchema(() => strictObject({
+  surface: 'this timeline configuration',
+  history: VIEW_HISTORY,
+}, {
   startDateField: z.string().describe('Field for timeline item start date'),
   endDateField: z.string().optional().describe('Field for timeline item end date'),
   titleField: z.string().describe('Field to display as timeline item title'),
@@ -310,7 +355,10 @@ export const TimelineConfigSchema = lazySchema(() => z.object({
  * View Sharing Configuration (Airtable-style)
  * Defines who can see and modify a view.
  */
-export const ViewSharingSchema = lazySchema(() => z.object({
+export const ViewSharingSchema = lazySchema(() => strictObject({
+  surface: 'this view sharing',
+  history: VIEW_HISTORY,
+}, {
   type: z.enum(['personal', 'collaborative']).default('collaborative').describe('View ownership type'),
   lockedBy: z.string().optional().describe('User who locked the view configuration'),
 }).describe('View sharing and access configuration'));
@@ -319,7 +367,10 @@ export const ViewSharingSchema = lazySchema(() => z.object({
  * Row Color Configuration (Airtable-style)
  * Defines how rows are colored based on field values.
  */
-export const RowColorConfigSchema = lazySchema(() => z.object({
+export const RowColorConfigSchema = lazySchema(() => strictObject({
+  surface: 'this row color configuration',
+  history: VIEW_HISTORY,
+}, {
   field: z.string().describe('Field to derive color from (typically a select/status field)'),
   colors: z.record(z.string(), z.string()).optional().describe('Map of field value to color (hex/token)'),
 }).describe('Row color configuration based on field values'));
@@ -348,7 +399,10 @@ export const VisualizationTypeSchema = lazySchema(() => z.enum([
  *
  * @see Airtable Interface → "User actions" panel
  */
-export const UserActionsConfigSchema = lazySchema(() => z.object({
+export const UserActionsConfigSchema = lazySchema(() => strictObject({
+  surface: 'this user actions configuration',
+  history: VIEW_HISTORY,
+}, {
   sort: z.boolean().default(true).describe('Allow users to sort records'),
   search: z.boolean().default(true).describe('Allow users to search records'),
   filter: z.boolean().default(true).describe('Allow users to filter records'),
@@ -365,7 +419,10 @@ export const UserActionsConfigSchema = lazySchema(() => z.object({
  *
  * @see Airtable Interface → "Appearance" panel
  */
-export const AppearanceConfigSchema = lazySchema(() => z.object({
+export const AppearanceConfigSchema = lazySchema(() => strictObject({
+  surface: 'this appearance configuration',
+  history: VIEW_HISTORY,
+}, {
   showDescription: z.boolean().default(true).describe('Show the view description text'),
   allowedVisualizations: z.array(VisualizationTypeSchema).optional()
     .describe('Whitelist of visualization types users can switch between (e.g. ["grid", "gallery", "kanban"])'),
@@ -378,7 +435,10 @@ export const AppearanceConfigSchema = lazySchema(() => z.object({
  *
  * @see Airtable Interface → "Tabs" panel
  */
-export const ViewTabSchema = lazySchema(() => z.object({
+export const ViewTabSchema = lazySchema(() => strictObject({
+  surface: 'this view tab',
+  history: VIEW_HISTORY,
+}, {
   name: SnakeCaseIdentifierSchema.describe('Tab identifier (snake_case)'),
   label: I18nLabelSchema.optional().describe('Display label'),
   icon: z.string().optional().describe('Tab icon name'),
@@ -398,7 +458,10 @@ export const ViewTabSchema = lazySchema(() => z.object({
  *
  * @see Airtable Interface → "User filters" panel (Dropdowns element)
  */
-export const UserFilterFieldSchema = lazySchema(() => z.object({
+export const UserFilterFieldSchema = lazySchema(() => strictObject({
+  surface: 'this user filter field',
+  history: VIEW_HISTORY,
+}, {
   field: z.string().describe('Field name on the source object (must exist — checked by reference diagnostics)'),
   label: I18nLabelSchema.optional().describe('Display label override (defaults to the field label)'),
   type: z.enum(['select', 'multi-select', 'boolean', 'date-range', 'text']).optional()
@@ -424,6 +487,22 @@ export const UserFilterFieldSchema = lazySchema(() => z.object({
  *
  * @see Airtable Interface → "User filters" panel (Elements: tabs / dropdowns)
  */
+/**
+ * Deliberately left STRIP by #4001, pending its own verification.
+ *
+ * `tabs` and `showAllRecords` are valid on a PAGE's user filters and not on an
+ * object list view's (ADR-0047), and `object-list-view.test.ts` asserts they are
+ * dropped here rather than rejected. That is the "correct on a neighbouring
+ * surface" shape this campaign usually answers with a `guidance` entry — so the
+ * likely right end state is a rejection saying "tabs are page-only" rather than
+ * a silent drop.
+ *
+ * Not done here because it is a behaviour change with a real consumer question
+ * behind it: something may pass a page-shaped userFilters block through this
+ * schema deliberately, relying on the strip to narrow it. The campaign's own
+ * rule is verify-then-enforce, and this batch did not verify it. Left as the one
+ * open shape in this file, named rather than quietly skipped.
+ */
 export const UserFiltersSchema = lazySchema(() => z.object({
   // `toggle` is DEPRECATED (ADR-0047 §3.4a): it overlaps `tabs` (presets) and
   // `dropdown` (per-field values) without adding expressive power, needs
@@ -446,7 +525,10 @@ export const UserFiltersSchema = lazySchema(() => z.object({
  *
  * @see Airtable Interface → "+ Add record" button
  */
-export const AddRecordConfigSchema = lazySchema(() => z.object({
+export const AddRecordConfigSchema = lazySchema(() => strictObject({
+  surface: 'this add record configuration',
+  history: VIEW_HISTORY,
+}, {
   enabled: z.boolean().default(true).describe('Show the add record entry point'),
   position: z.enum(['top', 'bottom', 'both']).default('bottom').describe('Position of the add record button'),
   mode: z.enum(['inline', 'form', 'modal']).default('inline').describe('How to add a new record'),
@@ -456,7 +538,10 @@ export const AddRecordConfigSchema = lazySchema(() => z.object({
 /**
  * Kanban Settings
  */
-export const KanbanConfigSchema = lazySchema(() => z.object({
+export const KanbanConfigSchema = lazySchema(() => strictObject({
+  surface: 'this kanban configuration',
+  history: VIEW_HISTORY,
+}, {
   groupByField: z.string().describe('Field to group columns by (usually status/select)'),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
   columns: z.array(z.string()).describe('Fields to show on cards'),
@@ -468,7 +553,10 @@ export const KanbanConfigSchema = lazySchema(() => z.object({
  * when used as a `type: 'chart'` ListView. Distinct from the full-featured
  * `ChartConfigSchema` in `chart.zod.ts` (which is for embedded reports).
  */
-export const ListChartConfigSchema = lazySchema(() => z.object({
+export const ListChartConfigSchema = lazySchema(() => strictObject({
+  surface: 'this list chart configuration',
+  history: VIEW_HISTORY,
+}, {
   /**
    * Narrowed from `ChartTypeSchema` with `.extract()` rather than retyped.
    * Same five members as before — this is a de-duplication, not a widening —
@@ -494,7 +582,10 @@ export const ListChartConfigSchema = lazySchema(() => z.object({
 /**
  * Calendar Settings
  */
-export const CalendarConfigSchema = lazySchema(() => z.object({
+export const CalendarConfigSchema = lazySchema(() => strictObject({
+  surface: 'this calendar configuration',
+  history: VIEW_HISTORY,
+}, {
   startDateField: z.string().describe('Field providing the event start date/time'),
   endDateField: z.string().optional().describe('Field providing the event end date/time (defaults to a single-day event)'),
   titleField: z.string().describe('Field displayed as the event title'),
@@ -504,7 +595,10 @@ export const CalendarConfigSchema = lazySchema(() => z.object({
 /**
  * Quick filter dimension for the Gantt toolbar.
  */
-export const GanttQuickFilterSchema = lazySchema(() => z.object({
+export const GanttQuickFilterSchema = lazySchema(() => strictObject({
+  surface: 'this gantt quick filter',
+  history: VIEW_HISTORY,
+}, {
   field: z.string().describe('Record field / dot-path the dimension filters on'),
   label: z.string().optional().describe('Trigger label (falls back to the field label)'),
   options: z.array(z.union([
@@ -523,7 +617,10 @@ export const GanttQuickFilterSchema = lazySchema(() => z.object({
  * parent/child hierarchy (parentField/typeField), planned-vs-actual baselines,
  * dynamic grouping, a resource/workload view, hover tooltips and quick filters.
  */
-export const GanttConfigSchema = lazySchema(() => z.object({
+export const GanttConfigSchema = lazySchema(() => strictObject({
+  surface: 'this gantt configuration',
+  history: VIEW_HISTORY,
+}, {
   startDateField: z.string().describe('Field providing the task start date'),
   endDateField: z.string().describe('Field providing the task end date'),
   titleField: z.string().describe('Field displayed as the task title'),
@@ -565,7 +662,10 @@ export const GanttConfigSchema = lazySchema(() => z.object({
  * category trees, BOMs, nested comments). When `parentField` is omitted the
  * renderer auto-detects the object's `tree`/self-reference field.
  */
-export const TreeConfigSchema = lazySchema(() => z.object({
+export const TreeConfigSchema = lazySchema(() => strictObject({
+  surface: 'this tree configuration',
+  history: VIEW_HISTORY,
+}, {
   parentField: z.string().optional().describe('Single-parent pointer field (auto-detected from the object schema when omitted)'),
   labelField: z.string().optional().describe('Field rendered indented in the first column (defaults to "name")'),
   fields: z.array(z.string()).optional().describe('Additional fields rendered as flat columns alongside the label'),
@@ -590,7 +690,10 @@ export const NavigationModeSchema = lazySchema(() => z.enum([
 /**
  * Navigation Configuration Schema
  */
-export const NavigationConfigSchema = lazySchema(() => z.object({
+export const NavigationConfigSchema = lazySchema(() => strictObject({
+  surface: 'this navigation configuration',
+  history: VIEW_HISTORY,
+}, {
   mode: NavigationModeSchema.default('page'),
   
   /** Target View Config */
@@ -646,7 +749,10 @@ export const NavigationConfigSchema = lazySchema(() => z.object({
  *   }
  * }
  */
-export const ListViewSchema = lazySchema(() => z.object({
+export const ListViewSchema = lazySchema(() => strictObject({
+  surface: 'this list view',
+  history: VIEW_HISTORY,
+}, {
   name: SnakeCaseIdentifierSchema.optional().describe('Internal view name (lowercase snake_case)'),
   label: I18nLabelSchema.optional(), // Display label override (supports i18n)
   type: z.enum([
@@ -970,6 +1076,13 @@ export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(
 
 /**
  * Form Layout Section
+ *
+ * Deliberately NOT converted to `strictObject` by #4001: this shape already
+ * closed under ADR-0089 D3a, with `strictVisibilityError` — the bespoke map that
+ * resolves the `visibleWhen` / `visibility` pair — and a `.transform()` that
+ * normalizes them. Converting would mean re-expressing that map as `guidance`
+ * and re-proving the transform: a refactor of working, tested behaviour rather
+ * than a strictness change. Same call as the widget map in `dashboard.zod.ts`.
  */
 export const FormSectionSchema = lazySchema(() => z.object({
   /**
@@ -1023,7 +1136,10 @@ export const FormSectionSchema = lazySchema(() => z.object({
  * Leaf of the {@link FormViewSchema} `buttons` block (#2998).
  * `.strict()` per ADR-0089 D3a so a typo'd key errors instead of vanishing.
  */
-export const FormButtonConfigSchema = lazySchema(() => z.object({
+export const FormButtonConfigSchema = lazySchema(() => strictObject({
+  surface: 'this form button configuration',
+  history: VIEW_HISTORY,
+}, {
   show: z.boolean().optional().describe('Whether the button is rendered (renderer default applies when omitted)'),
   label: I18nLabelSchema.optional().describe('Button label (i18n-capable; renderer default when omitted)'),
 }).strict());
@@ -1049,7 +1165,10 @@ export type FormButtonConfig = z.infer<typeof FormButtonConfigSchema>;
  *   ]
  * }
  */
-export const FormViewSchema = lazySchema(() => z.object({
+export const FormViewSchema = lazySchema(() => strictObject({
+  surface: 'this form view',
+  history: VIEW_HISTORY,
+}, {
   type: z.enum([
     'simple',  // Single column or sections
     'tabbed',  // Tabs
@@ -1261,7 +1380,47 @@ export const ObjectListViewSchema = lazySchema(() =>
  *   }
  * }
  */
-export const ViewSchema = lazySchema(() => z.object({
+export const ViewSchema = lazySchema(() => strictObject({
+  surface: 'this view container',
+  history: VIEW_HISTORY,
+  // The one mistake this shape actually sees: a FLAT list view written where a
+  // CONTAINER goes. `defineView` has guarded it since the container was
+  // introduced, with a comment saying why — "`ViewSchema` strips unknown
+  // top-level keys, so a flat list view would parse to an empty container".
+  // Another bespoke guard built to work around silent stripping, and like every
+  // other one this campaign has found, it covered ONE door: `defineView`. The
+  // metadata door (Studio, the API, an agent) got the empty container in
+  // silence. Closing the shape covers both; the guard stays for the case strict
+  // cannot see — `defineView({})`, an empty container with no unknown keys at
+  // all, which is still zero views registered.
+  //
+  // `name`, `label` and `object` are NOT in this list, and the first draft had
+  // all three — wrongly. A container carries its own identity and its object
+  // binding: `saveMetaItem` sends the name, artifact-shipped containers do
+  // (`service-ai/ai_traces`), the validation sweep injects it, and a
+  // stack-level `views: [...]` entry needs `object` to say which object it
+  // belongs to (this file's own note on `ObjectListViewSchema` calls the
+  // container "view definitions for a specific object", and `getViewsByObject()`
+  // is what reads that binding). Tombstoning them rejected shapes the platform
+  // itself writes.
+  //
+  // The list below is what survived an EMPIRICAL check rather than a confident
+  // one: every container literal in the repo was scanned for these nine keys,
+  // and only `name` / `label` / `object` ever appear on one. That check should
+  // have come before the guidance, not after three CI failures — a guidance
+  // entry is a claim about the schema, and claims need verifying like code.
+  guidance: Object.fromEntries(
+    ['type', 'columns', 'data', 'viewKind', 'filters', 'sort']
+      .map((k) => [k, `\`${k}\` belongs to a single VIEW, not to the container. Wrap it: \`defineView({ list: { type, data, columns, … } })\`, or name it — \`defineView({ listViews: { my_view: { … } } })\`. The container's own keys are \`list\`, \`form\`, \`listViews\`, \`formViews\`.`]),
+  ),
+}, {
+    // Item identity. The container is a registered metadata item, so the door
+    // supplies these — declared for the same reason `translation` needed them
+    // (#4001 batch 5): undeclared, they were stripped, and the metadata door
+    // quietly discarded an item's own name on the way through.
+    name: z.string().optional().describe('Item name — supplied by the metadata door; for an object-scoped container it is the object name.'),
+    label: I18nLabelSchema.optional().describe('Human-readable label shown in metadata lists.'),
+    object: z.string().optional().describe('Object this container binds to — how a stack-level `views: [...]` entry says which object its views belong to; read by `getViewsByObject()` / `GET /meta/view?object=`.'),
     list: ObjectListViewSchema.optional(), // Default list view (views mode — dropdown userFilters allowed, no tabs; ADR-0047)
     form: FormViewSchema.optional(), // Default form view
     listViews: z.record(z.string(), ObjectListViewSchema).optional().describe('Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047)'),
@@ -1583,8 +1742,17 @@ export const ViewMetadataSchema = lazySchema(() =>
     // 3. Flattened runtime overlay — inline ListView / FormView config + identity.
     //    The list member is tried first; a flattened form (no required
     //    `columns`, disjoint `type` enum) then matches the form member.
-    ListViewSchema.extend(flattenedViewOverlayFields()),
-    FormViewSchema.extend(flattenedViewOverlayFields()),
+    //
+    //    `.strip()` is load-bearing, not leftover. `.extend()` INHERITS
+    //    strictness, so closing `ListViewSchema`/`FormViewSchema` for authoring
+    //    (#4001) silently made this overlay strict too — and this member exists
+    //    precisely to carry Studio's auxiliary round-trip keys (`isPinned`,
+    //    `sortOrder`, …) that `saveMetaItem` persists verbatim. Strict here is a
+    //    422 on a shape the platform itself writes. The ledger names this as the
+    //    trap to watch while batching: a response-side extension of an authoring
+    //    schema must strip back, or an upstream field addition becomes a crash.
+    ListViewSchema.extend(flattenedViewOverlayFields()).strip(),
+    FormViewSchema.extend(flattenedViewOverlayFields()).strip(),
   ]),
 );
 

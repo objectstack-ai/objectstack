@@ -223,6 +223,22 @@ describe('registered metadata types', () => {
  * `STILL_STRIP` carries the same reverse pin as `UNDECLARED_ENVELOPE`: closing a
  * type fails this suite until the list shrinks, so the list cannot outlive the
  * debt and start exempting types that no longer need exempting.
+ *
+ * ## `view` is the end state, not the last item of debt
+ *
+ * 24 of 25 are closed and the 25th will not be, for a reason worth stating so
+ * nobody "finishes the job" by force. The registered `view` schema is a UNION of
+ * three runtime shapes, and the third — the flattened overlay — is deliberately
+ * `.strip()`: it carries Studio's auxiliary round-trip keys (`isPinned`,
+ * `sortOrder`, …) that `saveMetaItem` persists verbatim, so closing it would 422
+ * a shape the platform itself writes. A union is only as closed as its most open
+ * member, so `view` reads `strip` and always will.
+ *
+ * What DID close is everything an author writes: `ViewSchema` (the container),
+ * `ListViewSchema`, `FormViewSchema`, and the ~28 config shapes under them. The
+ * open member is a wire shape wearing the same type name — which is exactly the
+ * distinction the ledger's classification rule exists to draw, arriving here as
+ * the campaign's final answer rather than as an exception to it.
  */
 const STILL_STRIP = new Set<string>(['view']);
 

@@ -2,6 +2,22 @@
   "type": "view",
   "_note": "ViewSchema (object view container: list/form/listViews/formViews). Seeded from docs/audits/2026-06-viewschema-property-liveness.md (objectui consumer cross-reference) and re-verified against objectui@fb35e48 (2026-07-16) — several audit-era DEAD findings have since gone LIVE (submitBehavior, sharing.lockedBy, ViewData providers on the list path) and are classified from the current reads, not the stale audit lines. objectui paths cited as 'objectui: <path>' prose (not resolved against this repo). Sub-sub-key divergences (userActions.buttons, addRecord.mode/formView, tabs[].order) can't be drilled (one level only) — captured in the parent entry's note and tracked in the enforce-or-remove worklist (#2998 Track B / ADR-0049). 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent. widget.performance (no ledger file of its own) was verified dead the corrected way — zero readers in either repo; objectui virtual scrolling reads the LIVE top-level virtualScroll — and removed with them.",
   "props": {
+    "name": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "Container item identity, declared in #4001 batch 6e and dead as a BODY key — the honest reading of a copy nobody reads. The live one is the sys_metadata row column: the door supplies it (saveMetaItem({type:'view', name})) and readers that resolve a view by name use the row, or a ViewItem's own name (rest-server.ts:5422 reads view.name on a ViewItem, not on a container). Declared anyway, and deliberately not authorWarn'd, because the platform's own writers send it — artifact-shipped containers (service-ai/ai_traces) and the metadata-validation sweep both do, so tombstoning it rejected shapes we write ourselves. Exactly the correction translation/name needed in batch 5."
+    },
+    "label": {
+      "status": "dead",
+      "verifiedAt": "2026-08-01",
+      "note": "Display metadata on the container with no runtime consumer. Not authorWarn'd: the README's rule is that pure display annotation (description, tags, icon) must not warn, and the job.label / translation.label precedent is this exact case — docs-shaped, deliberately kept, ADR-0033 exempt from enforce-or-remove."
+    },
+    "object": {
+      "status": "live",
+      "verifiedAt": "2026-08-01",
+      "evidence": "packages/objectql/src/engine.ts:1653 (getViewsByObject() / GET /meta/view?object=)",
+      "note": "How a stack-level `views: [...]` entry says which object its views belong to — the container is 'view definitions for a specific object' (this file's own note on ObjectListViewSchema), and the object index is what reads the binding. Declared in #4001 batch 6e: it was undeclared and therefore stripped, so a container's object binding was dropped on every parse. Found by the CLI's migrate e2e, whose fixture carries it."
+    },
     "list": {
       "children": {
         "name": {

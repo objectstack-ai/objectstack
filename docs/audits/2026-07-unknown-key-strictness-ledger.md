@@ -330,6 +330,85 @@ dropped at parse, and nothing failed.
     rejects first, so the same curation that used to power a warning now powers a
     rejection. That is the intended end state for every entry in it.
 
+16. **The `.extend()` trap this file warned about, arriving on schedule.**
+    `view` (the final batch). `ViewMetadataSchema`'s third and fourth union
+    members are `ListViewSchema.extend(...)` / `FormViewSchema.extend(...)` — the
+    flattened Studio overlay that carries auxiliary round-trip keys (`isPinned`,
+    `sortOrder`, …) which `saveMetaItem` persists verbatim. `.extend()` INHERITS
+    strictness, so closing the two authoring schemas silently closed the overlay
+    too, turning **a shape the platform itself writes** into a 422.
+
+    Worth noting how it was caught: not by reading, but by a test whose name is
+    the whole contract — *"preserves auxiliary Studio round-trip keys without a
+    strict-mode 422"*. Someone wrote that test before this campaign existed,
+    naming the exact failure a future ratchet would cause. Both members now
+    `.strip()` back, with a comment saying the `.strip()` is load-bearing.
+
+17. **Five bespoke guards, all built around silent stripping, all covering one
+    door.** With `defineView`'s the campaign has now found the whole family:
+    #1535's `create()`-only object guard (found by #4522), #3778's ten-key
+    translation preprocess (batch 5), `retiredKey` (kept — it is *stronger* than
+    guidance, not a workaround), the `defineView` empty-container check, and the
+    `metadata-create-seeds` gate that could only fail in one direction.
+
+    The pattern is stable enough to state as a rule: **when a schema strips, the
+    fix someone reaches for is a guard at the door they happen to be standing
+    at.** It works, it is tested, and it leaves every other door open — because
+    the author of the guard was solving their bug, not auditing the surface.
+    Closing the shape is the only fix that covers doors nobody has thought of
+    yet. And what was worth keeping from each guard was never the detection —
+    that generalizes for free once the default flips — but the prose.
+
+18. **A `guidance` entry is a claim about the schema, and this campaign shipped
+    four false ones — all in its last two batches.** `action.permissions` said
+    an action has no permission key when `requiredPermissions` is declared and
+    enforced with a 403 (following it invited deleting a working gate);
+    `action.location` aliased the CORRECT key to a nonexistent one;
+    `view.name` / `view.label` / `view.object` tombstoned the container's own
+    identity and object binding, rejecting shapes the platform itself writes.
+
+    None was caught by writing the schema. One came from checking the docs-drift
+    report — the advisory "107 files, FYI" list — against the schema. The rest
+    came from CI running packages `packages/spec` alone does not:
+    `metadata-protocol`, `objectql`, `cli`.
+
+    **What finally worked was not more care, it was a different method.** Scan
+    every real payload of that shape in the repo, and keep only the guidance
+    entries no real payload contradicts. On `view` that was one command, it took
+    six of nine entries through and killed three, and it would have caught all
+    of them before the first CI failure. The generalisation:
+
+    > A tombstone asserts *"nothing legitimately writes this key."* That is an
+    > empirical claim about the codebase, and the codebase can be asked.
+
+    Two rules fall out. **Prose in a rejection is behaviour, not documentation**
+    — it tells an author what to do next, and a confidently wrong one is worse
+    than none because there is no reason to doubt it. And **the blast radius of
+    closing a registered type is every package that parses that type**, not the
+    package that declares it.
+
+## Where this ended up
+
+**24 of 25 registered types closed** (from 9 when the line started), and the
+25th — `view` — is a **documented permanent exception**, not the last item of
+debt. Its registered schema is a union of three runtime shapes and a union is
+only as closed as its most open member; that member is the Studio overlay above,
+a wire shape wearing the same type name. Everything an author writes is closed.
+The distinction is exactly the one the classification rule at the top of this
+file exists to draw, arriving at the end as the answer rather than as an
+exception to it.
+
+**The ADR-0010 undeclared-envelope debt list is empty**, from the eight the
+structural walk opened it with — after replacing a probe that had been hiding
+seven. The empty set is kept rather than deleted, so the declaration check now
+runs over every type with no exemptions.
+
+**The warning layer has one covered root left.** A layer built to warn about
+strip-mode metadata, with almost nothing left to warn about, is the ratchet
+finishing. Its tests say so in place: change the floor to 0 and assert the empty
+set *deliberately* — never delete the test, because an empty result nobody chose
+is indistinguishable from a derivation that broke.
+
 This is the empirical argument for the ratchet: the inference "no metadata in
 the repo carries unknown keys" was **false three times over**, and only the
 strict gate could prove it. Note the asymmetry in the two schema gaps — both
@@ -450,9 +529,32 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 
 ## Next steps (verify-then-enforce, one shape at a time)
 
-1. Let the warning layer run in the wild for a release, then schedule the v18
-   strict close-out on what it actually reports — which is the whole point of
-   having built it. Nothing more to do here until there is field data.
+1. ~~Let the warning layer run in the wild for a release, then schedule the v18
+   strict close-out on what it actually reports.~~ **ANSWERED — the wait was
+   discharged by a decision, not by data.** Recording it here as this step asks.
+
+   The question below was never answered because it could not be: this is a
+   pre-1.0 product with no third-party authors to report from, so "wait for
+   field data" was waiting for a signal that would never arrive — the third
+   outcome in the list, and the one it warns is indistinguishable from success.
+
+   The call was to proceed anyway, on the grounds that a breaking change is
+   acceptable when the upgrade is mechanical and documented: every rejection
+   carries its own prescription, so an AI reading the error has the migration in
+   front of it. That is a stronger position than the wait assumed, and it is
+   *why* the tombstone/guidance discipline in the Standard wiring is not
+   optional decoration — it is the thing that made shipping without field data
+   defensible.
+
+   What the wait was meant to buy — evidence that closing shapes does not break
+   real metadata — arrived from a different instrument instead: every batch was
+   verified against the dogfood apps (`examples/app-crm`, `app-todo`,
+   `app-showcase`, `platform-objects`), which parse their metadata at build. The
+   answer that mattered turned out to be reachable without waiting.
+
+   The original decision point is left below, struck through rather than
+   deleted: the reasoning is still correct for a product that *does* have field
+   reporting, and the third outcome is still the one to check for.
 
    **This wait has a decision point, deliberately.** "Wait for field data" with
    no way to tell when it has arrived is how a ratchet stops without anyone

@@ -2099,13 +2099,29 @@ describe('defineView', () => {
     expect(() => defineView({})).toThrow(/defines no views/);
   });
 
-  it('should throw on a flat list view — stripped keys must not silently produce an empty container', () => {
+  it('should throw on a flat list view, now at the PARSE and so at both doors', () => {
+    // The `defineView` guard was written because `ViewSchema` stripped unknown
+    // top-level keys, so a flat view parsed to an empty container. Like every
+    // other bespoke guard this campaign has found, it covered ONE door —
+    // `defineView` — while the metadata door (Studio, the API, an agent) got the
+    // empty container in silence.
+    //
+    // Closing the shape (#4001) moves the rejection into the parse, so it reaches
+    // both, and it carries the wrap instruction rather than only the symptom.
+    // Assert the prescription, not which layer produced it.
     expect(() => defineView({
       name: 'all_tasks',
       label: 'All Tasks',
       type: 'grid',
       columns: ['name', 'status'],
-    } as never)).toThrow(/defines no views/);
+    } as never)).toThrow(/belongs to a single VIEW, not to the container/);
+  });
+
+  it('still throws on an EMPTY container — the case strict cannot see', () => {
+    // `defineView({})` has no unknown keys, so the parse is happy and zero views
+    // register. That is why the guard stays rather than retiring with the
+    // stripping it was written to work around.
+    expect(() => defineView({} as never)).toThrow(/defines no views/);
   });
 });
 

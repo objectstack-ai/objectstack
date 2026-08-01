@@ -663,6 +663,9 @@ End-user quick-filter configuration (Airtable "User filters" parity)
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Item name — supplied by the metadata door; for an object-scoped container it is the object name. |
+| **label** | `string` | optional | Human-readable label shown in metadata lists. |
+| **object** | `string` | optional | Object this container binds to — how a stack-level `views: [...]` entry says which object its views belong to; read by `getViewsByObject()` / `GET /meta/view?object=`. |
 | **list** | `{ name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }` | optional |  |
 | **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }` | optional |  |
 | **listViews** | `Record<string, { name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
