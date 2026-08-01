@@ -477,6 +477,19 @@ approver, or **recall** it — releasing the lock. An admin decision is
 authoritative: it finalizes the node even under `unanimous`/`quorum`/`per_group`,
 and is audited under the admin's own id. Prefer a guaranteed-staffed fallback
 approver so the set is never empty in the first place.
+
+Note the rule is **"the actor is an admin"**, not "the slate is unstaffed" — so
+an admin can also act on a request whose slate *is* properly staffed, bypassing
+the people on it. That is why the decision records **which door it came
+through**: `sys_approval_action.via_override` is `true` when the actor was
+admitted *only* by this privileged path, holding no slot themselves. An admin who
+is also a designated approver is approving normally and records `false` — the
+flag is about the branch that authorized the call, not about who holds admin
+rights. A row written before the column existed carries no value at all, which
+reads as *not recorded* rather than as *not an override*. Without it, an
+override and an ordinary approval were byte-for-byte identical, and the only
+trace that a slate had been bypassed was the designated approver's later
+`409 INVALID_STATE` — if they happened to try.
 </Callout>
 
 <Callout type="info">
@@ -491,6 +504,18 @@ The sweep only ever acts on a run it can positively confirm is terminal: a
 paused run (the normal state of a live approval), an unknown run, or an
 unreachable automation engine all count as *alive* and are left untouched. It
 frees orphaned records; it never cancels a live approval.
+
+That sweep scans **pending** requests, which leaves one shape outside it: a
+request already *decided* — `approved`, `rejected` or `returned` — whose run has
+since vanished. The decision landed and the flow never moved, and flipping the
+request out of `pending` is precisely what removed it from the sweep's view. A
+second, **read-only** inspection rides the same clock for those: it reports a
+terminal request only when the suspension store says no live pause exists **and**
+no terminal run record exists either, skipping (never condemning) any row whose
+store could not be read. It deliberately **does not rewrite** them — the decision
+really happened, and rolling it back automatically would put the audit trail at
+odds with the facts — so it names the stuck requests, their step, and the stale
+mirrored status for an operator to act on.
 </Callout>
 
 ### Progress and notification deep links
