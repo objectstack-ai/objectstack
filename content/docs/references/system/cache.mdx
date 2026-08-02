@@ -46,11 +46,11 @@ See also: ../../[api/http-cache.zod.ts](/docs/references/api/http-cache) for HTT
 ## TypeScript Usage
 
 ```typescript
-import { CacheAvalanchePrevention, CacheConfig, CacheConsistency, CacheInvalidation, CacheStrategy, CacheTier, CacheWarmup, DistributedCacheConfig } from '@objectstack/spec/system';
+import { CacheAvalanchePreventionSchema, CacheConfigSchema, CacheConsistencySchema, CacheInvalidationSchema, CacheStrategySchema, CacheTierSchema, CacheWarmupSchema, DistributedCacheConfigSchema } from '@objectstack/spec/system';
 import type { CacheAvalanchePrevention, CacheConfig, CacheConsistency, CacheInvalidation, CacheStrategy, CacheTier, CacheWarmup, DistributedCacheConfig } from '@objectstack/spec/system';
 
 // Validate data
-const result = CacheAvalanchePrevention.parse(data);
+const result = CacheAvalanchePreventionSchema.parse(data);
 ```
 
 ---

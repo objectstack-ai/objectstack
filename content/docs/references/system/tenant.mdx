@@ -28,11 +28,11 @@ Isolation Levels:
 ## TypeScript Usage
 
 ```typescript
-import { DatabaseLevelIsolationStrategy, DatabaseProvider, LevelIsolationStrategySchema, QuotaEnforcementResult, RowLevelIsolationStrategy, Tenant, TenantConnectionConfig, TenantIsolationConfig, TenantIsolationLevel, TenantQuota, TenantSecurityPolicy, TenantUsage } from '@objectstack/spec/system';
-import type { DatabaseLevelIsolationStrategy, DatabaseProvider, LevelIsolationStrategy, QuotaEnforcementResult, RowLevelIsolationStrategy, Tenant, TenantConnectionConfig, TenantIsolationConfig, TenantIsolationLevel, TenantQuota, TenantSecurityPolicy, TenantUsage } from '@objectstack/spec/system';
+import { DatabaseLevelIsolationStrategySchema, DatabaseProviderSchema, QuotaEnforcementResultSchema, RowLevelIsolationStrategySchema, TenantSchema, TenantConnectionConfigSchema, TenantIsolationConfigSchema, TenantIsolationLevel, TenantQuotaSchema, TenantSecurityPolicySchema, TenantUsageSchema } from '@objectstack/spec/system';
+import type { DatabaseLevelIsolationStrategy, DatabaseProvider, QuotaEnforcementResult, RowLevelIsolationStrategy, Tenant, TenantConnectionConfig, TenantIsolationConfig, TenantIsolationLevel, TenantQuota, TenantSecurityPolicy, TenantUsage } from '@objectstack/spec/system';
 
 // Validate data
-const result = DatabaseLevelIsolationStrategy.parse(data);
+const result = DatabaseLevelIsolationStrategySchema.parse(data);
 ```
 
 ---

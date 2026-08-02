@@ -16,11 +16,11 @@ Supports Kafka, RabbitMQ, AWS SQS, Redis Pub/Sub
 ## TypeScript Usage
 
 ```typescript
-import { ConsumerConfig, DeadLetterQueue, MessageQueueConfig, MessageQueueProvider, TopicConfig } from '@objectstack/spec/system';
+import { ConsumerConfigSchema, DeadLetterQueueSchema, MessageQueueConfigSchema, MessageQueueProviderSchema, TopicConfigSchema } from '@objectstack/spec/system';
 import type { ConsumerConfig, DeadLetterQueue, MessageQueueConfig, MessageQueueProvider, TopicConfig } from '@objectstack/spec/system';
 
 // Validate data
-const result = ConsumerConfig.parse(data);
+const result = ConsumerConfigSchema.parse(data);
 ```
 
 ---

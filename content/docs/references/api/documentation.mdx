@@ -66,11 +66,11 @@ enableTryItOut: true
 ## TypeScript Usage
 
 ```typescript
-import { ApiChangelogEntry, ApiDocumentationConfig, ApiTestCollection, ApiTestRequest, ApiTestingUiConfig, ApiTestingUiType, CodeGenerationTemplate, GeneratedApiDocumentation, OpenApiSecurityScheme, OpenApiServer, OpenApiSpec } from '@objectstack/spec/api';
+import { ApiChangelogEntrySchema, ApiDocumentationConfigSchema, ApiTestCollectionSchema, ApiTestRequestSchema, ApiTestingUiConfigSchema, ApiTestingUiType, CodeGenerationTemplateSchema, GeneratedApiDocumentationSchema, OpenApiSecuritySchemeSchema, OpenApiServerSchema, OpenApiSpecSchema } from '@objectstack/spec/api';
 import type { ApiChangelogEntry, ApiDocumentationConfig, ApiTestCollection, ApiTestRequest, ApiTestingUiConfig, ApiTestingUiType, CodeGenerationTemplate, GeneratedApiDocumentation, OpenApiSecurityScheme, OpenApiServer, OpenApiSpec } from '@objectstack/spec/api';
 
 // Validate data
-const result = ApiChangelogEntry.parse(data);
+const result = ApiChangelogEntrySchema.parse(data);
 ```
 
 ---

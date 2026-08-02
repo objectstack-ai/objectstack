@@ -48,11 +48,11 @@ never installs them directly.
 ## TypeScript Usage
 
 ```typescript
-import { DisablePackageRequest, DisablePackageResponse, EnablePackageRequest, EnablePackageResponse, GetPackageRequest, GetPackageResponse, InstallPackageRequest, InstallPackageResponse, InstalledPackage, ListPackagesRequest, ListPackagesResponse, NamespaceConflictError, NamespaceRegistryEntry, PackageStatusEnum, UninstallPackageRequest, UninstallPackageResponse } from '@objectstack/spec/kernel';
-import type { DisablePackageRequest, DisablePackageResponse, EnablePackageRequest, EnablePackageResponse, GetPackageRequest, GetPackageResponse, InstallPackageRequest, InstallPackageResponse, InstalledPackage, ListPackagesRequest, ListPackagesResponse, NamespaceConflictError, NamespaceRegistryEntry, PackageStatusEnum, UninstallPackageRequest, UninstallPackageResponse } from '@objectstack/spec/kernel';
+import { DisablePackageRequestSchema, DisablePackageResponseSchema, EnablePackageRequestSchema, EnablePackageResponseSchema, GetPackageRequestSchema, GetPackageResponseSchema, InstallPackageRequestSchema, InstallPackageResponseSchema, InstalledPackageSchema, ListPackagesRequestSchema, ListPackagesResponseSchema, NamespaceConflictErrorSchema, NamespaceRegistryEntrySchema, PackageStatusEnum, UninstallPackageRequestSchema, UninstallPackageResponseSchema } from '@objectstack/spec/kernel';
+import type { DisablePackageRequest, DisablePackageResponse, EnablePackageRequest, EnablePackageResponse, GetPackageRequest, GetPackageResponse, InstallPackageRequest, InstallPackageResponse, InstalledPackage, ListPackagesRequest, ListPackagesResponse, NamespaceConflictError, NamespaceRegistryEntry, UninstallPackageRequest, UninstallPackageResponse } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = DisablePackageRequest.parse(data);
+const result = DisablePackageRequestSchema.parse(data);
 ```
 
 ---

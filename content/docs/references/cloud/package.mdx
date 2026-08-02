@@ -32,11 +32,11 @@ See `docs/adr/0003-package-as-first-class-citizen.md` for the full rationale.
 ## TypeScript Usage
 
 ```typescript
-import { CreatePackageRequest, Package, PackageCategory, PackageLocale, PackagePublisher, PackageTranslation, PackageTranslations, PackageVisibility, UpdatePackageRequest } from '@objectstack/spec/cloud';
+import { CreatePackageRequestSchema, PackageSchema, PackageCategorySchema, PackageLocaleSchema, PackagePublisherSchema, PackageTranslationSchema, PackageTranslationsSchema, PackageVisibilitySchema, UpdatePackageRequestSchema } from '@objectstack/spec/cloud';
 import type { CreatePackageRequest, Package, PackageCategory, PackageLocale, PackagePublisher, PackageTranslation, PackageTranslations, PackageVisibility, UpdatePackageRequest } from '@objectstack/spec/cloud';
 
 // Validate data
-const result = CreatePackageRequest.parse(data);
+const result = CreatePackageRequestSchema.parse(data);
 ```
 
 ---

@@ -46,11 +46,11 @@ express dependency conflicts, resolution results, and installation order.
 ## TypeScript Usage
 
 ```typescript
-import { DependencyResolutionResult, DependencyStatusEnum, RequiredAction, ResolvedDependency } from '@objectstack/spec/kernel';
-import type { DependencyResolutionResult, DependencyStatusEnum, RequiredAction, ResolvedDependency } from '@objectstack/spec/kernel';
+import { DependencyResolutionResultSchema, DependencyStatusEnum, RequiredActionSchema, ResolvedDependencySchema } from '@objectstack/spec/kernel';
+import type { DependencyResolutionResult, RequiredAction, ResolvedDependency } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = DependencyResolutionResult.parse(data);
+const result = DependencyResolutionResultSchema.parse(data);
 ```
 
 ---

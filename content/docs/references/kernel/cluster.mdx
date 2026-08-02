@@ -30,11 +30,11 @@ subsystems depend on.
 ## TypeScript Usage
 
 ```typescript
-import { ClusterCapabilityConfig, ClusterDriver, ClusterTenantIsolation, EventClusterOptions, EventDeliverySemantics, EventScope, MetadataChangeOperation, ServiceClusterAnnotations, ServiceClusterScope, ServiceLeaderStrategy } from '@objectstack/spec/kernel';
+import { ClusterCapabilityConfigSchema, ClusterDriverSchema, ClusterTenantIsolationSchema, EventClusterOptionsSchema, EventDeliverySemanticsSchema, EventScopeSchema, MetadataChangeOperationSchema, ServiceClusterAnnotationsSchema, ServiceClusterScopeSchema, ServiceLeaderStrategySchema } from '@objectstack/spec/kernel';
 import type { ClusterCapabilityConfig, ClusterDriver, ClusterTenantIsolation, EventClusterOptions, EventDeliverySemantics, EventScope, MetadataChangeOperation, ServiceClusterAnnotations, ServiceClusterScope, ServiceLeaderStrategy } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = ClusterCapabilityConfig.parse(data);
+const result = ClusterCapabilityConfigSchema.parse(data);
 ```
 
 ---

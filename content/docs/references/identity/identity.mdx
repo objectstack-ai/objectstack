@@ -22,11 +22,11 @@ defines "how to login".
 ## TypeScript Usage
 
 ```typescript
-import { Account, ApiKey, Session, User, VerificationToken } from '@objectstack/spec/identity';
+import { AccountSchema, ApiKeySchema, SessionSchema, UserSchema, VerificationTokenSchema } from '@objectstack/spec/identity';
 import type { Account, ApiKey, Session, User, VerificationToken } from '@objectstack/spec/identity';
 
 // Validate data
-const result = Account.parse(data);
+const result = AccountSchema.parse(data);
 ```
 
 ---

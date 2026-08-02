@@ -28,11 +28,11 @@ schemas for configuration and metadata related to service registry.
 ## TypeScript Usage
 
 ```typescript
-import { ScopeConfig, ScopeInfo, ServiceFactoryRegistration, ServiceMetadata, ServiceRegistryConfig, ServiceScopeType } from '@objectstack/spec/kernel';
+import { ScopeConfigSchema, ScopeInfoSchema, ServiceFactoryRegistrationSchema, ServiceMetadataSchema, ServiceRegistryConfigSchema, ServiceScopeType } from '@objectstack/spec/kernel';
 import type { ScopeConfig, ScopeInfo, ServiceFactoryRegistration, ServiceMetadata, ServiceRegistryConfig, ServiceScopeType } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = ScopeConfig.parse(data);
+const result = ScopeConfigSchema.parse(data);
 ```
 
 ---

@@ -34,11 +34,11 @@ Navigation item IDs are used in URLs and configuration and must be lowercase sna
 ## TypeScript Usage
 
 ```typescript
-import { ActionNavItem, App, AppBranding, AppContextSelector, ComponentNavItem, DashboardNavItem, GroupNavItem, NavigationArea, NavigationContribution, NavigationItem, ObjectNavItem, PageNavItem, ReportNavItem, UrlNavItem } from '@objectstack/spec/ui';
+import { ActionNavItemSchema, AppSchema, AppBrandingSchema, AppContextSelectorSchema, ComponentNavItemSchema, DashboardNavItemSchema, GroupNavItemSchema, NavigationAreaSchema, NavigationContributionSchema, NavigationItemSchema, ObjectNavItemSchema, PageNavItemSchema, ReportNavItemSchema, UrlNavItemSchema } from '@objectstack/spec/ui';
 import type { ActionNavItem, App, AppBranding, AppContextSelector, ComponentNavItem, DashboardNavItem, GroupNavItem, NavigationArea, NavigationContribution, NavigationItem, ObjectNavItem, PageNavItem, ReportNavItem, UrlNavItem } from '@objectstack/spec/ui';
 
 // Validate data
-const result = ActionNavItem.parse(data);
+const result = ActionNavItemSchema.parse(data);
 ```
 
 ---

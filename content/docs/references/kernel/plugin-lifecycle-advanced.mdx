@@ -28,11 +28,11 @@ features for production environments.
 ## TypeScript Usage
 
 ```typescript
-import { AdvancedPluginLifecycleConfig, DistributedStateConfig, GracefulDegradation, HotReloadConfig, PluginHealthCheck, PluginHealthReport, PluginHealthStatus, PluginStateSnapshot, PluginUpdateStrategy } from '@objectstack/spec/kernel';
+import { AdvancedPluginLifecycleConfigSchema, DistributedStateConfigSchema, GracefulDegradationSchema, HotReloadConfigSchema, PluginHealthCheckSchema, PluginHealthReportSchema, PluginHealthStatusSchema, PluginStateSnapshotSchema, PluginUpdateStrategySchema } from '@objectstack/spec/kernel';
 import type { AdvancedPluginLifecycleConfig, DistributedStateConfig, GracefulDegradation, HotReloadConfig, PluginHealthCheck, PluginHealthReport, PluginHealthStatus, PluginStateSnapshot, PluginUpdateStrategy } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = AdvancedPluginLifecycleConfig.parse(data);
+const result = AdvancedPluginLifecycleConfigSchema.parse(data);
 ```
 
 ---

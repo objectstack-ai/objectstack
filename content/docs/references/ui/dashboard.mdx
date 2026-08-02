@@ -14,11 +14,11 @@ Color variant for dashboard widgets (e.g., KPI cards).
 ## TypeScript Usage
 
 ```typescript
-import { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, DashboardWidgetOptions, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant } from '@objectstack/spec/ui';
+import { DashboardSchema, DashboardHeaderSchema, DashboardHeaderActionSchema, DashboardWidgetSchema, DashboardWidgetOptionsSchema, GlobalFilterSchema, GlobalFilterOptionsFromSchema, WidgetActionTypeSchema, WidgetColorVariantSchema } from '@objectstack/spec/ui';
 import type { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, DashboardWidgetOptions, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant } from '@objectstack/spec/ui';
 
 // Validate data
-const result = Dashboard.parse(data);
+const result = DashboardSchema.parse(data);
 ```
 
 ---

@@ -16,11 +16,11 @@ Defines the operating mode of the kernel
 ## TypeScript Usage
 
 ```typescript
-import { KernelContext, PreviewModeConfig, RuntimeMode, TenantRuntimeContext } from '@objectstack/spec/kernel';
+import { KernelContextSchema, PreviewModeConfigSchema, RuntimeMode, TenantRuntimeContextSchema } from '@objectstack/spec/kernel';
 import type { KernelContext, PreviewModeConfig, RuntimeMode, TenantRuntimeContext } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = KernelContext.parse(data);
+const result = KernelContextSchema.parse(data);
 ```
 
 ---

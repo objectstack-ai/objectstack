@@ -46,11 +46,11 @@ layer is absorbed/retired in a later phase (D-A).
 ## TypeScript Usage
 
 ```typescript
-import { Dataset, DatasetDimension, DatasetMeasure, DerivedMeasureOp } from '@objectstack/spec/ui';
-import type { Dataset, DatasetDimension, DatasetMeasure, DerivedMeasureOp } from '@objectstack/spec/ui';
+import { DatasetSchema, DatasetDimensionSchema, DatasetMeasureSchema, DerivedMeasureOp } from '@objectstack/spec/ui';
+import type { Dataset, DatasetDimension, DatasetMeasure } from '@objectstack/spec/ui';
 
 // Validate data
-const result = Dataset.parse(data);
+const result = DatasetSchema.parse(data);
 ```
 
 ---

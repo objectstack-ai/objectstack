@@ -58,11 +58,11 @@ Each layer only stores the delta (changed fields), not the full definition.
 ## TypeScript Usage
 
 ```typescript
-import { CustomizationOrigin, CustomizationPolicy, FieldChange, MergeConflict, MergeResult, MergeStrategyConfig, MetadataOverlay } from '@objectstack/spec/kernel';
+import { CustomizationOriginSchema, CustomizationPolicySchema, FieldChangeSchema, MergeConflictSchema, MergeResultSchema, MergeStrategyConfigSchema, MetadataOverlaySchema } from '@objectstack/spec/kernel';
 import type { CustomizationOrigin, CustomizationPolicy, FieldChange, MergeConflict, MergeResult, MergeStrategyConfig, MetadataOverlay } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = CustomizationOrigin.parse(data);
+const result = CustomizationOriginSchema.parse(data);
 ```
 
 ---

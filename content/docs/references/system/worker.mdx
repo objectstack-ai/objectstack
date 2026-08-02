@@ -58,11 +58,11 @@ priority: 5
 ## TypeScript Usage
 
 ```typescript
-import { BatchProgress, QueueConfig, Task, TaskExecutionResult, TaskPriority, TaskRetryPolicy, TaskStatus, WorkerStats } from '@objectstack/spec/system';
+import { BatchProgressSchema, QueueConfigSchema, TaskSchema, TaskExecutionResultSchema, TaskPriority, TaskRetryPolicySchema, TaskStatus, WorkerStatsSchema } from '@objectstack/spec/system';
 import type { BatchProgress, QueueConfig, Task, TaskExecutionResult, TaskPriority, TaskRetryPolicy, TaskStatus, WorkerStats } from '@objectstack/spec/system';
 
 // Validate data
-const result = BatchProgress.parse(data);
+const result = BatchProgressSchema.parse(data);
 ```
 
 ---

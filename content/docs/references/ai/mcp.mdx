@@ -40,11 +40,11 @@ at runtime and does not need a metadata representation.
 ## TypeScript Usage
 
 ```typescript
-import { MCPApprovalPolicy, MCPServerRef, MCPToolBinding, MCPTransport } from '@objectstack/spec/ai';
+import { MCPApprovalPolicySchema, MCPServerRefSchema, MCPToolBindingSchema, MCPTransportSchema } from '@objectstack/spec/ai';
 import type { MCPApprovalPolicy, MCPServerRef, MCPToolBinding, MCPTransport } from '@objectstack/spec/ai';
 
 // Validate data
-const result = MCPApprovalPolicy.parse(data);
+const result = MCPApprovalPolicySchema.parse(data);
 ```
 
 ---

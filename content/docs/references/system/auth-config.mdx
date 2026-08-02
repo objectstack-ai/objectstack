@@ -18,11 +18,11 @@ Used in server-side configuration injection.
 ## TypeScript Usage
 
 ```typescript
-import { AdvancedAuthConfig, AuthConfig, AuthPluginConfig, AuthProviderConfig, EmailAndPasswordConfig, EmailVerificationConfig, MutualTLSConfig, OidcProviderConfig, OidcProvidersConfig, SocialProviderConfig } from '@objectstack/spec/system';
+import { AdvancedAuthConfigSchema, AuthConfigSchema, AuthPluginConfigSchema, AuthProviderConfigSchema, EmailAndPasswordConfigSchema, EmailVerificationConfigSchema, MutualTLSConfigSchema, OidcProviderConfigSchema, OidcProvidersConfigSchema, SocialProviderConfigSchema } from '@objectstack/spec/system';
 import type { AdvancedAuthConfig, AuthConfig, AuthPluginConfig, AuthProviderConfig, EmailAndPasswordConfig, EmailVerificationConfig, MutualTLSConfig, OidcProviderConfig, OidcProvidersConfig, SocialProviderConfig } from '@objectstack/spec/system';
 
 // Validate data
-const result = AdvancedAuthConfig.parse(data);
+const result = AdvancedAuthConfigSchema.parse(data);
 ```
 
 ---

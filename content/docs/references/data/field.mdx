@@ -14,11 +14,11 @@ Field Type Enum
 ## TypeScript Usage
 
 ```typescript
-import { Address, CurrencyConfig, CurrencyValue, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
+import { AddressSchema, CurrencyConfigSchema, CurrencyValueSchema, FieldSchema, FieldType, LocationCoordinatesSchema, SelectOptionSchema, UniqueScopeSchema } from '@objectstack/spec/data';
 import type { Address, CurrencyConfig, CurrencyValue, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
 
 // Validate data
-const result = Address.parse(data);
+const result = AddressSchema.parse(data);
 ```
 
 ---

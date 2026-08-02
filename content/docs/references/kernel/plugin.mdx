@@ -16,11 +16,11 @@ These are the specialized plugin types common between Manifest (Package) and Plu
 ## TypeScript Usage
 
 ```typescript
-import { ActivationEvent, Plugin } from '@objectstack/spec/kernel';
-import type { ActivationEvent, Plugin } from '@objectstack/spec/kernel';
+import { ActivationEventSchema, PluginSchema } from '@objectstack/spec/kernel';
+import type { ActivationEvent } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = ActivationEvent.parse(data);
+const result = ActivationEventSchema.parse(data);
 ```
 
 ---

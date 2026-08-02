@@ -28,11 +28,11 @@ See `content/docs/protocol/knowledge.mdx` for the full design.
 ## TypeScript Usage
 
 ```typescript
-import { FileKnowledgeSource, HttpKnowledgeSource, KnowledgeRefreshPolicy, KnowledgeSource, KnowledgeSourceKind, ObjectKnowledgeSource } from '@objectstack/spec/ai';
+import { FileKnowledgeSourceSchema, HttpKnowledgeSourceSchema, KnowledgeRefreshPolicySchema, KnowledgeSourceSchema, KnowledgeSourceKindSchema, ObjectKnowledgeSourceSchema } from '@objectstack/spec/ai';
 import type { FileKnowledgeSource, HttpKnowledgeSource, KnowledgeRefreshPolicy, KnowledgeSource, KnowledgeSourceKind, ObjectKnowledgeSource } from '@objectstack/spec/ai';
 
 // Validate data
-const result = FileKnowledgeSource.parse(data);
+const result = FileKnowledgeSourceSchema.parse(data);
 ```
 
 ---

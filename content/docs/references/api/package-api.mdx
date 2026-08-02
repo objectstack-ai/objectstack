@@ -36,11 +36,11 @@ DELETE /api/v1/packages/:packageId           — Uninstall a package
 ## TypeScript Usage
 
 ```typescript
-import { GetInstalledPackageRequest, GetInstalledPackageResponse, ListInstalledPackagesRequest, ListInstalledPackagesResponse, PackageApiErrorCode, PackageInstallRequest, PackageInstallResponse, PackagePathParams, PackageRollbackRequest, PackageRollbackResponse, PackageUpgradeRequest, PackageUpgradeResponse, ResolveDependenciesRequest, ResolveDependenciesResponse, UninstallPackageApiRequest, UninstallPackageApiResponse, UploadArtifactRequest, UploadArtifactResponse } from '@objectstack/spec/api';
+import { GetInstalledPackageRequestSchema, GetInstalledPackageResponseSchema, ListInstalledPackagesRequestSchema, ListInstalledPackagesResponseSchema, PackageApiErrorCode, PackageInstallRequestSchema, PackageInstallResponseSchema, PackagePathParamsSchema, PackageRollbackRequestSchema, PackageRollbackResponseSchema, PackageUpgradeRequestSchema, PackageUpgradeResponseSchema, ResolveDependenciesRequestSchema, ResolveDependenciesResponseSchema, UninstallPackageApiRequestSchema, UninstallPackageApiResponseSchema, UploadArtifactRequestSchema, UploadArtifactResponseSchema } from '@objectstack/spec/api';
 import type { GetInstalledPackageRequest, GetInstalledPackageResponse, ListInstalledPackagesRequest, ListInstalledPackagesResponse, PackageApiErrorCode, PackageInstallRequest, PackageInstallResponse, PackagePathParams, PackageRollbackRequest, PackageRollbackResponse, PackageUpgradeRequest, PackageUpgradeResponse, ResolveDependenciesRequest, ResolveDependenciesResponse, UninstallPackageApiRequest, UninstallPackageApiResponse, UploadArtifactRequest, UploadArtifactResponse } from '@objectstack/spec/api';
 
 // Validate data
-const result = GetInstalledPackageRequest.parse(data);
+const result = GetInstalledPackageRequestSchema.parse(data);
 ```
 
 ---

@@ -102,11 +102,11 @@ timeRelative: \{ object: 'purchase_order', dateField: 'due_date', withinDays: -1
 ## TypeScript Usage
 
 ```typescript
-import { TimeRelativeTrigger } from '@objectstack/spec/automation';
+import { TimeRelativeTriggerSchema } from '@objectstack/spec/automation';
 import type { TimeRelativeTrigger } from '@objectstack/spec/automation';
 
 // Validate data
-const result = TimeRelativeTrigger.parse(data);
+const result = TimeRelativeTriggerSchema.parse(data);
 ```
 
 ---

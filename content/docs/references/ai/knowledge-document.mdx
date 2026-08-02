@@ -26,11 +26,11 @@ See `content/docs/protocol/knowledge.mdx` for the full design.
 ## TypeScript Usage
 
 ```typescript
-import { KnowledgeChunk, KnowledgeDocument, KnowledgeHit } from '@objectstack/spec/ai';
+import { KnowledgeChunkSchema, KnowledgeDocumentSchema, KnowledgeHitSchema } from '@objectstack/spec/ai';
 import type { KnowledgeChunk, KnowledgeDocument, KnowledgeHit } from '@objectstack/spec/ai';
 
 // Validate data
-const result = KnowledgeChunk.parse(data);
+const result = KnowledgeChunkSchema.parse(data);
 ```
 
 ---

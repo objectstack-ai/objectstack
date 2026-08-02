@@ -112,11 +112,11 @@ count: true
 ## TypeScript Usage
 
 ```typescript
-import { ODataConfig, ODataError, ODataFilterFunction, ODataMetadata, ODataQuery, ODataResponse } from '@objectstack/spec/api';
+import { ODataConfigSchema, ODataErrorSchema, ODataFilterFunctionSchema, ODataMetadataSchema, ODataQuerySchema, ODataResponseSchema } from '@objectstack/spec/api';
 import type { ODataConfig, ODataError, ODataFilterFunction, ODataMetadata, ODataQuery, ODataResponse } from '@objectstack/spec/api';
 
 // Validate data
-const result = ODataConfig.parse(data);
+const result = ODataConfigSchema.parse(data);
 ```
 
 ---

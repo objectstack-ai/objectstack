@@ -18,11 +18,11 @@ Enables AI-powered ObjectStack applications to discover and use LLMs consistentl
 ## TypeScript Usage
 
 ```typescript
-import { ModelCapability, ModelConfig, ModelLimits, ModelPricing, ModelProvider, ModelRegistry, ModelRegistryEntry, ModelSelectionCriteria, PromptTemplate, PromptVariable } from '@objectstack/spec/ai';
+import { ModelCapabilitySchema, ModelConfigSchema, ModelLimitsSchema, ModelPricingSchema, ModelProviderSchema, ModelRegistrySchema, ModelRegistryEntrySchema, ModelSelectionCriteriaSchema, PromptTemplateSchema, PromptVariableSchema } from '@objectstack/spec/ai';
 import type { ModelCapability, ModelConfig, ModelLimits, ModelPricing, ModelProvider, ModelRegistry, ModelRegistryEntry, ModelSelectionCriteria, PromptTemplate, PromptVariable } from '@objectstack/spec/ai';
 
 // Validate data
-const result = ModelCapability.parse(data);
+const result = ModelCapabilitySchema.parse(data);
 ```
 
 ---

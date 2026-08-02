@@ -18,11 +18,11 @@ Lower numbers = higher priority
 ## TypeScript Usage
 
 ```typescript
-import { Event, EventMetadata, EventPriority, EventTypeDefinition } from '@objectstack/spec/kernel';
-import type { Event, EventMetadata, EventPriority, EventTypeDefinition } from '@objectstack/spec/kernel';
+import { EventSchema, EventMetadataSchema, EventPriority, EventTypeDefinitionSchema } from '@objectstack/spec/kernel';
+import type { Event, EventPriority, EventTypeDefinition } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = Event.parse(data);
+const result = EventSchema.parse(data);
 ```
 
 ---

@@ -138,11 +138,11 @@ schedule: '0 2 * * *' // Daily at 2 AM
 ## TypeScript Usage
 
 ```typescript
-import { ETLDestination, ETLEndpointType, ETLPipeline, ETLPipelineRun, ETLRunStatus, ETLSource, ETLSyncMode, ETLTransformation, ETLTransformationType } from '@objectstack/spec/automation';
+import { ETLDestinationSchema, ETLEndpointTypeSchema, ETLPipelineSchema, ETLPipelineRunSchema, ETLRunStatusSchema, ETLSourceSchema, ETLSyncModeSchema, ETLTransformationSchema, ETLTransformationTypeSchema } from '@objectstack/spec/automation';
 import type { ETLDestination, ETLEndpointType, ETLPipeline, ETLPipelineRun, ETLRunStatus, ETLSource, ETLSyncMode, ETLTransformation, ETLTransformationType } from '@objectstack/spec/automation';
 
 // Validate data
-const result = ETLDestination.parse(data);
+const result = ETLDestinationSchema.parse(data);
 ```
 
 ---

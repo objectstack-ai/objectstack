@@ -16,11 +16,11 @@ Ensures touch targets meet WCAG 2.5.5 minimum size requirements (44x44px).
 ## TypeScript Usage
 
 ```typescript
-import { GestureConfig, GestureType, LongPressGestureConfig, PinchGestureConfig, SwipeDirection, SwipeGestureConfig, TouchInteraction, TouchTargetConfig } from '@objectstack/spec/ui';
+import { GestureConfigSchema, GestureTypeSchema, LongPressGestureConfigSchema, PinchGestureConfigSchema, SwipeDirectionSchema, SwipeGestureConfigSchema, TouchInteractionSchema, TouchTargetConfigSchema } from '@objectstack/spec/ui';
 import type { GestureConfig, GestureType, LongPressGestureConfig, PinchGestureConfig, SwipeDirection, SwipeGestureConfig, TouchInteraction, TouchTargetConfig } from '@objectstack/spec/ui';
 
 // Validate data
-const result = GestureConfig.parse(data);
+const result = GestureConfigSchema.parse(data);
 ```
 
 ---

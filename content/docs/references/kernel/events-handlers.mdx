@@ -16,11 +16,11 @@ Defines how to handle a specific event
 ## TypeScript Usage
 
 ```typescript
-import { EventHandler, EventPersistence, EventRoute } from '@objectstack/spec/kernel';
+import { EventHandlerSchema, EventPersistenceSchema, EventRouteSchema } from '@objectstack/spec/kernel';
 import type { EventHandler, EventPersistence, EventRoute } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = EventHandler.parse(data);
+const result = EventHandlerSchema.parse(data);
 ```
 
 ---

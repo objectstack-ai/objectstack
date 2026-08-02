@@ -32,11 +32,11 @@ The memory driver is ideal for:
 ## TypeScript Usage
 
 ```typescript
-import { AutoPersistenceConfig, FilePersistenceConfig, LocalStoragePersistenceConfig, PersistenceType } from '@objectstack/spec/data';
+import { AutoPersistenceConfigSchema, FilePersistenceConfigSchema, LocalStoragePersistenceConfigSchema, PersistenceTypeSchema } from '@objectstack/spec/data';
 import type { AutoPersistenceConfig, FilePersistenceConfig, LocalStoragePersistenceConfig, PersistenceType } from '@objectstack/spec/data';
 
 // Validate data
-const result = AutoPersistenceConfig.parse(data);
+const result = AutoPersistenceConfigSchema.parse(data);
 ```
 
 ---

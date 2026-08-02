@@ -16,11 +16,11 @@ Passed to most driver methods to control behavior (transactions, timeouts, etc.)
 ## TypeScript Usage
 
 ```typescript
-import { DriverCapabilities, DriverConfig, DriverOptions, PoolConfig } from '@objectstack/spec/data';
+import { DriverCapabilitiesSchema, DriverConfigSchema, DriverOptionsSchema, PoolConfigSchema } from '@objectstack/spec/data';
 import type { DriverCapabilities, DriverConfig, DriverOptions, PoolConfig } from '@objectstack/spec/data';
 
 // Validate data
-const result = DriverCapabilities.parse(data);
+const result = DriverCapabilitiesSchema.parse(data);
 ```
 
 ---

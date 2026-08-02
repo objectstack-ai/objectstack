@@ -34,11 +34,11 @@ batch-draft. This is the safety valve for low-specificity input.
 ## TypeScript Usage
 
 ```typescript
-import { BlueprintApp, BlueprintCondition, BlueprintDashboard, BlueprintField, BlueprintNavItem, BlueprintObject, BlueprintSeed, BlueprintSummaryOperations, BlueprintView, BlueprintWidgetCondition, SolutionBlueprint, SolutionBlueprintStrict } from '@objectstack/spec/ai';
+import { BlueprintAppSchema, BlueprintConditionSchema, BlueprintDashboardSchema, BlueprintFieldSchema, BlueprintNavItemSchema, BlueprintObjectSchema, BlueprintSeedSchema, BlueprintSummaryOperationsSchema, BlueprintViewSchema, BlueprintWidgetConditionSchema, SolutionBlueprintSchema, SolutionBlueprintStrictSchema } from '@objectstack/spec/ai';
 import type { BlueprintApp, BlueprintCondition, BlueprintDashboard, BlueprintField, BlueprintNavItem, BlueprintObject, BlueprintSeed, BlueprintSummaryOperations, BlueprintView, BlueprintWidgetCondition, SolutionBlueprint, SolutionBlueprintStrict } from '@objectstack/spec/ai';
 
 // Validate data
-const result = BlueprintApp.parse(data);
+const result = BlueprintAppSchema.parse(data);
 ```
 
 ---

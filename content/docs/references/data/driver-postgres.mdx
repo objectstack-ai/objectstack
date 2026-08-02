@@ -28,11 +28,11 @@ block, which the factory now honours for every SQL driver.
 ## TypeScript Usage
 
 ```typescript
-import { PostgresConfig } from '@objectstack/spec/data';
+import { PostgresConfigSchema } from '@objectstack/spec/data';
 import type { PostgresConfig } from '@objectstack/spec/data';
 
 // Validate data
-const result = PostgresConfig.parse(data);
+const result = PostgresConfigSchema.parse(data);
 ```
 
 ---

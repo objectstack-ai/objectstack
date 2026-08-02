@@ -26,11 +26,11 @@ Comprehensive metrics collection and monitoring:
 ## TypeScript Usage
 
 ```typescript
-import { HistogramBucketConfig, MetricAggregationConfig, MetricAggregationType, MetricDataPoint, MetricDefinition, MetricExportConfig, MetricLabels, MetricType, MetricUnit, MetricsConfig, ServiceLevelIndicator, ServiceLevelObjective, TimeSeries, TimeSeriesDataPoint } from '@objectstack/spec/system';
+import { HistogramBucketConfigSchema, MetricAggregationConfigSchema, MetricAggregationType, MetricDataPointSchema, MetricDefinitionSchema, MetricExportConfigSchema, MetricLabelsSchema, MetricType, MetricUnit, MetricsConfigSchema, ServiceLevelIndicatorSchema, ServiceLevelObjectiveSchema, TimeSeriesSchema, TimeSeriesDataPointSchema } from '@objectstack/spec/system';
 import type { HistogramBucketConfig, MetricAggregationConfig, MetricAggregationType, MetricDataPoint, MetricDefinition, MetricExportConfig, MetricLabels, MetricType, MetricUnit, MetricsConfig, ServiceLevelIndicator, ServiceLevelObjective, TimeSeries, TimeSeriesDataPoint } from '@objectstack/spec/system';
 
 // Validate data
-const result = HistogramBucketConfig.parse(data);
+const result = HistogramBucketConfigSchema.parse(data);
 ```
 
 ---

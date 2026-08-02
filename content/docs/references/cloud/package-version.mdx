@@ -30,11 +30,11 @@ See `docs/adr/0003-package-as-first-class-citizen.md` for the full rationale.
 ## TypeScript Usage
 
 ```typescript
-import { CreatePackageVersionRequest, PackageManifest, PackageVersion, PackageVersionStatus, PublishPackageVersionRequest, UpdatePackageVersionRequest } from '@objectstack/spec/cloud';
+import { CreatePackageVersionRequestSchema, PackageManifestSchema, PackageVersionSchema, PackageVersionStatusSchema, PublishPackageVersionRequestSchema, UpdatePackageVersionRequestSchema } from '@objectstack/spec/cloud';
 import type { CreatePackageVersionRequest, PackageManifest, PackageVersion, PackageVersionStatus, PublishPackageVersionRequest, UpdatePackageVersionRequest } from '@objectstack/spec/cloud';
 
 // Validate data
-const result = CreatePackageVersionRequest.parse(data);
+const result = CreatePackageVersionRequestSchema.parse(data);
 ```
 
 ---

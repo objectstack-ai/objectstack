@@ -24,11 +24,11 @@ Base path: /api/v1/data/\{object\}/export
 ## TypeScript Usage
 
 ```typescript
-import { CreateExportJobRequest, CreateExportJobResponse, CreateImportJobRequest, CreateImportJobResponse, DeduplicationStrategy, ExportFormat, ExportImportTemplate, ExportJobProgress, ExportJobStatus, ExportJobSummary, FieldMappingEntry, GetExportJobDownloadRequest, GetExportJobDownloadResponse, ImportJobProgress, ImportJobResults, ImportJobStatus, ImportJobSummary, ImportMapping, ImportRequest, ImportResponse, ImportRowResult, ImportValidationConfig, ImportValidationMode, ImportValidationResult, ImportWriteMode, ListExportJobsRequest, ListExportJobsResponse, ListImportJobsRequest, ListImportJobsResponse, ScheduleExportRequest, ScheduleExportResponse, ScheduledExport, UndoImportJobResponse } from '@objectstack/spec/api';
+import { CreateExportJobRequestSchema, CreateExportJobResponseSchema, CreateImportJobRequestSchema, CreateImportJobResponseSchema, DeduplicationStrategy, ExportFormat, ExportImportTemplateSchema, ExportJobProgressSchema, ExportJobStatus, ExportJobSummarySchema, FieldMappingEntrySchema, GetExportJobDownloadRequestSchema, GetExportJobDownloadResponseSchema, ImportJobProgressSchema, ImportJobResultsSchema, ImportJobStatus, ImportJobSummarySchema, ImportMappingSchema, ImportRequestSchema, ImportResponseSchema, ImportRowResultSchema, ImportValidationConfigSchema, ImportValidationMode, ImportValidationResultSchema, ImportWriteMode, ListExportJobsRequestSchema, ListExportJobsResponseSchema, ListImportJobsRequestSchema, ListImportJobsResponseSchema, ScheduleExportRequestSchema, ScheduleExportResponseSchema, ScheduledExportSchema, UndoImportJobResponseSchema } from '@objectstack/spec/api';
 import type { CreateExportJobRequest, CreateExportJobResponse, CreateImportJobRequest, CreateImportJobResponse, DeduplicationStrategy, ExportFormat, ExportImportTemplate, ExportJobProgress, ExportJobStatus, ExportJobSummary, FieldMappingEntry, GetExportJobDownloadRequest, GetExportJobDownloadResponse, ImportJobProgress, ImportJobResults, ImportJobStatus, ImportJobSummary, ImportMapping, ImportRequest, ImportResponse, ImportRowResult, ImportValidationConfig, ImportValidationMode, ImportValidationResult, ImportWriteMode, ListExportJobsRequest, ListExportJobsResponse, ListImportJobsRequest, ListImportJobsResponse, ScheduleExportRequest, ScheduleExportResponse, ScheduledExport, UndoImportJobResponse } from '@objectstack/spec/api';
 
 // Validate data
-const result = CreateExportJobRequest.parse(data);
+const result = CreateExportJobRequestSchema.parse(data);
 ```
 
 ---

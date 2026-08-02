@@ -22,11 +22,11 @@ must have Zod schemas for runtime validation and JSON Schema generation.
 ## TypeScript Usage
 
 ```typescript
-import { PluginMetadata, ValidationError, ValidationResult, ValidationWarning } from '@objectstack/spec/kernel';
+import { PluginMetadataSchema, ValidationErrorSchema, ValidationResultSchema, ValidationWarningSchema } from '@objectstack/spec/kernel';
 import type { PluginMetadata, ValidationError, ValidationResult, ValidationWarning } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = PluginMetadata.parse(data);
+const result = PluginMetadataSchema.parse(data);
 ```
 
 ---

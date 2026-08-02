@@ -68,11 +68,11 @@ platform, and customers who install plugins.
 ## TypeScript Usage
 
 ```typescript
-import { ArtifactDownloadResponse, ArtifactReference, ListingStatus, MarketplaceCategory, MarketplaceInstallRequest, MarketplaceInstallResponse, MarketplaceListing, MarketplaceSearchRequest, MarketplaceSearchResponse, PackageSubmission, PricingModel, Publisher, PublisherVerification } from '@objectstack/spec/cloud';
+import { ArtifactDownloadResponseSchema, ArtifactReferenceSchema, ListingStatusSchema, MarketplaceCategorySchema, MarketplaceInstallRequestSchema, MarketplaceInstallResponseSchema, MarketplaceListingSchema, MarketplaceSearchRequestSchema, MarketplaceSearchResponseSchema, PackageSubmissionSchema, PricingModelSchema, PublisherSchema, PublisherVerificationSchema } from '@objectstack/spec/cloud';
 import type { ArtifactDownloadResponse, ArtifactReference, ListingStatus, MarketplaceCategory, MarketplaceInstallRequest, MarketplaceInstallResponse, MarketplaceListing, MarketplaceSearchRequest, MarketplaceSearchResponse, PackageSubmission, PricingModel, Publisher, PublisherVerification } from '@objectstack/spec/cloud';
 
 // Validate data
-const result = ArtifactDownloadResponse.parse(data);
+const result = ArtifactDownloadResponseSchema.parse(data);
 ```
 
 ---

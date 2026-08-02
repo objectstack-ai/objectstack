@@ -22,11 +22,11 @@ See also: https://www.iso.org/standard/27001
 ## TypeScript Usage
 
 ```typescript
-import { SupplierAssessmentStatus, SupplierRiskLevel, SupplierSecurityAssessment, SupplierSecurityPolicy, SupplierSecurityRequirement } from '@objectstack/spec/system';
+import { SupplierAssessmentStatusSchema, SupplierRiskLevelSchema, SupplierSecurityAssessmentSchema, SupplierSecurityPolicySchema, SupplierSecurityRequirementSchema } from '@objectstack/spec/system';
 import type { SupplierAssessmentStatus, SupplierRiskLevel, SupplierSecurityAssessment, SupplierSecurityPolicy, SupplierSecurityRequirement } from '@objectstack/spec/system';
 
 // Validate data
-const result = SupplierAssessmentStatus.parse(data);
+const result = SupplierAssessmentStatusSchema.parse(data);
 ```
 
 ---

@@ -18,11 +18,11 @@ These schemas ensure consistency across different parts of the stack.
 ## TypeScript Usage
 
 ```typescript
-import { CorsConfig, HttpMethod, HttpRequest, RateLimitConfig, StaticMount } from '@objectstack/spec/shared';
+import { CorsConfigSchema, HttpMethodSchema, HttpRequestSchema, RateLimitConfigSchema, StaticMountSchema } from '@objectstack/spec/shared';
 import type { CorsConfig, HttpMethod, HttpRequest, RateLimitConfig, StaticMount } from '@objectstack/spec/shared';
 
 // Validate data
-const result = CorsConfig.parse(data);
+const result = CorsConfigSchema.parse(data);
 ```
 
 ---

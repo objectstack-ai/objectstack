@@ -16,11 +16,11 @@ Represents a failed event in the dead letter queue
 ## TypeScript Usage
 
 ```typescript
-import { DeadLetterQueueEntry, EventLogEntry } from '@objectstack/spec/kernel';
+import { DeadLetterQueueEntrySchema, EventLogEntrySchema } from '@objectstack/spec/kernel';
 import type { DeadLetterQueueEntry, EventLogEntry } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = DeadLetterQueueEntry.parse(data);
+const result = DeadLetterQueueEntrySchema.parse(data);
 ```
 
 ---

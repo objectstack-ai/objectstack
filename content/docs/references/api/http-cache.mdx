@@ -58,11 +58,11 @@ See also: ../../[system/cache.zod.ts](/docs/references/system/cache) for applica
 ## TypeScript Usage
 
 ```typescript
-import { CacheControl, CacheDirective, CacheInvalidationRequest, CacheInvalidationResponse, CacheInvalidationTarget, ETag, MetadataCacheRequest, MetadataCacheResponse } from '@objectstack/spec/api';
+import { CacheControlSchema, CacheDirective, CacheInvalidationRequestSchema, CacheInvalidationResponseSchema, CacheInvalidationTarget, ETagSchema, MetadataCacheRequestSchema, MetadataCacheResponseSchema } from '@objectstack/spec/api';
 import type { CacheControl, CacheDirective, CacheInvalidationRequest, CacheInvalidationResponse, CacheInvalidationTarget, ETag, MetadataCacheRequest, MetadataCacheResponse } from '@objectstack/spec/api';
 
 // Validate data
-const result = CacheControl.parse(data);
+const result = CacheControlSchema.parse(data);
 ```
 
 ---

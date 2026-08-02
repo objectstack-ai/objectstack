@@ -40,11 +40,11 @@ encryption: \{ enabled: true, algorithm: 'AES-256-GCM' \},
 ## TypeScript Usage
 
 ```typescript
-import { BackupConfig, BackupRetention, BackupStrategy, DisasterRecoveryPlan, FailoverConfig, FailoverMode, RPO, RTO } from '@objectstack/spec/system';
+import { BackupConfigSchema, BackupRetentionSchema, BackupStrategySchema, DisasterRecoveryPlanSchema, FailoverConfigSchema, FailoverModeSchema, RPOSchema, RTOSchema } from '@objectstack/spec/system';
 import type { BackupConfig, BackupRetention, BackupStrategy, DisasterRecoveryPlan, FailoverConfig, FailoverMode, RPO, RTO } from '@objectstack/spec/system';
 
 // Validate data
-const result = BackupConfig.parse(data);
+const result = BackupConfigSchema.parse(data);
 ```
 
 ---

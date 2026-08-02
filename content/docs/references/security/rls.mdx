@@ -152,11 +152,11 @@ See also: https://help.salesforce.com/s/articleView?id=sf.security_sharing_rules
 ## TypeScript Usage
 
 ```typescript
-import { RLSEvaluationResult, RLSOperation, RLSUserContext, RowLevelSecurityPolicy } from '@objectstack/spec/security';
+import { RLSEvaluationResultSchema, RLSOperation, RLSUserContextSchema, RowLevelSecurityPolicySchema } from '@objectstack/spec/security';
 import type { RLSEvaluationResult, RLSOperation, RLSUserContext, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 
 // Validate data
-const result = RLSEvaluationResult.parse(data);
+const result = RLSEvaluationResultSchema.parse(data);
 ```
 
 ---

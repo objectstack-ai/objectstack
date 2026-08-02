@@ -82,11 +82,11 @@ See also: https://datatracker.ietf.org/doc/html/rfc7644
 ## TypeScript Usage
 
 ```typescript
-import { SCIMAddress, SCIMBulkOperation, SCIMBulkRequest, SCIMBulkResponse, SCIMBulkResponseOperation, SCIMEmail, SCIMEnterpriseUser, SCIMError, SCIMGroup, SCIMGroupReference, SCIMListResponse, SCIMMemberReference, SCIMMeta, SCIMName, SCIMPatchOperation, SCIMPatchRequest, SCIMPhoneNumber, SCIMUser } from '@objectstack/spec/identity';
+import { SCIMAddressSchema, SCIMBulkOperationSchema, SCIMBulkRequestSchema, SCIMBulkResponseSchema, SCIMBulkResponseOperationSchema, SCIMEmailSchema, SCIMEnterpriseUserSchema, SCIMErrorSchema, SCIMGroupSchema, SCIMGroupReferenceSchema, SCIMListResponseSchema, SCIMMemberReferenceSchema, SCIMMetaSchema, SCIMNameSchema, SCIMPatchOperationSchema, SCIMPatchRequestSchema, SCIMPhoneNumberSchema, SCIMUserSchema } from '@objectstack/spec/identity';
 import type { SCIMAddress, SCIMBulkOperation, SCIMBulkRequest, SCIMBulkResponse, SCIMBulkResponseOperation, SCIMEmail, SCIMEnterpriseUser, SCIMError, SCIMGroup, SCIMGroupReference, SCIMListResponse, SCIMMemberReference, SCIMMeta, SCIMName, SCIMPatchOperation, SCIMPatchRequest, SCIMPhoneNumber, SCIMUser } from '@objectstack/spec/identity';
 
 // Validate data
-const result = SCIMAddress.parse(data);
+const result = SCIMAddressSchema.parse(data);
 ```
 
 ---

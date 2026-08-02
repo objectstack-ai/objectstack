@@ -70,11 +70,11 @@ and distribute package artifacts.
 ## TypeScript Usage
 
 ```typescript
-import { ArtifactChecksum, ArtifactFileEntry, ArtifactSignature, MetadataCategoryEnum, PackageArtifact } from '@objectstack/spec/kernel';
-import type { ArtifactChecksum, ArtifactFileEntry, ArtifactSignature, MetadataCategoryEnum, PackageArtifact } from '@objectstack/spec/kernel';
+import { ArtifactChecksumSchema, ArtifactFileEntrySchema, ArtifactSignatureSchema, MetadataCategoryEnum, PackageArtifactSchema } from '@objectstack/spec/kernel';
+import type { ArtifactChecksum, ArtifactFileEntry, ArtifactSignature, PackageArtifact } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = ArtifactChecksum.parse(data);
+const result = ArtifactChecksumSchema.parse(data);
 ```
 
 ---

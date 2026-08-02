@@ -42,11 +42,11 @@ Each version is immutable and maintains its own metadata and download URL.
 ## TypeScript Usage
 
 ```typescript
-import { Document, DocumentTemplate, DocumentVersion, ESignatureConfig } from '@objectstack/spec/data';
+import { DocumentSchema, DocumentTemplateSchema, DocumentVersionSchema, ESignatureConfigSchema } from '@objectstack/spec/data';
 import type { Document, DocumentTemplate, DocumentVersion, ESignatureConfig } from '@objectstack/spec/data';
 
 // Validate data
-const result = Document.parse(data);
+const result = DocumentSchema.parse(data);
 ```
 
 ---

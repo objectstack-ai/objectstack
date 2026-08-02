@@ -118,11 +118,11 @@ selector state.
 ## TypeScript Usage
 
 ```typescript
-import { ContextToken, ContextTokenPlaceholder } from '@objectstack/spec/data';
-import type { ContextToken, ContextTokenPlaceholder } from '@objectstack/spec/data';
+import { ContextTokenSchema, ContextTokenPlaceholderSchema } from '@objectstack/spec/data';
+import type { ContextToken } from '@objectstack/spec/data';
 
 // Validate data
-const result = ContextToken.parse(data);
+const result = ContextTokenSchema.parse(data);
 ```
 
 ---

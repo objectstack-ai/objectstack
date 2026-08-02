@@ -46,11 +46,11 @@ value that silently never fires.
 ## TypeScript Usage
 
 ```typescript
-import { Webhook, WebhookTriggerType } from '@objectstack/spec/automation';
-import type { Webhook, WebhookTriggerType } from '@objectstack/spec/automation';
+import { WebhookSchema, WebhookTriggerType } from '@objectstack/spec/automation';
+import type { Webhook } from '@objectstack/spec/automation';
 
 // Validate data
-const result = Webhook.parse(data);
+const result = WebhookSchema.parse(data);
 ```
 
 ---

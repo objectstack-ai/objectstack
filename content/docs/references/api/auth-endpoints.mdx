@@ -24,11 +24,11 @@ the canonical API contract.
 ## TypeScript Usage
 
 ```typescript
-import { AuthEndpoint, AuthFeaturesConfig, AuthProviderInfo, DeviceRequestResponse, DeviceTokenResponse, EmailPasswordConfigPublic, GetAuthConfigResponse } from '@objectstack/spec/api';
+import { AuthEndpointSchema, AuthFeaturesConfigSchema, AuthProviderInfoSchema, DeviceRequestResponseSchema, DeviceTokenResponseSchema, EmailPasswordConfigPublicSchema, GetAuthConfigResponseSchema } from '@objectstack/spec/api';
 import type { AuthEndpoint, AuthFeaturesConfig, AuthProviderInfo, DeviceRequestResponse, DeviceTokenResponse, EmailPasswordConfigPublic, GetAuthConfigResponse } from '@objectstack/spec/api';
 
 // Validate data
-const result = AuthEndpoint.parse(data);
+const result = AuthEndpointSchema.parse(data);
 ```
 
 ---

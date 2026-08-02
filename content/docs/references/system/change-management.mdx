@@ -18,11 +18,11 @@ Follows ITIL change management best practices.
 ## TypeScript Usage
 
 ```typescript
-import { ChangeImpact, ChangePriority, ChangeRequest, ChangeStatus, ChangeType, RollbackPlan } from '@objectstack/spec/system';
+import { ChangeImpactSchema, ChangePrioritySchema, ChangeRequestSchema, ChangeStatusSchema, ChangeTypeSchema, RollbackPlanSchema } from '@objectstack/spec/system';
 import type { ChangeImpact, ChangePriority, ChangeRequest, ChangeStatus, ChangeType, RollbackPlan } from '@objectstack/spec/system';
 
 // Validate data
-const result = ChangeImpact.parse(data);
+const result = ChangeImpactSchema.parse(data);
 ```
 
 ---

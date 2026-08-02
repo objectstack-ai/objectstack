@@ -38,11 +38,11 @@ is product policy that varies wildly between tenants.
 ## TypeScript Usage
 
 ```typescript
-import { AIUsageRecord, TokenUsage } from '@objectstack/spec/ai';
+import { AIUsageRecordSchema, TokenUsageSchema } from '@objectstack/spec/ai';
 import type { AIUsageRecord, TokenUsage } from '@objectstack/spec/ai';
 
 // Validate data
-const result = AIUsageRecord.parse(data);
+const result = AIUsageRecordSchema.parse(data);
 ```
 
 ---

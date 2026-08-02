@@ -8,11 +8,11 @@ description: Connector Auth protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { ConnectorInstanceAPIKeyAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth } from '@objectstack/spec/integration';
-import type { ConnectorInstanceAPIKeyAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth } from '@objectstack/spec/integration';
+import { ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema } from '@objectstack/spec/integration';
+import type { ConnectorInstanceAuth } from '@objectstack/spec/integration';
 
 // Validate data
-const result = ConnectorInstanceAPIKeyAuth.parse(data);
+const result = ConnectorInstanceAPIKeyAuthSchema.parse(data);
 ```
 
 ---

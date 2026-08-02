@@ -20,11 +20,11 @@ and composed together in the ObjectStack ecosystem.
 ## TypeScript Usage
 
 ```typescript
-import { PluginInstallConfig, PluginQualityMetrics, PluginRegistryEntry, PluginSearchFilters, PluginStatistics, PluginVendor } from '@objectstack/spec/kernel';
+import { PluginInstallConfigSchema, PluginQualityMetricsSchema, PluginRegistryEntrySchema, PluginSearchFiltersSchema, PluginStatisticsSchema, PluginVendorSchema } from '@objectstack/spec/kernel';
 import type { PluginInstallConfig, PluginQualityMetrics, PluginRegistryEntry, PluginSearchFilters, PluginStatistics, PluginVendor } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = PluginInstallConfig.parse(data);
+const result = PluginInstallConfigSchema.parse(data);
 ```
 
 ---

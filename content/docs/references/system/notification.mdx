@@ -50,11 +50,11 @@ Supports variables for personalization and file attachments.
 ## TypeScript Usage
 
 ```typescript
-import { EmailTemplate, InAppNotification, NotificationChannel, NotificationConfig, PushNotification, SMSTemplate } from '@objectstack/spec/system';
+import { EmailTemplateSchema, InAppNotificationSchema, NotificationChannelSchema, NotificationConfigSchema, PushNotificationSchema, SMSTemplateSchema } from '@objectstack/spec/system';
 import type { EmailTemplate, InAppNotification, NotificationChannel, NotificationConfig, PushNotification, SMSTemplate } from '@objectstack/spec/system';
 
 // Validate data
-const result = EmailTemplate.parse(data);
+const result = EmailTemplateSchema.parse(data);
 ```
 
 ---

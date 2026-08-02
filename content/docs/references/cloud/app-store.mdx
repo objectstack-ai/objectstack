@@ -44,11 +44,11 @@ Discover → Evaluate → Install → Configure → Use → Rate/Review → Mana
 ## TypeScript Usage
 
 ```typescript
-import { AppDiscoveryRequest, AppDiscoveryResponse, AppSubscription, InstalledAppSummary, ListInstalledAppsRequest, ListInstalledAppsResponse, ListReviewsRequest, ListReviewsResponse, RecommendationReason, RecommendedApp, ReviewModerationStatus, SubmitReviewRequest, SubscriptionStatus, UserReview } from '@objectstack/spec/cloud';
+import { AppDiscoveryRequestSchema, AppDiscoveryResponseSchema, AppSubscriptionSchema, InstalledAppSummarySchema, ListInstalledAppsRequestSchema, ListInstalledAppsResponseSchema, ListReviewsRequestSchema, ListReviewsResponseSchema, RecommendationReasonSchema, RecommendedAppSchema, ReviewModerationStatusSchema, SubmitReviewRequestSchema, SubscriptionStatusSchema, UserReviewSchema } from '@objectstack/spec/cloud';
 import type { AppDiscoveryRequest, AppDiscoveryResponse, AppSubscription, InstalledAppSummary, ListInstalledAppsRequest, ListInstalledAppsResponse, ListReviewsRequest, ListReviewsResponse, RecommendationReason, RecommendedApp, ReviewModerationStatus, SubmitReviewRequest, SubscriptionStatus, UserReview } from '@objectstack/spec/cloud';
 
 // Validate data
-const result = AppDiscoveryRequest.parse(data);
+const result = AppDiscoveryRequestSchema.parse(data);
 ```
 
 ---

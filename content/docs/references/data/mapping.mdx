@@ -24,11 +24,11 @@ green run.
 ## TypeScript Usage
 
 ```typescript
-import { FieldMapping, Mapping, TransformType } from '@objectstack/spec/data';
-import type { FieldMapping, Mapping, TransformType } from '@objectstack/spec/data';
+import { FieldMappingSchema, MappingSchema, TransformType } from '@objectstack/spec/data';
+import type { FieldMapping, Mapping } from '@objectstack/spec/data';
 
 // Validate data
-const result = FieldMapping.parse(data);
+const result = FieldMappingSchema.parse(data);
 ```
 
 ---

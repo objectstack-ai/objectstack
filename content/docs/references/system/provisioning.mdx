@@ -30,11 +30,11 @@ Provisioning is designed to be:
 ## TypeScript Usage
 
 ```typescript
-import { ProvisioningStep, TenantPlan, TenantProvisioningRequest, TenantProvisioningResult, TenantProvisioningStatusEnum, TenantRegion } from '@objectstack/spec/system';
-import type { ProvisioningStep, TenantPlan, TenantProvisioningRequest, TenantProvisioningResult, TenantProvisioningStatusEnum, TenantRegion } from '@objectstack/spec/system';
+import { ProvisioningStepSchema, TenantPlanSchema, TenantProvisioningRequestSchema, TenantProvisioningResultSchema, TenantProvisioningStatusEnum, TenantRegionSchema } from '@objectstack/spec/system';
+import type { ProvisioningStep, TenantPlan, TenantProvisioningRequest, TenantProvisioningResult, TenantRegion } from '@objectstack/spec/system';
 
 // Validate data
-const result = ProvisioningStep.parse(data);
+const result = ProvisioningStepSchema.parse(data);
 ```
 
 ---

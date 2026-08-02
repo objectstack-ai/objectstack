@@ -30,11 +30,11 @@ no longer constrains authored flows — plugins extend the vocabulary.
 ## TypeScript Usage
 
 ```typescript
-import { Flow, FlowEdge, FlowNode, FlowNodeAction, FlowVariable, FlowVersionHistory } from '@objectstack/spec/automation';
-import type { Flow, FlowEdge, FlowNode, FlowNodeAction, FlowVariable, FlowVersionHistory } from '@objectstack/spec/automation';
+import { FlowSchema, FlowEdgeSchema, FlowNodeSchema, FlowNodeAction, FlowVariableSchema, FlowVersionHistorySchema } from '@objectstack/spec/automation';
+import type { Flow, FlowEdge, FlowNode, FlowVersionHistory } from '@objectstack/spec/automation';
 
 // Validate data
-const result = Flow.parse(data);
+const result = FlowSchema.parse(data);
 ```
 
 ---
