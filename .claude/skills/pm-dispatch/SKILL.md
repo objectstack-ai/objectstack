@@ -117,6 +117,18 @@ shared files, and the merge queue is one lane regardless. Scaling order:
    shard in every claim comment and **never claims outside it**.
 3. Multiple PMs on the SAME queue: prohibited — all cost, no throughput.
 
+**Shard ownership is registered, never assumed.** A registry issue in the
+main backlog (`[PM] 分片分工登记表`) records which session owns which
+shard; a PM taking over a shard comments there as its FIRST action, and
+comments again when handing off. An unowned shard may be **caretaken** by
+the main-backlog PM (triage + dispatch), but the moment a shard is
+registered to another session, the caretaker stops dispatching into it —
+in-flight claimed tasks finish under whoever claimed them (the claim
+protocol makes the handoff collision-free), and everything else belongs to
+the new owner. State the mode in claim comments (「cloud 分片,主 PM 代管」
+vs a registered shard PM's own tag) so the registry and the claims never
+disagree silently.
+
 **Cross-shard transfer protocol — work crosses shard lines, PMs never
 do.** When a sharded PM's task (or a sub-task of its parent issue) needs a
 change in another shard's repo:
