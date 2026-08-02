@@ -4464,6 +4464,7 @@
     "kernel/ExecutionContext:accessToken",
     "kernel/ExecutionContext:accessible_org_ids",
     "kernel/ExecutionContext:actor",
+    "kernel/ExecutionContext:attributedUserId",
     "kernel/ExecutionContext:audience",
     "kernel/ExecutionContext:currency",
     "kernel/ExecutionContext:email",

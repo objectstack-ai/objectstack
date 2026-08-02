@@ -183,6 +183,63 @@ describe('audit writers — actor attribution (ADR-0014 D2, cloud#340)', () => {
     expect(audit?.row.actor).toBeNull();
     expect(audit?.row.user_id).toBeNull();
   });
+
+  /**
+   * [#4586] The `sys_member` case the issue is about: better-auth authorizes
+   * identity writes as the SYSTEM on purpose, so the session names no caller
+   * and every grade change used to record as "system". The human arrives on
+   * PROVENANCE instead — attribution, never authorization.
+   */
+  it('credits the attributed human when the write authorized as the system', async () => {
+    const { engine, fire, created } = makeEngine(SINGLE_TENANT);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'sys_member',
+      input: { id: 'mem-1' },
+      __previous: { id: 'mem-1', role: 'member' },
+      result: { id: 'mem-1', role: 'admin' },
+      // Exactly the envelope `withSystemContext` produces for an
+      // `organization/update-member-role` call.
+      session: { isSystem: true },
+      provenance: { attributedUserId: 'user-admin' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(audit?.row.action).toBe('update');
+    // WHO changed the grade — a real sys_user id, so the lookup still joins
+    // (ADR-0118 D1: an id or null, never a sentinel like 'system').
+    expect(audit?.row.user_id).toBe('user-admin');
+    expect(audit?.row.actor).toBe('user-admin');
+  });
+
+  it('a genuinely machine-originated write still records as the system (null)', async () => {
+    // Boot sync / migration / the kernel:ready backfill: no scope, no actor.
+    // Absence must stay absence — never upgraded into some ambient user.
+    const { engine, fire, created } = makeEngine(SINGLE_TENANT);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_member',
+      input: { id: 'mem-2' },
+      result: { id: 'mem-2', role: 'member' },
+      session: { isSystem: true },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(audit?.row.user_id).toBeNull();
+    expect(audit?.row.actor).toBeNull();
+  });
+
+  it('a real caller outranks attribution — the session subject wins', async () => {
+    const { engine, fire, created } = makeEngine(SINGLE_TENANT);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-3' },
+      result: { id: 'lead-3', name: 'Gamma' },
+      session: { userId: 'user-7' },
+      provenance: { attributedUserId: 'user-admin' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(audit?.row.user_id).toBe('user-7');
+  });
 });
 
 describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', () => {

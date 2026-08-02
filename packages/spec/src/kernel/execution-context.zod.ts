@@ -35,6 +35,46 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   actor: z.string().optional(),
 
   /**
+   * [#4586] The real HUMAN behind a write whose authorization subject is the
+   * SYSTEM — **attribution only, never authorization**.
+   *
+   * The case it exists for: better-auth owns every write to the identity
+   * tables (`sys_member`, `sys_user`, …) and its adapter runs them
+   * `isSystem: true` **on purpose** — the route already authorized the action
+   * under better-auth's own ACL (ADR-0092 D2 refuses user-context writes to
+   * those tables outright). So the person who clicked *make admin* was known
+   * exactly once, in the hook layer where the session exists, and was then
+   * discarded: every `sys_member` role transition recorded "system" as its
+   * actor. This field is the one hop that carries them through.
+   *
+   * **The invariant, and it is load-bearing:** nothing in the authorization
+   * path reads this. It is not {@link userId} — that is the subject the
+   * engine authorizes AS (RLS `current_user`, ownership stamps, permission
+   * resolution). Promoting the attributed human to the write's authorization
+   * subject would re-adjudicate a decision better-auth already made, opening
+   * the second adjudication track ADR-0095 D3 closed. A context carrying only
+   * this field authorizes exactly like a context carrying nothing —
+   * ANONYMOUS, per ADR-0118 D2 ("absence is never system") — and a context
+   * carrying it beside `isSystem: true` authorizes exactly like `isSystem`
+   * alone. Attribution and authorization are separate fields on purpose.
+   *
+   * Relationship to {@link actor}: same intent (audit attribution), different
+   * principal. `actor` is a LABEL for a caller that is not a user at all
+   * (`svc:<name>`) and lands on `sys_audit_log.actor`; this is a real
+   * `sys_user` id and lands on `sys_audit_log.user_id`, keeping that lookup
+   * column joinable (ADR-0118 D1 — a user-lookup column holds an id or null,
+   * never a sentinel). Absent = the write is genuinely machine-originated
+   * (boot sync, migration, scheduled job) and records as `null`.
+   *
+   * Server-constructed only, never client-supplied — exactly like
+   * {@link isSystem} and {@link flowRunId}. Surfaced to hooks as
+   * `HookContext.provenance.attributedUserId`, deliberately NOT folded into
+   * `session`: a hook that gates on `session.userId` must keep seeing "no
+   * caller" here, because there is none.
+   */
+  attributedUserId: z.string().optional(),
+
+  /**
    * Current user's unique email (resolved from session, falling back to a
    * `sys_user` lookup). Exposed to RLS as `current_user.email` for seedable,
    * human-readable owner scoping. Unique by auth invariant — unlike display

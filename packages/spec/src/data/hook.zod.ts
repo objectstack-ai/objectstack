@@ -380,21 +380,31 @@ export const HookContextSchema = lazySchema(() => z.object({
 
   /**
    * Write Provenance
-   * WHAT produced this write, as opposed to WHO is calling ({@link session}).
+   * WHERE this write came from, as opposed to WHO is calling ({@link session}).
    *
-   * Server-stamped and never client-supplied. It is not an identity: nothing
-   * here is evaluated by any security middleware, and it neither widens nor
-   * narrows what the write may touch. It exists so a hook can tell "the actor
-   * that OWNS some externalized state" from "an unrelated caller".
+   * Server-stamped and never client-supplied. **Nothing here is an
+   * authorization input**: no security middleware evaluates any of it, and it
+   * neither widens nor narrows what the write may touch. It exists so a hook —
+   * or the audit writer — can tell "the run / the person this write belongs
+   * to" from "an unrelated caller".
+   *
+   * Two marks, both non-authorizing, for two different questions:
+   *  - `flowRunId` — WHAT produced the write (a machine origin, no person);
+   *  - `attributedUserId` — WHO is CREDITED for a write the system authorized
+   *    (a person, but never the subject the write was authorized as).
    *
    * Kept OUT of `session` on purpose. A writer can have provenance and no
    * identity at all — a schedule-triggered flow run resolves no principal — and
    * folding the two together would have forced such a run to present an empty
    * session, silently turning "no caller" into "an anonymous caller" for every
-   * hook that gates on `session` being absent (#3712).
+   * hook that gates on `session` being absent (#3712). The same reasoning
+   * keeps `attributedUserId` out: it names a human, but the write authorized
+   * as the SYSTEM, and a hook reading `session.userId` must keep seeing the
+   * truth — there was no caller (#4586).
    */
   provenance: z.object({
     flowRunId: z.string().optional().describe('Id of the automation flow run performing this write, when it originates from a flow data node. Lets a hook recognize the run that OWNS state that run itself opened — the approvals record lock exempts the run holding the pending request (#3456).'),
+    attributedUserId: z.string().optional().describe('The real human credited for a write whose authorization subject was the SYSTEM — e.g. the admin whose better-auth `update-member-role` call the identity adapter executes as `isSystem` (#4586). ATTRIBUTION ONLY: the audit writer records it as `sys_audit_log.user_id`; no security middleware reads it, and it never becomes the subject the write is authorized as.'),
   }).optional().describe('Server-stamped write provenance (never client-supplied, never an authorization input)'),
 
 

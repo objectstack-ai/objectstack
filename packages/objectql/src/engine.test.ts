@@ -632,6 +632,82 @@ describe('ObjectQL Engine', () => {
         });
     });
 
+    /**
+     * #4586 — the ATTRIBUTED human rides provenance, never the session.
+     *
+     * better-auth owns every write to the identity tables and runs them
+     * `isSystem: true` ON PURPOSE: the route already authorized the action
+     * under better-auth's own ACL. Threading the real human through so
+     * `sys_member` history stops saying "system" must therefore change exactly
+     * one thing — who the write is CREDITED to — and nothing about who it is
+     * AUTHORIZED as. Re-authorizing as the human would open a second
+     * adjudication track at the boundary ADR-0095 D3 closed.
+     *
+     * These are the pins for that constraint at the engine seam, where the
+     * context is split into the envelopes hooks and middleware actually read.
+     */
+    describe('attributed actor is attribution, never authorization (#4586)', () => {
+        beforeEach(async () => {
+            engine.registerDriver(mockDriver, true);
+            await engine.init();
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', fields: {} } as any);
+        });
+
+        const capture = () => {
+            const seen: { session?: any; provenance?: any; user?: any } = {};
+            engine.registerHook('beforeInsert', async (ctx: any) => {
+                seen.session = ctx.session;
+                seen.provenance = ctx.provenance;
+                seen.user = ctx.user;
+            }, { object: 'task' });
+            return seen;
+        };
+
+        it('a better-auth write surfaces the human on provenance and stays a SYSTEM session', async () => {
+            const seen = capture();
+
+            await engine.insert('task', { title: 'grade change' }, {
+                context: { isSystem: true, attributedUserId: 'usr_admin' } as any,
+            });
+
+            expect(seen.provenance).toEqual({ attributedUserId: 'usr_admin' });
+            // The authorization half is untouched: still system, still no caller.
+            expect(seen.session).toMatchObject({ isSystem: true });
+            expect(seen.session.userId).toBeUndefined();
+            // And the attributed human must NOT leak into any channel that a
+            // hook or middleware reads as "the acting user".
+            expect(seen.session).not.toHaveProperty('attributedUserId');
+            expect(seen.user).toBeUndefined();
+        });
+
+        it('attribution ALONE authorizes exactly like no context at all (ADR-0118 D2)', async () => {
+            // "Absence is never system": a context that names only who to credit
+            // establishes no principal, so it must not become one. Anything else
+            // would make forgetting `isSystem` an accidental elevation.
+            const seen = capture();
+
+            await engine.insert('task', { title: 'no authority' }, {
+                context: { attributedUserId: 'usr_admin' } as any,
+            });
+
+            expect(seen.provenance).toEqual({ attributedUserId: 'usr_admin' });
+            expect(seen.session).toBeUndefined();
+            expect(seen.user).toBeUndefined();
+        });
+
+        it('a real caller keeps their own session; the two envelopes never merge', async () => {
+            const seen = capture();
+
+            await engine.insert('task', { title: 'both' }, {
+                context: { userId: 'u1', attributedUserId: 'usr_admin', flowRunId: 'run_9' } as any,
+            });
+
+            expect(seen.session).toMatchObject({ userId: 'u1' });
+            expect(seen.user).toMatchObject({ id: 'u1' });
+            expect(seen.provenance).toEqual({ flowRunId: 'run_9', attributedUserId: 'usr_admin' });
+        });
+    });
+
     describe('execution context via the trailing options arg (read methods)', () => {
         // Regression: reads took context inside the query while writes took it in
         // a trailing options arg — so `find(obj, q, { context })` silently dropped
