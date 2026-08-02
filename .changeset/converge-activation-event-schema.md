@@ -70,6 +70,20 @@ enum 取**两侧 v17 前词表的并集**,共 9 个值:
 
 手工迁移步骤:按上表把每个字符串改写成 `{ type, pattern }`。**漏改会在 parse 处响亮失败** —— `StudioPluginManifestSchema` 是 `strictObject`,字符串遇到对象 schema 直接抛错,不存在静默吞掉或强制转换。
 
+## 不要与同窗口的 #4509 / #4664 退休项混淆
+
+v17 同窗口的 #4664 退休了五个键。其中 **`app.contextSelectors[].placement`** 与本条变更**毫无关系**,但很容易被读成有关系 —— 那条退休说明里写着「`location` 曾是 `placement` 的别名」,而 Studio 插件的面板贡献点**恰好也有一个 `location` 键**:
+
+| | 被 #4664 退休的 | 本次变更**未动**的 |
+|:--|:--|:--|
+| 键 | `ui/App.contextSelectors[].placement`(`location` 是它的别名) | `studio/PanelContribution.location` |
+| 语义 | app 的上下文选择器渲染在哪(`sidebar_header` / `topbar`) | Studio 插件的辅助面板停靠在哪(`bottom` / `right` / `modal`) |
+| 状态 | 已删除 | **原样保留**,仍是可作者化键 |
+
+两者在不同 schema 上、取值域不同、互不相关。写 Studio 插件的作者**不需要**因为 #4664 去动 `contributes.panels[].location`。
+
+其余四个退休键(`mapping.extractQuery` / `mapping.errorPolicy` / `mapping.batchSize` / `app.contextSelectors[].includeAll`)与 `activationEvents` 无任何语义交叉;同窗口的 #4668(ADR-0119 D2 migration journal)亦然。
+
 ## 其它影响
 
 - `@objectstack/spec/studio` 现在**额外导出** `ActivationEvent` 类型(此前只有 schema),与 `./kernel` 指向同一份声明。
