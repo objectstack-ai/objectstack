@@ -44,6 +44,11 @@ import type {
 } from '@objectstack/spec/kernel';
 import type { MetadataOverlay } from '@objectstack/spec/kernel';
 import { getMetadataTypeActions } from '@objectstack/spec/kernel';
+import {
+  MetadataEventType,
+  MetadataEventSchema,
+  type MetadataEvent as RealtimeMetadataEvent,
+} from '@objectstack/spec/api';
 import { createLogger, type Logger } from '@objectstack/core';
 import { JSONSerializer } from './serializers/json-serializer.js';
 import { YAMLSerializer } from './serializers/yaml-serializer.js';
@@ -63,6 +68,24 @@ import type {
  * Watch callback function (legacy)
  */
 export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
+
+/**
+ * RFC-4122 v4 uuid for realtime `MetadataEvent.id` (#4602).
+ * Prefers `crypto.randomUUID`; the fallback keeps browser-compatible (Pure)
+ * environments without WebCrypto working while still satisfying
+ * `MetadataEventSchema`'s `z.string().uuid()`.
+ */
+function generateEventUuid(): string {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === 'function') {
+    return c.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 /**
  * Payload format for cluster-wide metadata change broadcasts.
@@ -261,6 +284,70 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * Publish a realtime {@link RealtimeMetadataEvent} for a metadata write
+   * (#4602 — contract-first).
+   *
+   * What reaches a `subscribeMetadata` callback must BE the spec's
+   * `MetadataEvent` (`@objectstack/spec/api`): `id` (uuid) at the top level,
+   * flattened `metadataType`/`name`/`definition`, `userId` when the write
+   * carried an actor. The transport keeps its `RealtimeEventPayload`
+   * envelope — `payload` carries the complete `MetadataEvent`, and the client
+   * SDK unwraps + validates it at the boundary.
+   *
+   * Two loud-by-design gates:
+   *  - `MetadataEventType` is a CLOSED enum. A metadata type outside it has
+   *    no declared realtime event contract, so we skip publishing (debug log)
+   *    instead of emitting an event every compliant consumer must reject.
+   *    Declared = enforced; widening coverage means widening the spec enum,
+   *    not producing off-contract events.
+   *  - The event body is `MetadataEventSchema.parse`d before publish, so a
+   *    malformed producer fails here (warn log, event not published) rather
+   *    than delivering a lie downstream.
+   */
+  private async publishRealtimeMetadataEvent(
+    action: 'created' | 'updated' | 'deleted',
+    type: string,
+    name: string,
+    opts: { definition?: unknown; packageId?: unknown; userId?: string } = {},
+  ): Promise<void> {
+    if (!this.realtimeService) return;
+
+    const eventType = `metadata.${type}.${action}`;
+    if (!(MetadataEventType.options as readonly string[]).includes(eventType)) {
+      this.logger.debug(
+        `Metadata type '${type}' has no declared realtime event type (MetadataEventType) — skipping publish`,
+        { eventType, name },
+      );
+      return;
+    }
+
+    try {
+      const event: RealtimeMetadataEvent = MetadataEventSchema.parse({
+        id: generateEventUuid(),
+        type: eventType,
+        metadataType: type,
+        name,
+        ...(typeof opts.packageId === 'string' ? { packageId: opts.packageId } : {}),
+        ...(opts.definition !== undefined ? { definition: opts.definition } : {}),
+        ...(opts.userId ? { userId: opts.userId } : {}),
+        timestamp: new Date().toISOString(),
+      });
+
+      const envelope: RealtimeEventPayload = {
+        type: event.type,
+        object: type,
+        payload: { ...event },
+        timestamp: event.timestamp,
+      };
+
+      await this.realtimeService.publish(envelope);
+      this.logger.debug(`Published ${eventType} event`, { name });
+    } catch (error) {
+      this.logger.warn(`Failed to publish metadata event`, { type, name, error });
+    }
+  }
+
+  /**
    * Register a new metadata loader (data source)
    */
   registerLoader(loader: MetadataLoader) {
@@ -323,27 +410,14 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
-    // Publish metadata.{type}.created event to realtime service
-    if (this.realtimeService) {
-      const event: RealtimeEventPayload = {
-        type: `metadata.${type}.created`,
-        object: type,
-        payload: {
-          metadataType: type,
-          name,
-          definition: data,
-          packageId: (data as any)?.packageId,
-        },
-        timestamp: new Date().toISOString(),
-      };
-
-      try {
-        await this.realtimeService.publish(event);
-        this.logger.debug(`Published metadata.${type}.created event`, { name });
-      } catch (error) {
-        this.logger.warn(`Failed to publish metadata event`, { type, name, error });
-      }
-    }
+    // Publish metadata.{type}.created / .updated event to realtime service.
+    // An overwrite is an UPDATE, mirroring the 'added' vs 'changed' split the
+    // watcher event below already makes (#4602).
+    await this.publishRealtimeMetadataEvent(existed ? 'updated' : 'created', type, name, {
+      definition: data,
+      packageId: (data as any)?.packageId,
+      userId: options?.userId,
+    });
 
     // Announce last, once the write has landed in the registry and every
     // writable loader — a subscriber that re-reads on the event must not
@@ -484,24 +558,9 @@ export class MetadataManager implements IMetadataService {
     }
 
     // Publish metadata.{type}.deleted event to realtime service
-    if (this.realtimeService) {
-      const event: RealtimeEventPayload = {
-        type: `metadata.${type}.deleted`,
-        object: type,
-        payload: {
-          metadataType: type,
-          name,
-        },
-        timestamp: new Date().toISOString(),
-      };
-
-      try {
-        await this.realtimeService.publish(event);
-        this.logger.debug(`Published metadata.${type}.deleted event`, { name });
-      } catch (error) {
-        this.logger.warn(`Failed to publish metadata event`, { type, name, error });
-      }
-    }
+    await this.publishRealtimeMetadataEvent('deleted', type, name, {
+      userId: options?.userId,
+    });
 
     // Announce last, once the removal has landed everywhere (see register()).
     if (options?.notify !== false) {
