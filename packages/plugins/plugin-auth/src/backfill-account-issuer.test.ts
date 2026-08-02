@@ -48,7 +48,7 @@ describe('backfillAccountIssuer (better-auth 1.7 account identity)', () => {
     expect(CREDENTIAL_ISSUER).toBe('local:credential');
   });
 
-  it('stamps configured social providers with the synthetic local:oauth issuer', async () => {
+  it('stamps a provider that declares no issuer with the synthetic local:oauth one', async () => {
     const ql = makeQl({
       sys_account: [{ id: 'a1', provider_id: 'github', account_id: '4242', issuer: null }],
     });
@@ -58,6 +58,36 @@ describe('backfillAccountIssuer (better-auth 1.7 account identity)', () => {
     expect(res.stamped).toBe(1);
     expect(ql.tables.sys_account[0].issuer).toBe('local:oauth:github');
     expect(oauthIssuerFor('github')).toBe('local:oauth:github');
+  });
+
+  it('stamps a provider that declares its own issuer with THAT issuer', async () => {
+    const ql = makeQl({
+      sys_account: [{ id: 'a1', provider_id: 'google', account_id: 'sub-1', issuer: null }],
+    });
+
+    const res = await backfillAccountIssuer(ql, {
+      socialProviders: [{ id: 'google', accountIssuer: 'https://accounts.google.com' }],
+    });
+
+    expect(res.stamped).toBe(1);
+    expect(ql.tables.sys_account[0].issuer).toBe('https://accounts.google.com');
+  });
+
+  it('leaves a per-login issuer underivable rather than synthesizing one', async () => {
+    // Microsoft Entra reads the tenant's `iss` off each login's profile, so
+    // there is no boot-time answer — and a guess would be the whole bug.
+    const ql = makeQl({
+      sys_account: [{ id: 'a1', provider_id: 'microsoft', account_id: 'oid-1', issuer: null }],
+    });
+
+    const res = await backfillAccountIssuer(ql, {
+      socialProviders: [{ id: 'microsoft', accountIssuer: ({ profile }: any) => profile.iss }],
+      socialProviderIds: ['microsoft'],
+    });
+
+    expect(res).toMatchObject({ scanned: 1, stamped: 0, repaired: 0 });
+    expect(res.unresolved).toEqual([{ providerId: 'microsoft', count: 1 }]);
+    expect(ql.tables.sys_account[0].issuer).toBeNull();
   });
 
   it('uses the registered SSO provider\'s real issuer for federated accounts', async () => {
@@ -143,5 +173,98 @@ describe('backfillAccountIssuer (better-auth 1.7 account identity)', () => {
   it('no-ops on an engine that cannot query', async () => {
     await expect(backfillAccountIssuer(undefined)).resolves.toMatchObject({ scanned: 0, stamped: 0 });
     await expect(backfillAccountIssuer({} as any)).resolves.toMatchObject({ scanned: 0, stamped: 0 });
+  });
+});
+
+/**
+ * The shipped defect: an earlier pass stamped `local:oauth:google` on links
+ * better-auth resolves under `https://accounts.google.com`. The row went
+ * invisible at sign-in, the callback fell through to "link this provider", and
+ * the insert hit the `(provider_id, account_id)` unique index the invisible row
+ * was holding — `?error=unable_to_link_account`.
+ */
+describe('backfillAccountIssuer — repairing a mis-stamped synthetic issuer', () => {
+  it('re-stamps a synthetic issuer with the one its provider declares', async () => {
+    const log = logger();
+    const ql = makeQl({
+      sys_account: [
+        { id: 'a1', provider_id: 'google', account_id: 'sub-1', issuer: 'local:oauth:google' },
+      ],
+    });
+
+    const res = await backfillAccountIssuer(ql, {
+      logger: log,
+      socialProviders: [{ id: 'google', accountIssuer: 'https://accounts.google.com' }],
+    });
+
+    expect(res).toMatchObject({ scanned: 1, stamped: 0, repaired: 1, unresolved: [] });
+    expect(ql.tables.sys_account[0].issuer).toBe('https://accounts.google.com');
+    expect(log.info).toHaveBeenCalled();
+  });
+
+  it('is idempotent — the repaired row is not touched again', async () => {
+    const ql = makeQl({
+      sys_account: [
+        { id: 'a1', provider_id: 'google', account_id: 'sub-1', issuer: 'local:oauth:google' },
+      ],
+    });
+    const opts = { socialProviders: [{ id: 'google', accountIssuer: 'https://accounts.google.com' }] };
+
+    await backfillAccountIssuer(ql, opts);
+    ql.update.mockClear();
+    const second = await backfillAccountIssuer(ql, opts);
+
+    expect(second).toMatchObject({ scanned: 0, repaired: 0 });
+    expect(ql.update).not.toHaveBeenCalled();
+  });
+
+  it('leaves the synthetic issuer alone when it IS what the provider mints', async () => {
+    const ql = makeQl({
+      sys_account: [
+        { id: 'a1', provider_id: 'github', account_id: '4242', issuer: 'local:oauth:github' },
+      ],
+    });
+
+    const res = await backfillAccountIssuer(ql, { socialProviders: [{ id: 'github' }] });
+
+    expect(res).toMatchObject({ scanned: 0, stamped: 0, repaired: 0 });
+    expect(ql.tables.sys_account[0].issuer).toBe('local:oauth:github');
+  });
+
+  it('rewrites ONLY the synthetic value — a row already holding a real issuer stands', async () => {
+    const ql = makeQl({
+      sys_account: [
+        { id: 'a1', provider_id: 'google', account_id: 'sub-1', issuer: 'https://accounts.google.com' },
+        { id: 'a2', provider_id: 'google', account_id: 'sub-2', issuer: 'https://some-other.example' },
+      ],
+    });
+
+    const res = await backfillAccountIssuer(ql, {
+      socialProviders: [{ id: 'google', accountIssuer: 'https://accounts.google.com' }],
+    });
+
+    expect(res).toMatchObject({ scanned: 0, repaired: 0 });
+    expect(ql.tables.sys_account[1].issuer).toBe('https://some-other.example');
+  });
+
+  it('reports a repair the database refuses instead of counting it', async () => {
+    // A duplicate row can already occupy (issuer, account_id) on a deployment
+    // that acquired one before the unique index existed.
+    const log = logger();
+    const ql = makeQl({
+      sys_account: [
+        { id: 'a1', provider_id: 'google', account_id: 'sub-1', issuer: 'local:oauth:google' },
+      ],
+    });
+    ql.update.mockRejectedValueOnce(new Error('unique constraint'));
+
+    const res = await backfillAccountIssuer(ql, {
+      logger: log,
+      socialProviders: [{ id: 'google', accountIssuer: 'https://accounts.google.com' }],
+    });
+
+    expect(res).toMatchObject({ scanned: 1, repaired: 0 });
+    expect(res.unresolved).toEqual([{ providerId: 'google', count: 1 }]);
+    expect(log.warn).toHaveBeenCalled();
   });
 });
