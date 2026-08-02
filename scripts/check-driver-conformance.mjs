@@ -34,6 +34,15 @@
 //
 // ## Invariants
 //
+//   DISCOVERED  at least one driver package was found. Zero is not an empty
+//               matrix, it is a broken run: the other three invariants iterate
+//               the discovered set, so they all pass vacuously and this script
+//               prints OK while checking nothing. The case-set axis cannot fail
+//               this way -- CASE_SETS is a declared expectation, so a vanished
+//               `spec/src/data` fails CLASSIFIED's reverse direction -- but the
+//               driver axis is disk-discovery with nothing declared to
+//               reconcile against, and RECONCILED's reverse direction walks
+//               LEDGER, which is empty in the intended steady state.
 //   CONSUMED    every (driver x case-set) cell is either covered -- some file
 //               under the package's `src/` imports the case-set's marker export
 //               from `@objectstack/spec/data` -- or carries a DEBT/EXEMPT entry
@@ -157,6 +166,27 @@ function discoverDrivers() {
     .sort();
 }
 
+/**
+ * DISCOVERED — the errors for a discovery that found nothing.
+ *
+ * Split out from `audit()` so the self-test can drive the invariant itself
+ * rather than a proxy for it. The previous guard lived only in the self-test
+ * and read `drivers.length >= 3 && drivers.includes('driver-sql')` — a
+ * hardcoded name and count inside the one script whose stated rule is that
+ * drivers come from disk and are never listed. Both would have needed editing
+ * the next time a driver is added or the packages move, which is exactly when
+ * the guard matters.
+ */
+function discoveredErrors(drivers) {
+  if (drivers.length) return [];
+  return [
+    `DISCOVERED: no driver package found under ${DRIVERS_DIR.slice(ROOT.length + 1)}/. `
+      + 'Either these packages moved and DRIVERS_DIR is stale, or they are gone. '
+      + 'Every other invariant iterates the discovered set, so a zero-driver run '
+      + 'reports OK having checked nothing — it fails here instead.',
+  ];
+}
+
 /** Every `*-conformance.ts` under spec/src/data, and the case-set exports in it. */
 function discoverCaseSets() {
   const found = [];
@@ -216,6 +246,9 @@ function audit() {
   const drivers = discoverDrivers();
   const errors = [];
   const rows = [];
+
+  // DISCOVERED — the precondition the other three iterate over.
+  errors.push(...discoveredErrors(drivers));
 
   // CLASSIFIED — both directions between CASE_SETS and the files on disk.
   const onDisk = discoverCaseSets();
@@ -370,9 +403,12 @@ function selfTest() {
   expect('discovers TEMPORAL_CASES on disk', found.includes('TEMPORAL_CASES'));
   expect('discovers PAGINATION_UNORDERED_CASES on disk', found.includes('PAGINATION_UNORDERED_CASES'));
 
-  // Discovery must find the drivers, for the same reason.
-  const drivers = discoverDrivers();
-  expect('discovers driver packages from disk', drivers.length >= 3 && drivers.includes('driver-sql'));
+  // DISCOVERED: the invariant itself, in both directions, then against the
+  // real tree. No driver name or count is asserted — the point of the gate is
+  // that the set comes from disk.
+  expect('a discovery that found nothing is an error', discoveredErrors([]).length === 1);
+  expect('a discovery that found something is not', discoveredErrors(['driver-anything']).length === 0);
+  expect('discovers driver packages from disk', discoverDrivers().length > 0);
 
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
