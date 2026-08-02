@@ -155,6 +155,70 @@ describe('os migrate meta --stored — the protocol resolves the engine itself (
     }
   }, 120_000);
 
+  it('a Studio edit heals the row — save persists the canonical dialect (#4542)', async () => {
+    // The other half of the acceptance: the migration is no longer the ONLY
+    // path that retires a legacy flow row. An author's ordinary round-trip —
+    // GET (served the legacy dialect, per the ADR-0078 read skip) → edit a
+    // label → PUT the body back — used to re-persist `config.filters`
+    // verbatim and leave the row `pending` forever; `saveMetaItem` now
+    // canonicalizes flow bodies before its schema gate.
+    const stack = await bootSchemaStack({
+      databaseUrl: `file:${dbFile}`,
+      projectRoot: dir,
+      extraPlugins: await buildDataMigrationPlugins({ automation: true }),
+    });
+    try {
+      const ql = engineOf(stack);
+      await ql.insert('sys_metadata', {
+        type: 'flow',
+        name: 'sfs_purge',
+        state: 'active',
+        metadata: JSON.stringify(LEGACY_FLOW),
+      }, SYSTEM);
+
+      const protocol: any = stack.kernel.getService('protocol');
+
+      // The read serves the stored (legacy) dialect — that skip is deliberate
+      // and unchanged; the heal happens on the way back in.
+      const served = await protocol.getMetaItem({ type: 'flow', name: 'sfs_purge' });
+      const item = served?.item ?? served;
+      expect(item.nodes.find((n: any) => n.id === 'n1').config).toHaveProperty('filters');
+
+      // Edit only the label — exactly the probe from #4542. Explicit
+      // `parentVersion: null`: a raw-seeded row has `checksum: null`, so the
+      // derived parent would disagree with the column and 409 (probe-only
+      // artifact; governed rows always carry a checksum).
+      await protocol.saveMetaItem({
+        type: 'flow',
+        name: 'sfs_purge',
+        item: { ...item, label: 'Purge Stale Leads (edited)' },
+        parentVersion: null,
+        actor: 'studio-roundtrip-probe',
+      });
+
+      const [row] = await ql.find('sys_metadata', {
+        where: { type: 'flow', name: 'sfs_purge', state: 'active' },
+      }, SYSTEM);
+      const stored = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+      expect(stored.label).toBe('Purge Stale Leads (edited)');
+      const node = stored.nodes.find((n: any) => n.id === 'n1');
+      expect(node.config).toEqual({ objectName: 'sfs_lead', filter: { title: 'stale' } });
+      expect(node.config).not.toHaveProperty('filters');
+      // Still no schema defaults — the save persists `storable`, not `parsed`.
+      expect(stored).not.toHaveProperty('runAs');
+
+      // The row the edit healed is retired from the stored report: the
+      // `--stored` preview that stayed `pending` "no matter how many times an
+      // author edits it" now comes back canonical.
+      const preview = await protocol.migrateStoredMetadata({ types: ['flow'] });
+      expect(preview.scanned).toBe(1);
+      expect(preview.canonical).toBe(1);
+      expect(preview.pending).toBe(0);
+    } finally {
+      await stack.shutdown();
+    }
+  }, 120_000);
+
   it('without the automation plugin the row is skipped with the reason, never counted done', async () => {
     // The honest negative: the coverage comes from the engine being present,
     // not from the report defaulting to optimistic.

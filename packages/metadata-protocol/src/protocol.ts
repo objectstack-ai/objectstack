@@ -6286,6 +6286,63 @@ export class ObjectStackProtocolImplementation implements
             request.item = normalizeViewMetadata(request.type, request.item, request.name, baseline);
         }
 
+        // Canonicalize `flow` bodies BEFORE the schema gate, so an author's
+        // save heals a pre-protocol row the way it heals every other type
+        // (#4542). The read path serves stored flows verbatim (the ADR-0078
+        // conflict guard needs the engine's executor registry — see
+        // {@link resolveFlowCanonicalizer}), and `FlowNodeSchema.config` is an
+        // open record, so without this pass the gate below accepts the legacy
+        // dialect back and the row stays `pending` in `os migrate meta
+        // --stored` forever. Persists `storable`, never the parsed shape —
+        // schema defaults are deliberately excluded (ADR-0087). Copy-on-write:
+        // an already-canonical body comes back reference-identical, so
+        // `migrateStoredMetadata` and `duplicatePackage` re-entering here pay
+        // nothing.
+        if (singularType === 'flow' && request.item) {
+            // No automation service reachable (control-plane / metadata-only
+            // host): save exactly as today — a host must not start refusing
+            // flow writes it accepted yesterday.
+            const canonicalizeFlow = this.resolveFlowCanonicalizer();
+            if (canonicalizeFlow) {
+                let result: StoredFlowCanonicalization | undefined;
+                try {
+                    result = canonicalizeFlow(request.name, request.item);
+                } catch {
+                    // `canonicalizeStoredFlow` is STRICTER than the gate below
+                    // (strict parse + cycle detection + control-flow region
+                    // validation). A work-in-progress draft with a temporary
+                    // cycle must stay saveable, so fall back to the raw body
+                    // and let today's gate stay the arbiter — in draft AND
+                    // publish mode; `registerFlow` refuses to arm a malformed
+                    // flow either way.
+                    result = undefined;
+                }
+                if (result) {
+                    if (result.conflicts.length > 0) {
+                        // ADR-0078's guard refused a node-type rename because
+                        // the old token is a LIVE name owned by a custom
+                        // executor here. Persisting the un-renamed body would
+                        // mint exactly the row this pass exists to prevent
+                        // (same posture as `duplicatePackage` / #4454). 409,
+                        // not 422: the body may be perfectly valid — the
+                        // refusal comes from environment state, so
+                        // resubmitting the same body cannot help.
+                        const first = result.conflicts[0]!;
+                        const err = new Error(
+                            `[flow_conversion_conflict] ${request.type}/${request.name}: conversion refused — `
+                            + `'${first.token}' at ${first.path} is a live name in this environment `
+                            + `(${result.conflicts.length} conflict(s)). ${first.message}`
+                        );
+                        (err as any).code = 'FLOW_CONVERSION_CONFLICT';
+                        (err as any).status = 409;
+                        (err as any).conflicts = result.conflicts;
+                        throw err;
+                    }
+                    request.item = result.storable;
+                }
+            }
+        }
+
         // Spec-conformance check: if a Zod schema is registered for this
         // overlay type (see OVERLAY_VALIDATION_SCHEMAS), validate the payload
         // before persisting. We surface invalid payloads as `422

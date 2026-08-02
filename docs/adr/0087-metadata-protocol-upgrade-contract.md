@@ -532,3 +532,29 @@ report still saying protocol N until the next run.
 
 The premise is restored rather than restated: the stored pass shrinks because
 every write path now canonicalizes, not because the sentence says so.
+
+## Addendum (2026-08-02) — the save seam itself (#4542)
+
+"Every write path now canonicalizes" above was still one short. `duplicatePackage`
+was the *platform* producer; the ordinary Studio/REST save was a producer by
+round-trip: reads serve stored flows verbatim (deliberately — see 2026-07-31),
+`FlowNodeSchema.config` is an open `z.record`, so an author served the legacy
+dialect who edited a label and saved re-persisted that dialect — and the row
+stayed `pending` in the stored report no matter how many times it was edited.
+That contradicted the boot warning's own remediation text ("re-save it (Studio
+edit → save …) to persist the canonical shape"), which held for every type
+except the one it never fires for.
+
+`saveMetaItem` now runs `resolveFlowCanonicalizer` on flow bodies before its
+schema gate and persists `storable`, with the same postures as the duplication
+seam: a refused rename fails the save loudly (`409 FLOW_CONVERSION_CONFLICT`,
+naming the token — the refusal comes from environment state, so it is not a 422
+the author can fix by editing the body); a body the stricter canonicalizer
+cannot parse (cycles, malformed regions) falls back to the raw save so a
+work-in-progress draft stays saveable, in draft and publish mode alike —
+`registerFlow` still refuses to arm it; no engine reachable saves as before.
+The pass is copy-on-write, so `migrateStoredMetadata` and `duplicatePackage`
+re-entering `saveMetaItem` with already-canonical bodies pay nothing.
+
+Reads still skip flows, and now the loop is closed from the other side: a
+served legacy body is healed the moment it is saved back.
