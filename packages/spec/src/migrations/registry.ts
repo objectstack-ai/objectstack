@@ -542,6 +542,21 @@ const step17: MigrationStep = {
     + 'hosts, correct port types, typos rejected. Precision applied to an inert slot reads as '
     + 'evidence the slot is live, which is why ADR-0049 asks for a consumer rather than for '
     + 'rigor. Retired from the load path with the rest of the keys that misdescribed themselves.\n\n'
+    + 'The datasource close-out also graduates the four legacy `datasource.config` spellings the '
+    + 'shared driver factory still tolerated via undeclared read-side `??` fallbacks (#4456, the '
+    + '#4410 follow-up): sqlite `file`/`database` (use `filename`), postgres/mysql '
+    + '`connectionString` (use `url`) and `user` (use `username`), and mongo `uri` (use `url`) '
+    + 'and `user` (use `username`). #4410 made the authoring gate reject each with a rename '
+    + 'hint, but a runtime datasource persisted in `sys_metadata` before the gate kept working '
+    + 'only because the factory read leniently — and deleting that tolerance without a '
+    + 'conversion would have silently moved data (a stored sqlite `file:` row falls back to '
+    + '`:memory:`). The `datasource-config-driver-key-aliases` conversion rewrites the stored '
+    + 'shape to the canonical keys at every rehydration seam, the factory now reads exactly one '
+    + 'spelling per key, and the four `??` chains are deleted. Driver-aware by construction: '
+    + '`database` renames only under sqlite, where it aliased the file path — for every other '
+    + 'driver it is a canonical key and is untouched. Retired from the load path not for lying '
+    + 'but because the authoring gate already rejects the spellings loudly; the chain and the '
+    + 'stored-row replay are the seams that accept them.\n\n'
     + 'The `script` flow node converges on its one real path (#4343). It had four ways to name '
     + 'what it ran and only one of them ran anything: `config.actionType: \'email\' | \'slack\'` '
     + 'were logger-backed stubs that wrote a line, reported success and delivered nothing under '
@@ -590,6 +605,7 @@ const step17: MigrationStep = {
     'datasource-inert-blocks-removed',
     'flow-node-wait-timeout-keys-removed',
     'datasource-read-replicas-removed',
+    'datasource-config-driver-key-aliases',
     'flow-node-script-branch-keys-removed',
   ],
   semantic: [

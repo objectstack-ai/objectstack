@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { registerMetadataTypeActions } from '@objectstack/spec/kernel';
 import type {
   IDatasourceDriverFactory,
@@ -107,7 +108,15 @@ async function loadDatasourceRows(engine: DataEngineLike | undefined): Promise<A
   for (const r of rows ?? []) {
     const raw = (r as { metadata?: unknown }).metadata;
     try {
-      out.push(typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>));
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
+      // This is a stored-row rehydration seam (ADR-0087 D2 addendum, #3903):
+      // rows written under a past protocol replay the FULL conversion chain —
+      // e.g. a pre-#4410 sqlite record whose config still says `file:` is
+      // served with the canonical `filename`, which is the only spelling the
+      // driver factory reads since #4456. The direct sys_metadata read here
+      // bypasses the metadata service's own converting loaders, so the pass
+      // must happen locally.
+      out.push(applyConversionsToStoredItem(DS_META_TYPE, parsed));
     } catch {
       /* skip corrupt row */
     }

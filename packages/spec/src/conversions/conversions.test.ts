@@ -507,4 +507,45 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(() => FlowSchema.parse(withoutDefault)).toThrow();
     });
   });
+
+  // #4456 — the driver-factory `??` fallback graduation. The mappings are
+  // driver-scoped by construction; these pin the two edges the flat fixture
+  // pair cannot express as sharply: the same key converting under one driver
+  // and not another, and the load-path posture.
+  describe('datasource-config-driver-key-aliases (#4456)', () => {
+    const convert = (datasources: unknown[]) =>
+      collectConversionNotices({ datasources }, { includeRetired: true });
+
+    it('renames `database` → `filename` ONLY under sqlite — it is canonical for the SQL/mongo drivers', () => {
+      const { stack, notices } = convert([
+        { name: 'a', driver: 'sqlite', config: { database: './a.db' } },
+        { name: 'b', driver: 'postgres', config: { host: 'db', database: 'analytics' } },
+        { name: 'c', driver: 'mysql', config: { host: 'db', database: 'orders' } },
+        { name: 'd', driver: 'mongo', config: { host: 'db', database: 'events' } },
+      ]);
+      const [a, b, c, d] = stack.datasources as Array<{ config: Record<string, unknown> }>;
+      expect(a!.config).toEqual({ filename: './a.db' });
+      expect(b!.config).toEqual({ host: 'db', database: 'analytics' });
+      expect(c!.config).toEqual({ host: 'db', database: 'orders' });
+      expect(d!.config).toEqual({ host: 'db', database: 'events' });
+      expect(notices.filter((n) => n.conversionId === 'datasource-config-driver-key-aliases')).toHaveLength(1);
+    });
+
+    it('does not touch a plugin-contributed driver id — no contract, no rewrite', () => {
+      const before = { datasources: [{ name: 'x', driver: 'com.vendor.snowflake', config: { user: 'svc' } }] };
+      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('is retired from the load path — an AUTHORED legacy spelling is not silently absorbed', () => {
+      // Without includeRetired (the normalizeStackInput posture) the stack is
+      // untouched: the authoring gate rejects `file:` with a rename hint, and
+      // this conversion must not run ahead of it and defeat #4410.
+      const before = { datasources: [{ name: 'a', driver: 'sqlite', config: { file: './a.db' } }] };
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+  });
 });

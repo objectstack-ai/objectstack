@@ -225,6 +225,12 @@
         "toMajor": 17
       },
       {
+        "surface": "datasource.config",
+        "to": "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' and 'user' → 'username' (#4456 — driver-factory `??` fallback graduation)",
+        "conversionId": "datasource-config-driver-key-aliases",
+        "toMajor": 17
+      },
+      {
         "surface": "flow.node.script.config.actionType / flow.node.script.config.template / flow.node.script.config.recipients / flow.node.script.config.variables / flow.node.script.config.script",
         "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
         "conversionId": "flow-node-script-branch-keys-removed",
@@ -729,6 +735,12 @@
           "surface": "datasource.retryPolicy / datasource.healthCheck / datasource.external.label / datasource.external.requirePermission",
           "to": "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (#4583 — nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody)",
           "conversionId": "datasource-inert-blocks-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "datasource.config",
+          "to": "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' and 'user' → 'username' (#4456 — driver-factory `??` fallback graduation)",
+          "conversionId": "datasource-config-driver-key-aliases",
           "toMajor": 17
         },
         {

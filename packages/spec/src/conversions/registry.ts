@@ -16,7 +16,8 @@
  */
 
 import type { ConversionApplication, MetadataConversion } from './types.js';
-import { mapCollection, mapFlowNodes, mapPages, renameConfigKey, renameKey } from './walk.js';
+import { mapCollection, mapDatasources, mapFlowNodes, mapPages, renameConfigKey, renameKey } from './walk.js';
+import { resolveDriverId, type BuiltinDriverId } from '../data/driver/config-registry.zod.js';
 
 /**
  * Flow callout node type rename (protocol 11.0).
@@ -2428,6 +2429,129 @@ const datasourceReadReplicasRemoved: MetadataConversion = {
 };
 
 /**
+ * The legacy `datasource.config` spellings the driver factory used to read via
+ * undeclared `??` fallbacks, per canonical driver id — exactly the set that
+ * HAPPENED TO WORK before #4456, nothing more.
+ *
+ * Deliberately narrower than the schemas' rename-hint alias tables: an alias
+ * that only ever produced a rejection hint (`path:`, `dsn:`, `hostname:`, …)
+ * never worked at run time, so "converting" it would CHANGE behaviour — e.g. a
+ * stored sqlite `path:` fell back to `:memory:`, and rewriting it to
+ * `filename` would silently move the database. D2 scope guard: lossless and
+ * behaviour-preserving only.
+ *
+ * Driver-awareness is load-bearing: `database` means "rename to `filename`"
+ * ONLY under sqlite — for postgres/mysql/mongo it is a canonical key and must
+ * not be touched.
+ */
+const DATASOURCE_CONFIG_KEY_ALIASES: Readonly<
+  Partial<Record<BuiltinDriverId, ReadonlyArray<readonly [from: string, to: string]>>>
+> = {
+  // `filename ?? file ?? database` was the factory's precedence; pair order
+  // mirrors it, so with both aliases present `file` wins and `database` is
+  // left shadowed — exactly what the `??` chain resolved to.
+  sqlite: [['file', 'filename'], ['database', 'filename']],
+  'sqlite-wasm': [['file', 'filename'], ['database', 'filename']],
+  postgres: [['connectionString', 'url'], ['user', 'username']],
+  mysql: [['connectionString', 'url'], ['user', 'username']],
+  mongo: [['uri', 'url'], ['user', 'username']],
+};
+
+/**
+ * Datasource `config` legacy key aliases → canonical, per driver (protocol 17,
+ * #4456 — the #4410 close-out).
+ *
+ * #4410 gave `datasource.config` its per-driver zod gate, so the AUTHORING
+ * surface has exactly one spelling per key and rejects the legacy ones with a
+ * rename hint. What the gate could not fix is data at rest: a runtime
+ * datasource stored in `sys_metadata` before the gate may carry `file:`
+ * (sqlite), `connectionString:`/`user:` (postgres/mysql), or `uri:`/`user:`
+ * (mongo), and until now those kept working only because
+ * `createDefaultDatasourceDriverFactory` carried undeclared read-side `??`
+ * fallbacks — the exact PD #12 debt {@link flowNodeFilterAlias} pioneered the
+ * retirement path for. Deleting the fallbacks without this entry would
+ * silently change where a stored datasource's data lives (a sqlite `file:`
+ * row would fall back to `:memory:`).
+ *
+ * So the tolerance graduates here: every stored-row rehydration seam replays
+ * the full chain (`applyConversionsToStoredItem`, #3903), hands the factory
+ * the canonical key, and the factory reads ONE spelling. Precedence follows
+ * {@link renameKey}: a canonical key already present wins and the alias is
+ * left shadowed in place, which is also what the factory's `??` chains
+ * resolved to.
+ *
+ * **Retired from the load path** — not because the keys misdescribed
+ * themselves (they were honest spellings, merely undeclared), but because the
+ * authoring gate ALREADY rejects each of them with a rename hint
+ * (`strictUnknownKeyError` alias tables), and a live-window entry at
+ * `normalizeStackInput` would run before that gate and silently absorb the
+ * spelling #4410 deliberately made loud. Stored rows and `migrate meta` are
+ * exactly the `includeRetired` seams.
+ */
+const datasourceConfigDriverKeyAliases: MetadataConversion = {
+  id: 'datasource-config-driver-key-aliases',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'datasource.config',
+  summary:
+    "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', "
+    + "postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' "
+    + "and 'user' → 'username' (#4456 — driver-factory `??` fallback graduation)",
+  apply(stack, emit) {
+    return mapDatasources(stack, (ds, path) => {
+      const kind = resolveDriverId(ds.driver);
+      const pairs = kind ? DATASOURCE_CONFIG_KEY_ALIASES[kind] : undefined;
+      if (!pairs) return ds;
+      const config = ds.config;
+      if (!isDict(config)) return ds;
+      let nextConfig = config;
+      for (const [from, to] of pairs) {
+        const renamed = renameKey(nextConfig, from, to);
+        if (!renamed) continue; // absent, or canonical already wins (alias stays shadowed)
+        emit({ from, to, path: `${path}.config.${to}` });
+        nextConfig = renamed;
+      }
+      return nextConfig === config ? ds : { ...ds, config: nextConfig };
+    });
+  },
+  fixture: {
+    before: {
+      datasources: [
+        { name: 'app_db', driver: 'sqlite', config: { file: './data/app.db' } },
+        // driver-id aliases resolve too — `sqlite3` selects the sqlite contract
+        { name: 'archive_db', driver: 'sqlite3', config: { database: './data/archive.db' } },
+        {
+          name: 'warehouse',
+          driver: 'pg',
+          config: { connectionString: 'postgresql://db.internal:5432/analytics', user: 'analyst' },
+        },
+        // `database` is CANONICAL for mysql — only `user` converts
+        { name: 'orders', driver: 'mysql', config: { host: 'db.internal', database: 'orders', user: 'svc_orders' } },
+        { name: 'events', driver: 'mongodb', config: { uri: 'mongodb://mongo.internal:27017/events' } },
+        // canonical already present → the shadowed alias is left alone (no notice)
+        { name: 'scratch', driver: 'sqlite', config: { filename: ':memory:', file: 'ignored.db' } },
+      ],
+    },
+    after: {
+      datasources: [
+        { name: 'app_db', driver: 'sqlite', config: { filename: './data/app.db' } },
+        { name: 'archive_db', driver: 'sqlite3', config: { filename: './data/archive.db' } },
+        {
+          name: 'warehouse',
+          driver: 'pg',
+          config: { url: 'postgresql://db.internal:5432/analytics', username: 'analyst' },
+        },
+        { name: 'orders', driver: 'mysql', config: { host: 'db.internal', database: 'orders', username: 'svc_orders' } },
+        { name: 'events', driver: 'mongodb', config: { url: 'mongodb://mongo.internal:27017/events' } },
+        { name: 'scratch', driver: 'sqlite', config: { filename: ':memory:', file: 'ignored.db' } },
+      ],
+    },
+    // app_db 1 + archive_db 1 + warehouse 2 + orders 1 + events 1 + scratch 0.
+    expectedNotices: 6,
+  },
+};
+
+/**
  * `script` node config — the four retired dispatch branches (protocol 17, #4343).
  *
  * A `script` node had four ways to name what it ran and only one of them ran
@@ -2618,6 +2742,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     datasourceReadReplicasRemoved,
     datasourceCapabilitiesRemoved,
     datasourceInertBlocksRemoved,
+    datasourceConfigDriverKeyAliases,
     // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
     // whether `config.function` is set, and that rename is what sets it.
     flowNodeScriptBranchKeysRemoved,

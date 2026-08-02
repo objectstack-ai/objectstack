@@ -141,64 +141,28 @@ export const AccountSchema = lazySchema(() => z.object({
 
 export type Account = z.infer<typeof AccountSchema>;
 
-/**
- * Session Schema
- * User session data model
+/*
+ * The bare `Session` / `SessionSchema` names are NOT declared here (#4641).
+ *
+ * This module used to carry a second `Session` declaration alongside the one in
+ * `api/auth.zod.ts`, so which shape a consumer got depended only on whether they
+ * imported from `@objectstack/spec/identity` or `@objectstack/spec/api` — the
+ * #4411 trap, and the two shapes did not even agree on field names (`expires` vs
+ * `expiresAt`, `sessionToken` vs `token`).
+ *
+ * The `./api` declaration is the live one: it is embedded in
+ * `SessionResponseSchema`, the body served for `AuthEndpointPaths.getSession`
+ * (`/get-session`, `/me`, `/refresh`). The declaration that stood here had no
+ * importer anywhere in framework, cloud or objectui outside its own unit test,
+ * was wired into no parent schema, and had drifted from the table it claimed to
+ * describe: the ENFORCED session record is the `sys_session` ObjectSchema in
+ * `@objectstack/platform-objects` (`identity/sys-session.object.ts`), which
+ * spells the columns `token` / `expires_at` and has no `fingerprint` at all.
+ *
+ * Need the wire shape? `import type { Session } from '@objectstack/spec/api'`.
+ * Need the persisted record? Read the `sys_session` object — it is what the
+ * migration and the auth plugin actually enforce.
  */
-export const SessionSchema = lazySchema(() => z.object({
-  /**
-   * Unique session identifier
-   */
-  id: z.string().describe('Unique session identifier'),
-  
-  /**
-   * Session token
-   */
-  sessionToken: z.string().describe('Session token'),
-  
-  /**
-   * Associated user ID
-   */
-  userId: z.string().describe('Associated user ID'),
-  
-  /**
-   * Active organization ID for this session
-   * Used for context switching in multi-tenant applications
-   */
-  activeOrganizationId: z.string().optional().describe('Active organization ID for context switching'),
-  
-  /**
-   * Session expiry timestamp
-   */
-  expires: z.string().datetime().describe('Session expiry timestamp'),
-  
-  /**
-   * Session creation timestamp
-   */
-  createdAt: z.string().datetime().describe('Session creation timestamp'),
-  
-  /**
-   * Last update timestamp
-   */
-  updatedAt: z.string().datetime().describe('Last update timestamp'),
-  
-  /**
-   * IP address of the session
-   */
-  ipAddress: z.string().optional().describe('IP address'),
-  
-  /**
-   * User agent string
-   */
-  userAgent: z.string().optional().describe('User agent string'),
-  
-  /**
-   * Device fingerprint
-   */
-  fingerprint: z.string().optional().describe('Device fingerprint'),
-}));
-
-export type Session = z.infer<typeof SessionSchema>;
 
 /**
  * Verification Token Schema
