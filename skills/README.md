@@ -12,7 +12,7 @@ npx skills add objectstack-ai/objectstack/skills --all
 The `/skills` subpath matters: it is the published catalog boundary — pointing
 the skills CLI at the repo root would also pick up repo-internal skills (#3101).
 
-Each skill is self-contained: a `SKILL.md` with YAML frontmatter, plus a
+Each **domain** skill is self-contained: a `SKILL.md` with YAML frontmatter, plus a
 `references/_index.md` that points into the authoritative Zod sources in
 `node_modules/@objectstack/spec/src/...` (the published `@objectstack/spec`
 package ships these `.zod.ts` sources, so the pointers resolve in consumer
@@ -38,6 +38,7 @@ apps too).
 | [API](./objectstack-api/SKILL.md) | `api` | Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch/versioning contracts. |
 | [i18n](./objectstack-i18n/SKILL.md) | `i18n` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the per-locale source layout. |
 | [Formula](./objectstack-formula/SKILL.md) | `expression` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. |
+| [PM Dispatch](./objectstack-pm-dispatch/SKILL.md) | `process` | Run a project-manager dispatch loop over a GitHub backlog: triage and queue ready issues, claim each one, dispatch it to a parallel developer agent that returns a structured JSON report, review the results against GitHub, and drive accepted pull requests to landing — escalating to the maintainer only what genuinely needs a human decision. Ships the developer-agent operating template the loop injects into every dispatch (no custom agent types required) and the upstream-reporting procedure for platform defects an app project finds. |
 
 <!-- END GENERATED: skills -->
 
@@ -59,6 +60,10 @@ skills/<skill-name>/
                           # inert (but harmless) in consumer installs
 ```
 
+A `process` skill (`metadata.domain: process`) points at no Zod schema, so it
+carries `SKILL.md` alone — `gen:skill-refs` only visits skills listed in its
+`SKILL_MAP`, and there is nothing to map.
+
 `SKILL.md` frontmatter fields:
 
 | Field | Purpose |
@@ -66,8 +71,8 @@ skills/<skill-name>/
 | `name` | Stable id (matches directory name). |
 | `description` | One paragraph — what the skill is for *and* what it is **not** for. |
 | `license` | `Apache-2.0`. |
-| `compatibility` | Minimum `@objectstack/spec` version. |
-| `metadata.domain` | One of: `platform`, `data`, `query`, `ui`, `automation`, `ai`, `api`, `i18n`, `formula`. |
+| `compatibility` | Minimum `@objectstack/spec` version — or, for a `process` skill that binds to no schema, the tooling it needs. |
+| `metadata.domain` | Authoring domain — one of: `platform`, `data`, `query`, `ui`, `automation`, `ai`, `api`, `i18n`, `expression` — or `process` for a delivery-process skill that teaches no schema. |
 | `metadata.tags` | Short comma-separated keywords for retrieval. |
 
 ---

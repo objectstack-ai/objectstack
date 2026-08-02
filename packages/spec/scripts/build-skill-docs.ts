@@ -54,6 +54,7 @@ const DISPLAY: Array<{ name: string; label: string }> = [
   { name: 'objectstack-api', label: 'API' },
   { name: 'objectstack-i18n', label: 'i18n' },
   { name: 'objectstack-formula', label: 'Formula' },
+  { name: 'objectstack-pm-dispatch', label: 'PM Dispatch' },
 ];
 
 // ── Frontmatter parser ───────────────────────────────────────────────────────
@@ -178,7 +179,7 @@ function renderGuideBlock(skills: Skill[]): string {
   return [
     begin,
     '',
-    `ObjectStack ships **${skills.length} domain-specific skills**. Each is self-contained — an AI assistant loads only the ones a task needs.`,
+    `ObjectStack ships **${skills.length} skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.`,
     '',
     '## Quick Reference',
     '',

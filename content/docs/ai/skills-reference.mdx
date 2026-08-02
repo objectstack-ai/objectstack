@@ -5,7 +5,7 @@ description: Reference for every ObjectStack AI skill — domain-scoped knowledg
 
 # AI Skills Reference
 
-ObjectStack ships a set of **domain-specific skills** that teach AI assistants (Claude Code, GitHub Copilot, Cursor, …) the protocol's schemas, patterns, and constraints. This guide is the complete catalog.
+ObjectStack ships a set of **domain-specific skills** that teach AI assistants (Claude Code, GitHub Copilot, Cursor, …) the protocol's schemas, patterns, and constraints — plus **process** skills that teach how work moves through a project rather than what to author. This guide is the complete catalog.
 
 <Callout type="info">
 **New to skills?** Read [AI Skills System](/docs/ai/skills) first for the conceptual overview, then return here for the per-skill reference.
@@ -39,7 +39,7 @@ Skills are versioned as **one bundle**. You do not track or update each skill in
 
 {/* BEGIN GENERATED: skills (packages/spec/scripts/build-skill-docs.ts) — DO NOT EDIT */}
 
-ObjectStack ships **9 domain-specific skills**. Each is self-contained — an AI assistant loads only the ones a task needs.
+ObjectStack ships **10 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
 
 ## Quick Reference
 
@@ -54,6 +54,7 @@ ObjectStack ships **9 domain-specific skills**. Each is self-contained — an AI
 | 7 | [API](#api) | `api` | `skills/objectstack-api/` | Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch/versioning contracts. |
 | 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the per-locale source layout. |
 | 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. |
+| 10 | [PM Dispatch](#pm-dispatch) | `process` | `skills/objectstack-pm-dispatch/` | Run a project-manager dispatch loop over a GitHub backlog: triage and queue ready issues, claim each one, dispatch it to a parallel developer agent that returns a structured JSON report, review the results against GitHub, and drive accepted pull requests to landing — escalating to the maintainer only what genuinely needs a human decision. Ships the developer-agent operating template the loop injects into every dispatch (no custom agent types required) and the upstream-reporting procedure for platform defects an app project finds. |
 
 ---
 
@@ -180,6 +181,20 @@ Use when the user is writing an `F`, `P`, or `cel` tagged-template literal, or a
 Do not use for SQL fragments (driver-native), cron schedules (cron dialect), or L2 hook bodies (those belong in objectstack-data).
 
 **Tags:** `cel`, `formula`, `predicate`, `condition`, `validation`, `visibility`, `seed-dynamic`
+
+---
+
+### PM Dispatch
+
+**Domain** `process` · **Path** `skills/objectstack-pm-dispatch/`
+
+Run a project-manager dispatch loop over a GitHub backlog: triage and queue ready issues, claim each one, dispatch it to a parallel developer agent that returns a structured JSON report, review the results against GitHub, and drive accepted pull requests to landing — escalating to the maintainer only what genuinely needs a human decision. Ships the developer-agent operating template the loop injects into every dispatch (no custom agent types required) and the upstream-reporting procedure for platform defects an app project finds.
+
+Use when asked to "work through the backlog", "batch-dispatch issues", "派发 issue 给开发 agent", to stand up a multi-agent delivery loop in an ObjectStack app project, or to report a platform bug found while building an app.
+
+Do not use for authoring ObjectStack metadata (the domain skills cover that), for a single already-scoped change you can just make, or as a replacement for the project's own conventions file — that file always wins.
+
+**Tags:** `pm`, `dispatch`, `backlog`, `triage`, `multi-agent`, `delivery`, `github`, `escalation`, `upstream`
 
 ---
 
