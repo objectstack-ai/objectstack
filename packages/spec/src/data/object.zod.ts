@@ -1538,6 +1538,58 @@ function warnGenericPasswordFields(
 }
 
 /**
+ * [#3355] Authoring-time refusal for the ONE way `system-data` can be
+ * mis-assigned: declaring it on an object that grants no user write at all.
+ *
+ * The v17 rename fixed a name that lied. This keeps it from lying again. The two
+ * halves of `system-data` are "platform-defined SCHEMA" and "admin/user-writable
+ * DATA"; an object whose resolved affordances forbid create AND edit AND delete
+ * satisfies the first half and contradicts the second, and the value it is
+ * actually describing is `engine-owned` (or `append-only` for an audit log).
+ * That contradiction is fully computable from the declaration alone — no call
+ * graph needed — so it is refused rather than reviewed.
+ *
+ * This matters more under the v17 defaults than it would have under v16. `system`
+ * defaulted LOCKED, so a mislabelled engine-owned object inherited a harmless
+ * read-only matrix; `system-data` defaults WRITABLE, so the same mistake now
+ * hands a table generic CRUD affordances it should never advertise. The write
+ * guard does not cover `system-data` (nothing to fail closed on when the default
+ * grants the write), so authoring time is the only place this can be caught —
+ * hence a throw, not a `console.warn`.
+ *
+ * Threshold is "no write verb at all", not "any narrowing": `system-data` +
+ * `userActions: { create: false, delete: false }` (an editable-only config grid)
+ * is a legitimate NARROW and passes. Only the all-writes-false shape is a
+ * contradiction, and it has no honest reading.
+ *
+ * Lives at `create()` — the authoring surface (ADR-0077) — alongside
+ * {@link warnGenericPasswordFields}, rather than in raw `.parse()`: stored rows
+ * arriving through the protocol-17 conversion are a 1:1 rename of values that
+ * were already writable, and failing a LOAD on metadata already at rest would
+ * turn an authoring defect into an outage.
+ */
+function assertSystemDataIsWritable(
+  objectName: unknown,
+  managedBy: unknown,
+  userActions: unknown,
+): void {
+  if (managedBy !== 'system-data') return;
+  const aff = resolveCrudAffordances({ managedBy, userActions } as never);
+  if (aff.create || aff.edit || aff.delete) return;
+  const name = typeof objectName === 'string' && objectName.length > 0 ? objectName : '<unnamed>';
+  throw new Error(
+    `ObjectSchema.create('${name}'): \`managedBy: 'system-data'\` declares "platform-defined `
+    + 'schema, admin/user-writable DATA", but this object\'s resolved affordances grant no '
+    + 'create, edit or delete — so nothing about it is user-writable and the bucket name is '
+    + 'false. Use `managedBy: \'engine-owned\'` for rows a platform service owns end to end '
+    + '(written via `isSystem` / a service SYSTEM_CTX), or `append-only` for an immutable '
+    + 'audit log. If the object IS user-writable, drop the `userActions` entries closing '
+    + 'create/edit/delete — the `system-data` default is full CRUD, and `userActions` is for '
+    + 'NARROWING only (#3355).',
+  );
+}
+
+/**
  * [ADR-0079] Back-compat alias normalization: an object authored with the
  * deprecated `displayNameField` key still parses by mapping it onto the
  * canonical `nameField` when `nameField` is absent. `displayNameField` is
@@ -1652,6 +1704,10 @@ export const ObjectSchema = lazySchema(() => {
     // rest, not hashed. `create()` is the authoring surface (ADR-0077), so the
     // steer lives here rather than in raw `.parse()`.
     warnGenericPasswordFields(cfg.name, cfg.fields, cfg.managedBy);
+    // [#3355] `system-data` on an object that grants no user write is a
+    // contradiction with no honest reading — refuse it here, where it is cheap
+    // to fix, rather than shipping a bucket whose name lies again.
+    assertSystemDataIsWritable(cfg.name, cfg.managedBy, cfg.userActions);
     const withDefaults = {
       ...cfg,
       label: cfg.label ?? snakeCaseToLabel(cfg.name as string),

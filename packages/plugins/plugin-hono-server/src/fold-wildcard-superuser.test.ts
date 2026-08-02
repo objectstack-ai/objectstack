@@ -52,10 +52,10 @@ describe('foldWildcardSuperUser', () => {
 /**
  * ADR-0092 D2 / ADR-0103 — the engine write guards are a second enforcement
  * layer the permission sets don't model. The client hint must reflect
- * permission ∩ guard: guarded (`better-auth`, and now engine-owned
- * `system`/`append-only`) objects are user-context-writable only where the
- * object opened the affordance via `userActions`; `config`/`platform` are
- * untouched.
+ * permission ∩ guard: guarded (`better-auth`, and engine-owned
+ * `engine-owned`/`append-only`) objects are user-context-writable only where the
+ * object opened the affordance via `userActions`; `config`/`platform`/
+ * `system-data` are untouched (#3355).
  */
 describe('clampManagedObjectWrites', () => {
   const SCHEMAS: Record<string, ManagedSchemaLike> = {
@@ -64,10 +64,11 @@ describe('clampManagedObjectWrites', () => {
     sys_session: { managedBy: 'better-auth' },
     // ADR-0103: explicit engine-owned bucket → guarded (clamped).
     sys_automation_run: { managedBy: 'engine-owned' },
-    // ADR-0103: a `system` object with no userActions still resolves locked → guarded.
-    sys_notification_receipt: { managedBy: 'system' },
-    // ADR-0103: system that opened its writes → writable set → NOT clamped.
-    sys_user_position: { managedBy: 'system', userActions: { create: true, edit: true, delete: true } },
+    // ADR-0103: an engine-owned receipt row → guarded (clamped).
+    sys_notification_receipt: { managedBy: 'engine-owned' },
+    // #3355: was `system` + a `userActions` re-open block; now `system-data`,
+    // a bucket no guard covers → still NOT clamped. See the equivalence pin below.
+    sys_user_position: { managedBy: 'system-data' },
     crm_lead: { managedBy: 'platform' },
   };
   const schemaOf = (n: string) => SCHEMAS[n];
@@ -105,12 +106,58 @@ describe('clampManagedObjectWrites', () => {
     expect(objects.crm_lead.allowEdit).toBe(true);
   });
 
-  it('leaves the writable system set untouched (userActions opened the writes)', () => {
+  it('leaves the writable platform-data set untouched (the bucket default grants the writes)', () => {
     const objects: Record<string, any> = {
       sys_user_position: { allowRead: true, allowEdit: true, allowCreate: true, allowDelete: true },
     };
     clampManagedObjectWrites(objects, schemaOf);
     expect(objects.sys_user_position).toMatchObject({ allowRead: true, allowEdit: true, allowCreate: true, allowDelete: true });
+  });
+
+  /**
+   * #3355 equivalence pin for the `/me/permissions` hint.
+   *
+   * This clamp reads `userActions` DIRECTLY rather than the resolved affordances,
+   * so removing `system` from GUARDED_WRITE_BUCKETS is load-bearing: had the
+   * bucket stayed listed while the 8 objects legitimately dropped their now-
+   * redundant `userActions` blocks, every one of them would report
+   * `allowEdit: false` for tables the engine happily writes — the exact false
+   * NEGATIVE this function exists to avoid, merely inverted.
+   *
+   * So: the answer must be identical for the v16 declaration shape (bucket
+   * `system` + `userActions`) and the v17 one (bucket `system-data`, no
+   * `userActions`), for all four flags, on the same input grant.
+   */
+  it('reports the same allowEdit/Create/Delete for the v16 and v17 declaration shapes', () => {
+    const GRANT = { allowRead: true, allowEdit: true, allowCreate: true, allowDelete: true };
+    const v16Schemas: Record<string, ManagedSchemaLike> = {
+      sys_user_position: { managedBy: 'system', userActions: { create: true, edit: true, delete: true } },
+    };
+    const v16: Record<string, any> = { sys_user_position: { ...GRANT } };
+    const v17: Record<string, any> = { sys_user_position: { ...GRANT } };
+
+    clampManagedObjectWrites(v16, (n) => v16Schemas[n]);
+    clampManagedObjectWrites(v17, schemaOf);
+
+    expect(v17.sys_user_position).toEqual(v16.sys_user_position);
+    // …and that shared answer is "unclamped", not "both wrong the same way".
+    expect(v17.sys_user_position).toMatchObject(GRANT);
+  });
+
+  /**
+   * The inverted-failure pin: if `system-data` were (re-)added to
+   * GUARDED_WRITE_BUCKETS, a v17-shaped declaration carrying no `userActions`
+   * would clamp to read-only. This asserts the bucket is genuinely out of scope
+   * by showing a userActions-less member keeps its writes.
+   */
+  it('does not clamp a `system-data` object that declares no userActions at all', () => {
+    const objects: Record<string, any> = {
+      sys_notification_template: { allowRead: true, allowEdit: true, allowCreate: true, allowDelete: true },
+    };
+    clampManagedObjectWrites(objects, () => ({ managedBy: 'system-data' }) as ManagedSchemaLike);
+    expect(objects.sys_notification_template).toMatchObject({
+      allowRead: true, allowEdit: true, allowCreate: true, allowDelete: true,
+    });
   });
 
   it('treats the #2614 object form by its enabled flag only (predicates are UI gating, not a grant)', () => {
