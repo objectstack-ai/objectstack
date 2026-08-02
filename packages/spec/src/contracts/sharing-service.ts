@@ -23,11 +23,25 @@
  * The default implementation lives in `@objectstack/plugin-sharing`.
  */
 
-/** Recipient categories — mirrors `ShareRecipientType` in spec/security. */
-export type ShareRecipientType =
+/**
+ * Recipient categories a `sys_record_share` ROW may carry — mirrors the
+ * `recipient_type` select on `SysRecordShare`
+ * (`@objectstack/plugin-sharing`), which is the storage-side gate on what a
+ * row can actually contain. Only `user` is enforced (and written) today:
+ * {@link ISharingService.grant} refuses every other value rather than
+ * persisting it inert (ADR-0078), and the rule evaluator materialises grants
+ * as expanded `user` rows. The remaining members are persisted-for-forward-
+ * compatibility vocabulary, kept in lockstep with the select.
+ *
+ * NOT the sharing-RULE recipient vocabulary — that is
+ * {@link SharingRuleRecipientType} here, whose authorable subset is
+ * `ShareRecipientType` in `spec/security` (a different concept that shares
+ * no declaration with this one).
+ */
+export type RecordShareRecipientType =
   | 'user'
   | 'group'
-  | 'role'
+  | 'position'
   | 'unit_and_subordinates'
   | 'guest';
 
@@ -52,7 +66,7 @@ export interface RecordShare {
   id: string;
   object_name: string;
   record_id: string;
-  recipient_type: ShareRecipientType;
+  recipient_type: RecordShareRecipientType;
   recipient_id: string;
   access_level: ShareAccessLevel;
   source: ShareSource;
@@ -67,7 +81,7 @@ export interface RecordShare {
 export interface GrantShareInput {
   object: string;
   recordId: string;
-  recipientType?: ShareRecipientType;
+  recipientType?: RecordShareRecipientType;
   recipientId: string;
   accessLevel?: ShareAccessLevel;
   source?: ShareSource;

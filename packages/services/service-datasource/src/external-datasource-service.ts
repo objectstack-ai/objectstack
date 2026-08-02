@@ -25,7 +25,7 @@ import type {
 } from '@objectstack/spec/contracts';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
 import {
-  suggestFieldType,
+  suggestFieldTypeForSqlType,
   isCompatible,
   ExternalCatalogSchema,
   type ExternalCatalog,
@@ -211,7 +211,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       if (exclude.has(col.name)) continue;
 
       const fieldName = opts.rename?.[col.name] ?? col.name;
-      const suggested = suggestFieldType(col.type, dialect);
+      const suggested = suggestFieldTypeForSqlType(col.type, dialect);
       const fieldType: FieldType = suggested ?? 'text';
       if (!suggested) {
         review.push({
@@ -310,7 +310,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
             sqlType: c.type,
             nullable: c.nullable,
             primaryKey: c.primaryKey,
-            suggestedFieldType: suggestFieldType(c.type, schema.dialect as SqlDialect),
+            suggestedFieldType: suggestFieldTypeForSqlType(c.type, schema.dialect as SqlDialect),
           })),
         };
       }),

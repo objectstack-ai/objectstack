@@ -939,10 +939,12 @@ describe('[ADR-0111 D7] no inert grants', () => {
   });
 
   it('refuses non-user recipient types instead of persisting rows no gate reads', async () => {
+    // Every non-`user` member of RecordShareRecipientType — no `as any`
+    // needed since #4539 aligned the contract type to the storage select.
     for (const recipientType of ['group', 'position', 'unit_and_subordinates', 'guest'] as const) {
       await expect(
         svc.grant(
-          { object: 'account', recordId: 'a1', recipientId: 'g1', recipientType: recipientType as any },
+          { object: 'account', recordId: 'a1', recipientId: 'g1', recipientType },
           { userId: 'alice' },
         ),
       ).rejects.toThrow(/VALIDATION_FAILED/);

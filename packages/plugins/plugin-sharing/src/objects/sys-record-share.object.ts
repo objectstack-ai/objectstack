@@ -22,9 +22,9 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *
  * Conventions:
  *  - `object_name` is the short object name (e.g. `account`, `lead`).
- *  - `recipient_type` mirrors `ShareRecipientType` from the spec
- *    (`user` is enforced today; `group`/`position` are persisted for
- *    forward-compatibility).
+ *  - `recipient_type` mirrors `RecordShareRecipientType` from
+ *    `@objectstack/spec/contracts` (`user` is enforced today;
+ *    `group`/`position` are persisted for forward-compatibility).
  *  - `source = 'manual'` rows are created by a user via the REST
  *    `POST /data/:object/:id/shares` endpoint. `source = 'rule'` rows
  *    are materialised by the sharing-rule evaluator (future); the

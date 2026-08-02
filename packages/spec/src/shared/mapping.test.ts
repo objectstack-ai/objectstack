@@ -1,32 +1,32 @@
 import { describe, it, expect } from 'vitest';
-import { TransformTypeSchema, FieldMappingSchema } from './mapping.zod';
+import { FieldMappingTransformSchema, FieldMappingSchema } from './mapping.zod';
 
-describe('TransformTypeSchema', () => {
+describe('FieldMappingTransformSchema', () => {
   it('should accept constant transform', () => {
-    const result = TransformTypeSchema.parse({ type: 'constant', value: 'hello' });
+    const result = FieldMappingTransformSchema.parse({ type: 'constant', value: 'hello' });
     expect(result).toEqual({ type: 'constant', value: 'hello' });
   });
 
   it('should accept constant transform with any value type', () => {
-    expect(() => TransformTypeSchema.parse({ type: 'constant', value: 42 })).not.toThrow();
-    expect(() => TransformTypeSchema.parse({ type: 'constant', value: null })).not.toThrow();
-    expect(() => TransformTypeSchema.parse({ type: 'constant', value: true })).not.toThrow();
+    expect(() => FieldMappingTransformSchema.parse({ type: 'constant', value: 42 })).not.toThrow();
+    expect(() => FieldMappingTransformSchema.parse({ type: 'constant', value: null })).not.toThrow();
+    expect(() => FieldMappingTransformSchema.parse({ type: 'constant', value: true })).not.toThrow();
   });
 
   it('should accept cast transform with valid target types', () => {
     const validTypes = ['string', 'number', 'boolean', 'date'];
     validTypes.forEach((t) => {
-      const result = TransformTypeSchema.parse({ type: 'cast', targetType: t });
+      const result = FieldMappingTransformSchema.parse({ type: 'cast', targetType: t });
       expect(result).toEqual({ type: 'cast', targetType: t });
     });
   });
 
   it('should reject cast transform with invalid target type', () => {
-    expect(() => TransformTypeSchema.parse({ type: 'cast', targetType: 'array' })).toThrow();
+    expect(() => FieldMappingTransformSchema.parse({ type: 'cast', targetType: 'array' })).toThrow();
   });
 
   it('should accept lookup transform', () => {
-    const result = TransformTypeSchema.parse({
+    const result = FieldMappingTransformSchema.parse({
       type: 'lookup',
       table: 'users',
       keyField: 'id',
@@ -41,11 +41,11 @@ describe('TransformTypeSchema', () => {
   });
 
   it('should reject lookup transform missing required fields', () => {
-    expect(() => TransformTypeSchema.parse({ type: 'lookup', table: 'users' })).toThrow();
+    expect(() => FieldMappingTransformSchema.parse({ type: 'lookup', table: 'users' })).toThrow();
   });
 
   it('should accept javascript transform', () => {
-    const result = TransformTypeSchema.parse({
+    const result = FieldMappingTransformSchema.parse({
       type: 'javascript',
       expression: 'value.toUpperCase()',
     });
@@ -53,7 +53,7 @@ describe('TransformTypeSchema', () => {
   });
 
   it('should accept map transform', () => {
-    const result = TransformTypeSchema.parse({
+    const result = FieldMappingTransformSchema.parse({
       type: 'map',
       mappings: { Active: 'active', Inactive: 'inactive' },
     });
@@ -64,7 +64,7 @@ describe('TransformTypeSchema', () => {
   });
 
   it('should reject unknown transform type', () => {
-    expect(() => TransformTypeSchema.parse({ type: 'unknown' })).toThrow();
+    expect(() => FieldMappingTransformSchema.parse({ type: 'unknown' })).toThrow();
   });
 });
 

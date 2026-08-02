@@ -8,9 +8,16 @@
  * ObjectStack field types, and answering "can this remote column back this
  * field type?". Used by `IExternalDatasourceService`:
  *
- *   - `generateObjectDraft` → {@link suggestFieldType} to draft `*.object.ts`.
+ *   - `generateObjectDraft` → {@link suggestFieldTypeForSqlType} to draft
+ *     `*.object.ts`.
  *   - `validateObject`      → {@link isCompatible} to diff a declared field
  *     against the remote column.
+ *
+ * Naming: NOT `suggestFieldType` — that name belongs to the typo-correction
+ * helper in `shared/suggestions.zod.ts` (invalid authored FieldType →
+ * `string[]` of candidates, exported from the root entry). This one is the
+ * deterministic SQL-column → FieldType mapper; the two sharing one name was
+ * the #4411 dual-source trap (#4539).
  *
  * No I/O, no driver coupling — operates on raw type strings so it can be
  * unit-tested independently and extended per dialect without touching the
@@ -194,7 +201,7 @@ export function canonicalizeSqlType(rawType: string, dialect?: SqlDialect): Cano
  * Returns `undefined` only when the type is wholly unrecognised (the caller
  * may fall back to `text` and flag it for review).
  */
-export function suggestFieldType(rawType: string, dialect?: SqlDialect): FieldType | undefined {
+export function suggestFieldTypeForSqlType(rawType: string, dialect?: SqlDialect): FieldType | undefined {
   const canonical = canonicalizeSqlType(rawType, dialect);
   if (canonical === 'unknown') return undefined;
   return CANONICAL_TO_FIELD[canonical].suggested;

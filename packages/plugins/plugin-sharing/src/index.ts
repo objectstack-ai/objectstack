@@ -71,7 +71,7 @@ export type {
   GrantShareInput,
   SharingExecutionContext,
   ShareAccessLevel,
-  ShareRecipientType,
+  RecordShareRecipientType,
   ShareSource,
   SharingRuleRow,
   DefineSharingRuleInput,

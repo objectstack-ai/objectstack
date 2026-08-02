@@ -30,14 +30,11 @@
     "RetryPolicySchema — [./automation (const)] ≠ [./system (const)]",
     "Session — [./api (type)] ≠ [./identity (type)]",
     "SessionSchema — [./api (const)] ≠ [./identity (const)]",
-    "ShareRecipientType — [./contracts (type)] ≠ [./security (const)]",
     "TenantPlan — [./cloud (type)] ≠ [./system (type)]",
     "TenantPlanSchema — [./cloud (const)] ≠ [./system (const)]",
-    "TransformType — [./data (const)] ≠ [./shared (type)]",
     "WebhookConfig — [./api (type)] ≠ [./integration (type)]",
     "WebhookConfigSchema — [./api (const)] ≠ [./integration (const)]",
     "WebhookEvent — [./api (type)] ≠ [./integration (type)]",
-    "WebhookEventSchema — [./api (const)] ≠ [./integration (const)]",
-    "suggestFieldType — [., ./shared (function)] ≠ [./data (function)]"
+    "WebhookEventSchema — [./api (const)] ≠ [./integration (const)]"
   ]
 }

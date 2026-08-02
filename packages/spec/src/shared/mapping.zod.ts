@@ -37,13 +37,19 @@ import { ExpressionInputSchema } from './expression.zod';
  */
 
 /**
- * Transform Type Schema
- * 
- * Defines the type of transformation to apply to a field value.
+ * Field Mapping Transform Schema
+ *
+ * Defines the transformation to apply to a field value during mapping.
  * Implementations can extend this for domain-specific transforms.
+ *
+ * Renamed from `TransformTypeSchema` (#4539): its inferred type exported as
+ * `TransformType`, colliding with the data domain's import-mapping enum of
+ * the same name under a DIFFERENT shape (config-object union vs string enum)
+ * — the #4411 dual-source trap. Neither old name had importers outside this
+ * module in framework/cloud/objectui, so the rename is a clean break.
  */
 import { lazySchema } from './lazy-schema';
-export const TransformTypeSchema = lazySchema(() => z.discriminatedUnion('type', [
+export const FieldMappingTransformSchema = lazySchema(() => z.discriminatedUnion('type', [
   z.object({
     type: z.literal('constant'),
     value: z.unknown().describe('Constant value to use'),
@@ -72,7 +78,7 @@ export const TransformTypeSchema = lazySchema(() => z.discriminatedUnion('type',
   }).describe('Map values using a dictionary'),
 ]));
 
-export type TransformType = z.infer<typeof TransformTypeSchema>;
+export type FieldMappingTransform = z.infer<typeof FieldMappingTransformSchema>;
 
 /**
  * Field Mapping Schema
@@ -107,7 +113,7 @@ export const FieldMappingSchema = lazySchema(() => z.object({
   /**
    * Transformation to apply
    */
-  transform: TransformTypeSchema.optional().describe('Transformation to apply'),
+  transform: FieldMappingTransformSchema.optional().describe('Transformation to apply'),
   
   /**
    * Default value if source is null/undefined

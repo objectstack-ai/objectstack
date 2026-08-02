@@ -3,9 +3,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   canonicalizeSqlType,
-  suggestFieldType,
+  suggestFieldTypeForSqlType,
   isCompatible,
 } from './type-compat';
+import { suggestFieldType } from '../shared/suggestions.zod';
 
 describe('canonicalizeSqlType (ADR-0015 §4.6)', () => {
   it('strips length/precision parameters', () => {
@@ -45,20 +46,39 @@ describe('canonicalizeSqlType (ADR-0015 §4.6)', () => {
   });
 });
 
-describe('suggestFieldType', () => {
+describe('suggestFieldTypeForSqlType', () => {
   it('suggests sensible defaults per canonical type', () => {
-    expect(suggestFieldType('varchar(255)')).toBe('text');
-    expect(suggestFieldType('integer')).toBe('number');
-    expect(suggestFieldType('numeric(10,2)')).toBe('number');
-    expect(suggestFieldType('boolean')).toBe('boolean');
-    expect(suggestFieldType('timestamptz', 'postgres')).toBe('datetime');
-    expect(suggestFieldType('date')).toBe('date');
-    expect(suggestFieldType('jsonb', 'postgres')).toBe('json');
-    expect(suggestFieldType('vector', 'postgres')).toBe('vector');
+    expect(suggestFieldTypeForSqlType('varchar(255)')).toBe('text');
+    expect(suggestFieldTypeForSqlType('integer')).toBe('number');
+    expect(suggestFieldTypeForSqlType('numeric(10,2)')).toBe('number');
+    expect(suggestFieldTypeForSqlType('boolean')).toBe('boolean');
+    expect(suggestFieldTypeForSqlType('timestamptz', 'postgres')).toBe('datetime');
+    expect(suggestFieldTypeForSqlType('date')).toBe('date');
+    expect(suggestFieldTypeForSqlType('jsonb', 'postgres')).toBe('json');
+    expect(suggestFieldTypeForSqlType('vector', 'postgres')).toBe('vector');
   });
 
   it('returns undefined for unknown types', () => {
-    expect(suggestFieldType('geometry')).toBeUndefined();
+    expect(suggestFieldTypeForSqlType('geometry')).toBeUndefined();
+  });
+
+  // #4539: this mapper and shared/suggestions.zod's `suggestFieldType` used to
+  // SHARE the name `suggestFieldType` while being different functions with
+  // different signatures, semantics and return types — the worst dual-source
+  // shape, since a wrong auto-import compiled (`[]` is truthy where
+  // `undefined` was expected) and misbehaved with no type error. These pins
+  // encode the divergence that forced the rename; if the two are ever
+  // reconciled, delete this block deliberately.
+  it('is NOT the typo-suggester: same input, divergent semantics', () => {
+    // SQL vocabulary: mapper resolves it, typo-suggester cannot.
+    expect(suggestFieldTypeForSqlType('varchar(255)')).toBe('text');
+    expect(suggestFieldType('varchar(255)')).toEqual([]);
+    // FieldType typo: typo-suggester resolves it, mapper cannot.
+    expect(suggestFieldTypeForSqlType('text_area')).toBeUndefined();
+    expect(suggestFieldType('text_area')).toEqual(['textarea']);
+    // Overlapping input: scalar FieldType vs array of candidates.
+    expect(suggestFieldTypeForSqlType('int')).toBe('number');
+    expect(suggestFieldType('int')).toEqual(['number']);
   });
 });
 
