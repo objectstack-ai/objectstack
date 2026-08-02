@@ -60,6 +60,16 @@ jobs:
               'gi',
             );
 
+            // Report credential state on EVERY run, before any early return.
+            // Otherwise a repository with the secret and one without look
+            // identical until a cross-repo reference happens to show up —
+            // which can be days — and "is it configured?" stays unanswerable.
+            // Presence only; the value is never read into the log.
+            const token = process.env.CROSS_REPO_TOKEN;
+            core.info(
+              `CROSS_REPO_ISSUE_TOKEN: ${token ? 'configured' : 'ABSENT — cross-repo closes will be reported, not performed'}`,
+            );
+
             const targets = new Map();
             for (const [, owner, repo, number] of body.matchAll(pattern)) {
               const key = `${owner}/${repo}#${number}`;
@@ -74,8 +84,6 @@ jobs:
               return;
             }
             core.info(`Cross-repo targets: ${[...targets.keys()].join(', ')}`);
-
-            const token = process.env.CROSS_REPO_TOKEN;
 
             if (!token) {
               // Degrade VISIBLY. Someone has to close these by hand, and this
