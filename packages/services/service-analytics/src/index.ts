@@ -35,6 +35,6 @@ export { compileScopedFilterToSql } from './read-scope-sql.js';
 // Strategies
 export { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 export { ObjectQLStrategy } from './strategies/objectql-strategy.js';
-export type { AnalyticsStrategy, StrategyContext, DriverCapabilities } from './strategies/types.js';
+export type { AnalyticsStrategy, StrategyContext, AnalyticsDriverCapabilities } from './strategies/types.js';
 
 // Note: InMemoryStrategy is exported from @objectstack/driver-memory

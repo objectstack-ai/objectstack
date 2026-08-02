@@ -324,7 +324,9 @@ describe('AnalyticsQuerySchema', () => {
     });
 
     expect(query.measures).toEqual(['orders.count']);
-    expect(query.timezone).toBe('UTC');
+    // [#4538] No `timezone` default: absence is meaningful (the engine
+    // resolves org timezone -- #1982/#2018), so the parse must preserve it.
+    expect(query.timezone).toBeUndefined();
   });
 
   it('should accept query with all fields', () => {
@@ -375,12 +377,13 @@ describe('AnalyticsQuerySchema', () => {
     }
   });
 
-  it('should apply default timezone', () => {
+  it('should NOT default timezone -- absence means the engine resolves it (#4538)', () => {
     const query = AnalyticsQuerySchema.parse({
       measures: ['orders.count'],
     });
 
-    expect(query.timezone).toBe('UTC');
+    expect(query.timezone).toBeUndefined();
+    expect('timezone' in query).toBe(false);
   });
 
   it('should reject query without measures', () => {

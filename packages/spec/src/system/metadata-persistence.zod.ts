@@ -313,21 +313,14 @@ export const MetadataCollectionInfoSchema = lazySchema(() => z.object({
   namespaces: z.array(z.string()),
 }));
 
-/**
- * Metadata Export/Import Options
- */
-export const MetadataExportOptionsSchema = lazySchema(() => z.object({
-  types: z.array(z.string()).optional(),
-  namespaces: z.array(z.string()).optional(),
-  output: z.string().describe('Output directory or file'),
-  format: MetadataFormatSchema.default('json'),
-}));
-
-export const MetadataImportOptionsSchema = lazySchema(() => z.object({
-  source: z.string().describe('Input directory or file'),
-  strategy: z.enum(['merge', 'replace', 'skip']).default('merge'),
-  validate: z.boolean().default(true),
-}));
+// `MetadataExportOptionsSchema` / `MetadataImportOptionsSchema` (an
+// `output`/`source`-directory-flavored options pair) lived here until #4538.
+// They were the last survivors of the duplicate persistence-envelope family
+// #4411 removed from kernel: no runtime, CLI, or sibling-repo code ever
+// consumed them — their only references were their own pin tests — while their
+// NAMES collided with the `IMetadataService.exportMetadata`/`importMetadata`
+// parameter types in `../contracts/metadata-service.ts`, which `MetadataManager`
+// actually implements. The name now has one declaration, on `./contracts`.
 
 /**
  * Metadata Source Origin
@@ -368,8 +361,6 @@ export type MetadataSaveOptions = z.infer<typeof MetadataSaveOptionsSchema>;
 export type MetadataSaveResult = z.infer<typeof MetadataSaveResultSchema>;
 export type MetadataWatchEvent = z.infer<typeof MetadataWatchEventSchema>;
 export type MetadataCollectionInfo = z.infer<typeof MetadataCollectionInfoSchema>;
-export type MetadataExportOptions = z.infer<typeof MetadataExportOptionsSchema>;
-export type MetadataImportOptions = z.infer<typeof MetadataImportOptionsSchema>;
 export type { MetadataManagerConfig, MetadataFallbackStrategy } from '../kernel/metadata-loader.zod';
 export type MetadataSource = z.infer<typeof MetadataSourceSchema>;
 

@@ -13,7 +13,7 @@ import type { Dataset } from '@objectstack/spec/ui';
 import type { Logger } from '@objectstack/spec/contracts';
 import { createLogger, bucketKeyToCalendarRange, zonedDateStartToUtcMs } from '@objectstack/core';
 import { CubeRegistry } from './cube-registry.js';
-import type { AnalyticsStrategy, DriverCapabilities, StrategyContext } from './strategies/types.js';
+import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
@@ -112,7 +112,7 @@ export interface AnalyticsServiceConfig {
    * Probe driver capabilities for the object that backs a cube.
    * The service calls this function to decide which strategy can handle a query.
    */
-  queryCapabilities?: (cubeName: string) => DriverCapabilities;
+  queryCapabilities?: (cubeName: string) => AnalyticsDriverCapabilities;
   /**
    * Execute raw SQL on the driver for a given object.
    * Required for NativeSQLStrategy.
@@ -287,7 +287,7 @@ export interface AnalyticsServiceConfig {
 /**
  * Default capabilities when probing is not configured — assumes in-memory only.
  */
-const DEFAULT_CAPABILITIES: DriverCapabilities = {
+const DEFAULT_CAPABILITIES: AnalyticsDriverCapabilities = {
   nativeSql: false,
   objectqlAggregate: false,
   inMemory: true,

@@ -7,15 +7,15 @@ import { AnalyticsQuerySchema, defineCube } from '@objectstack/spec/data';
 import type { AnalyticsQuery, AnalyticsQueryInput, Cube } from '@objectstack/spec/data';
 
 /**
- * Author-tier literal → the parsed `AnalyticsQuery` the service contract takes.
+ * Validate a literal through the schema before handing it to the service —
+ * the same route a real request body takes (the REST layer validates against
+ * the schema and forwards).
  *
- * `timezone` is `.default('UTC')` on the schema, so it is optional to write and
- * required on the parsed type — the two tiers are genuinely different types. A
- * real query reaches `query()` through the schema (the REST layer parses the
- * request body), so these tests take the same route rather than hand-writing
- * the filled-in default: the parse IS the proof that the default lands. Until
- * #4311 no tsc read this file, so 19 author-tier literals sat unnoticed in a
- * parameter that had required `timezone` all along.
+ * [#4538] The two tiers collapsed: `AnalyticsQuerySchema` no longer carries
+ * any `.default()`/`.transform()` (`timezone` is genuinely optional — absence
+ * means the engine resolves org timezone, #1982/#2018), so `AnalyticsQuery`
+ * and `AnalyticsQueryInput` are the same shape and the parse is validation
+ * only. The helper stays so every test query is proven schema-valid.
  */
 const asQuery = (input: AnalyticsQueryInput): AnalyticsQuery => AnalyticsQuerySchema.parse(input);
 

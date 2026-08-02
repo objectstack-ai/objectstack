@@ -14,14 +14,19 @@
  */
 
 /**
- * Supported notification delivery channels
+ * Supported notification delivery channels.
  *
- * ⚠️ PARTIALLY ENFORCED — mirrors `NotificationChannelSchema`
- * (system/notification.zod.ts); the delivery channels actually registered by
+ * [#4538] Re-exported from the zod source (`NotificationChannelSchema`,
+ * system/notification.zod.ts) instead of a hand-written mirror union — the
+ * member sets had stayed identical only by discipline, and one declaration
+ * per name is the rule (#4446).
+ *
+ * ⚠️ PARTIALLY ENFORCED — the delivery channels actually registered by
  * `service-messaging` are `inbox`, `email`, and `sms` only (#3197). Messages
  * addressed to an unregistered channel are dead-lettered, not delivered.
  */
-export type NotificationChannel = 'email' | 'sms' | 'push' | 'in-app' | 'slack' | 'teams' | 'webhook';
+import type { NotificationChannel } from '../system/notification.zod';
+export type { NotificationChannel } from '../system/notification.zod';
 
 /**
  * A notification message to be sent

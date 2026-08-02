@@ -13,8 +13,23 @@
  * Aligned with CoreServiceName 'job' in core-services.zod.ts.
  */
 
+// [#4538] `JobExecution` is the system domain's zod-derived type — one
+// declaration, re-exported here for the IJobService surface below.
+import type { JobExecution } from '../system/job.zod';
+export type { JobExecution } from '../system/job.zod';
+
 /**
- * Schedule definition for a job
+ * Schedule definition for a job — the `IJobService.schedule` BOUNDARY shape.
+ *
+ * [#4538] The SOLE declaration of this name; the legacy `JobSchedule =
+ * Schedule` alias on `./system` was consumer-free and removed. This is
+ * deliberately NOT the authored `Schedule` union from `system/job.zod.ts`:
+ * that is the authoring/persistence tier (discriminated union, cron
+ * `expression` parsed into the ADR expression envelope, `timezone`
+ * defaulted), while this is the plain-runtime-value shape the schedulers
+ * consume — `trigger-schedule` normalizes authored shorthands into it, and
+ * the cron adapter hands `expression` (a bare cron string here) straight to
+ * croner.
  */
 export interface JobSchedule {
     /** Schedule type */
@@ -62,24 +77,6 @@ export interface JobScheduleOptions {
      * cancel the in-flight handler — the attempt is abandoned, not killed.
      */
     timeout?: number;
-}
-
-/**
- * Status of a job execution
- */
-export interface JobExecution {
-    /** Job identifier */
-    jobId: string;
-    /** Execution status */
-    status: 'running' | 'success' | 'failed' | 'timeout';
-    /** Start time (ISO 8601) */
-    startedAt: string;
-    /** Completion time (ISO 8601) */
-    completedAt?: string;
-    /** Error message if failed */
-    error?: string;
-    /** Duration in milliseconds */
-    durationMs?: number;
 }
 
 export interface IJobService {

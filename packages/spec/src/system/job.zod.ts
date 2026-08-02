@@ -48,7 +48,12 @@ export type Schedule = z.infer<typeof ScheduleSchema>;
 export type CronSchedule = z.infer<typeof CronScheduleSchema>;
 export type IntervalSchedule = z.infer<typeof IntervalScheduleSchema>;
 export type OnceSchedule = z.infer<typeof OnceScheduleSchema>;
-export type JobSchedule = Schedule; // Alias for backwards compatibility
+// NOTE [#4538]: the legacy `export type JobSchedule = Schedule` alias was
+// removed. It collided with the differently-shaped `JobSchedule` on
+// `@objectstack/spec/contracts` — the IJobService boundary type every runtime
+// caller (trigger-schedule, wait-node, the job adapters) imports — while this
+// alias itself had zero consumers. The authored metadata type keeps its real
+// name: `Schedule`.
 
 /**
  * Retry Policy Schema
@@ -142,7 +147,14 @@ export type JobExecutionStatus = z.infer<typeof JobExecutionStatus>;
 
 /**
  * Job Execution Schema
- * Logs for job execution
+ * Logs for job execution.
+ *
+ * [#4538] This is the ONE declaration of `JobExecution` — the contracts entry
+ * re-exports it for `IJobService.getExecutions`. The duration field is
+ * `durationMs`: that is what every job adapter produces (cron/interval set it
+ * from `Date.now()` deltas; the DB adapter round-trips the `duration_ms`
+ * column). The schema's earlier `duration` spelling described records nothing
+ * ever wrote and was aligned to the runtime truth.
  */
 export const JobExecutionSchema = lazySchema(() => z.object({
   jobId: z.string().describe('Job identifier'),
@@ -150,7 +162,7 @@ export const JobExecutionSchema = lazySchema(() => z.object({
   completedAt: z.string().datetime().optional().describe('ISO 8601 datetime when execution completed'),
   status: JobExecutionStatus.describe('Execution status'),
   error: z.string().optional().describe('Error message if failed'),
-  duration: z.number().int().optional().describe('Execution duration in milliseconds'),
+  durationMs: z.number().int().optional().describe('Execution duration in milliseconds'),
 }));
 
 export type JobExecution = z.infer<typeof JobExecutionSchema>;

@@ -6,7 +6,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IAnalyticsService, IDataDriver } from '@objectstack/spec/contracts';
 import { AnalyticsService } from './analytics-service.js';
 import type { AnalyticsServiceConfig } from './analytics-service.js';
-import type { DriverCapabilities } from './strategies/types.js';
+import type { AnalyticsDriverCapabilities } from './strategies/types.js';
 import { pickDisplayField, type DimensionLabelDeps } from './dimension-labels.js';
 
 /**
@@ -77,7 +77,7 @@ export interface AnalyticsServicePluginOptions {
    * Probe driver capabilities for a given cube.
    * When omitted, defaults to in-memory only.
    */
-  queryCapabilities?: (cubeName: string) => DriverCapabilities;
+  queryCapabilities?: (cubeName: string) => AnalyticsDriverCapabilities;
   /**
    * Execute raw SQL on a driver. Enables NativeSQLStrategy.
    */

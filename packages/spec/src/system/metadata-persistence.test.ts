@@ -12,8 +12,6 @@ import {
   MetadataSaveResultSchema,
   MetadataWatchEventSchema,
   MetadataCollectionInfoSchema,
-  MetadataExportOptionsSchema,
-  MetadataImportOptionsSchema,
   MetadataManagerConfigSchema,
   MetadataFallbackStrategySchema,
   MetadataSourceSchema,
@@ -448,50 +446,6 @@ describe('MetadataCollectionInfoSchema', () => {
   it('should reject missing required fields', () => {
     expect(() => MetadataCollectionInfoSchema.parse({})).toThrow();
     expect(() => MetadataCollectionInfoSchema.parse({ type: 'view' })).toThrow();
-  });
-});
-
-describe('MetadataExportOptionsSchema', () => {
-  it('should accept minimal export options with defaults', () => {
-    const opts = MetadataExportOptionsSchema.parse({ output: '/export' });
-    expect(opts.output).toBe('/export');
-    expect(opts.format).toBe('json');
-  });
-
-  it('should accept full export options', () => {
-    const opts = MetadataExportOptionsSchema.parse({
-      types: ['view', 'object'],
-      namespaces: ['crm'],
-      output: '/export/crm',
-      format: 'yaml',
-    });
-
-    expect(opts.types).toEqual(['view', 'object']);
-    expect(opts.format).toBe('yaml');
-  });
-
-  it('should reject missing output', () => {
-    expect(() => MetadataExportOptionsSchema.parse({})).toThrow();
-  });
-});
-
-describe('MetadataImportOptionsSchema', () => {
-  it('should accept minimal import options with defaults', () => {
-    const opts = MetadataImportOptionsSchema.parse({ source: '/import' });
-    expect(opts.source).toBe('/import');
-    expect(opts.strategy).toBe('merge');
-    expect(opts.validate).toBe(true);
-  });
-
-  it('should accept all strategies', () => {
-    const strategies = ['merge', 'replace', 'skip'];
-    strategies.forEach((strategy) => {
-      expect(() => MetadataImportOptionsSchema.parse({ source: '/x', strategy })).not.toThrow();
-    });
-  });
-
-  it('should reject missing source', () => {
-    expect(() => MetadataImportOptionsSchema.parse({})).toThrow();
   });
 });
 

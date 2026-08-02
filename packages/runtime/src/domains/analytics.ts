@@ -38,8 +38,13 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * "unrecognized key" — gets a bespoke hint at the contract field `where`.
  *
  * Validation only — the ORIGINAL body is forwarded to the service untouched.
- * (Parsing would inject the schema's `timezone: 'UTC'` default and silently
- * override the engine's org-timezone resolution, #1982/#2018.)
+ * (Historically load-bearing: the schema carried a `timezone: 'UTC'` default
+ * that parsing would have injected, silently overriding the engine's
+ * org-timezone resolution, #1982/#2018. #4538 removed that default from
+ * `AnalyticsQuerySchema` itself — the schema is transform-free now, so
+ * validated body ≡ parsed output by construction — but forwarding the
+ * original body stays the rule: it keeps this entry immune to any future
+ * default someone adds to the schema without re-reading this file.)
  */
 function assertAnalyticsQueryBody(body: unknown): void {
     if (body && typeof body === 'object' && !Array.isArray(body)) {

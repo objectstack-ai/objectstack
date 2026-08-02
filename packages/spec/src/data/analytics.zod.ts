@@ -167,7 +167,17 @@ export const AnalyticsQuerySchema = lazySchema(() => z.object({
   limit: z.number().optional(),
   offset: z.number().optional(),
 
-  timezone: z.string().optional().default('UTC'),
+  /**
+   * Reference timezone (IANA name) for date bucketing. OPTIONAL WITH NO
+   * DEFAULT, deliberately (#4538): an ABSENT timezone is a meaningful state —
+   * the engine resolves it (`selection.timezone ?? context.timezone ?? 'UTC'`,
+   * ADR-0053 Phase 2), and the `/analytics` entry forwards bodies
+   * validation-only precisely so a schema default cannot silently override
+   * the org-timezone resolution chain (#1982/#2018). The `.default('UTC')`
+   * this field used to carry declared a boundary the runtime refused to
+   * enforce.
+   */
+  timezone: z.string().optional(),
 }));
 
 export type Metric = z.infer<typeof MetricSchema>;
@@ -188,14 +198,15 @@ export function defineCube(config: z.input<typeof CubeSchema>): Cube {
 export type AnalyticsQuery = z.infer<typeof AnalyticsQuerySchema>;
 
 /**
- * Author-tier `AnalyticsQuery` — what a caller writes, before `.parse()` fills
- * the defaults in. `timezone` is `.default('UTC')`, so it is optional here and
- * REQUIRED on {@link AnalyticsQuery}: the two tiers are genuinely different
- * types, and only the parse turns one into the other.
+ * Input-tier alias of {@link AnalyticsQuery}.
  *
- * Every executor (`IAnalyticsService.query`, the analytics strategies) takes
- * the PARSED type, because a request body reaches them through the schema. Use
- * this one for the literal handed to `AnalyticsQuerySchema.parse()` — the
- * mirror of `QueryInput` / `QueryAST` in `data/query.zod.ts`.
+ * [#4538] The two tiers COLLAPSED when `timezone` lost its `.default('UTC')`
+ * (see the field's own note): the schema now carries no `.default()` or
+ * `.transform()` anywhere — `FilterCondition` is declared transform-free —
+ * so what a caller writes is exactly what an executor receives, and this
+ * name survives only for source compatibility. `IAnalyticsService.query`,
+ * the analytics strategies, and the `/analytics` entry all traffic in the
+ * single {@link AnalyticsQuery} shape (validated at the entry by
+ * `AnalyticsQueryRequestSchema`, forwarded unmodified).
  */
 export type AnalyticsQueryInput = z.input<typeof AnalyticsQuerySchema>;

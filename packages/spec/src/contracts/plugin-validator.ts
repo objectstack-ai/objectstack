@@ -8,32 +8,16 @@
  */
 
 /**
- * Validation result for a plugin
+ * Validation result for a plugin.
+ *
+ * [#4538] Re-exported from the zod source (`ValidationResultSchema`,
+ * kernel/plugin-validator.zod.ts) instead of a hand-written twin — the two
+ * declarations were field-for-field identical, and one declaration per name
+ * is the rule (#4446). `ValidationError` / `ValidationWarning` element types
+ * live there too.
  */
-export interface ValidationResult {
-    /**
-     * Whether the plugin passed validation
-     */
-    valid: boolean;
-    
-    /**
-     * Validation errors (if any)
-     */
-    errors?: Array<{
-        field: string;
-        message: string;
-        code?: string;
-    }>;
-    
-    /**
-     * Validation warnings (non-fatal issues)
-     */
-    warnings?: Array<{
-        field: string;
-        message: string;
-        code?: string;
-    }>;
-}
+import type { ValidationResult } from '../kernel/plugin-validator.zod';
+export type { ValidationResult } from '../kernel/plugin-validator.zod';
 
 /**
  * Plugin metadata for validation

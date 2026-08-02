@@ -45,8 +45,6 @@ export type {
   MetadataStats,
   MetadataLoadOptions,
   MetadataSaveOptions,
-  MetadataExportOptions,
-  MetadataImportOptions,
   MetadataLoadResult,
   MetadataSaveResult,
   MetadataWatchEvent,
@@ -60,11 +58,18 @@ export type {
   MetadataHistoryRetentionPolicy,
 } from '@objectstack/spec/system';
 
-// Re-export IMetadataService contract
+// Re-export IMetadataService contract.
+// [#4538] `MetadataExportOptions` / `MetadataImportOptions` moved into this
+// block: this package used to re-export the same-named system-entry bags
+// (`output`/`source`-flavored, removed with #4538) while `MetadataManager`
+// implements the contracts shapes — the public re-export was pointing at the
+// wrong declaration.
 export type {
   IMetadataService,
   MetadataWatchCallback,
   MetadataWatchHandle,
+  MetadataExportOptions,
+  MetadataImportOptions,
   MetadataTypeInfo,
   MetadataImportResult,
 } from '@objectstack/spec/contracts';

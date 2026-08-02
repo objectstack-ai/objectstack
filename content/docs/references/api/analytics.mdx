@@ -66,7 +66,7 @@ const result = AnalyticsEndpoint.parse(data);
 | **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
 | **limit** | `number` | optional |  |
 | **offset** | `number` | optional |  |
-| **timezone** | `string` | ✅ |  |
+| **timezone** | `string` | optional |  |
 | **query** | `any` | optional | [REMOVED] `query` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0 (#3878). The `{ cube, query: {...}` } envelope was the dialect of the retired degraded analytics shim (#3891) — the real engine never understood it. Move the query.* fields to the body top level: `{ cube, measures, dimensions?, where?, timeDimensions?, order?, limit?, offset?, timezone? }`. |
 | **format** | `any` | optional | [REMOVED] `format` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0 (#3878). It was never implemented — every response is the JSON envelope. Delete the key; for CSV/XLSX use the export surface instead. |
 

@@ -7,7 +7,7 @@ import { AnalyticsService } from '../analytics-service.js';
 import { CubeRegistry } from '../cube-registry.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
-import type { DriverCapabilities } from '../strategies/types.js';
+import type { AnalyticsDriverCapabilities } from '../strategies/types.js';
 
 // ─────────────────────────────────────────────────────────────────
 // Test fixtures

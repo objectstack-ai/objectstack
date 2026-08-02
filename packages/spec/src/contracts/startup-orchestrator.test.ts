@@ -1,24 +1,37 @@
 import { describe, it, expect } from 'vitest';
 import type {
   StartupOptions,
+  StartupOptionsInput,
   PluginStartupResult,
   HealthStatus,
   IStartupOrchestrator,
 } from './startup-orchestrator';
+// [#4538] The contract's data shapes ARE the kernel zod types — the same
+// declaration, re-exported. This import compiling is part of the pin.
+import { StartupOptionsSchema } from '../kernel/startup-orchestrator.zod';
 import type { Plugin } from './plugin-validator';
 
 describe('Startup Orchestrator Contract', () => {
-  describe('StartupOptions interface', () => {
-    it('should allow an empty options object (all optional)', () => {
-      const options: StartupOptions = {};
+  describe('StartupOptions tiers (re-exported kernel zod types, #4538)', () => {
+    it('should allow an empty INPUT-tier options object (all optional)', () => {
+      const options: StartupOptionsInput = {};
 
       expect(options).toBeDefined();
       expect(options.timeout).toBeUndefined();
       expect(options.rollbackOnFailure).toBeUndefined();
     });
 
+    it('parses the input tier into the defaulted StartupOptions tier', () => {
+      const parsed: StartupOptions = StartupOptionsSchema.parse({});
+
+      expect(parsed.timeout).toBe(30000);
+      expect(parsed.rollbackOnFailure).toBe(true);
+      expect(parsed.healthCheck).toBe(false);
+      expect(parsed.parallel).toBe(false);
+    });
+
     it('should allow full options', () => {
-      const options: StartupOptions = {
+      const options: StartupOptionsInput = {
         timeout: 30000,
         rollbackOnFailure: true,
         healthCheck: true,
@@ -73,13 +86,15 @@ describe('Startup Orchestrator Contract', () => {
       expect(result.error).toBeUndefined();
     });
 
-    it('should represent a failed startup with error', () => {
+    it('should represent a failed startup with a SERIALIZABLE error (#4538)', () => {
       const plugin: Plugin = { name: 'broken-plugin' };
       const result: PluginStartupResult = {
         plugin,
         success: false,
         duration: 30000,
-        error: new Error('Timeout'),
+        // The kernel schema declares the serializable projection, not a live
+        // Error instance — what a wire/log consumer of the result can carry.
+        error: { name: 'Error', message: 'Timeout' },
       };
 
       expect(result.success).toBe(false);

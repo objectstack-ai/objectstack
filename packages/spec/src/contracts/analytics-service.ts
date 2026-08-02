@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Cube } from '../data/analytics.zod.js';
+import type { AnalyticsQuery, Cube } from '../data/analytics.zod.js';
 import type { FilterCondition } from '../data/filter.zod.js';
 import type { PercentScale } from '../data/percent-scale.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
@@ -20,44 +20,19 @@ import type { Dataset } from '../ui/dataset.zod.js';
  */
 
 /**
- * An analytical query definition
+ * An analytical query definition.
+ *
+ * [#4538] Re-exported from the zod source (`AnalyticsQuerySchema`,
+ * data/analytics.zod.ts) instead of a hand-written mirror — the mirror had
+ * drifted (`where` had decayed to `Record<string, unknown>` where the schema
+ * declares the canonical `FilterCondition`; `timeDimensions[].granularity`
+ * to bare `string`). One shape, both tiers: the schema carries no
+ * `.default()`/`.transform()` — `timezone` is genuinely optional, because an
+ * absent timezone means "the engine resolves it" (org-timezone chain,
+ * #1982/#2018) — so what a caller authors is exactly what an executor
+ * receives.
  */
-export interface AnalyticsQuery {
-    /** Target cube name. Optional when cube is specified at a higher level (e.g. API request wrapper or cube-scoped endpoint). Implementations should validate presence at runtime. */
-    cube?: string;
-    /** Measures to compute (e.g. ['orders.count', 'orders.totalRevenue']) */
-    measures: string[];
-    /** Dimensions to group by (e.g. ['orders.status', 'orders.createdAt']) */
-    dimensions?: string[];
-    /**
-     * WHERE clause — canonical filter shape per the unified Query DSL
-     * (see `FilterConditionSchema` in `spec/data/filter.zod.ts`).
-     * MongoDB-style: implicit equality, `$eq/$ne/$gt/$gte/$lt/$lte/
-     * $in/$nin/$contains/...` operator wrappers, `$and/$or/$not`
-     * logical combinators. This is the same filter shape used by
-     * `find()`, dashboard widget `filter`, RLS, etc.
-     *
-     * @example
-     * ```ts
-     * { where: { is_active: true, stage: { $nin: ['lost'] } } }
-     * ```
-     */
-    where?: Record<string, unknown>;
-    /** Time dimension configuration */
-    timeDimensions?: Array<{
-        dimension: string;
-        granularity?: string;
-        dateRange?: string | string[];
-    }>;
-    /** Sort order for results */
-    order?: Record<string, 'asc' | 'desc'>;
-    /** Result limit */
-    limit?: number;
-    /** Result offset */
-    offset?: number;
-    /** Timezone for date/time calculations */
-    timezone?: string;
-}
+export type { AnalyticsQuery, AnalyticsQueryInput } from '../data/analytics.zod.js';
 
 /**
  * Analytics query result
@@ -253,12 +228,19 @@ export interface IAnalyticsService {
 // ==========================================
 
 /**
- * Driver capability descriptor.
+ * Analytics execution-path capability descriptor.
  *
  * Used by the strategy chain to decide at runtime which execution path
  * is available for a given cube / object.
+ *
+ * [#4538] Renamed from `DriverCapabilities`: that name belongs to the data
+ * domain's driver feature-flag record (`DriverCapabilitiesSchema`,
+ * data/driver.zod.ts — what every `IDataDriver.supports` declares), a
+ * genuinely different concept that was squatting behind the same name on
+ * this entry. This trio answers one narrow question — which analytics
+ * execution path can serve a cube — and now says so in its name.
  */
-export interface DriverCapabilities {
+export interface AnalyticsDriverCapabilities {
     /** Driver supports native SQL execution (e.g. Postgres, MySQL, SQLite). */
     nativeSql: boolean;
     /** Driver supports ObjectQL aggregate() operations. */
@@ -274,7 +256,7 @@ export interface StrategyContext {
     /** Resolve a cube definition by name. */
     getCube(name: string): Cube | undefined;
     /** Probe driver capabilities for the object backing a cube. */
-    queryCapabilities(cubeName: string): DriverCapabilities;
+    queryCapabilities(cubeName: string): AnalyticsDriverCapabilities;
     /**
      * Execute a raw SQL string on the driver that owns `objectName`.
      * Only available when `nativeSql` capability is true.

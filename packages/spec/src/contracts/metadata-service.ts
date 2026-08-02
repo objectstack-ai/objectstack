@@ -66,7 +66,14 @@ export interface MetadataWatchHandle {
 }
 
 /**
- * Metadata export options
+ * Metadata export options — the parameter type of
+ * {@link IMetadataService.exportMetadata}.
+ *
+ * [#4538] The SOLE declaration of this name. `@objectstack/spec/system` used
+ * to export a same-named, differently-shaped options bag
+ * (`output`-directory-flavored, from the #4411 duplicate persistence-envelope
+ * family); it had no consumer anywhere and was removed. `MetadataManager`
+ * implements THIS shape (`options.types` drives the export loop).
  */
 export interface MetadataExportOptions {
     /** Filter by metadata types */
@@ -78,7 +85,13 @@ export interface MetadataExportOptions {
 }
 
 /**
- * Metadata import options
+ * Metadata import options — the parameter type of
+ * {@link IMetadataService.importMetadata}.
+ *
+ * [#4538] The SOLE declaration of this name (the same-named
+ * `source`/`strategy` bag on `./system` was consumer-free and removed).
+ * `MetadataManager` implements THIS shape (`conflictResolution` / `validate` /
+ * `dryRun` are what its import loop destructures).
  */
 export interface MetadataImportOptions {
     /** Conflict resolution strategy */

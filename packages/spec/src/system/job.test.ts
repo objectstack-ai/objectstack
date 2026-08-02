@@ -401,12 +401,12 @@ describe('JobExecutionSchema', () => {
       startedAt: '2024-01-15T10:30:00Z',
       completedAt: '2024-01-15T10:35:00Z',
       status: 'success',
-      duration: 300000,
+      durationMs: 300000,
     };
 
     const parsed = JobExecutionSchema.parse(execution);
     expect(parsed.completedAt).toBe('2024-01-15T10:35:00Z');
-    expect(parsed.duration).toBe(300000);
+    expect(parsed.durationMs).toBe(300000);
   });
 
   it('should accept failed execution', () => {
@@ -416,7 +416,7 @@ describe('JobExecutionSchema', () => {
       completedAt: '2024-01-15T11:05:00Z',
       status: 'failed',
       error: 'Database connection timeout',
-      duration: 300000,
+      durationMs: 300000,
     };
 
     const parsed = JobExecutionSchema.parse(execution);
@@ -431,7 +431,7 @@ describe('JobExecutionSchema', () => {
       completedAt: '2024-01-15T12:10:00Z',
       status: 'timeout',
       error: 'Job exceeded maximum execution time of 600000ms',
-      duration: 600000,
+      durationMs: 600000,
     };
 
     const parsed = JobExecutionSchema.parse(execution);
@@ -548,14 +548,14 @@ describe('Job Scheduling Integration', () => {
         startedAt: '2024-01-15T02:00:00Z',
         completedAt: '2024-01-15T02:15:00Z',
         status: 'success',
-        duration: 900000,
+        durationMs: 900000,
       },
       {
         jobId: 'backup-daily',
         startedAt: '2024-01-16T02:00:00Z',
         completedAt: '2024-01-16T02:10:00Z',
         status: 'success',
-        duration: 600000,
+        durationMs: 600000,
       },
       {
         jobId: 'backup-daily',
@@ -563,7 +563,7 @@ describe('Job Scheduling Integration', () => {
         completedAt: '2024-01-17T02:35:00Z',
         status: 'failed',
         error: 'Insufficient disk space',
-        duration: 2100000,
+        durationMs: 2100000,
       },
     ];
 
