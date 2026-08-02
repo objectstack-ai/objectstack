@@ -2627,25 +2627,14 @@ export class ObjectStackProtocolImplementation implements
 
                 // Only hydrate the global registry for unscoped (control-plane)
                 // calls — scoped project entries must not leak process-wide.
-                // Graft the artifact's protection envelope onto the overlay body
-                // BEFORE registering: the plain-key entry written here shadows
-                // the packaged artifact on `registry.getItem`, and a bare
-                // overlay body would strip `_lock`/`_packageId`/`_provenance`
-                // from every registry-direct reader (ADR-0010 §3.3 — an overlay
-                // must never loosen a packaged lock). ADR-0048 (#1828) — scope
-                // the artifact lookup to the row's OWN package so a colliding
-                // overlay no longer grafts the first-registered package's
-                // provenance/lock onto another package's row.
+                // #4521 — this loop is no longer the ONLY way an overlay reaches
+                // the registry (the write writes through as well), so it is the
+                // shared {@link hydrateOverlayIntoRegistry} that both callers
+                // use: a read and a write that register differently would put
+                // the registry in two different states for the same row.
                 if (this.environmentId === undefined) {
                     for (const { data, packageId: recPkg } of overlays) {
-                        if (data && typeof data === 'object' && 'name' in data) {
-                            const artifact = this.lookupArtifactItem(request.type, (data as any).name, recPkg);
-                            this.engine.registry.registerItem(
-                                request.type,
-                                mergeArtifactProtection(data, artifact),
-                                'name' as any,
-                            );
-                        }
+                        this.hydrateOverlayIntoRegistry(request.type, data, recPkg);
                     }
                 }
             }
@@ -5971,6 +5960,89 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * Register ONE active overlay body into the engine's SchemaRegistry.
+     *
+     * The single implementation shared by the READ-side hydration
+     * (`getMetaItems`) and the WRITE-side write-through
+     * ({@link applyRegistryWriteThrough}) — #4521. Two copies of this rule
+     * would let a read and a write leave the registry in two different
+     * states for the same row, which is the class of bug the write-through
+     * exists to close.
+     *
+     * Graft the artifact's protection envelope onto the overlay body BEFORE
+     * registering: the plain-key entry written here shadows the packaged
+     * artifact on `registry.getItem`, and a bare overlay body would strip
+     * `_lock`/`_packageId`/`_provenance` from every registry-direct reader
+     * (ADR-0010 §3.3 — an overlay must never loosen a packaged lock).
+     * ADR-0048 (#1828) — scope the artifact lookup to the row's OWN package
+     * so a colliding overlay no longer grafts the first-registered package's
+     * provenance/lock onto another package's row.
+     *
+     * Returns whether anything was registered (bodies without a `name`, and
+     * registry doubles without `registerItem`, are no-ops).
+     */
+    private hydrateOverlayIntoRegistry(type: string, data: unknown, packageId?: string | null): boolean {
+        if (!data || typeof data !== 'object' || !('name' in data)) return false;
+        const registry: any = (this.engine as any)?.registry;
+        if (!registry || typeof registry.registerItem !== 'function') return false;
+        const artifact = this.lookupArtifactItem(type, (data as any).name, packageId ?? undefined);
+        registry.registerItem(type, mergeArtifactProtection(data, artifact), 'name' as any);
+        return true;
+    }
+
+    /**
+     * [#4521] Write-through the SchemaRegistry after a mutation goes LIVE, so
+     * a just-saved item is dispatchable — not merely listable.
+     *
+     * `resolveRouteActionDeclaration` (and every other runtime consumer that
+     * reads `engine.registry` directly) treats the registry as the live view
+     * of metadata. Before this method the write only wrote through it for
+     * `object` ({@link applyObjectRegistryMutation} returns early otherwise);
+     * every other overlay type arrived in the registry solely via the
+     * READ-side hydration in `getMetaItems` / `loadMetaFromDb`. That made a
+     * *read* the thing that repaired the registry: a `PUT /meta/action/x`
+     * followed immediately by `POST /actions/<object>/x` answered the
+     * ADR-0110 "has no declaration" 404, and the very next listing call made
+     * the same POST succeed (#4432 F1, split out as #4521). Read-your-writes
+     * between the meta list and the dispatch path was decided by whether
+     * anyone had listed yet.
+     *
+     * The fix is at the producer, not the consumer: no retry, no sleep and no
+     * tolerance was added at the dispatch site, and ADR-0110's 404 for a
+     * genuinely absent declaration is untouched — an item nobody wrote still
+     * has nothing in the registry to find.
+     *
+     * Call ONLY after the write has landed and is live:
+     *  • `saveMetaItem` repo path — post-`put()`, `mode === 'publish'` only
+     *    (drafts are a staging buffer and must never leak into the runtime);
+     *  • `runPublishSideEffects` — the draft→active promotion;
+     *  • `rollbackMetaItem` — the restored body is the live one.
+     *
+     * The non-object branch carries the same `environmentId === undefined`
+     * gate the read-side hydration carries: a project-scoped row must not be
+     * registered into a registry that unscoped (control-plane) callers share.
+     * The write must not be more permissive about that than the read is.
+     */
+    private applyRegistryWriteThrough(request: { type: string; name: string; item?: any; packageId?: string | null }): void {
+        if (request.type === 'object' || request.type === 'objects') {
+            this.applyObjectRegistryMutation(request);
+            return;
+        }
+        if (this.environmentId !== undefined) return;
+        try {
+            this.hydrateOverlayIntoRegistry(request.type, request.item, request.packageId ?? undefined);
+        } catch (err: any) {
+            // Best-effort, exactly like the object branch: the row is already
+            // persisted, so a registry hiccup must not fail the write that
+            // succeeded. It degrades to the pre-#4521 behaviour (the next
+            // listing hydrates it), never to a lost write.
+            console.warn(
+                `[Protocol] registry write-through failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
+            );
+        }
+    }
+
+    /**
      * Heal the in-memory registry after a metadata reset (overlay-row
      * delete) on control-plane kernels. Two layers:
      *
@@ -6493,12 +6565,21 @@ export class ObjectStackProtocolImplementation implements
                     ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
                 });
                 // Persistence succeeded — NOW it's safe to mutate the
-                // in-memory object registry. If put() had thrown, the
-                // registry would still reflect the prior state. Drafts
-                // are NOT live: don't propagate them into the runtime
-                // object registry (would defeat the staging buffer).
+                // in-memory registry. If put() had thrown, the registry
+                // would still reflect the prior state. Drafts are NOT
+                // live: don't propagate them into the runtime registry
+                // (would defeat the staging buffer).
+                // #4521 — write through for EVERY overlay type, not just
+                // `object`: the runtime dispatch path reads this registry,
+                // so an item that is already listable must be dispatchable
+                // in the same breath. See {@link applyRegistryWriteThrough}.
                 if (mode === 'publish') {
-                    this.applyObjectRegistryMutation(request);
+                    this.applyRegistryWriteThrough({
+                        type: singularTypeForRepo,
+                        name: request.name,
+                        item: request.item,
+                        packageId: request.packageId ?? null,
+                    });
                     await this.ensureObjectStorage(request.type, request.name);
                 }
                 // ADR-0010 — success audit (best-effort).
@@ -7147,12 +7228,15 @@ export class ObjectStackProtocolImplementation implements
             projectionApplied?: MutationProjectionOutcome;
         } = {};
         // Drafts skipped the registry mutation; on publish we now refresh the
-        // runtime object registry so live behaviour catches up immediately
-        // (matches saveMetaItem's post-persistence registry update path).
-        this.applyObjectRegistryMutation({
-            type: args.requestType,
+        // runtime registry so live behaviour catches up immediately (matches
+        // saveMetaItem's post-persistence registry update path — #4521 makes
+        // that path cover every overlay type, so promoting a drafted action
+        // makes it dispatchable at once instead of at the next listing).
+        this.applyRegistryWriteThrough({
+            type: args.singularType,
             name: args.name,
             item: args.body,
+            packageId: args.packageId,
         });
         // Create the object's table now so it's CRUD-able without a restart.
         await this.ensureObjectStorage(args.requestType, args.name);
@@ -8417,8 +8501,11 @@ export class ObjectStackProtocolImplementation implements
                 ...(request.message ? { message: request.message } : {}),
                 intent,
             });
-            this.applyObjectRegistryMutation({
-                type: request.type,
+            // #4521 — a rollback is a live write like any other: the restored
+            // body must be the one the runtime dispatches on immediately, not
+            // after someone lists the type.
+            this.applyRegistryWriteThrough({
+                type: singularType,
                 name: request.name,
                 item: result.item.body,
             });

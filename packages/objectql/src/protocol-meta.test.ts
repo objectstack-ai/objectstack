@@ -214,15 +214,30 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             ).rejects.toThrow('Item data is required');
         });
 
-        it('should NOT mutate the SchemaRegistry for non-object types (ADR-0005)', async () => {
-            // ADR-0005: sys_metadata is the authoritative overlay store.
-            // saveMetaItem must not pollute the artifact-loaded registry for
-            // overlay-eligible types (view/dashboard/etc.) — getMetaItem reads
-            // sys_metadata first, so the registry stays at the artifact value.
+        it('writes the saved body through to the SchemaRegistry for non-object types (#4521)', async () => {
+            // INVERTED from "should NOT mutate the SchemaRegistry for
+            // non-object types (ADR-0005)". That assertion was written when
+            // mutating the registry here meant OVERWRITING the artifact in
+            // place, so `deleteMetaItem` ("reset to artifact default") would
+            // have had nothing left to restore. That is no longer how the
+            // registry stores the two: an artifact lives under the composite
+            // `<packageId>:<name>` key, an overlay is a plain-key SHADOW, and
+            // `restoreArtifactRegistryView` drops the shadow on delete. The
+            // read side (`getMetaItems` hydration) has been writing that
+            // shadow for a long time.
+            //
+            // Leaving the write alone therefore did not protect the artifact —
+            // it only made a READ the thing that repaired the registry: a
+            // just-saved overlay was listed but NOT dispatchable until someone
+            // listed the type, because `resolveRouteActionDeclaration` reads
+            // the registry (#4432 F1 → #4521). The rest of ADR-0005 is intact:
+            // `sys_metadata` is still the authoritative store and `getMetaItem`
+            // still consults it first.
             await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp });
 
             const stored = registry.getItem('app', 'test_app');
-            expect(stored).toBeUndefined();
+            expect(stored).toBeDefined();
+            expect((stored as any).name).toBe('test_app');
         });
 
         it('should register `object` type items in SchemaRegistry (engine schema-sync needs it)', async () => {
