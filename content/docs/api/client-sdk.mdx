@@ -504,9 +504,13 @@ The `find` method accepts an options object with **canonical** (recommended) fie
 
 | Property | Type | Default | Description |
 |:---------|:-----|:--------|:------------|
-| `atomic` | `boolean` | `true` | Rollback entire batch on any failure |
+| `atomic` | `boolean` | `false` | Run the batch in one transaction and roll every write back on the first failure. Refused with `501 NOT_IMPLEMENTED` where the driver cannot roll back, rather than degrading to best-effort. Takes precedence over `continueOnError` |
 | `returnRecords` | `boolean` | `false` | Include full records in response |
-| `continueOnError` | `boolean` | `false` | Continue after errors (when atomic=false) |
+| `continueOnError` | `boolean` | `false` | Continue after errors (when atomic is false) |
+
+A rolled-back atomic batch reports `succeeded: 0`, with each row carrying
+`ROLLED_BACK:`, the causal error, or `NOT_ATTEMPTED:` — no row is reported as a
+success, because none of them survived.
 
 ---
 

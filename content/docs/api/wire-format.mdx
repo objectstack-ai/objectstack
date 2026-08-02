@@ -471,7 +471,11 @@ release group); any code reading them directly should move to `error.code`.
 
 **`POST /api/v1/data/task/batch`**
 
-Process many records of a **single** operation type in one request. The body carries one `operation` (`create`, `update`, `upsert`, or `delete`) plus a `records` array. By default (`options.atomic: true`) processing stops at the first failing record — records already written earlier in the same batch are **not** rolled back, since there is no wrapping database transaction. Set `options.atomic: false` (with `options.continueOnError: true`) to keep processing every record and collect a full partial-success report.
+Process many records of a **single** operation type in one request. The body carries one `operation` (`create`, `update`, `upsert`, or `delete`) plus a `records` array.
+
+By default (`options.atomic` omitted or `false`) processing stops at the first failing record, and records written earlier in the same batch are **not** rolled back — there is no wrapping transaction. Add `options.continueOnError: true` to keep going instead and collect a full partial-success report.
+
+Send `options.atomic: true` to run the whole batch inside one database transaction: the first failure rolls back every prior write, and the response reports zero successes with each row marked `ROLLED_BACK:`, the causal error, or `NOT_ATTEMPTED:`. A deployment whose driver cannot roll back **rejects** an atomic request with `501 NOT_IMPLEMENTED` rather than quietly running it best-effort — probe `capabilities.transactionalBatch` on `/discovery` to know in advance. `atomic` takes precedence over `continueOnError`.
 
 ### Request
 
@@ -483,7 +487,7 @@ Process many records of a **single** operation type in one request. The body car
     { "id": "tsk_01HQ4B8C0E4G6H9K3L5M", "data": { "status": "done" } }
   ],
   "options": {
-    "atomic": true,
+    "atomic": false,
     "continueOnError": false
   }
 }
@@ -509,7 +513,7 @@ The response is the `BatchUpdateResponse` envelope: a top-level `success` flag p
 
 ### Partial Failure Response
 
-When `options.atomic: false` and some records fail, the failing entries carry a single `error` message string (not an array):
+When the batch is not atomic and some records fail, the failing entries carry a single `error` message string (not an array). An atomic batch never returns this shape — it either commits everything or reports every row as failed:
 
 ```json
 {

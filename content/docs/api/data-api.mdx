@@ -228,6 +228,8 @@ Execute a batch operation (create / update / upsert / delete) on multiple record
 
 **Response**: `BatchUpdateResponse` with `succeeded`, `failed`, `total`, and a per-record `results` array. Each entry in `results` has `id`, `success`, an optional `errors` array, and optional `data` (the full record, present when `returnRecords` is `true`).
 
+`options.atomic` defaults to `false` (sequential best-effort, stopping at the first failure). Set it to `true` and the whole batch runs inside one transaction: the first failure rolls back every prior write, and the response reports `succeeded: 0` with each row marked `ROLLED_BACK:`, the causal error, or `NOT_ATTEMPTED:`. A deployment whose driver cannot roll back rejects an atomic request with `501 NOT_IMPLEMENTED` instead of running it best-effort — probe `capabilities.transactionalBatch` on `/discovery` first. `atomic` takes precedence over `continueOnError`.
+
 ### `POST /data/:object/createMany`
 
 Batch create multiple records.
@@ -260,16 +262,20 @@ ignored, on this route and on `deleteMany`.
 
 Batch delete records by ID list.
 
-**Body**: `{ "ids": ["1", "2", "3"], "options": { "atomic": true } }` — `options` is
+**Body**: `{ "ids": ["1", "2", "3"], "options": { "continueOnError": true } }` — `options` is
 the same `BatchOptions` bag `/batch` takes. The body is validated against the
 contract and unknown keys are dropped: the id list is the *only* thing that
 selects rows, so no body key can widen the delete into a filter.
 
 **Response**: `BatchUpdateResponse` — one `results` entry per id. Records are
 deleted one at a time by primary key, so each honours `deleteBehavior`
-(`cascade` / `set_null` / `restrict`) on relations pointing at it. `atomic`
-(default) stops the run at the first failure; `atomic: false` with
-`continueOnError: true` processes the remaining ids and reports the failures.
+(`cascade` / `set_null` / `restrict`) on relations pointing at it. The run stops
+at the first failure; `continueOnError: true` processes the remaining ids and
+reports the failures instead.
+
+Note that on this route `atomic` only stops the run — deletes already performed
+are **not** rolled back. Unlike `/batch`, `deleteMany` has no wrapping
+transaction yet.
 
 ### Batch size
 
