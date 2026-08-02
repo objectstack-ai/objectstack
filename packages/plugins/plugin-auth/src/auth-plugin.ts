@@ -27,6 +27,7 @@ import {
   type AuthManagerOptions,
 } from './auth-manager.js';
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
+import { runAttributedToUser } from './auth-actor-attribution.js';
 import type { ResolvedSocialProvider } from './backfill-account-issuer.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import { backfillMemberships, type MembershipPolicy } from './reconcile-membership.js';
@@ -1690,7 +1691,17 @@ export class AuthPlugin implements Plugin {
             );
           }
           const { runAdminCreateUser } = await import('./admin-user-endpoints.js');
-          const { status, body } = await runAdminCreateUser(adminUserDeps(), c.req.raw, actor);
+          // [#4586] This route authorized the admin itself (`gateAdmin`) and
+          // then drives better-auth SERVER-SIDE, so it never passes through
+          // `AuthManager.handleRequest` and the request-scoped actor seam is
+          // not open. Open it here with the actor already in hand, so the
+          // identity rows this creates — and the membership the reconciler
+          // binds in `user.create.after` — are credited to the admin instead
+          // of recorded as the system. Attribution only: the route's own
+          // authorization already happened above, and the writes stay system.
+          const { status, body } = await runAttributedToUser(actor.id, () =>
+            runAdminCreateUser(adminUserDeps(), c.req.raw, actor),
+          );
           return c.json(body, status as any);
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
@@ -1735,7 +1746,10 @@ export class AuthPlugin implements Plugin {
           const metaReader = (() => {
             try { return ctx.getService?.<MetaItemReaderSurface>('protocol'); } catch { return undefined; }
           })();
-          const { status, body } = await runAdminImportUsers(
+          // [#4586] Same seam as create-user: server-side better-auth calls,
+          // credited to the admin who ran the import.
+          const { status, body } = await runAttributedToUser(actor.id, () =>
+            runAdminImportUsers(
             {
               getAuthApi: () => this.authManager!.getApi() as any,
               getDataEngine: () => this.authManager!.getDataEngine(),
@@ -1754,6 +1768,7 @@ export class AuthPlugin implements Plugin {
             },
             c.req.raw,
             actor,
+            ),
           );
           return c.json(body, status as any);
         } catch (error) {

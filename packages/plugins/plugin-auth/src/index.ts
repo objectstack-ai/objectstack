@@ -25,6 +25,12 @@ export * from './otp-send-guard.js';
 export * from './register-sso-provider.js';
 export * from './send-verification-email.js';
 export * from './objectql-adapter.js';
+// [#4586] The better-auth actor seam. Exported because a host that writes an
+// identity table on better-auth's behalf (a control-plane provisioning hook,
+// an SSO JIT path) must construct the SAME two-part context —
+// `isSystem` for authorization, `attributedUserId` for attribution — rather
+// than inventing a second way to say "the system did this, for that person".
+export * from './auth-actor-attribution.js';
 export * from './auth-schema-config.js';
 // ADR-0093 — membership reconciler + tenancy service (public host API: hosts
 // compose the reconciler into their own hooks; embeddings query tenancy mode).

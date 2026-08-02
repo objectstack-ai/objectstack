@@ -39,7 +39,7 @@ const result = BaseEngineOptionsSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 
 
 ---
@@ -52,7 +52,7 @@ Options for DataEngine.aggregate operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **groupBy** | `string[]` | optional |  |
 | **aggregations** | `{ field: string; method: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; alias?: string }[]` | optional |  |
@@ -94,7 +94,7 @@ Options for DataEngine.count operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 
@@ -121,7 +121,7 @@ Options for DataEngine.delete operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **multi** | `boolean` | optional |  |
 
@@ -212,7 +212,7 @@ Options for DataEngine.insert operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **returning** | `boolean` | optional |  |
 
 
@@ -240,7 +240,7 @@ Query options for IDataEngine.find() operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **select** | `string[]` | optional |  |
 | **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, '1' \| '-1'> \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
@@ -428,7 +428,7 @@ Options for DataEngine.update operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **upsert** | `boolean` | optional |  |
 | **multi** | `boolean` | optional |  |
@@ -492,7 +492,7 @@ QueryAST-aligned options for DataEngine.aggregate operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **groupBy** | `string[]` | optional |  |
 | **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]` | optional |  |
@@ -510,7 +510,7 @@ QueryAST-aligned options for DataEngine.count operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 
 
@@ -524,7 +524,7 @@ QueryAST-aligned options for DataEngine.delete operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **multi** | `boolean` | optional |  |
 
@@ -539,7 +539,7 @@ QueryAST-aligned query options for IDataEngine.find() operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **fields** | `string[]` | optional |  |
 | **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
@@ -563,7 +563,7 @@ QueryAST-aligned options for DataEngine.update operations
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
+| **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **upsert** | `boolean` | optional |  |
 | **multi** | `boolean` | optional |  |

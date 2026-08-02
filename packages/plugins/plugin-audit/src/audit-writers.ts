@@ -476,7 +476,26 @@ export function installAuditWriters(
     if (recordId !== undefined) recordId = String(recordId);
 
     const sess: any = (ctx as any).session ?? {};
-    const userId: string | undefined = sess.userId;
+    // [#4586] Two channels can name a human, and they mean different things:
+    //
+    //   session.userId              — the subject the write was AUTHORIZED as.
+    //   provenance.attributedUserId — the human CREDITED for a write the
+    //                                 system authorized on their behalf.
+    //
+    // The second exists because better-auth owns every identity-table write
+    // and runs them `isSystem` on purpose (the route already authorized under
+    // its own ACL), which left every `sys_member` grade change recorded as
+    // "system". Reading it here is what makes the history row name the admin
+    // who clicked *make admin*. The session subject still WINS when present —
+    // attribution never overrides who actually acted — and neither channel
+    // widens what the write may touch (no security middleware reads
+    // provenance).
+    const attributedUserId: string | undefined =
+      typeof (ctx as any).provenance?.attributedUserId === 'string' &&
+      (ctx as any).provenance.attributedUserId
+        ? (ctx as any).provenance.attributedUserId
+        : undefined;
+    const userId: string | undefined = sess.userId ?? attributedUserId;
     // Principal label for attribution. Prefer the real user id; otherwise fall
     // back to a service/automation principal the host put on the context
     // (`ExecutionContext.actor`, e.g. `svc:<name>`). This is what makes a

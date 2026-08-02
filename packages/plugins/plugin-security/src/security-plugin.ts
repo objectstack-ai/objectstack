@@ -2090,9 +2090,24 @@ export class SecurityPlugin implements Plugin {
         return;
       }
       const pairs = extractMemberPairs(opCtx);
+      // [#4586] Carry the triggering write's ATTRIBUTED human into the grant.
+      // better-auth's membership writes authorize as the system on purpose, so
+      // `opCtx.context.userId` is empty by construction and `granted_by` was
+      // always null; `attributedUserId` is the channel that does name the
+      // admin who clicked. Read as attribution only — it decides nothing about
+      // whether this reconcile may run, and the reconciler's own writes stay
+      // system-context.
+      const attributedUserId =
+        typeof opCtx?.context?.attributedUserId === 'string' && opCtx.context.attributedUserId
+          ? opCtx.context.attributedUserId
+          : undefined;
       for (const { userId, orgId } of pairs) {
         try {
-          await reconcileOrgAdminGrant(ql, userId, orgId, { logger: ctx.logger, posture: this.tenancyPosture });
+          await reconcileOrgAdminGrant(ql, userId, orgId, {
+            logger: ctx.logger,
+            posture: this.tenancyPosture,
+            ...(attributedUserId ? { attributedUserId } : {}),
+          });
         } catch (e) {
           ctx.logger.warn?.('[security] org_admin reconcile failed', {
             userId,

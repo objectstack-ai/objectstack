@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { reconcileMembership, backfillMemberships } from './reconcile-membership.js';
+import { runAttributedToUser } from './auth-actor-attribution.js';
 
 /**
  * In-memory engine over sys_member (+ optional sys_user) with the find/insert
@@ -156,5 +157,39 @@ describe('backfillMemberships', () => {
     expect(res.scanned).toBe(2);
     expect(res.bound).toBe(1); // u2 still bound
     expect(res.skipped).toBe(1);
+  });
+});
+
+/**
+ * [#4586] The reconciler bind is the third `sys_member` writer (after the
+ * better-auth adapter and the invite-accept path), and it runs INSIDE
+ * better-auth's `user.create.after` — so when the creation was an admin
+ * action, the acting human is in scope and the membership row should name them.
+ */
+describe('reconcileMembership — actor attribution (#4586)', () => {
+  it('credits the acting admin when a request scope names one', async () => {
+    const engine = makeEngine();
+    await runAttributedToUser('usr_admin', () =>
+      reconcileMembership(engine, 'user-1', {
+        policy: 'auto',
+        resolveTargetOrg: async () => 'org_default',
+      }),
+    );
+    const [, , options] = engine.insert.mock.calls[0];
+    // Both halves, side by side and separate: system AUTHORIZES the write to a
+    // better-auth-managed table, the admin is merely CREDITED for it.
+    expect(options).toEqual({ context: { isSystem: true, attributedUserId: 'usr_admin' } });
+  });
+
+  it('a self sign-up has no actor — the bind records as the system', async () => {
+    // Nobody else acted, and there is no session on the sign-up request. ADR-0118
+    // D1: that is `null`, not a fabricated caller.
+    const engine = makeEngine();
+    await reconcileMembership(engine, 'user-2', {
+      policy: 'auto',
+      resolveTargetOrg: async () => 'org_default',
+    });
+    const [, , options] = engine.insert.mock.calls[0];
+    expect(options).toEqual({ context: { isSystem: true } });
   });
 });

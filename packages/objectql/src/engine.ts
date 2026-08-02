@@ -1181,17 +1181,28 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * Build the HookContext.provenance envelope — WHAT produced this write.
+   * Build the HookContext.provenance envelope — WHERE this write came from.
    *
    * Deliberately separate from {@link buildSession}: provenance is server-
    * stamped, evaluated by no security middleware, and can exist with no
    * identity beside it. A schedule-triggered flow run resolves no principal
    * yet still owns its writes, and that is the case the approvals record lock
    * needs to recognize (#3456 / #3712).
+   *
+   * `attributedUserId` rides the SAME envelope for the same reason (#4586):
+   * a better-auth-originated write authorizes as the system, so the human who
+   * triggered it must reach the audit writer WITHOUT appearing in `session` —
+   * where every caller-gating hook would read them as the caller. Attribution
+   * here, authorization in `session`/`isSystem`, never the two mixed.
    */
   private buildProvenance(execCtx?: ExecutionContextInput): HookContext['provenance'] {
     const flowRunId = (execCtx as any)?.flowRunId;
-    return flowRunId ? { flowRunId: String(flowRunId) } : undefined;
+    const attributedUserId = (execCtx as any)?.attributedUserId;
+    if (!flowRunId && !attributedUserId) return undefined;
+    return {
+      ...(flowRunId ? { flowRunId: String(flowRunId) } : {}),
+      ...(attributedUserId ? { attributedUserId: String(attributedUserId) } : {}),
+    };
   }
 
   /**

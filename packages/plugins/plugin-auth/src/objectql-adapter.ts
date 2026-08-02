@@ -4,6 +4,7 @@ import type { IDataEngine } from '@objectstack/core';
 import { createAdapterFactory } from 'better-auth/adapters';
 import type { CleanedWhere } from 'better-auth/adapters';
 import { SystemObjectName } from '@objectstack/spec/system';
+import { resolveAttributedUserId } from './auth-actor-attribution.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -241,14 +242,28 @@ export function withValidationErrorMapping<A extends Record<string, any>>(adapte
  * writes; user-context writes to `managedBy: 'better-auth'` tables are already
  * rejected upstream by the identity write guard (ADR-0092 D2), so this path only
  * ever carries better-auth's internal writes.
+ *
+ * WRITES additionally carry `attributedUserId` when an auth request is in scope
+ * (#4586) — the human whose click better-auth is executing. That is the
+ * ATTRIBUTION half and nothing more: `isSystem` remains the AUTHORIZATION half,
+ * unconditionally, so what a write may touch is byte-for-byte what it could
+ * touch before. Reads never carry it — attribution describes a change, and a
+ * read changes nothing.
  */
 export function withSystemContext(engine: IDataEngine): IDataEngine {
   const e = engine as any;
   const asSystem = (q: any) => ({ ...(q ?? {}), context: { isSystem: true, ...(q?.context ?? {}) } });
+  // The attributed human is spread FIRST so an explicit caller-supplied context
+  // still wins on every key — the same precedence `isSystem` already had.
+  const asAttributedSystem = async (q: any) => {
+    const attributedUserId = await resolveAttributedUserId();
+    if (!attributedUserId) return asSystem(q);
+    return { ...(q ?? {}), context: { attributedUserId, isSystem: true, ...(q?.context ?? {}) } };
+  };
   return {
-    insert: (m: string, d: any, o?: any) => e.insert(m, d, asSystem(o)),
-    update: (m: string, d: any, o?: any) => e.update(m, d, asSystem(o)),
-    delete: (m: string, q?: any) => e.delete(m, asSystem(q)),
+    insert: async (m: string, d: any, o?: any) => e.insert(m, d, await asAttributedSystem(o)),
+    update: async (m: string, d: any, o?: any) => e.update(m, d, await asAttributedSystem(o)),
+    delete: async (m: string, q?: any) => e.delete(m, await asAttributedSystem(q)),
     find: (m: string, q?: any) => e.find(m, asSystem(q)),
     findOne: (m: string, q?: any) => e.findOne(m, asSystem(q)),
     count: (m: string, q?: any) => e.count(m, asSystem(q)),
