@@ -30,7 +30,6 @@
     "core-services",
     "events",
     "export",
-    "identity",
     "metadata",
     "package-api",
     "package-registry",

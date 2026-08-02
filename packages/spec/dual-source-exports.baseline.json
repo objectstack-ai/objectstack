@@ -21,8 +21,6 @@
     "RateLimitConfigSchema — [./integration (const)] ≠ [./shared (const)]",
     "RetryPolicy — [./automation (type)] ≠ [./system (type)]",
     "RetryPolicySchema — [./automation (const)] ≠ [./system (const)]",
-    "Session — [./api (type)] ≠ [./identity (type)]",
-    "SessionSchema — [./api (const)] ≠ [./identity (const)]",
     "TenantPlan — [./cloud (type)] ≠ [./system (type)]",
     "TenantPlanSchema — [./cloud (const)] ≠ [./system (const)]"
   ]

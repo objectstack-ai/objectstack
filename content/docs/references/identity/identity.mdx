@@ -22,8 +22,8 @@ defines "how to login".
 ## TypeScript Usage
 
 ```typescript
-import { AccountSchema, ApiKeySchema, SessionSchema, UserSchema, VerificationTokenSchema } from '@objectstack/spec/identity';
-import type { Account, ApiKey, Session, User, VerificationToken } from '@objectstack/spec/identity';
+import { AccountSchema, ApiKeySchema, UserSchema, VerificationTokenSchema } from '@objectstack/spec/identity';
+import type { Account, ApiKey, User, VerificationToken } from '@objectstack/spec/identity';
 
 // Validate data
 const result = AccountSchema.parse(data);
@@ -80,26 +80,6 @@ const result = AccountSchema.parse(data);
 | **permissions** | `Record<string, boolean>` | optional | Granular permission flags |
 | **scopes** | `string[]` | optional | High-level access scopes |
 | **metadata** | `Record<string, any>` | optional | Custom metadata |
-
-
----
-
-## Session
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique session identifier |
-| **sessionToken** | `string` | ✅ | Session token |
-| **userId** | `string` | ✅ | Associated user ID |
-| **activeOrganizationId** | `string` | optional | Active organization ID for context switching |
-| **expires** | `string` | ✅ | Session expiry timestamp |
-| **createdAt** | `string` | ✅ | Session creation timestamp |
-| **updatedAt** | `string` | ✅ | Last update timestamp |
-| **ipAddress** | `string` | optional | IP address |
-| **userAgent** | `string` | optional | User agent string |
-| **fingerprint** | `string` | optional | Device fingerprint |
 
 
 ---

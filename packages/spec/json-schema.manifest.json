@@ -864,7 +864,6 @@
     "identity/SCIMPatchRequest",
     "identity/SCIMPhoneNumber",
     "identity/SCIMUser",
-    "identity/Session",
     "identity/User",
     "identity/VerificationToken",
     "integration/CircuitBreakerConfig",

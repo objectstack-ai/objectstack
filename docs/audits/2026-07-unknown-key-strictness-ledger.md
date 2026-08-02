@@ -544,7 +544,7 @@ it rather than rediscover it.
 | `cloud/` | 83 | wire | multi-tenant runtime |
 | `ai/` | 75 | mixed | agent/tool/skill definitions authored (partially strict already); model/provider payloads wire |
 | `integration/` | 64 | wire | connector payloads — upstream adds fields freely |
-| `identity/` | 34 | mixed | position/user shapes authored (`PositionSchema` **strict as of #4001 step 2**, with the ADR-0010 envelope declared); auth payloads wire |
+| `identity/` | 33 | mixed | position/user shapes authored (`PositionSchema` **strict as of #4001 step 2**, with the ADR-0010 envelope declared); auth payloads wire. **34 → 33 in #4641**: `identity.zod.ts` lost its `SessionSchema` site — a second, importerless declaration of a name `api/auth.zod.ts` already owned (the #4411 dual-source trap), deleted rather than reclassified |
 | `shared/` | 25 | n/a | utilities and building blocks; strictness decided at the consuming schema |
 | `qa/` | 6 | n/a | test fixtures |
 

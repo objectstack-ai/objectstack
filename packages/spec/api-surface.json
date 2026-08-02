@@ -4412,8 +4412,6 @@
     "SCIMUser (type)",
     "SCIMUserSchema (const)",
     "SCIM_SCHEMAS (const)",
-    "Session (type)",
-    "SessionSchema (const)",
     "TokenPayload (interface)",
     "User (type)",
     "UserSchema (const)",
