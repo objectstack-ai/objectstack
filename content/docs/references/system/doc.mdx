@@ -67,6 +67,7 @@ const result = DocSchema.parse(data);
 | **content** | `string` | ✅ | Raw Markdown content (CommonMark + GFM) |
 | **order** | `number` | optional | Sort key within a book group (ADR-0046 §6) |
 | **group** | `string` | optional | Explicit book-group key (ADR-0046 §6); rules usually suffice |
+| **tags** | `string[]` | optional | Membership tags matched by a book group's `include: { tag }` rule (ADR-0046 §5) |
 | **translations** | `Record<string, { label?: string; description?: string; content: string }>` | optional | Per-locale `{label?,description?,content}` variants; the base doc is the fallback |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

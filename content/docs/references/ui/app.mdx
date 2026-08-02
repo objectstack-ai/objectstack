@@ -128,10 +128,8 @@ const result = ActionNavItemSchema.parse(data);
 | **label** | `string` | ✅ | Dropdown label |
 | **icon** | `string` | optional | Icon name |
 | **optionsSource** | `{ endpoint: string; valueKey: string; labelKey: string; filter?: { key: string; op: Enum<'eq' \| 'ne' \| 'in' \| 'nin'>; value: string \| string[] }[] }` | ✅ | Option data source |
-| **includeAll** | `boolean` | ✅ | Prepend an "All" option that clears the scope |
-| **allValue** | `string` | ✅ | Template value when "All" is selected (empty = no filter) |
+| **allValue** | `string` | ✅ | Sentinel value meaning "no concrete selection yet" (empty string is almost always right) |
 | **persist** | `Enum<'query' \| 'session' \| 'none'>` | ✅ | Persist selection via URL query, sessionStorage, or not at all |
-| **placement** | `Enum<'sidebar_header' \| 'topbar'>` | ✅ | Render location in the app chrome |
 
 
 ---

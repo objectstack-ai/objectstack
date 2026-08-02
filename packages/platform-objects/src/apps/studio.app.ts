@@ -71,10 +71,13 @@ export const STUDIO_APP: AppInput = {
         labelKey: 'manifest.name',
         filter: [{ key: 'manifest.scope', op: 'nin', value: ['system', 'cloud'] }],
       },
-      includeAll: true,
+      // `includeAll` / `placement` retired in 17.0.0 (#4509). Both were
+      // authored here and neither was read. The shell never offered an "All"
+      // row — correct for THIS selector, since an All row would undo the
+      // `filter` above and list the platform's own kernel packages — and
+      // selectors always render in the sidebar header.
       allValue: '',
       persist: 'query',
-      placement: 'sidebar_header',
     },
   ],
   navigation: [

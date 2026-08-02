@@ -1241,4 +1241,54 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
       })!.message).toContain('`targetGroup` → `group`');
     });
   });
+
+  // ── Context-selector keys retired in 17.0.0 (#4509, ADR-0049) ─────────────
+  describe('retired context-selector keys', () => {
+    const withSelector = (extra: Record<string, unknown>) => ({
+      name: 'app_a',
+      label: 'A',
+      contextSelectors: [{
+        id: 'pkg', label: 'Package',
+        optionsSource: { endpoint: '/api/v1/packages' },
+        ...extra,
+      }],
+    });
+
+    it('rejects `includeAll` with the mandatory-scope reason, not a bare "unknown key"', () => {
+      // The reason matters more than the rejection here. `includeAll` was not
+      // merely unread — the shell deliberately disobeyed it, because an "All"
+      // row clears a scope that exists to be mandatory, and on Studio's package
+      // selector that means listing the platform's own kernel packages. An
+      // author who only learns "removed" may go looking for the replacement
+      // knob; there is none, and this message has to say why.
+      const msg = unknownKeyIssue(AppSchema, withSelector({ includeAll: true }))!.message;
+      expect(msg).toMatch(/includeAll.*removed.*17\.0\.0/s);
+      expect(msg).toMatch(/mandatory|clear the scope/is);
+      expect(msg).toMatch(/optionsSource\.filter/s);
+    });
+
+    it('rejects `placement` and says the topbar never existed', () => {
+      const msg = unknownKeyIssue(AppSchema, withSelector({ placement: 'topbar' }))!.message;
+      expect(msg).toMatch(/placement.*removed.*17\.0\.0/s);
+      expect(msg).toMatch(/sidebar header/s);
+    });
+
+    it('routes the retired alias spellings to the same prescriptions', () => {
+      expect(unknownKeyIssue(AppSchema, withSelector({ showall: true }))!.message)
+        .toMatch(/includeAll.*removed/s);
+      expect(unknownKeyIssue(AppSchema, withSelector({ location: 'topbar' }))!.message)
+        .toMatch(/placement.*removed/s);
+    });
+
+    it('keeps `allValue` — it is the no-selection sentinel, not an "All" value', () => {
+      // The one key whose verdict had to be RE-checked when includeAll went:
+      // its ledger note asked for exactly that. It survives because the shell
+      // really does read it (auto-selection + query-param defaulting) — only
+      // its documented rationale was wrong.
+      const parsed = AppSchema.parse(withSelector({ allValue: '' }));
+      expect(parsed.contextSelectors![0].allValue).toBe('');
+      expect(parsed.contextSelectors![0]).not.toHaveProperty('includeAll');
+      expect(parsed.contextSelectors![0]).not.toHaveProperty('placement');
+    });
+  });
 });

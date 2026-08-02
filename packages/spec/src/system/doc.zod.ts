@@ -107,6 +107,25 @@ export const DocSchema = lazySchema(() => strictObject({
   group: z.string().optional().describe('Explicit book-group key (ADR-0046 §6); rules usually suffice'),
 
   /**
+   * Membership tags — the operand of a book group's `include: { tag: '<t>' }`
+   * rule (ADR-0046 §5).
+   *
+   * The tag half of `include` has always been implemented on the resolver side
+   * (`matchesInclude` in `book.zod.ts` compares against these) and the REST book
+   * route has always forwarded the value, but this schema is `.strict()` and did
+   * not declare the key — so authoring `tags:` on a doc was a parse error, every
+   * doc reached the resolver with `tags === undefined`, and `include: { tag }`
+   * could never match anything. Declared here in 17.0.0 (#4509, ADR-0049): the
+   * consumer already existed, so this is the enforce half of enforce-or-remove.
+   *
+   * Prefer a name convention (`include: "crm_guide_*"`) when one exists — tags
+   * are for membership that cuts across naming, e.g. a `tutorial` tag spanning
+   * several feature prefixes.
+   */
+  tags: z.array(z.string()).optional()
+    .describe('Membership tags matched by a book group\'s `include: { tag }` rule (ADR-0046 §5)'),
+
+  /**
    * Per-locale content variants (ADR-0046 i18n addendum). Compiled from
    * sibling `<name>.<locale>.md` files; the base `<name>.md` is the default
    * and the fallback. The REST layer resolves the request locale, returns a

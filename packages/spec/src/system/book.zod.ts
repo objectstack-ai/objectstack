@@ -169,7 +169,7 @@ export interface ResolverDoc {
   order?: number;
   /** Explicit placement: the `key` of the group this doc belongs to. */
   group?: string;
-  /** Tags for `include: { tag }` matching (P3d; absent today). */
+  /** Tags for `include: { tag }` matching — `DocSchema.tags` (declared #4509). */
   tags?: string[];
   /** Owning package id (stamped as `_packageId`); used to scope `include`. */
   packageId?: string;

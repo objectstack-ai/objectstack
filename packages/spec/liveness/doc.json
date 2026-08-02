@@ -43,6 +43,12 @@
       "verifiedAt": "2026-08-01",
       "evidence": "packages/spec/src/system/doc.zod.ts:110, packages/rest/src/rest-server.ts:2996, packages/rest/src/rest-server.ts:3388",
       "note": "per-locale {label,description,content} variants collapsed by resolveDocLocale on every read path (list, tree corpus, single item); the map itself is stripped from responses. This is the doc's OWN i18n mechanism — the generic bundle translator does not cover `doc`."
+    },
+    "tags": {
+      "status": "live",
+      "verifiedAt": "2026-08-02",
+      "evidence": "packages/spec/src/system/book.zod.ts:213 (matchesInclude tag branch), reached from :255 and :281; transported by packages/rest/src/rest-server.ts:3218",
+      "note": "DECLARED 2026-08-02 (#4509, ADR-0049) — the enforce half of enforce-or-remove. The consumer, the transport and the resolver-side interface all predated this key: matchesInclude compared `doc.tags` against a group's `include: { tag }`, the book route already forwarded `tags: d.tags`, and ResolverDoc declared `tags?: string[]` marked '(P3d; absent today)'. What was missing was one line HERE — DocSchema is strict, so authoring `tags:` was a parse error, every doc reached the resolver with tags undefined, and the `{ tag }` include variant could never match. Removing the variant was the alternative and was rejected: a union member has no clean tombstone (retiredKey covers object keys), so authors would have gotten a bare union error, and it would have discarded working matcher code. Live on arrival — the branch it feeds is reachable the moment a doc carries a tag."
     }
   }
 }
