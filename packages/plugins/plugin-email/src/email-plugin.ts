@@ -5,6 +5,7 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 import type {
   IEmailTransport,
   EmailAddress,
+  IMetadataService,
 } from '@objectstack/spec/contracts';
 import { SysEmail, SysEmailTemplate } from '@objectstack/platform-objects/audit';
 import { EmailService, LogTransport, type EmailPersistence, type TemplateLoader, type EmailTemplateRow } from './email-service.js';
@@ -415,8 +416,8 @@ export class EmailServicePlugin implements Plugin {
       ctx.logger.warn('EmailServicePlugin: template provenance stamp not bound: ' + (err?.message ?? err));
     }
 
-    let metadataService: any;
-    try { metadataService = ctx.getService('metadata'); } catch { /* optional */ }
+    let metadataService: IMetadataService | undefined;
+    try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
 
     try {
       await bootstrapDeclaredEmailTemplates(engine, metadataService, ctx.logger as any);
