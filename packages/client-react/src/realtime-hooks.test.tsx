@@ -329,6 +329,19 @@ describe('#4682 events reach the caller', () => {
     expect(result.current?.type).toBe('data.records.updated');
   });
 
+  it('useMetadataSubscription exposes the latest metadata event', () => {
+    const { client, metadata } = createFakeClient();
+    const { result } = renderHook(() => useMetadataSubscription('object'), {
+      wrapper: wrapperFor(client),
+    });
+
+    expect(result.current).toBeNull();
+
+    act(() => metadata[0].deliver(METADATA_EVENT));
+
+    expect(result.current).toEqual(METADATA_EVENT);
+  });
+
   it('useDataSubscriptionCallback forwards the event without re-rendering state', () => {
     const { client, data } = createFakeClient();
     const seen: DataEvent[] = [];
