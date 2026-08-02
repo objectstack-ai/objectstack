@@ -364,34 +364,44 @@ Yes. All schemas work with plain JavaScript. You lose compile-time type checking
 
 ### How do I extend a built-in schema?
 
-**Not with `.extend()` on the schema itself.** Several built-in schemas —
-`FieldSchema`, `ObjectSchema`, `ActionSchema` — carry a `.transform()` that lowers
-author-facing sugar at parse time, which makes the exported value a **`ZodPipe`,
-not a `ZodObject`**. `FieldSchema.extend` is `undefined`, so calling it throws
-`is not a function`.
-
-Compose instead: parse with the built-in schema, and validate your additions
-alongside it. This keeps the transform running, which `.extend()` would discard.
+It depends on whether the schema you are extending carries a parse-time
+`.transform()`. A plain schema (`FieldSchema`, `ObjectSchema` since protocol 17
+retired their alias-lowering transforms, #3855) is a `ZodObject` and takes
+`.extend()` directly. The composition form works in **either** case, and is the
+safe default when you don't want to track which is which:
 
 {/* os:check */}
 ```typescript
 import { z } from 'zod';
 import { FieldSchema } from '@objectstack/spec/data';
 
-const CustomProps = z.object({ customProperty: z.string().optional() });
+// Plain object schema: .extend() works directly. (This line is what pins the
+// claim — if FieldSchema ever grows a transform again and becomes a ZodPipe,
+// .extend vanishes and this example fails CI instead of the prose going stale.)
+const CustomFieldSchema = FieldSchema.extend({
+  customProperty: z.string().optional(),
+});
+CustomFieldSchema.parse({ name: 'code', type: 'text', customProperty: 'x' });
 
+// Composition: parse with the built-in schema, validate additions alongside.
+// Shape-agnostic — works for plain schemas AND transform-carrying pipes.
+const CustomProps = z.object({ customProperty: z.string().optional() });
 function parseCustomField(input: unknown) {
   return { ...FieldSchema.parse(input), ...CustomProps.parse(input) };
 }
-
 parseCustomField({ name: 'code', type: 'text', customProperty: 'x' });
 ```
 
-If you genuinely need one merged schema object, `FieldSchema.in` is the
-`ZodObject` the pipe wraps, so `FieldSchema.in.extend({ … })` builds one — but
-the result **skips the transform**, so author-facing sugar the pipe would have
-lowered stays raw. Prefer the composition above unless you specifically want the
-untransformed shape.
+A schema that still lowers author-facing sugar at parse time — `ActionSchema`
+(its `requiresFeature` → `visible` lowering) is one, as of protocol 17 — is a
+**`ZodPipe`**, where `.extend` does not exist: prefer the composition form.
+Reaching the inner object via `.in.extend({ … })` builds a merged schema but
+**skips the transform**, so the sugar the pipe would have lowered stays raw.
+
+A quick check when unsure: `typeof SomeSchema.extend === 'function'` — a pipe
+reports `undefined`. This page once asserted the shapes the other way around;
+the schemas moved under it within days (#3890 → #3855), which is why the
+load-bearing claim above now lives in a CI-checked block rather than prose.
 
 ### Where are the JSON Schemas for IDE autocomplete?
 
