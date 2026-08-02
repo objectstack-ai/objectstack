@@ -474,13 +474,41 @@ export class SeedLoaderService implements ISeedLoaderService {
       const tenantOrg =
         config.organizationId ??
         (/^(sys_|cloud_|ai_)/.test(objectName) ? undefined : this.fallbackOrgId);
+      // Remember that WE wrote this value, so the reference pass below leaves it
+      // alone. `tenantOrg` is an ID by construction — the caller's target org,
+      // or a resolved `sys_organization.id` — never a natural key. But
+      // `organization_id` is declared as a lookup → `sys_organization`, so the
+      // pass would treat the id as a natural key, probe `sys_organization.name`
+      // for it, miss, and DROP the column: the row lands org-less and is then
+      // invisible to every member behind the tenant wall.
+      //
+      // The probe cannot rescue it either. `resolveFromDatabase` falls back to
+      // an `id` probe, but under per-tenant replay it AND-scopes every probe
+      // with `organization_id = <target org>` — and `sys_organization`, being
+      // the tenant table itself, carries no such column, so that probe matches
+      // nothing by construction.
+      //
+      // Only better-auth-shaped ids (`org_msbubm8g3j35rgx0`) actually hit this:
+      // `looksLikeInternalId` recognises UUID/ObjectId and short-circuits those.
+      // Every organization better-auth creates — including the default org
+      // `ensureDefaultOrganization` bootstraps — carries the `org_` shape, so in
+      // a real multi-org deployment EVERY replayed row landed org-less, while
+      // fixtures that mint UUID org ids passed. That asymmetry is why this
+      // survived: see `apps/ee-tenant-crm-showcase` in the cloud repo, which
+      // reproduces it end-to-end.
+      let stampedTenantOrg = false;
       if (tenantOrg && record['organization_id'] == null) {
         record['organization_id'] = tenantOrg;
+        stampedTenantOrg = true;
       }
 
       // Resolve references
       let unresolvedRefError = false;
       for (const ref of objectRefs) {
+        // Never re-resolve the tenant stamp we just wrote (see above). A seed
+        // that authors `organization_id` ITSELF still goes through resolution,
+        // so naming an org by its natural key keeps working.
+        if (stampedTenantOrg && ref.field === 'organization_id') continue;
         const fieldValue = record[ref.field];
         if (fieldValue === undefined || fieldValue === null) continue;
 
