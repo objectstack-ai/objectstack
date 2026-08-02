@@ -114,9 +114,32 @@ shared files, and the merge queue is one lane regardless. Scaling order:
 2. When one PM genuinely can't keep up: a second session takes a **whole
    repo** as its shard (`/pm-dispatch repo:objectstack-ai/objectui`) —
    file universes are disjoint by construction. A sharded PM states its
-   shard in every claim comment and **never claims outside it**; cross-repo
-   parent/sub-issue chains stay with the main-backlog PM.
+   shard in every claim comment and **never claims outside it**.
 3. Multiple PMs on the SAME queue: prohibited — all cost, no throughput.
+
+**Cross-shard transfer protocol — work crosses shard lines, PMs never
+do.** When a sharded PM's task (or a sub-task of its parent issue) needs a
+change in another shard's repo:
+
+- **Transfer via the target queue**: file the piece as an issue in the
+  target repo with `pm:queue` and a source line (`Part of
+  <owner/repo>#<n>`). The target shard's PM picks it up through its own
+  backlog sweep — the queue label IS the inter-PM channel; PMs never need
+  to talk directly, and never dispatch into a repo whose in-flight batch
+  they cannot see (that is the same collision the same-queue ban exists
+  for).
+- **Dependencies via `Blocked-by:`** on the waiting side; the waiting PM's
+  batch selection skips it until the upstream merges.
+- **Follow-up chores belong to the consuming shard**: when the upstream
+  change lands (say spec gained a key), the dependent-repo adaptation issue
+  is filed by the PM of the repo that consumes it — it knows its surfaces.
+- **Shared contract surfaces have one owner**: anything touching
+  `packages/spec` transfers to the main-backlog (objectstack) PM
+  regardless of who needs it — only that PM sees the repo's in-flight
+  batch and generated-baseline collisions.
+- Cross-repo parent/sub-issue chains as a whole stay coordinated by the
+  main-backlog PM; sharded PMs coordinate only chains fully inside their
+  shard.
 
 **5. One board, no second tracker.** The pm labels above are the state
 machine; an org-level GitHub Project pulling issues/PRs from all three repos
