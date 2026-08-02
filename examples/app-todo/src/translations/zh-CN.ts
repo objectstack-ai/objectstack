@@ -116,8 +116,4 @@ export const zhCN: TranslationData = {
     'error.required': '此字段为必填项',
     'error.load_failed': '数据加载失败',
   },
-  validationMessages: {
-    completed_date_required: '状态为"已完成"时，完成日期为必填项',
-    recurrence_fields_required: '周期性任务必须指定重复类型',
-  },
 };

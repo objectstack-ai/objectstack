@@ -20,13 +20,6 @@
       "evidence": "objectui @940ba24: apps/console/src/pages/book-nav.ts:341 (buildBookCards)",
       "note": "portal landing-card subtitle. The framework tree omits it; the portal reads it off the raw /meta/book item."
     },
-    "translations": {
-      "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "authorWarn": true,
-      "authorHint": "Delete it. No resolver reads a book's inline translations map — the tree endpoint and the portal render `label`/`description` verbatim, and the generic bundle translator covers view/action/object/app/dashboard/page only (i18n-resolver.ts METADATA_DOCUMENT_TRANSLATORS), not `book`. Locale-variant doc CONTENT belongs on `doc.translations`, which IS enforced (resolveDocLocale); book/group titles currently have no i18n mechanism at all.",
-      "note": "The trap is proximity: `doc.translations` two files over works on every read path, so this map reads as the same feature. It is parsed and stored and nothing ever looks at it."
-    },
     "slug": {
       "status": "live",
       "verifiedAt": "2026-08-01",
@@ -67,10 +60,8 @@
         },
         "translations": {
           "status": "dead",
-          "verifiedAt": "2026-08-01",
-          "authorWarn": true,
-          "authorHint": "Delete it — see the book-level `translations` entry: no resolver reads inline book/group translations; group labels render verbatim in every locale.",
-          "note": "Same dead map one level down."
+          "verifiedAt": "2026-08-02",
+          "note": "REMOVED 2026-08-02 (#4667) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). TOMBSTONE rather than delete because BookGroupSchema is a plain z.object with NO .strict() — a bare delete would have zod silently strip the key, trading one silent no-op for another. No resolver read inline book/group translations; group labels rendered verbatim in every locale. Localize the DOCS instead: doc.translations is live on every doc render path."
         },
         "order": {
           "status": "live",

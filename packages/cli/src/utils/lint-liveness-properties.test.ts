@@ -261,16 +261,19 @@ describe('lintLivenessProperties', () => {
   // The app ledger's most important entries: area-level gating keys that FAIL
   // OPEN (nothing evaluates them, so a "hidden"/"gated" area shows for
   // everyone), on the surface whose item-level siblings ARE enforced.
-  it('warns on the fail-open area gates and dead homePageId (#4488)', () => {
+  // `homePageId` and `areas.order` used to be asserted here too. Both were
+  // RETIRED in 17.0.0 (#4667) — the schema owns them now (a tombstone and a
+  // strict rejection respectively), so this advisory lint correctly says
+  // nothing about them. The two that remain are the ones #4651 still has to
+  // decide, and they are the reason this test exists.
+  it('warns on the fail-open area gates (#4488, tracked as #4651)', () => {
     const findings = lintLivenessProperties({
       apps: [{
         name: 'crm',
         label: 'CRM',
-        homePageId: 'nav_pipeline',
         areas: [{
           id: 'area_sales',
           label: 'Sales',
-          order: 2,
           visible: "'sales' in current_user.positions",
           requiredPermissions: ['crm.access'],
           navigation: [],
@@ -278,8 +281,6 @@ describe('lintLivenessProperties', () => {
       }],
     });
     const msgs = paths(findings);
-    expect(msgs.some((m) => m.includes('homePageId'))).toBe(true);
-    expect(msgs.some((m) => m.includes('areas.order'))).toBe(true);
     expect(msgs.some((m) => m.includes('areas.visible'))).toBe(true);
     expect(msgs.some((m) => m.includes('areas.requiredPermissions'))).toBe(true);
     // The gating hints must point at the enforced alternative (per-item gates),
@@ -307,45 +308,29 @@ describe('lintLivenessProperties', () => {
     expect(findings).toEqual([]);
   });
 
-  // translation.validationMessages: pointed at by #3778's own migration table,
-  // read by nothing — the hint must say what actually renders (rule.message).
-  it('warns on translation.validationMessages (#4488)', () => {
+  // The advisory lint's job is the keys the PARSE still accepts. #4667 retired
+  // the last batch it was warning about — book `translations` (both levels),
+  // `job.id`, `translation.validationMessages`, `app.homePageId`,
+  // `app.areas[].order` — so those warnings are gone by design: a strict
+  // rejection or a `retiredKey` tombstone reaches the author harder and earlier
+  // than an advisory line, and warning about a key that no longer parses would
+  // be noise. `mapping.extractQuery` left the same way in #4509.
+  //
+  // This test pins that the lint has genuinely fallen silent on them, so a
+  // half-reverted retirement (schema restored, ledger not, or vice versa) shows
+  // up here rather than as a mysteriously chatty lint.
+  it('is silent on the keys retired in #4509 / #4667 — the schema owns them now', () => {
     const findings = lintLivenessProperties({
-      translations: [{
-        name: 'zh_cn',
-        locale: 'zh-CN',
-        validationMessages: { discount_limit: '折扣不能超过40%' },
-      }],
-    });
-    const hit = findings.find((f) => f.message.includes('validationMessages'));
-    expect(hit).toBeDefined();
-    expect(hit!.hint).toMatch(/message/);
-  });
-
-  // book: both inline translations maps are dead (the doc-level map two files
-  // over works, which is what makes these read alive); job.id is the other flat
-  // dead key. `mapping.extractQuery` used to be asserted here too — it was
-  // REMOVED in 17.0.0 (#4509), so the strict parse owns it now and this
-  // advisory lint correctly says nothing about it.
-  it('warns on book/job dead keys (#4488)', () => {
-    const findings = lintLivenessProperties({
-      books: [{
-        name: 'crm_guide',
-        label: 'CRM Guide',
-        translations: { 'zh-CN': { label: 'CRM 指南' } },
-        groups: [{ key: 'basics', label: 'Basics', translations: { 'zh-CN': { label: '基础' } } }],
-      }],
+      books: [{ name: 'crm_guide', label: 'CRM Guide', groups: [{ key: 'basics', label: 'Basics' }] }],
       jobs: [{
         name: 'nightly_sync',
-        id: 'job_nightly',
         schedule: { type: 'cron', expression: '0 0 * * *' },
         handler: 'syncAll',
       }],
+      translations: [{ name: 'zh_cn', locale: 'zh-CN', messages: { 'common.save': '保存' } }],
+      apps: [{ name: 'crm', label: 'CRM', navigation: [] }],
     });
-    const msgs = paths(findings);
-    expect(msgs.some((m) => m.includes('`translations`'))).toBe(true);
-    expect(msgs.some((m) => m.includes('groups.translations'))).toBe(true);
-    expect(msgs.some((m) => m.includes('`id`'))).toBe(true);
+    expect(findings).toEqual([]);
   });
 
   // The unwarnable-default rule, and what became of it.

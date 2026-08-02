@@ -408,40 +408,14 @@ describe('TranslationBundleSchema', () => {
 });
 
 // ============================================================================
-// Protocol Improvement Tests: Translation validationMessages
+// Translation validationMessages — RETIRED in 17.0.0 (#4667)
 // ============================================================================
-
-describe('TranslationDataSchema - validationMessages', () => {
-  it('should accept translation data with validationMessages', () => {
-    const data = TranslationDataSchema.parse({
-      validationMessages: {
-        'discount_limit': 'Discount cannot exceed 40%',
-        'amount_required': 'Amount is required for closed deals',
-      },
-    });
-    expect(data.validationMessages?.['discount_limit']).toBe('Discount cannot exceed 40%');
-    expect(data.validationMessages?.['amount_required']).toBe('Amount is required for closed deals');
-  });
-
-  it('should accept Chinese validation messages', () => {
-    const bundle = TranslationBundleSchema.parse({
-      'zh-CN': {
-        validationMessages: {
-          'discount_limit': '折扣不能超过40%',
-          'end_date_check': '结束日期必须大于开始日期',
-        },
-      },
-    });
-    expect(bundle['zh-CN'].validationMessages?.['discount_limit']).toBe('折扣不能超过40%');
-  });
-
-  it('should accept translation data without validationMessages (optional)', () => {
-    const data = TranslationDataSchema.parse({
-      messages: { 'save': 'Save' },
-    });
-    expect(data.validationMessages).toBeUndefined();
-  });
-});
+//
+// This block used to assert the group parsed at both doors. It was never read
+// by any resolver, so a translated rule message was stored and never shown;
+// the rejection now lives in the "retired translation.validationMessages"
+// describe at the bottom of this file. Validation messages are authored on the
+// rule itself (`object.validations[].message`).
 
 // ============================================================================
 // FieldTranslationSchema
@@ -859,7 +833,6 @@ describe('translation unknown-key strictness (#4001)', () => {
       objects: { account: { label: 'Account', _views: { all: { label: 'All', emptyState: { title: 'None' } } } } },
       apps: { crm: { label: 'CRM', navigation: { sales: { label: 'Sales' } } } },
       messages: { 'common.save': 'Save' },
-      validationMessages: { discount_limit: 'Too high' },
       globalActions: { export_csv: { label: 'Export', params: { format: { label: 'Format' } } } },
       dashboards: { sales: { label: 'Sales', widgets: { rev: { title: 'Revenue' } } } },
       pages: { home: { label: 'Home', title: 'Welcome' } },
@@ -1149,5 +1122,44 @@ describe('CoverageBreakdownEntrySchema', () => {
         coveragePercent: 101,
       }),
     ).toThrow();
+  });
+});
+
+// ── `validationMessages` retired in 17.0.0 (#4667, ADR-0049) ────────────────
+describe('retired translation.validationMessages (#4667)', () => {
+  it('rejects the group at BOTH doors — bundle entry and registered item', () => {
+    // #3778's original guard ran on the item door only, which is exactly how
+    // this key survived in file-authored bundles. It now lives in the shared
+    // `translationDataShape()`, so retiring it closes both at once — that
+    // symmetry is what these two assertions pin.
+    const payload = { validationMessages: { discount_limit: '折扣不能超过40%' } };
+    expect(() => TranslationDataSchema.parse(payload))
+      .toThrow(/validationMessages.*removed.*17\.0\.0/s);
+    expect(() => TranslationItemSchema.parse({ name: 'zh_cn', locale: 'zh-CN', ...payload }))
+      .toThrow(/validationMessages.*removed.*17\.0\.0/s);
+  });
+
+  it('points at the rule, which is where a validation message actually renders', () => {
+    expect(() => TranslationDataSchema.parse({ validationMessages: { x: 'y' } }))
+      .toThrow(/object\.validations\[\]\.message/s);
+  });
+
+  it('the retired `errors` dialect no longer signposts a dead key', () => {
+    // #3778 retired `errors` by telling authors to use `validationMessages` —
+    // a signpost into another unread group. Taking that advice moved content
+    // from one dead place to another. The replacement guidance must NOT name
+    // `validationMessages`.
+    let msg = '';
+    try { TranslationDataSchema.parse({ errors: { x: 'y' } }); } catch (e) { msg = String(e); }
+    expect(msg).toMatch(/`errors` is the retired object-first dialect/s);
+    expect(msg).not.toMatch(/use 'validationMessages'/s);
+    expect(msg).toMatch(/object\.validations\[\]\.message/s);
+  });
+
+  it('still accepts the live sibling groups', () => {
+    expect(() => TranslationDataSchema.parse({
+      messages: { 'common.save': '保存' },
+      apps: { crm: { label: 'CRM' } },
+    })).not.toThrow();
   });
 });

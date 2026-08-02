@@ -1618,31 +1618,39 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   surface:
     'app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / '
-    + 'app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement',
-  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' plus contextSelectors 'includeAll'/'placement' removed (liveness audits #4001, #4509 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, and includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope)",
+    + 'app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement / '
+    + 'app.homePageId / app.areas.order',
+  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits #4001, #4509, #4667 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, the landing page IS the first nav item, and no renderer ever sorted areas)",
   apply(stack, emit) {
-    const RETIRED = ['version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation'];
+    const RETIRED = [
+      'version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation',
+      'homePageId',
+    ];
     const RETIRED_SELECTOR = ['includeAll', 'placement'];
     return mapCollection(stack, 'apps', (app, path) => {
       const next = stripKeys(app, RETIRED, emit, path);
-      // `contextSelectors` is an ARRAY one level down, so stripKeys (top-level
-      // only) cannot reach it. Drill in and copy-on-write at both levels, so an
-      // app with nothing to strip keeps its identity for change detection.
-      const selectors = next.contextSelectors;
-      if (!Array.isArray(selectors)) return next;
-      let touched = false;
-      const nextSelectors = selectors.map((sel, i) => {
-        if (!sel || typeof sel !== 'object' || Array.isArray(sel)) return sel;
-        const stripped = stripKeys(
-          sel as Record<string, unknown>,
-          RETIRED_SELECTOR,
-          emit,
-          `${path}.contextSelectors[${i}]`,
-        );
-        if (stripped !== sel) touched = true;
-        return stripped;
-      });
-      return touched ? { ...next, contextSelectors: nextSelectors } : next;
+      // `contextSelectors` and `areas` are ARRAYS one level down, so stripKeys
+      // (top-level only) cannot reach them. Drill in and copy-on-write at both
+      // levels, so an app with nothing to strip keeps its identity for change
+      // detection.
+      const stripInArray = (key: string, retired: string[], src: Record<string, unknown>) => {
+        const arr = src[key];
+        if (!Array.isArray(arr)) return src;
+        let touched = false;
+        const mapped = arr.map((el, i) => {
+          if (!el || typeof el !== 'object' || Array.isArray(el)) return el;
+          const stripped = stripKeys(
+            el as Record<string, unknown>,
+            retired,
+            emit,
+            `${path}.${key}[${i}]`,
+          );
+          if (stripped !== el) touched = true;
+          return stripped;
+        });
+        return touched ? { ...src, [key]: mapped } : src;
+      };
+      return stripInArray('areas', ['order'], stripInArray('contextSelectors', RETIRED_SELECTOR, next));
     });
   },
   fixture: {
@@ -1654,6 +1662,7 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
         sharing: { enabled: true },
         embed: { enabled: true },
         mobileNavigation: { mode: 'bottom_nav' },
+        homePageId: 'nav_home',
         contextSelectors: [{
           id: 'active_package',
           label: 'Package',
@@ -1661,6 +1670,7 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
           includeAll: true,
           placement: 'sidebar_header',
         }],
+        areas: [{ id: 'area_sales', label: 'Sales', order: 1, navigation: [] }],
         navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
       }],
     },
@@ -1673,12 +1683,14 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
           label: 'Package',
           optionsSource: { endpoint: '/api/v1/packages', valueKey: 'id', labelKey: 'name' },
         }],
+        areas: [{ id: 'area_sales', label: 'Sales', navigation: [] }],
         navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
       }],
     },
-    // Six notices: four top-level keys (`version`, `sharing`, `embed`,
-    // `mobileNavigation`) plus the two on the single context selector.
-    expectedNotices: 6,
+    // Eight notices: five top-level keys (`version`, `sharing`, `embed`,
+    // `mobileNavigation`, `homePageId`), the two on the single context
+    // selector, and `order` on the single area.
+    expectedNotices: 8,
   },
 };
 
@@ -2440,6 +2452,162 @@ const mappingInertKeysRemoved: MetadataConversion = {
 };
 
 /**
+ * Inline book translation maps removed (protocol 17, #4667, ADR-0049).
+ *
+ * `book.translations` and `book.groups[].translations` were parsed, stored and
+ * round-tripped, and read by nothing: the tree endpoint and the docs portal
+ * render `label` / `description` verbatim, and the generic bundle translator
+ * covers view / action / object / app / dashboard / page only. A localized book
+ * therefore shipped its authoring-locale strings to every reader.
+ *
+ * The trap was PROXIMITY: `doc.translations` — same name, same shape, two files
+ * over — is live on every doc render path, so the book-level map read as the
+ * same feature one level up.
+ *
+ * Split routes, because the two schemas differ: `BookSchema` is `strictObject`
+ * (key deleted, `guidance` carries the prescription, ledger row deleted), while
+ * `BookGroupSchema` is a plain `z.object` with no `.strict()` — a bare delete
+ * there would have zod silently strip the key, so it is tombstoned with
+ * `retiredKey` and its ledger row STAYS.
+ */
+const bookTranslationsRemoved: MetadataConversion = {
+  id: 'book-translations-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'book.translations / book.groups.translations',
+  summary: "book keys 'translations' (book-level and group-level) removed (#4667 — no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
+  apply(stack, emit) {
+    return mapCollection(stack, 'books', (book, path) => {
+      const next = stripKeys(book, ['translations'], emit, path);
+      const groups = next.groups;
+      if (!Array.isArray(groups)) return next;
+      let touched = false;
+      const mapped = groups.map((g, i) => {
+        if (!g || typeof g !== 'object' || Array.isArray(g)) return g;
+        const stripped = stripKeys(
+          g as Record<string, unknown>,
+          ['translations'],
+          emit,
+          `${path}.groups[${i}]`,
+        );
+        if (stripped !== g) touched = true;
+        return stripped;
+      });
+      return touched ? { ...next, groups: mapped } : next;
+    });
+  },
+  fixture: {
+    before: {
+      books: [{
+        name: 'crm_guide',
+        label: 'CRM Guide',
+        translations: { 'zh-CN': { label: 'CRM 指南' } },
+        groups: [{
+          key: 'basics',
+          label: 'Basics',
+          translations: { 'zh-CN': { label: '基础' } },
+        }],
+      }],
+    },
+    after: {
+      books: [{
+        name: 'crm_guide',
+        label: 'CRM Guide',
+        groups: [{ key: 'basics', label: 'Basics' }],
+      }],
+    },
+    // Two notices: the book-level map and the one on its single group.
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * `job.id` removed (protocol 17, #4667, ADR-0049).
+ *
+ * Nothing read it, and its own `describe()` — "defaults to `name` when omitted"
+ * — advertised an identity override that never existed. `name` is the identity
+ * at every layer that has one: the scheduling key, the `sys_job` row key (the
+ * DB adapter upserts by `name` and mints its own row id), and the
+ * `JobExecution.jobId` stamp. Two jobs differing only in `id` were never two
+ * jobs — they were one job declared twice.
+ */
+const jobIdRemoved: MetadataConversion = {
+  id: 'job-id-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'job.id',
+  summary: "job key 'id' removed (#4667 — nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'jobs', (job, path) => stripKeys(job, ['id'], emit, path));
+  },
+  fixture: {
+    before: {
+      jobs: [{
+        name: 'nightly_sync',
+        id: 'job_nightly',
+        schedule: { type: 'cron', expression: '0 0 * * *' },
+        handler: 'syncAll',
+      }],
+    },
+    after: {
+      jobs: [{
+        name: 'nightly_sync',
+        schedule: { type: 'cron', expression: '0 0 * * *' },
+        handler: 'syncAll',
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * `translation.validationMessages` removed (protocol 17, #4667, ADR-0049).
+ *
+ * A translation group with no reader — objectui's spec-translations transform
+ * passed it through to the client tree and nothing downstream consumed it. The
+ * platform's own signature was on it twice: the schema example showed a
+ * concrete override, and #3778's legacy-key migration table steered retired
+ * `errors:` authors straight into it. Retiring one dead key by pointing authors
+ * at another is the failure this conversion also fixes — that guidance entry is
+ * rewritten in the same change to say rule messages are authored on the rule
+ * (`object.validations[].message`), not translated through a group.
+ *
+ * Removed from the shared `translationDataShape()`, so it retires at BOTH doors
+ * at once — the bundle entry and the registered item. #3778's original guard
+ * ran on the item door only, which is exactly how the key survived this long in
+ * file-authored bundles.
+ */
+const translationValidationMessagesRemoved: MetadataConversion = {
+  id: 'translation-validation-messages-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'translation.validationMessages',
+  summary: "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'translations', (t, path) =>
+      stripKeys(t, ['validationMessages'], emit, path));
+  },
+  fixture: {
+    before: {
+      translations: [{
+        name: 'zh_cn',
+        locale: 'zh-CN',
+        validationMessages: { discount_limit: '折扣不能超过40%' },
+        messages: { 'common.save': '保存' },
+      }],
+    },
+    after: {
+      translations: [{
+        name: 'zh_cn',
+        locale: 'zh-CN',
+        messages: { 'common.save': '保存' },
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
  * `datasource.capabilities` removed (protocol 17, #4583).
  *
  * Eleven boolean flags, declared and strict-guarded, read by nothing. Pushdown
@@ -2868,6 +3036,9 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     datasourceCapabilitiesRemoved,
     datasourceInertBlocksRemoved,
     mappingInertKeysRemoved,
+    bookTranslationsRemoved,
+    jobIdRemoved,
+    translationValidationMessagesRemoved,
     datasourceConfigDriverKeyAliases,
     // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
     // whether `config.function` is set, and that rename is what sets it.

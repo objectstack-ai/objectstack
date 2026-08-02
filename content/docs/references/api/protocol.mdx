@@ -862,7 +862,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **locale** | `string` | ✅ | Locale code |
-| **translations** | `{ objects?: Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>; … }>; apps?: Record<string, { label: string; description?: string; navigation?: Record<string, { label: string }> }>; messages?: Record<string, string>; validationMessages?: Record<string, string>; … }` | ✅ | Translation data |
+| **translations** | `{ objects?: Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>; … }>; apps?: Record<string, { label: string; description?: string; navigation?: Record<string, { label: string }> }>; messages?: Record<string, string>; globalActions?: Record<string, { label?: string; confirmText?: string; successMessage?: string; params?: Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>; … }>; … }` | ✅ | Translation data |
 
 
 ---

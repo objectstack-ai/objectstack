@@ -598,6 +598,23 @@ export const AppBrandingSchema = lazySchema(() => z.object({
 }).strict());
 
 /**
+ * `app.areas[].order`, retired in 17.0.0 (#4667, ADR-0049).
+ *
+ * The sibling that works is what made this one read alive: nav-item `order` IS
+ * sorted (`NavigationRenderer.tsx:1154`). Area-level order is not — `AppSidebar`
+ * and `AppSchemaRenderer` both iterate the `areas` array as authored — so
+ * declaration order has always been display order, and an author who set
+ * `order` to rearrange areas saw nothing move.
+ */
+const AREA_ORDER_RETIRED =
+  '`areas[].order` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no renderer '
+  + 'ever sorted areas; both the sidebar and the schema renderer iterate the array as '
+  + 'authored, so declaration order already IS display order. Delete the key and reorder the '
+  + '`areas` array itself. NOTE the neighbour that behaves differently: a navigation ITEM\'s '
+  + '`order` is genuinely sorted — this removal does not touch it. Run '
+  + '`os migrate meta --from 16` to rewrite existing sources automatically.';
+
+/**
  * Navigation Area Schema
  * 
  * A logical grouping (zone/section) of navigation items, similar to Salesforce "App Areas"
@@ -908,22 +925,6 @@ const HOME_PAGE_ID_RETIRED =
   + 'should own the root landing. Run `os migrate meta --from 16` to rewrite existing sources '
   + 'automatically.';
 
-/**
- * `app.areas[].order`, retired in 17.0.0 (#4667, ADR-0049).
- *
- * The sibling that works is what made this one read alive: nav-item `order` IS
- * sorted (`NavigationRenderer.tsx:1154`). Area-level order is not — `AppSidebar`
- * and `AppSchemaRenderer` both iterate the `areas` array as authored — so
- * declaration order has always been display order, and an author who set
- * `order` to rearrange areas saw nothing move.
- */
-const AREA_ORDER_RETIRED =
-  '`areas[].order` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no renderer '
-  + 'ever sorted areas; both the sidebar and the schema renderer iterate the array as '
-  + 'authored, so declaration order already IS display order. Delete the key and reorder the '
-  + '`areas` array itself. NOTE the neighbour that behaves differently: a navigation ITEM\'s '
-  + '`order` is genuinely sorted — this removal does not touch it. Run '
-  + '`os migrate meta --from 16` to rewrite existing sources automatically.';
 
 const appUnknownKeyError = strictUnknownKeyError({
   surface: 'this app',

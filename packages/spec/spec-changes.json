@@ -147,8 +147,8 @@
         "toMajor": 17
       },
       {
-        "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement",
-        "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' plus contextSelectors 'includeAll'/'placement' removed (liveness audits #4001, #4509 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, and includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope)",
+        "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement / app.homePageId / app.areas.order",
+        "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits #4001, #4509, #4667 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, the landing page IS the first nav item, and no renderer ever sorted areas)",
         "conversionId": "app-dead-authoring-keys-removed",
         "toMajor": 17
       },
@@ -228,6 +228,24 @@
         "surface": "mapping.extractQuery / mapping.errorPolicy / mapping.batchSize",
         "to": "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (#4509 — no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
         "conversionId": "mapping-inert-keys-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "book.translations / book.groups.translations",
+        "to": "book keys 'translations' (book-level and group-level) removed (#4667 — no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
+        "conversionId": "book-translations-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "job.id",
+        "to": "job key 'id' removed (#4667 — nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
+        "conversionId": "job-id-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "translation.validationMessages",
+        "to": "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`)",
+        "conversionId": "translation-validation-messages-removed",
         "toMajor": 17
       },
       {
@@ -673,8 +691,8 @@
           "toMajor": 17
         },
         {
-          "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement",
-          "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' plus contextSelectors 'includeAll'/'placement' removed (liveness audits #4001, #4509 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, and includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope)",
+          "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement / app.homePageId / app.areas.order",
+          "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits #4001, #4509, #4667 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, the landing page IS the first nav item, and no renderer ever sorted areas)",
           "conversionId": "app-dead-authoring-keys-removed",
           "toMajor": 17
         },
@@ -754,6 +772,24 @@
           "surface": "mapping.extractQuery / mapping.errorPolicy / mapping.batchSize",
           "to": "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (#4509 — no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
           "conversionId": "mapping-inert-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "book.translations / book.groups.translations",
+          "to": "book keys 'translations' (book-level and group-level) removed (#4667 — no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
+          "conversionId": "book-translations-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "job.id",
+          "to": "job key 'id' removed (#4667 — nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
+          "conversionId": "job-id-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "translation.validationMessages",
+          "to": "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`)",
+          "conversionId": "translation-validation-messages-removed",
           "toMajor": 17
         },
         {

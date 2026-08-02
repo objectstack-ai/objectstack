@@ -81,9 +81,9 @@ const result = ActionNavItemSchema.parse(data);
 | **isDefault** | `boolean` | optional | Is default app |
 | **hidden** | `boolean` | optional | Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead |
 | **navigation** | `{ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| { id: string; label: string; icon?: string; order?: number; … }[]` | optional | Full navigation tree for the app sidebar |
-| **areas** | `{ id: string; label: string; icon?: string; order?: number; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
+| **areas** | `{ id: string; label: string; icon?: string; description?: string; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
 | **contextSelectors** | `{ id: string; label: string; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
-| **homePageId** | `string` | optional | ID of the navigation item to serve as landing page |
+| **homePageId** | `any` | optional | [REMOVED] `app.homePageId` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no shell ever read it. An app's landing page IS its first navigation item (by `order`), and the root landing follows `isDefault` routing. Delete the key; to change where an app opens, reorder `navigation` so the intended entry is first, and set `isDefault` on the app that should own the root landing. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this app |
 | **objects** | `any` | optional | [REMOVED] `App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read; the spec itself labelled it "config file convenience"). Objects belong to the stack (`defineStack({ objects })`); an app reaches them through its navigation items. Delete the key. |
 | **apis** | `any` | optional | [REMOVED] `App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read). Declarative endpoints belong to the stack (`defineStack({ apis })`), not the app shell. Delete the key. |
@@ -210,7 +210,6 @@ const result = ActionNavItemSchema.parse(data);
 | **id** | `string` | ✅ | Unique area identifier (lowercase snake_case) |
 | **label** | `string` | ✅ | Area display label |
 | **icon** | `string` | optional | Area icon name |
-| **order** | `number` | optional | Sort order among areas (lower = first) |
 | **description** | `string` | optional | Area description |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) for this area. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this area |
