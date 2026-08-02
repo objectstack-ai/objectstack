@@ -28,8 +28,8 @@
     },
     {
       "file": "packages/core/src/security/resolve-authz-context.ts",
-      "adrs": ["ADR-0095"],
-      "invariant": "No enforcement-time code path may consult the better-auth role directly. `mapMembershipRole` is a grant-PROVISIONING concern here; posture and adjudication run off the resulting capability grants."
+      "adrs": ["ADR-0068", "ADR-0095"],
+      "invariant": "No enforcement-time code path may consult the better-auth role directly — `mapMembershipRole` is a grant-PROVISIONING concern here; posture and adjudication run off the resulting capability grants (ADR-0095 D3). `platform_admin` is DERIVED from an unscoped `admin_full_access` user grant — there is no trusted stored boolean (ADR-0068 D2)."
     },
     {
       "file": "packages/plugins/plugin-security/src/delegated-admin-gate.ts",
@@ -40,6 +40,41 @@
       "file": "packages/plugins/plugin-auth/src/invitation-role-cap.ts",
       "adrs": ["ADR-0105"],
       "invariant": "An invitation may add a person, never authority above the issuer's own grade. An issuer below admin grade may invite as plain `member` only."
+    },
+    {
+      "file": "packages/core/src/security/posture-ladder.ts",
+      "adrs": ["ADR-0095"],
+      "invariant": "Posture DERIVES from held capability grants, never from a better-auth role (D3) — re-reading the role here reopens the #2836 dual-track class. The ladder is monotonic: each rung's visible set contains the rung below's, one rung maps to exactly one injection rule, and EXTERNAL is deny-by-default (explicit shares only; OWD never widens it)."
+    },
+    {
+      "file": "packages/core/src/security/grant-validity.ts",
+      "adrs": ["ADR-0091"],
+      "invariant": "A grant row outside its validity window must not resolve, and correctness lives at RESOLUTION time — never in a cleanup job (ADR-0049: no unenforced security properties). Half-open `[from, until)` in UTC; absent bounds are unbounded; a present-but-unparseable bound disables the grant, fail closed."
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/tenant-layer.ts",
+      "adrs": ["ADR-0095"],
+      "invariant": "Layer 0 (the tenant wall) is an independent, always-first, AND-composed filter sharing no compiler, no merge step and no bypass bit with business RLS (D1). Merging it into the RLS compiler would let a Layer-1 change weaken tenant isolation and the superuser business-RLS bypass cross the wall."
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/auto-org-admin-grant.ts",
+      "adrs": ["ADR-0105"],
+      "invariant": "The one provisioning bridge from an admin-grade membership to the `organization_admin` capability grant — idempotent, and revoked on demotion. Under a wall-less posture it hands out `organization_admin_no_bypass` instead: blanket record visibility must be granted deliberately, never as a side effect of a membership role (the ADR-0105 F2 finding)."
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/invitation-placement.ts",
+      "adrs": ["ADR-0105"],
+      "invariant": "Placement intent is authorized at ISSUANCE by dry-running `DelegatedAdminGate` against the very `sys_user_position` rows acceptance would write — an invitation can never place what its issuer could not have assigned directly. Acceptance runs under system context, so skipping the issuance check ('acceptance re-checks anyway') would be an escalation hole, not a simplification."
+    },
+    {
+      "file": "packages/spec/src/identity/position.zod.ts",
+      "adrs": ["ADR-0090"],
+      "invariant": "Positions are deliberately FLAT — no `parent`, no hierarchy (D3). Visibility rollup lives on the business-unit tree; adding a second tree here is the mistake ADR-0057 D5 retired and D3 bans, and the word 'role' is reserved-forbidden in this vocabulary."
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/permission-evaluator.ts",
+      "adrs": ["ADR-0057", "ADR-0066"],
+      "invariant": "The superuser bypass derives solely from a resolved set carrying the `objects['*']` wildcard with `viewAllRecords`/`modifyAllRecords` (ADR-0066 D2) — no stored boolean, no role fast-path. Scope depth (own/unit/unit_and_below/org) resolves to an effective access depth per operation class (ADR-0057 D1); an unenforceable depth is a compile error, never silent fail-open (ADR-0049)."
     }
   ]
 }
