@@ -216,9 +216,16 @@ export async function auditDanglingReferences(
   // cached too: a target that cannot be probed does not become probeable
   // halfway through one sweep, and re-asking would multiply an outage by the
   // row count.
+  //
+  // The key separator is NUL because it cannot occur in an object name or a
+  // record id, so no (target, value) pair can collide with another. It is
+  // spelled as the \u0000 ESCAPE, never the raw byte: a raw NUL makes
+  // ripgrep treat the whole file as binary and return ZERO matches, dropping
+  // it out of code search and every grep-based lint (`pnpm check:nul-bytes`
+  // enforces this). The escape is byte-identical at runtime.
   const probed = new Map<string, boolean | null>();
   const exists = async (target: string, value: string): Promise<boolean | null> => {
-    const key = `${target} ${value}`;
+    const key = `${target}\u0000${value}`;
     if (probed.has(key)) return probed.get(key)!;
     let answer: boolean | null;
     try {
