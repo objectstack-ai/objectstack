@@ -298,9 +298,14 @@ against the report's own claims:
 Verdict per issue:
 
 - **ACCEPT** — comment on the issue (Chinese) linking the PR and summarizing
-  what shipped; leave the PR for the normal human/merge-queue review flow.
-  **The PM never merges** — merge discipline (CI-green, serial/queue) belongs
-  to the repo, not this loop.
+  what shipped. Then drive it to landing (maintainer policy: review passed +
+  CI green ⇒ merge): once every check on the PR is green, mark it ready for
+  review and **add it to the merge queue** — the queue rebuilds the PR
+  against current `main` and lands it only if that result is green, which is
+  the repo's sanctioned path. Never `--auto`-merge outside the queue; where
+  no queue exists, merge serially per AGENTS.md §7 only after remote CI is
+  fully green. This applies to **dev-agent PRs dispatched by this loop
+  only** — the PM's own tooling PRs stay with the maintainer.
 - **REWORK** — concrete, itemized feedback; re-dispatch the same issue with
   the feedback block filled (same claim, new dev agent). **Max 2 rework
   rounds** per issue; a third failure escalates instead.
@@ -357,7 +362,10 @@ Stop the loop and report when any of these hits:
 
 ## Guardrails (binding)
 
-- PM writes **no files** and merges **no PRs**. No exceptions.
+- PM writes **no files**. Merging is allowed for **reviewed, fully-green
+  dev-agent PRs via the merge queue only** (see the ACCEPT verdict) — never
+  its own PRs, never a red or unreviewed one, never bypassing the queue
+  where one exists.
 - Never force-push, never push `main`, never reassign an issue claimed by
   someone else, never dispatch a `needs-user-decision` issue.
 - Every dev agent works in its **own worktree per repo** (enforced by
