@@ -72,25 +72,12 @@ cohesive plugin that "takes over" the entire platform's metadata management:
 ## TypeScript Usage
 
 ```typescript
-import { MetadataBulkRegisterRequestSchema, MetadataBulkResultSchema, MetadataDependencySchema, MetadataEventSchema, MetadataPluginConfigSchema, MetadataPluginManifestSchema, MetadataQuerySchema, MetadataQueryResultSchema, MetadataTypeSchema, MetadataTypeRegistryEntrySchema, MetadataValidationResultSchema } from '@objectstack/spec/kernel';
-import type { MetadataBulkRegisterRequest, MetadataBulkResult, MetadataDependency, MetadataEvent, MetadataPluginConfig, MetadataPluginManifest, MetadataQuery, MetadataQueryResult, MetadataType, MetadataTypeRegistryEntry, MetadataValidationResult } from '@objectstack/spec/kernel';
+import { MetadataBulkResultSchema, MetadataDependencySchema, MetadataPluginConfigSchema, MetadataPluginManifestSchema, MetadataQuerySchema, MetadataQueryResultSchema, MetadataTypeSchema, MetadataTypeRegistryEntrySchema, MetadataValidationResultSchema } from '@objectstack/spec/kernel';
+import type { MetadataBulkResult, MetadataDependency, MetadataPluginConfig, MetadataPluginManifest, MetadataQuery, MetadataQueryResult, MetadataType, MetadataTypeRegistryEntry, MetadataValidationResult } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = MetadataBulkRegisterRequestSchema.parse(data);
+const result = MetadataBulkResultSchema.parse(data);
 ```
-
----
-
-## MetadataBulkRegisterRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **items** | `{ type: string; name: string; data: Record<string, any>; namespace?: string }[]` | ✅ | Items to register |
-| **continueOnError** | `boolean` | ✅ | Continue if individual item fails |
-| **validate** | `boolean` | ✅ | Validate before register |
-
 
 ---
 
@@ -119,24 +106,6 @@ const result = MetadataBulkRegisterRequestSchema.parse(data);
 | **targetType** | `string` | ✅ | Referenced metadata type |
 | **targetName** | `string` | ✅ | Referenced metadata name |
 | **kind** | `Enum<'reference' \| 'extends' \| 'includes' \| 'triggers'>` | ✅ | How the dependency is formed |
-
-
----
-
-## MetadataEvent
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **event** | `Enum<'metadata.registered' \| 'metadata.updated' \| 'metadata.unregistered' \| 'metadata.validated' \| 'metadata.deployed' \| 'metadata.overlay.applied' \| 'metadata.overlay.removed' \| 'metadata.imported' \| 'metadata.exported'>` | ✅ | Event type |
-| **metadataType** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'agent' \| 'tool' \| 'skill'>` | ✅ | Metadata type |
-| **name** | `string` | ✅ | Metadata item name |
-| **namespace** | `string` | optional | Namespace |
-| **packageId** | `string` | optional | Owning package ID |
-| **timestamp** | `string` | ✅ | Event timestamp |
-| **actor** | `string` | optional | User or system that triggered the event |
-| **payload** | `Record<string, any>` | optional | Event-specific payload |
 
 
 ---
