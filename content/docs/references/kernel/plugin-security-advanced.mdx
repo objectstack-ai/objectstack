@@ -30,11 +30,11 @@ Features:
 ## TypeScript Usage
 
 ```typescript
-import { KernelSecurityPolicy, KernelSecurityScanResult, KernelSecurityVulnerability, PermissionAction, PermissionScope, PluginPermission, PluginPermissionSet, PluginSecurityManifest, PluginTrustLevel, ResourceType, RuntimeConfig, SandboxConfig } from '@objectstack/spec/kernel';
+import { KernelSecurityPolicySchema, KernelSecurityScanResultSchema, KernelSecurityVulnerabilitySchema, PermissionActionSchema, PermissionScopeSchema, PluginPermissionSchema, PluginPermissionSetSchema, PluginSecurityManifestSchema, PluginTrustLevelSchema, ResourceTypeSchema, RuntimeConfigSchema, SandboxConfigSchema } from '@objectstack/spec/kernel';
 import type { KernelSecurityPolicy, KernelSecurityScanResult, KernelSecurityVulnerability, PermissionAction, PermissionScope, PluginPermission, PluginPermissionSet, PluginSecurityManifest, PluginTrustLevel, ResourceType, RuntimeConfig, SandboxConfig } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = KernelSecurityPolicy.parse(data);
+const result = KernelSecurityPolicySchema.parse(data);
 ```
 
 ---

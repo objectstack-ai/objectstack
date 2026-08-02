@@ -30,7 +30,7 @@
 
 import { createHash } from 'node:crypto';
 
-import { isGlobalUnique, isUniqueDeclared } from '@objectstack/spec/data';
+import { isAppResolvedDefaultToken, isGlobalUnique, isUniqueDeclared } from '@objectstack/spec/data';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
 
 export type SqlDialectName = 'sqlite' | 'postgres' | 'mysql' | 'unknown';
@@ -50,6 +50,19 @@ export type DriftOp =
   | { type: 'widen_varchar'; table: string; column: string; to: number; from?: number }
   | { type: 'narrow_varchar'; table: string; column: string; to: number; from?: number }
   | { type: 'drop_column'; table: string; column: string }
+  /**
+   * Strip a column DEFAULT metadata never asked for (#4560).
+   *
+   * Today's only source is a `defaultValue` runtime token that a pre-fix build
+   * emitted as a literal (`DEFAULT 'current_user'`), so every insert that
+   * omitted the field got the token's own spelling instead of the engine's
+   * deliberate "leave it unset". Dropping it cannot fail and cannot lose data —
+   * stored rows keep whatever they hold; only FUTURE omitted inserts change,
+   * from a bogus literal to NULL. Rows already carrying the bogus value are NOT
+   * rewritten: they stay visible to the dangling-reference audit (#4551), whose
+   * standing rule is report, never rewrite.
+   */
+  | { type: 'drop_column_default'; table: string; column: string }
   /**
    * Retire the legacy platform-wide UNIQUE index on a now-tenant-scoped field
    * and put the composite `(tenantField, field)` in its place (#3696). The two
@@ -196,6 +209,13 @@ export interface PhysicalColumn {
   type: string;
   nullable: boolean;
   maxLength?: number;
+  /**
+   * The column's raw DEFAULT as the dialect reports it (knex `columnInfo`), or
+   * `null`/`undefined` when it has none. Dialect-decorated — SQLite and Postgres
+   * quote a string literal and Postgres appends a `::type` cast — so compare it
+   * through {@link physicalDefaultIsToken}, never with `===`.
+   */
+  defaultValue?: unknown;
 }
 
 /** Minimal shape of a metadata field definition. */
@@ -206,6 +226,35 @@ export interface FieldDef {
   maxLength?: number;
   /** ADR-0113: the explicit physical constraint — nullability drift reads THIS, not `required`. */
   storage?: { notNull?: boolean };
+  /**
+   * The declared default. Only consulted for the runtime-token dimension
+   * (#4560): a token is an instruction, so it must never appear as a physical
+   * column DEFAULT. Literal defaults are deliberately NOT diffed — a hand-edited
+   * DEFAULT on a column is a DBA's business, and reporting every one of them
+   * would drown the plan the same way undeclared indexes would.
+   */
+  defaultValue?: unknown;
+}
+
+/**
+ * Does the physical column DEFAULT literally spell out `token`?
+ *
+ * Each dialect decorates the literal it reports differently — SQLite
+ * `'current_user'`, Postgres `'current_user'::character varying`, MySQL a bare
+ * `current_user` — so the raw string is stripped of one layer of quoting and of
+ * a trailing cast before comparing. Deliberately EXACT after that: this is the
+ * fingerprint of a DEFAULT the platform itself emitted from a token spelling,
+ * and matching loosely would let it drop a default that merely resembles one.
+ */
+export function physicalDefaultIsToken(raw: unknown, token: string): boolean {
+  if (typeof raw !== 'string') return false;
+  let s = raw.trim();
+  const cast = s.indexOf('::');
+  if (cast > 0) s = s.slice(0, cast).trim();
+  if (s.length >= 2 && ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"')))) {
+    s = s.slice(1, -1);
+  }
+  return s === token;
 }
 
 /**
@@ -302,6 +351,36 @@ export function diffManagedTable(args: {
         message:
           `${table}.${fieldName}: metadata declares \`storage.notNull\` but the column is ` +
           `nullable — existing nulls must be backfilled. Run "os migrate apply --allow-destructive".`,
+      });
+    }
+
+    // ── runtime-token column DEFAULT (#4560) ──────────
+    // A `defaultValue` the APPLICATION layer owns (`current_user`) must leave
+    // the column with no DEFAULT at all. A build that predated the token family
+    // passed it through to `col.defaultTo(...)`, so the database now supplies
+    // the token's own spelling — a literal `'current_user'` in a
+    // `lookup('sys_user')` column — for exactly the writes the engine
+    // deliberately left unset. Detected here rather than fixed inline so it
+    // travels the same plan/apply road as every other divergence.
+    if (isAppResolvedDefaultToken(field.defaultValue) && physicalDefaultIsToken(col.defaultValue, field.defaultValue)) {
+      out.push({
+        kind: 'default_mismatch',
+        remoteName: table,
+        table,
+        column: fieldName,
+        expected: '(no column default)',
+        actual: `DEFAULT '${field.defaultValue}'`,
+        severity: 'warning',
+        // Pure removal: stored rows are untouched and the statement cannot
+        // fail, so dev auto-reconcile is welcome to apply it unattended.
+        category: 'safe',
+        op: { type: 'drop_column_default', table, column: fieldName },
+        message:
+          `${table}.${fieldName}: the column carries DEFAULT '${field.defaultValue}', but ` +
+          `'${field.defaultValue}' is a runtime token the engine resolves per write — the database ` +
+          `has been stamping the literal token into every insert that omitted the field (#4560). ` +
+          `Dropping the default is non-destructive: run "os migrate apply". Rows already holding ` +
+          `'${field.defaultValue}' are NOT rewritten — the dangling-reference audit reports them.`,
       });
     }
 

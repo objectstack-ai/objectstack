@@ -32,11 +32,11 @@ PluginPermissionEnforcer.
 ## TypeScript Usage
 
 ```typescript
-import { Manifest, ManifestPermissions, PluginEngines, PluginIntegrity, PluginPackaging, PluginPermissions, PluginRuntime } from '@objectstack/spec/kernel';
-import type { Manifest, ManifestPermissions, PluginEngines, PluginIntegrity, PluginPackaging, PluginPermissions, PluginRuntime } from '@objectstack/spec/kernel';
+import { ManifestSchema, ManifestPermissionsSchema, PluginEnginesSchema, PluginIntegritySchema, PluginPackagingSchema, PluginPermissionsSchema, PluginRuntimeSchema } from '@objectstack/spec/kernel';
+import type { ManifestPermissions, PluginEngines, PluginIntegrity, PluginPackaging, PluginPermissions, PluginRuntime } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = Manifest.parse(data);
+const result = ManifestSchema.parse(data);
 ```
 
 ---

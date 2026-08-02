@@ -16,11 +16,11 @@ Schedule jobs using cron expressions
 ## TypeScript Usage
 
 ```typescript
-import { CronSchedule, IntervalSchedule, Job, JobExecution, JobExecutionStatus, OnceSchedule, RetryPolicy, Schedule } from '@objectstack/spec/system';
+import { CronScheduleSchema, IntervalScheduleSchema, JobSchema, JobExecutionSchema, JobExecutionStatus, OnceScheduleSchema, RetryPolicySchema, ScheduleSchema } from '@objectstack/spec/system';
 import type { CronSchedule, IntervalSchedule, Job, JobExecution, JobExecutionStatus, OnceSchedule, RetryPolicy, Schedule } from '@objectstack/spec/system';
 
 // Validate data
-const result = CronSchedule.parse(data);
+const result = CronScheduleSchema.parse(data);
 ```
 
 ---

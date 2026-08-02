@@ -38,11 +38,11 @@ This protocol enables:
 ## TypeScript Usage
 
 ```typescript
-import { PluginCaching, PluginCodeSplitting, PluginDependencyResolution, PluginDynamicImport, PluginHotReload, PluginInitialization, PluginLoadingConfig, PluginLoadingEvent, PluginLoadingState, PluginLoadingStrategy, PluginPerformanceMonitoring, PluginPreloadConfig, PluginSandboxing } from '@objectstack/spec/kernel';
+import { PluginCachingSchema, PluginCodeSplittingSchema, PluginDependencyResolutionSchema, PluginDynamicImportSchema, PluginHotReloadSchema, PluginInitializationSchema, PluginLoadingConfigSchema, PluginLoadingEventSchema, PluginLoadingStateSchema, PluginLoadingStrategySchema, PluginPerformanceMonitoringSchema, PluginPreloadConfigSchema, PluginSandboxingSchema } from '@objectstack/spec/kernel';
 import type { PluginCaching, PluginCodeSplitting, PluginDependencyResolution, PluginDynamicImport, PluginHotReload, PluginInitialization, PluginLoadingConfig, PluginLoadingEvent, PluginLoadingState, PluginLoadingStrategy, PluginPerformanceMonitoring, PluginPreloadConfig, PluginSandboxing } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = PluginCaching.parse(data);
+const result = PluginCachingSchema.parse(data);
 ```
 
 ---

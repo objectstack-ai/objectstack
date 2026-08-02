@@ -20,11 +20,11 @@ invented codes instead of letting a new dialect grow (#3841).
 ## TypeScript Usage
 
 ```typescript
-import { ApiError, BaseResponse, BatchLoadingStrategy, BulkRequest, BulkResponse, CreateRequest, DataLoaderConfig, DeleteResponse, ExportRequest, IdRequest, ListRecordResponse, ModificationResult, QueryOptimizationConfig, RecordData, SingleRecordResponse, UpdateRequest } from '@objectstack/spec/api';
+import { ApiErrorSchema, BaseResponseSchema, BatchLoadingStrategySchema, BulkRequestSchema, BulkResponseSchema, CreateRequestSchema, DataLoaderConfigSchema, DeleteResponseSchema, ExportRequestSchema, IdRequestSchema, ListRecordResponseSchema, ModificationResultSchema, QueryOptimizationConfigSchema, RecordDataSchema, SingleRecordResponseSchema, UpdateRequestSchema } from '@objectstack/spec/api';
 import type { ApiError, BaseResponse, BatchLoadingStrategy, BulkRequest, BulkResponse, CreateRequest, DataLoaderConfig, DeleteResponse, ExportRequest, IdRequest, ListRecordResponse, ModificationResult, QueryOptimizationConfig, RecordData, SingleRecordResponse, UpdateRequest } from '@objectstack/spec/api';
 
 // Validate data
-const result = ApiError.parse(data);
+const result = ApiErrorSchema.parse(data);
 ```
 
 ---

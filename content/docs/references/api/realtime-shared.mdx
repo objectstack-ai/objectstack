@@ -32,11 +32,11 @@ See also: websocket.zod.ts for collaborative editing protocol
 ## TypeScript Usage
 
 ```typescript
-import { BasePresence, PresenceStatus, RealtimeRecordAction } from '@objectstack/spec/api';
+import { BasePresenceSchema, PresenceStatus, RealtimeRecordAction } from '@objectstack/spec/api';
 import type { BasePresence, PresenceStatus, RealtimeRecordAction } from '@objectstack/spec/api';
 
 // Validate data
-const result = BasePresence.parse(data);
+const result = BasePresenceSchema.parse(data);
 ```
 
 ---

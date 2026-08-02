@@ -329,6 +329,33 @@ describe('AutoEnqueuer', () => {
         await ae.stop();
     });
 
+    it('says OUT LOUD that a zero-trigger webhook will never fire (ADR-0078 Phase 4)', async () => {
+        // The skip used to be silent, under a comment blessing it as "a
+        // manual-only webhook" — a mode #3196 removed (no manual fire path
+        // exists). A zero-trigger ACTIVE row is a dead subscription that looks
+        // armed in Setup, so the skip now warns with the same rule id the
+        // author-time gate reports (`webhook/without-triggers`). Inactive rows
+        // never reach parseRow (the cache query filters `active: true`), so a
+        // deliberately-disabled webhook stays warning-free.
+        const engine = new FakeEngine({ sys_webhook: [webhook({ triggers: '' })] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const warn = vi.fn();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+        await ae.start();
+
+        await realtime.publish(event('created', 'contact', { id: 'c-1' }));
+        await flush();
+
+        expect(calls).toHaveLength(0);
+        expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining('webhook/without-triggers'),
+            expect.objectContaining({ id: 'wh-1' }),
+        );
+        expect(String(warn.mock.calls[0][0])).toContain('NEVER fire');
+        await ae.stop();
+    });
+
     it('self-heals the cache when sys_webhook changes', async () => {
         const engine = new FakeEngine({ sys_webhook: [] });
         const realtime = new FakeRealtime();

@@ -6,7 +6,7 @@
  *
  * ## Why this exists
  *
- * `FilterCondition` is evaluated by four independent implementations, and they
+ * `FilterCondition` is evaluated by five independent implementations, and they
  * had drifted:
  *
  * | Backend | Where |
@@ -15,6 +15,14 @@
  * | In-memory matcher | `driver-memory` `memory-matcher` |
  * | Record-at-a-time evaluator | `formula` `matchesFilterCondition` (RLS write-side `check`) |
  * | Read-scope SQL lowering | `service-analytics` `read-scope-sql` |
+ * | MongoDB query translator | `driver-mongodb` `translateFilter` |
+ *
+ * #3774 said "four" and enrolled four: `translateFilter` was missed, not
+ * excluded, and ran unchecked against this standard until #4405 — the one
+ * backend whose target language has no document-level `$not` at all, so a
+ * negation leaves it as `$nor`. `driver-sqlite-wasm` runs the table too; it
+ * *inherits* the SQL compiler, so what its suite adds is the sql.js engine
+ * executing the compiled predicate rather than a sixth way of building one.
  *
  * In #3774 the SQL compiler OR-ed the contents *within* a `$or` branch instead
  * of AND-ing them, so every `$or` filter matched more rows than it should —

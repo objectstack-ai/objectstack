@@ -14,11 +14,11 @@ AI Model Configuration
 ## TypeScript Usage
 
 ```typescript
-import { AIModelConfig, Agent, StructuredOutputConfig, StructuredOutputFormat, TransformPipelineStep } from '@objectstack/spec/ai';
-import type { AIModelConfig, Agent, StructuredOutputConfig, StructuredOutputFormat, TransformPipelineStep } from '@objectstack/spec/ai';
+import { AIModelConfigSchema, AgentSchema, StructuredOutputConfigSchema, StructuredOutputFormatSchema, TransformPipelineStepSchema } from '@objectstack/spec/ai';
+import type { Agent, StructuredOutputConfig, StructuredOutputFormat, TransformPipelineStep } from '@objectstack/spec/ai';
 
 // Validate data
-const result = AIModelConfig.parse(data);
+const result = AIModelConfigSchema.parse(data);
 ```
 
 ---

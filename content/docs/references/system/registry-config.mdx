@@ -18,11 +18,11 @@ Includes federation, synchronization, and storage settings.
 ## TypeScript Usage
 
 ```typescript
-import { RegistryConfig, RegistrySyncPolicy, RegistryUpstream } from '@objectstack/spec/system';
+import { RegistryConfigSchema, RegistrySyncPolicySchema, RegistryUpstreamSchema } from '@objectstack/spec/system';
 import type { RegistryConfig, RegistrySyncPolicy, RegistryUpstream } from '@objectstack/spec/system';
 
 // Validate data
-const result = RegistryConfig.parse(data);
+const result = RegistryConfigSchema.parse(data);
 ```
 
 ---

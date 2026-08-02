@@ -42,7 +42,15 @@ export type SchemaDiffEntryKind =
    *  definition than metadata declares (#3728). */
   | 'index_mismatch'
   /** A physical index ObjectStack generated that metadata no longer declares. */
-  | 'unmapped_index';
+  | 'unmapped_index'
+  /**
+   * The column's physical DEFAULT is not the one metadata calls for — including
+   * "metadata calls for none". A column DEFAULT is data the DATABASE writes on
+   * the platform's behalf, so a wrong one is silently wrong rows, not a
+   * rejected write: a `defaultValue` runtime token emitted as a literal DEFAULT
+   * stamped the token's own spelling into every omitted insert (#4560).
+   */
+  | 'default_mismatch';
 
 /**
  * A single divergence entry. Produced by the validation gate (ADR §5.2)

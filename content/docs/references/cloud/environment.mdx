@@ -52,11 +52,11 @@ Split of concerns:
 ## TypeScript Usage
 
 ```typescript
-import { Environment, EnvironmentCredential, EnvironmentCredentialStatus, EnvironmentDriver, EnvironmentMember, EnvironmentRole, EnvironmentStatus, EnvironmentType, EnvironmentVisibility, ProvisionEnvironmentRequest, ProvisionEnvironmentResponse, ProvisionOrganizationRequest, ProvisionOrganizationResponse } from '@objectstack/spec/cloud';
+import { EnvironmentSchema, EnvironmentCredentialSchema, EnvironmentCredentialStatusSchema, EnvironmentDriverSchema, EnvironmentMemberSchema, EnvironmentRoleSchema, EnvironmentStatusSchema, EnvironmentTypeSchema, EnvironmentVisibilitySchema, ProvisionEnvironmentRequestSchema, ProvisionEnvironmentResponseSchema, ProvisionOrganizationRequestSchema, ProvisionOrganizationResponseSchema } from '@objectstack/spec/cloud';
 import type { Environment, EnvironmentCredential, EnvironmentCredentialStatus, EnvironmentDriver, EnvironmentMember, EnvironmentRole, EnvironmentStatus, EnvironmentType, EnvironmentVisibility, ProvisionEnvironmentRequest, ProvisionEnvironmentResponse, ProvisionOrganizationRequest, ProvisionOrganizationResponse } from '@objectstack/spec/cloud';
 
 // Validate data
-const result = Environment.parse(data);
+const result = EnvironmentSchema.parse(data);
 ```
 
 ---

@@ -46,6 +46,15 @@ export const SEMCONV = {
     /** Counter, labels: `adapter`, `op`, `errorClass`. */
     cacheErrorsTotal: 'cache_errors_total',
 
+    // ── Background jobs — emitted by `@objectstack/runtime`'s AppPlugin ──
+    /**
+     * Counter, labels: `app`, `job`. Incremented when a DECLARED background
+     * job could not be handed to the job service — i.e. the app booted green
+     * but that job will never run (#4567). Any non-zero value is an outage of
+     * the job, not a warning.
+     */
+    jobScheduleFailuresTotal: 'job_schedule_failures_total',
+
     // ── Package / registry-reader — emitted by `@objectstack/service-package` ──
     /** Counter, labels: `result` (`ok`|`miss`|`error`). */
     registryLookupsTotal: 'registry_lookups_total',

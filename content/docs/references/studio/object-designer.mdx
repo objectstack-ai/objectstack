@@ -110,11 +110,11 @@ showFieldDetails: true,
 ## TypeScript Usage
 
 ```typescript
-import { ERDiagramConfig, ERLayoutAlgorithm, ERNodeDisplay, FieldEditorConfig, FieldGroup, FieldPropertySection, ObjectDesignerConfig, ObjectDesignerDefaultView, ObjectFilter, ObjectListDisplayMode, ObjectManagerConfig, ObjectPreviewConfig, ObjectPreviewTab, ObjectSortField, RelationshipDisplay, RelationshipMapperConfig } from '@objectstack/spec/studio';
+import { ERDiagramConfigSchema, ERLayoutAlgorithmSchema, ERNodeDisplaySchema, FieldEditorConfigSchema, FieldGroupSchema, FieldPropertySectionSchema, ObjectDesignerConfigSchema, ObjectDesignerDefaultViewSchema, ObjectFilterSchema, ObjectListDisplayModeSchema, ObjectManagerConfigSchema, ObjectPreviewConfigSchema, ObjectPreviewTabSchema, ObjectSortFieldSchema, RelationshipDisplaySchema, RelationshipMapperConfigSchema } from '@objectstack/spec/studio';
 import type { ERDiagramConfig, ERLayoutAlgorithm, ERNodeDisplay, FieldEditorConfig, FieldGroup, FieldPropertySection, ObjectDesignerConfig, ObjectDesignerDefaultView, ObjectFilter, ObjectListDisplayMode, ObjectManagerConfig, ObjectPreviewConfig, ObjectPreviewTab, ObjectSortField, RelationshipDisplay, RelationshipMapperConfig } from '@objectstack/spec/studio';
 
 // Validate data
-const result = ERDiagramConfig.parse(data);
+const result = ERDiagramConfigSchema.parse(data);
 ```
 
 ---

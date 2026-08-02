@@ -30,11 +30,11 @@ Industry alignment: Google Cloud Errors, AWS Error Codes, Stripe API Errors
 ## TypeScript Usage
 
 ```typescript
-import { EnhancedApiError, ErrorCategory, ErrorResponse, FieldError, FieldErrorCode, RetryStrategy, StandardErrorCode } from '@objectstack/spec/api';
+import { EnhancedApiErrorSchema, ErrorCategory, ErrorResponseSchema, FieldErrorSchema, FieldErrorCode, RetryStrategy, StandardErrorCode } from '@objectstack/spec/api';
 import type { EnhancedApiError, ErrorCategory, ErrorResponse, FieldError, FieldErrorCode, RetryStrategy, StandardErrorCode } from '@objectstack/spec/api';
 
 // Validate data
-const result = EnhancedApiError.parse(data);
+const result = EnhancedApiErrorSchema.parse(data);
 ```
 
 ---

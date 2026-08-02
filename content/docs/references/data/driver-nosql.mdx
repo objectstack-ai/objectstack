@@ -16,11 +16,11 @@ Supported NoSQL database types
 ## TypeScript Usage
 
 ```typescript
-import { AggregationPipeline, AggregationStage, ConsistencyLevel, DocumentValidationSchema, NoSQLDataTypeMapping, NoSQLDatabaseType, NoSQLDriverConfig, NoSQLIndex, NoSQLIndexType, NoSQLOperationType, NoSQLQueryOptions, NoSQLTransactionOptions, ReplicationConfig, ShardingConfig } from '@objectstack/spec/data';
-import type { AggregationPipeline, AggregationStage, ConsistencyLevel, DocumentValidation, NoSQLDataTypeMapping, NoSQLDatabaseType, NoSQLDriverConfig, NoSQLIndex, NoSQLIndexType, NoSQLOperationType, NoSQLQueryOptions, NoSQLTransactionOptions, ReplicationConfig, ShardingConfig } from '@objectstack/spec/data';
+import { AggregationPipelineSchema, AggregationStageSchema, ConsistencyLevelSchema, NoSQLDataTypeMappingSchema, NoSQLDatabaseTypeSchema, NoSQLDriverConfigSchema, NoSQLIndexSchema, NoSQLIndexTypeSchema, NoSQLOperationTypeSchema, NoSQLQueryOptionsSchema, NoSQLTransactionOptionsSchema, ReplicationConfigSchema, ShardingConfigSchema } from '@objectstack/spec/data';
+import type { AggregationPipeline, AggregationStage, ConsistencyLevel, NoSQLDataTypeMapping, NoSQLDatabaseType, NoSQLDriverConfig, NoSQLIndex, NoSQLIndexType, NoSQLOperationType, NoSQLQueryOptions, NoSQLTransactionOptions, ReplicationConfig, ShardingConfig } from '@objectstack/spec/data';
 
 // Validate data
-const result = AggregationPipeline.parse(data);
+const result = AggregationPipelineSchema.parse(data);
 ```
 
 ---

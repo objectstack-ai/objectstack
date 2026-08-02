@@ -32,11 +32,11 @@ Unified storage protocol that combines:
 ## TypeScript Usage
 
 ```typescript
-import { AccessControlConfig, BucketConfig, FileMetadata, LifecycleAction, LifecyclePolicyConfig, LifecyclePolicyRule, MultipartUploadConfig, ObjectMetadata, ObjectStorageConfig, PresignedUrlConfig, StorageAcl, StorageClass, StorageConnection, StorageProvider, StorageScope } from '@objectstack/spec/system';
+import { AccessControlConfigSchema, BucketConfigSchema, FileMetadataSchema, LifecycleActionSchema, LifecyclePolicyConfigSchema, LifecyclePolicyRuleSchema, MultipartUploadConfigSchema, ObjectMetadataSchema, ObjectStorageConfigSchema, PresignedUrlConfigSchema, StorageAclSchema, StorageClassSchema, StorageConnectionSchema, StorageProviderSchema, StorageScopeSchema } from '@objectstack/spec/system';
 import type { AccessControlConfig, BucketConfig, FileMetadata, LifecycleAction, LifecyclePolicyConfig, LifecyclePolicyRule, MultipartUploadConfig, ObjectMetadata, ObjectStorageConfig, PresignedUrlConfig, StorageAcl, StorageClass, StorageConnection, StorageProvider, StorageScope } from '@objectstack/spec/system';
 
 // Validate data
-const result = AccessControlConfig.parse(data);
+const result = AccessControlConfigSchema.parse(data);
 ```
 
 ---

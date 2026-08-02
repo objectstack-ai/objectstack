@@ -16,11 +16,11 @@ Defines how the engine handles existing records when a seed is applied.
 ## TypeScript Usage
 
 ```typescript
-import { Seed, SeedMode } from '@objectstack/spec/data';
-import type { Seed, SeedMode } from '@objectstack/spec/data';
+import { SeedSchema, SeedMode } from '@objectstack/spec/data';
+import type { Seed } from '@objectstack/spec/data';
 
 // Validate data
-const result = Seed.parse(data);
+const result = SeedSchema.parse(data);
 ```
 
 ---

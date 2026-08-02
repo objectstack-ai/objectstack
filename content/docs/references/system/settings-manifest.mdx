@@ -40,11 +40,11 @@ Resolution order (handled by `SettingsService.get`):
 ## TypeScript Usage
 
 ```typescript
-import { ResolvedSettingValue, SettingsActionResult, SettingsManifest, SettingsNamespacePayload, Specifier, SpecifierHandler, SpecifierOption, SpecifierScope, SpecifierType } from '@objectstack/spec/system';
+import { ResolvedSettingValueSchema, SettingsActionResultSchema, SettingsManifestSchema, SettingsNamespacePayloadSchema, SpecifierSchema, SpecifierHandlerSchema, SpecifierOptionSchema, SpecifierScopeSchema, SpecifierType } from '@objectstack/spec/system';
 import type { ResolvedSettingValue, SettingsActionResult, SettingsManifest, SettingsNamespacePayload, Specifier, SpecifierHandler, SpecifierOption, SpecifierScope, SpecifierType } from '@objectstack/spec/system';
 
 // Validate data
-const result = ResolvedSettingValue.parse(data);
+const result = ResolvedSettingValueSchema.parse(data);
 ```
 
 ---

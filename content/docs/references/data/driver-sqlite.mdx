@@ -38,11 +38,11 @@ already persisted that way; no new one can be authored.
 ## TypeScript Usage
 
 ```typescript
-import { SqliteConfig, SqliteWasmConfig, SqliteWasmPersistMode } from '@objectstack/spec/data';
+import { SqliteConfigSchema, SqliteWasmConfigSchema, SqliteWasmPersistModeSchema } from '@objectstack/spec/data';
 import type { SqliteConfig, SqliteWasmConfig, SqliteWasmPersistMode } from '@objectstack/spec/data';
 
 // Validate data
-const result = SqliteConfig.parse(data);
+const result = SqliteConfigSchema.parse(data);
 ```
 
 ---

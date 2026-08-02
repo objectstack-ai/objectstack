@@ -36,11 +36,11 @@ Covers the administrative workflows for managing and governing the marketplace.
 ## TypeScript Usage
 
 ```typescript
-import { CuratedCollection, FeaturedListing, MarketplaceHealthMetrics, PolicyAction, PolicyViolationType, RejectionReason, ReviewCriterion, ReviewDecision, SubmissionReview, TrendingListing } from '@objectstack/spec/cloud';
+import { CuratedCollectionSchema, FeaturedListingSchema, MarketplaceHealthMetricsSchema, PolicyActionSchema, PolicyViolationTypeSchema, RejectionReasonSchema, ReviewCriterionSchema, ReviewDecisionSchema, SubmissionReviewSchema, TrendingListingSchema } from '@objectstack/spec/cloud';
 import type { CuratedCollection, FeaturedListing, MarketplaceHealthMetrics, PolicyAction, PolicyViolationType, RejectionReason, ReviewCriterion, ReviewDecision, SubmissionReview, TrendingListing } from '@objectstack/spec/cloud';
 
 // Validate data
-const result = CuratedCollection.parse(data);
+const result = CuratedCollectionSchema.parse(data);
 ```
 
 ---

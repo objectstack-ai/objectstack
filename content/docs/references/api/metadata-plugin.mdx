@@ -8,11 +8,11 @@ description: Metadata Plugin protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { MetadataBulkRegisterRequest, MetadataEvent } from '@objectstack/spec/api';
-import type { MetadataBulkRegisterRequest, MetadataEvent } from '@objectstack/spec/api';
+import { MetadataBulkRegisterRequestSchema, MetadataEventSchema } from '@objectstack/spec/api';
+import type { MetadataEvent } from '@objectstack/spec/api';
 
 // Validate data
-const result = MetadataBulkRegisterRequest.parse(data);
+const result = MetadataBulkRegisterRequestSchema.parse(data);
 ```
 
 ---

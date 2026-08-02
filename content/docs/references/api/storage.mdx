@@ -20,11 +20,11 @@ rather than proxying bytes through the API server.
 ## TypeScript Usage
 
 ```typescript
-import { CompleteChunkedUploadRequest, CompleteChunkedUploadResponse, CompleteUploadRequest, FileDownloadUrlResponse, FileTypeValidation, FileUploadResponse, GetPresignedUrlRequest, InitiateChunkedUploadRequest, InitiateChunkedUploadResponse, PresignedUrlResponse, RawUploadResponse, UploadChunkRequest, UploadChunkResponse, UploadProgress } from '@objectstack/spec/api';
+import { CompleteChunkedUploadRequestSchema, CompleteChunkedUploadResponseSchema, CompleteUploadRequestSchema, FileDownloadUrlResponseSchema, FileTypeValidationSchema, FileUploadResponseSchema, GetPresignedUrlRequestSchema, InitiateChunkedUploadRequestSchema, InitiateChunkedUploadResponseSchema, PresignedUrlResponseSchema, RawUploadResponseSchema, UploadChunkRequestSchema, UploadChunkResponseSchema, UploadProgressSchema } from '@objectstack/spec/api';
 import type { CompleteChunkedUploadRequest, CompleteChunkedUploadResponse, CompleteUploadRequest, FileDownloadUrlResponse, FileTypeValidation, FileUploadResponse, GetPresignedUrlRequest, InitiateChunkedUploadRequest, InitiateChunkedUploadResponse, PresignedUrlResponse, RawUploadResponse, UploadChunkRequest, UploadChunkResponse, UploadProgress } from '@objectstack/spec/api';
 
 // Validate data
-const result = CompleteChunkedUploadRequest.parse(data);
+const result = CompleteChunkedUploadRequestSchema.parse(data);
 ```
 
 ---

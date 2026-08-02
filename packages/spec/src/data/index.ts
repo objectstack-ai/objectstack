@@ -3,8 +3,9 @@
 export * from './query.zod';
 export * from './filter.zod';
 // Canonical conformance cases for the filter logical combinators — the shared
-// standard the four independent FilterCondition backends are each checked
-// against, so they cannot drift apart again (#3774).
+// standard the five independent FilterCondition backends are each checked
+// against, so they cannot drift apart again (#3774; the fifth — MongoDB's
+// `translateFilter` — was enrolled by #4405).
 export * from './filter-logic-conformance';
 export * from './temporal-conformance';
 // Canonical conformance cases for deterministic paged reads — the standard
@@ -18,6 +19,11 @@ export * from './calendar-day';
 // the sibling vocabulary to date macros. Presentation scope only; RLS is the
 // enforcement boundary. See context-tokens.zod.ts.
 export * from './context-tokens.zod';
+// `defaultValue` runtime tokens (`NOW()`, `current_user`) — the reserved string
+// sentinels that are instructions, not literals. Declared once so the engine's
+// insert-time default resolution and every driver's DDL agree on which
+// `defaultValue`s may become a physical column DEFAULT (#4560).
+export * from './default-value-tokens';
 export * from './object.zod';
 // API-method derivation — the single source of truth turning an object's
 // `enable.apiMethods` whitelist into its effective operation set (#3391).

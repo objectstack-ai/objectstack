@@ -106,11 +106,11 @@ The `objectstack.config.ts` plugins array no longer determines CLI commands.
 ## TypeScript Usage
 
 ```typescript
-import { CLICommandContribution, OclifPluginConfig } from '@objectstack/spec/kernel';
+import { CLICommandContributionSchema, OclifPluginConfigSchema } from '@objectstack/spec/kernel';
 import type { CLICommandContribution, OclifPluginConfig } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = CLICommandContribution.parse(data);
+const result = CLICommandContributionSchema.parse(data);
 ```
 
 ---

@@ -62,11 +62,11 @@ graph and lets us mock the client trivially in tests.
 ## TypeScript Usage
 
 ```typescript
-import { SettingsChangeEvent } from '@objectstack/spec/system';
+import { SettingsChangeEventSchema } from '@objectstack/spec/system';
 import type { SettingsChangeEvent } from '@objectstack/spec/system';
 
 // Validate data
-const result = SettingsChangeEvent.parse(data);
+const result = SettingsChangeEventSchema.parse(data);
 ```
 
 ---

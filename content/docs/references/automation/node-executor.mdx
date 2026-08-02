@@ -30,11 +30,11 @@ The protocol covers:
 ## TypeScript Usage
 
 ```typescript
-import { ActionCategory, ActionDescriptor, ActionParadigm, NodeExecutorDescriptor, WaitEventType, WaitExecutorConfig, WaitResumePayload, WaitTimeoutBehavior } from '@objectstack/spec/automation';
+import { ActionCategorySchema, ActionDescriptorSchema, ActionParadigmSchema, NodeExecutorDescriptorSchema, WaitEventTypeSchema, WaitExecutorConfigSchema, WaitResumePayloadSchema, WaitTimeoutBehaviorSchema } from '@objectstack/spec/automation';
 import type { ActionCategory, ActionDescriptor, ActionParadigm, NodeExecutorDescriptor, WaitEventType, WaitExecutorConfig, WaitResumePayload, WaitTimeoutBehavior } from '@objectstack/spec/automation';
 
 // Validate data
-const result = ActionCategory.parse(data);
+const result = ActionCategorySchema.parse(data);
 ```
 
 ---

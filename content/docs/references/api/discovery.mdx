@@ -28,11 +28,11 @@ not been verified (may 501 at runtime).
 ## TypeScript Usage
 
 ```typescript
-import { ApiRoutes, Discovery, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, WellKnownCapabilities } from '@objectstack/spec/api';
-import type { ApiRoutes, Discovery, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, WellKnownCapabilities } from '@objectstack/spec/api';
+import { ApiRoutesSchema, DiscoverySchema, RouteHealthEntrySchema, RouteHealthReportSchema, ServiceInfoSchema, ServiceSelfInfoSchema, WellKnownCapabilitiesSchema } from '@objectstack/spec/api';
+import type { ApiRoutes, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, WellKnownCapabilities } from '@objectstack/spec/api';
 
 // Validate data
-const result = ApiRoutes.parse(data);
+const result = ApiRoutesSchema.parse(data);
 ```
 
 ---

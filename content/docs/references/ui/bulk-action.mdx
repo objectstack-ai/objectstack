@@ -30,11 +30,11 @@ action's own label, params and `visible`.
 ## TypeScript Usage
 
 ```typescript
-import { BulkActionDef, BulkActionExecution, BulkActionOperation, BulkActionParam } from '@objectstack/spec/ui';
+import { BulkActionDefSchema, BulkActionExecutionSchema, BulkActionOperationSchema, BulkActionParamSchema } from '@objectstack/spec/ui';
 import type { BulkActionDef, BulkActionExecution, BulkActionOperation, BulkActionParam } from '@objectstack/spec/ui';
 
 // Validate data
-const result = BulkActionDef.parse(data);
+const result = BulkActionDefSchema.parse(data);
 ```
 
 ---

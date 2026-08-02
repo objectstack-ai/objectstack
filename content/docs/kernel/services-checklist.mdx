@@ -14,7 +14,7 @@ the code wins. See [Plugins & Packages](/docs/plugins/packages) for the full
 package catalog.
 </Callout>
 
-The ObjectStack protocol defines **16 kernel services** registered via the `CoreServiceName` enum (the never-implemented `graphql` entry was removed in v17). Each service maps to a set of protocol methods governed by its per-domain contract (`DataProtocol`, `MetadataProtocol`, ...) — the transitional `ObjectStackProtocol` composition alias was dissolved in v17 (ADR-0076 D9); capability availability comes from the runtime discovery `services` registry.
+The ObjectStack protocol defines **15 kernel services** registered via the `CoreServiceName` enum (v17 removed the never-implemented `graphql` entry and retired the never-filled `workflow` slot, #4451). Each service maps to a set of protocol methods governed by its per-domain contract (`DataProtocol`, `MetadataProtocol`, ...) — the transitional `ObjectStackProtocol` composition alias was dissolved in v17 (ADR-0076 D9); capability availability comes from the runtime discovery `services` registry.
 
 **Key architecture principle**: the kernel guarantees only **data** and **metadata**, and even those are filled by packages (`@objectstack/objectql`, `@objectstack/metadata`) rather than baked in — the kernel's own contribution is an in-memory fallback for the `core` slots that have one (`metadata`, `cache`, `queue`, `job`, `i18n` — **not** `auth`). Everything else — including **auth** and **automation** — is delivered by plugins. `@objectstack/objectql` is an example kernel implementation to get the basic API running; production kernels will be rebuilt as separate plugins.
 
@@ -50,7 +50,7 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 ├─────────────────────────────────────────────────────────┤
 │                    Plugin Layer                           │
 │  All other services: analytics, auth, automation,        │
-│  workflow, ui, realtime, notification, ai, i18n,         │
+│  ui, realtime, notification, ai, i18n,                   │
 │  search, file-storage, cache, queue, job                 │
 │                                                          │
 │  Discovery API reports availability per service          │
@@ -70,17 +70,16 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 | 3 | **analytics** | `optional` | 2 | ❌ Plugin Required | `@objectstack/service-analytics` |
 | 4 | **auth** | `core` | — | ✅ Implemented | `@objectstack/plugin-auth` |
 | 5 | **ui** | `optional` | 5 | ❌ Nothing fills this slot | `@objectstack/metadata-protocol` — `/ui/view` is served by its `protocol` service, not by a `ui` service |
-| 6 | **workflow** | `optional` | 3 | ❌ Nothing ships | — |
-| 7 | **automation** | `optional` | 1 | ❌ Plugin Required | `@objectstack/service-automation` |
-| 8 | **realtime** | `optional` | 6 | ❌ Plugin Required (in-process only — no HTTP/WS route is mounted) | `@objectstack/service-realtime` |
-| 9 | **notification** | `optional` | 7 | ❌ Plugin Required | `@objectstack/service-messaging` |
-| 10 | **ai** | `optional` | — | ❌ Nothing ships in this repo | `@objectstack/service-ai` (Cloud/EE — not installable, so the table entry is `null`) |
-| 11 | **i18n** | `core` | 3 | ✅ Built-in (in-memory fallback) | `@objectstack/service-i18n` |
-| 12 | **file-storage** | `optional` | — | ❌ Plugin Required | `@objectstack/service-storage` |
-| 13 | **search** | `optional` | — | ❌ Nothing ships | — |
-| 14 | **cache** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-cache` |
-| 15 | **queue** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-queue` |
-| 16 | **job** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-job` |
+| 6 | **automation** | `optional` | 1 | ❌ Plugin Required | `@objectstack/service-automation` |
+| 7 | **realtime** | `optional` | 6 | ❌ Plugin Required (in-process only — no HTTP/WS route is mounted) | `@objectstack/service-realtime` |
+| 8 | **notification** | `optional` | 7 | ❌ Plugin Required | `@objectstack/service-messaging` |
+| 9 | **ai** | `optional` | — | ❌ Nothing ships in this repo | `@objectstack/service-ai` (Cloud/EE — not installable, so the table entry is `null`) |
+| 10 | **i18n** | `core` | 3 | ✅ Built-in (in-memory fallback) | `@objectstack/service-i18n` |
+| 11 | **file-storage** | `optional` | — | ❌ Plugin Required | `@objectstack/service-storage` |
+| 12 | **search** | `optional` | — | ❌ Nothing ships | — |
+| 13 | **cache** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-cache` |
+| 14 | **queue** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-queue` |
+| 15 | **job** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-job` |
 
 <Callout type="info">
 The Provider column mirrors `CORE_SERVICE_PROVIDER` in
@@ -319,7 +318,7 @@ registered under their own names (`security.permissions`, `security.rls`,
 
 ---
 
-## 5–7. Business Services
+## 5–6. Business Services
 
 ### 5. ui Service — 5 declared methods, none routed ❌
 `listViews`, `getView`, `createView`, `updateView`, `deleteView`
@@ -337,7 +336,7 @@ the domain answers **501** with that remedy spelled out, not a generic "install 
 plugin".
 </Callout>
 
-### 6. workflow Service — retired in v17
+### Retired in v17: the `workflow` slot
 The slot, its `IWorkflowService` contract and the three `WorkflowProtocol`
 methods (`getWorkflowConfig`, `getWorkflowState`, `workflowTransition`) were
 removed in [#4451](https://github.com/objectstack-ai/objectstack/issues/4451):
@@ -350,7 +349,7 @@ flow nodes on the approvals runtime (ADR-0019 — decisions via
 `@objectstack/plugin-approvals`), and record-triggered automation is lifecycle
 hooks + `record_change` flows.
 
-### 7. automation Service — 1 method ✅ `@objectstack/service-automation`
+### 6. automation Service — 1 method ✅ `@objectstack/service-automation`
 `triggerAutomation`  
 Trigger engine, event triggers from ObjectQL hooks, flow executor, scheduled triggers.
 The `/automation` dispatcher domain gates on `isServiceServeable`, so a slot filled by
@@ -358,9 +357,9 @@ a self-declared stub answers as an empty one.
 
 ---
 
-## 8–11. Communication Services
+## 7–10. Communication Services
 
-### 8. realtime — 6 methods · `@objectstack/service-realtime`
+### 7. realtime — 6 methods · `@objectstack/service-realtime`
 `realtimeConnect`, `realtimeDisconnect`, `realtimeSubscribe`, `realtimeUnsubscribe`, `setPresence`, `getPresence`
 
 <Callout type="warn">
@@ -374,7 +373,7 @@ in-process only and no HTTP/WS surface is mounted. Re-advertising waits on a rea
 transport.
 </Callout>
 
-### 9. notification — 7 methods · `@objectstack/service-messaging`
+### 8. notification — 7 methods · `@objectstack/service-messaging`
 `registerDevice`, `unregisterDevice`, `getNotificationPreferences`, `updateNotificationPreferences`, `listNotifications`, `markNotificationsRead`, `markAllNotificationsRead`
 
 The slot name is `notification` (singular) and the package that fills it shares no word
@@ -386,7 +385,7 @@ on `INotificationService` — a send-only provider (SMTP, Twilio, a webhook) fil
 slot legitimately without an inbox, and each route probes its own method and answers
 501 when absent.
 
-### 10. ai — contract removed ❌
+### 9. ai — contract removed ❌
 ~~`aiNlq`, `aiSuggest`, `aiInsights`~~
 
 <Callout type="warn">
@@ -402,7 +401,7 @@ The `ai` slot still exists in `CoreServiceName`, but nothing in this repo fills
 it (`CORE_SERVICE_PROVIDER.ai` is `null`).
 </Callout>
 
-### 11. i18n — 3 methods
+### 10. i18n — 3 methods
 `getLocales`, `getTranslations`, `getFieldLabels`
 
 **Service Name**: `i18n` · **Criticality**: `core`  
@@ -467,7 +466,7 @@ AppPlugin will:
 
 ---
 
-## 12–16. Infrastructure Services
+## 11–15. Infrastructure Services
 
 `cache`, `queue`, and `job` are `core` services: like `i18n`, the kernel auto-injects an in-memory fallback when no plugin registers them (see `CORE_FALLBACK_FACTORIES` in `packages/core/src/fallbacks/`). The `optional` services (`file-storage`, `search`) stay disabled until a plugin provides them.
 

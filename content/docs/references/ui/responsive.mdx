@@ -16,11 +16,11 @@ Standard Tailwind-style breakpoint names (xs–2xl).
 ## TypeScript Usage
 
 ```typescript
-import { BreakpointColumnMap, BreakpointName, BreakpointOrderMap, ResponsiveConfig, ResponsiveStyles, StyleMap } from '@objectstack/spec/ui';
-import type { BreakpointColumnMap, BreakpointName, BreakpointOrderMap, ResponsiveConfig, ResponsiveStyles, StyleMap } from '@objectstack/spec/ui';
+import { BreakpointColumnMapSchema, BreakpointName, BreakpointOrderMapSchema, ResponsiveConfigSchema, ResponsiveStylesSchema, StyleMapSchema } from '@objectstack/spec/ui';
+import type { BreakpointName, ResponsiveConfig, ResponsiveStyles, StyleMap } from '@objectstack/spec/ui';
 
 // Validate data
-const result = BreakpointColumnMap.parse(data);
+const result = BreakpointColumnMapSchema.parse(data);
 ```
 
 ---

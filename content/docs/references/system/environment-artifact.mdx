@@ -48,11 +48,11 @@ a breaking schema bump.
 ## TypeScript Usage
 
 ```typescript
-import { EnvironmentArtifact, EnvironmentArtifactChecksum, EnvironmentArtifactFunction, EnvironmentArtifactFunctionLanguageEnum, EnvironmentArtifactHashAlgorithmEnum, EnvironmentArtifactManifest, EnvironmentArtifactMetadata, EnvironmentArtifactPayloadRef, EnvironmentArtifactRequirement } from '@objectstack/spec/system';
-import type { EnvironmentArtifact, EnvironmentArtifactChecksum, EnvironmentArtifactFunction, EnvironmentArtifactFunctionLanguageEnum, EnvironmentArtifactHashAlgorithmEnum, EnvironmentArtifactManifest, EnvironmentArtifactMetadata, EnvironmentArtifactPayloadRef, EnvironmentArtifactRequirement } from '@objectstack/spec/system';
+import { EnvironmentArtifactSchema, EnvironmentArtifactChecksumSchema, EnvironmentArtifactFunctionSchema, EnvironmentArtifactFunctionLanguageEnum, EnvironmentArtifactHashAlgorithmEnum, EnvironmentArtifactManifestSchema, EnvironmentArtifactMetadataSchema, EnvironmentArtifactPayloadRefSchema, EnvironmentArtifactRequirementSchema } from '@objectstack/spec/system';
+import type { EnvironmentArtifact, EnvironmentArtifactChecksum, EnvironmentArtifactFunction, EnvironmentArtifactManifest, EnvironmentArtifactMetadata, EnvironmentArtifactPayloadRef, EnvironmentArtifactRequirement } from '@objectstack/spec/system';
 
 // Validate data
-const result = EnvironmentArtifact.parse(data);
+const result = EnvironmentArtifactSchema.parse(data);
 ```
 
 ---

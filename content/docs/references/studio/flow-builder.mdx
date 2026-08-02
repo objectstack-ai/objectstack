@@ -60,11 +60,11 @@ within ObjectStack Studio. Covers:
 ## TypeScript Usage
 
 ```typescript
-import { FlowBuilderConfig, FlowCanvasEdge, FlowCanvasEdgeStyle, FlowCanvasNode, FlowLayoutAlgorithm, FlowLayoutDirection, FlowNodeRenderDescriptor, FlowNodeShape } from '@objectstack/spec/studio';
+import { FlowBuilderConfigSchema, FlowCanvasEdgeSchema, FlowCanvasEdgeStyleSchema, FlowCanvasNodeSchema, FlowLayoutAlgorithmSchema, FlowLayoutDirectionSchema, FlowNodeRenderDescriptorSchema, FlowNodeShapeSchema } from '@objectstack/spec/studio';
 import type { FlowBuilderConfig, FlowCanvasEdge, FlowCanvasEdgeStyle, FlowCanvasNode, FlowLayoutAlgorithm, FlowLayoutDirection, FlowNodeRenderDescriptor, FlowNodeShape } from '@objectstack/spec/studio';
 
 // Validate data
-const result = FlowBuilderConfig.parse(data);
+const result = FlowBuilderConfigSchema.parse(data);
 ```
 
 ---

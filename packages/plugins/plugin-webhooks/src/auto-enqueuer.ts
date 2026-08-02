@@ -244,8 +244,25 @@ export class AutoEnqueuer {
             normalized.filter((t) => DISPATCHABLE_WEBHOOK_TRIGGERS.has(t)) as Array<'create' | 'update' | 'delete'>,
         );
         if (triggers.size === 0) {
-            // No dispatchable triggers (or a manual-only webhook with none) —
-            // skip auto-enqueue.
+            // [ADR-0078 Phase 4] No dispatchable triggers — the webhook can
+            // never fire on ANY path, so say so instead of skipping silently.
+            // This comment used to read "(or a manual-only webhook with
+            // none)", but that mode does not exist: the `api` trigger was
+            // REMOVED (#3196, `webhook.zod.ts`) precisely because there is no
+            // manual fire path — the only webhook HTTP surface re-queues
+            // already-failed deliveries. So a zero-trigger row is not an off
+            // switch (that is `active`), it is a dead subscription that looks
+            // armed in Setup. Same rule id as the author-time gate
+            // (`webhook/without-triggers`) so the boot log greps into the
+            // same docs. Only active rows reach parseRow, so a deliberately
+            // disabled webhook stays warning-free.
+            this.logger.warn?.(
+                `[webhook-auto-enqueuer] webhook '${(row.name as string) ?? row.id}' has no dispatchable ` +
+                    `triggers — it will NEVER fire (rule webhook/without-triggers): there is no manual fire ` +
+                    `path (#3196), so this row is dead while looking armed in Setup. Declare ` +
+                    `triggers: ['create'|'update'|'delete'], or set it inactive if it should be off.`,
+                { id: row.id },
+            );
             return null;
         }
 

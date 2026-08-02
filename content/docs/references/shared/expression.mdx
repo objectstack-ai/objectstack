@@ -48,11 +48,11 @@ See also: content/docs/concepts/north-star.mdx §8 "No private expression DSL"
 ## TypeScript Usage
 
 ```typescript
-import { CronExpressionInput, Expression, ExpressionDialect, ExpressionInput, ExpressionMeta, Predicate, PredicateInput, TemplateExpressionInput } from '@objectstack/spec/shared';
+import { CronExpressionInputSchema, ExpressionSchema, ExpressionDialect, ExpressionInputSchema, ExpressionMetaSchema, PredicateSchema, PredicateInputSchema, TemplateExpressionInputSchema } from '@objectstack/spec/shared';
 import type { CronExpressionInput, Expression, ExpressionDialect, ExpressionInput, ExpressionMeta, Predicate, PredicateInput, TemplateExpressionInput } from '@objectstack/spec/shared';
 
 // Validate data
-const result = CronExpressionInput.parse(data);
+const result = CronExpressionInputSchema.parse(data);
 ```
 
 ---

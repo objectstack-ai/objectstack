@@ -3,7 +3,7 @@
 import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, isTenancyDisabled, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, type AuditProvenanceField } from '@objectstack/spec/data';
 import { resolveMultiOrgEnabled, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { provisionSearchCompanion } from './search-companion.js';
-import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema } from '@objectstack/spec/kernel';
+import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, checkFieldCompleteness } from '@objectstack/spec/kernel';
 import { AppSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
 
@@ -583,6 +583,66 @@ export function warnStrippedLegacyApiMethods(
   );
 }
 
+/** Objects already diagnosed for functional completeness (once per object). */
+const warnedFunctionalCompleteness = new Set<string>();
+
+/**
+ * [ADR-0078 Phase 4] Registration-time functional-completeness diagnostic.
+ *
+ * The author-time gate (`@objectstack/lint`'s `validate-functional-completeness`)
+ * only protects metadata that passes through `os build` / `validate` / `lint`.
+ * The registry is the one choke point EVERY door goes through — declared
+ * stacks, plugin-provided objects, `extend` contributions, `saveMetaItem`, raw
+ * `registerObject` calls — including the doors that skip Zod and lint entirely.
+ * Two shipped instances prove those doors are real, not hypothetical: #3896
+ * (Setup authoring inserted `sys_sharing_rule` rows directly, bypassing the
+ * schema that "required" `criteria`) and cloud's `rowColor.mapping` (an
+ * `as never` cast bypassed tsc, then the strip-era parse dropped the key).
+ *
+ * Same shared predicate as the author-time gate (`checkFieldCompleteness` in
+ * `@objectstack/spec/kernel`), so the rule ids in this warning are the SAME ids
+ * the lint reports — an operator or an AI reading the boot log can grep the id
+ * straight into the docs and the suppression story. Judgement lives only in the
+ * predicate; if a rule seems wrong, fix it there, never here.
+ *
+ * WARN, never throw — deliberately, and not as a soft default: an inert field
+ * must not kill a boot that thousands of healthy objects share (ADR-0078 §1
+ * maps error-severity to "the INSTANCE is dead", not "the system is dead").
+ * The author-time gate is where errors block; the registry's job is to make
+ * sure the silence never survives to runtime unobserved.
+ *
+ * Emitted once per object name with every finding aggregated into that one
+ * line (not per request, not per finding — the hot path stays free and a
+ * 3-dead-field object is one greppable line, not three).
+ */
+export function warnFunctionalCompleteness(
+  schema: ServiceObject,
+  opts?: { warn?: (msg: string) => void },
+): void {
+  const fields = (schema as { fields?: Record<string, unknown> }).fields;
+  if (!fields || typeof fields !== 'object') return;
+  const name = String((schema as { name?: unknown }).name ?? '');
+  if (warnedFunctionalCompleteness.has(name)) return;
+
+  const findings: string[] = [];
+  for (const [fieldName, def] of Object.entries(fields)) {
+    for (const f of checkFieldCompleteness(def)) {
+      findings.push(`${fieldName}: [${f.severity}] ${f.rule} — add \`${f.fix}\``);
+    }
+  }
+  if (findings.length === 0) return;
+  warnedFunctionalCompleteness.add(name);
+
+  const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
+  warn(
+    `[Registry] Object "${name}" registered with ${findings.length} functionally-incomplete ` +
+      `field(s) — Zod-valid but runtime-DEAD: the consumer silently skips each one, so it reads ` +
+      `0/null/never-resolves while every authoring surface reports success (ADR-0078). ` +
+      findings.join(' · ') +
+      ` — \`os lint\` reports the same rule ids with full context.`,
+  );
+}
+
 /**
  * Platform namespaces that multiple packages may legitimately share, so the
  * install-time namespace-uniqueness gate (ADR-0048 Phase 1) must never fire on
@@ -877,6 +937,13 @@ export class SchemaRegistry {
     // the object-name context the parse-time strip warning lacks. Runs after
     // reconcile so we diagnose what actually ships.
     warnStrippedLegacyApiMethods(schema);
+
+    // [ADR-0078 Phase 4] One-shot per-object functional-completeness
+    // diagnostic — the registry is the choke point every metadata door goes
+    // through, including the ones that skip Zod and lint (#3896, raw
+    // registerObject). Same shared predicate and rule ids as `os lint`;
+    // warn-never-throw (an inert FIELD must not kill the boot).
+    warnFunctionalCompleteness(schema);
 
     // [ADR-0079] Object-materialization seam — DESIGNATE-ONLY primary-title
     // provisioning. Runs AFTER `applySystemFields` (so any designated field

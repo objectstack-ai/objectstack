@@ -132,11 +132,11 @@ ever sees `flowName`.
 ## TypeScript Usage
 
 ```typescript
-import { DecisionCondition, DecisionConfig, ScriptConfig, SubflowConfig } from '@objectstack/spec/automation';
+import { DecisionConditionSchema, DecisionConfigSchema, ScriptConfigSchema, SubflowConfigSchema } from '@objectstack/spec/automation';
 import type { DecisionCondition, DecisionConfig, ScriptConfig, SubflowConfig } from '@objectstack/spec/automation';
 
 // Validate data
-const result = DecisionCondition.parse(data);
+const result = DecisionConditionSchema.parse(data);
 ```
 
 ---

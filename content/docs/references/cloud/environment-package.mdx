@@ -34,11 +34,11 @@ Stored in the **Control Plane DB** (not in environment data-plane DBs).
 ## TypeScript Usage
 
 ```typescript
-import { EnvironmentPackageInstallation, EnvironmentPackageStatus, InstallPackageToEnvironmentRequest, ListEnvironmentPackagesResponse, RollbackEnvironmentPackageRequest, UpgradeEnvironmentPackageRequest } from '@objectstack/spec/cloud';
+import { EnvironmentPackageInstallationSchema, EnvironmentPackageStatusSchema, InstallPackageToEnvironmentRequestSchema, ListEnvironmentPackagesResponseSchema, RollbackEnvironmentPackageRequestSchema, UpgradeEnvironmentPackageRequestSchema } from '@objectstack/spec/cloud';
 import type { EnvironmentPackageInstallation, EnvironmentPackageStatus, InstallPackageToEnvironmentRequest, ListEnvironmentPackagesResponse, RollbackEnvironmentPackageRequest, UpgradeEnvironmentPackageRequest } from '@objectstack/spec/cloud';
 
 // Validate data
-const result = EnvironmentPackageInstallation.parse(data);
+const result = EnvironmentPackageInstallationSchema.parse(data);
 ```
 
 ---

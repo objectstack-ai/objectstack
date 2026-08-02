@@ -27,7 +27,6 @@
     "auth",
     "auth-endpoints",
     "automation-api",
-    "connector",
     "core-services",
     "events",
     "export",

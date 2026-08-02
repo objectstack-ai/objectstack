@@ -34,11 +34,11 @@ resolved by `(name, locale)`; subject/body strings carry simple
 ## TypeScript Usage
 
 ```typescript
-import { EmailTemplateDefinition, EmailTemplateDefinitionCategory, EmailTemplateDefinitionVariable } from '@objectstack/spec/system';
+import { EmailTemplateDefinitionSchema, EmailTemplateDefinitionCategorySchema, EmailTemplateDefinitionVariableSchema } from '@objectstack/spec/system';
 import type { EmailTemplateDefinition, EmailTemplateDefinitionCategory, EmailTemplateDefinitionVariable } from '@objectstack/spec/system';
 
 // Validate data
-const result = EmailTemplateDefinition.parse(data);
+const result = EmailTemplateDefinitionSchema.parse(data);
 ```
 
 ---

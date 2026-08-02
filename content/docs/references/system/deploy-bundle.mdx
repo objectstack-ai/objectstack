@@ -28,11 +28,11 @@ Target: 2-5 second deploys vs. 2-15 minute traditional Docker/CI/CD.
 ## TypeScript Usage
 
 ```typescript
-import { ChangeSchema, DeployBundle, DeployDiff, DeployManifest, DeployStatusEnum, DeployValidationIssue, DeployValidationResult, MigrationPlan, MigrationStatement } from '@objectstack/spec/system';
-import type { Change, DeployBundle, DeployDiff, DeployManifest, DeployStatusEnum, DeployValidationIssue, DeployValidationResult, MigrationPlan, MigrationStatement } from '@objectstack/spec/system';
+import { DeployBundleSchema, DeployDiffSchema, DeployManifestSchema, DeployStatusEnum, DeployValidationIssueSchema, DeployValidationResultSchema, MigrationPlanSchema, MigrationStatementSchema } from '@objectstack/spec/system';
+import type { DeployBundle, DeployDiff, DeployManifest, DeployValidationIssue, DeployValidationResult, MigrationPlan, MigrationStatement } from '@objectstack/spec/system';
 
 // Validate data
-const result = ChangeSchema.parse(data);
+const result = DeployBundleSchema.parse(data);
 ```
 
 ---

@@ -24,8 +24,8 @@ This registry is used by the `ObjectKernel` and `HttpDispatcher` to:
 ## TypeScript Usage
 
 ```typescript
-import { CoreServiceName, KernelServiceMap, ServiceConfig, ServiceCriticality, ServiceStatus } from '@objectstack/spec/system';
-import type { CoreServiceName, KernelServiceMap, ServiceConfig, ServiceCriticality, ServiceStatus } from '@objectstack/spec/system';
+import { CoreServiceName, KernelServiceMapSchema, ServiceConfigSchema, ServiceCriticalitySchema, ServiceStatusSchema } from '@objectstack/spec/system';
+import type { CoreServiceName } from '@objectstack/spec/system';
 
 // Validate data
 const result = CoreServiceName.parse(data);

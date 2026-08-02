@@ -16,11 +16,11 @@ Transform input/output data.
 ## TypeScript Usage
 
 ```typescript
-import { ApiEndpoint, ApiMapping } from '@objectstack/spec/api';
-import type { ApiEndpoint, ApiMapping } from '@objectstack/spec/api';
+import { ApiEndpointSchema, ApiMappingSchema } from '@objectstack/spec/api';
+import type { ApiEndpoint } from '@objectstack/spec/api';
 
 // Validate data
-const result = ApiEndpoint.parse(data);
+const result = ApiEndpointSchema.parse(data);
 ```
 
 ---

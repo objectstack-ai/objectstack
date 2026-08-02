@@ -11,6 +11,11 @@ import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, isGlobalUnique, isUniqueDeclared, type AutonumberToken } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 import { canonicalAstOperator } from '@objectstack/spec/data';
+// `defaultValue` runtime tokens (#4560). The DDL below asks the SPEC — not a
+// list of its own — which `defaultValue`s are instructions rather than literals,
+// so the engine and this driver can never disagree about what may become a
+// physical column DEFAULT.
+import { isNowDefaultToken, isRuntimeDefaultToken } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
@@ -145,11 +150,13 @@ function repairNaiveUtcAuditTimestamp(value: unknown): unknown {
 /**
  * Whether a field's `defaultValue` is the framework's `'NOW()'` convention
  * ("use the database clock at insert time"). Case-insensitive, whitespace
- * tolerant. Single source for the two places `createColumn` checks it.
+ * tolerant.
+ *
+ * Thin alias over the spec's {@link isNowDefaultToken} — the token vocabulary
+ * itself lives in `@objectstack/spec/data` so the engine's insert-time
+ * resolution and this driver's DDL read one set (#4560).
  */
-function isNowDefaultValue(v: unknown): v is string {
-  return typeof v === 'string' && /^now\(\)$/i.test(v.trim());
-}
+const isNowDefaultValue = isNowDefaultToken;
 
 /**
  * Read-side normalization for user-declared `Field.datetime` columns on SQLite.
@@ -3665,6 +3672,10 @@ export class SqlDriver implements IDataDriver {
       type: c.type,
       nullable: c.nullable,
       maxLength: c.maxLength,
+      // The raw, dialect-decorated DEFAULT — the only evidence that a column was
+      // created by a build which turned a `defaultValue` runtime token into a
+      // literal (#4560).
+      defaultValue: c.defaultValue,
     }));
     const out = diffManagedTable({ table: tableName, fields, columns: physical, dialect: this.dialectName });
     out.push(...(await this.detectTableIndexDrift(tableName, fields, declaredIndexes, new Set(cols.map((c) => c.name)))));
@@ -3922,6 +3933,9 @@ export class SqlDriver implements IDataDriver {
         case 'drop_column':
           await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
           return true;
+        case 'drop_column_default':
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+          return true;
       }
     }
     if (this.isMysql) {
@@ -3949,6 +3963,12 @@ export class SqlDriver implements IDataDriver {
         case 'drop_column':
           await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
           return true;
+        case 'drop_column_default':
+          // `ALTER … ALTER COLUMN … DROP DEFAULT` — the one ALTER COLUMN form
+          // MySQL accepts without restating the type, so it cannot lose a
+          // varchar length the way MODIFY can.
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+          return true;
       }
     }
     this.logger.warn(`[schema-drift] ${op.type} on ${table}.${column} is unsupported on dialect '${this.dialectName}' — skipped`);
@@ -3957,9 +3977,19 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Rebuild a SQLite table applying a set of column edits (relax/tighten NOT
-   * NULL, drop column), preserving all other columns and their data. Follows
-   * the official SQLite procedure: create patched table → copy → drop → rename.
-   * varchar widen/narrow are no-ops on SQLite (dynamic typing) and ignored.
+   * NULL, drop column, drop a column DEFAULT), preserving all other columns and
+   * their data. Follows the official SQLite procedure: create patched table →
+   * copy → drop → rename. varchar widen/narrow are no-ops on SQLite (dynamic
+   * typing) and ignored.
+   *
+   * SQLite cannot alter a column's DEFAULT in place, so `drop_column_default`
+   * (#4560) is reconciled here too — by re-materializing every column's default
+   * from METADATA through {@link applyDeclaredColumnDefault} and simply not
+   * re-emitting the dropped one. Rebuilding from metadata rather than copying
+   * the physical DEFAULT is what makes this safe both ways: the token default
+   * the op targets is gone because metadata never declared it, and a sibling
+   * `defaultValue: 'NOW()'` column keeps the default it always had instead of
+   * silently losing it to the rebuild.
    *
    * Unique field-level constraints and declared indexes are recreated from
    * metadata afterwards (the source of truth). DB-level foreign keys declared
@@ -3970,10 +4000,12 @@ export class SqlDriver implements IDataDriver {
     const relax = new Set<string>();
     const tighten = new Set<string>();
     const drop = new Set<string>();
+    const dropDefault = new Set<string>();
     for (const e of ents) {
       if (e.op.type === 'relax_not_null') relax.add(e.op.column);
       else if (e.op.type === 'tighten_not_null') tighten.add(e.op.column);
       else if (e.op.type === 'drop_column') drop.add(e.op.column);
+      else if (e.op.type === 'drop_column_default') dropDefault.add(e.op.column);
       // widen/narrow varchar: SQLite ignores declared length — nothing to do.
     }
 
@@ -3996,7 +4028,17 @@ export class SqlDriver implements IDataDriver {
             if (!col) continue;
             const nullable = relax.has(c.name) ? true : tighten.has(c.name) ? false : c.nullable;
             if (!nullable && c.name !== 'id') col.notNullable();
-            if (c.name === 'created_at' || c.name === 'updated_at') col.defaultTo(this.knex.fn.now());
+            if (c.name === 'created_at' || c.name === 'updated_at') {
+              col.defaultTo(this.knex.fn.now());
+            } else if (!dropDefault.has(c.name)) {
+              // Re-emit the METADATA-declared default. The rebuild dropped the
+              // original table, so a column whose default is not restated here
+              // comes back without one — which is precisely what a
+              // `drop_column_default` op wants, and precisely what a
+              // `defaultValue: 'NOW()'` sibling must not suffer.
+              const f = (fields as Record<string, any>)[c.name];
+              if (f) this.applyDeclaredColumnDefault(col, f, f.type || 'string');
+            }
           }
         });
         const colList = keptNames.map((n) => `"${n}"`).join(', ');
@@ -5938,26 +5980,51 @@ export class SqlDriver implements IDataDriver {
       // `storage.notNull` explicitly via the `field-required-notnull-explicit`
       // conversion, so their columns come out exactly as they always did.
       if ((field as { storage?: { notNull?: boolean } }).storage?.notNull) col.notNullable();
-      // `defaultValue: 'NOW()'` is a framework convention for "use the
-      // database clock at insert time". Translate it to the driver-native
-      // canonical default (`nowColumnDefault`) so the column gets a real,
-      // zone-explicit default instead of leaving the literal string 'NOW()'
-      // for whatever upstream code happens to write — and, on SQLite, instead
-      // of the timezone-naive `CURRENT_TIMESTAMP` that `knex.fn.now()` emits.
-      if (
-        (type === 'datetime' || type === 'date' || type === 'time') &&
-        isNowDefaultValue(field.defaultValue)
-      ) {
-        col.defaultTo(this.nowColumnDefault(type));
-      } else if (field.defaultValue !== undefined && field.defaultValue !== null) {
-        const dv = field.defaultValue;
-        if (isNowDefaultValue(dv)) {
-          col.defaultTo(this.nowColumnDefault(type));
-        } else if (typeof dv !== 'object') {
-          col.defaultTo(dv as any);
-        }
-      }
+      this.applyDeclaredColumnDefault(col, field, type);
     }
+  }
+
+  /**
+   * Emit the physical column DEFAULT a field's `defaultValue` calls for — or,
+   * deliberately, none at all.
+   *
+   * The single place `defaultValue` becomes DDL. `createColumn` uses it for a
+   * fresh column and {@link rebuildSqliteTablePatched} for a re-materialized
+   * one, so a SQLite table rebuild cannot quietly hand back a column whose
+   * default differs from the one metadata declares.
+   *
+   * Four cases, in order:
+   *
+   * 1. **`'NOW()'`** — the one runtime token with a database counterpart.
+   *    Translated to the driver-native canonical default
+   *    ({@link nowColumnDefault}) so the column gets a real, zone-explicit
+   *    default instead of the literal string `'NOW()'` for whatever upstream
+   *    code happens to write — and, on SQLite, instead of the timezone-naive
+   *    `CURRENT_TIMESTAMP` that `knex.fn.now()` emits.
+   * 2. **Any other runtime token** (`current_user`, and anything the spec adds
+   *    to `DEFAULT_VALUE_TOKENS` later) — resolved by the ENGINE at insert time
+   *    against the request context, with **no** database counterpart, so this
+   *    emits NOTHING. That omission is the contract, not an oversight: the
+   *    engine deliberately leaves a `current_user` field UNSET when there is no
+   *    authenticated user (system/anonymous writes), and a column DEFAULT
+   *    silently overrode that decision — writing the literal string
+   *    `'current_user'` into `lookup('sys_user')` columns (#4560). Checking the
+   *    spec's predicate rather than an open-coded name keeps a future token
+   *    from leaking its own spelling the same way.
+   * 3. **Objects** — Expression envelopes (`{ dialect, source }`), evaluated
+   *    app-side; never a column DEFAULT.
+   * 4. **Everything else** — a real literal, emitted verbatim.
+   */
+  protected applyDeclaredColumnDefault(col: Knex.ColumnBuilder, field: any, type: string): void {
+    const dv = field?.defaultValue;
+    if (dv === undefined || dv === null) return;
+    if (isNowDefaultValue(dv)) {
+      col.defaultTo(this.nowColumnDefault(type));
+      return;
+    }
+    if (isRuntimeDefaultToken(dv)) return;
+    if (typeof dv === 'object') return;
+    col.defaultTo(dv as any);
   }
 
   // ── Database helpers ────────────────────────────────────────────────────────

@@ -12,11 +12,11 @@ description: Testing protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { TestAction, TestActionType, TestAssertion, TestAssertionType, TestContext, TestScenario, TestStep, TestSuite } from '@objectstack/spec/qa';
-import type { TestAction, TestActionType, TestAssertion, TestAssertionType, TestContext, TestScenario, TestStep, TestSuite } from '@objectstack/spec/qa';
+import { TestActionSchema, TestActionTypeSchema, TestAssertionSchema, TestAssertionTypeSchema, TestContextSchema, TestScenarioSchema, TestStepSchema, TestSuiteSchema } from '@objectstack/spec/qa';
+import type { TestAction, TestAssertion, TestScenario, TestStep, TestSuite } from '@objectstack/spec/qa';
 
 // Validate data
-const result = TestAction.parse(data);
+const result = TestActionSchema.parse(data);
 ```
 
 ---

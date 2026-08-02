@@ -20,11 +20,11 @@ This aligns with better-auth's organization plugin capabilities.
 ## TypeScript Usage
 
 ```typescript
-import { Invitation, InvitationStatus, Member, Organization } from '@objectstack/spec/identity';
+import { InvitationSchema, InvitationStatus, MemberSchema, OrganizationSchema } from '@objectstack/spec/identity';
 import type { Invitation, InvitationStatus, Member, Organization } from '@objectstack/spec/identity';
 
 // Validate data
-const result = Invitation.parse(data);
+const result = InvitationSchema.parse(data);
 ```
 
 ---

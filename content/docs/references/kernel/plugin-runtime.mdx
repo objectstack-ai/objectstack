@@ -38,11 +38,11 @@ This protocol enables:
 ## TypeScript Usage
 
 ```typescript
-import { DynamicLoadRequest, DynamicPluginOperation, DynamicPluginResult, DynamicUnloadRequest, PluginSource } from '@objectstack/spec/kernel';
+import { DynamicLoadRequestSchema, DynamicPluginOperationSchema, DynamicPluginResultSchema, DynamicUnloadRequestSchema, PluginSourceSchema } from '@objectstack/spec/kernel';
 import type { DynamicLoadRequest, DynamicPluginOperation, DynamicPluginResult, DynamicUnloadRequest, PluginSource } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = DynamicLoadRequest.parse(data);
+const result = DynamicLoadRequestSchema.parse(data);
 ```
 
 ---

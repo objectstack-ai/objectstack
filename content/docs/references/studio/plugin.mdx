@@ -100,11 +100,11 @@ modes: ['preview', 'design', 'data'],
 ## TypeScript Usage
 
 ```typescript
-import { ActionContribution, ActivationEvent, CommandContribution, MetadataIconContribution, MetadataViewerContribution, PanelContribution, PanelLocation, SidebarGroupContribution, StudioPluginContributions, StudioPluginManifest, ViewMode } from '@objectstack/spec/studio';
-import type { ActionContribution, ActivationEvent, CommandContribution, MetadataIconContribution, MetadataViewerContribution, PanelContribution, PanelLocation, SidebarGroupContribution, StudioPluginContributions, StudioPluginManifest, ViewMode } from '@objectstack/spec/studio';
+import { ActionContributionSchema, ActivationEventSchema, CommandContributionSchema, MetadataIconContributionSchema, MetadataViewerContributionSchema, PanelContributionSchema, PanelLocationSchema, SidebarGroupContributionSchema, StudioPluginContributionsSchema, StudioPluginManifestSchema, ViewModeSchema } from '@objectstack/spec/studio';
+import type { ActionContribution, CommandContribution, MetadataIconContribution, MetadataViewerContribution, PanelContribution, SidebarGroupContribution, StudioPluginContributions, StudioPluginManifest, ViewMode } from '@objectstack/spec/studio';
 
 // Validate data
-const result = ActionContribution.parse(data);
+const result = ActionContributionSchema.parse(data);
 ```
 
 ---

@@ -40,11 +40,11 @@ recipes (separate spec) so they remain auditable and replayable.
 ## TypeScript Usage
 
 ```typescript
-import { ExpressionBody, HookBody, HookBodyCapability, ScriptBody } from '@objectstack/spec/data';
+import { ExpressionBodySchema, HookBodySchema, HookBodyCapability, ScriptBodySchema } from '@objectstack/spec/data';
 import type { ExpressionBody, HookBody, HookBodyCapability, ScriptBody } from '@objectstack/spec/data';
 
 // Validate data
-const result = ExpressionBody.parse(data);
+const result = ExpressionBodySchema.parse(data);
 ```
 
 ---

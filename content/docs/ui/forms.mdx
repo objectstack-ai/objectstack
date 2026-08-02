@@ -44,7 +44,8 @@ Only the spec'd whitelist of form fields is accepted; everything else (status, o
 > from the form's own declaration — `{ object: <the form's target object> }` —
 > and the SecurityPlugin authorizes **only** create + the immediate read-back on
 > exactly that object, never anything else and never the anonymous fall-open. So
-> public forms work under secure-by-default (`requireAuth: true`) with **no**
+> public forms work under the unconditional anonymous-deny posture (v17
+> retired the `requireAuth: false` opt-out, #3963) with **no**
 > `guest_portal` permission set. The `guest_portal` permission set + `anonymous` flag
 > are still attached for **back-compat** (object hooks that detect a guest via a
 > falsy `ctx.user?.id`), but they are no longer the authorization mechanism.
@@ -231,7 +232,7 @@ The companion `GET /api/v1/forms/:slug` route returns `500 FORM_RESOLVE_FAILED` 
 
 ### Auth model
 
-- Neither route calls `enforceAuth`, so they work even when the project is configured with `requireAuth: true`.
+- Neither route calls `enforceAuth`, so they work under the always-on anonymous-deny default (there is no `requireAuth` knob to configure since v17).
 - The execution context handed to ObjectQL is `{ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true }` with no `userId`. The Security plugin honors `publicFormGrant` first — a create + read-back grant scoped to exactly the declared object — so authorization holds even without a `guest_portal` profile. `permissions: ['guest_portal']` is retained for back-compat.
 - No CSRF or auth header is needed; embed the form on any domain.
 

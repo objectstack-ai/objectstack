@@ -16,11 +16,11 @@ Defines the communication protocol for realtime data synchronization
 ## TypeScript Usage
 
 ```typescript
-import { RealtimeConfig, RealtimeEvent, RealtimeEventType, RealtimePresence, Subscription, SubscriptionEvent, TransportProtocol } from '@objectstack/spec/api';
-import type { RealtimeConfig, RealtimeEvent, RealtimeEventType, RealtimePresence, Subscription, SubscriptionEvent, TransportProtocol } from '@objectstack/spec/api';
+import { RealtimeConfigSchema, RealtimeEventSchema, RealtimeEventType, RealtimePresenceSchema, SubscriptionSchema, SubscriptionEventSchema, TransportProtocol } from '@objectstack/spec/api';
+import type { RealtimeConfig, RealtimeEvent, RealtimeEventType, RealtimePresence, Subscription, TransportProtocol } from '@objectstack/spec/api';
 
 // Validate data
-const result = RealtimeConfig.parse(data);
+const result = RealtimeConfigSchema.parse(data);
 ```
 
 ---

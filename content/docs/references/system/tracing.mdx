@@ -26,11 +26,11 @@ Comprehensive distributed tracing based on OpenTelemetry standards:
 ## TypeScript Usage
 
 ```typescript
-import { OpenTelemetryCompatibility, OtelExporterType, SamplingDecision, SamplingStrategyType, Span, SpanAttributeValue, SpanAttributes, SpanEvent, SpanKind, SpanLink, SpanStatus, TraceContext, TraceContextPropagation, TraceFlags, TracePropagationFormat, TraceSamplingConfig, TraceState, TracingConfig } from '@objectstack/spec/system';
+import { OpenTelemetryCompatibilitySchema, OtelExporterType, SamplingDecision, SamplingStrategyType, SpanSchema, SpanAttributeValueSchema, SpanAttributesSchema, SpanEventSchema, SpanKind, SpanLinkSchema, SpanStatus, TraceContextSchema, TraceContextPropagationSchema, TraceFlagsSchema, TracePropagationFormat, TraceSamplingConfigSchema, TraceStateSchema, TracingConfigSchema } from '@objectstack/spec/system';
 import type { OpenTelemetryCompatibility, OtelExporterType, SamplingDecision, SamplingStrategyType, Span, SpanAttributeValue, SpanAttributes, SpanEvent, SpanKind, SpanLink, SpanStatus, TraceContext, TraceContextPropagation, TraceFlags, TracePropagationFormat, TraceSamplingConfig, TraceState, TracingConfig } from '@objectstack/spec/system';
 
 // Validate data
-const result = OpenTelemetryCompatibility.parse(data);
+const result = OpenTelemetryCompatibilitySchema.parse(data);
 ```
 
 ---

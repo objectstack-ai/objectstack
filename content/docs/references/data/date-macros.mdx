@@ -122,11 +122,11 @@ last calendar DAY (`\{current_year_end\}` → `2026-12-31`), so on a
 ## TypeScript Usage
 
 ```typescript
-import { DateMacroPlaceholder, DateMacroToken } from '@objectstack/spec/data';
-import type { DateMacroPlaceholder, DateMacroToken } from '@objectstack/spec/data';
+import { DateMacroPlaceholderSchema, DateMacroTokenSchema } from '@objectstack/spec/data';
+import type { DateMacroToken } from '@objectstack/spec/data';
 
 // Validate data
-const result = DateMacroPlaceholder.parse(data);
+const result = DateMacroPlaceholderSchema.parse(data);
 ```
 
 ---

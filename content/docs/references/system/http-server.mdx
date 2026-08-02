@@ -26,11 +26,11 @@ Architecture alignment:
 ## TypeScript Usage
 
 ```typescript
-import { HttpServerConfig, MiddlewareConfig, MiddlewareType, RouteHandlerMetadata, ServerCapabilities, ServerEvent, ServerEventType, ServerStatus } from '@objectstack/spec/system';
+import { HttpServerConfigSchema, MiddlewareConfigSchema, MiddlewareType, RouteHandlerMetadataSchema, ServerCapabilitiesSchema, ServerEventSchema, ServerEventType, ServerStatusSchema } from '@objectstack/spec/system';
 import type { HttpServerConfig, MiddlewareConfig, MiddlewareType, RouteHandlerMetadata, ServerCapabilities, ServerEvent, ServerEventType, ServerStatus } from '@objectstack/spec/system';
 
 // Validate data
-const result = HttpServerConfig.parse(data);
+const result = HttpServerConfigSchema.parse(data);
 ```
 
 ---

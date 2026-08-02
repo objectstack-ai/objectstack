@@ -16,11 +16,11 @@ Determines how data is fetched when connectivity is limited.
 ## TypeScript Usage
 
 ```typescript
-import { ConflictResolution, EvictionPolicy, OfflineCacheConfig, OfflineConfig, OfflineStrategy, PersistStorage, SyncConfig } from '@objectstack/spec/ui';
+import { ConflictResolutionSchema, EvictionPolicySchema, OfflineCacheConfigSchema, OfflineConfigSchema, OfflineStrategySchema, PersistStorageSchema, SyncConfigSchema } from '@objectstack/spec/ui';
 import type { ConflictResolution, EvictionPolicy, OfflineCacheConfig, OfflineConfig, OfflineStrategy, PersistStorage, SyncConfig } from '@objectstack/spec/ui';
 
 // Validate data
-const result = ConflictResolution.parse(data);
+const result = ConflictResolutionSchema.parse(data);
 ```
 
 ---
