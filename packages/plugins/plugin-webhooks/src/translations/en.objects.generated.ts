@@ -30,11 +30,13 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       triggers: {
         label: "Triggers",
-        help: "Comma-separated event list: create,update,delete",
+        help: "Record events that fire this webhook. bulk_update / bulk_delete fire on predicate writes and deliver a count, not a record.",
         options: {
           create: "create",
           update: "update",
-          delete: "delete"
+          delete: "delete",
+          bulk_update: "bulk_update",
+          bulk_delete: "bulk_delete"
         }
       },
       url: {

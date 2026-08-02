@@ -30,11 +30,13 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       triggers: {
         label: "触发器",
-        help: "以逗号分隔的事件列表：create,update,delete",
+        help: "触发该 Webhook 的记录事件。bulk_update / bulk_delete 由谓词写（批量）触发，投递的是受影响条数而非记录。",
         options: {
           create: "创建",
           update: "更新",
-          delete: "删除"
+          delete: "删除",
+          bulk_update: "批量更新",
+          bulk_delete: "批量删除"
         }
       },
       url: {
