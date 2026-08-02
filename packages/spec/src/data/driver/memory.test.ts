@@ -441,30 +441,4 @@ describe('MemoryDriverSpec', () => {
   it('should have an icon', () => {
     expect(MemoryDriverSpec.icon).toBe('memory');
   });
-
-  it('should have capabilities defined', () => {
-    expect(MemoryDriverSpec.capabilities).toBeDefined();
-  });
-
-  it('should support transactions', () => {
-    expect(MemoryDriverSpec.capabilities!.transactions).toBe(true);
-  });
-
-  it('should support core query features', () => {
-    expect(MemoryDriverSpec.capabilities!.queryFilters).toBe(true);
-    expect(MemoryDriverSpec.capabilities!.queryAggregations).toBe(true);
-    expect(MemoryDriverSpec.capabilities!.querySorting).toBe(true);
-    expect(MemoryDriverSpec.capabilities!.queryPagination).toBe(true);
-  });
-
-  it('should not support advanced query features', () => {
-    expect(MemoryDriverSpec.capabilities!.joins).toBe(false);
-    expect(MemoryDriverSpec.capabilities!.queryWindowFunctions).toBe(false);
-    expect(MemoryDriverSpec.capabilities!.querySubqueries).toBe(false);
-    expect(MemoryDriverSpec.capabilities!.fullTextSearch).toBe(false);
-  });
-
-  it('should support dynamic schema', () => {
-    expect(MemoryDriverSpec.capabilities!.dynamicSchema).toBe(true);
-  });
 });

@@ -586,6 +586,7 @@ const step17: MigrationStep = {
     'agent-knowledge-removed',
     'skill-trigger-phrases-removed',
     'stack-api-require-auth-removed',
+    'datasource-capabilities-removed',
     'flow-node-wait-timeout-keys-removed',
     'datasource-read-replicas-removed',
     'flow-node-script-branch-keys-removed',

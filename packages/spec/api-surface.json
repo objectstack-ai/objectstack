@@ -290,8 +290,6 @@
     "DataTypeMapping (type)",
     "DataTypeMappingSchema (const)",
     "Datasource (type)",
-    "DatasourceCapabilities (const)",
-    "DatasourceCapabilitiesType (type)",
     "DatasourceInput (type)",
     "DatasourceSchema (const)",
     "DateGranularity (const)",

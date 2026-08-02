@@ -1,6 +1,6 @@
 {
   "type": "datasource",
-  "_note": "DatasourceSchema. Consumers: @objectstack/service-datasource (DatasourceConnectionService.toSpec → DatasourceConnectionSpec → createDefaultDatasourceDriverFactory), @objectstack/objectql (engine.ts federation write gate), @objectstack/runtime (external-validation-plugin). Seeded 2026-08-01 (#4487) after #4465/#4481 found six inert keys BY HAND on a type no gate governed. Method: the authoritative boundary is what crosses into `ConnectableDatasource` (datasource-connection-service.ts:45-74) and `DatasourceConnectionSpec` (contracts/datasource-driver-factory.ts:25-59) — a block on neither reaches no driver. objectui's DatasourcePreview renders `pool`/`ssl`/`retryPolicy`/`healthCheck` as SideBlocks and is NOT counted as evidence for any entry (see README, 'An authoring/preview renderer is NOT a runtime consumer' — the #4481 precedent was exactly this). Framework provenance/lock fields auto-live.",
+  "_note": "DatasourceSchema. Consumers: @objectstack/service-datasource (DatasourceConnectionService.toSpec → DatasourceConnectionSpec → createDefaultDatasourceDriverFactory), @objectstack/objectql (engine.ts federation write gate), @objectstack/runtime (external-validation-plugin). Seeded 2026-08-01 (#4487) after #4465/#4481 found six inert keys BY HAND on a type no gate governed. Method: the authoritative boundary is what crosses into `ConnectableDatasource` (datasource-connection-service.ts:45-74) and `DatasourceConnectionSpec` (contracts/datasource-driver-factory.ts:25-59) — a block on neither reaches no driver. objectui's DatasourcePreview renders `pool`/`ssl`/`retryPolicy`/`healthCheck` as SideBlocks and is NOT counted as evidence for any entry (see README, 'An authoring/preview renderer is NOT a runtime consumer' — the #4481 precedent was exactly this). Framework provenance/lock fields auto-live. RETIREMENT 2026-08-02 (#4583): the whole `capabilities` block (11 flags, every one dead and authorWarn'd) was REMOVED from the schema rather than bridged — pushdown is decided by the runtime driver's own `supports.*`, a different mechanism, so there was nothing to connect it to. Its rows are deleted rather than flipped, per the strict-removal route (the keys left the walked shape, so a kept row would read as an ORPHAN). `readOnly` is called out separately in the tombstone: deleting it does NOT hand the author a working alternative, because `external.allowWrites` only gates FEDERATED datasources — a managed datasource has no read-only gate at all, which is #4584 rather than something this removal invented.",
   "props": {
     "name": {
       "status": "live",
@@ -45,32 +45,23 @@
         }
       }
     },
-    "capabilities": {
-      "children": {
-        "transactions": { "status": "dead", "authorWarn": true, "authorHint": "Delete it. The engine gates pushdown on the runtime driver's own `supports.*` object (objectql/src/engine.ts:3671, :4529, :4810 — `autonumber`, `queryDateGranularity`, `batchSchemaSync`), which is a different mechanism with a different vocabulary. Nothing reads this block." },
-        "queryFilters": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. Filter support is not negotiated through datasource metadata." },
-        "queryAggregations": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. Whether aggregation runs in SQL or in memory is decided by the driver's own code path, never by this flag." },
-        "querySorting": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`." },
-        "queryPagination": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`." },
-        "queryWindowFunctions": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. Window functions were themselves retired from the query surface in #4286." },
-        "querySubqueries": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`." },
-        "joins": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. `query.joins` was retired in #4286; related-record retrieval is `expand`." },
-        "fullTextSearch": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. Search capability is deployment/locale-gated in the search companion, not declared here." },
-        "readOnly": {
-          "status": "dead",
-          "authorWarn": true,
-          "authorHint": "Delete it. It does NOT make a datasource read-only — no write path consults it. The enforced datasource-wide write gate is `external.allowWrites: false` (objectql/src/engine.ts:620), which requires `schemaMode !== 'managed'`.",
-          "note": "The most dangerous entry in this ledger and the reason it was seeded. `readOnly` reads as a safety property, and until this PR TWO shipped prescriptions pointed authors AT it: the `externalSettingsUnknownKeyError` guidance in datasource.zod.ts and the #4465 changeset's relocation table both offered `capabilities.readOnly` as the place to 'describe the driver'. Both were corrected in #4487. An author following that advice believed they had marked a datasource non-writable and had not."
-        },
-        "dynamicSchema": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `capabilities.transactions`. Whether a driver is schemaless is a property of the driver, and the drivers that are (mongo, memory) behave that way unconditionally." }
-      },
-      "note": "All 11 dead, verified 2026-08-01 by closing the call graph in both directions: (1) `capabilities` is absent from ConnectableDatasource AND DatasourceConnectionSpec, so it cannot reach a driver; (2) grepping each flag name across the monorepo returns only packages/spec — the schema's own declaration, its alias table, and the `*DriverSpec` literals in data/driver/*.zod.ts. The engine's real capability seam is `driver.supports?.*` on the runtime driver OBJECT, whose keys (`autonumber`, `batchSchemaSync`, `queryDateGranularity`) do not overlap with this vocabulary at all. `having-filter.ts:13` states the position plainly in a comment: 'SQL pushdown can come later behind a driver capability flag' — i.e. the mechanism this block describes is not built."
-    },
     "healthCheck": {
       "children": {
-        "enabled": { "status": "dead", "authorWarn": true, "authorHint": "Delete it. No health-check loop reads this block. Connection liveness is probed on demand via the driver handle's `ping()` / `checkHealth()` (contracts/datasource-driver-factory.ts:88-92), which the admin service calls for `testConnection` — not on any interval this could enable." },
-        "intervalMs": { "status": "dead", "authorWarn": true, "authorHint": "Delete it. Nothing schedules a datasource health check, so there is no interval to set. The only recurring datasource timer is `external.validation.checkIntervalMs` (schema-drift checking, a different concern)." },
-        "timeoutMs": { "status": "dead", "authorWarn": true, "authorHint": "Delete it. See `healthCheck.intervalMs` — there is no probe loop for this to bound." }
+        "enabled": {
+          "status": "dead",
+          "authorWarn": true,
+          "authorHint": "Delete it. No health-check loop reads this block. Connection liveness is probed on demand via the driver handle's `ping()` / `checkHealth()` (contracts/datasource-driver-factory.ts:88-92), which the admin service calls for `testConnection` — not on any interval this could enable."
+        },
+        "intervalMs": {
+          "status": "dead",
+          "authorWarn": true,
+          "authorHint": "Delete it. Nothing schedules a datasource health check, so there is no interval to set. The only recurring datasource timer is `external.validation.checkIntervalMs` (schema-drift checking, a different concern)."
+        },
+        "timeoutMs": {
+          "status": "dead",
+          "authorWarn": true,
+          "authorHint": "Delete it. See `healthCheck.intervalMs` — there is no probe loop for this to bound."
+        }
       },
       "note": "All 3 dead, verified 2026-08-01. `healthCheck` is absent from ConnectableDatasource and DatasourceConnectionSpec. Every `healthCheck` hit in the monorepo belongs to a DIFFERENT surface — the PLUGIN health monitor (core/src/health-monitor.ts, core/src/plugin-loader.ts:316), the AI model registry, the integration connector, `StartupOrchestratorOptions.healthCheck`. Name collision, not a consumer. Easy to mis-verify: a bare grep for 'healthCheck' returns 20 hits and none of them is this block."
     },
@@ -102,10 +93,26 @@
     },
     "retryPolicy": {
       "children": {
-        "maxRetries": { "status": "dead", "authorWarn": true, "authorHint": "Delete it. No connect or query path retries on this block. Connection failure handling is the boot policy in datasource-connection-service.ts (degraded boot / `bootCritical` fail-fast), which does not retry on a schedule. Do not confuse this with `hook.retryPolicy` (enforced, objectql/src/hook-wrappers.ts:105) or `job.retryPolicy` (enforced, runtime/src/app-plugin.ts:791) — same key name, different types, different shapes." },
-        "baseDelayMs": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `retryPolicy.maxRetries`. Note this key does not even exist on the two retryPolicy blocks that ARE enforced: `hook.retryPolicy` spells its delay `backoffMs`." },
-        "maxDelayMs": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `retryPolicy.maxRetries`." },
-        "backoffMultiplier": { "status": "dead", "authorWarn": true, "authorHint": "Delete it — see `retryPolicy.maxRetries`." }
+        "maxRetries": {
+          "status": "dead",
+          "authorWarn": true,
+          "authorHint": "Delete it. No connect or query path retries on this block. Connection failure handling is the boot policy in datasource-connection-service.ts (degraded boot / `bootCritical` fail-fast), which does not retry on a schedule. Do not confuse this with `hook.retryPolicy` (enforced, objectql/src/hook-wrappers.ts:105) or `job.retryPolicy` (enforced, runtime/src/app-plugin.ts:791) — same key name, different types, different shapes."
+        },
+        "baseDelayMs": {
+          "status": "dead",
+          "authorWarn": true,
+          "authorHint": "Delete it — see `retryPolicy.maxRetries`. Note this key does not even exist on the two retryPolicy blocks that ARE enforced: `hook.retryPolicy` spells its delay `backoffMs`."
+        },
+        "maxDelayMs": {
+          "status": "dead",
+          "authorWarn": true,
+          "authorHint": "Delete it — see `retryPolicy.maxRetries`."
+        },
+        "backoffMultiplier": {
+          "status": "dead",
+          "authorWarn": true,
+          "authorHint": "Delete it — see `retryPolicy.maxRetries`."
+        }
       },
       "note": "All 4 dead, verified 2026-08-01. Absent from ConnectableDatasource and DatasourceConnectionSpec. The trap here is the name: `retryPolicy` IS enforced on `hook` and on `job`, so a grep for the key looks alive and a reader who stops there concludes the datasource one works too. The shapes differ — hook uses `{maxRetries, backoffMs}`, this declares `{maxRetries, baseDelayMs, maxDelayMs, backoffMultiplier}` — which is itself the tell that nothing reads both."
     },

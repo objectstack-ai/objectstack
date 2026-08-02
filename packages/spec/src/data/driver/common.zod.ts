@@ -42,10 +42,22 @@ export const SCHEMA_MODE_BELONGS_ON_DATASOURCE =
   + "(`schemaMode: 'external'`) — the connection service now carries it down to the driver, so "
   + 'the copy inside `config` is gone rather than duplicated.';
 
-/** `readOnly` written inside `config`. Shared by every driver. */
+/**
+ * `readOnly` written inside `config`. Shared by every driver.
+ *
+ * This line used to send authors to `capabilities: { readOnly: true }` — a key
+ * #4583 removed because nothing read it, so the advice manufactured exactly the
+ * belief it was meant to correct: an author moved the key, the parse went
+ * green, and the datasource stayed writable. The prescription now names the one
+ * gate that is enforced, and says plainly where it does NOT apply rather than
+ * leaving the reader to assume it covers their case (#4584).
+ */
 export const READ_ONLY_BELONGS_ON_DATASOURCE =
-  '`readOnly` is not driver config. Use `capabilities: { readOnly: true }` on the datasource to '
-  + 'declare the connection read-only, or `external.allowWrites: false` for a federated database.';
+  '`readOnly` is not driver config, and there is no datasource key that makes a connection '
+  + 'read-only. For a FEDERATED datasource use `external.allowWrites: false`, which the ObjectQL '
+  + 'engine enforces before every write. For a managed (local) datasource there is currently no '
+  + 'read-only gate — grant the connection SELECT-only at the database instead, which is a real '
+  + 'boundary rather than an application-layer flag (#4584).';
 
 /**
  * TLS on/off for a SQL driver — the shorthand, and deliberately ONLY the

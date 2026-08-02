@@ -114,9 +114,44 @@ shared files, and the merge queue is one lane regardless. Scaling order:
 2. When one PM genuinely can't keep up: a second session takes a **whole
    repo** as its shard (`/pm-dispatch repo:objectstack-ai/objectui`) —
    file universes are disjoint by construction. A sharded PM states its
-   shard in every claim comment and **never claims outside it**; cross-repo
-   parent/sub-issue chains stay with the main-backlog PM.
+   shard in every claim comment and **never claims outside it**.
 3. Multiple PMs on the SAME queue: prohibited — all cost, no throughput.
+
+**Shard ownership is registered, never assumed.** A registry issue in the
+main backlog (`[PM] 分片分工登记表`) records which session owns which
+shard; a PM taking over a shard comments there as its FIRST action, and
+comments again when handing off. An unowned shard may be **caretaken** by
+the main-backlog PM (triage + dispatch), but the moment a shard is
+registered to another session, the caretaker stops dispatching into it —
+in-flight claimed tasks finish under whoever claimed them (the claim
+protocol makes the handoff collision-free), and everything else belongs to
+the new owner. State the mode in claim comments (「cloud 分片,主 PM 代管」
+vs a registered shard PM's own tag) so the registry and the claims never
+disagree silently.
+
+**Cross-shard transfer protocol — work crosses shard lines, PMs never
+do.** When a sharded PM's task (or a sub-task of its parent issue) needs a
+change in another shard's repo:
+
+- **Transfer via the target queue**: file the piece as an issue in the
+  target repo with `pm:queue` and a source line (`Part of
+  <owner/repo>#<n>`). The target shard's PM picks it up through its own
+  backlog sweep — the queue label IS the inter-PM channel; PMs never need
+  to talk directly, and never dispatch into a repo whose in-flight batch
+  they cannot see (that is the same collision the same-queue ban exists
+  for).
+- **Dependencies via `Blocked-by:`** on the waiting side; the waiting PM's
+  batch selection skips it until the upstream merges.
+- **Follow-up chores belong to the consuming shard**: when the upstream
+  change lands (say spec gained a key), the dependent-repo adaptation issue
+  is filed by the PM of the repo that consumes it — it knows its surfaces.
+- **Shared contract surfaces have one owner**: anything touching
+  `packages/spec` transfers to the main-backlog (objectstack) PM
+  regardless of who needs it — only that PM sees the repo's in-flight
+  batch and generated-baseline collisions.
+- Cross-repo parent/sub-issue chains as a whole stay coordinated by the
+  main-backlog PM; sharded PMs coordinate only chains fully inside their
+  shard.
 
 **5. One board, no second tracker.** The pm labels above are the state
 machine; an org-level GitHub Project pulling issues/PRs from all three repos
@@ -126,13 +161,43 @@ the loop resumable and the board honest.
 
 ## The round loop
 
+### 0. Backlog sweep — classification is a standing duty, not a request
+
+The maintainer does not pre-sort the backlog. On every round (and every
+idle check-in), sweep issues that carry no `pm:*` / `needs-user-decision`
+label and classify each:
+
+- **Auto-queue (`pm:queue`)**: a concrete defect with a named location or
+  repro; a scoped tooling/gate fix; a restore-invariant finding; a
+  test-only pin. Nothing to ask — label it and it becomes dispatchable.
+- **Maintainer confirm (`needs-user-decision`)**: design cards, feature/
+  contract-shape proposals, multi-week programs needing appetite and
+  sequencing, anything touching stored-data migration shape or removing a
+  shipped capability. The label alone is the inbox entry; the deep two-axis
+  analysis is written when the card is actually taken up.
+- **Repair first**: a body truncated by GitHub's sanitizer (bare `<x>`
+  swallows the rest at rest) cannot be dispatched — comment the repair
+  instruction and move on.
+
 ### 1. Fetch candidates
 
 List open issues matching the filter, excluding anything assigned or labeled
 `needs-user-decision`. **Open sub-issues of a matching parent are candidates
 too** — they inherit the parent's queue membership and need no label of their
-own. Read each candidate's full body — triage, batch selection (steps 2–3)
-and the dispatch prompt all need it.
+own. Read each candidate's full body **and its comments** — a comment may
+record that half the work already shipped (#4075's step 1 had been merged
+for three days; the claim went out without reading the comment that said
+so). Triage, batch selection (steps 2–3) and the dispatch prompt all need
+the full picture.
+
+**Stale-premise check before every dispatch.** Issues describe the repo as
+of their filing date; main moves ~18 merges a day. Before dispatching,
+check the named files/subsystem against recent main history (`git log
+--oneline -20 -- <paths>`, or search merged PRs referencing the issue's
+keywords). Three same-day cases: #4525 (spec key landed 3 days before
+filing), #4379 (fix merged via #4459 with the exact proposed sketch),
+#4075 (step 1 shipped via objectui#3032). A dispatch that starts with "is
+this still true?" costs minutes; one that doesn't costs an agent-run.
 
 ### 2. Triage — routing is the PM's job, never the maintainer's
 

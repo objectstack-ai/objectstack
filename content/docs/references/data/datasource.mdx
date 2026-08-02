@@ -16,7 +16,7 @@ Can be a built-in driver or a plugin-contributed driver (e.g., "com.vendor.snowf
 ## TypeScript Usage
 
 ```typescript
-import { DatasourceSchema, DatasourceCapabilities, DriverDefinitionSchema, DriverType, ExternalDatasourceSettingsSchema } from '@objectstack/spec/data';
+import { DatasourceSchema, DriverDefinitionSchema, DriverType, ExternalDatasourceSettingsSchema } from '@objectstack/spec/data';
 import type { Datasource, DriverDefinition, ExternalDatasourceSettings } from '@objectstack/spec/data';
 
 // Validate data
@@ -36,7 +36,6 @@ const result = DatasourceSchema.parse(data);
 | **driver** | `string` | ✅ | Underlying driver type |
 | **config** | `Record<string, any>` | ✅ | Driver specific configuration |
 | **pool** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool settings |
-| **capabilities** | `{ transactions: boolean; queryFilters: boolean; queryAggregations: boolean; querySorting: boolean; … }` | optional | Capability overrides |
 | **healthCheck** | `{ enabled: boolean; intervalMs: number; timeoutMs: number }` | optional | Datasource health check configuration |
 | **ssl** | `{ enabled: boolean; rejectUnauthorized: boolean; ca?: string; cert?: string; … }` | optional | SSL/TLS configuration for secure database connections |
 | **retryPolicy** | `{ maxRetries: number; baseDelayMs: number; maxDelayMs: number; backoffMultiplier: number }` | optional | Connection retry policy for transient failures |
@@ -57,27 +56,6 @@ const result = DatasourceSchema.parse(data);
 
 ---
 
-## DatasourceCapabilities
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **transactions** | `boolean` | ✅ |  |
-| **queryFilters** | `boolean` | ✅ |  |
-| **queryAggregations** | `boolean` | ✅ |  |
-| **querySorting** | `boolean` | ✅ |  |
-| **queryPagination** | `boolean` | ✅ |  |
-| **queryWindowFunctions** | `boolean` | ✅ |  |
-| **querySubqueries** | `boolean` | ✅ |  |
-| **joins** | `boolean` | ✅ |  |
-| **fullTextSearch** | `boolean` | ✅ |  |
-| **readOnly** | `boolean` | ✅ |  |
-| **dynamicSchema** | `boolean` | ✅ |  |
-
-
----
-
 ## DriverDefinition
 
 ### Properties
@@ -89,7 +67,6 @@ const result = DatasourceSchema.parse(data);
 | **description** | `string` | optional |  |
 | **icon** | `string` | optional |  |
 | **configSchema** | `Record<string, any>` | ✅ | JSON Schema for connection configuration |
-| **capabilities** | `{ transactions: boolean; queryFilters: boolean; queryAggregations: boolean; querySorting: boolean; … }` | optional |  |
 
 
 ---

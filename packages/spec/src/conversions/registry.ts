@@ -2231,6 +2231,63 @@ const flowNodeWaitTimeoutKeysRemoved: MetadataConversion = {
 };
 
 /**
+ * `datasource.capabilities` removed (protocol 17, #4583).
+ *
+ * Eleven boolean flags, declared and strict-guarded, read by nothing. Pushdown
+ * is decided by the runtime driver's own `supports.*` object — a different
+ * mechanism entirely — so a datasource declaring `queryAggregations: false`
+ * never once changed which engine path ran.
+ *
+ * `readOnly` is why this one is not merely tidy-up. It reads as a safety
+ * property and was authored as one: the shipped CRM example labelled a
+ * datasource "Read Replica" on the strength of it, while the datasource
+ * accepted writes exactly like the primary. The key had already been MOVED
+ * twice toward somewhere it might be enforced — out of `config` in #4410, into
+ * `capabilities` in #4465 — and was inert at every address. This removes it
+ * instead of moving it a third time.
+ *
+ * Deliberately NOT converted to `external.allowWrites: false`, which is the
+ * enforced gate and the obvious-looking target: it applies only to FEDERATED
+ * datasources (`schemaMode` other than `managed`), so rewriting a managed
+ * datasource that way would produce a key that is equally inert for that author
+ * — the exact defect being retired, laundered through a migration. A managed
+ * datasource has no read-only gate at all (#4584); the honest conversion is a
+ * delete plus a rejection message that says so.
+ *
+ * `retiredFromLoadPath`: both shapes are `.strict()` and reject the key with
+ * its prescription (`RETIRED_CAPABILITIES`).
+ */
+const datasourceCapabilitiesRemoved: MetadataConversion = {
+  id: 'datasource-capabilities-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'datasource.capabilities',
+  summary: "datasource key 'capabilities' removed (#4583 — eleven flags no code read; pushdown comes from the driver's own supports.*, and `readOnly` never made anything read-only)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'datasources', (ds, path) => stripKeys(ds, ['capabilities'], emit, path));
+  },
+  fixture: {
+    before: {
+      datasources: [{
+        name: 'analytics',
+        driver: 'sqlite',
+        config: { filename: ':memory:' },
+        capabilities: { readOnly: true, queryAggregations: true },
+      }],
+    },
+    // One notice per datasource, not per flag: the block is what was removed.
+    after: {
+      datasources: [{
+        name: 'analytics',
+        driver: 'sqlite',
+        config: { filename: ':memory:' },
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
  * `datasource.readReplicas` — replica connections nothing ever opened (#4468).
  *
  * A lossless delete, and an unusually clear one: read/write splitting does not
@@ -2476,6 +2533,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     stackApiRequireAuthRemoved,
     flowNodeWaitTimeoutKeysRemoved,
     datasourceReadReplicasRemoved,
+    datasourceCapabilitiesRemoved,
     // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
     // whether `config.function` is set, and that rename is what sets it.
     flowNodeScriptBranchKeysRemoved,

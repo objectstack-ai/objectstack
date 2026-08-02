@@ -42,7 +42,6 @@
     "data/DataEngineInsertRequest — no type export",
     "data/DataEngineUpdateRequest — no type export",
     "data/DataEngineVectorFindRequest — no type export",
-    "data/DatasourceCapabilities — no type export",
     "data/DateGranularity — no type export",
     "data/DateMacroPlaceholder — no type export",
     "data/DimensionType — no type export",
