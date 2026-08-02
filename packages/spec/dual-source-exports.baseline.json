@@ -13,7 +13,6 @@
     "FieldMapping — [./data (type)] ≠ [./integration (type)] ≠ [./shared (type)]",
     "FieldMappingSchema — [./data (const)] ≠ [./integration (const)] ≠ [./shared (const)]",
     "HttpMethod — [./api, ./shared (type)] ≠ [./ui (type)]",
-    "HttpRequest — [./shared (type)] ≠ [./ui (type)]",
     "PackageDependency — [./cloud (type)] ≠ [./kernel (type)]",
     "PackageDependencySchema — [./cloud (const)] ≠ [./kernel (const)]",
     "RateLimitConfig — [./integration (type)] ≠ [./shared (type)]",
