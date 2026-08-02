@@ -85,6 +85,20 @@ describe('validateFunctionalCompleteness — the walk', () => {
     expect(findings.every((f) => f.severity === 'warning')).toBe(true);
   });
 
+  it('walks webhooks in both spellings', () => {
+    expect(validateFunctionalCompleteness({
+      webhooks: [{ name: 'notify', url: 'https://x' }],
+    })[0]).toMatchObject({
+      rule: 'webhook/without-triggers',
+      severity: 'error',
+      where: 'webhook "notify"',
+      path: 'webhooks[0].triggers',
+    });
+    expect(validateFunctionalCompleteness({
+      webhooks: { notify: { url: 'https://x' } },
+    })[0]).toMatchObject({ where: 'webhook "notify"', path: 'webhooks.notify.triggers' });
+  });
+
   it('is silent on a complete stack', () => {
     expect(validateFunctionalCompleteness({
       objects: [{
@@ -97,6 +111,7 @@ describe('validateFunctionalCompleteness — the walk', () => {
         ],
       }],
       views: [{ object: 'order', list: { type: 'grid' } }],
+      webhooks: [{ name: 'notify', url: 'https://x', triggers: ['create'] }],
     })).toEqual([]);
   });
 
@@ -107,6 +122,7 @@ describe('validateFunctionalCompleteness — the walk', () => {
       { objects: [{ name: 'o', fields: 'nope' }] },
       { views: [{ list: null }] },
       { views: 'nope' },
+      { webhooks: 'nope' }, { webhooks: [null, 7] },
     ]) {
       expect(() => validateFunctionalCompleteness(junk)).not.toThrow();
     }

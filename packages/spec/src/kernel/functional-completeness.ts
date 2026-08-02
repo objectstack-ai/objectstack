@@ -46,6 +46,13 @@
  * - `checkboxes` w/o `options` sits between the two: it shares the multi
  *   branch's free-form validator behaviour, but a checkbox group with zero
  *   boxes is almost certainly an omission — so it is a WARNING, not an error.
+ * - `webhook` w/o `triggers` → `auto-enqueuer.ts` `if (triggers.size === 0) …
+ *   return null`. Note this one needed a SECOND source: that skip site's own
+ *   comment blesses the empty case as "a manual-only webhook", which reads
+ *   exactly like the `multiselect` exemption above — but `webhook.zod.ts`
+ *   (#3196) records that no manual fire path exists, so the blessed mode is
+ *   unreachable. See {@link checkWebhookCompleteness}. A runtime comment states
+ *   what its author believed; a removed sibling feature can make it stale.
  *
  * Severity follows ADR-0078 decision 1: `error` when the instance is fully
  * inert, `warning` when it degrades to something that partially works.
@@ -70,6 +77,7 @@ export const FIELD_FORMULA_WITHOUT_EXPRESSION = 'field/formula-without-expressio
 export const FIELD_RELATIONSHIP_WITHOUT_REFERENCE = 'field/relationship-without-reference';
 export const FIELD_CHOICE_WITHOUT_OPTIONS = 'field/choice-without-options';
 export const VIEW_LAYOUT_WITHOUT_BINDING = 'view/layout-without-binding';
+export const WEBHOOK_WITHOUT_TRIGGERS = 'webhook/without-triggers';
 
 /** Every rule id this module can emit — pinned by tests so ids cannot drift. */
 export const FUNCTIONAL_COMPLETENESS_RULES = [
@@ -78,6 +86,7 @@ export const FUNCTIONAL_COMPLETENESS_RULES = [
   FIELD_RELATIONSHIP_WITHOUT_REFERENCE,
   FIELD_CHOICE_WITHOUT_OPTIONS,
   VIEW_LAYOUT_WITHOUT_BINDING,
+  WEBHOOK_WITHOUT_TRIGGERS,
 ] as const;
 
 type AnyRec = Record<string, unknown>;
@@ -220,5 +229,60 @@ export function checkViewCompleteness(view: unknown): CompletenessFinding[] {
         : type === 'calendar'
           ? "calendar: { startDateField: '<date_field>', titleField: '<text_field>' }"
           : "gantt: { startDateField: '<date_field>', endDateField: '<date_field>', titleField: '<text_field>' }",
+  }];
+}
+
+/**
+ * Completeness of a single webhook definition.
+ *
+ * ## Why this one needed TWO sources, and why one of them alone was misleading
+ *
+ * The auto-enqueuer's own comment reads, at the skip site:
+ *
+ * ```
+ * if (triggers.size === 0) {
+ *     // No dispatchable triggers (or a manual-only webhook with none) —
+ *     // skip auto-enqueue.
+ *     return null;
+ * ```
+ *
+ * Read alone, that parenthetical *blesses* the empty case as a deliberate mode
+ * — exactly the shape that makes `multiselect` without options a NON-rule
+ * above. Stopping there would have left this candidate unenforced.
+ *
+ * But the mode it names does not exist. `webhook.zod.ts`'s #3196 note records
+ * that `api` (manual/programmatic fire) was REMOVED as a trigger value
+ * precisely because "no manual fire path exists (the only webhook HTTP surface
+ * re-queues already-failed deliveries)". So there is no way to fire a webhook
+ * that the auto-enqueuer has dropped: it is inert on every path, not
+ * manual-only. Hence `error`, not a NON-rule.
+ *
+ * The lesson generalizes past this rule: a runtime comment describes what its
+ * author believed, and beliefs go stale when a sibling feature is removed. The
+ * blessing has to be corroborated by something that says the blessed mode is
+ * REACHABLE — otherwise it is a comment about a mode that no longer exists.
+ *
+ * `triggers: []` is flagged the same as an omitted `triggers`: unlike an
+ * action's `locations: []` (the documented headless spelling), an empty array
+ * here is not an "I meant it" marker — turning a webhook OFF has its own key
+ * (`isActive` → the row's `active`), so `[]` is simply the same dead shape
+ * spelled out.
+ */
+export function checkWebhookCompleteness(webhook: unknown): CompletenessFinding[] {
+  if (!isRec(webhook)) return [];
+  if (hasEntries(webhook.triggers)) return [];
+  return [{
+    rule: WEBHOOK_WITHOUT_TRIGGERS,
+    severity: 'error',
+    path: 'triggers',
+    message:
+      'A webhook with no `triggers` never fires on any path. The auto-enqueuer drops it while '
+      + 'building its subscription cache (`auto-enqueuer.ts` — `if (triggers.size === 0) … return '
+      + 'null`), and there is no manual fire path to reach it either: `webhook.zod.ts` (#3196) '
+      + 'records that the `api` trigger was removed because "no manual fire path exists — the only '
+      + 'webhook HTTP surface re-queues already-failed deliveries". The webhook materializes into '
+      + '`sys_webhook`, looks armed in Setup, and delivers nothing. To disable a webhook use '
+      + '`isActive: false`; an empty `triggers` is not an off switch, just a dead one.',
+    fix: "triggers: ['create', 'update']",
   }];
 }

@@ -20,12 +20,14 @@ import { describe, expect, it } from 'vitest';
 import {
   checkFieldCompleteness,
   checkViewCompleteness,
+  checkWebhookCompleteness,
   FUNCTIONAL_COMPLETENESS_RULES,
   FIELD_SUMMARY_WITHOUT_OPERATIONS,
   FIELD_FORMULA_WITHOUT_EXPRESSION,
   FIELD_RELATIONSHIP_WITHOUT_REFERENCE,
   FIELD_CHOICE_WITHOUT_OPTIONS,
   VIEW_LAYOUT_WITHOUT_BINDING,
+  WEBHOOK_WITHOUT_TRIGGERS,
 } from './functional-completeness';
 
 const only = (findings: ReturnType<typeof checkFieldCompleteness>) => {
@@ -135,6 +137,50 @@ describe('checkViewCompleteness — layout bindings', () => {
   });
 });
 
+describe('checkWebhookCompleteness — the rule the runtime comment argued against', () => {
+  it('flags a webhook with no `triggers` as an ERROR', () => {
+    const f = only(checkWebhookCompleteness({ name: 'notify_slack', url: 'https://x' }) as never);
+    expect(f.rule).toBe(WEBHOOK_WITHOUT_TRIGGERS);
+    expect(f.severity).toBe('error');
+  });
+
+  it('flags `triggers: []` the same — an empty array is not an off switch here', () => {
+    // Contrast with an action's `locations: []`, which IS the documented
+    // headless spelling. A webhook's off switch is `isActive: false`, so an
+    // empty trigger list carries no "I meant it" signal — it is the same dead
+    // shape written out longhand.
+    const f = only(checkWebhookCompleteness({ triggers: [] }) as never);
+    expect(f.severity).toBe('error');
+  });
+
+  it('is silent once a trigger is declared', () => {
+    expect(checkWebhookCompleteness({ triggers: ['create'] })).toEqual([]);
+    expect(checkWebhookCompleteness({ triggers: ['create', 'update', 'delete'] })).toEqual([]);
+  });
+
+  it('carries BOTH sources, because either one alone gets this wrong', () => {
+    // The skip site's own comment says "or a manual-only webhook with none",
+    // which reads as a runtime blessing — the exact shape that makes
+    // `multiselect` a NON-rule. What defeats it is webhook.zod.ts's #3196 note
+    // that no manual fire path exists, so the blessed mode is unreachable.
+    // If someone later demotes or deletes this rule on the strength of that
+    // comment alone, this assertion is where the missing half is stated.
+    const [f] = checkWebhookCompleteness({});
+    expect(f.message).toContain('auto-enqueuer.ts');
+    expect(f.message).toContain('no manual fire path exists');
+    expect(f.message).toContain('isActive');
+  });
+
+  it('never throws on junk', () => {
+    for (const junk of [undefined, null, 42, 'x', [], { triggers: 'create' }, { triggers: 7 }]) {
+      expect(() => checkWebhookCompleteness(junk)).not.toThrow();
+    }
+    // A non-array `triggers` is not a declared trigger list — it is the dead
+    // shape wearing the wrong type, so it must not slip through as "declared".
+    expect(checkWebhookCompleteness({ triggers: 'create' })).toHaveLength(1);
+  });
+});
+
 describe('registry hygiene', () => {
   it('pins the rule-id list — ids are API for suppressions and dashboards', () => {
     expect([...FUNCTIONAL_COMPLETENESS_RULES].sort()).toEqual([
@@ -143,6 +189,7 @@ describe('registry hygiene', () => {
       'field/relationship-without-reference',
       'field/summary-without-operations',
       'view/layout-without-binding',
+      'webhook/without-triggers',
     ]);
   });
 
@@ -154,8 +201,9 @@ describe('registry hygiene', () => {
       ...checkFieldCompleteness({ type: 'select' }),
       ...checkFieldCompleteness({ type: 'checkboxes' }),
       ...checkViewCompleteness({ type: 'kanban' }),
+      ...checkWebhookCompleteness({ url: 'https://x' }),
     ];
-    expect(all).toHaveLength(6);
+    expect(all).toHaveLength(7);
     for (const f of all) {
       expect(f.fix.length).toBeGreaterThan(8);
       expect(f.message.length).toBeGreaterThan(60);

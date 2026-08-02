@@ -25,6 +25,7 @@
 import {
   checkFieldCompleteness,
   checkViewCompleteness,
+  checkWebhookCompleteness,
   type CompletenessFinding,
 } from '@objectstack/spec/kernel';
 
@@ -115,6 +116,20 @@ export function validateFunctionalCompleteness(stack: unknown): FunctionalComple
         `views[${vi}].listViews${lv.key}`,
       );
     }
+  }
+
+  // ── Webhooks: stack.webhooks[] ─────────────────────────────────────────
+  // [ADR-0078 Phase 3] The one Tier-B candidate that survived its verification
+  // pass. A webhook materializes into `sys_webhook` and looks armed in Setup
+  // whether or not it declares a trigger, so the omission is invisible on every
+  // surface an author can see.
+  for (const hook of entriesOf(stack.webhooks)) {
+    push(
+      out,
+      checkWebhookCompleteness(hook.def),
+      `webhook "${hook.name}"`,
+      `webhooks${hook.key}`,
+    );
   }
 
   return out;
