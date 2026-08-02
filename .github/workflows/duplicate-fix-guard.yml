@@ -1,0 +1,140 @@
+# GitHub happily lets any number of open PRs declare `Fixes #N` for the same
+# issue. On 2026-08-02 that cost a full duplicate implementation: #4555 and
+# #4559 both declared `Fixes #4551`, both ran the whole gate suite green, and
+# the duplication sat machine-detectable from the moment the second PR opened
+# (03:08) until a human noticed it (08:52). All agents here share one GitHub
+# identity, so the issue's assignee could not warn the second author either —
+# "assigned to os-zhuang" reads the same whether it is you or another session.
+# Full post-mortem: #4588.
+#
+# This gate makes the second PR red at open time. First come, first served —
+# the EARLIER open PR (lower number) keeps its claim and stays green; the
+# later one fails with a pointer to it. That matches the pm-dispatch claim
+# convention ("first claim comment wins") already in .claude/skills/.
+#
+# Scope: same-repo references only (bare `#N` and qualified `<this repo>#N`).
+# Cross-repo references are the cross-repo-issue-closer's territory, and a
+# duplicate across repos cannot be resolved by failing one side's CI anyway.
+name: Duplicate Fix Guard
+
+# `edited` matters as much as `opened`: a PR that adds `Fixes #N` to its body
+# after the fact must re-run this check, and one that drops the line must be
+# able to go green again.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  duplicate-fix-guard:
+    name: No other open PR may claim the same issue
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check declared issues against other open PRs
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const thisRepo = `${context.repo.owner}/${context.repo.repo}`;
+
+            // GitHub's own closing-keyword set. The optional colon is part of
+            // GitHub's accepted syntax (`Fixes: #123`). Two same-repo forms:
+            // bare `#N` and qualified `owner/repo#N` naming THIS repo.
+            const KEYWORDS = 'close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved';
+            const pattern = new RegExp(
+              `\\b(?:${KEYWORDS}):?\\s+(?:([\\w.-]+)\\/([\\w.-]+))?#(\\d+)\\b`,
+              'gi',
+            );
+
+            // Strip fenced blocks and inline code spans before matching.
+            // GitHub's own closing-keyword parser ignores code formatting, and
+            // this guard must not be stricter than the linker it protects:
+            // this very PR's first run counted its own DISCUSSION of
+            // `Fixes #4551` (in backticks, describing the incident) as a
+            // declaration. Benign there — #4551 is closed — but a prose
+            // mention of an issue some other open PR really fixes would have
+            // been a spurious red.
+            const declaredIssues = (body) => {
+              const prose = (body || '')
+                .replace(/```[\s\S]*?```/g, ' ')
+                .replace(/`[^`\n]*`/g, ' ');
+              const found = new Set();
+              for (const [, owner, repo, number] of prose.matchAll(pattern)) {
+                // A qualified reference to ANOTHER repo is not ours to judge.
+                if (owner && `${owner}/${repo}`.toLowerCase() !== thisRepo.toLowerCase()) continue;
+                found.add(Number(number));
+              }
+              return found;
+            };
+
+            const mine = declaredIssues(pr.body);
+            if (mine.size === 0) {
+              core.info('This PR declares no same-repo closing keywords — nothing to guard.');
+              return;
+            }
+            core.info(`This PR declares: ${[...mine].map((n) => `#${n}`).join(', ')}`);
+
+            // Branch-name convention (advisory, never red): a fix branch named
+            // `claude/issue-<n>-<slug>` is discoverable by the next session
+            // with one `git ls-remote | grep issue-<n>`. #4555 vs #4559
+            // happened partly because the branches shared no token to grep.
+            // Warning only — existing branches must not go red retroactively.
+            const branch = pr.head.ref;
+            if (![...mine].some((n) => branch.includes(`issue-${n}`))) {
+              core.warning(
+                `Branch \`${branch}\` does not name any declared issue. ` +
+                `Convention: claude/issue-<n>-<slug> (e.g. claude/issue-${[...mine][0]}-short-slug) ` +
+                `so parallel sessions can discover in-flight work with git ls-remote.`,
+              );
+            }
+
+            // Drafts count: a draft PR is work in flight, which is exactly
+            // what the second session needs to see.
+            const openPrs = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            const conflicts = [];
+            for (const other of openPrs) {
+              if (other.number === pr.number) continue;
+              const theirs = declaredIssues(other.body);
+              const shared = [...mine].filter((n) => theirs.has(n));
+              if (shared.length > 0) conflicts.push({ other, shared });
+            }
+
+            if (conflicts.length === 0) {
+              core.info('No other open PR declares these issues.');
+              return;
+            }
+
+            // First come, first served: only the LATER PR goes red. Failing
+            // both would leave the original author red through no action of
+            // their own; failing the earlier one would reward racing.
+            const older = conflicts.filter((c) => c.other.number < pr.number);
+            const newer = conflicts.filter((c) => c.other.number > pr.number);
+
+            for (const { other, shared } of newer) {
+              core.info(
+                `#${other.number} (newer) also declares ${shared.map((n) => `#${n}`).join(', ')} — ` +
+                `it will fail its own run of this guard; this PR keeps its claim.`,
+              );
+            }
+
+            if (older.length > 0) {
+              const lines = older.map(({ other, shared }) =>
+                `  - ${shared.map((n) => `#${n}`).join(', ')} is already claimed by #${other.number} ` +
+                `(${other.html_url}, branch \`${other.head.ref}\`${other.draft ? ', draft' : ''})`,
+              );
+              core.setFailed(
+                `Another open PR already declares a fix for the same issue(s):\n${lines.join('\n')}\n` +
+                `If this PR is the duplicate, close it and add anything it uniquely covers to the ` +
+                `earlier PR or a follow-up issue (that is what saved #4560 when #4559 was closed). ` +
+                `If the EARLIER one is abandoned, close it first — this check re-runs on 'edited' ` +
+                `and 'synchronize', and goes green once the conflict is gone.`,
+              );
+            }

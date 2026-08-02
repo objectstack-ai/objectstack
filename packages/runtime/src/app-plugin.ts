@@ -13,7 +13,9 @@ import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
 import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
-import { countServerTiming } from '@objectstack/observability';
+import { toBoundaryJobSchedule } from './job-schedule.js';
+import { countServerTiming, SEMCONV } from '@objectstack/observability';
+import { resolveMetrics } from './observability/observability-service-plugin.js';
 
 /**
  * The write options every seed insert must use — mirrors
@@ -810,7 +812,9 @@ export class AppPlugin implements Plugin {
                         return;
                     }
                     const fnMap = collectBundleFunctions(this.bundle);
+                    const metrics = resolveMetrics(ctx);
                     let ok = 0;
+                    let failed = 0;
                     for (const job of jobs) {
                         const jobName: string = job?.name;
                         if (!jobName) {
@@ -831,7 +835,13 @@ export class AppPlugin implements Plugin {
                         try {
                             await svc.schedule(
                                 jobName,
-                                job.schedule,
+                                // #4567: authoring tier → boundary tier. `job.schedule`
+                                // is the PARSED `Schedule`, whose cron `expression` is
+                                // the ADR expression envelope `{dialect,source}`;
+                                // `IJobService.schedule` (and croner behind it) take a
+                                // bare cron string. Same seam, same place, as the
+                                // retryPolicy/timeout threading just below.
+                                toBoundaryJobSchedule(job.schedule, jobName),
                                 async (jobCtx: any) => {
                                     await handler({ ...jobCtx, jobId: jobName, bundle: this.bundle });
                                 },
@@ -842,12 +852,29 @@ export class AppPlugin implements Plugin {
                             );
                             ok++;
                         } catch (err: any) {
-                            ctx.logger.warn('[AppPlugin] Failed to schedule job', {
-                                appId, job: jobName, error: err?.message ?? String(err),
-                            });
+                            failed++;
+                            // #4567: a job that fails to schedule is a SILENT OUTAGE —
+                            // the app builds and boots green while the work never runs.
+                            // It gets error level plus its own counter, and deliberately
+                            // NOT the `warn` that "handler not found" / "job disabled"
+                            // use: those describe a job that was never going to run,
+                            // this one describes a job the author is owed.
+                            ctx.logger.error(
+                                '[AppPlugin] Background job FAILED TO SCHEDULE — it will never run',
+                                err as Error,
+                                { appId, job: jobName, schedule: job.schedule },
+                            );
+                            metrics.counter(SEMCONV.jobScheduleFailuresTotal, { app: appId, job: jobName });
                         }
                     }
-                    ctx.logger.info('[AppPlugin] Scheduled background jobs', { appId, count: ok });
+                    ctx.logger.info('[AppPlugin] Scheduled background jobs', { appId, count: ok, failed });
+                    if (failed > 0) {
+                        ctx.logger.error(
+                            '[AppPlugin] Some background jobs are declared but NOT scheduled',
+                            undefined,
+                            { appId, scheduled: ok, failed },
+                        );
+                    }
                 });
             }
         } catch (err: any) {

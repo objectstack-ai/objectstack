@@ -118,6 +118,18 @@ then race to land conflicting shapes for the same problem, which is worse than
 either one alone. If it is already assigned to someone else it is taken — pick
 another, or say so and ask; never reassign it to yourself.
 
+Because every agent here shares one GitHub identity, the assignee field alone
+cannot answer "is this claim *mine*?" — seeing your own shared name on an issue
+is exactly what another session's claim looks like. So a claim is two acts, not
+one: assign, **and leave a claim comment carrying your session ID and branch
+name** (`claude/issue-<n>-<slug>`). Before writing code, re-read the issue's
+comments; an earlier claim comment with a different session ID or branch means
+the issue is taken no matter what the assignee field seems to say. Skipping
+this read is how #4551 got implemented twice in one morning (#4555 and #4559 —
+post-mortem in #4588), and misreading shared-identity state is also how a
+maintainer's manual ready-flip got reverted by an agent that assumed its own
+write had failed.
+
 The claim is also what makes the *finding* rule (Prime Directive #10) safe to
 follow. Once out-of-scope discoveries become issues, the issue list is a real
 queue other agents read, and a claim is the only thing separating "someone is on
@@ -130,7 +142,13 @@ Even inside your own worktree, operate defensively:
    reverts, or other agents' in-flight edits, and don't try to manage the whole
    working tree. If a file you didn't change shows as modified, leave it.
 2. **One feature branch + one PR per task.** Branch off `main`. **Never commit
-   task work straight to `main`.**
+   task work straight to `main`.** Name the branch after the issue it fixes:
+   `claude/issue-<n>-<slug>`. The issue number in the name is what makes
+   in-flight work *discoverable* — `git ls-remote --heads origin | grep
+   issue-<n>` is a one-command pre-check, and the Duplicate Fix Guard workflow
+   warns on fix PRs whose branch names no declared issue. The #4555/#4559
+   duplicate (#4588) stayed invisible partly because one branch carried the
+   issue number and the other didn't.
 3. **Never `git push --force` / `--force-with-lease`, and never push `main`.** A
    force-push can clobber a parallel agent's work; `main` is shared — land
    everything via PR.

@@ -47,6 +47,7 @@
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
+    "@objectstack/service-job": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
