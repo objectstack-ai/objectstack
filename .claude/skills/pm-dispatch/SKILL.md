@@ -233,8 +233,19 @@ Whenever a dev returns `needs_decision`, an issue is too vague to dispatch, or
 rework has failed twice:
 
 1. **File a new issue** titled `[决策] <一句话说清要拍板什么>`, labeled
-   `needs-user-decision`, body in Chinese: 背景、具体问题、可选方案(各自
-   代价)、你的建议、关联的原 issue / PR / 分支。
+   `needs-user-decision`, body in Chinese: 背景、具体问题、可选方案、你的
+   建议、关联的原 issue / PR / 分支。**每个方案必须沿两条固定评估轴分析,
+   这是决策分析的核心原则,不是可选项:**
+   - **项目长远合理性** — 哪个方案符合北极星方向与可持续架构(Prime
+     Directive #5 no workarounds、#8 North Star、#12 contract-first),
+     而不是眼下最省事;临时补丁式的选项要明说其长期代价。
+   - **防 AI 写代码犯错,尤其是防 AI 写元数据 app 犯错** — 哪个方案让
+     AI agent 在结构上*更难写错*:契约收紧(严格 Zod schema、publish 时
+     校验拒绝、错误响亮)优于消费端宽容(`??` 回退、静默容错)——宽容
+     恰恰是 AI 批量犯错被掩盖的温床;声明即强制(declared = enforced),
+     绝不让 AI 能声明一个运行时不兑现的能力。
+   推荐意见必须基于这两条轴给出理由;两轴冲突时如实呈现权衡,交维护者
+   拍板。
 2. Comment on the original issue linking the decision issue, add
    `needs-user-decision` to it too, and drop it from the active queue.
 3. If the session is interactive, additionally raise it via `AskUserQuestion`;

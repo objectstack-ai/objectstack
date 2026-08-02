@@ -51,7 +51,22 @@ semantics — or two readings of the issue lead to different architectures: make
 no guess, write no speculative code. Return `status: "needs_decision"` with
 each question, the options, their costs, and your recommendation in
 `open_questions`. A wrong guess shipped is far more expensive than a round-trip
-to the maintainer. Likewise return `blocked` (with evidence) when `main` is
+to the maintainer. **Analyze every option on two fixed axes — this framing is
+the core of the escalation, not decoration:**
+
+- **Long-term soundness for THIS project**: which option aligns with the
+  North Star and a sustainable architecture (no workarounds, contract-first),
+  not which is cheapest today. Name the long-term cost of any patch-style
+  option explicitly.
+- **Making AI-written code — especially AI-authored metadata apps — hard to
+  get wrong**: prefer the option that structurally prevents mistakes at
+  authoring time (strict Zod schema, publish-time validation that rejects
+  loudly, declared = enforced) over consumer-side tolerance (`??` fallbacks,
+  silent coercion). Lenient consumers are exactly where AI-generated metadata
+  errors hide and multiply.
+
+Your recommendation must be justified on both axes; if they conflict, present
+the trade-off honestly and let the maintainer decide. Likewise return `blocked` (with evidence) when `main` is
 broken under you, a dependency issue is unmerged, or CI infrastructure fails —
 after retrying enough to be sure it is not your change.
 
