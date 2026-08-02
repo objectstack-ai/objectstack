@@ -68,7 +68,24 @@ import { z } from 'zod';
  * in the right-side property inspector.
  */
 import { lazySchema } from '../shared/lazy-schema';
-export const FieldPropertySectionSchema = lazySchema(() => z.object({
+import { strictObject } from '../shared/strict-object';
+
+/**
+ * Shared history for this file (#4001).
+ *
+ * The object designer is the surface where a human shapes the data model, so a
+ * dropped key here quietly narrows what the designer can express — a field group
+ * that never renders, a filter that never applies — while the designer itself
+ * looks like it is working.
+ */
+const OBJECT_DESIGNER_HISTORY =
+  'Until #4001 closed these shapes an unknown key was dropped silently — the designer still '
+  + 'rendered, without whatever the key was meant to configure.';
+
+export const FieldPropertySectionSchema = lazySchema(() => strictObject({
+  surface: 'this field property section',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Unique section key */
   key: z.string().describe('Section key (e.g., "basics", "constraints", "security")'),
 
@@ -91,7 +108,10 @@ export type FieldPropertySection = z.infer<typeof FieldPropertySectionSchema>;
  * Field grouping configuration — organizes fields into collapsible groups
  * within the field editor table (e.g., "Contact Info", "Billing", "System").
  */
-export const FieldGroupSchema = lazySchema(() => z.object({
+export const FieldGroupSchema = lazySchema(() => strictObject({
+  surface: 'this field group',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Group key (matches field.group value) */
   key: z.string().describe('Group key matching field.group values'),
 
@@ -113,7 +133,10 @@ export type FieldGroup = z.infer<typeof FieldGroupSchema>;
 /**
  * Field Editor configuration — controls the visual field editing experience.
  */
-export const FieldEditorConfigSchema = lazySchema(() => z.object({
+export const FieldEditorConfigSchema = lazySchema(() => strictObject({
+  surface: 'this field editor configuration',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Enable inline editing of field properties in the table */
   inlineEditing: z.boolean().default(true).describe('Enable inline editing of field properties'),
 
@@ -157,7 +180,10 @@ export type FieldEditorConfig = z.infer<typeof FieldEditorConfigSchema>;
  * Relationship display configuration — controls how relationships
  * are visualized in the mapper and ER diagram.
  */
-export const RelationshipDisplaySchema = lazySchema(() => z.object({
+export const RelationshipDisplaySchema = lazySchema(() => strictObject({
+  surface: 'this relationship display',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Relationship type to configure */
   type: z.enum(['lookup', 'master_detail', 'tree']).describe('Relationship type'),
 
@@ -180,7 +206,10 @@ export type RelationshipDisplay = z.infer<typeof RelationshipDisplaySchema>;
  * Relationship Mapper configuration — controls the relationship
  * editing and visualization experience.
  */
-export const RelationshipMapperConfigSchema = lazySchema(() => z.object({
+export const RelationshipMapperConfigSchema = lazySchema(() => strictObject({
+  surface: 'this relationship mapp configuration',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Enable visual relationship creation (drag from source to target) */
   visualCreation: z.boolean().default(true).describe('Enable drag-to-create relationships'),
 
@@ -216,7 +245,10 @@ export type ERLayoutAlgorithm = z.infer<typeof ERLayoutAlgorithmSchema>;
  * Node display options — controls what information is shown
  * on each entity node in the ER diagram.
  */
-export const ERNodeDisplaySchema = lazySchema(() => z.object({
+export const ERNodeDisplaySchema = lazySchema(() => strictObject({
+  surface: 'this e r node display',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Show field list within the node */
   showFields: z.boolean().default(true).describe('Show field list inside entity nodes'),
 
@@ -245,7 +277,10 @@ export type ERNodeDisplay = z.infer<typeof ERNodeDisplaySchema>;
  * ER Diagram configuration — controls the entity-relationship
  * diagram rendering, interaction, and layout.
  */
-export const ERDiagramConfigSchema = lazySchema(() => z.object({
+export const ERDiagramConfigSchema = lazySchema(() => strictObject({
+  surface: 'this e r diagram configuration',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Enable the ER diagram panel */
   enabled: z.boolean().default(true).describe('Enable ER diagram panel'),
 
@@ -321,7 +356,10 @@ export const ObjectSortFieldSchema = lazySchema(() => z.enum([
 export type ObjectSortField = z.infer<typeof ObjectSortFieldSchema>;
 
 /** Object filter criteria */
-export const ObjectFilterSchema = lazySchema(() => z.object({
+export const ObjectFilterSchema = lazySchema(() => strictObject({
+  surface: 'this object filter',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Filter by package/namespace */
   package: z.string().optional().describe('Filter by owning package'),
 
@@ -350,7 +388,10 @@ export type ObjectFilter = z.infer<typeof ObjectFilterSchema>;
  * Object Manager configuration — controls the unified object list,
  * search, and management experience.
  */
-export const ObjectManagerConfigSchema = lazySchema(() => z.object({
+export const ObjectManagerConfigSchema = lazySchema(() => strictObject({
+  surface: 'this object manag configuration',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Default display mode */
   defaultDisplayMode: ObjectListDisplayModeSchema.default('table').describe('Default list display mode'),
 
@@ -396,7 +437,10 @@ export type ObjectManagerConfig = z.infer<typeof ObjectManagerConfigSchema>;
  * Preview tab configuration — defines the tabs available
  * when viewing a single object.
  */
-export const ObjectPreviewTabSchema = lazySchema(() => z.object({
+export const ObjectPreviewTabSchema = lazySchema(() => strictObject({
+  surface: 'this object preview tab',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Tab key */
   key: z.string().describe('Tab key'),
 
@@ -419,7 +463,10 @@ export type ObjectPreviewTab = z.infer<typeof ObjectPreviewTabSchema>;
  * Object Preview configuration — defines the tabs and layout
  * when viewing/editing a single object's metadata.
  */
-export const ObjectPreviewConfigSchema = lazySchema(() => z.object({
+export const ObjectPreviewConfigSchema = lazySchema(() => strictObject({
+  surface: 'this object preview configuration',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Tabs to show in the object detail view */
   tabs: z.array(ObjectPreviewTabSchema).default([
     { key: 'fields', label: 'Fields', icon: 'list', enabled: true, order: 0 },
@@ -480,7 +527,10 @@ export type ObjectDesignerDefaultView = z.infer<typeof ObjectDesignerDefaultView
  * });
  * ```
  */
-export const ObjectDesignerConfigSchema = lazySchema(() => z.object({
+export const ObjectDesignerConfigSchema = lazySchema(() => strictObject({
+  surface: 'this object design configuration',
+  history: OBJECT_DESIGNER_HISTORY,
+}, {
   /** Default view when opening the designer */
   defaultView: ObjectDesignerDefaultViewSchema.default('field-editor').describe('Default view'),
 

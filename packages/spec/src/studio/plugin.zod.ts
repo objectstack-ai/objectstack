@@ -60,6 +60,21 @@ import { z } from 'zod';
 
 /** Supported view modes for metadata viewers */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
+
+/**
+ * Shared history for this file (#4001).
+ *
+ * A Studio plugin manifest is the `package.json` of an extension — declarative,
+ * hand-written, and parsed once by `defineStudioPlugin`. A dropped key here does
+ * not fail the plugin: it loads, activates, and simply contributes less than its
+ * author declared. A viewer that never appears in the switcher looks like a
+ * registration bug, not a spelling one.
+ */
+const STUDIO_PLUGIN_HISTORY =
+  'Until #4001 closed these shapes an unknown key was dropped silently — the plugin still '
+  + 'loaded and activated, contributing less than its manifest declared.';
+
 export const ViewModeSchema = lazySchema(() => z.enum(['preview', 'design', 'code', 'data', 'history']));
 export type ViewMode = z.infer<typeof ViewModeSchema>;
 
@@ -69,7 +84,10 @@ export type ViewMode = z.infer<typeof ViewModeSchema>;
  * Declares a metadata viewer/designer component.
  * The runtime component is registered imperatively during plugin activation.
  */
-export const MetadataViewerContributionSchema = lazySchema(() => z.object({
+export const MetadataViewerContributionSchema = lazySchema(() => strictObject({
+  surface: 'this metadata view contribution',
+  history: STUDIO_PLUGIN_HISTORY,
+}, {
   /** Unique viewer ID (namespaced: `pluginId.viewerId`) */
   id: z.string().describe('Unique viewer identifier'),
 
@@ -94,7 +112,10 @@ export type MetadataViewerContribution = z.infer<typeof MetadataViewerContributi
  * Declares a sidebar group that organizes metadata types.
  * Plugins can add new groups or extend existing ones.
  */
-export const SidebarGroupContributionSchema = lazySchema(() => z.object({
+export const SidebarGroupContributionSchema = lazySchema(() => strictObject({
+  surface: 'this sidebar group contribution',
+  history: STUDIO_PLUGIN_HISTORY,
+}, {
   /** Unique group key */
   key: z.string().describe('Unique group key'),
 
@@ -122,7 +143,10 @@ export const ActionLocationSchema = lazySchema(() => z.enum(['toolbar', 'context
  * Declares an action that can be triggered on metadata items.
  * The handler is registered imperatively during activation.
  */
-export const ActionContributionSchema = lazySchema(() => z.object({
+export const ActionContributionSchema = lazySchema(() => strictObject({
+  surface: 'this action contribution',
+  history: STUDIO_PLUGIN_HISTORY,
+}, {
   /** Unique action ID */
   id: z.string().describe('Unique action identifier'),
 
@@ -147,7 +171,10 @@ export type ActionContribution = z.infer<typeof ActionContributionSchema>;
  * Declares an icon and label for a metadata type.
  * Used by the sidebar and breadcrumbs.
  */
-export const MetadataIconContributionSchema = lazySchema(() => z.object({
+export const MetadataIconContributionSchema = lazySchema(() => strictObject({
+  surface: 'this metadata icon contribution',
+  history: STUDIO_PLUGIN_HISTORY,
+}, {
   /** Metadata type this icon represents */
   metadataType: z.string().describe('Metadata type'),
 
@@ -168,7 +195,10 @@ export const PanelLocationSchema = lazySchema(() => z.enum(['bottom', 'right', '
 /**
  * Declares an auxiliary panel (like VS Code's Terminal, Problems, Output panels).
  */
-export const PanelContributionSchema = lazySchema(() => z.object({
+export const PanelContributionSchema = lazySchema(() => strictObject({
+  surface: 'this panel contribution',
+  history: STUDIO_PLUGIN_HISTORY,
+}, {
   /** Unique panel ID */
   id: z.string().describe('Unique panel identifier'),
 
@@ -190,7 +220,10 @@ export type PanelContribution = z.infer<typeof PanelContributionSchema>;
  * Declares a command that can be invoked from the command palette
  * or programmatically by other plugins.
  */
-export const CommandContributionSchema = lazySchema(() => z.object({
+export const CommandContributionSchema = lazySchema(() => strictObject({
+  surface: 'this command contribution',
+  history: STUDIO_PLUGIN_HISTORY,
+}, {
   /** Unique command ID (namespaced: `pluginId.commandName`) */
   id: z.string().describe('Unique command identifier'),
 
@@ -212,7 +245,10 @@ export type CommandContribution = z.infer<typeof CommandContributionSchema>;
  * All contribution points a Studio plugin can declare.
  * Analogous to VS Code's `contributes` section in `package.json`.
  */
-export const StudioPluginContributionsSchema = lazySchema(() => z.object({
+export const StudioPluginContributionsSchema = lazySchema(() => strictObject({
+  surface: 'this studio plugin contributions',
+  history: STUDIO_PLUGIN_HISTORY,
+}, {
   /** Metadata viewer/designer components */
   metadataViewers: z.array(MetadataViewerContributionSchema).default([]),
 
@@ -257,7 +293,34 @@ export const ActivationEventSchema = lazySchema(() => z.string().describe('Activ
  * All contribution points are declared here; runtime components
  * are registered imperatively during the `activate()` call.
  */
-export const StudioPluginManifestSchema = lazySchema(() => z.object({
+export const StudioPluginManifestSchema = lazySchema(() => strictObject({
+  surface: 'this studio plugin manifest',
+  history: STUDIO_PLUGIN_HISTORY,
+  // This file says outright that the manifest is "the `package.json` equivalent"
+  // and that `contributes` is "analogous to VS Code's". That analogy is the
+  // point AND the hazard: an author who knows VS Code reaches for its
+  // vocabulary, and every near-miss below is a word that is correct over there.
+  aliases: {
+    displayName: 'name', title: 'name',
+    publisher: 'author', vendor: 'author',
+    contributions: 'contributes', contribute: 'contributes',
+    activation: 'activationEvents', events: 'activationEvents', onActivate: 'activationEvents',
+  },
+  guidance: {
+    // VS Code manifest keys with no counterpart here. `main` is the dangerous
+    // one: an author declares an entry point, gets a plugin that loads and
+    // contributes nothing, and it looks exactly like a broken `activate()`.
+    main:
+      'there is no entry-point key — a Studio plugin declares its contributions here and registers '
+      + 'the runtime components imperatively in its `activate()` call. Nothing is loaded from a path.',
+    engines: 'there is no engine-compatibility field; a plugin carries `version` and nothing gates it',
+    categories: 'there is no category taxonomy — UI grouping comes from `contributes.sidebarGroups`',
+    keywords: 'there is no keyword index for Studio plugins',
+    repository: 'manifest metadata is limited to `id` / `name` / `version` / `description` / `author`',
+    icon: 'the manifest carries no icon — icons are Lucide names on the CONTRIBUTION (`contributes.metadataIcons`, or an action / panel / command `icon`)',
+    dependencies: 'Studio plugins declare no dependency graph; order activation with `activationEvents` instead',
+  },
+}, {
   /** 
    * Unique plugin ID using reverse-domain notation.
    * @example "objectstack.object-designer"

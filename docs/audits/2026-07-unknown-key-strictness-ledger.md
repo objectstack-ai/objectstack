@@ -509,9 +509,29 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 
 | File | Sites | Class | Note |
 |---|---|---|---|
-| `object-designer.zod.ts` | 12 | authorable (p) | Studio-written JSON — machine-authored but *our* machine; strict protects the builder itself |
-| `plugin.zod.ts` | 8 | mixed (p) | |
-| `flow-builder.zod.ts` | 7 | authorable (p) | independent of `FlowSchema` shapes |
+| `object-designer.zod.ts` | 12 | authorable | strict as of #4001 — `defineObjectDesignerConfig` is the authoring door |
+| `plugin.zod.ts` | 8 | authorable | strict as of #4001 — **was `mixed (p)`; verification found no wire half** |
+| `flow-builder.zod.ts` | 7 | authorable | strict as of #4001 — `defineFlowBuilderConfig`; independent of `FlowSchema` |
+
+**All three provisional verdicts are now verified, and one was wrong.** The
+deciding evidence is the same lens the registered-type batches used: each file
+exports a `define*` factory (`defineStudioPlugin`,
+`defineFlowBuilderConfig`, `defineObjectDesignerConfig`) that `.parse()`s an
+author-written literal. That is the authoring door, so `authorable` holds without
+needing to know what `objectui` does with the result.
+
+`plugin.zod.ts` was carried as `mixed (p)` with an empty note — a verdict with no
+stated reason, which is how a provisional label survives. Reading it settles the
+question: all eight shapes are contribution points on a VS Code-style plugin
+manifest, every one hand-written by a plugin author. There is no wire half.
+
+What could NOT be verified from this checkout, stated rather than glossed:
+whether `objectui` also *constructs* these configs programmatically and parses
+them with extra internal keys. If it does, strictness turns that into a loud 422
+at its build — detectable and fixable, with the rename suggested — rather than
+the silent narrowing it replaces. That is the trade this whole campaign makes,
+and the residual risk is named here so a reader with `objectui` access can close
+it rather than rediscover it.
 
 ## Other directories (coarse; classify per schema before touching)
 
@@ -576,11 +596,19 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
    if the answer is "still nothing". A wait that is never re-examined is
    indistinguishable from an abandoned one.
 
-2. `studio/` is the largest untouched authorable block — 27 sites, **0 strict**,
-   and all three files still carry a provisional `(p)` from the original triage.
-   Not blocked on field data (Studio-written JSON is our own producer, so the
-   downstream risk is the lowest on the board); it is simply unstarted. If the
-   step-1 question comes back "nothing is reporting", start here instead.
+2. ~~`studio/` is the largest untouched authorable block — 27 sites, **0
+   strict**, and all three files still carry a provisional `(p)`.~~ **DONE
+   (#4001).** All 27 sites strict; the three provisional verdicts verified, and
+   `plugin.zod.ts`'s `mixed (p)` corrected to `authorable` — see the `studio/`
+   table above for the evidence and for the one thing this checkout could not
+   settle.
+
+   Worth noting how the verdicts were settled, because the original triage had
+   no method for it: each file exports a `define*` factory that parses an
+   author-written literal. **A `define*` factory is the authoring door** — the
+   same lens the registered-type batches used, and a cheaper one than reasoning
+   about who consumes the output. When a future triage row needs promoting out
+   of `(p)`, look for the factory first.
 
 Done in the registered-types batch: `strictObject` (`shared/strict-object.ts`)
 replaced the four-part wiring recipe, and `seed` + `doc` became the first two

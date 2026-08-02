@@ -40,6 +40,19 @@ import { z } from 'zod';
  * Matches BPMN conventions where applicable.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
+
+/**
+ * Shared history for this file (#4001).
+ *
+ * Canvas configuration is visual, so a dropped key produces a canvas — just not
+ * the one that was configured. The author looks for the mistake in their layout,
+ * not in their spelling.
+ */
+const FLOW_BUILDER_HISTORY =
+  'Until #4001 closed these shapes an unknown key was dropped silently — the builder still '
+  + 'rendered, without whatever the key was meant to configure.';
+
 export const FlowNodeShapeSchema = lazySchema(() => z.enum([
   'rounded_rect',   // Default activity shape (assignments, CRUD, HTTP, script, subflow)
   'circle',         // Start / End events
@@ -57,7 +70,10 @@ export type FlowNodeShape = z.infer<typeof FlowNodeShapeSchema>;
  * Maps each FlowNodeAction to its canvas rendering descriptor.
  * Used by the Studio flow canvas to determine shape, icon, and default size.
  */
-export const FlowNodeRenderDescriptorSchema = lazySchema(() => z.object({
+export const FlowNodeRenderDescriptorSchema = lazySchema(() => strictObject({
+  surface: 'this flow node rend descriptor',
+  history: FLOW_BUILDER_HISTORY,
+}, {
   /** The node action type this descriptor applies to */
   action: z.string().describe('FlowNodeAction value (e.g., "parallel_gateway")'),
 
@@ -98,7 +114,10 @@ export type FlowNodeRenderDescriptor = z.infer<typeof FlowNodeRenderDescriptorSc
 /**
  * A node instance on the flow canvas, containing position and visual overrides.
  */
-export const FlowCanvasNodeSchema = lazySchema(() => z.object({
+export const FlowCanvasNodeSchema = lazySchema(() => strictObject({
+  surface: 'this flow canvas node',
+  history: FLOW_BUILDER_HISTORY,
+}, {
   /** Reference to the flow node id */
   nodeId: z.string().describe('Corresponding FlowNode.id'),
 
@@ -149,7 +168,10 @@ export type FlowCanvasEdgeStyle = z.infer<typeof FlowCanvasEdgeStyleSchema>;
 /**
  * A sequence-flow edge on the flow canvas with visual properties.
  */
-export const FlowCanvasEdgeSchema = lazySchema(() => z.object({
+export const FlowCanvasEdgeSchema = lazySchema(() => strictObject({
+  surface: 'this flow canvas edge',
+  history: FLOW_BUILDER_HISTORY,
+}, {
   /** Reference to the flow edge id */
   edgeId: z.string().describe('Corresponding FlowEdge.id'),
 
@@ -164,7 +186,11 @@ export const FlowCanvasEdgeSchema = lazySchema(() => z.object({
     .describe('Position of the condition label along the edge'),
 
   /** Optional waypoints for routing the edge around nodes */
-  waypoints: z.array(z.object({
+  waypoints: z.array(strictObject({
+    surface: 'this edge waypoint',
+    history: FLOW_BUILDER_HISTORY,
+    aliases: { left: 'x', top: 'y', cx: 'x', cy: 'y' },
+  }, {
     x: z.number().describe('Waypoint X'),
     y: z.number().describe('Waypoint Y'),
   })).optional().describe('Manual waypoints for edge routing'),
@@ -207,9 +233,16 @@ export type FlowLayoutDirection = z.infer<typeof FlowLayoutDirectionSchema>;
  * Flow Builder configuration — top-level config for the Studio
  * automation flow canvas editor.
  */
-export const FlowBuilderConfigSchema = lazySchema(() => z.object({
+export const FlowBuilderConfigSchema = lazySchema(() => strictObject({
+  surface: 'this flow build configuration',
+  history: FLOW_BUILDER_HISTORY,
+}, {
   /** Canvas snap settings */
-  snap: z.object({
+  snap: strictObject({
+    surface: 'these snap settings',
+    history: FLOW_BUILDER_HISTORY,
+    aliases: { active: 'enabled', on: 'enabled', grid: 'gridSize', size: 'gridSize', step: 'gridSize', visible: 'showGrid', grid_: 'showGrid' },
+  }, {
     enabled: z.boolean().default(true).describe('Enable snap-to-grid'),
     gridSize: z.number().int().min(1).default(16).describe('Snap grid size in pixels'),
     showGrid: z.boolean().default(true).describe('Show grid overlay'),
@@ -217,7 +250,11 @@ export const FlowBuilderConfigSchema = lazySchema(() => z.object({
     .describe('Canvas snap-to-grid settings'),
 
   /** Canvas zoom settings */
-  zoom: z.object({
+  zoom: strictObject({
+    surface: 'these zoom settings',
+    history: FLOW_BUILDER_HISTORY,
+    aliases: { minZoom: 'min', maxZoom: 'max', initial: 'default', defaultZoom: 'default', increment: 'step', delta: 'step' },
+  }, {
     min: z.number().min(0.1).default(0.25).describe('Minimum zoom level'),
     max: z.number().max(10).default(3).describe('Maximum zoom level'),
     default: z.number().default(1).describe('Default zoom level'),
