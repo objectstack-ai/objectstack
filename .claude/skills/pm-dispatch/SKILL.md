@@ -77,7 +77,9 @@ The product spans three repos with a fixed dependency direction:
 
 **1. One main backlog.** Feature-level issues live in `objectstack`,
 whatever repo the code lands in. A `repo:objectui` / `repo:cloud` label
-routes the dev agent's working repo; no routing label = backend. The dev
+routes the dev agent's working repo; no routing label = backend. **The PM
+applies these labels itself at triage (round loop step 2)** — the maintainer
+just files the task and is never expected to pre-route it. The dev
 still branches/pushes/PRs **in the target repo** (its own worktree there —
 one worktree per repo, as always). Repo-local trivia may still be filed in
 the sibling repos directly; to drain such a local queue, run
@@ -111,27 +113,48 @@ the loop resumable and the board honest.
 ### 1. Fetch candidates
 
 List open issues matching the filter, excluding anything assigned or labeled
-`needs-user-decision`. Read each candidate's full body — batch selection
-(step 2) and the dispatch prompt both need it.
+`needs-user-decision`. Read each candidate's full body — triage, batch
+selection (steps 2–3) and the dispatch prompt all need it.
 
-### 2. Select the batch
+### 2. Triage — routing is the PM's job, never the maintainer's
+
+The maintainer's only input is the issue itself plus `pm:queue` (or naming
+the task in chat). They are **not** expected to know which repo a change
+lands in — that answer usually *is* the analysis. For each candidate whose
+routing isn't already decided:
+
+- **Determine where the change lands** by reading the issue against the
+  actual code of the three repos. Apply `repo:objectui` / `repo:cloud`
+  yourself; leave unlabeled for backend. A routing label a human already
+  set is respected as-is.
+- **Cross-repo?** Do the split yourself per "Multi-repo coordination" rule
+  2: file the parent + per-repo sub-issues, contract-first order,
+  `Blocked-by:` lines, routing labels on each sub-issue.
+- **Leave a one-comment audit trail** on the issue (Chinese), so the
+  maintainer can veto cheaply: 「分诊:落地 objectui;理由:…」.
+- Routing is a **technical judgment — never escalate "which repo?" to the
+  maintainer.** If after reading the code you genuinely cannot tell where a
+  change lands, the issue is underspecified: escalate the *underlying
+  product question* (step 8), not the routing.
+
+### 3. Select the batch
 
 Pick up to `batch` issues that are **mutually independent**: no two issues in
 one batch may plausibly touch the same package, registry/barrel file, or spec
 schema. Two dev agents editing the same shared file produce a merge race that
 costs more than serializing. When in doubt, serialize — put the second issue in
 the next round. Prefer small, well-specified issues; an issue with no acceptance
-criteria you can state in one sentence is a candidate for escalation (step 7),
+criteria you can state in one sentence is a candidate for escalation (step 8),
 not dispatch.
 
-### 3. Claim
+### 4. Claim
 
 For each selected issue, **before dispatching** (repo rule: claim before code):
 assign it to yourself (`@me`) and add labels + a comment in Chinese, e.g.
 「已由 PM 循环派发给开发 agent(第 N 轮)。」Skip — and drop from the batch —
 any issue that acquired an assignee since step 1.
 
-### 4. Dispatch
+### 5. Dispatch
 
 One `Agent` call per issue, `subagent_type: "os-dev"` (fall back to
 `general-purpose` with the same prompt if the custom agent isn't loaded), run
@@ -187,9 +210,9 @@ to `mode:subagent`). Per issue:
    report as a comment on the issue** (prefixed `<!-- os-dev-report -->`)
    instead of returning it, in addition to opening the draft PR.
 2. `fire_trigger` to launch it, then `delete_trigger` once the report has
-   been collected (step 5) so poke-only triggers don't accumulate.
+   been collected (step 6) so poke-only triggers don't accumulate.
 
-### 5. Collect
+### 6. Collect
 
 **Subagent mode:** wait for the background task notifications — do not poll,
 do not fabricate a pending agent's result. A dev that dies or returns
@@ -202,7 +225,7 @@ silently until every dispatch of the round has reported or a dispatch has
 been silent for over ~2 h (count it as `blocked` and move on). Never treat
 the absence of a report as success.
 
-### 6. Review each report
+### 7. Review each report
 
 You are the reviewer of record. For each report, verify against GitHub — not
 against the report's own claims:
@@ -225,9 +248,9 @@ Verdict per issue:
 - **REWORK** — concrete, itemized feedback; re-dispatch the same issue with
   the feedback block filled (same claim, new dev agent). **Max 2 rework
   rounds** per issue; a third failure escalates instead.
-- **ESCALATE** — see step 7.
+- **ESCALATE** — see step 8.
 
-### 7. Escalate uncertainties to the maintainer
+### 8. Escalate uncertainties to the maintainer
 
 Whenever a dev returns `needs_decision`, an issue is too vague to dispatch, or
 rework has failed twice:
@@ -252,7 +275,7 @@ rework has failed twice:
    the filed issue remains the durable record either way. **Never** answer a
    product/architecture question on the maintainer's behalf.
 
-### 8. Round report, then next round
+### 9. Round report, then next round
 
 Print a round report to the maintainer **in Chinese**: a table of
 issue → verdict → PR link → notes, plus anything escalated. Then start the
@@ -277,7 +300,7 @@ Stop the loop and report when any of these hits:
 - Every dev agent works in its **own worktree per repo** (enforced by
   `guard-main-checkout.sh`; the os-dev definition repeats it).
 - Parallelism is capped by `batch`. Dev agents for one batch must be
-  file-disjoint by construction (step 2).
+  file-disjoint by construction (step 3).
 - When any rule here conflicts with AGENTS.md, **AGENTS.md wins**.
 
 ## Report contract (what os-dev returns)
