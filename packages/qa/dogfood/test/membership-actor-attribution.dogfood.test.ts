@@ -57,7 +57,7 @@ async function waitForMembership(ql: any, userId: string): Promise<any> {
   throw new Error(`no sys_member row appeared for ${userId}`);
 }
 
-/** Audit rows this stack wrote for one `sys_member` row, newest last. */
+/** Audit rows this stack wrote for one `sys_member` row. */
 async function memberHistory(ql: any, memberId: string, action?: string): Promise<any[]> {
   const rows = await findRows(
     ql,
@@ -68,13 +68,38 @@ async function memberHistory(ql: any, memberId: string, action?: string): Promis
   return action ? rows.filter((r: any) => r.action === action) : rows;
 }
 
-async function waitForHistory(ql: any, memberId: string, action: string): Promise<any> {
+/**
+ * Wait for the history row that records a SPECIFIC transition, identified by
+ * what it says rather than by its position.
+ *
+ * Selecting "the last row" is wrong twice over here: `find` is unordered
+ * without an explicit sort, and — the trap this file walked into — the audit
+ * row lands ASYNCHRONOUSLY after the endpoint returns, so a promote/demote
+ * pair polled by count alone happily returns the *previous* transition and
+ * asserts against it. Matching on the row's own `new_value` is immune to both.
+ *
+ * On `action: 'update'` the audit writer stores a CHANGED-FIELDS DIFF: the
+ * before-state in `old_value`, the after-state in `new_value` (a demotion is
+ * `old_value {"role":"admin"}` → `new_value {"role":"member"}`). Both halves
+ * are recorded — this change adds WHO to a row that already knew WHAT.
+ */
+async function waitForHistoryMatching(
+  ql: any,
+  memberId: string,
+  action: string,
+  matches: (row: any) => boolean,
+  what = action,
+): Promise<any> {
   for (let i = 0; i < 20; i++) {
-    const rows = await memberHistory(ql, memberId, action);
-    if (rows.length > 0) return rows[rows.length - 1];
+    const hit = (await memberHistory(ql, memberId, action)).find(matches);
+    if (hit) return hit;
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error(`no '${action}' history row appeared for sys_member ${memberId}`);
+  throw new Error(`no '${what}' history row appeared for sys_member ${memberId}`);
+}
+
+async function waitForHistory(ql: any, memberId: string, action: string): Promise<any> {
+  return waitForHistoryMatching(ql, memberId, action, () => true);
 }
 
 describe('#4586: the better-auth actor reaches sys_member history and the grant', () => {
@@ -246,12 +271,31 @@ describe('#4586: the better-auth actor reaches sys_member history and the grant'
     const [row] = await findRows(ql, 'sys_member', { id: memberRowId }, 1);
     expect(row.role).toBe('member');
 
-    const updates = await memberHistory(ql, memberRowId, 'update');
-    const demotion = updates[updates.length - 1];
+    // Identify the demotion row by what it RECORDS, not by its position: the
+    // promotion row is already there, and the new row lands asynchronously.
+    const demotion = await waitForHistoryMatching(
+      ql,
+      memberRowId,
+      'update',
+      (r) => String(r.new_value).includes('member'),
+      'demotion',
+    );
+    // The pair the diff actually stores: admin → member.
+    expect(String(demotion.old_value)).toContain('admin');
     expect(String(demotion.new_value)).toContain('member');
     // Attribution works in both directions — taking authority away is exactly
     // as answerable as handing it out.
     expect(demotion.user_id).toBe(adminUserId);
+    // …and it is a DISTINCT row from the promotion, which keeps its own actor.
+    const promotion = await waitForHistoryMatching(
+      ql,
+      memberRowId,
+      'update',
+      (r) => String(r.new_value).includes('admin'),
+      'promotion',
+    );
+    expect(String(promotion.id)).not.toBe(String(demotion.id));
+    expect(promotion.user_id).toBe(adminUserId);
 
     // NOTE: whether the org-admin GRANT is revoked on demotion is deliberately
     // not asserted here. It currently is not — `auto-org-admin-grant`'s only
