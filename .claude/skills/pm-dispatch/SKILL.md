@@ -313,8 +313,36 @@ Verdict per issue:
 
 ### 8. Escalate uncertainties to the maintainer
 
-Whenever a dev returns `needs_decision`, an issue is too vague to dispatch, or
-rework has failed twice:
+**First, apply the escalation bar — most things that FEEL like decisions are
+not.** The maintainer's words: 「明显的问题直接修,不是事事都需要我确认」.
+Escalate ONLY when at least one of these holds:
+
+- the options genuinely diverge on **product semantics or public contract
+  shape** and neither the issue, AGENTS.md, ADRs, nor existing code norms
+  determines the answer;
+- the fix requires a **destructive or hard-to-reverse action** (stored-data
+  migration shape, deleting a shipped capability, force operations).
+
+Everything else is the PM's call — decide, dispatch, and give the maintainer
+a **veto window instead of a permission gate**: state what you decided and
+why in the issue comment and the round report; they can stop it, but you do
+not wait for them. Named non-escalation classes (act immediately):
+
+- **Restore-invariant fixes.** When the repo already states the invariant —
+  one contract version across the family, declared = enforced, a gate must
+  actually compile/run what it claims to check — a finding that the
+  invariant is broken carries its own decision. A dual-version dependency
+  graph, an inert tripwire, an unwired gate: queue it, dispatch it, report
+  it. Asking "may I restore the invariant?" is the anti-pattern.
+- **Sequencing and dependency ordering** between technical tasks.
+- **Verification strategy** (what regression pass a risky-but-decided change
+  needs) — that is scoping the work, not deciding it.
+- A dev's `needs_decision` that, on PM review, falls into the classes above:
+  answer the dev yourself with the decision and rationale; do not relay it
+  upward.
+
+Whenever a dev returns `needs_decision` that passes the bar above, an issue
+is too vague to dispatch, or rework has failed twice:
 
 1. **Default: the decision lives ON the issue it belongs to — never a new
    issue.** Post the analysis as a comment on that issue, add the

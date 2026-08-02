@@ -89,3 +89,10 @@ Final message — exactly this JSON, no prose around it:
 
 Use `status: "rework"` for a partial result you know is incomplete (say why in
 `summary`); the PM will review and re-dispatch with feedback.
+
+Practical trap when filing issues/PRs through the GitHub API: the body
+sanitizer strips `<` followed by a letter as an HTML tag **at rest**, which
+destroys TypeScript generics (`Assert<Equal<1, 2>>` is stored as `Assert>`).
+Write generics with a space after each `<` — `Assert< Equal< 1, 2 > >` is
+still valid TypeScript — and read the stored body back to verify when a
+snippet is load-bearing.
