@@ -38,8 +38,8 @@ Architecture alignment:
 ## TypeScript Usage
 
 ```typescript
-import { BatchEndpointsConfig, Callback, CrudEndpointPattern, CrudEndpointsConfig, CrudOperation, EndpointRegistry, GeneratedEndpoint, MetadataEndpointsConfig, OpenApi31Extensions, RestApiConfig, RestServerConfig, RouteGenerationConfig } from '@objectstack/spec/api';
-import type { BatchEndpointsConfig, Callback, CrudEndpointPattern, CrudEndpointsConfig, CrudOperation, EndpointRegistry, GeneratedEndpoint, MetadataEndpointsConfig, OpenApi31Extensions, RestApiConfig, RestServerConfig, RouteGenerationConfig } from '@objectstack/spec/api';
+import { BatchEndpointsConfig, Callback, CrudEndpointPattern, CrudEndpointsConfig, CrudOperation, EndpointRegistry, GeneratedEndpoint, MetadataEndpointsConfig, OpenApi31Extensions, OpenApiWebhookEvent, RestApiConfig, RestServerConfig, RouteGenerationConfig } from '@objectstack/spec/api';
+import type { BatchEndpointsConfig, Callback, CrudEndpointPattern, CrudEndpointsConfig, CrudOperation, EndpointRegistry, GeneratedEndpoint, MetadataEndpointsConfig, OpenApi31Extensions, OpenApiWebhookEvent, RestApiConfig, RestServerConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 
 // Validate data
 const result = BatchEndpointsConfig.parse(data);
@@ -171,6 +171,22 @@ const result = BatchEndpointsConfig.parse(data);
 | **callbacks** | `Record<string, { name: string; expression: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; url: string }[]>` | optional | OpenAPI 3.1 callbacks (async response definitions) |
 | **jsonSchemaDialect** | `string` | ✅ | JSON Schema dialect for schema definitions |
 | **pathItemReferences** | `boolean` | ✅ | Allow $ref in path items (OpenAPI 3.1 feature) |
+
+
+---
+
+## OpenApiWebhookEvent
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Webhook event identifier (snake_case) |
+| **description** | `string` | ✅ | Human-readable event description |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method for webhook delivery |
+| **payloadSchema** | `string` | ✅ | JSON Schema $ref for the webhook payload |
+| **headers** | `Record<string, string>` | optional | Custom headers to include in webhook delivery |
+| **security** | `Enum<'hmac_sha256' \| 'basic' \| 'bearer' \| 'api_key'>[]` | ✅ | Supported authentication methods for webhook verification |
 
 
 ---
