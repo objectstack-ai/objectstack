@@ -104,7 +104,7 @@ async function makeEngine(withRealtime: boolean): Promise<ObjectQL> {
   const engine = new ObjectQL();
   engine.registerDriver(makeMemoryDriver(), true);
   await engine.init();
-  engine.registry.registerObject(task as any);
+  engine.registry.registerObject(task as any, 'bench');
   if (withRealtime) engine.setRealtimeService(nullRealtime);
   // Silence the per-write logger so log formatting is not in the measurement.
   const logger = (engine as any).logger;
@@ -136,27 +136,48 @@ async function makePair(): Promise<[ObjectQL, ObjectQL]> {
   return pair;
 }
 
-const [insertOn, insertOff] = await makePair();
-const [updateOn, updateOff] = await makePair();
-const [bulkOn, bulkOff] = await makePair();
+/**
+ * Memoized lazy init. Two constraints rule out the obvious alternatives:
+ * this package compiles to CommonJS, so a top-level `await` is a TS1309 error;
+ * and vitest's benchmark mode is experimental and does NOT run `beforeAll`, so
+ * a hook-based setup leaves every engine `undefined`, every iteration throwing,
+ * and the summary reporting `NaNx faster` off zero samples.
+ *
+ * Awaiting an already-settled promise costs one microtask, paid identically by
+ * both arms, so the delta each case reports is unaffected — and the actual
+ * construction happens during vitest's warmup iterations, outside the measured
+ * samples.
+ */
+function lazyPair(): () => Promise<[ObjectQL, ObjectQL]> {
+  let pending: Promise<[ObjectQL, ObjectQL]> | undefined;
+  return () => (pending ??= makePair());
+}
+
+const insertPair = lazyPair();
+const updatePair = lazyPair();
+const bulkPair = lazyPair();
 
 describe('insert — per-record DataEvent (#4626)', () => {
   bench('with realtime service', async () => {
-    await insertOn.insert('task', { title: 'bench', status: 'open' });
+    const [on] = await insertPair();
+    await on.insert('task', { title: 'bench', status: 'open' });
   });
 
   bench('without realtime service', async () => {
-    await insertOff.insert('task', { title: 'bench', status: 'open' });
+    const [, off] = await insertPair();
+    await off.insert('task', { title: 'bench', status: 'open' });
   });
 });
 
 describe('single-id update — per-record DataEvent (#4626)', () => {
   bench('with realtime service', async () => {
-    await updateOn.update('task', { id: 'r_1', title: 'bench' });
+    const [on] = await updatePair();
+    await on.update('task', { id: 'r_1', title: 'bench' });
   });
 
   bench('without realtime service', async () => {
-    await updateOff.update('task', { id: 'r_1', title: 'bench' });
+    const [, off] = await updatePair();
+    await off.update('task', { id: 'r_1', title: 'bench' });
   });
 });
 
@@ -170,10 +191,12 @@ describe('predicate update — one aggregate BulkDataEvent (#4639)', () => {
   // it selects on would shrink its own match set as the bench ran, making the
   // two arms diverge exactly like the shared-engine bug above.
   bench('with realtime service', async () => {
-    await bulkOn.update('task', { title: 'bench' }, { multi: true, where: { status: 'open' } } as any);
+    const [on] = await bulkPair();
+    await on.update('task', { title: 'bench' }, { multi: true, where: { status: 'open' } } as any);
   });
 
   bench('without realtime service', async () => {
-    await bulkOff.update('task', { title: 'bench' }, { multi: true, where: { status: 'open' } } as any);
+    const [, off] = await bulkPair();
+    await off.update('task', { title: 'bench' }, { multi: true, where: { status: 'open' } } as any);
   });
 });
