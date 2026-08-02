@@ -70,6 +70,37 @@ export const PluginSourceSchema = lazySchema(() => z.object({
  * Activation Event
  * Defines when a dynamically available plugin should be activated.
  * Plugins remain dormant until an activation event fires.
+ *
+ * [#4653] **This is the platform's single activation vocabulary.** Until v17
+ * the name `ActivationEventSchema` resolved to two DIFFERENT declarations
+ * depending on the import path (#4411's trap): this structured
+ * `{ type, pattern }` on `./kernel`, and a bare `z.string()` on `./studio`.
+ * A studio plugin author wrote `activationEvents: ['onMetadataType:flow']` and
+ * got no validation at all — `z.string()` accepts `'onMetadatType:flow'`, and
+ * every other typo, forever. `./studio` now re-exports THIS declaration, so
+ * there is one trigger vocabulary and one place to extend it.
+ *
+ * The enum below is the **union of both sides' pre-v17 vocabularies**, because
+ * dropping either side's values would have silently removed a capability its
+ * authors were already using:
+ *
+ * | value            | came from                                                  |
+ * |:-----------------|:-----------------------------------------------------------|
+ * | `onCommand`      | kernel enum + studio docs (`onCommand:myPlugin.doSomething`) |
+ * | `onRoute`        | kernel enum                                                 |
+ * | `onObject`       | kernel enum                                                 |
+ * | `onEvent`        | kernel enum                                                 |
+ * | `onService`      | kernel enum                                                 |
+ * | `onSchedule`     | kernel enum                                                 |
+ * | `onStartup`      | kernel enum; also the target of studio's eager `'*'`         |
+ * | `onMetadataType` | studio docs/tests (`onMetadataType:object`) — kernel lacked it |
+ * | `onView`         | studio docs/tests (`onView:myPlugin.myPanel`) — kernel lacked it |
+ *
+ * Deliberately NOT adopted: `priority`, and the `onInstall` / `onWebhook`
+ * values that cloud-v1's unreleased marketplace runtime carries. Nothing in
+ * any repo reads them, and adding an unenforced key is the exact debt ADR-0049
+ * is retiring — they can be proposed when there is an executor that honours
+ * them.
  */
 export const ActivationEventSchema = lazySchema(() => z.object({
   /**
@@ -82,11 +113,18 @@ export const ActivationEventSchema = lazySchema(() => z.object({
     'onEvent',           // Activate when a system event fires
     'onService',         // Activate when a service is requested
     'onSchedule',        // Activate on a cron schedule
-    'onStartup',         // Activate immediately on kernel startup
+    'onStartup',         // Activate immediately on startup (eager)
+    'onMetadataType',    // Activate when a metadata type is loaded
+    'onView',            // Activate when a view / panel is opened
   ]).describe('Trigger type for lazy activation'),
-  
+
   /**
    * Pattern to match (command name, route glob, object name, event pattern, etc.)
+   *
+   * The pre-v17 studio string form packed this into the same token after a
+   * colon — `'onCommand:myPlugin.doSomething'` is `{ type: 'onCommand',
+   * pattern: 'myPlugin.doSomething' }`, and eager `'*'` is
+   * `{ type: 'onStartup', pattern: '*' }`.
    */
   pattern: z.string().describe('Match pattern for the activation trigger'),
 }).describe('Lazy activation trigger for a dynamic plugin'));

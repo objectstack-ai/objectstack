@@ -100,7 +100,7 @@ modes: ['preview', 'design', 'data'],
 ## TypeScript Usage
 
 ```typescript
-import { ActionContributionSchema, ActivationEventSchema, CommandContributionSchema, MetadataIconContributionSchema, MetadataViewerContributionSchema, PanelContributionSchema, PanelLocationSchema, SidebarGroupContributionSchema, StudioPluginContributionsSchema, StudioPluginManifestSchema, ViewModeSchema } from '@objectstack/spec/studio';
+import { ActionContributionSchema, CommandContributionSchema, MetadataIconContributionSchema, MetadataViewerContributionSchema, PanelContributionSchema, PanelLocationSchema, SidebarGroupContributionSchema, StudioPluginContributionsSchema, StudioPluginManifestSchema, ViewModeSchema } from '@objectstack/spec/studio';
 import type { ActionContribution, CommandContribution, MetadataIconContribution, MetadataViewerContribution, PanelContribution, SidebarGroupContribution, StudioPluginContributions, StudioPluginManifest, ViewMode } from '@objectstack/spec/studio';
 
 // Validate data
@@ -120,9 +120,6 @@ const result = ActionContributionSchema.parse(data);
 | **icon** | `string` | optional | Lucide icon name |
 | **location** | `Enum<'toolbar' \| 'contextMenu' \| 'commandPalette'>` | ✅ | UI location |
 | **metadataTypes** | `string[]` | ✅ | Applicable metadata types |
-
-
----
 
 
 ---
@@ -237,7 +234,7 @@ const result = ActionContributionSchema.parse(data);
 | **description** | `string` | optional | Plugin description |
 | **author** | `string` | optional | Author |
 | **contributes** | `{ metadataViewers: { id: string; metadataTypes: string[]; label: string; priority: number; … }[]; sidebarGroups: { key: string; label: string; icon?: string; metadataTypes: string[]; … }[]; actions: { id: string; label: string; icon?: string; location: Enum<'toolbar' \| 'contextMenu' \| 'commandPalette'>; … }[]; metadataIcons: { metadataType: string; label: string; icon: string }[]; … }` | ✅ |  |
-| **activationEvents** | `string[]` | ✅ |  |
+| **activationEvents** | `{ type: Enum<'onCommand' \| 'onRoute' \| 'onObject' \| 'onEvent' \| 'onService' \| 'onSchedule' \| 'onStartup' \| 'onMetadataType' \| 'onView'>; pattern: string }[]` | ✅ |  |
 
 
 ---

@@ -61,6 +61,8 @@ import { z } from 'zod';
 /** Supported view modes for metadata viewers */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+// [#4653] The one activation vocabulary — see the note above the re-export below.
+import { ActivationEventSchema } from '../kernel/plugin-runtime.zod';
 
 /**
  * Shared history for this file (#4001).
@@ -273,16 +275,31 @@ export type StudioPluginContributions = z.infer<typeof StudioPluginContributions
 // ─── Activation Events ───────────────────────────────────────────────
 
 /**
- * Events that trigger plugin activation.
- * Similar to VS Code's `activationEvents`.
- * 
- * Patterns:
- * - `*` — Activate immediately (eager)
- * - `onMetadataType:object` — Activate when metadata type "object" is loaded
- * - `onCommand:myPlugin.doSomething` — Activate when command is invoked
- * - `onView:myPlugin.myPanel` — Activate when panel is opened
+ * [#4653] The local `z.string()` declaration that used to live here is gone —
+ * `ActivationEventSchema` now names ONE declaration platform-wide, the
+ * structured `{ type, pattern }` in `kernel/plugin-runtime.zod.ts`, re-exported
+ * below (dual-source cleanup, #4535 C5).
+ *
+ * Why this side gave way, when the string form was the friendlier one: it
+ * validated nothing. `z.string()` accepted `''`, `'banana'` and — the case that
+ * matters — `'onMetadatType:flow'`, so the vocabulary this file documented
+ * (`*`, `onMetadataType:`, `onCommand:`, `onView:`) lived only in prose and a
+ * misspelling stayed silent forever. The kernel form gates the trigger on an
+ * enum at authoring time, which is the whole point of declaring it. Its enum
+ * was widened to the union of both vocabularies in the same change, so nothing
+ * a studio author could express before is unexpressible now.
+ *
+ * FROM (pre-v17)                          TO (v17+)
+ *   activationEvents: ['*']                 [{ type: 'onStartup',      pattern: '*' }]
+ *   activationEvents: ['onMetadataType:flow'] [{ type: 'onMetadataType', pattern: 'flow' }]
+ *   activationEvents: ['onCommand:my.cmd']  [{ type: 'onCommand',      pattern: 'my.cmd' }]
+ *   activationEvents: ['onView:my.panel']   [{ type: 'onView',         pattern: 'my.panel' }]
+ *
+ * A manifest still carrying the string form fails `StudioPluginManifestSchema`
+ * loudly at parse (it is a `strictObject`); there is no silent coercion, and no
+ * automatic conversion is possible — see the changeset for why.
  */
-export const ActivationEventSchema = lazySchema(() => z.string().describe('Activation event pattern'));
+export { ActivationEventSchema, type ActivationEvent } from '../kernel/plugin-runtime.zod';
 
 // ─── Studio Plugin Manifest ──────────────────────────────────────────
 
@@ -351,11 +368,17 @@ export const StudioPluginManifestSchema = lazySchema(() => strictObject({
     commands: [],
   }),
 
-  /** 
+  /**
    * Activation events — when to load this plugin.
-   * Default `['*']` means eager activation.
+   *
+   * [#4653] The default is the structured equivalent of the pre-v17 `['*']`:
+   * eager activation. `'*'` did not need its own `type` — it always meant
+   * "activate immediately", which is exactly what `onStartup` already means on
+   * the kernel side, so eager survives as `onStartup` with the `'*'` pattern
+   * rather than as a tenth enum value that would duplicate it.
    */
-  activationEvents: z.array(ActivationEventSchema).default(['*']),
+  activationEvents: z.array(ActivationEventSchema)
+    .default([{ type: 'onStartup', pattern: '*' }]),
 }));
 
 export type StudioPluginManifest = z.infer<typeof StudioPluginManifestSchema>;
