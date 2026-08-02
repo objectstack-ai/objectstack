@@ -388,7 +388,6 @@ describe('AppSchema', () => {
     const app: App = {
       name: 'portal',
       label: 'Customer Portal',
-      homePageId: 'nav_dashboard',
       navigation: [
         {
           id: 'nav_dashboard',
@@ -424,7 +423,6 @@ describe('AppSchema', () => {
         branding: {
           primaryColor: '#0070F3',
         },
-        homePageId: 'nav_home',
         navigation: [
           {
             id: 'nav_home',
@@ -618,7 +616,6 @@ describe('AppSchema', () => {
           { id: 'nav_settings', type: 'page', label: 'Settings', icon: 'settings', pageName: 'admin_settings' },
           { id: 'nav_help', type: 'url', label: 'Help', icon: 'help-circle', url: 'https://help.example.com', target: '_blank' },
         ],
-        homePageId: 'nav_pipeline',
         requiredPermissions: ['app.access.crm'],
       });
 
@@ -895,7 +892,6 @@ describe('NavigationAreaSchema', () => {
       id: 'area_service',
       label: 'Service',
       icon: 'headset',
-      order: 2,
       description: 'Customer service management',
       visible: 'user.has_permission("service.access")',
       requiredPermissions: ['service.access'],
@@ -906,7 +902,6 @@ describe('NavigationAreaSchema', () => {
     });
     expect(area.id).toBe('area_service');
     expect(area.icon).toBe('headset');
-    expect(area.order).toBe(2);
     expect(area.requiredPermissions).toEqual(['service.access']);
     expect(area.navigation).toHaveLength(2);
   });
@@ -930,7 +925,6 @@ describe('AppSchema with areas', () => {
           id: 'area_sales',
           label: 'Sales',
           icon: 'briefcase',
-          order: 1,
           navigation: [
             { id: 'nav_leads', type: 'object', label: 'Leads', objectName: 'lead' },
             { id: 'nav_opportunities', type: 'object', label: 'Opportunities', objectName: 'opportunity' },
@@ -940,7 +934,6 @@ describe('AppSchema with areas', () => {
           id: 'area_service',
           label: 'Service',
           icon: 'headset',
-          order: 2,
           navigation: [
             { id: 'nav_cases', type: 'object', label: 'Cases', objectName: 'case' },
           ],
@@ -949,7 +942,6 @@ describe('AppSchema with areas', () => {
           id: 'area_settings',
           label: 'Settings',
           icon: 'settings',
-          order: 99,
           requiredPermissions: ['admin.access'],
           navigation: [
             { id: 'nav_users', type: 'object', label: 'Users', objectName: 'user' },
@@ -1005,7 +997,6 @@ describe('AppSchema with areas', () => {
         {
           id: 'area_main',
           label: 'Main',
-          order: 1,
           navigation: [
             { id: 'nav_home', type: 'dashboard', label: 'Home', dashboardName: 'home' },
             { id: 'nav_accounts', type: 'object', label: 'Accounts', objectName: 'account', order: 1 },
@@ -1108,7 +1099,7 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
         navigation: [{ id: 'nav_a', label: 'A', type: 'object', objectName: 'account' }],
         areas: [{ id: 'area_a', label: 'A', navigation: [] }],
         contextSelectors: [{ id: 'pkg', label: 'Package', optionsSource: { endpoint: '/api/v1/packages' } }],
-        homePageId: 'nav_a', requiredPermissions: ['app.access.x'],
+        requiredPermissions: ['app.access.x'],
         defaultAgent: 'ask', protection: { lock: 'none' },
       };
       for (const [key, value] of Object.entries(probes)) {
@@ -1289,6 +1280,59 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
       expect(parsed.contextSelectors![0].allValue).toBe('');
       expect(parsed.contextSelectors![0]).not.toHaveProperty('includeAll');
       expect(parsed.contextSelectors![0]).not.toHaveProperty('placement');
+    });
+  });
+  // ── homePageId / areas[].order retired in 17.0.0 (#4667, ADR-0049) ────────
+  describe('retired app keys (#4667)', () => {
+    it('rejects `homePageId` and names what actually decides the landing page', () => {
+      // Tombstoned (retiredKey), matching the seven #4142 retirements on this
+      // schema — so it is a tsc error as well as a parse error. The schema's own
+      // hedge ("if not set, usually defaults to the first navigation item") had
+      // been describing the only behaviour that ever existed.
+      const parse = () => AppSchema.parse({
+        name: 'crm', label: 'CRM', homePageId: 'nav_pipeline',
+        navigation: [{ id: 'nav_home', type: 'object', label: 'Home', objectName: 'account' }],
+      });
+      expect(parse).toThrow(/homePageId.*removed.*17\.0\.0/s);
+      expect(parse).toThrow(/first navigation item/s);
+      expect(parse).toThrow(/isDefault/s);
+    });
+
+    it('routes the three retired homePageId aliases to the same prescription', () => {
+      for (const alias of ['home', 'homepage', 'landingpage']) {
+        expect(unknownKeyIssue(AppSchema, { name: 'crm', label: 'CRM', [alias]: 'nav_x' })!.message)
+          .toMatch(/homePageId.*removed/s);
+      }
+    });
+
+    it('rejects `areas[].order` and distinguishes it from the nav-item `order` that IS sorted', () => {
+      // The sibling that works is why this one read alive. The message must say
+      // so, or an author concludes ordering is unsupported and restructures the
+      // navigation tree for no reason.
+      const msg = unknownKeyIssue(AppSchema, {
+        name: 'crm', label: 'CRM',
+        areas: [{ id: 'area_sales', label: 'Sales', order: 1, navigation: [] }],
+      })!.message;
+      expect(msg).toMatch(/order.*removed.*17\.0\.0/s);
+      expect(msg).toMatch(/reorder the\s+`areas` array/s);
+      expect(msg).toMatch(/navigation ITEM/s);
+    });
+
+    it('the `sort` alias on an area carries the same prescription', () => {
+      expect(unknownKeyIssue(AppSchema, {
+        name: 'crm', label: 'CRM',
+        areas: [{ id: 'a', label: 'A', sort: 1, navigation: [] }],
+      })!.message).toMatch(/order.*removed/s);
+    });
+
+    it('an app without either key still parses', () => {
+      const app = AppSchema.parse({
+        name: 'crm', label: 'CRM',
+        areas: [{ id: 'area_sales', label: 'Sales', navigation: [] }],
+        navigation: [{ id: 'nav_home', type: 'object', label: 'Home', objectName: 'account' }],
+      });
+      expect(app).not.toHaveProperty('homePageId');
+      expect(app.areas![0]).not.toHaveProperty('order');
     });
   });
 });

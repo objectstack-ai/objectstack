@@ -278,3 +278,47 @@ describe('resolveDocAudiences — union over claiming books (§6.7)', () => {
     expect(docAudienceAllows(undefined, { authenticated: false })).toBe(false);
   });
 });
+
+// ── Inline translation maps retired in 17.0.0 (#4667, ADR-0049) ─────────────
+describe('retired book translation maps (#4667)', () => {
+  it('rejects a book-level `translations` map and names the live neighbour', () => {
+    // The prescription has to mention `doc.translations`: that key is live on
+    // every doc render path and is what the author actually wanted. Without it
+    // the rejection reads as "localization is unsupported", which is false.
+    const parse = () => BookSchema.parse({
+      name: 'crm_guide', label: 'CRM Guide',
+      translations: { 'zh-CN': { label: 'CRM 指南' } },
+      groups: [{ key: 'basics', label: 'Basics' }],
+    });
+    expect(parse).toThrow(/translations.*removed.*17\.0\.0/s);
+    expect(parse).toThrow(/doc\.translations/s);
+  });
+
+  it('rejects the `i18n` alias with the same prescription, not a rename', () => {
+    // `i18n` used to alias `translations`. An alias surviving its target would
+    // answer "did you mean `translations`?" — a rename onto a key that is gone.
+    expect(() => BookSchema.parse({
+      name: 'crm_guide', label: 'CRM Guide',
+      i18n: { 'zh-CN': { label: 'CRM 指南' } },
+      groups: [{ key: 'basics', label: 'Basics' }],
+    })).toThrow(/translations.*removed/s);
+  });
+
+  it('rejects a GROUP-level `translations` map — the tombstone, not a silent strip', () => {
+    // BookGroupSchema is a plain z.object with no .strict(), so this key is
+    // TOMBSTONED rather than deleted. Pinning the throw is what proves the
+    // tombstone is still there: a plain delete here would make zod strip the
+    // key silently and this test would fail with "expected to throw".
+    expect(() => BookSchema.parse({
+      name: 'crm_guide', label: 'CRM Guide',
+      groups: [{ key: 'basics', label: 'Basics', translations: { 'zh-CN': { label: '基础' } } }],
+    })).toThrow(/translations.*removed.*17\.0\.0/s);
+  });
+
+  it('still accepts a book with no translation map', () => {
+    expect(() => BookSchema.parse({
+      name: 'crm_guide', label: 'CRM Guide',
+      groups: [{ key: 'basics', label: 'Basics', include: 'crm_*' }],
+    })).not.toThrow();
+  });
+});

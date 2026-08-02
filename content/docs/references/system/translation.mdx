@@ -156,7 +156,6 @@ Translation data for objects, apps, and UI messages
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>; … }>` | optional | Object translations keyed by object name |
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, { label: string }> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
-| **validationMessages** | `Record<string, string>` | optional | Translatable validation error messages keyed by rule name (e.g., `{"discount_limit": "折扣不能超过40%"}`) |
 | **globalActions** | `Record<string, { label?: string; confirmText?: string; successMessage?: string; params?: Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, { label?: string }>; widgets?: Record<string, { title?: string; description?: string }> }>` | optional | Dashboard translations keyed by dashboard name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string }>` | optional | Page translations keyed by page name |
@@ -210,7 +209,6 @@ One locale of translations — the `translation` metadata type
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>; … }>` | optional | Object translations keyed by object name |
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, { label: string }> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
-| **validationMessages** | `Record<string, string>` | optional | Translatable validation error messages keyed by rule name (e.g., `{"discount_limit": "折扣不能超过40%"}`) |
 | **globalActions** | `Record<string, { label?: string; confirmText?: string; successMessage?: string; params?: Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, { label?: string }>; widgets?: Record<string, { title?: string; description?: string }> }>` | optional | Dashboard translations keyed by dashboard name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string }>` | optional | Page translations keyed by page name |

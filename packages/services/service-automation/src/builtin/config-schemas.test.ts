@@ -203,6 +203,16 @@ describe('builtin node configSchemas — designer parity (#3304)', () => {
       expect(retry?.maxRetries?.maximum).toBe(10);
       expect(retry?.backoffMultiplier?.minimum).toBe(1);
       expect(retry?.jitter?.type).toBe('boolean');
+
+      // #4661: the base delay is `backoffMs` — one spelling shared with
+      // `job.retryPolicy` since the retry policy converged onto a single
+      // declaration. Pinned here because the form/Zod ledger test compares only
+      // the TOP-LEVEL config keys (`try`/`catch`/`errorVariable`/`retry`), so
+      // nothing else would notice this nested key being renamed back or the
+      // Studio form drifting off the contract it is supposed to drive.
+      expect(retry?.backoffMs?.type).toBe('integer');
+      expect(retry?.backoffMs?.minimum).toBe(0);
+      expect(retry?.retryDelayMs).toBeUndefined();
     });
   });
 

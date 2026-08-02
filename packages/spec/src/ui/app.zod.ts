@@ -598,6 +598,23 @@ export const AppBrandingSchema = lazySchema(() => z.object({
 }).strict());
 
 /**
+ * `app.areas[].order`, retired in 17.0.0 (#4667, ADR-0049).
+ *
+ * The sibling that works is what made this one read alive: nav-item `order` IS
+ * sorted (`NavigationRenderer.tsx:1154`). Area-level order is not — `AppSidebar`
+ * and `AppSchemaRenderer` both iterate the `areas` array as authored — so
+ * declaration order has always been display order, and an author who set
+ * `order` to rearrange areas saw nothing move.
+ */
+const AREA_ORDER_RETIRED =
+  '`areas[].order` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no renderer '
+  + 'ever sorted areas; both the sidebar and the schema renderer iterate the array as '
+  + 'authored, so declaration order already IS display order. Delete the key and reorder the '
+  + '`areas` array itself. NOTE the neighbour that behaves differently: a navigation ITEM\'s '
+  + '`order` is genuinely sorted — this removal does not touch it. Run '
+  + '`os migrate meta --from 16` to rewrite existing sources automatically.';
+
+/**
  * Navigation Area Schema
  * 
  * A logical grouping (zone/section) of navigation items, similar to Salesforce "App Areas"
@@ -632,8 +649,8 @@ export const NavigationAreaSchema = lazySchema(() => z.object({
   /** Icon name (Lucide) */
   icon: z.string().optional().describe('Area icon name'),
 
-  /** Sort order among areas (lower = first) */
-  order: z.number().optional().describe('Sort order among areas (lower = first)'),
+  // `order` removed in 17.0.0 (#4667) — see AREA_ORDER_RETIRED. Reorder the
+  // `areas` array instead; declaration order is display order.
 
   /** Area description */
   description: I18nLabelSchema.optional().describe('Area description'),
@@ -652,8 +669,10 @@ export const NavigationAreaSchema = lazySchema(() => z.object({
 }, {
   error: strictUnknownKeyError({
     surface: 'this navigation area',
-    knownKeys: ['id', 'label', 'icon', 'order', 'description', 'visible', 'requiredPermissions', 'navigation'],
-    aliases: { visiblewhen: 'visible', visibleon: 'visible', title: 'label', name: 'id', sort: 'order', permissions: 'requiredPermissions', items: 'navigation', children: 'navigation' },
+    knownKeys: ['id', 'label', 'icon', 'description', 'visible', 'requiredPermissions', 'navigation'],
+    // `sort: 'order'` retired with the key it pointed at (#4667).
+    aliases: { visiblewhen: 'visible', visibleon: 'visible', title: 'label', name: 'id', permissions: 'requiredPermissions', items: 'navigation', children: 'navigation' },
+    guidance: { order: AREA_ORDER_RETIRED, sort: AREA_ORDER_RETIRED },
     history:
       'Until #4001 these were dropped silently — the area still parsed, so its gating or ' +
       'ordering was quietly ignored.',
@@ -888,6 +907,25 @@ const APP_KEYS = [
   'version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation',
 ] as const;
 
+/**
+ * `app.homePageId`, retired in 17.0.0 (#4667, ADR-0049).
+ *
+ * The schema's own hedge gave it away — "if not set, usually defaults to the
+ * first navigation item" describes the ONLY behaviour that exists. No shell
+ * reads the key: an app's landing page is its first navigation item in `order`,
+ * and the ROOT landing follows `isDefault` routing (objectui's
+ * `RootLandingRedirect`). So an author pinning a home page got the first nav
+ * item anyway, and "usually" was doing the work of "always".
+ */
+const HOME_PAGE_ID_RETIRED =
+  '`app.homePageId` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no shell '
+  + 'ever read it. An app\'s landing page IS its first navigation item (by `order`), and the '
+  + 'root landing follows `isDefault` routing. Delete the key; to change where an app opens, '
+  + 'reorder `navigation` so the intended entry is first, and set `isDefault` on the app that '
+  + 'should own the root landing. Run `os migrate meta --from 16` to rewrite existing sources '
+  + 'automatically.';
+
+
 const appUnknownKeyError = strictUnknownKeyError({
   surface: 'this app',
   knownKeys: APP_KEYS,
@@ -902,9 +940,9 @@ const appUnknownKeyError = strictUnknownKeyError({
     sections: 'areas',
     groups: 'areas',
     permissions: 'requiredPermissions',
-    home: 'homePageId',
-    homepage: 'homePageId',
-    landingpage: 'homePageId',
+    // `home` / `homepage` / `landingpage` aliased `homePageId`, retired in
+    // 17.0.0 (#4667). They fall through to the tombstone's own prescription
+    // rather than renaming onto a key that no longer exists.
     agent: 'defaultAgent',
     logo: 'branding',
     theme: 'branding',
@@ -922,6 +960,11 @@ const appUnknownKeyError = strictUnknownKeyError({
     flows:
       '`flows` is not an App field — flows are top-level stack metadata ' +
       '(`defineStack({ flows })`), not app-scoped.',
+    // The three retired `homePageId` aliases. `retiredKey` already answers the
+    // canonical spelling; these cover the spellings that used to route to it.
+    home: HOME_PAGE_ID_RETIRED,
+    homepage: HOME_PAGE_ID_RETIRED,
+    landingpage: HOME_PAGE_ID_RETIRED,
   },
   history:
     'Until #4001 these were dropped silently — the app still parsed, so navigation or ' +
@@ -1014,12 +1057,13 @@ export const AppSchema = lazySchema(() => z.object({
   contextSelectors: z.array(AppContextSelectorSchema).optional()
     .describe('App-level scope dropdowns whose value is injected into nav items as {<id>} template vars'),
   
-  /** 
-   * App-level Home Page Override
-   * ID of the navigation item to act as the landing page.
-   * If not set, usually defaults to the first navigation item.
+  /**
+   * REMOVED in 17.0.0 (#4667) — see {@link HOME_PAGE_ID_RETIRED}. Tombstoned
+   * rather than deleted, matching the seven #4142 retirements on this schema:
+   * `retiredKey` types it `never`, so an app still authoring it fails to
+   * compile as well as to parse.
    */
-  homePageId: z.string().optional().describe('ID of the navigation item to serve as landing page'),
+  homePageId: retiredKey(HOME_PAGE_ID_RETIRED),
 
   /** 
    * Access Control

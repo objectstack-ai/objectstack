@@ -637,7 +637,42 @@ const step17: MigrationStep = {
     + 'ignored it. The mapping prescription for `batchSize` deliberately offers no rename: '
     + 'bulk-action, connector, sync, offline, seed-loader and NoSQL-cursor `batchSize` are all '
     + 'live, but each is a different key sizing its own path — the same trap `datasource.'
-    + 'retryPolicy` vs `hook`/`job` `retryPolicy` had to defuse one issue earlier.',
+    + 'retryPolicy` vs `hook`/`job` `retryPolicy` had to defuse one issue earlier.\n\n'
+    + 'The same window converges the retry policy (#4661). `@objectstack/spec/automation` and '
+    + '`@objectstack/spec/system` each exported a `RetryPolicy`/`RetryPolicySchema` resolving '
+    + 'to a DIFFERENT declaration, so which shape a consumer got depended only on the import '
+    + 'path (#4411) — yet both computed `delay = base * multiplier^(retry-1)` and both '
+    + 'executors implemented that same formula. One declaration now serves both entries with '
+    + 'the union of their capabilities, so `job.retryPolicy` gains the `maxRetryDelayMs` ceiling '
+    + 'and `jitter` (both enforced in `runWithPolicy`, not merely declared — jitter is what stops '
+    + 'a fleet of jobs that failed on one outage from retrying in lockstep). The single '
+    + 'authorable casualty is the automation spelling of the base delay: `retryDelayMs` → '
+    + '`backoffMs`, a pure rename that replays losslessly and is what the already-enforced '
+    + 'retry policies (`job.retryPolicy`, `hook.retryPolicy`) call it.\n\n'
+    + 'The subtle half is the defaults, and it is worth stating because no gate can see it: '
+    + '`job.retryPolicy` defaulted `maxRetries: 3` / `backoffMultiplier: 2` while the automation '
+    + 'shape defaulted 0 / 1, and the authorable-surface gate compares KEY SETS — a changed '
+    + 'default is invisible to it, to the tombstone mechanism and to `spec_changes` alike. The '
+    + 'merged declaration takes 0 / 1 (retry replays side effects, so it is opt-in — the same '
+    + 'reading already recorded in `flow-retry-max-retries-required`), and the conversion writes '
+    + 'the pre-17 numbers into every existing `job.retryPolicy` that omitted them. Deployed '
+    + 'stacks therefore keep their exact behaviour; what changes is only what a NEWLY authored '
+    + 'omission means.\n\n'
+    + 'The same enforce-or-remove pass reaches the event vocabulary: `DataEventType` drops '
+    + '`data.field.changed` (#4673). It had no producer anywhere — the engine emits '
+    + '`data.record.{created,updated,deleted}` and, since #4639, `data.records.{updated,'
+    + 'deleted}` — so a subscriber switching on it held a branch that could never run, and '
+    + 'the `switch` still compiled, which is why an empty member could sit in a public enum '
+    + 'this long. It could not have been implemented against this contract as written: '
+    + '`DataEventSchema` is record-shaped and has no `field` / `oldValue` / `newValue` slot, '
+    + 'so the member advertised a granularity the payload has no room for. Nothing is lost — '
+    + 'per-field detail already rides on `data.record.updated` as `changes` (with `before` / '
+    + '`after`), one event per write instead of N on a wide table. Like the driver contract '
+    + 'above it is a runtime surface, never stored in stack metadata, so it is one semantic '
+    + 'TODO for event consumers rather than a source rewrite, and it carries no tombstone: a '
+    + 'removed enum VALUE cannot hold a fix-it error, exactly as the sharing-rule `full` '
+    + 'retirement noted. Should a real per-field stream ever be wanted, it earns its own '
+    + 'contract on the #4639 precedent rather than reclaiming this slot.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -664,13 +699,36 @@ const step17: MigrationStep = {
     'datasource-capabilities-removed',
     'datasource-inert-blocks-removed',
     'mapping-inert-keys-removed',
+    'book-translations-removed',
+    'job-id-removed',
+    'translation-validation-messages-removed',
     'flow-node-wait-timeout-keys-removed',
     'datasource-read-replicas-removed',
     'datasource-config-driver-key-aliases',
     'flow-node-script-branch-keys-removed',
     'object-managed-by-system-to-system-data',
+    'retry-policy-converged',
   ],
   semantic: [
+    {
+      id: 'job-retry-policy-constraints-tightened',
+      surface: 'job.retryPolicy.maxRetries (> 10) / job.retryPolicy.backoffMultiplier (< 1)',
+      replacement: 'maxRetries <= 10, and backoffMultiplier >= 1',
+      reason:
+        'The converged RetryPolicy (#4661) keeps the automation side\'s bounds, which the job '
+        + 'side never had: `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1. '
+        + 'Neither has a lossless rewrite. Clamping `maxRetries: 20` to 10 would halve a '
+        + 'retry budget its author chose, and a `backoffMultiplier` below 1 describes a delay '
+        + 'that SHRINKS on each attempt — retrying a failing dependency ever faster, which is '
+        + 'the opposite of backoff and was never a shape the engine meant to offer. Both now '
+        + 'fail at parse time with the bound named, rather than being silently reinterpreted. '
+        + 'Choosing the replacement count (or accepting the cap) is the author\'s call.',
+      acceptanceCriteria:
+        'Every job declaring `retryPolicy` parses: no `maxRetries` above 10 and no '
+        + '`backoffMultiplier` below 1 remain, and each adjusted value was re-chosen knowing a '
+        + 'retry re-runs the handler with its writes and callouts. No job fails to register '
+        + 'with the retry-policy bound prescription.',
+    },
     {
       id: 'flow-retry-max-retries-required',
       surface: "flow.errorHandling.maxRetries (under strategy: 'retry')",
@@ -919,6 +977,42 @@ const step17: MigrationStep = {
         + 'through the export surface. Drivers and test doubles no longer implement the '
         + 'method — one left behind still compiles and is simply never reached, so removing '
         + 'it is cleanup rather than a break, while a CALLER of it no longer type-checks.',
+    },
+    {
+      id: 'data-field-changed-event-retired',
+      surface: "api.DataEventType 'data.field.changed'",
+      replacement:
+        "the `data.record.updated` event, whose payload already carries the per-field "
+        + 'detail: `changes` (the changed fields), plus `before` / `after`',
+      reason:
+        '`data.field.changed` was declared in `DataEventType` and emitted by nothing — the '
+        + 'engine\'s `publishDataEvent` sends `data.record.{created,updated,deleted}` and (since '
+        + '#4639) `data.records.{updated,deleted}`, and no other producer exists in either '
+        + 'repository. A subscriber that switched on it was waiting on an event no producer '
+        + 'sends: the branch never ran, and because the surrounding `switch` still compiled, '
+        + 'nothing anywhere reported the gap (ADR-0078\'s silently-inert declaration, on the '
+        + 'event vocabulary). `DataEventSchema` could not have carried the semantics even if '
+        + 'something had emitted it — the payload is record-shaped (`recordId`, `changes`, '
+        + '`before`, `after`) with no `field` / `oldValue` / `newValue` slot — so the member '
+        + 'promised a granularity the contract has no room for. Per-field detail is therefore '
+        + 'not lost: it has always ridden on `data.record.updated` as `changes`, which is one '
+        + 'event per write rather than N events on a wide table. This is a runtime EVENT '
+        + 'surface — no stack, example or template authors an event name (webhooks subscribe '
+        + 'through the separate authorable `WebhookTriggerType`, whose vocabulary was already '
+        + 'trimmed to producers that exist, #3196) — so there is no source for the chain to '
+        + 'rewrite, and deliberately no schema tombstone: a removed ENUM MEMBER cannot carry a '
+        + 'retiredKey() fix-it error the way an authorable object key can (the same limit the '
+        + 'sharing-rule `full` retirement hit above). The enforced channels are tsc, which '
+        + 'fails any consumer still naming the value in a `DataEventType` position, and the '
+        + 'enum parse, which now rejects the name instead of accepting an event that never '
+        + 'arrives. A genuine per-field stream, if one is ever wanted, gets its own honest '
+        + 'contract the way #4639 gave bulk writes theirs. ADR-0049 / ADR-0078, #4673.',
+      acceptanceCriteria:
+        'No consumer subscribes to or switches on `data.field.changed`; per-field change '
+        + 'detail is read from a `data.record.updated` event\'s `changes` map (with `before` / '
+        + '`after` for the surrounding state). Deleting the dead branch changes no observable '
+        + 'behaviour — it never executed — so the migration is removing code that could not '
+        + 'run, not rebuilding a capability.',
     },
     {
       id: 'data-engine-batch-retired',

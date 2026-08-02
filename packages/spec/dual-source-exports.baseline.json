@@ -13,13 +13,10 @@
     "FieldMapping — [./data (type)] ≠ [./integration (type)] ≠ [./shared (type)]",
     "FieldMappingSchema — [./data (const)] ≠ [./integration (const)] ≠ [./shared (const)]",
     "HttpMethod — [./api, ./shared (type)] ≠ [./ui (type)]",
-    "HttpRequest — [./shared (type)] ≠ [./ui (type)]",
     "PackageDependency — [./cloud (type)] ≠ [./kernel (type)]",
     "PackageDependencySchema — [./cloud (const)] ≠ [./kernel (const)]",
     "RateLimitConfig — [./integration (type)] ≠ [./shared (type)]",
     "RateLimitConfigSchema — [./integration (const)] ≠ [./shared (const)]",
-    "RetryPolicy — [./automation (type)] ≠ [./system (type)]",
-    "RetryPolicySchema — [./automation (const)] ≠ [./system (const)]",
     "TenantPlan — [./cloud (type)] ≠ [./system (type)]",
     "TenantPlanSchema — [./cloud (const)] ≠ [./system (const)]"
   ]

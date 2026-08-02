@@ -79,6 +79,20 @@ const DELETED: RealtimeEventPayload = {
   timestamp: '2026-08-02T12:00:01.000Z',
 };
 
+/** [#4639] What a predicate (`multi: true`) write publishes: a count, no rows. */
+const BULK_DELETED: RealtimeEventPayload = {
+  type: 'data.records.deleted',
+  object: 'task',
+  payload: {
+    id: '9c8b7a65-4321-4fed-8ba9-876543210fed',
+    type: 'data.records.deleted',
+    object: 'task',
+    matched: 12,
+    timestamp: '2026-08-02T12:00:02.000Z',
+  },
+  timestamp: '2026-08-02T12:00:02.000Z',
+};
+
 describe('#4626 — KnowledgeServicePlugin event sync on data.record.*', () => {
   it('upserts the RECORD (payload.after), not the event envelope', async () => {
     const harness = makeCtx();
@@ -113,5 +127,26 @@ describe('#4626 — KnowledgeServicePlugin event sync on data.record.*', () => {
     });
 
     expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('[#4639] says out loud that a predicate write leaves the index stale', async () => {
+    const harness = makeCtx();
+    const { service, deliver } = await harness.boot(new KnowledgeServicePlugin());
+    const upsert = vi.spyOn(service, 'handleRecordUpsert').mockResolvedValue(undefined);
+    const del = vi.spyOn(service, 'handleRecordDelete').mockResolvedValue(undefined);
+
+    await deliver(BULK_DELETED);
+
+    // A knowledge index is a per-record projection and `matched: 12` names no
+    // record, so there is nothing to upsert or delete — the adapters take
+    // neither a count nor a predicate. The index is now stale in a way this
+    // subscription cannot repair, and a silent no-op here would read exactly
+    // like "nothing happened". Reconciliation is tracked in #4672.
+    expect(upsert).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+    expect(harness.ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('may now be stale'),
+      expect.objectContaining({ object: 'task', matched: 12 }),
+    );
   });
 });

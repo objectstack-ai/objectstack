@@ -30,11 +30,13 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       triggers: {
         label: "トリガー",
-        help: "カンマ区切りのイベントリスト: create,update,delete",
+        help: "このウェブフックを発火するレコードイベント。bulk_update / bulk_delete は述語による一括書き込みで発火し、レコードではなく件数を配信します。",
         options: {
           create: "作成",
           update: "更新",
-          delete: "削除"
+          delete: "削除",
+          bulk_update: "一括更新",
+          bulk_delete: "一括削除"
         }
       },
       url: {

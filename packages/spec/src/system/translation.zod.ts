@@ -281,14 +281,35 @@ export type LegacyObjectFirstKey = (typeof LEGACY_OBJECT_FIRST_KEYS)[number];
  * when the two carry different inner shapes and the content has to be rewritten,
  * not renamed.
  */
-const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey, string> = {
+const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessages', string> = {
+  // Not a legacy object-first key — a group that was live-looking and unread
+  // until 17.0.0 (#4667, ADR-0049). The platform's own signature was on it
+  // twice: the schema example showed a concrete override
+  // ({"discount_limit": "折扣不能超过40%"}), and #3778's migration table steered
+  // retired `errors:` authors straight into it. Both signposts pointed at a
+  // group no resolver read — objectui's spec-translations transform passed it
+  // through to the client tree and nothing downstream consumed it.
+  validationMessages:
+    '`validationMessages` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no '
+    + 'resolver ever read it, so a translated rule message was stored and never shown. '
+    + 'Validation messages are not translated through a translation group: author the '
+    + 'message on the rule itself (`object.validations[].message`), which the engine '
+    + 'evaluates and returns on every rejected write. Delete the key. Run '
+    + '`os migrate meta --from 16` to rewrite existing sources automatically.',
   o: "`o` is the retired object-first dialect, which no resolver reads — use 'objects.<object_name>'",
   app: "`app` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>'",
   nav: "`nav` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>.navigation.<node_id>.label'",
   dashboard: "`dashboard` is the retired object-first dialect, which no resolver reads — use 'dashboards.<dashboard_name>' (plural)",
   reports: '`reports` is the retired object-first dialect — reports have no translation group, omit them',
   notifications: '`notifications` is the retired object-first dialect — notifications have no translation group, omit them',
-  errors: "`errors` is the retired object-first dialect — use 'validationMessages' for rule messages; other errors have no translation group",
+  // Was: "use 'validationMessages' for rule messages". That was a signpost to a
+  // key with no reader — #3778 retired `errors` by pointing authors at
+  // `validationMessages`, which was itself dead, so taking the advice moved the
+  // content from one unread group to another. Both are gone now (#4667).
+  errors:
+    '`errors` is the retired object-first dialect and has no replacement — rule messages are '
+    + 'not translated through a translation group at all. Author the message on the rule '
+    + "itself (`object.validations[].message`); omit `errors`.",
   _globalOptions: "`_globalOptions` is the retired object-first dialect — use 'objects.<object_name>.fields.<field_name>.options'",
   _meta: "`_meta` is the retired object-first dialect — use the top-level 'locale' field (on a bundle, the locale is the map key)",
   namespace: '`namespace` is not part of the translation contract — omit it (ADR-0006 D4 retired namespaces platform-wide)',
@@ -352,8 +373,10 @@ const translationDataShape = () => ({
   /** UI Messages */
   messages: z.record(z.string(), z.string()).optional().describe('UI message translations keyed by message ID'),
   
-  /** Validation Error Messages */
-  validationMessages: z.record(z.string(), z.string()).optional().describe('Translatable validation error messages keyed by rule name (e.g., {"discount_limit": "折扣不能超过40%"})'),
+  // `validationMessages` removed in 17.0.0 (#4667) — see the
+  // TRANSLATION_KEY_GUIDANCE entry. Removing it from this shared shape retires
+  // it at BOTH doors at once (bundle entry + registered item), which is the
+  // asymmetry #3778's item-only guard got wrong.
 
   /**
    * Global (object-less) action translations keyed by action name (snake_case).

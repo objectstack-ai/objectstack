@@ -1618,31 +1618,39 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
   retiredFromLoadPath: true,
   surface:
     'app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / '
-    + 'app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement',
-  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' plus contextSelectors 'includeAll'/'placement' removed (liveness audits #4001, #4509 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, and includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope)",
+    + 'app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement / '
+    + 'app.homePageId / app.areas.order',
+  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits #4001, #4509, #4667 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, the landing page IS the first nav item, and no renderer ever sorted areas)",
   apply(stack, emit) {
-    const RETIRED = ['version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation'];
+    const RETIRED = [
+      'version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation',
+      'homePageId',
+    ];
     const RETIRED_SELECTOR = ['includeAll', 'placement'];
     return mapCollection(stack, 'apps', (app, path) => {
       const next = stripKeys(app, RETIRED, emit, path);
-      // `contextSelectors` is an ARRAY one level down, so stripKeys (top-level
-      // only) cannot reach it. Drill in and copy-on-write at both levels, so an
-      // app with nothing to strip keeps its identity for change detection.
-      const selectors = next.contextSelectors;
-      if (!Array.isArray(selectors)) return next;
-      let touched = false;
-      const nextSelectors = selectors.map((sel, i) => {
-        if (!sel || typeof sel !== 'object' || Array.isArray(sel)) return sel;
-        const stripped = stripKeys(
-          sel as Record<string, unknown>,
-          RETIRED_SELECTOR,
-          emit,
-          `${path}.contextSelectors[${i}]`,
-        );
-        if (stripped !== sel) touched = true;
-        return stripped;
-      });
-      return touched ? { ...next, contextSelectors: nextSelectors } : next;
+      // `contextSelectors` and `areas` are ARRAYS one level down, so stripKeys
+      // (top-level only) cannot reach them. Drill in and copy-on-write at both
+      // levels, so an app with nothing to strip keeps its identity for change
+      // detection.
+      const stripInArray = (key: string, retired: string[], src: Record<string, unknown>) => {
+        const arr = src[key];
+        if (!Array.isArray(arr)) return src;
+        let touched = false;
+        const mapped = arr.map((el, i) => {
+          if (!el || typeof el !== 'object' || Array.isArray(el)) return el;
+          const stripped = stripKeys(
+            el as Record<string, unknown>,
+            retired,
+            emit,
+            `${path}.${key}[${i}]`,
+          );
+          if (stripped !== el) touched = true;
+          return stripped;
+        });
+        return touched ? { ...src, [key]: mapped } : src;
+      };
+      return stripInArray('areas', ['order'], stripInArray('contextSelectors', RETIRED_SELECTOR, next));
     });
   },
   fixture: {
@@ -1654,6 +1662,7 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
         sharing: { enabled: true },
         embed: { enabled: true },
         mobileNavigation: { mode: 'bottom_nav' },
+        homePageId: 'nav_home',
         contextSelectors: [{
           id: 'active_package',
           label: 'Package',
@@ -1661,6 +1670,7 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
           includeAll: true,
           placement: 'sidebar_header',
         }],
+        areas: [{ id: 'area_sales', label: 'Sales', order: 1, navigation: [] }],
         navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
       }],
     },
@@ -1673,12 +1683,14 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
           label: 'Package',
           optionsSource: { endpoint: '/api/v1/packages', valueKey: 'id', labelKey: 'name' },
         }],
+        areas: [{ id: 'area_sales', label: 'Sales', navigation: [] }],
         navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
       }],
     },
-    // Six notices: four top-level keys (`version`, `sharing`, `embed`,
-    // `mobileNavigation`) plus the two on the single context selector.
-    expectedNotices: 6,
+    // Eight notices: five top-level keys (`version`, `sharing`, `embed`,
+    // `mobileNavigation`, `homePageId`), the two on the single context
+    // selector, and `order` on the single area.
+    expectedNotices: 8,
   },
 };
 
@@ -2440,6 +2452,162 @@ const mappingInertKeysRemoved: MetadataConversion = {
 };
 
 /**
+ * Inline book translation maps removed (protocol 17, #4667, ADR-0049).
+ *
+ * `book.translations` and `book.groups[].translations` were parsed, stored and
+ * round-tripped, and read by nothing: the tree endpoint and the docs portal
+ * render `label` / `description` verbatim, and the generic bundle translator
+ * covers view / action / object / app / dashboard / page only. A localized book
+ * therefore shipped its authoring-locale strings to every reader.
+ *
+ * The trap was PROXIMITY: `doc.translations` — same name, same shape, two files
+ * over — is live on every doc render path, so the book-level map read as the
+ * same feature one level up.
+ *
+ * Split routes, because the two schemas differ: `BookSchema` is `strictObject`
+ * (key deleted, `guidance` carries the prescription, ledger row deleted), while
+ * `BookGroupSchema` is a plain `z.object` with no `.strict()` — a bare delete
+ * there would have zod silently strip the key, so it is tombstoned with
+ * `retiredKey` and its ledger row STAYS.
+ */
+const bookTranslationsRemoved: MetadataConversion = {
+  id: 'book-translations-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'book.translations / book.groups.translations',
+  summary: "book keys 'translations' (book-level and group-level) removed (#4667 — no resolver read them; the tree endpoint and portal render labels verbatim, so a localized book served its authoring locale to everyone). Localize the docs instead: `doc.translations` is live",
+  apply(stack, emit) {
+    return mapCollection(stack, 'books', (book, path) => {
+      const next = stripKeys(book, ['translations'], emit, path);
+      const groups = next.groups;
+      if (!Array.isArray(groups)) return next;
+      let touched = false;
+      const mapped = groups.map((g, i) => {
+        if (!g || typeof g !== 'object' || Array.isArray(g)) return g;
+        const stripped = stripKeys(
+          g as Record<string, unknown>,
+          ['translations'],
+          emit,
+          `${path}.groups[${i}]`,
+        );
+        if (stripped !== g) touched = true;
+        return stripped;
+      });
+      return touched ? { ...next, groups: mapped } : next;
+    });
+  },
+  fixture: {
+    before: {
+      books: [{
+        name: 'crm_guide',
+        label: 'CRM Guide',
+        translations: { 'zh-CN': { label: 'CRM 指南' } },
+        groups: [{
+          key: 'basics',
+          label: 'Basics',
+          translations: { 'zh-CN': { label: '基础' } },
+        }],
+      }],
+    },
+    after: {
+      books: [{
+        name: 'crm_guide',
+        label: 'CRM Guide',
+        groups: [{ key: 'basics', label: 'Basics' }],
+      }],
+    },
+    // Two notices: the book-level map and the one on its single group.
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * `job.id` removed (protocol 17, #4667, ADR-0049).
+ *
+ * Nothing read it, and its own `describe()` — "defaults to `name` when omitted"
+ * — advertised an identity override that never existed. `name` is the identity
+ * at every layer that has one: the scheduling key, the `sys_job` row key (the
+ * DB adapter upserts by `name` and mints its own row id), and the
+ * `JobExecution.jobId` stamp. Two jobs differing only in `id` were never two
+ * jobs — they were one job declared twice.
+ */
+const jobIdRemoved: MetadataConversion = {
+  id: 'job-id-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'job.id',
+  summary: "job key 'id' removed (#4667 — nothing read it; `name` is the job's identity everywhere, so two jobs differing only in `id` were the same job, and the key's own description advertised an override that did not exist)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'jobs', (job, path) => stripKeys(job, ['id'], emit, path));
+  },
+  fixture: {
+    before: {
+      jobs: [{
+        name: 'nightly_sync',
+        id: 'job_nightly',
+        schedule: { type: 'cron', expression: '0 0 * * *' },
+        handler: 'syncAll',
+      }],
+    },
+    after: {
+      jobs: [{
+        name: 'nightly_sync',
+        schedule: { type: 'cron', expression: '0 0 * * *' },
+        handler: 'syncAll',
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * `translation.validationMessages` removed (protocol 17, #4667, ADR-0049).
+ *
+ * A translation group with no reader — objectui's spec-translations transform
+ * passed it through to the client tree and nothing downstream consumed it. The
+ * platform's own signature was on it twice: the schema example showed a
+ * concrete override, and #3778's legacy-key migration table steered retired
+ * `errors:` authors straight into it. Retiring one dead key by pointing authors
+ * at another is the failure this conversion also fixes — that guidance entry is
+ * rewritten in the same change to say rule messages are authored on the rule
+ * (`object.validations[].message`), not translated through a group.
+ *
+ * Removed from the shared `translationDataShape()`, so it retires at BOTH doors
+ * at once — the bundle entry and the registered item. #3778's original guard
+ * ran on the item door only, which is exactly how the key survived this long in
+ * file-authored bundles.
+ */
+const translationValidationMessagesRemoved: MetadataConversion = {
+  id: 'translation-validation-messages-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'translation.validationMessages',
+  summary: "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'translations', (t, path) =>
+      stripKeys(t, ['validationMessages'], emit, path));
+  },
+  fixture: {
+    before: {
+      translations: [{
+        name: 'zh_cn',
+        locale: 'zh-CN',
+        validationMessages: { discount_limit: '折扣不能超过40%' },
+        messages: { 'common.save': '保存' },
+      }],
+    },
+    after: {
+      translations: [{
+        name: 'zh_cn',
+        locale: 'zh-CN',
+        messages: { 'common.save': '保存' },
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
  * `datasource.capabilities` removed (protocol 17, #4583).
  *
  * Eleven boolean flags, declared and strict-guarded, read by nothing. Pushdown
@@ -2914,6 +3082,159 @@ const objectManagedBySystemToSystemData: MetadataConversion = {
   },
 };
 
+/**
+ * The retry policy converges to one declaration (protocol 17, #4661 — the
+ * #4535 C8 dual-source cluster).
+ *
+ * `@objectstack/spec/automation` and `@objectstack/spec/system` both exported a
+ * `RetryPolicy` / `RetryPolicySchema`, resolving to DIFFERENT declarations — so
+ * which shape a consumer got depended only on the import path (#4411). They
+ * were never two concepts: `try_catch`'s `retry` region and `job.retryPolicy`
+ * both compute `delay = base * multiplier^(retry-1)`, and the two executors
+ * implemented that identical formula. What differed was cosmetic and
+ * accidental, and this conversion pays for both halves of the merge:
+ *
+ *  1. **The base delay had two spellings.** automation said `retryDelayMs`,
+ *     system said `backoffMs`. `backoffMs` wins — it is what the *enforced*
+ *     retry policies already spell it (`job.retryPolicy` and `hook.retryPolicy`;
+ *     see the `datasource-inert-blocks-removed` note above, which leans on
+ *     exactly that distinction), so the platform drops from three spellings to
+ *     two rather than four. `retryDelayMs` is tombstoned (`retiredKey`) — NOT
+ *     deleted — because neither owning shape is `.strict()`: a plain deletion
+ *     would have Zod silently swallow the authored number and fall back to the
+ *     1000ms default, which is the quiet-failure class ADR-0049 removes.
+ *
+ *  2. **The defaults were opposite, and no gate can see a default.** Pre-17,
+ *     `job.retryPolicy` defaulted `maxRetries: 3` / `backoffMultiplier: 2`
+ *     while the automation shape defaulted 0 / 1. The merged declaration takes
+ *     0 / 1 (retry is opt-in: a retry replays whatever the attempt already did,
+ *     and an implicit replay of side effects is the failure mode hardest to
+ *     catch in tests — the same reading already recorded for flow-level retry
+ *     in `flow-retry-max-retries-required`, #4247). Taken alone that would
+ *     SILENTLY stop existing jobs from retrying, and the authorable-surface
+ *     gate would never notice: it compares key sets, and a default is not a key.
+ *     So this conversion writes the pre-17 numbers into every existing
+ *     `job.retryPolicy` that omitted them. Deployed stacks keep their exact
+ *     behaviour; only a newly authored omission means "no retry".
+ *
+ * Jobs with no `retryPolicy` block at all are left alone — absence already
+ * meant a single attempt on both sides of the change.
+ *
+ * `retiredFromLoadPath` is NOT set: `FlowNodeSchema.config` is an unconstrained
+ * record, so no schema rejection can reach `config.retry.retryDelayMs` and the
+ * conversion layer is the only seam that can declare and retire that spelling.
+ * The `RetryPolicySchema` tombstone still fires for anyone who reaches the
+ * policy through a parsed job.
+ */
+const retryPolicyConverged: MetadataConversion = {
+  id: 'retry-policy-converged',
+  toMajor: 17,
+  surface: 'flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
+  summary:
+    "retry policy unified across job.retryPolicy and try_catch retry: base delay 'retryDelayMs' → 'backoffMs', " +
+    "and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661)",
+  apply(stack, emit) {
+    // ── 1. try_catch nodes: retry.retryDelayMs → retry.backoffMs ──────
+    const withFlows = mapFlowNodes(stack, (node, path) => {
+      if (node.type !== 'try_catch') return node;
+      const config = node.config;
+      if (!config || typeof config !== 'object' || Array.isArray(config)) return node;
+      const configDict = config as Record<string, unknown>;
+      const retry = configDict.retry;
+      if (!retry || typeof retry !== 'object' || Array.isArray(retry)) return node;
+      const renamed = renameKey(retry as Record<string, unknown>, 'retryDelayMs', 'backoffMs');
+      if (renamed === null) return node;
+      emit({ from: 'retryDelayMs', to: 'backoffMs', path: `${path}.config.retry.backoffMs` });
+      return { ...node, config: { ...configDict, retry: renamed } };
+    });
+
+    // ── 2. jobs: materialize the pre-17 implicit defaults ─────────────
+    return mapCollection(withFlows, 'jobs', (job, path) => {
+      const policy = job.retryPolicy;
+      if (!policy || typeof policy !== 'object' || Array.isArray(policy)) return job;
+      const policyDict = policy as Record<string, unknown>;
+      let next = policyDict;
+      if (next.maxRetries === undefined) {
+        next = { ...next, maxRetries: 3 };
+        emit({
+          from: 'maxRetries unset (implied 3)',
+          to: 'maxRetries: 3',
+          path: `${path}.retryPolicy.maxRetries`,
+        });
+      }
+      if (next.backoffMultiplier === undefined) {
+        next = { ...next, backoffMultiplier: 2 };
+        emit({
+          from: 'backoffMultiplier unset (implied 2)',
+          to: 'backoffMultiplier: 2',
+          path: `${path}.retryPolicy.backoffMultiplier`,
+        });
+      }
+      return next === policyDict ? job : { ...job, retryPolicy: next };
+    });
+  },
+  fixture: {
+    before: {
+      flows: [{
+        name: 'sync_orders',
+        nodes: [
+          { id: 'n1', type: 'start' },
+          {
+            id: 'n2',
+            type: 'try_catch',
+            config: {
+              try: { nodes: [], edges: [] },
+              retry: { maxRetries: 3, retryDelayMs: 500, jitter: true },
+            },
+          },
+          // Already canonical — left alone, contributes no notice.
+          {
+            id: 'n3',
+            type: 'try_catch',
+            config: { try: { nodes: [], edges: [] }, retry: { maxRetries: 2, backoffMs: 250 } },
+          },
+        ],
+      }],
+      jobs: [
+        // Omits both defaults — both get written out.
+        { name: 'nightly_sync', schedule: { type: 'cron', expression: '0 0 * * *' }, handler: 'jobs.ts:sync', retryPolicy: { backoffMs: 5000 } },
+        // States both — untouched.
+        { name: 'hourly_roll', schedule: { type: 'cron', expression: '0 * * * *' }, handler: 'jobs.ts:roll', retryPolicy: { maxRetries: 1, backoffMultiplier: 3 } },
+        // No policy block at all — absence already meant one attempt.
+        { name: 'weekly_purge', schedule: { type: 'cron', expression: '0 0 * * 0' }, handler: 'jobs.ts:purge' },
+      ],
+    },
+    after: {
+      flows: [{
+        name: 'sync_orders',
+        nodes: [
+          { id: 'n1', type: 'start' },
+          {
+            id: 'n2',
+            type: 'try_catch',
+            config: {
+              try: { nodes: [], edges: [] },
+              retry: { maxRetries: 3, jitter: true, backoffMs: 500 },
+            },
+          },
+          {
+            id: 'n3',
+            type: 'try_catch',
+            config: { try: { nodes: [], edges: [] }, retry: { maxRetries: 2, backoffMs: 250 } },
+          },
+        ],
+      }],
+      jobs: [
+        { name: 'nightly_sync', schedule: { type: 'cron', expression: '0 0 * * *' }, handler: 'jobs.ts:sync', retryPolicy: { backoffMs: 5000, maxRetries: 3, backoffMultiplier: 2 } },
+        { name: 'hourly_roll', schedule: { type: 'cron', expression: '0 * * * *' }, handler: 'jobs.ts:roll', retryPolicy: { maxRetries: 1, backoffMultiplier: 3 } },
+        { name: 'weekly_purge', schedule: { type: 'cron', expression: '0 0 * * 0' }, handler: 'jobs.ts:purge' },
+      ],
+    },
+    // n2's rename, plus nightly_sync's two materialized defaults.
+    expectedNotices: 3,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -2947,10 +3268,14 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     datasourceCapabilitiesRemoved,
     datasourceInertBlocksRemoved,
     mappingInertKeysRemoved,
+    bookTranslationsRemoved,
+    jobIdRemoved,
+    translationValidationMessagesRemoved,
     datasourceConfigDriverKeyAliases,
     // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
     // whether `config.function` is set, and that rename is what sets it.
     flowNodeScriptBranchKeysRemoved,
+    retryPolicyConverged,
     objectManagedBySystemToSystemData,
   ],
 };

@@ -19,6 +19,26 @@ producer are declared here — an author can't subscribe to something that
 
 never fires.
 
+**Bulk triggers (#4639).** `bulk_update` / `bulk_delete` map to the engine's
+
+aggregate `data.records.updated` / `data.records.deleted`, emitted when a
+
+predicate write (`multi: true` → `IDataDriver.updateMany`/`deleteMany`)
+
+affects a set of rows the driver reports only as a count. They are separate
+
+trigger values, not extra sources for `update` / `delete`, because their
+
+delivery has a different SHAPE: no `recordId`, no record body, just
+
+`object` + `matched`. Folding them into the per-record triggers would send
+
+every existing subscriber a body missing the fields it reads — the same
+
+class of breakage as the pre-#4626 `recordId: ''` fabrication, arriving from
+
+the other direction. A webhook that wants both subscribes to both.
+
 Deliberately NOT triggers (#3196):
 
 - `undelete` — there is no soft-delete / restore capability in the engine
@@ -47,7 +67,7 @@ value that silently never fires.
 
 ```typescript
 import { WebhookSchema, WebhookTriggerType } from '@objectstack/spec/automation';
-import type { Webhook } from '@objectstack/spec/automation';
+import type { Webhook, WebhookTriggerType } from '@objectstack/spec/automation';
 
 // Validate data
 const result = WebhookSchema.parse(data);
@@ -63,8 +83,8 @@ const result = WebhookSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Webhook unique name (lowercase snake_case) |
 | **label** | `string` | optional | Human-readable webhook label |
-| **object** | `string` | optional | Object whose record events (create/update/delete) trigger this webhook |
-| **triggers** | `Enum<'create' \| 'update' \| 'delete'>[]` | optional | Events that trigger execution |
+| **object** | `string` | optional | Object whose record events (create/update/delete, bulk_update/bulk_delete) trigger this webhook |
+| **triggers** | `Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]` | optional | Events that trigger execution |
 | **url** | `string` | ✅ | External webhook endpoint URL |
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | ✅ | HTTP method |
 | **headers** | `Record<string, string>` | optional | Custom HTTP headers |
@@ -83,6 +103,8 @@ const result = WebhookSchema.parse(data);
 * `create`
 * `update`
 * `delete`
+* `bulk_update`
+* `bulk_delete`
 
 
 ---

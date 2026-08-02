@@ -37,6 +37,23 @@ const VIEW_HISTORY =
 export { HttpMethodSchema, HttpRequestSchema };
 
 /**
+ * [#4688] `HttpRequest` is RE-EXPORTED from its one declaration in
+ * `shared/http.zod.ts` — never re-inferred here.
+ *
+ * The line this replaces was `export type HttpRequest = z.infer< typeof
+ * HttpRequestSchema >` in the alias block at the bottom of this file. It looked
+ * single-source: it inferred from the very schema object imported above, so the
+ * resolved shape was identical. But it was a SECOND type declaration carrying
+ * one name, and symbol identity — not shape — is what
+ * `check:dual-source-exports` measures, and what an auto-import or a model
+ * completion resolves by. That is how `./shared` and `./ui` came to name two
+ * different declarations `HttpRequest` (the #4411 trap). A re-export keeps every
+ * existing `import type { HttpRequest } from '@objectstack/spec/ui'` working
+ * while leaving exactly one declaration that could ever diverge.
+ */
+export type { HttpRequest } from '../shared/http.zod';
+
+/**
  * View Data Source Configuration
  * Supports three modes:
  * 1. 'object': Standard Protocol - Auto-connects to ObjectStack Metadata and Data APIs
@@ -2036,7 +2053,11 @@ export type SelectionConfig = z.infer<typeof SelectionConfigSchema>;
 export type NavigationConfig = z.infer<typeof NavigationConfigSchema>;
 export type PaginationConfig = z.infer<typeof PaginationConfigSchema>;
 export type ViewData = z.infer<typeof ViewDataSchema>;
-export type HttpRequest = z.infer<typeof HttpRequestSchema>;
+// `HttpRequest` is NOT inferred here — it is re-exported from its single
+// declaration in `shared/http.zod.ts` next to the schema re-export at the top of
+// this file (#4688). Re-adding `= z.infer<typeof HttpRequestSchema>` below would
+// re-create the dual-source row this change removed, even though the inferred
+// shape is identical.
 export type HttpMethod = z.infer<typeof HttpMethodSchema>;
 export type ColumnSummary = z.infer<typeof ColumnSummarySchema>;
 export type ColumnSummaryConfig = z.infer<typeof ColumnSummaryConfigSchema>;

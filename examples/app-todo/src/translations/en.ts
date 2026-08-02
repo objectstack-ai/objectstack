@@ -108,8 +108,8 @@ export const en: TranslationData = {
     'error.required': 'This field is required',
     'error.load_failed': 'Failed to load data',
   },
-  validationMessages: {
-    completed_date_required: 'Completed date is required when status is Completed',
-    recurrence_fields_required: 'Recurrence type is required for recurring tasks',
-  },
+  // `validationMessages` retired in spec 17.0.0 (#4667) — no resolver ever read
+  // it, so the zh-CN / ja-JP strings here were never rendered and the `en` ones
+  // merely duplicated the rule's own text. The live home for these messages is
+  // `validations[].message` on the task object.
 };

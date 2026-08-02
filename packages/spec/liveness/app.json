@@ -172,13 +172,6 @@
           "verifiedAt": "2026-08-01",
           "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:448"
         },
-        "order": {
-          "status": "dead",
-          "verifiedAt": "2026-08-01",
-          "authorWarn": true,
-          "authorHint": "Delete it — no renderer sorts areas (AppSidebar and AppSchemaRenderer both iterate the array as authored), so declaration order is the display order. Reorder the `areas` array instead.",
-          "note": "Contrast with nav-item `order`, which IS sorted (NavigationRenderer.tsx:1154) — the sibling that works is what makes this one read alive."
-        },
         "description": {
           "status": "dead",
           "verifiedAt": "2026-08-01",
@@ -248,10 +241,8 @@
     },
     "homePageId": {
       "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "authorWarn": true,
-      "authorHint": "Delete it. No shell reads it — the landing IS the first navigation item (in `order`), and the ROOT landing follows `isDefault` routing (objectui RootLandingRedirect). Reorder `navigation` or set `isDefault` instead.",
-      "note": "The schema's own hedge ('if not set, usually defaults to the first navigation item') describes the only behavior that exists."
+      "verifiedAt": "2026-08-02",
+      "note": "REMOVED 2026-08-02 (#4667) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). No shell ever read it — the landing IS the first navigation item (by order), and the ROOT landing follows isDefault routing (objectui RootLandingRedirect). The schema own hedge (\"if not set, usually defaults to the first navigation item\") described the only behavior that existed. Reorder navigation, or set isDefault, instead. The three aliases that routed here (home / homepage / landingpage) were removed from AppSchema aliases and now carry the same prescription as guidance."
     },
     "requiredPermissions": {
       "status": "live",

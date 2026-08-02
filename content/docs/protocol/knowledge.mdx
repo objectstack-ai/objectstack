@@ -296,15 +296,30 @@ with a `permissions` mapping function at index time.
 
 ## 6. Sync model
 
-For `object` sources, `KnowledgeService` subscribes to ObjectQL
-`record.created`, `record.updated`, and `record.deleted` events. Each
-event triggers a single `adapter.upsert` / `adapter.delete` call.
+For `object` sources, `KnowledgeService` subscribes to the ObjectQL engine's
+`data.record.created`, `data.record.updated` and `data.record.deleted` events
+(the legacy unprefixed `record.*` shape is still accepted). Each event triggers
+a single `adapter.upsert` / `adapter.delete` call — the record body is read
+from the event's `after`, and a delete's id from its required `recordId`.
 
 - **MVP (Phase 1):** synchronous, inline with the originating mutation.
   Fast for low-volume dev / demo. Indexing failures are logged but do
   not block the originating write.
 - **Phase 2:** async via `service-queue` for batching, retries, and
   back-pressure.
+
+<Callout type="warn">
+  **A predicate write leaves the index stale.** A `multi: true` update/delete
+  reaches `updateMany` / `deleteMany`, which report only an affected row count,
+  so it publishes the aggregate `data.records.updated` / `data.records.deleted`
+  ([#4639](https://github.com/objectstack-ai/objectstack/issues/4639)) rather
+  than per-record events. A knowledge index is a per-record projection and
+  `matched: 40` names no record, so there is no upsert or delete to derive —
+  the service logs a warning naming the object and count instead of failing
+  silently. Reconciliation against the source object is the durable fix and is
+  tracked in [#4672](https://github.com/objectstack-ai/objectstack/issues/4672):
+  events keep the index *fresh*, reconciliation keeps it *correct*.
+</Callout>
 
 `file` / `http` sources rely on explicit `reindexSource` calls
 (typically triggered by a cron job, a Console button, or a webhook).

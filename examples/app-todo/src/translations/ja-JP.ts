@@ -112,8 +112,4 @@ export const jaJP: TranslationData = {
     'error.required': 'この項目は必須です',
     'error.load_failed': 'データの読み込みに失敗しました',
   },
-  validationMessages: {
-    completed_date_required: 'ステータスが「完了」の場合、完了日は必須です',
-    recurrence_fields_required: '繰り返しタスクには繰り返しタイプが必要です',
-  },
 };

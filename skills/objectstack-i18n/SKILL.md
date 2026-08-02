@@ -48,8 +48,8 @@ and integration with the I18nService.
 1. **Runtime format — `objects.*` (`TranslationData`)**: each locale is authored as one
    `TranslationData` value. All translatable content for an object (label, fields,
    options, views, sections, actions) is grouped under `objects.{object_name}`, with
-   global groups (`apps`, `messages`, `validationMessages`, `globalActions`,
-   `dashboards`, `settings`, `metadataForms`) at the top level.
+   global groups (`apps`, `messages`, `globalActions`, `dashboards`, `settings`,
+   `metadataForms`) at the top level.
 
 2. **Bundle registration**: per-locale files are assembled with
    `defineTranslationBundle({ en, 'zh-CN': … })` into a `TranslationBundle`
@@ -203,9 +203,6 @@ const en: TranslationData = {
     'common.cancel': 'Cancel',
     'welcome.user': 'Welcome, {{userName}}!',
   },
-  validationMessages: {
-    completed_date_required: 'Completed date is required when status is Completed',
-  },
 };
 
 // src/translations/zh-CN.ts — same shape, translated values
@@ -266,8 +263,14 @@ All translatable content for a single object is aggregated under
 | `_sections.{section_name}` | Form section / tab `label`, `description` |
 
 Top-level groups alongside `objects`: `apps` (label, description, navigation),
-`messages`, `validationMessages`, `globalActions` (object-less actions),
-`dashboards`, `settings`, `metadataForms`, `settingsCommon`.
+`messages`, `globalActions` (object-less actions), `dashboards`, `settings`,
+`metadataForms`, `settingsCommon`.
+
+> **Validation messages are not a translation group.** `validationMessages` was
+> removed in spec 17.0.0 (#4667) — nothing ever read it, so a translated rule
+> message was stored and never shown. Author the message on the rule itself
+> (`object.validations[].message`), which the engine returns on every rejected
+> write.
 
 For the exact Zod shape (and any field that may have been added since), read
 `node_modules/@objectstack/spec/src/system/translation.zod.ts` —

@@ -36,13 +36,6 @@
       "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts:562-579, :744-745",
       "note": "consumed via II18nService.t: plugin-audit localizes activity-feed summaries (messages.activityCreated/Updated/Deleted, framework#3039) and collaboration notifications (messages.mentionedYou). Easy to mis-verify — no resolver in i18n-resolver.ts reads it; the consumer is a t() caller with composed keys, which a literal grep for the group name never finds."
     },
-    "validationMessages": {
-      "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "authorWarn": true,
-      "authorHint": "Delete it — nothing resolves `validationMessages.<ruleName>` in either repo. A validation violation renders the rule's own authored `message` verbatim (rule-validator.ts), and the #3957 message-translation hook covers only the BUILT-IN field messages via the i18n service's `validation.field.*` keys. There is currently no per-locale override mechanism for rule messages; until one ships, translate by authoring per-locale rules or keep messages locale-neutral.",
-      "note": "The trap has the platform's own signature on it twice: the schema example shows a concrete override ({\"discount_limit\": \"折扣不能超过40%\"}), and #3778's legacy-key migration table steers retired `errors:` authors here ('use validationMessages for rule messages'). Both point at a group with no reader — the capabilities.readOnly shape. objectui's spec-translations transform passes the group through to the client tree, but no client code looks anything up under it (a passthrough is not a consumer)."
-    },
     "globalActions": {
       "status": "live",
       "verifiedAt": "2026-08-01",

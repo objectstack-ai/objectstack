@@ -50,16 +50,25 @@ export interface JobSchedule {
 export type JobHandler = (context: { jobId: string; data?: unknown }) => Promise<void>;
 
 /**
- * Retry policy for a scheduled job (mirrors the authorable
- * `RetryPolicySchema` in system/job.zod.ts).
+ * Retry policy for a scheduled job (mirrors the authorable `RetryPolicySchema`,
+ * which since 17.0.0 is declared once in `shared/retry-policy.zod.ts` and
+ * re-exported by both `./automation` and `./system` — #4661).
+ *
+ * Defaults restated here because this is a hand-written boundary type: a caller
+ * that builds `JobScheduleOptions` itself never goes through Zod, so
+ * `runWithPolicy` applies the same values the schema declares.
  */
 export interface JobRetryPolicy {
-    /** Maximum number of retry attempts after the initial run (default 3) */
+    /** Retry attempts after the initial run. 0 (the default since 17.0.0, #4661) means no retry. */
     maxRetries?: number;
-    /** Initial backoff delay in milliseconds (default 1000) */
+    /** Base delay before the first retry, in milliseconds (default 1000) */
     backoffMs?: number;
-    /** Multiplier for exponential backoff (default 2) */
+    /** Multiplier for exponential backoff (default 1 since 17.0.0, #4661 — a flat delay) */
     backoffMultiplier?: number;
+    /** Ceiling for a single backoff delay, in milliseconds (default 30000) */
+    maxRetryDelayMs?: number;
+    /** Randomize each delay within [50%, 100%] of its computed value (default false) */
+    jitter?: boolean;
 }
 
 /**

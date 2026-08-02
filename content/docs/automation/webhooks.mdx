@@ -94,7 +94,7 @@ in `definition_json`, a serialised `Webhook` JSON (canonical schema:
 | `name`            | text      | Unique snake_case name — referenced in logs and audit.                             |
 | `label`           | text      | Optional display label.                                                            |
 | `object_name`     | text      | Short object name whose record events fire this webhook.                           |
-| `triggers`        | select    | Multi-select of `create` / `update` / `delete`, stored as an array (the enqueuer also accepts a legacy comma-separated string). |
+| `triggers`        | select    | Multi-select of `create` / `update` / `delete` plus the opt-in bulk pair `bulk_update` / `bulk_delete` ([see below](#bulk-writes-bulk_update-and-bulk_delete)), stored as an array (the enqueuer also accepts a legacy comma-separated string). |
 | `url`             | text      | External endpoint that receives the POST.                                          |
 | `method`          | select    | HTTP method — one of `GET` / `POST` / `PUT` / `PATCH` / `DELETE`. Default `POST`.   |
 | `description`     | textarea  | Free-text description.                                                              |
@@ -214,11 +214,59 @@ is the spec's `DataEvent` (`@objectstack/spec/api`) — validated against
 }
 ```
 
-> **A multi-row write emits no record event.** `updateMany` / `deleteMany`
-> (`multi: true`) return only an affected count, so there is no record for a
-> `DataEvent` to name and the engine publishes nothing rather than an event
-> with an empty `recordId` — meaning webhooks do **not** fire for bulk writes
-> today. Tracked in [#4639](https://github.com/objectstack-ai/objectstack/issues/4639).
+### Bulk writes: `bulk_update` and `bulk_delete`
+
+A predicate write — `updateMany` / `deleteMany` (`multi: true`) — reports only
+an affected count, so there is no record for a `DataEvent` to name. Rather than
+publish an event with an empty `recordId` (which every schema-compliant
+consumer must reject), the engine publishes a **separate** aggregate event
+(#4639):
+
+```ts
+{
+  type: 'data.records.updated',   // note: recordS — plural
+  object: 'account',
+  timestamp: '<ISO 8601>',
+  payload: {
+    id: '<uuid>',                 // unique event id
+    type: 'data.records.updated',
+    object: 'account',
+    matched: 40,                  // how many records the predicate affected
+    userId: 'usr_1',              // when the write names an actor
+    timestamp: '<ISO 8601>',
+  },
+}
+```
+
+These dispatch under their own triggers, `bulk_update` and `bulk_delete`, and
+they are **opt-in**: a webhook declaring `update` does not receive them. That
+is deliberate — the body has no `recordId` and no record, so delivering it to a
+subscriber written against the per-record shape would hand it a payload missing
+everything it reads.
+
+```ts
+webhooks: [{
+  name: 'account_bulk_audit',
+  object: 'account',
+  triggers: ['update', 'bulk_update'],   // subscribe to both if you want both
+  url: 'https://example.com/hooks/accounts',
+}]
+```
+
+Two properties worth knowing:
+
+- **No event when nothing matched.** A predicate that affected zero rows
+  changed no data, so it publishes nothing — an idle background sweep does not
+  become an hourly "0 records" delivery.
+- **The predicate is not included.** The only filter available at publish time
+  is the query after the security layer composed row scoping into it (RLS,
+  sharing), so sending it would leak tenant scoping internals to the
+  destination URL. The event states the count and nothing more.
+
+Because a count names no rows, a bulk delivery cannot drive an incremental
+per-record projection (a cache, a search index, a mirror). Use it to invalidate,
+alert, or schedule a refetch; anything that must know *which* records changed
+has to reconcile against the source.
 
 > **Not yet cluster-aware.** The only shipped `IRealtimeService` implementation
 > is `InMemoryRealtimeAdapter`, an in-process, single-node pub/sub with no

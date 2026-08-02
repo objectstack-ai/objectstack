@@ -184,12 +184,45 @@ describe('RetryPolicySchema', () => {
     expect(() => RetryPolicySchema.parse(policy)).not.toThrow();
   });
 
-  it('should apply default values', () => {
+  // #4661: retry is opt-in since 17.0.0. `maxRetries` defaulted to 3 and
+  // `backoffMultiplier` to 2 while this shape was job-only; the converged
+  // declaration takes the automation side's 0 / 1, because a retry replays the
+  // handler's writes and callouts and that has to be asked for. Existing job
+  // documents keep the old numbers — `retry-policy-converged` writes them in —
+  // so what changed is only what a NEWLY authored omission means.
+  it('applies opt-in defaults: a declared but empty policy does not retry', () => {
     const policy = RetryPolicySchema.parse({});
 
-    expect(policy.maxRetries).toBe(3);
+    expect(policy.maxRetries).toBe(0);
     expect(policy.backoffMs).toBe(1000);
-    expect(policy.backoffMultiplier).toBe(2);
+    expect(policy.backoffMultiplier).toBe(1);
+    expect(policy.maxRetryDelayMs).toBe(30000);
+    expect(policy.jitter).toBe(false);
+  });
+
+  // The two keys the convergence brought over from the automation side. They
+  // are declared here only because `runWithPolicy` actually honours them
+  // (ADR-0049: declared IS enforced).
+  it('accepts the maxRetryDelayMs ceiling and jitter', () => {
+    const policy = RetryPolicySchema.parse({ maxRetries: 5, maxRetryDelayMs: 60000, jitter: true });
+
+    expect(policy.maxRetryDelayMs).toBe(60000);
+    expect(policy.jitter).toBe(true);
+  });
+
+  it('rejects the retired `retryDelayMs` spelling with the rename prescription', () => {
+    const parse = () => RetryPolicySchema.parse({ retryDelayMs: 500 });
+
+    expect(parse).toThrow(/backoffMs/);
+    expect(parse).toThrow(/retryDelayMs/);
+  });
+
+  // Bounds the job side did not have before the merge. Both fail loudly rather
+  // than being silently reinterpreted — see the
+  // `job-retry-policy-constraints-tightened` semantic migration note.
+  it('enforces the converged bounds (maxRetries <= 10, backoffMultiplier >= 1)', () => {
+    expect(() => RetryPolicySchema.parse({ maxRetries: 20 })).toThrow();
+    expect(() => RetryPolicySchema.parse({ backoffMultiplier: 0.5 })).toThrow();
   });
 
   it('should accept zero retries', () => {
@@ -240,7 +273,6 @@ describe('RetryPolicySchema', () => {
 describe('JobSchema', () => {
   it('should accept valid minimal job', () => {
     const job: Job = {
-      id: 'job-123',
       name: 'daily_cleanup',
       schedule: {
         type: 'cron',
@@ -262,7 +294,6 @@ describe('JobSchema', () => {
 
     validNames.forEach(name => {
       const job = {
-        id: 'job-123',
         name,
         schedule: { type: 'cron' as const, expression: '0 0 * * *' },
         handler: 'jobs/handler.ts',
@@ -281,7 +312,6 @@ describe('JobSchema', () => {
 
     invalidNames.forEach(name => {
       expect(() => JobSchema.parse({
-        id: 'job-123',
         name,
         schedule: { type: 'cron', expression: '0 0 * * *' },
         handler: 'jobs/handler.ts',
@@ -291,7 +321,6 @@ describe('JobSchema', () => {
 
   it('should apply default enabled value', () => {
     const job = JobSchema.parse({
-      id: 'job-123',
       name: 'test_job',
       schedule: { type: 'interval', intervalMs: 60000 },
       handler: 'jobs/handler.ts',
@@ -302,7 +331,6 @@ describe('JobSchema', () => {
 
   it('should accept job with all fields', () => {
     const job = {
-      id: 'job-456',
       name: 'complex_job',
       schedule: {
         type: 'cron' as const,
@@ -333,7 +361,6 @@ describe('JobSchema', () => {
 
     schedules.forEach(schedule => {
       const job = {
-        id: 'job-789',
         name: 'test_job',
         schedule,
         handler: 'jobs/handler.ts',
@@ -344,7 +371,6 @@ describe('JobSchema', () => {
 
   it('should accept job with timeout', () => {
     const job = {
-      id: 'job-timeout',
       name: 'long_running_job',
       schedule: { type: 'cron' as const, expression: '0 0 * * *' },
       handler: 'jobs/handler.ts',
@@ -357,7 +383,6 @@ describe('JobSchema', () => {
 
   it('should accept disabled job', () => {
     const job = {
-      id: 'job-disabled',
       name: 'disabled_job',
       schedule: { type: 'interval' as const, intervalMs: 30000 },
       handler: 'jobs/handler.ts',
@@ -488,7 +513,6 @@ describe('JobExecutionSchema', () => {
 describe('Job Scheduling Integration', () => {
   it('should handle daily backup job', () => {
     const job: Job = {
-      id: 'backup-daily',
       name: 'daily_backup',
       schedule: {
         type: 'cron',
@@ -510,7 +534,6 @@ describe('Job Scheduling Integration', () => {
 
   it('should handle periodic cleanup job', () => {
     const job: Job = {
-      id: 'cleanup-temp',
       name: 'cleanup_temp_files',
       schedule: {
         type: 'interval',
@@ -525,7 +548,6 @@ describe('Job Scheduling Integration', () => {
 
   it('should handle one-time scheduled job', () => {
     const job: Job = {
-      id: 'migration-2024',
       name: 'data_migration',
       schedule: {
         type: 'once',
@@ -570,5 +592,31 @@ describe('Job Scheduling Integration', () => {
     executions.forEach(execution => {
       expect(() => JobExecutionSchema.parse(execution)).not.toThrow();
     });
+  });
+});
+
+// ── `job.id` retired in 17.0.0 (#4667, ADR-0049) ────────────────────────────
+describe('retired job.id (#4667)', () => {
+  const base = {
+    name: 'nightly_sync',
+    schedule: { type: 'cron' as const, expression: '0 0 * * *' },
+    handler: 'syncAll',
+  };
+
+  it('rejects `id` and says `name` is the identity', () => {
+    // The damage this key did was its own describe(): "defaults to `name` when
+    // omitted" advertised an identity OVERRIDE. Nothing read it, so two jobs
+    // differing only in `id` were one job — the second silently winning. The
+    // rejection has to name `name` or the author just deletes the key and keeps
+    // wondering how to give a job a stable identifier.
+    const parse = () => JobSchema.parse({ ...base, id: 'job_nightly' });
+    expect(parse).toThrow(/job\.id.*removed.*17\.0\.0/s);
+    expect(parse).toThrow(/`name`/s);
+  });
+
+  it('a job with only `name` parses and keeps no `id`', () => {
+    const job = JobSchema.parse(base);
+    expect(job).not.toHaveProperty('id');
+    expect(job.name).toBe('nightly_sync');
   });
 });

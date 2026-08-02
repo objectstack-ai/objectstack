@@ -53,6 +53,8 @@ export {
   useDataSubscription,
   useMetadataSubscriptionCallback,
   useDataSubscriptionCallback,
+  useBulkDataSubscription,
+  useBulkDataSubscriptionCallback,
   useRealtimeConnection,
   useAutoRefresh
 } from './realtime-hooks';

@@ -2639,6 +2639,103 @@ describe('HttpMethodSchema/HttpRequestSchema backward compat', () => {
   });
 });
 
+// ─── [#4688] Dual-source regression pin ──────────────────────────────
+//
+// RUNTIME assertions, deliberately. #4642 established that a compile-time pin in
+// `packages/spec` is a no-op: `tsconfig.json` excludes `**/*.test.ts` and
+// `vitest.config.ts` never enables `typecheck`, so neither path type-checks a
+// test file. A conditional-type `Assert< Equal< … > >` here would be dead text —
+// and so, for the same reason, is the bare `type HttpRequest` import at the top
+// of this file: vitest's transform erases it, so it proves nothing about the
+// export still existing. The third test below is what actually proves that.
+//
+// What these defend: `HttpRequest` naming ONE declaration across both published
+// entries. `HttpRequestSchema` was never duplicated — `./ui` imports and
+// re-exports `./shared`'s const — so the only thing that ever split was the type
+// alias, which is exactly the part runtime cannot see. Hence two layers.
+describe('[#4688] HttpRequest is single-source across ./shared and ./ui', () => {
+  it('both entry points expose the very same schema declaration at runtime', async () => {
+    const sharedEntry = await import('../shared/index');
+    const uiEntry = await import('../ui/index');
+
+    // Identity, not shape: `lazySchema` returns one Proxy per declaration site,
+    // so two declarations could never be `toBe`-equal however alike they look.
+    // A re-introduced local `HttpRequestSchema` in view.zod.ts fails here.
+    expect(uiEntry.HttpRequestSchema).toBe(sharedEntry.HttpRequestSchema);
+  });
+
+  it('the shared declaration validates identically on both entries', async () => {
+    const sharedEntry = await import('../shared/index');
+    const uiEntry = await import('../ui/index');
+
+    for (const [entry, schema] of [
+      ['./shared', sharedEntry.HttpRequestSchema],
+      ['./ui', uiEntry.HttpRequestSchema],
+    ] as const) {
+      expect(schema.parse({ url: '/api/data' }), `${entry} defaults method to GET`)
+        .toEqual({ url: '/api/data', method: 'GET' });
+      expect(() => schema.parse({}), `${entry} requires url`).toThrow();
+    }
+  });
+
+  // The load-bearing one. `HttpRequest` is a TYPE — erased before any runtime
+  // assertion can see it — so the two tests above would stay green if the
+  // re-export were deleted or replaced by a second local `z.infer` alias, which
+  // is the entire defect #4688 fixed. This resolves the export through its alias
+  // chain to the ORIGINAL declaration: the same symbol-identity measurement
+  // `check:dual-source-exports` makes, but over `src/` so it runs in `pnpm test`
+  // without a build. It also pins that `./ui` still EXPORTS the name at all —
+  // the compatibility promise this file's own `type HttpRequest` import rests on.
+  it('both entry points resolve the TYPE to the one declaration in shared/http.zod.ts', async () => {
+    const ts = (await import('typescript')).default;
+    const { resolve, relative, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+
+    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    const entries = {
+      './shared': resolve(specDir, 'src/shared/index.ts'),
+      './ui': resolve(specDir, 'src/ui/index.ts'),
+    };
+    const program = ts.createProgram(Object.values(entries), {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      skipLibCheck: true,
+      noEmit: true,
+    });
+    const checker = program.getTypeChecker();
+    const unalias = (s: import('typescript').Symbol) =>
+      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
+
+    const origins = new Map<string, string>();
+    for (const [sub, file] of Object.entries(entries)) {
+      const sf = program.getSourceFile(file);
+      const moduleSym = sf && checker.getSymbolAtLocation(sf);
+      // Without this, a resolution failure would make every assertion below
+      // pass vacuously — the exact way a gate goes dormant.
+      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
+
+      const exported = checker
+        .getExportsOfModule(moduleSym!)
+        .find((e) => e.getName() === 'HttpRequest');
+      expect(exported, `${sub} must still export the name \`HttpRequest\``).toBeTruthy();
+
+      const decl = unalias(exported!).declarations?.[0];
+      expect(decl, `${sub}'s HttpRequest must have a declaration`).toBeTruthy();
+      const declFile = decl!.getSourceFile();
+      origins.set(
+        sub,
+        `${relative(specDir, declFile.fileName)}:${
+          declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
+        }`,
+      );
+    }
+
+    // Same file AND same line — one declaration reached by two import paths.
+    expect(origins.get('./ui')).toBe(origins.get('./shared'));
+    expect(origins.get('./shared')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
+  });
+});
+
 describe('ADR-0089 — visibleWhen unification (view form)', () => {
   it('normalizes a deprecated `visibleOn` alias to `visibleWhen` on a form field', () => {
     const parsed = FormFieldSchema.parse({ field: 'state', visibleOn: "record.country == 'US'" });

@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import type { MetadataEvent, DataEvent } from '@objectstack/spec/api';
+import type { MetadataEvent, DataEvent, BulkDataEvent } from '@objectstack/spec/api';
 import { useClient } from './context';
 
 /**
@@ -193,6 +193,96 @@ export function useDataSubscriptionCallback(
 }
 
 /**
+ * Hook to subscribe to bulk (predicate-write) data events
+ *
+ * A `multi: true` update/delete reaches the driver's `updateMany`/`deleteMany`,
+ * which report an affected COUNT and name no rows — so it publishes
+ * `data.records.updated` / `data.records.deleted` rather than the per-record
+ * events {@link useDataSubscription} delivers (#4639).
+ *
+ * The event carries `object` and `matched` — there is no `recordId` and no
+ * record body, which is why this is a separate hook rather than more types
+ * flowing through `useDataSubscription`: a `DataEvent` callback receiving one
+ * of these would read `undefined` for every field it expects.
+ *
+ * Use it to invalidate a list, show "40 records changed", or trigger a
+ * refetch — not to patch a per-record cache, which a count cannot drive.
+ *
+ * @param object - Object name to subscribe to
+ * @returns Latest bulk data event or null
+ *
+ * @example
+ * ```tsx
+ * function TaskList() {
+ *   const bulk = useBulkDataSubscription('project_task');
+ *
+ *   useEffect(() => {
+ *     if (bulk) {
+ *       console.log(`${bulk.matched} tasks changed in one write`);
+ *     }
+ *   }, [bulk]);
+ *
+ *   return <div>...</div>;
+ * }
+ * ```
+ */
+export function useBulkDataSubscription(object: string): BulkDataEvent | null {
+  const client = useClient();
+  const [event, setEvent] = useState<BulkDataEvent | null>(null);
+
+  useEffect(() => {
+    if (!client) return;
+
+    const unsubscribe = client.events.subscribeBulkData(object, (e) => setEvent(e));
+
+    return () => {
+      unsubscribe();
+    };
+  }, [client, object]);
+
+  return event;
+}
+
+/**
+ * Hook to subscribe to bulk data events with a callback
+ *
+ * The callback variant of {@link useBulkDataSubscription} — no state, no
+ * re-render, for triggering refetches and side effects.
+ *
+ * @param object - Object name to subscribe to
+ * @param callback - Callback to invoke on events
+ *
+ * @example
+ * ```tsx
+ * function TaskList() {
+ *   const { refetch } = useQuery(...);
+ *
+ *   useBulkDataSubscriptionCallback('project_task', () => {
+ *     refetch(); // a predicate write touched an unknown set of rows
+ *   });
+ *
+ *   return <div>...</div>;
+ * }
+ * ```
+ */
+export function useBulkDataSubscriptionCallback(
+  object: string,
+  callback: (event: BulkDataEvent) => void
+): void {
+  const client = useClient();
+
+  useEffect(() => {
+    if (!client) return;
+
+    const unsubscribe = client.events.subscribeBulkData(object, callback);
+
+    return () => {
+      unsubscribe();
+    };
+  }, [client, object, callback]);
+}
+
+/**
  * Hook to get connection status of realtime events
  *
  * @returns Whether realtime is connected
@@ -233,6 +323,18 @@ export function useRealtimeConnection(): boolean {
  *
  * Combines data subscription with query refetch.
  *
+ * Watches BOTH event streams (#4678): per-record `data.record.*` writes and
+ * the aggregate `data.records.*` a predicate (`multi: true`) write publishes.
+ * A bulk write is the case that dirties a list hardest — one statement can
+ * change or delete every row on screen — so a refresh hook that ignored it
+ * would sit still exactly when it matters most, while still refreshing for a
+ * single-row edit.
+ *
+ * Mixing the two streams is safe here in a way it is not for
+ * {@link useDataSubscription}: this hook's output is a refetch signal, not an
+ * event body, so the shape difference that keeps the two contracts apart
+ * (no `recordId`, no record) never reaches the caller.
+ *
  * @param object - Object name to watch
  * @param refetch - Refetch function from useQuery
  * @param options - Optional filters
@@ -258,5 +360,14 @@ export function useAutoRefresh(
     refetch();
   }, [refetch]);
 
+  // A bulk event carries only a count, so when `options.recordId` narrows this
+  // hook to one record there is no way to tell whether that record was in the
+  // match set. Refetch anyway: a redundant query is cheap, and the alternative
+  // is showing a record that a predicate write already changed.
+  const handleBulkEvent = useCallback((_event: BulkDataEvent) => {
+    refetch();
+  }, [refetch]);
+
   useDataSubscriptionCallback(object, handleEvent, options);
+  useBulkDataSubscriptionCallback(object, handleBulkEvent);
 }

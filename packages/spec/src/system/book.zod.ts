@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+import { retiredKey } from '../shared/retired-key';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
 /**
@@ -51,6 +52,31 @@ export const BookIncludeSchema = lazySchema(() =>
 );
 export type BookInclude = string | { tag: string };
 
+/**
+ * Book-level and group-level inline translation maps, retired in 17.0.0
+ * (#4667, ADR-0049).
+ *
+ * The trap here was PROXIMITY, not plausibility. `doc.translations` — two files
+ * over, the same shape, the same name — is read on every path that renders a
+ * doc. So a book's own map reads as the same feature switched on one level up.
+ * It never was: the tree endpoint and the portal render `label` / `description`
+ * verbatim, and the generic bundle translator covers view / action / object /
+ * app / dashboard / page only (`i18n-resolver.ts`). A localized book was parsed,
+ * stored, round-tripped — and rendered in the authoring locale to every reader.
+ *
+ * Shared by both levels deliberately: an author who localized one almost
+ * certainly localized the other, and splitting the wording would make the second
+ * rejection read like a different problem.
+ */
+const BOOK_TRANSLATIONS_RETIRED =
+  'Inline `translations` on a book (and on a book group) was removed in @objectstack/spec '
+  + '17.0.0 (#4667, ADR-0049) — no resolver ever read it. The book tree endpoint and the '
+  + 'docs portal render `label` / `description` verbatim in every locale, so a localized '
+  + 'book shipped its authoring-locale strings to every reader. Delete the key. NOTE the '
+  + 'near neighbour that DOES work: `doc.translations` is live and read on every doc render '
+  + 'path — localize the docs themselves, and the portal picks the reader\'s locale up from '
+  + 'there. Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+
 export const BookGroupSchema = lazySchema(() =>
   z.object({
     key: z
@@ -58,10 +84,12 @@ export const BookGroupSchema = lazySchema(() =>
       .regex(/^[a-z][a-z0-9_]*$/, 'group key must be lowercase snake_case')
       .describe('Stable group key (used by overrides, deep links, explicit `doc.group`)'),
     label: z.string().describe('Section title — first-class, i18n-homed'),
-    translations: z
-      .record(z.string(), z.object({ label: z.string() }))
-      .optional()
-      .describe('Per-locale label variants'),
+    // TOMBSTONE, not a deletion: `BookGroupSchema` is a plain `z.object` with
+    // no `.strict()`, so a bare delete would have zod silently STRIP the key —
+    // replacing one silent no-op with another. `retiredKey` types it `never`
+    // (a tsc error at the authoring site) and raises the prescription on parse.
+    // Its liveness row therefore STAYS: the key is still in the walked shape.
+    translations: retiredKey(BOOK_TRANSLATIONS_RETIRED),
     order: z.number().optional().describe('Order of THIS group within the book'),
     include: BookIncludeSchema.optional().describe('Rule that derives membership (glob or tag)'),
     package: z
@@ -77,7 +105,6 @@ export const BookGroupSchema = lazySchema(() =>
 export type BookGroup = {
   key: string;
   label: string;
-  translations?: Record<string, { label: string }>;
   order?: number;
   include?: BookInclude;
   package?: string;
@@ -110,7 +137,12 @@ export const BookSchema = lazySchema(() =>
     aliases: {
       title: 'label', sections: 'groups', chapters: 'groups', toc: 'groups',
       access: 'audience', visibility: 'audience', sort: 'order', position: 'order',
-      url: 'slug', path: 'slug', i18n: 'translations',
+      url: 'slug', path: 'slug',
+      // `i18n: 'translations'` retired with the key it pointed at (#4667).
+    },
+    guidance: {
+      translations: BOOK_TRANSLATIONS_RETIRED,
+      i18n: BOOK_TRANSLATIONS_RETIRED,
     },
   }, {
     name: z
@@ -119,9 +151,7 @@ export const BookSchema = lazySchema(() =>
       .describe('Book name (namespace prefix recommended, like every metadata name)'),
     label: z.string().optional().describe('Display title'),
     description: z.string().optional(),
-    translations: z
-      .record(z.string(), z.object({ label: z.string().optional(), description: z.string().optional() }))
-      .optional(),
+    // `translations` removed in 17.0.0 (#4667) — see BOOK_TRANSLATIONS_RETIRED.
     slug: z.string().optional().describe('Portal URL segment; defaults to name sans prefix'),
     icon: z.string().optional(),
     order: z.number().optional().describe('Orders books within the portal'),
@@ -141,7 +171,6 @@ export type Book = {
   name: string;
   label?: string;
   description?: string;
-  translations?: Record<string, { label?: string; description?: string }>;
   slug?: string;
   icon?: string;
   order?: number;

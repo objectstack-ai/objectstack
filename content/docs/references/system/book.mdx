@@ -60,12 +60,11 @@ const result = BookSchema.parse(data);
 | **name** | `string` | ✅ | Book name (namespace prefix recommended, like every metadata name) |
 | **label** | `string` | optional | Display title |
 | **description** | `string` | optional |  |
-| **translations** | `Record<string, { label?: string; description?: string }>` | optional |  |
 | **slug** | `string` | optional | Portal URL segment; defaults to name sans prefix |
 | **icon** | `string` | optional |  |
 | **order** | `number` | optional | Orders books within the portal |
 | **audience** | `'org' \| 'public' \| { permissionSet: string }` | optional | Access audience; defaults to 'org' (inherits package grant) |
-| **groups** | `{ key: string; label: string; translations?: Record<string, { label: string }>; order?: number; … }[]` | ✅ | The spine: ordered sections. Two levels total. |
+| **groups** | `{ key: string; label: string; translations?: any; order?: number; … }[]` | ✅ | The spine: ordered sections. Two levels total. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -116,7 +115,7 @@ Type: `'public'`
 | :--- | :--- | :--- | :--- |
 | **key** | `string` | ✅ | Stable group key (used by overrides, deep links, explicit `doc.group`) |
 | **label** | `string` | ✅ | Section title — first-class, i18n-homed |
-| **translations** | `Record<string, { label: string }>` | optional | Per-locale label variants |
+| **translations** | `any` | optional | [REMOVED] Inline `translations` on a book (and on a book group) was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no resolver ever read it. The book tree endpoint and the docs portal render `label` / `description` verbatim in every locale, so a localized book shipped its authoring-locale strings to every reader. Delete the key. NOTE the near neighbour that DOES work: `doc.translations` is live and read on every doc render path — localize the docs themselves, and the portal picks the reader's locale up from there. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **order** | `number` | optional | Order of THIS group within the book |
 | **include** | `string \| { tag: string }` | optional | Rule that derives membership (glob or tag) |
 | **package** | `string` | optional | Scope the rule to a package id (default: the book package; cross-package via ADR-0048) |

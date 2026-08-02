@@ -25,7 +25,6 @@
     "automation/GuardRef — no type export",
     "automation/StateMachine — no type export",
     "automation/StateNode — no type export",
-    "automation/WebhookTriggerType — no type export",
     "data/AddressValue — no type export",
     "data/AggregationFunction — no type export",
     "data/AggregationMetricType — no type export",

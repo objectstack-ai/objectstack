@@ -13,6 +13,17 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
  * producer are declared here — an author can't subscribe to something that
  * never fires.
  *
+ * **Bulk triggers (#4639).** `bulk_update` / `bulk_delete` map to the engine's
+ * aggregate `data.records.updated` / `data.records.deleted`, emitted when a
+ * predicate write (`multi: true` → `IDataDriver.updateMany`/`deleteMany`)
+ * affects a set of rows the driver reports only as a count. They are separate
+ * trigger values, not extra sources for `update` / `delete`, because their
+ * delivery has a different SHAPE: no `recordId`, no record body, just
+ * `object` + `matched`. Folding them into the per-record triggers would send
+ * every existing subscriber a body missing the fields it reads — the same
+ * class of breakage as the pre-#4626 `recordId: ''` fabrication, arriving from
+ * the other direction. A webhook that wants both subscribes to both.
+ *
  * Deliberately NOT triggers (#3196):
  * - `undelete` — there is no soft-delete / restore capability in the engine
  *   (`delete` is a hard delete; no `deleted_at` convention, no restore
@@ -29,7 +40,11 @@ export const WebhookTriggerType = z.enum([
   'create',
   'update',
   'delete',
+  'bulk_update',
+  'bulk_delete',
 ]);
+
+export type WebhookTriggerType = z.infer<typeof WebhookTriggerType>;
 
 /**
  * CANONICAL WEBHOOK DEFINITION
@@ -90,7 +105,7 @@ export const WebhookSchema = lazySchema(() => z.object({
   label: z.string().optional().describe('Human-readable webhook label'),
   
   /** Scope */
-  object: z.string().optional().describe('Object whose record events (create/update/delete) trigger this webhook'),
+  object: z.string().optional().describe('Object whose record events (create/update/delete, bulk_update/bulk_delete) trigger this webhook'),
   triggers: z.array(WebhookTriggerType).optional().describe('Events that trigger execution'),
   
   /** Target */

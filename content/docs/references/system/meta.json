@@ -45,6 +45,7 @@
     "collaboration",
     "doc",
     "---More---",
-    "metadata-types"
+    "metadata-types",
+    "retry-policy"
   ]
 }

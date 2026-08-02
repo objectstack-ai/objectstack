@@ -56,16 +56,31 @@ export type OnceSchedule = z.infer<typeof OnceScheduleSchema>;
 // name: `Schedule`.
 
 /**
- * Retry Policy Schema
- * Configuration for job retry behavior with exponential backoff
+ * Retry Policy Schema — job retry behaviour with exponential backoff.
+ *
+ * The declaration moved to `shared/retry-policy.zod.ts` in 17.0.0 (#4661).
+ * `@objectstack/spec/automation` exported an identically-named, differently
+ * shaped `RetryPolicy` for the `try_catch` node's `retry` region, so which type
+ * a consumer got depended only on the import path (the #4411 trap) — and they
+ * were never two concepts: both compute
+ * `delay = base * multiplier^(retry-1)`. Re-exported so `./system` keeps
+ * publishing the name (and its `system/RetryPolicy` def, keyed by entry
+ * namespace).
+ *
+ * Three things change for job authors, all covered by the
+ * `retry-policy-converged` conversion:
+ *
+ *  - `maxRetryDelayMs` and `jitter` are now available here (they were
+ *    automation-only). Both are honoured by `runWithPolicy`.
+ *  - `maxRetries` now defaults to **0**, not 3, and `backoffMultiplier` to 1,
+ *    not 2 — the conversion writes the old values into existing documents, so
+ *    no deployed job changes behaviour; only a NEWLY authored omission means
+ *    "no retry".
+ *  - `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1 (the
+ *    automation constraints). Both reject loudly at parse time.
  */
-export const RetryPolicySchema = lazySchema(() => z.object({
-  maxRetries: z.number().int().min(0).default(3).describe('Maximum number of retry attempts'),
-  backoffMs: z.number().int().positive().default(1000).describe('Initial backoff delay in milliseconds'),
-  backoffMultiplier: z.number().positive().default(2).describe('Multiplier for exponential backoff'),
-}));
-
-export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
+export { RetryPolicySchema, type RetryPolicy, type RetryPolicyParsed } from '../shared/retry-policy.zod';
+import { RetryPolicySchema } from '../shared/retry-policy.zod';
 
 /**
  * Job Schema
@@ -87,19 +102,39 @@ export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
  *   }
  * }
  */
+/**
+ * `job.id`, retired in 17.0.0 (#4667, ADR-0049).
+ *
+ * The `describe()` did the damage: "defaults to `name` when omitted" implies an
+ * identity OVERRIDE that never existed. Nothing read the key. `name` is the
+ * job's identity at every layer that has one — the scheduling key, the `sys_job`
+ * row key (the DB adapter upserts by `name` and mints its own row id), and the
+ * `JobExecution.jobId` stamp — so two jobs differing only in `id` were never two
+ * jobs, they were one job declared twice, with the second silently winning.
+ */
+const JOB_ID_RETIRED =
+  '`job.id` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — nothing ever read '
+  + 'it, and its own description ("defaults to `name` when omitted") advertised an identity '
+  + 'override that did not exist. `name` IS the job\'s identity everywhere: the scheduling '
+  + 'key, the `sys_job` row key, and the `JobExecution.jobId` stamp. Two jobs differing only '
+  + 'in `id` were the same job. Delete the key; rename the job via `name` if you need a '
+  + 'different identity. Run `os migrate meta --from 16` to rewrite existing sources '
+  + 'automatically.';
+
 export const JobSchema = lazySchema(() => strictObject({
   surface: 'this job',
   history:
     'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
   aliases: { cron: 'schedule', interval: 'schedule', fn: 'handler', function: 'handler', retry: 'retryPolicy', enabled_: 'enabled', timeoutMs: 'timeout' },
+  guidance: { id: JOB_ID_RETIRED },
 }, {
-  id: z.string().optional().describe('Unique job identifier (defaults to `name` when omitted)'),
+  // `id` removed in 17.0.0 (#4667) — see JOB_ID_RETIRED. `name` is the identity.
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Job name (snake_case)'),
   label: z.string().optional().describe('Human-readable label'),
   description: z.string().optional().describe('Job description / purpose'),
   schedule: ScheduleSchema.describe('Job schedule configuration'),
   handler: z.string().describe('Handler function name (must match a key in `defineStack({ functions })`)'),
-  retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = backoffMs * backoffMultiplier^(retry-1)) up to maxRetries retries after the initial attempt (#3494). Omit for the legacy single-attempt behavior.'),
+  retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt (#3494). Omit the block for a single attempt; declaring it without `maxRetries` also means no retry since 17.0.0 (#4661) — state a count to opt in.'),
   timeout: z.number().int().positive().optional().describe('Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout" (#3494). The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit.'),
   enabled: z.boolean().default(true).describe('Whether the job is enabled'),
 

@@ -2,13 +2,6 @@
   "type": "job",
   "_note": "JobSchema. The file-authored path is healthy: `defineStack({ jobs })` → app-plugin kernel:ready → IJobService.schedule (packages/runtime/src/app-plugin.ts:790-855) → the service-job adapters honor every schedule shape (packages/services/service-job/src/cron-job-adapter.ts:71-88) and runWithPolicy enforces retryPolicy/timeout (#3494 — these used to be parsed-but-ignored). `retryPolicy` here is the ENFORCED spelling ({maxRetries, backoffMs, backoffMultiplier}); do not confuse it with the datasource `retryPolicy`, which is dead and spells its delay differently. TYPE-LEVEL GAP CLOSED 2026-08-02 (#4509) by CLOSING THE DOOR, not building a bridge: `job` was registered `allowRuntimeCreate: true` while only the compiled bundle's `jobs` ever reached the scheduler, so a Studio-created job saved cleanly and never ran. Unlike the webhook (#3461) and email_template (#4509 item 1) disconnects, this one could not be bridged: `handler` names a function in the compiled bundle's function table (`collectBundleFunctions`, app-plugin.ts:812), which a runtime writer does not have and cannot name — the missing piece is a handler-binding design, not an ingestion path. So `allowRuntimeCreate` AND `allowOrgOverride` are now both false (metadata-plugin.zod.ts, with the rationale block), leaving `*.job.ts` / `defineStack({ jobs })` as the supported doors. The kind stays registered: its file loader is genuinely consumed, so it still passes the ADR-0088 admission test. Evidence lines restamped 2026-08-02 — the seeded set pointed at app-plugin.ts:767-791, which had drifted ~25 lines (the gate resolves paths, not line numbers, so nothing failed; this is the rot mode `verifiedAt` exists to catch). Seeded 2026-08-01.",
   "props": {
-    "id": {
-      "status": "dead",
-      "verifiedAt": "2026-08-02",
-      "authorWarn": true,
-      "authorHint": "Delete it — `name` is the job's identity everywhere: the scheduling key (app-plugin.ts:833), the sys_job row key (db-job-adapter upserts by `name` and mints its own row id), and the JobExecution.jobId stamp. Nothing reads `id`, so two jobs differing only in `id` are the same job.",
-      "note": "The describe() text ('defaults to `name` when omitted') implies an identity override that does not exist."
-    },
     "name": {
       "status": "live",
       "verifiedAt": "2026-08-02",

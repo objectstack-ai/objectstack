@@ -26,12 +26,38 @@ Examples:
 ## TypeScript Usage
 
 ```typescript
-import { DataEventSchema, DataEventType, MetadataEventSchema, MetadataEventType } from '@objectstack/spec/api';
-import type { DataEvent, DataEventType, MetadataEvent, MetadataEventType } from '@objectstack/spec/api';
+import { BulkDataEventSchema, BulkDataEventType, DataEventSchema, DataEventType, MetadataEventSchema, MetadataEventType } from '@objectstack/spec/api';
+import type { BulkDataEvent, BulkDataEventType, DataEvent, DataEventType, MetadataEvent, MetadataEventType } from '@objectstack/spec/api';
 
 // Validate data
-const result = DataEventSchema.parse(data);
+const result = BulkDataEventSchema.parse(data);
 ```
+
+---
+
+## BulkDataEvent
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique event identifier |
+| **type** | `Enum<'data.records.updated' \| 'data.records.deleted'>` | ✅ | Event type |
+| **object** | `string` | ✅ | Object name |
+| **matched** | `integer` | ✅ | Number of records affected |
+| **userId** | `string` | optional | User who triggered the event |
+| **timestamp** | `string` | ✅ | Event timestamp |
+
+
+---
+
+## BulkDataEventType
+
+### Allowed Values
+
+* `data.records.updated`
+* `data.records.deleted`
+
 
 ---
 
@@ -42,7 +68,7 @@ const result = DataEventSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique event identifier |
-| **type** | `Enum<'data.record.created' \| 'data.record.updated' \| 'data.record.deleted' \| 'data.field.changed'>` | ✅ | Event type |
+| **type** | `Enum<'data.record.created' \| 'data.record.updated' \| 'data.record.deleted'>` | ✅ | Event type |
 | **object** | `string` | ✅ | Object name |
 | **recordId** | `string` | ✅ | Record ID |
 | **changes** | `Record<string, any>` | optional | Changed fields |
@@ -61,7 +87,6 @@ const result = DataEventSchema.parse(data);
 * `data.record.created`
 * `data.record.updated`
 * `data.record.deleted`
-* `data.field.changed`
 
 
 ---

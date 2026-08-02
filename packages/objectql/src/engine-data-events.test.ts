@@ -16,15 +16,18 @@
  *  - the transport envelope's `payload` IS a schema-valid `DataEvent`;
  *  - a batch insert publishes one event PER RECORD, with unique ids;
  *  - `userId` is carried when the execution context names an actor;
- *  - a multi-row write (`updateMany`/`deleteMany` → affected count) publishes
- *    NOTHING, loudly — it has no per-record identity, and `recordId` is
- *    required, so the pre-fix fabrication (`recordId: ''`, `after: <count>`)
- *    is not replaced by another one;
+ *  - a multi-row write publishes no PER-RECORD event — it has no per-record
+ *    identity, and `recordId` is required, so the pre-fix fabrication
+ *    (`recordId: ''`, `after: <count>`) is not replaced by another one;
  *  - a publish failure never fails the write.
+ *
+ * #4639 then gave the multi-row case its own honest contract rather than
+ * leaving it silent — see the second describe block: `data.records.updated` /
+ * `data.records.deleted`, carrying `matched` and NO `recordId`.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { DataEventSchema } from '@objectstack/spec/api';
+import { BulkDataEventSchema, DataEventSchema } from '@objectstack/spec/api';
 import type { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
 import { ObjectQL } from './engine.js';
 
@@ -203,35 +206,6 @@ describe('#4626 — engine writes publish true DataEvents', () => {
     expect(DataEventSchema.parse(published[0].payload).userId).toBeUndefined();
   });
 
-  it('publishes NOTHING for a multi-row update — and says so', async () => {
-    await engine.insert('task', [{ title: 'a', status: 'open' }, { title: 'b', status: 'open' }]);
-    published.length = 0;
-    warn.mockClear();
-
-    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'open' } } as any);
-
-    // `updateMany` returns an affected COUNT: there is no record to name, and
-    // `DataEvent.recordId` is required. Pre-fix this published one event with
-    // `recordId: ''` and `after: 2` — an event every compliant consumer must
-    // reject. Absence is loud, not silent.
-    expect(published).toHaveLength(0);
-    const logged = warn.mock.calls.map((c) => String(c[0])).join('\n');
-    expect(logged).toContain('data.record.updated');
-    expect(logged).toContain('#4626');
-  });
-
-  it('publishes NOTHING for a multi-row delete — and says so', async () => {
-    await engine.insert('task', [{ title: 'a', status: 'stale' }, { title: 'b', status: 'stale' }]);
-    published.length = 0;
-    warn.mockClear();
-
-    await engine.delete('task', { multi: true, where: { status: 'stale' } } as any);
-
-    expect(published).toHaveLength(0);
-    const logged = warn.mock.calls.map((c) => String(c[0])).join('\n');
-    expect(logged).toContain('data.record.deleted');
-  });
-
   it('a publish failure never fails the write itself', async () => {
     (realtime.publish as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('transport down'));
 
@@ -249,5 +223,178 @@ describe('#4626 — engine writes publish true DataEvents', () => {
 
     await expect(bare.insert('task', { title: 'no realtime' })).resolves.toBeTruthy();
     expect(published).toHaveLength(0);
+  });
+});
+
+/**
+ * #4639 — a predicate write gets its OWN contract instead of impersonating a
+ * per-record one.
+ *
+ * `IDataDriver.updateMany`/`deleteMany` resolve an affected COUNT, so a
+ * `multi: true` write can satisfy neither `DataEvent.recordId` (required) nor
+ * any of `before`/`after`/`changes`. #4626 correctly refused to fabricate one
+ * and published nothing — honest, but it meant webhooks, knowledge sync and
+ * `subscribeData` all went silent when a predicate write emptied half a table.
+ *
+ * These pin the third option: `data.records.updated` / `data.records.deleted`,
+ * an aggregate event that states the count and claims nothing else.
+ */
+describe('#4639 — predicate writes publish aggregate BulkDataEvents', () => {
+  let engine: ObjectQL;
+  let published: RealtimeEventPayload[];
+  let realtime: IRealtimeService;
+  let warn: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    published = [];
+    realtime = {
+      publish: vi.fn(async (event: RealtimeEventPayload) => { published.push(event); }),
+      subscribe: vi.fn(async () => 'sub-1'),
+      unsubscribe: vi.fn(async () => undefined),
+    };
+    engine = new ObjectQL();
+    const { driver } = makeMemoryDriver();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject(task as any);
+    engine.setRealtimeService(realtime);
+    warn = vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
+  });
+
+  it('a multi-row update publishes ONE schema-valid data.records.updated', async () => {
+    await engine.insert('task', [{ title: 'a', status: 'open' }, { title: 'b', status: 'open' }]);
+    published.length = 0;
+
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'open' } } as any);
+
+    expect(published).toHaveLength(1);
+    const envelope = published[0];
+    expect(envelope.type).toBe('data.records.updated');
+    expect(envelope.object).toBe('task');
+
+    const event = BulkDataEventSchema.parse(envelope.payload);
+    expect(event.id).toMatch(UUID_RE);
+    expect(event.type).toBe('data.records.updated');
+    expect(event.object).toBe('task');
+    expect(event.matched).toBe(2);
+    expect(event.timestamp).toBe(envelope.timestamp);
+  });
+
+  it('a multi-row delete publishes ONE schema-valid data.records.deleted', async () => {
+    await engine.insert('task', [{ title: 'a', status: 'stale' }, { title: 'b', status: 'stale' }, { title: 'c', status: 'live' }]);
+    published.length = 0;
+
+    await engine.delete('task', { multi: true, where: { status: 'stale' } } as any);
+
+    expect(published).toHaveLength(1);
+    const event = BulkDataEventSchema.parse(published[0].payload);
+    expect(event.type).toBe('data.records.deleted');
+    expect(event.matched).toBe(2);
+  });
+
+  it('a bulk event is NOT a DataEvent — it cannot be mistaken for a per-record one', async () => {
+    await engine.insert('task', [{ title: 'a', status: 'open' }]);
+    published.length = 0;
+
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'open' } } as any);
+
+    // The whole point of a separate type: a consumer validating against the
+    // per-record contract REJECTS this rather than reading `recordId` as an
+    // empty string (the pre-#4626 fabrication) or as `undefined` (what a
+    // widened `DataEvent` would have given it).
+    const payload = published[0].payload as Record<string, unknown>;
+    expect(DataEventSchema.safeParse(payload).success).toBe(false);
+    expect(payload.recordId).toBeUndefined();
+    expect(payload.after).toBeUndefined();
+    expect(payload.changes).toBeUndefined();
+  });
+
+  it('does NOT carry the query predicate (it embeds composed security scoping)', async () => {
+    await engine.insert('task', [{ title: 'a', status: 'open' }]);
+    published.length = 0;
+
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'open' } } as any);
+
+    // The only predicate available at publish time is the middleware-COMPOSED
+    // AST, whose `where` carries the security layer's injected row scoping
+    // (RLS, sharing). Shipping that to an external webhook URL would disclose
+    // tenant scoping internals, so the event states the count and stops.
+    const payload = published[0].payload as Record<string, unknown>;
+    expect(payload.where).toBeUndefined();
+    expect(JSON.stringify(payload)).not.toContain('status');
+  });
+
+  it('carries userId when the execution context names an actor', async () => {
+    await engine.insert('task', [{ title: 'a', status: 'open' }]);
+    published.length = 0;
+
+    await engine.update(
+      'task',
+      { status: 'done' },
+      { multi: true, where: { status: 'open' }, context: { userId: 'usr_789' } } as any,
+    );
+
+    expect(BulkDataEventSchema.parse(published[0].payload).userId).toBe('usr_789');
+  });
+
+  it('publishes NOTHING when the predicate matched no rows', async () => {
+    await engine.insert('task', [{ title: 'a', status: 'open' }]);
+    published.length = 0;
+
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'nonexistent' } } as any);
+
+    // No rows matched → no data changed → not a data event. This is what keeps
+    // an idle hourly LifecycleService sweep from becoming one webhook delivery
+    // per object per hour saying "0 records".
+    expect(published).toHaveLength(0);
+  });
+
+  it('publishes NOTHING when the driver breaks its count contract — and says so', async () => {
+    const offContract = new ObjectQL();
+    const { driver } = makeMemoryDriver();
+    // `updateMany` is contracted to resolve the affected count. A driver that
+    // resolves something else leaves `matched` unknowable, and `matched` is the
+    // entire substance of a bulk event — so none is published.
+    driver.updateMany = async () => ({ acknowledged: true } as any);
+    offContract.registerDriver(driver, true);
+    await offContract.init();
+    offContract.registry.registerObject(task as any);
+    offContract.setRealtimeService(realtime);
+    const offWarn = vi.spyOn((offContract as any).logger, 'warn').mockImplementation(() => undefined);
+    await offContract.insert('task', [{ title: 'a', status: 'open' }]);
+    published.length = 0;
+
+    await offContract.update('task', { status: 'done' }, { multi: true, where: { status: 'open' } } as any);
+
+    expect(published).toHaveLength(0);
+    const logged = offWarn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('data.records.updated');
+    expect(logged).toContain('#4639');
+  });
+
+  it('a by-id delete still takes the PER-RECORD path even with multi: true', async () => {
+    const [record] = await engine.insert('task', [{ title: 'reaped' }]);
+    published.length = 0;
+
+    // The shape LifecycleService's guarded reap uses: a scalar `where.id` is a
+    // single-record target regardless of `multi`, so it must keep producing a
+    // per-record event. Only an operator predicate routes to deleteMany.
+    await engine.delete('task', { where: { id: record.id }, multi: true } as any);
+
+    expect(published).toHaveLength(1);
+    expect(published[0].type).toBe('data.record.deleted');
+    expect(DataEventSchema.parse(published[0].payload).recordId).toBe(record.id);
+  });
+
+  it('a publish failure never fails the predicate write itself', async () => {
+    await engine.insert('task', [{ title: 'a', status: 'open' }]);
+    published.length = 0;
+    (realtime.publish as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('transport down'));
+
+    await expect(
+      engine.update('task', { status: 'done' }, { multi: true, where: { status: 'open' } } as any),
+    ).resolves.not.toThrow();
+    expect(await engine.findOne('task', { where: { status: 'done' } })).toBeTruthy();
+    expect(warn).toHaveBeenCalled();
   });
 });

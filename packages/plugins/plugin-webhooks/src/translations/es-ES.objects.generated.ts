@@ -30,11 +30,13 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       triggers: {
         label: "Desencadenantes",
-        help: "Lista de eventos separada por comas: create,update,delete.",
+        help: "Eventos de registro que activan este Webhook. bulk_update / bulk_delete se activan en escrituras por predicado y entregan un recuento, no un registro.",
         options: {
           create: "Crear",
           update: "Actualizar",
-          delete: "Eliminar"
+          delete: "Eliminar",
+          bulk_update: "Actualización masiva",
+          bulk_delete: "Eliminación masiva"
         }
       },
       url: {

@@ -127,7 +127,7 @@ export const SysWebhook = ObjectSchema.create({
     }),
 
     triggers: Field.select(
-      ['create', 'update', 'delete'],
+      ['create', 'update', 'delete', 'bulk_update', 'bulk_delete'],
       {
         label: 'Triggers',
         required: false,
@@ -135,7 +135,12 @@ export const SysWebhook = ObjectSchema.create({
         // an array; the auto-enqueuer parser also tolerates the legacy
         // comma-separated / JSON-string forms so existing rows keep working.
         multiple: true,
-        description: 'Record events that fire this webhook',
+        // [#4639] `bulk_*` fire on predicate writes (`multi: true`), whose
+        // delivery carries `matched` instead of a record — opt-in precisely
+        // because that body is a different shape. Kept in step with
+        // `WebhookTriggerType` (`@objectstack/spec/automation`), which is the
+        // contract the auto-enqueuer validates against.
+        description: 'Record events that fire this webhook (bulk_* deliver a count, not a record)',
         group: 'Definition',
       },
     ),

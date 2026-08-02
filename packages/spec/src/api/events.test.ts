@@ -111,7 +111,6 @@ describe('DataEventSchema', () => {
       'data.record.created',
       'data.record.updated',
       'data.record.deleted',
-      'data.field.changed',
     ]);
     expect(() => DataEventSchema.parse({
       id: '4b4720e8-97c3-4a12-9b70-b70a3d2314a3',
@@ -120,5 +119,39 @@ describe('DataEventSchema', () => {
       recordId: 'rec_1',
       timestamp: new Date().toISOString(),
     })).toThrow();
+  });
+
+  // #4673 (ADR-0049 enforce-or-remove): `data.field.changed` was declared here
+  // with no producer anywhere in the repo. It is gone, and the enum is the only
+  // channel that can say so — an enum member cannot carry a retiredKey()
+  // fix-it prescription the way an authorable object key can.
+  it('no longer accepts the retired data.field.changed event name', () => {
+    expect(DataEventType.options).not.toContain('data.field.changed');
+    expect(() => DataEventSchema.parse({
+      id: '4b4720e8-97c3-4a12-9b70-b70a3d2314a4',
+      type: 'data.field.changed',
+      object: 'account',
+      recordId: 'rec_1',
+      timestamp: new Date().toISOString(),
+    })).toThrow();
+  });
+
+  // The replacement is not a different event name — it is the payload the live
+  // record event already carries. This pins that FROM → TO so the changeset's
+  // one-line fix stays true.
+  it('carries per-field detail on data.record.updated via changes/before/after', () => {
+    const event = DataEventSchema.parse({
+      id: '4b4720e8-97c3-4a12-9b70-b70a3d2314a5',
+      type: 'data.record.updated',
+      object: 'account',
+      recordId: 'rec_1',
+      changes: { name: 'New Name' },
+      before: { name: 'Old Name' },
+      after: { name: 'New Name' },
+      timestamp: new Date().toISOString(),
+    });
+    expect(event.changes).toEqual({ name: 'New Name' });
+    expect(event.before).toEqual({ name: 'Old Name' });
+    expect(event.after).toEqual({ name: 'New Name' });
   });
 });
