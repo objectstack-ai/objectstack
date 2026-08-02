@@ -19,12 +19,11 @@
  *
  * The map intentionally only contains types that meaningfully round-trip
  * through the runtime metadata API. (The former code-only placeholder kinds
- * `function`/`service`/`router` — and `trigger` — were retired from the
- * registry entirely by ADR-0088.)
+ * `function`/`service`/`router` — and `trigger`, then `validation` — were
+ * retired from the registry entirely by ADR-0088.)
  *
- * `validation` exposes the discriminated union
- * over all built-in rule variants. Custom plugin types can extend this
- * registry at runtime via `registerMetadataTypeSchema()`.
+ * Custom plugin types can extend this registry at runtime via
+ * `registerMetadataTypeSchema()`.
  */
 
 import type { z } from 'zod';
@@ -32,7 +31,6 @@ import type { z } from 'zod';
 import { FieldSchema } from '../data/field.zod';
 import { ObjectSchema } from '../data/object.zod';
 import { HookSchema } from '../data/hook.zod';
-import { ValidationRuleSchema } from '../data/validation.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { SeedSchema } from '../data/seed.zod';
 import { MappingSchema } from '../data/mapping.zod';
@@ -81,7 +79,10 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   object: ObjectSchema,
   field: FieldSchema,
   hook: HookSchema,
-  validation: ValidationRuleSchema,
+  // ADR-0088 (#4509): no `validation` entry — the kind is retired. Rules are
+  // authored inline as `object.validations[]`, where `ObjectSchema` already
+  // carries `ValidationRuleSchema`, so the shape stays resolvable through its
+  // owning object.
   seed: SeedSchema, // fixture/init data; runtime-draftable, applied on publish
   mapping: MappingSchema as unknown as z.ZodType, // #2611: reusable import mapping; runtime-creatable so the wizard can save one
 

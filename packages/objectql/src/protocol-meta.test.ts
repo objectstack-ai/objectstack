@@ -1314,7 +1314,10 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(result.success).toBe(true);
         });
 
-        it('accepts brand-new trigger and validation (allowRuntimeCreate:true)', async () => {
+        // `validation` used to ride along here; #4509 retired the kind
+        // (ADR-0088), so `seed` — still registry-default allowRuntimeCreate —
+        // stands in as the second case.
+        it('accepts brand-new trigger and seed (allowRuntimeCreate:true)', async () => {
             mockEngine.findOne.mockResolvedValue(null);
 
             const triggerResult = await scoped.saveMetaItem({
@@ -1323,20 +1326,15 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 item: { name: 'my_trigger', object: 'case', event: 'beforeInsert' },
                 organizationId: 'org_alpha',
             });
-            const validationResult = await scoped.saveMetaItem({
-                type: 'validation',
-                name: 'my_validation',
-                item: {
-                    name: 'my_validation',
-                    type: 'script',
-                    message: 'Amount must be positive',
-                    condition: 'record.amount < 0',
-                },
+            const seedResult = await scoped.saveMetaItem({
+                type: 'seed',
+                name: 'my_seed',
+                item: { object: 'case', records: [] },
                 organizationId: 'org_alpha',
             });
 
             expect(triggerResult.success).toBe(true);
-            expect(validationResult.success).toBe(true);
+            expect(seedResult.success).toBe(true);
         });
 
         it('rejects brand-new agent with not_creatable (allowRuntimeCreate:false)', async () => {

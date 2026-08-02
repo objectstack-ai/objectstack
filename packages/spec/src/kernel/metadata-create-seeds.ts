@@ -73,17 +73,9 @@ const BUILTIN_METADATA_CREATE_SEEDS: Partial<Record<MetadataType, unknown>> = {
     nodes: [],
     edges: [],
   },
-  validation: {
-    name: 'new_validation',
-    label: 'New Validation',
-    message: 'This record is invalid.',
-    type: 'script',
-    active: true,
-    events: ['insert', 'update'],
-    priority: 10,
-    severity: 'error',
-    condition: 'false',
-  },
+  // ADR-0088 (#4509): no `validation` seed — the kind is retired, so there is
+  // no standalone "create validation" flow to seed. Rules are added to an
+  // object's `validations:` array.
   hook: {
     name: 'new_hook',
     label: 'New Hook',

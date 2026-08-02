@@ -130,7 +130,7 @@ const result = MetadataBulkRegisterRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **event** | `Enum<'metadata.registered' \| 'metadata.updated' \| 'metadata.unregistered' \| 'metadata.validated' \| 'metadata.deployed' \| 'metadata.overlay.applied' \| 'metadata.overlay.removed' \| 'metadata.imported' \| 'metadata.exported'>` | ✅ | Event type |
-| **metadataType** | `Enum<'object' \| 'field' \| 'validation' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'agent' \| 'tool' \| 'skill'>` | ✅ | Metadata type |
+| **metadataType** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'agent' \| 'tool' \| 'skill'>` | ✅ | Metadata type |
 | **name** | `string` | ✅ | Metadata item name |
 | **namespace** | `string` | optional | Namespace |
 | **packageId** | `string` | optional | Owning package ID |
@@ -183,7 +183,7 @@ const result = MetadataBulkRegisterRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `Enum<'object' \| 'field' \| 'validation' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
+| **types** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
 | **namespaces** | `string[]` | optional | Filter by namespaces |
 | **packageId** | `string` | optional | Filter by owning package |
 | **search** | `string` | optional | Full-text search query |
@@ -218,7 +218,6 @@ const result = MetadataBulkRegisterRequest.parse(data);
 
 * `object`
 * `field`
-* `validation`
 * `hook`
 * `seed`
 * `mapping`
@@ -252,7 +251,7 @@ const result = MetadataBulkRegisterRequest.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'object' \| 'field' \| 'validation' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'agent' \| 'tool' \| 'skill'>` | ✅ | Metadata type identifier |
+| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'agent' \| 'tool' \| 'skill'>` | ✅ | Metadata type identifier |
 | **label** | `string` | ✅ | Display label for the metadata type |
 | **description** | `string` | optional | Description of the metadata type |
 | **filePatterns** | `string[]` | ✅ | Glob patterns to discover files of this type |

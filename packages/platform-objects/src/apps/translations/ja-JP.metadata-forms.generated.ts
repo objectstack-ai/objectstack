@@ -444,9 +444,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
-  validation: {
-    label: "検証ルール"
-  },
   hook: {
     label: "フック",
     sections: {

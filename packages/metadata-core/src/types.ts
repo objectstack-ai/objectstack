@@ -19,7 +19,7 @@ import { z } from 'zod';
 export const MetadataTypeSchema = z.enum([
   'object',
   'field',
-  'validation',
+  // ADR-0088 (#4509): no `validation` kind — rules are inline `object.validations[]`.
   'hook',
   'mapping',
   'view',

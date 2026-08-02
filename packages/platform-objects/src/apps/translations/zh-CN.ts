@@ -101,7 +101,6 @@ export const zhCN: TranslationData = {
         nav_packages: { label: '软件包' },
         group_data_model: { label: '数据模型' },
         nav_objects: { label: '对象' },
-        nav_validations: { label: '校验规则' },
         group_ux: { label: '用户体验' },
         nav_apps: { label: '应用' },
         nav_views: { label: '视图' },

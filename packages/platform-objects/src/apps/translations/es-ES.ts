@@ -98,7 +98,6 @@ export const esES: TranslationData = {
         nav_packages: { label: 'Paquetes' },
         group_data_model: { label: 'Modelo de datos' },
         nav_objects: { label: 'Objetos' },
-        nav_validations: { label: 'Validaciones' },
         group_ux: { label: 'Experiencia de usuario' },
         nav_apps: { label: 'Aplicaciones' },
         nav_views: { label: 'Vistas' },

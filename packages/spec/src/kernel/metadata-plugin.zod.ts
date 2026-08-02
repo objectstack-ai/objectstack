@@ -76,7 +76,13 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // ADR-0088: there is no `trigger` metadata type — sync data-layer logic is a
   // `hook` (24 lifecycle events); async automation is a `record_change` flow.
   // (The `triggers` capability token in `requires:` is a different namespace.)
-  'validation',  // Validation rules (ValidationSchema)
+  // ADR-0088 (#4509): there is no `validation` metadata type — validation rules
+  // are authored INLINE as `object.validations[]`, which is the only shape the
+  // engine evaluates. A standalone rule had no way to say what it validated
+  // (`ValidationRuleSchema` carries no object-binding key and every variant is
+  // strict), so an item authored here bound to nothing and intercepted no write
+  // — including `state_machine` rules, which ADR-0020 routes through this same
+  // inline shape. `ValidationRuleSchema` itself is unchanged and fully live.
   'hook',        // Data hooks (HookSchema)
   'seed',        // Seed/fixture data — runtime-draftable; publishing applies it (SeedSchema)
   'mapping',     // Import/export field mappings (MappingSchema) — consumed by POST /data/:object/import via mappingName (#2611); promoted to a kind per the ADR-0088 admission test once the consumer landed
@@ -599,7 +605,13 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
   // are not modifiable per-org beyond layout/label; custom objects are full).
   { type: 'object', label: 'Object', filePatterns: ['**/*.object.ts', '**/*.object.yml', '**/*.object.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 10, domain: 'data' },
   { type: 'field', label: 'Field', filePatterns: ['**/*.field.ts', '**/*.field.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 20, domain: 'data' },
-  { type: 'validation', label: 'Validation Rule', filePatterns: ['**/*.validation.ts', '**/*.validation.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 30, domain: 'data' },
+  // ADR-0088 (#4509) — the `validation` kind is RETIRED. It failed the
+  // admission test on its first clause: no independent lifecycle. A rule only
+  // means anything against an object, and the only shape the engine evaluates
+  // is `object.validations[]`; the standalone schema had no binding key to
+  // name its object with (and, being `.strict()` in all six variants, could not
+  // be given one by an author). Its `filePatterns` and `allowRuntimeCreate`
+  // retire with it. Author rules as `validations:` on the object.
   { type: 'hook', label: 'Hook', filePatterns: ['**/*.hook.ts', '**/*.hook.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 30, domain: 'data' },
   // `seed`: fixture / initialization data (SeedSchema = object + records + mode +
   // externalId). Runtime-draftable so the AI (and any author) can stage seed

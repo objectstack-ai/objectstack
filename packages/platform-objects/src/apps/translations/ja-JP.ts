@@ -98,7 +98,6 @@ export const jaJP: TranslationData = {
         nav_packages: { label: 'パッケージ' },
         group_data_model: { label: 'データモデル' },
         nav_objects: { label: 'オブジェクト' },
-        nav_validations: { label: 'バリデーション' },
         group_ux: { label: 'ユーザー体験' },
         nav_apps: { label: 'アプリ' },
         nav_views: { label: 'ビュー' },

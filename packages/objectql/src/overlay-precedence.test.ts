@@ -219,15 +219,9 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
     describe('runtime-creatable (allowOrgOverride:false, allowRuntimeCreate:true) — brand-new items succeed', () => {
         const runtimeCreatable: Array<{ type: string; item: any }> = [
             { type: 'trigger', item: { name: 'on_insert', object: 'case', event: 'beforeInsert' } },
-            {
-                type: 'validation',
-                item: {
-                    name: 'require_name',
-                    type: 'script',
-                    message: 'Name required',
-                    condition: 'record.name == null',
-                },
-            },
+            // `validation` left this list with the kind (#4509, ADR-0088): it is
+            // no longer registered, so "runtime-creatable" no longer describes
+            // it. The reintroduction guard below is what holds the line now.
             { type: 'hook', item: { name: 'before_save', object: 'case', events: ['beforeInsert'] } },
             { type: 'hooks', item: { name: 'before_save', object: 'case', events: ['beforeInsert'] } }, // plural
             // object/field reverted to allowOrgOverride:false on 2026-05-29 —
@@ -325,7 +319,8 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             // Execution/wiring-layer types must NOT be in the set.
             // Accepting them as overlays would corrupt runtime semantics.
             // (trigger/router/function/service were retired outright by
-            // ADR-0088 — the asserts double as reintroduction guards.)
+            // ADR-0088, and `validation` by #4509 under the same ADR — the
+            // asserts double as reintroduction guards.)
             expect(allowedFromRegistry.has('trigger')).toBe(false);
             expect(allowedFromRegistry.has('validation')).toBe(false);
             expect(allowedFromRegistry.has('hook')).toBe(false);

@@ -33,10 +33,11 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         registry.registerItem('flow', { name: 'crm.onboard', steps: [] }, 'name');
         // Register control types so getMetaTypes() includes them in `entries`
         // (getMetaTypes only returns types present in getRegisteredTypes()).
-        // `hook`/`validation`/`external_catalog` are registry-default
+        // `hook`/`seed`/`external_catalog` are registry-default
         // `allowOrgOverride: false` — used by the OS_METADATA_WRITABLE tests.
+        // (`validation` used to stand here; #4509 retired the kind.)
         registry.registerItem('hook', { name: 'audit_stamp' }, 'name');
-        registry.registerItem('validation', { name: 'amount_positive' }, 'name');
+        registry.registerItem('seed', { name: 'demo_rows' }, 'name');
         registry.registerItem('external_catalog', { name: 'warehouse_snapshot' }, 'name');
 
         mockEngine = {
@@ -92,10 +93,11 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
     });
 
     it('honours OS_METADATA_WRITABLE to elevate allowOrgOverride', async () => {
-        // Use `hook` and `validation` — both are registry-default
+        // Use `hook` and `seed` — both are registry-default
         // `allowOrgOverride: false` (ADR-0088 retired the former code-only
-        // placeholder kinds this test used to lean on).
-        process.env.OS_METADATA_WRITABLE = 'hook,validation';
+        // placeholder kinds this test used to lean on, and #4509 retired
+        // `validation`, which stood here until then).
+        process.env.OS_METADATA_WRITABLE = 'hook,seed';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
 
         const result: any = await protocol.getMetaTypes();

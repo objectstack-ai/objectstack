@@ -54,3 +54,48 @@ The cached remote-schema snapshot of a federated datasource (ADR-0062) has a rea
 - `OPS_FILE_SUFFIX_REGEX` drops the four suffixes: `*.trigger.ts` / `*.router.ts` / `*.function.ts` / `*.service.ts` are no longer valid OPS metadata file names.
 - The showcase's registry-driven `KIND_COVERAGE` shrinks in lockstep (its coverage test enforces exact registry membership); the four waivers disappear and `external_catalog`'s waiver becomes a permanent, documented exclusion.
 - ADR-0005 / ADR-0010 prose tables no longer list the retired kinds.
+
+## Addendum (2026-08): `validation` retired — the admission test's first clause
+
+`validation` was registered as a kind with `allowRuntimeCreate: true`, a
+`*.validation.ts` loader, and a Studio form. On the admission test above it
+nonetheless fails the **first** clause — independent lifecycle — and the failure
+is not cosmetic:
+
+- **No independent lifecycle.** A rule only means something against an object,
+  and the only shape the engine evaluates is `object.validations[]`
+  (`evaluateValidationRules` on insert and on every matched update row).
+- **No way to bind.** `ValidationRuleSchema` carries no `object` / `objectName`
+  key, and all six variants are `strictObject`, so an author could not supply
+  one either — the parse would reject it. There was no merge step, and the only
+  code that expected such a key was a reference-tracker row scanning a field
+  that could never exist.
+
+So the standalone door led nowhere: an item authored through it — including a
+`state_machine` rule, which ADR-0020 explicitly routes through this same
+vocabulary — saved cleanly, reported success, and intercepted no write. That is
+the ADR-0049 false-compliance shape, on a surface authors reasonably expect to
+gate their data.
+
+The kind is removed (registry entry, `MetadataTypeSchema` member, metadata-core
+lockstep enum, schema map entry, Studio nav item and hand-crafted form, create
+seed, and the dangling reference row). `ValidationRuleSchema` itself is
+**unchanged and fully live** — it is the kind that was inert, not the
+vocabulary. The liveness ledger keeps governing the schema through the gate's
+`SPEC_ONLY_SCHEMAS` override, alongside `webhook` and `query`, precisely because
+an ungoverned live schema is how the next drift would hide.
+
+Note the contrast with the sibling disconnects closed in the same batch (#4509).
+`email_template` had a real feature with missing wiring, so enforce-or-remove
+resolved it by **enforcing** — a materializer bridge. `validation` had a shape
+that could not carry the feature at all, so it resolves by **removing**. The
+test is not "is this dead?" but "can this be made to work as declared?".
+
+- `MetadataTypeSchema` and `DEFAULT_METADATA_TYPE_REGISTRY` shrink 26 → 25.
+- `*.validation.ts` / `*.validation.yml` are no longer metadata file patterns.
+  (`OPS_FILE_SUFFIX_REGEX` never listed them — no change there.)
+- Persisted standalone `sys_metadata` rows are left alone. They were never
+  evaluated, so nothing changes behaviorally; `migrateStoredMetadata` declines
+  them like any unregistered type.
+- **Migration for authors:** move the rule into the object's `validations:`
+  array. The rule body is unchanged — same schema, same six variants.

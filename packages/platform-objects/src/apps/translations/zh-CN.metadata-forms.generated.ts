@@ -444,9 +444,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
-  validation: {
-    label: "验证规则"
-  },
   hook: {
     label: "钩子",
     sections: {

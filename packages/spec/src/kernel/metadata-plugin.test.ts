@@ -18,10 +18,11 @@ describe('MetadataPluginProtocol', () => {
   describe('MetadataTypeSchema', () => {
     it('should accept all built-in metadata types', () => {
       const types = [
-        'object', 'field', 'validation', 'hook', 'seed', 'mapping',
+        'object', 'field', 'hook', 'seed', 'mapping',
         'view', 'page', 'dashboard', 'app', 'action', 'report',
         'flow', // ADR-0020: `workflow` retired as a metadata type
-        // ADR-0088: `trigger`/`router`/`function`/`service` retired as kinds
+        // ADR-0088: `trigger`/`router`/`function`/`service` retired as kinds,
+        // then `validation` (#4509) — rules are inline `object.validations[]`
         'datasource', 'external_catalog', 'translation',
         'permission', 'position',
         'agent', 'tool', 'skill',
@@ -40,6 +41,15 @@ describe('MetadataPluginProtocol', () => {
 
     it('should reject `approval` as a metadata type (ADR-0019: approval is a flow node)', () => {
       expect(() => MetadataTypeSchema.parse('approval')).toThrow();
+    });
+
+    it('should reject `validation` as a metadata type (#4509: rules are inline object.validations[])', () => {
+      // ADR-0088 retirement. A standalone rule had no object-binding key —
+      // ValidationRuleSchema carries none and every variant is strict — so an
+      // item authored as its own artifact bound to nothing and intercepted no
+      // write. The rule VOCABULARY is untouched and fully live via the object.
+      expect(() => MetadataTypeSchema.parse('validation')).toThrow();
+      expect(DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'validation')).toBeUndefined();
     });
 
     it('registers `seed` as a runtime-draftable data type applied on publish', () => {

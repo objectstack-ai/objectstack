@@ -55,6 +55,7 @@ import { dirname, join, resolve } from 'node:path';
 import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '../../src/kernel/metadata-type-schemas';
 import { WebhookSchema } from '../../src/automation/webhook.zod';
 import { QuerySchema } from '../../src/data/query.zod';
+import { ValidationRuleSchema } from '../../src/data/validation.zod';
 import {
   BOUND_PROOF_PATHS,
   HIGH_RISK_CLASSES,
@@ -135,9 +136,18 @@ const PENDING_GOVERNANCE: Record<string, string> = {
 // what authors write into metadata files while nothing governed what callers
 // write into a query. Walking `QuerySchema` here closes that class;
 // `query.json` carries the request-surface verdicts.
+//
+// `validation` stopped being a metadata type in #4509 (ADR-0088 retirement):
+// a standalone rule had no object-binding key, so an item authored as its own
+// artifact bound to nothing and intercepted no write. The RULE VOCABULARY is
+// entirely live — the engine evaluates `object.validations[]` on every insert
+// and update — so the ledger must keep governing `ValidationRuleSchema`; it is
+// the kind, not the schema, that went away. Governing it here is what stops the
+// retirement from quietly un-governing a live surface.
 const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   webhook: WebhookSchema,
   query: QuerySchema,
+  validation: ValidationRuleSchema,
 };
 
 // ADR-0010 provenance/lock overlay fields — system-stamped, on every type; auto-live.

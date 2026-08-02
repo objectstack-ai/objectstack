@@ -122,7 +122,6 @@ export const en: TranslationData = {
         nav_packages: { label: 'Packages' },
         group_data_model: { label: 'Data Model' },
         nav_objects: { label: 'Objects' },
-        nav_validations: { label: 'Validations' },
         group_ux: { label: 'User Experience' },
         nav_apps: { label: 'Apps' },
         nav_views: { label: 'Views' },

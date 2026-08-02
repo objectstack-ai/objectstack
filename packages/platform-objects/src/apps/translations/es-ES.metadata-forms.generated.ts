@@ -444,9 +444,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
-  validation: {
-    label: "Regla de validación"
-  },
   hook: {
     label: "Gancho",
     sections: {

@@ -54,6 +54,8 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
   object: {
     status: 'demonstrated',
     files: ['src/data/objects/index.ts', 'src/data/objects/field-zoo.object.ts'],
+    notes:
+      'Also carries the validation-rule surface: rules are authored inline via object `validations` (the `validation` KIND was retired in #4509 — ADR-0088 — because a standalone rule had no way to name the object it validated). Every declared rule type is write-path enforced (rule-validator dispatches all of state_machine/script/cross_field/format/json_schema/conditional — ADR-0020 "no silent no-ops", closing the #1475 gap) and each is demonstrated: state_machine (task/project), script+cross_field (project), format/json_schema/conditional (account). Field-level requiredWhen/readonlyWhen are likewise enforced and demonstrated on invoice.',
   },
   field: {
     status: 'demonstrated',
@@ -61,17 +63,10 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
     notes:
       'FieldSchema is authored inline on objects (the stack DSL has no standalone `fields` collection); field-zoo exhausts every field type — see the variant-level test.',
   },
-  validation: {
-    status: 'demonstrated',
-    files: [
-      'src/data/objects/account.object.ts',
-      'src/data/objects/task.object.ts',
-      'src/data/objects/project.object.ts',
-      'src/data/objects/invoice.object.ts',
-    ],
-    notes:
-      'Authored inline via object `validations`. Every declared rule type is now write-path enforced (rule-validator dispatches all of state_machine/script/cross_field/format/json_schema/conditional — ADR-0020 "no silent no-ops", closing the #1475 gap) and each is demonstrated: state_machine (task/project), script+cross_field (project), format/json_schema/conditional (account). Field-level requiredWhen/readonlyWhen are likewise enforced and demonstrated on invoice.',
-  },
+  // `validation` was retired as a KIND in #4509 (ADR-0088) — the coverage test
+  // fails on any entry the registry no longer knows. The rules themselves are
+  // unchanged and still demonstrated; that coverage moved onto `object`, which
+  // is where they are authored.
   hook: { status: 'demonstrated', files: ['src/data/hooks/index.ts'] },
   seed: { status: 'demonstrated', files: ['src/data/seed/index.ts'] },
   mapping: {

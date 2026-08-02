@@ -130,14 +130,11 @@ export const STUDIO_APP: AppInput = {
           params: { type: 'object', package: '{active_package}' },
           icon: 'box',
         },
-        {
-          id: 'nav_validations',
-          type: 'component',
-          label: 'Validations',
-          componentRef: 'metadata:resource',
-          params: { type: 'validation', package: '{active_package}' },
-          icon: 'check-square',
-        },
+        // `nav_validations` removed (#4509): the `validation` kind is retired
+        // (ADR-0088), so this list had nothing to list. Validation rules are
+        // authored on the object as `validations:` and edited there — a
+        // standalone rule never bound to an object, so every rule created
+        // through this nav item saved cleanly and intercepted no write.
       ],
     },
     {

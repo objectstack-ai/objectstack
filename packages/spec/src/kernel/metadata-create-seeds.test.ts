@@ -33,7 +33,9 @@ describe('metadata create seeds validate against their spec schemas', () => {
 
   it('sanity: seeds the core Studio-designer types', () => {
     const seeded = new Set(listMetadataCreateSeedTypes());
-    for (const t of ['dashboard', 'action', 'page', 'view', 'flow', 'validation', 'hook', 'dataset', 'object']) {
+    // `validation` left this list with the kind (#4509, ADR-0088) — rules are
+    // authored inside an object's `validations:`, never created standalone.
+    for (const t of ['dashboard', 'action', 'page', 'view', 'flow', 'hook', 'dataset', 'object']) {
       expect(seeded.has(t), `core type '${t}' has no create seed`).toBe(true);
     }
   });

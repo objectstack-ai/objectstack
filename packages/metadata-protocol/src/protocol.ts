@@ -261,74 +261,13 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
         required: ['name', 'label', 'type'],
         additionalProperties: true,
     },
-    // Validation rules live inside `object.validations[]`. The canonical
-    // ValidationRuleSchema is a discriminated union of 6 variants; the
-    // generic SchemaForm renderer treats unions as opaque JSON, so we
-    // ship a *flat* form-friendly schema covering the common base
-    // properties plus every variant-specific field as optional. Save-time
-    // validation is unaffected — the union schema is still authoritative
-    // at write time.
-    validation: {
-        type: 'object',
-        properties: {
-            // --- Base fields (all variants) ---
-            name: { type: 'string', description: 'Unique rule name (snake_case)' },
-            label: { type: 'string' },
-            description: { type: 'string' },
-            type: {
-                type: 'string',
-                enum: [
-                    'script',
-                    'state_machine',
-                    'format',
-                    'cross_field',
-                    'json_schema',
-                    'conditional',
-                ],
-                default: 'script',
-                description: 'Validation variant',
-            },
-            active: { type: 'boolean', default: true },
-            events: {
-                type: 'array',
-                items: { type: 'string', enum: ['insert', 'update'] },
-                default: ['insert', 'update'],
-            },
-            priority: { type: 'number', default: 100, minimum: 0, maximum: 9999 },
-            severity: {
-                type: 'string',
-                enum: ['error', 'warning', 'info'],
-                default: 'error',
-            },
-            message: { type: 'string' },
-            tags: { type: 'array', items: { type: 'string' } },
-            // --- Variant-specific (all optional, gated by `type`) ---
-            condition: {
-                type: 'string',
-                description: 'CEL predicate (type=script). True ⇒ validation fails.',
-            },
-            fields: {
-                type: 'array',
-                items: { type: 'string' },
-                description: 'Fields (type=cross_field).',
-            },
-            field: { type: 'string', description: 'Single field (type=state_machine / format).' },
-            transitions: {
-                type: 'object',
-                additionalProperties: { type: 'array', items: { type: 'string' } },
-                description: 'Map { OldState: [AllowedNewStates] } (type=state_machine).',
-            },
-            regex: { type: 'string', description: 'Regex (type=format).' },
-            format: {
-                type: 'string',
-                enum: ['email', 'url', 'phone', 'json'],
-                description: 'Built-in format (type=format).',
-            },
-            when: { type: 'string', description: 'Outer condition (type=conditional).' },
-        },
-        required: ['name', 'type', 'message'],
-        additionalProperties: true,
-    },
+    // ADR-0088 (#4509): the `validation` kind is retired, so its hand-crafted
+    // form goes with it. Rules are authored inside `object.validations[]` and
+    // edited on the object; there is no standalone validation editor to render
+    // a schema for. (The form was flat by necessity — ValidationRuleSchema is a
+    // 6-variant discriminated union the generic SchemaForm treats as opaque —
+    // and it had no field for the object being validated, which is precisely
+    // the gap that retired the kind: a rule saved here bound to nothing.)
 };
 
 /**
@@ -1374,7 +1313,11 @@ const REFERENCE_PATHS: Record<string, Array<{ fromType: string; paths: string[];
         { fromType: 'page', paths: ['object', 'objectName'], kind: 'page' },
         { fromType: 'report', paths: ['object', 'objectName'], kind: 'report' },
         { fromType: 'action', paths: ['object', 'objectName'], kind: 'action' },
-        { fromType: 'validation', paths: ['object', 'objectName'], kind: 'validation' },
+        // fromType 'validation' removed (#4509): it scanned `object`/`objectName`
+        // on a schema that has neither — every variant is strict, so parse would
+        // have stripped such a key anyway — and the kind is now retired
+        // (ADR-0088). Rules travel with their object, so a rule's dependency on
+        // that object needs no row: deleting the object takes them with it.
         { fromType: 'hook', paths: ['object', 'objectName'], kind: 'hook' },
         { fromType: 'object', paths: ['fields[].referenceTo', 'fields{}.referenceTo', 'fields{}.reference'], kind: 'field reference' },
     ],

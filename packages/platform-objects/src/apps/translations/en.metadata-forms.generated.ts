@@ -444,9 +444,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
-  validation: {
-    label: "Validation Rule"
-  },
   hook: {
     label: "Hook",
     sections: {

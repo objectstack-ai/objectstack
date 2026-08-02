@@ -307,7 +307,11 @@ describe('#4001 — registered-type closure is derived, not tallied', () => {
   it('reports the campaign number so a reader never has to count', () => {
     const closed = types.filter((t) => !STILL_STRIP.has(t));
     expect(closed.length + STILL_STRIP.size).toBe(types.length);
-    expect(closed.length).toBe(24);
-    expect(types.length).toBe(25);
+    // 25 → 24 on 2026-08-02: `validation` left the registry entirely (#4509,
+    // ADR-0088 retirement), taking an already-closed schema with it. The
+    // campaign's closure ratio is unchanged — one fewer registered type, not
+    // one fewer closed one.
+    expect(closed.length).toBe(23);
+    expect(types.length).toBe(24);
   });
 });
