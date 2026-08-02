@@ -36,15 +36,6 @@ export interface WasmConnectionOptions {
   logger?: { warn: (msg: string, meta?: unknown) => void };
 }
 
-/** Mutation method names that should trigger a persistence cycle. */
-const WRITE_METHODS = new Set([
-  'run',
-  'insert',
-  'update',
-  'del',
-  'counter',
-]);
-
 /**
  * Detect whether a Node-style `fs` module is available. WebContainer
  * (StackBlitz) provides Node `fs`; pure-browser environments do not.
@@ -339,10 +330,22 @@ export class WasmSqliteConnection {
     }
   }
 
-  /** Hint that a mutation just executed; schedule a flush if needed. */
-  markDirty(method?: string): void {
+  /**
+   * Record that the statement just executed CHANGED the database, and schedule
+   * a flush according to {@link persist}.
+   *
+   * Deliberately takes no argument. It used to filter the caller's Knex
+   * `method` against a local write-method allowlist, which made "did this
+   * mutate?" a decision taken in TWO places — here and in the dialect's
+   * execution-path branch — and the two disagreed: an `INSERT … RETURNING`
+   * runs down the dialect's ROW-returning branch (it has rows to return), that
+   * branch never called this method at all, and so a whole class of committed
+   * writes was never marked dirty and never reached disk (#4518). One decision,
+   * one owner: {@link statementMutatesDatabase} in the dialect classifies the
+   * statement, and this method just does what it is told.
+   */
+  markDirty(): void {
     if (this.isEphemeral || !this.fs) return;
-    if (method && !WRITE_METHODS.has(method)) return;
     this.dirty = true;
 
     if (this.persist === 'on-write') {

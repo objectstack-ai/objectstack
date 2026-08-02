@@ -131,6 +131,13 @@ export interface BootOptions {
    * path and the second is a genuine COLD BOOT over the first's data — the
    * restart a durable suspended run has to survive (ADR-0019). Callers own the
    * file's lifetime (create it under a temp dir, delete it after).
+   *
+   * **`stop()` is the durability boundary.** When it returns, everything
+   * committed before it is on disk: the kernel shutdown runs the datasource
+   * plugin's `destroy()` → `disconnect()` → the driver's final flush. Nothing
+   * else is needed — no explicit flush, no sleep — and a cold boot that finds
+   * tables but no rows is a driver bug, not a fixture that forgot to wait
+   * (which is exactly what #4518 turned out to be).
    */
   databaseFile?: string;
   /**

@@ -92,11 +92,67 @@ function formatBindings(bindings: unknown[] | undefined): unknown[] {
  * Everything else — `select`, `first`, `pluck`, `columnInfo`, raw PRAGMA,
  * DDL with no `method` — is read with `all`/row iteration so Knex sees the
  * same response shape it would from better-sqlite3.
+ *
+ * ⚠️ This answers "how do I EXECUTE this statement", never "does this statement
+ * change the database" — an `INSERT … RETURNING *` is executed down the
+ * row-returning branch and mutates. Persistence is classified separately by
+ * {@link statementMutatesDatabase}; conflating the two is #4518.
  */
-function isReadMethod(method?: string, returning?: unknown): boolean {
+function isRowReturningExecution(method?: string, returning?: unknown): boolean {
   if (method === 'insert' || method === 'update') return !!returning ? true : false;
   if (method === 'counter' || method === 'del') return false;
   return true;
+}
+
+/** Knex `method` values that always denote a mutation. */
+const MUTATING_METHODS = new Set(['insert', 'update', 'del', 'counter']);
+
+/** Statement-control forms whose persistence is owned by the transaction lifecycle. */
+const TRANSACTION_CONTROL_RE = /^\s*(BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/i;
+
+/**
+ * DDL / schema statements. `BEGIN…RELEASE` share this prefix set in SQLite's
+ * grammar but are transaction control, so they are matched (and routed) first.
+ */
+const DDL_RE =
+  /^\s*(CREATE|ALTER|DROP|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|REINDEX|VACUUM|ATTACH|DETACH|TRUNCATE)\b/i;
+
+/** DML that changes rows, whatever execution branch it happens to run down. */
+const MUTATING_DML_RE = /^\s*(INSERT|UPDATE|DELETE|REPLACE|UPSERT)\b/i;
+
+/**
+ * PRAGMA forms that change bytes in the database file: any assignment
+ * (`PRAGMA auto_vacuum = INCREMENTAL`, `PRAGMA user_version = 3` — both
+ * persistent header state) and `incremental_vacuum`, which actually moves
+ * pages. Introspection PRAGMAs (`table_info`, `index_list`, …) are reads.
+ */
+const MUTATING_PRAGMA_RE = /^\s*PRAGMA\b(?:[^;]*=|\s+incremental_vacuum\b)/i;
+
+/**
+ * THE single answer to "did this statement change the database, so that the
+ * in-memory image must eventually be written back to disk?"
+ *
+ * It is deliberately independent of which execution branch {@link
+ * isRowReturningExecution} picks, because those are different questions and
+ * answering them with one predicate is what broke persistence in #4518: the
+ * ObjectQL engine writes through `INSERT … RETURNING *` / `UPDATE … RETURNING *`
+ * (it needs the stored row back), those run down the row-returning branch, and
+ * the dirty flag was only ever set on the other branch. The result was a
+ * file-backed database that flushed its schema and then silently stopped
+ * recording anything — a cold boot found every table present and every row
+ * gone, and `on-disconnect` did not save it either, because the final flush
+ * also keys off the same flag.
+ *
+ * Classifying by BOTH the Knex `method` and the SQL text means a mutation
+ * cannot slip through by arriving without a method (`knex.raw('INSERT …')`,
+ * seed/migration SQL) or by taking an unexpected branch.
+ */
+export function statementMutatesDatabase(sql: string, method?: string): boolean {
+  if (TRANSACTION_CONTROL_RE.test(sql)) return false; // owned by noteTransactionControl
+  if (method && MUTATING_METHODS.has(method)) return true;
+  if (DDL_RE.test(sql)) return true;
+  if (MUTATING_DML_RE.test(sql)) return true;
+  return MUTATING_PRAGMA_RE.test(sql);
 }
 
 /**
@@ -179,35 +235,27 @@ export function getClient_WasmSqlite(): any {
       const db = connection.raw;
       const bindings = formatBindings(obj.bindings);
 
-      // DDL / transactional control statements have no Knex `method`. sql.js's
+      // ── 1. EXECUTE ────────────────────────────────────────────────────────
+      // Three execution shapes. None of them decides persistence: that is
+      // settled once, below, so a statement cannot mutate the database on a
+      // branch that forgot to say so (#4518).
+
+      // DDL / transaction control have no Knex `method`. sql.js's
       // `prepare`+`step` silently no-ops on many of these (e.g. CREATE TABLE),
       // so route them through `run` which is implemented via `exec` and
       // actually mutates the database. PRAGMA is intentionally excluded — many
       // PRAGMA forms (e.g. `PRAGMA table_info(...)`, `foreign_key_list(...)`)
       // return rows used by Knex's schema introspection/columnInfo, and
       // `db.run` discards those rows.
-      const isDdl =
-        /^\s*(CREATE|ALTER|DROP|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|REINDEX|VACUUM|ATTACH|DETACH|TRUNCATE)\b/i.test(
-          obj.sql,
-        );
-      if (isDdl) {
+      if (DDL_RE.test(obj.sql)) {
         db.run(obj.sql, bindings as any);
         obj.response = [];
-        // Transaction-control statements are routed through
-        // `noteTransactionControl`, which owns flushing for the transaction
-        // lifecycle: it suppresses flushes while a transaction is open (sql.js
-        // `export()` closes+reopens the db, which would abort the txn) and
-        // performs a single flush once the transaction fully closes. Routing
-        // them away from `markDirty` avoids a second, racing flush on COMMIT.
-        if (/^\s*(BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/i.test(obj.sql)) {
-          connection.noteTransactionControl(obj.sql);
-        } else {
-          connection.markDirty('run');
-        }
-        return obj;
-      }
-
-      if (isReadMethod(obj.method, obj.returning) || /^\s*PRAGMA\b/i.test(obj.sql)) {
+      } else if (
+        isRowReturningExecution(obj.method, obj.returning) ||
+        /^\s*PRAGMA\b/i.test(obj.sql)
+      ) {
+        // Row-returning branch. NOTE this is also where `INSERT … RETURNING *`
+        // and `UPDATE … RETURNING *` land — statements that very much write.
         const stmt = db.prepare(obj.sql);
         try {
           if (bindings.length) stmt.bind(bindings as any);
@@ -219,21 +267,34 @@ export function getClient_WasmSqlite(): any {
         } finally {
           stmt.free();
         }
-        return obj;
+      } else {
+        // Row-less write path: execute via `run` and capture SQLite's
+        // per-connection lastID / changes counters.
+        db.run(obj.sql, bindings as any);
+        const changes = db.getRowsModified();
+        let lastID: number | bigint = 0;
+        if (obj.method === 'insert') {
+          const r = db.exec('SELECT last_insert_rowid() AS id');
+          lastID = (r?.[0]?.values?.[0]?.[0] as number) ?? 0;
+        }
+        obj.response = [];
+        obj.context = { lastID, changes };
       }
 
-      // Write path: execute via `run` (no row iteration needed) and capture
-      // SQLite's per-connection lastID / changes counters.
-      db.run(obj.sql, bindings as any);
-      const changes = db.getRowsModified();
-      let lastID: number | bigint = 0;
-      if (obj.method === 'insert') {
-        const r = db.exec('SELECT last_insert_rowid() AS id');
-        lastID = (r?.[0]?.values?.[0]?.[0] as number) ?? 0;
+      // ── 2. PERSIST ────────────────────────────────────────────────────────
+      // Exactly one place decides whether the on-disk image is now stale.
+      //
+      // Transaction-control statements are routed to `noteTransactionControl`,
+      // which owns flushing across the transaction lifecycle: it suppresses
+      // flushes while a transaction is open (sql.js `export()` closes+reopens
+      // the db, which would abort the txn) and performs a single flush once the
+      // transaction fully closes. Routing them away from `markDirty` avoids a
+      // second, racing flush on COMMIT.
+      if (TRANSACTION_CONTROL_RE.test(obj.sql)) {
+        connection.noteTransactionControl(obj.sql);
+      } else if (statementMutatesDatabase(obj.sql, obj.method)) {
+        connection.markDirty();
       }
-      obj.response = [];
-      obj.context = { lastID, changes };
-      connection.markDirty(obj.method);
       return obj;
     }
   }
