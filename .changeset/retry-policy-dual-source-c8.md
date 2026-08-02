@@ -68,6 +68,14 @@ ever faster, the opposite of backoff.
 shape** (every key optional) rather than the post-parse shape. Use the new
 `RetryPolicyParsed` where you need defaults applied.
 
+## Not related to `mapping.errorPolicy` (#4509 / #4664, same release)
+
+17.0.0 also retires `mapping.errorPolicy`, whose values included `'retry'`. That is a
+different thing on a different type: an inert enum on the stored **mapping**, whose
+prescription is "error handling on the import path belongs to the import REQUEST's own
+options". It does **not** migrate to a `retryPolicy` block, and nothing in this change
+affects it.
+
 ## What you gain
 
 `job.retryPolicy` accepts **`maxRetryDelayMs`** (ceiling on a single backoff delay) and
