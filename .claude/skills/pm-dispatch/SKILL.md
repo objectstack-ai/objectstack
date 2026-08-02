@@ -102,7 +102,23 @@ known case: accepting a `repo:objectui` PR ⇒ file a `pm:queue` issue in
 `objectstack` — "run `pnpm objectui:refresh` and land the console bump",
 referencing the merged PR, blocked-by it until it actually merges.
 
-**4. One board, no second tracker.** The pm labels above are the state
+**4. Multiple PM sessions shard by repo — never share one queue.** The
+claim protocol makes concurrent PMs *safe*, not *useful*: batch
+independence (file-disjointness) is only checked within one PM's view, so
+two PMs on the same queue can claim different issues that collide on
+shared files, and the merge queue is one lane regardless. Scaling order:
+
+1. One PM, bigger batch (`batch:5` is the maintainer's chosen operating
+   point, riding on the resource discipline above), heavy tasks via
+   `mode:cloud` — adds compute without adding schedulers.
+2. When one PM genuinely can't keep up: a second session takes a **whole
+   repo** as its shard (`/pm-dispatch repo:objectstack-ai/objectui`) —
+   file universes are disjoint by construction. A sharded PM states its
+   shard in every claim comment and **never claims outside it**; cross-repo
+   parent/sub-issue chains stay with the main-backlog PM.
+3. Multiple PMs on the SAME queue: prohibited — all cost, no throughput.
+
+**5. One board, no second tracker.** The pm labels above are the state
 machine; an org-level GitHub Project pulling issues/PRs from all three repos
 gives the maintainer a single view (filter by `repo:*` and `pm:*`). The PM
 maintains no tracking state outside GitHub — that invariant is what keeps
@@ -200,6 +216,16 @@ execute atomically, in order:
 
 Dev agents push their branch early — a remote branch is the hardest evidence
 of work in flight, closing the gap between "claimed" and "PR exists".
+
+**Multiple GitHub accounts (colleagues' Claude Code sessions) simplify
+this, not complicate it.** Across accounts the assignee alone already says
+*who*: `assignee isn't you → taken, never touch` is the entire cross-account
+protocol, and it's already the rule. The claim-comment ritual (branch name,
+round, race check) matters *within* one account's sessions. When several
+accounts work the backlog, partition it the same way as multi-PM sharding —
+by repo or by an agreed label per account — and record the assignment table
+once in a pinned issue or the round report so nobody triages another
+account's shard.
 
 **Stale-claim reclaim**: a claim older than ~24 h whose promised branch does
 not exist on the remote and has no PR is presumed dead — comment asking, and
