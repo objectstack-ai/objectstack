@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { schemaNameFromExportKey } from './lib/schema-name';
+import { RENAMED_DEFS, carryAuthorableKey, checkRenameTable } from './lib/renamed-defs';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
 import { MIGRATIONS_BY_MAJOR } from '../src/migrations/registry';
 import * as AI from '../src/ai';
@@ -301,7 +302,24 @@ try {
 }
 
 const generatedKeys = new Set(generatedSchemas.keys());
-const missing = (manifest?.schemas ?? []).filter((key) => !generatedKeys.has(key));
+
+// ─── Declared def renames must describe THIS build ────────────────────
+// Both ratchets below consult RENAMED_DEFS, so an entry that no longer matches
+// reality (target never emitted, or source still emitted alongside it) would
+// weaken them silently. Fail before either one runs. See lib/renamed-defs.ts.
+const renameProblems = checkRenameTable(generatedKeys);
+if (renameProblems.length > 0) {
+  console.error(`\n❌ ${renameProblems.length} problem(s) in RENAMED_DEFS (scripts/lib/renamed-defs.ts):`);
+  for (const p of renameProblems) console.error(`     - ${p}`);
+  process.exit(1);
+}
+
+const missing = (manifest?.schemas ?? []).filter(
+  // A def listed as renamed is not missing — it is published under the new
+  // name, which `checkRenameTable` just proved this build emits. The manifest
+  // rewrite below drops the old key, so the entry self-clears on regeneration.
+  (key) => !generatedKeys.has(key) && !(key in RENAMED_DEFS),
+);
 if (missing.length > 0) {
   console.error(`\n❌ ${missing.length} previously published schema(s) disappeared from this build:`);
   for (const key of missing) {
@@ -319,7 +337,12 @@ if (missing.length > 0) {
 }
 
 const added = [...generatedKeys].filter((key) => !(manifest?.schemas ?? []).includes(key));
-if (!manifest || added.length > 0) {
+// A renamed-away source key must be dropped from the manifest even in the (rare)
+// case where the new name adds nothing — e.g. a rename onto a def that already
+// existed. Without this the stale key would sit in the manifest forever, kept
+// alive only by its RENAMED_DEFS entry.
+const renamedAway = (manifest?.schemas ?? []).filter((key) => key in RENAMED_DEFS);
+if (!manifest || added.length > 0 || renamedAway.length > 0) {
   const updated: SchemaManifest = {
     description:
       'Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. ' +
@@ -401,9 +424,45 @@ if (fs.existsSync(AUTHORABLE_SURFACE_PATH)) {
 }
 
 if (surfaceDoc) {
-  const prev = new Map<string, boolean>(
+  const snapshot = new Map<string, boolean>(
     surfaceDoc.keys.map((e) => [e.replace(RETIRED_MARK, ''), e.endsWith(RETIRED_MARK)]),
   );
+
+  // Carry the snapshot through any declared def rename FIRST, so every check
+  // below compares like with like. A rename moves keys between defs; it must
+  // never be able to drop one, and it must never launder a retirement past
+  // check (b) either — which is why the carried key keeps the OLD key's
+  // retired state. See scripts/lib/renamed-defs.ts (#4684).
+  const prev = new Map<string, boolean>();
+  const carriedFrom = new Map<string, string>(); // new key -> old key
+  for (const [key, retired] of snapshot) {
+    const carried = carryAuthorableKey(key);
+    if (carried !== key) carriedFrom.set(carried, key);
+    prev.set(carried, retired);
+  }
+
+  // (a0) A declared rename that did not carry one of its keys. Reported apart
+  //      from (a) because the remedy is the opposite one: the key did not leave
+  //      the contract by accident of a deletion, it failed to arrive under the
+  //      new def — restore it there, or stop calling this a rename.
+  const notCarried = [...carriedFrom.entries()].filter(([to]) => !currentKeys.has(to));
+  if (notCarried.length > 0) {
+    console.error(
+      `\n❌ ${notCarried.length} authorable key(s) were lost by a declared def rename:`,
+    );
+    for (const [to, from] of notCarried) console.error(`     - ${from}  →  ${to}  (absent)`);
+    console.error(
+      `\n   RENAMED_DEFS (scripts/lib/renamed-defs.ts) declares that these defs were renamed,\n` +
+      `   and a rename must carry EVERY key: the author-facing contract is unchanged, only\n` +
+      `   an internal schema name moved. A key missing under the new name is a real removal\n` +
+      `   wearing a rename's clothes — and these schemas are NOT .strict(), so Zod would\n` +
+      `   silently strip whatever the author kept writing (#3733, ADR-0104).\n\n` +
+      `   Either re-add the key under the new def, or — if it is genuinely being retired —\n` +
+      `   tombstone it there with \`retiredKey()\` plus its registered D2 conversion, exactly\n` +
+      `   as a retirement without a rename would require.`,
+    );
+    process.exit(1);
+  }
 
   // (a) A key that vanished outright. The silent-strip class — always fatal.
   const vanished = [...prev.keys()].filter((k) => !currentKeys.has(k));

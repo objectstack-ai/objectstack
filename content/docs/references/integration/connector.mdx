@@ -132,8 +132,8 @@ with simple `auth` — or by `[automation/sync.zod.ts](/docs/references/automati
 ## TypeScript Usage
 
 ```typescript
-import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorErrorCategorySchema, ConnectorHealthSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, ErrorMappingConfigSchema, ErrorMappingRuleSchema, HealthCheckConfigSchema, RateLimitStrategySchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
-import type { CircuitBreakerConfig, Connector, ConnectorErrorCategory, ConnectorHealth, ConnectorRetryStrategy, ConnectorStatus, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RateLimitStrategy, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
+import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorErrorCategorySchema, ConnectorHealthSchema, ConnectorRateLimitConfigSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, ErrorMappingConfigSchema, ErrorMappingRuleSchema, HealthCheckConfigSchema, RateLimitStrategySchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
+import type { CircuitBreakerConfig, Connector, ConnectorErrorCategory, ConnectorHealth, ConnectorRateLimitConfig, ConnectorRetryStrategy, ConnectorStatus, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RateLimitStrategy, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
 
 // Validate data
 const result = CircuitBreakerConfigSchema.parse(data);
@@ -235,6 +235,22 @@ Connector health configuration
 | :--- | :--- | :--- | :--- |
 | **healthCheck** | `{ enabled: boolean; intervalMs: number; timeoutMs: number; endpoint?: string; … }` | optional | Health check configuration |
 | **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeoutMs: number; halfOpenMaxRequests: number; … }` | optional | Circuit breaker configuration |
+
+
+---
+
+## ConnectorRateLimitConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'fixed_window' \| 'sliding_window' \| 'token_bucket' \| 'leaky_bucket'>` | ✅ | Rate limiting strategy |
+| **maxRequests** | `number` | ✅ | Maximum requests per window |
+| **windowSeconds** | `number` | ✅ | Time window in seconds |
+| **burstCapacity** | `number` | optional | Burst capacity |
+| **respectUpstreamLimits** | `boolean` | ✅ | Respect external rate limit headers |
+| **rateLimitHeaders** | `{ remaining: string; limit: string; reset: string }` | optional | Custom rate limit headers |
 
 
 ---

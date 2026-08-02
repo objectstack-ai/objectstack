@@ -6,7 +6,6 @@
     "connector-auth",
     "mapping",
     "---Transport & Storage---",
-    "http",
     "offline"
   ]
 }
