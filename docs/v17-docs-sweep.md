@@ -132,4 +132,62 @@ merely *references* changed code, use the `docs-accuracy-audit` workflow the
   found seventeen. Grep the pattern repo-wide (including `skills/`), do not work a
   fingerprint list file-by-file.
 
+### 2026-08-02 — run 4 (rc.1 catch-up; closes the run-2 gap)
+
+- **Watermark:** framework `ff17642` (origin/main, post-#4590) · spec
+  `17.0.0-rc.1` · `PROTOCOL_VERSION = '17.0.0'`.
+- **Coverage note:** the log holds run 1 (`a641d10`) and run 3 (version-number
+  pass only) — **no run 2 exists**, so the 362 changesets added
+  `a641d10..0f9faa2` had never been swept with removal fingerprints. This run's
+  delta is therefore `a641d10..HEAD` (435 new changesets, ~48 breaking), not
+  just the run-3 watermark.
+- **Fingerprints added:** `api.requireAuth` (retired outright, #3963 — a doc
+  presenting the opt-out as available is drift); `workflow` kernel service slot
+  (#4451); standalone `validation` metadata kind (#4509, ADR-0088); `job`
+  runtime create/org override (#4509); flow `script` `config.actionType` /
+  `.template` / `.recipients` / `.variables` / inline `script` (#4343);
+  `query.cursor` / `query.distinct` / `joins` / `windowFunctions` /
+  nested-select (#4286, #4196); `EnhancedApiError.fieldErrors` (ADR-0114 D4);
+  `BatchOptions.validateOnly` (#4052); `registerStandardEndpoints` (#4073);
+  `readReplicas` (#4481); connector template / trigger-registry Connector
+  clusters (#4500, #4503); dual-source names (`WebhookConfig` from `./api`,
+  `CacheStrategyEnum`, `MetadataFormat` `'yml'/'ts'/'js'` aliases,
+  contracts `ShareRecipientType` → `RecordShareRecipientType`; #4537–#4539,
+  #4572).
+- **Fixed (drift → corrected):**
+  - `permissions/authorization.mdx` — gate 1 still said serving the data plane
+    publicly "requires an explicit `api.requireAuth: false` opt-out"; the
+    opt-out is retired and tombstoned (#3963).
+  - `permissions/explain.mdx` — "even on `requireAuth: false` deployments", a
+    posture that no longer exists.
+  - `ui/forms.mdx` — two mentions of configuring `requireAuth`; rewritten
+    against the unconditional anonymous-deny posture.
+  - `kernel/services-checklist.mdx` — partially updated at change time: §6 and
+    the provider callout documented the `workflow` retirement, but the page
+    still claimed **16** services, listed `workflow` in the architecture
+    diagram, and carried its live row in the summary table. Now 15 services,
+    row removed, tables and section numbering re-aligned (enum verified:
+    15 members).
+- **Judged, not drift (skip re-checking):** `actionType` in
+  `deployment/validating-metadata.mdx` / `skills/objectstack-ui` (dashboard
+  action buttons — same key name, different surface); flows.mdx / automation
+  skill (document the #4343 retirement); `bulkActionDefs` in ui docs (teach
+  the new typed shape, #4457); `having` (documents "enforced since #4286");
+  `fieldErrors` in api docs (documents the tombstone); `windowFunctions` /
+  `query.distinct` hits (all "removed in spec 17" notices, run 3 fixed their
+  version numbers); `maxRetries` in flows.mdx (explicit count — the required
+  posture, #4247).
+- **Zero-hit fingerprints (nothing to fix):** `validateOnly`,
+  `registerStandardEndpoints`, `readReplicas`, `CacheStrategyEnum`,
+  `WebhookConfig`, `MetadataFormat` aliases, `ShareRecipientType`, standalone
+  `.validation.ts`, job `allowRuntimeCreate`, connector template cluster,
+  `storage.notNull` misclaims, plugin lifecycle-hook family.
+- **Method note:** docs-at-change-time discipline improved markedly in this
+  window — most removals landed with their retirement callouts already written
+  (flows.mdx #4343, query-syntax #4286, error-catalog ADR-0114). The drift
+  that survives is the *second-order* kind: a page partially updated (checklist
+  count vs narrative) or a cross-reference in a page the change didn't touch
+  (requireAuth in explain/forms). Grep the fingerprint repo-wide even when the
+  primary page looks done.
+
 <!-- Append the next run above this line, newest last. -->

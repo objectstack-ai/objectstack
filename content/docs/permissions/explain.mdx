@@ -86,8 +86,9 @@ through.
 
 ## Who may ask
 
-The endpoint is **authenticated-only** — even on `requireAuth: false`
-deployments (an access report is sensitive even about oneself). Beyond that,
+The endpoint is **authenticated-only** (an access report is sensitive even
+about oneself; since v17 anonymous access to object data is always denied
+anyway — the `requireAuth: false` opt-out was retired, #3963). Beyond that,
 authorization lives in the *service*, so REST and in-process callers share one
 rule:
 
