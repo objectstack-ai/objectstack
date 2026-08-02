@@ -188,8 +188,11 @@ describe('HttpDispatcher', () => {
                 listRuns: vi.fn().mockResolvedValue([{ id: 'run_1', status: 'completed' }]),
                 getRun: vi.fn().mockResolvedValue({ id: 'run_1', status: 'completed' }),
                 resume: vi.fn().mockResolvedValue({ success: true, output: {}, durationMs: 7 }),
-                // Sync per IAutomationService — `ScreenSpec | null`, not a promise.
-                getSuspendedScreen: vi.fn().mockReturnValue({ nodeId: 'collect', fields: [] }),
+                // ASYNC per IAutomationService (#4515) — `Promise<ScreenSpec | null>`.
+                // It has to be: a screen re-fetch answers for any genuinely
+                // suspended run, which after a restart means reading the
+                // durable suspended-run store, not just the hot cache.
+                getSuspendedScreen: vi.fn().mockResolvedValue({ nodeId: 'collect', fields: [] }),
                 getActionDescriptors: vi.fn().mockReturnValue([
                     { type: 'decision', name: 'Decision', category: 'logic', paradigms: ['flow'], source: 'builtin' },
                     { type: 'http_request', name: 'HTTP Request', category: 'io', paradigms: ['flow', 'approval'], source: 'builtin' },
@@ -444,7 +447,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should return 404 when the run is not awaiting a screen', async () => {
-            mockAutomationService.getSuspendedScreen.mockReturnValue(null);
+            mockAutomationService.getSuspendedScreen.mockResolvedValue(null);
             const result = await dispatcher.handleAutomation('flow_a/runs/run_1/screen', 'GET', {}, { request: {} });
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(404);

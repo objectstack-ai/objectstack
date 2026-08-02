@@ -3186,9 +3186,20 @@ export class AutomationEngine implements IAutomationService {
      * The screen a paused run is currently waiting on (screen-flow runtime), or
      * `null` if the run isn't suspended / didn't pause at a screen node. Lets a
      * UI flow-runner re-fetch the form after a refresh.
+     *
+     * Durable (#4515): the hot cache is the fast path, and a miss falls through
+     * to the {@link SuspendedRunStore} via the same {@link loadSuspendedRun}
+     * that {@link resume} rehydrates from — one loader, two callers. Without
+     * that fallback a screen run that survived a restart could be *resumed* but
+     * not *rendered*, which is precisely when a refresh-safe re-fetch matters.
+     *
+     * Best-effort by design: a store outage reads as "no such run" (`null`),
+     * matching the 404 this backs. A caller that must distinguish "gone" from
+     * "unknown" before writing anything wants {@link hasSuspendedRun}, which
+     * throws instead.
      */
-    getSuspendedScreen(runId: string): ScreenSpec | null {
-        return this.suspendedRuns.get(runId)?.screen ?? null;
+    async getSuspendedScreen(runId: string): Promise<ScreenSpec | null> {
+        return (await this.loadSuspendedRun(runId))?.screen ?? null;
     }
 
     // ── DAG Traversal Core ──────────────────────────────────

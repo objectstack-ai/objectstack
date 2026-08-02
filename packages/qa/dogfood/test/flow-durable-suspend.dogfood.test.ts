@@ -291,6 +291,42 @@ describe('objectstack verify FLOW: a suspended run survives a real cold boot (#4
     expect(JSON.parse(String(rec.variables_json)).noteId).toBe(noteId);
   });
 
+  it('the cold kernel RE-FETCHES the screen — refresh-safe rendering, not just resuming (#4515)', async () => {
+    // The rendering half of the same promise, and the half that was missing.
+    // `GET …/runs/:runId/screen` exists so a user who refreshes the page — or
+    // picks the flow up on another device — gets the form back. It was backed
+    // by `AutomationEngine.getSuspendedScreen`, which was SYNCHRONOUS and so
+    // structurally could only read the in-memory hot cache: after this cold
+    // boot the run was resumable (the test below) yet its screen 404'd, i.e.
+    // the route failed in exactly the situation it was built for. Fixed by
+    // making the contract method async and falling through to the same
+    // suspended-run store `resume` rehydrates from.
+    const res = await cold!.apiAs(coldToken, 'GET', `/automation/flow_durable_suspend/runs/${runId}/screen`);
+    expect(res.status, `screen re-fetch after cold boot: ${await res.clone().text()}`).toBe(200);
+    const body = (await res.json()) as any;
+    const payload = body.data ?? body;
+    expect(payload.runId).toBe(runId);
+
+    // The screen served by a kernel that never rendered it must be the screen
+    // the flow declared — read back out of `screen_json`, field contract intact
+    // (that contract is what the resume below is validated against, #4477).
+    const screen = payload.screen;
+    expect(screen.nodeId).toBe('ask');
+    expect(screen.fields.map((f: any) => f.name)).toContain('resolution');
+    expect(screen.fields.find((f: any) => f.name === 'resolution').required).toBe(true);
+
+    // Read-only: re-fetching must not consume the pause, or a refresh would
+    // destroy the very run it is trying to display.
+    const again = await cold!.apiAs(coldToken, 'GET', `/automation/flow_durable_suspend/runs/${runId}/screen`);
+    expect(again.status).toBe(200);
+    const row = await cold!.apiAs(coldToken, 'GET', `/data/sys_automation_run/${runId}`);
+    expect(row.status).toBe(200);
+
+    // A genuinely absent run still 404s — durable ≠ credulous.
+    const missing = await cold!.apiAs(coldToken, 'GET', '/automation/flow_durable_suspend/runs/run_nope/screen');
+    expect(missing.status).toBe(404);
+  });
+
   it('the cold kernel RESUMES the run and takes the right branch', async () => {
     // The one assertion #4470 was written for. The second kernel never
     // executed a node of this run: it has to rebuild the continuation from
@@ -313,6 +349,12 @@ describe('objectstack verify FLOW: a suspended run survives a real cold boot (#4
     const history = await cold!.apiAs(coldToken, 'GET', `/data/sys_automation_run/run_${runId}`);
     expect(history.status).toBe(200);
     expect((((await history.json()) as any).record ?? {}).status).toBe('completed');
+
+    // …and with the suspension consumed there is no screen left to render:
+    // the durable fallback answers for runs that are SUSPENDED, not for every
+    // id that was ever suspended (#4515).
+    const screen = await cold!.apiAs(coldToken, 'GET', `/automation/flow_durable_suspend/runs/${runId}/screen`);
+    expect(screen.status).toBe(404);
   });
 
   it('the resumed result is itself durable — a THIRD boot still reads it', async () => {

@@ -245,7 +245,7 @@ describe('subflow node executor', () => {
     expect(r2.status).toBe('paused');
     expect(r2.runId).toBe(parentRunId); // UI keeps one stable run id
     expect(r2.screen).toEqual(s2); // next wizard screen
-    expect(engine.getSuspendedScreen(parentRunId)).toEqual(s2); // refresh-safe re-fetch
+    expect(await engine.getSuspendedScreen(parentRunId)).toEqual(s2); // refresh-safe re-fetch
 
     const r3 = await engine.resume(parentRunId, { variables: { other: 'x' } });
     expect(r3.success).toBe(true);

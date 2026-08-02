@@ -370,7 +370,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // (refresh-safe re-fetch for the UI flow-runner).
         if (parts[1] === 'runs' && parts[2] && parts[3] === 'screen' && m === 'GET') {
             if (typeof automationService.getSuspendedScreen === 'function') {
-                const screen = automationService.getSuspendedScreen(parts[2]);
+                const screen = await automationService.getSuspendedScreen(parts[2]);
                 if (!screen) return { handled: true, response: deps.error('No pending screen for run', 404) };
                 return { handled: true, response: deps.success({ runId: parts[2], screen }) };
             }

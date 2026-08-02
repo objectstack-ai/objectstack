@@ -26,7 +26,7 @@ interface ScreenSpec { nodeId: string; title?: string; description?: string; fie
 - **screen executor**: suspend when `waitForInput === true` **or** (`config.fields` non-empty **and** `waitForInput !== false`). When suspending, return `{ success:true, suspend:true, screen: { nodeId, title, description, fields } }` built from `node.config`.
 - **suspend plumbing**: `NodeExecutionResult.screen` → `FlowSuspendSignal.screen` → `SuspendedRun.screen` → paused `AutomationResult.screen`.
 - **resume**: apply `signal.variables` as **bare** variables (`variables.set(name, value)`) in addition to the existing `signal.output` (`${nodeId}.key`). If the continuation suspends at another screen, return that screen (multi-screen wizards).
-- `getSuspendedScreen(runId)` getter so HTTP can re-fetch the current screen.
+- `async getSuspendedScreen(runId)` getter so HTTP can re-fetch the current screen. Durable (#4515): hot cache first, then the `SuspendedRunStore` via the same loader `resume` rehydrates from, so a screen run that survived a restart renders as well as it resumes.
 
 ### HTTP (`runtime/http-dispatcher.ts` `handleAutomation`)
 - **Launch**: existing `POST /api/v1/automation/:name/trigger` — when the run pauses at a screen, the response includes `{ status:'paused', runId, screen }`.

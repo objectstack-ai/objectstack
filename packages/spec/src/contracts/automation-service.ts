@@ -494,7 +494,19 @@ export interface IAutomationService {
     /**
      * The screen a paused run is currently awaiting (screen-flow runtime), or
      * `null` if the run isn't suspended at a `screen` node. Lets a UI flow-runner
-     * re-fetch the form (e.g. after a page refresh).
+     * re-fetch the form (e.g. after a page refresh, or on another device).
+     *
+     * **Durable, like {@link resume} (#4515).** The answer covers any run that
+     * is genuinely suspended, not just the ones this process paused: the
+     * in-memory hot cache is the fast path, and a miss falls back to the
+     * suspended-run store the same way `resume` rehydrates. So a screen run
+     * that survives a restart re-fetches its screen exactly as it resumes —
+     * the rendering half of ADR-0019's durable-suspend promise. Async for that
+     * reason; a synchronous reading of this method can only ever answer for the
+     * current process lifetime.
+     *
+     * A run that does not exist, is no longer suspended, or paused at a
+     * non-screen node still resolves to `null`.
      */
-    getSuspendedScreen?(runId: string): ScreenSpec | null;
+    getSuspendedScreen?(runId: string): Promise<ScreenSpec | null>;
 }

@@ -140,7 +140,7 @@ describe('screen resume validation (#4477)', () => {
         const bad = await engine.resume(runId, { variables: {} });
         expect(bad.success).toBe(false);
         // The screen is still fetchable…
-        expect(engine.getSuspendedScreen(runId)?.nodeId).toBe('ask');
+        expect((await engine.getSuspendedScreen(runId))?.nodeId).toBe('ask');
         // …and the legitimate submission still lands.
         const good = await engine.resume(runId, { variables: { kind: 'normal' } });
         expect(good.success).toBe(true);

@@ -581,13 +581,13 @@ describe('AutomationEngine', () => {
             expect(paused.screen!.fields[0]).toMatchObject({ name: 'new_assignee', required: true, type: 'text' });
             expect(captured).toBe('UNSET'); // downstream not run yet
             // Re-fetchable for a refreshed client.
-            expect(engine.getSuspendedScreen(paused.runId!)).toMatchObject({ nodeId: 'collect' });
+            expect(await engine.getSuspendedScreen(paused.runId!)).toMatchObject({ nodeId: 'collect' });
 
             const done = await engine.resume(paused.runId!, { variables: { new_assignee: 'ada@example.com' } });
             expect(done.success).toBe(true);
             expect(done.status).toBeUndefined();
             expect(captured).toBe('ada@example.com'); // bare var set on resume → downstream read it
-            expect(engine.getSuspendedScreen(paused.runId!)).toBeNull();
+            expect(await engine.getSuspendedScreen(paused.runId!)).toBeNull();
         });
 
         it('passes a field-less screen straight through (no pause)', async () => {
