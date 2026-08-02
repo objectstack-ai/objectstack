@@ -2893,6 +2893,98 @@ describe('filterAppForUser — ADR-0045 hidden-app gate', () => {
 });
 
 // ---------------------------------------------------------------------------
+// #4651 — the gates that ARE enforced, pinned after the fake one was removed
+//
+// `app.areas[].visible` / `app.areas[].requiredPermissions` left the spec in
+// 17.0.0 because nothing evaluated them: this function reads the APP's
+// `requiredPermissions` and then walks ONLY `item.navigation`. Removing a gate
+// that never gated is safe exactly and only while the gates that DO exist keep
+// working — otherwise the change trades "a gate that fails open" for "nobody
+// checks whether the real gates are still there". Both surviving layers are
+// pinned here, at the server that is the authority for them.
+// ---------------------------------------------------------------------------
+
+describe('filterAppForUser — the enforced permission layers (#4651)', () => {
+  const make = () => new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
+  const ids = (a: any): string[] => (a?.navigation ?? []).map((e: any) => e.id);
+
+  it('APP level: an app whose requiredPermissions the caller lacks is dropped entirely', () => {
+    const rest: any = make();
+    const app = { name: 'crm', requiredPermissions: ['crm.access'], navigation: [] };
+    expect(rest.filterAppForUser(app, new Set<string>())).toBeNull();
+    expect(rest.filterAppForUser(app, new Set(['other.perm']))).toBeNull();
+    expect(rest.filterAppForUser(app, new Set(['crm.access']))?.name).toBe('crm');
+  });
+
+  it('APP level: every declared permission is required, not any of them', () => {
+    const rest: any = make();
+    const app = { name: 'crm', requiredPermissions: ['crm.access', 'crm.admin'], navigation: [] };
+    expect(rest.filterAppForUser(app, new Set(['crm.access']))).toBeNull();
+    expect(rest.filterAppForUser(app, new Set(['crm.access', 'crm.admin']))?.name).toBe('crm');
+  });
+
+  it('ITEM level: nav entries the caller cannot satisfy are stripped from the served tree', () => {
+    const rest: any = make();
+    const app = () => ({
+      name: 'crm',
+      navigation: [
+        { id: 'nav_leads', type: 'object' },
+        { id: 'nav_forecast', type: 'object', requiredPermissions: ['sales.admin'] },
+        {
+          id: 'grp_admin', type: 'group', children: [
+            { id: 'nav_users', type: 'object', requiredPermissions: ['admin.access'] },
+            { id: 'nav_about', type: 'url' },
+          ],
+        },
+      ],
+    });
+    const out = rest.filterAppForUser(app(), new Set<string>());
+    expect(ids(out)).toEqual(['nav_leads', 'grp_admin']);
+    expect(out.navigation[1].children.map((c: any) => c.id)).toEqual(['nav_about']);
+
+    const admin = rest.filterAppForUser(app(), new Set(['sales.admin', 'admin.access']));
+    expect(ids(admin)).toEqual(['nav_leads', 'nav_forecast', 'grp_admin']);
+    expect(admin.navigation[2].children.map((c: any) => c.id)).toEqual(['nav_users', 'nav_about']);
+  });
+
+  it('a group left empty by the item gate is dropped, not served as a bare label', () => {
+    const rest: any = make();
+    const app = {
+      name: 'crm',
+      navigation: [{
+        id: 'grp_admin', type: 'group',
+        children: [{ id: 'nav_users', type: 'object', requiredPermissions: ['admin.access'] }],
+      }],
+    };
+    expect(ids(rest.filterAppForUser(app, new Set<string>()))).toEqual([]);
+    expect(ids(rest.filterAppForUser(app, new Set(['admin.access'])))).toEqual(['grp_admin']);
+  });
+
+  it('characterises the boundary the #4651 prescription warns about: `areas` is not walked', () => {
+    // NOT an endorsement — a characterisation. The server filters the top-level
+    // `navigation` tree only, so an item gate nested under `areas[]` is enforced
+    // by the shell alone. That is exactly why the retirement's guidance tells an
+    // author to put anything that must never reach the browser in the top-level
+    // tree or its own app, and why route A (enforce area gates server-side) is a
+    // separate decision with its own semantics to settle. Whoever makes this
+    // walk areas should see THIS expectation fail and rewrite it deliberately,
+    // updating the `areas.navigation` ledger note in the same change.
+    const rest: any = make();
+    const app = {
+      name: 'crm',
+      navigation: [{ id: 'nav_home', type: 'object' }],
+      areas: [{
+        id: 'area_admin', label: 'Admin',
+        navigation: [{ id: 'nav_users', type: 'object', requiredPermissions: ['admin.access'] }],
+      }],
+    };
+    const out = rest.filterAppForUser(app, new Set<string>());
+    expect(ids(out)).toEqual(['nav_home']);
+    expect(out.areas[0].navigation.map((e: any) => e.id)).toEqual(['nav_users']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ADR-0057 D10 — requiresService capability gate (filterAppForUser)
 // ---------------------------------------------------------------------------
 

@@ -435,6 +435,14 @@ jobs:
           TZ: America/New_York
           OS_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
           OS_TEST_MYSQL_URL: mysql://root:root@127.0.0.1:3306/conformance
+          # The URL half of the same vacuous-pass hole the `node -e` below closes
+          # for the zone (#4245). The temporal conformance MATRIX now runs one
+          # cell per dialect (ADR-0053 D-A3 `driver {SQLite, Postgres at
+          # minimum}`), and a cell whose URL is missing is an ordinary skip — so
+          # losing either of the two lines above would silently return the matrix
+          # to SQLite-only coverage and stay green. This flag says "this runner
+          # provisioned the servers", which turns that skip into a named red.
+          OS_EXPECT_LIVE_DIALECT_MATRIX: '1'
         run: |
           # The axis is only real if the zone actually took. Without this, a
           # dropped `TZ:` line silently returns the job to UTC coverage and

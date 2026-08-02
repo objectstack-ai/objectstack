@@ -211,8 +211,6 @@ const result = ActionNavItemSchema.parse(data);
 | **label** | `string` | ✅ | Area display label |
 | **icon** | `string` | optional | Area icon name |
 | **description** | `string` | optional | Area description |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) for this area. |
-| **requiredPermissions** | `string[]` | optional | Permissions required to access this area |
 | **navigation** | `{ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| { id: string; label: string; icon?: string; order?: number; … }[]` | ✅ | Navigation items within this area |
 
 
