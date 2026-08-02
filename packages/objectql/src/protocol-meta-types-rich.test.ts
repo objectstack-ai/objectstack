@@ -116,8 +116,9 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         const scoped = new ObjectStackProtocolImplementation(mockEngine, undefined, 'env_alpha');
         mockEngine.findOne.mockResolvedValue(null);
 
-        // Without env var: `agent` writes blocked — the one remaining
-        // `allowRuntimeCreate: false` kind (platform-owned, ADR-0063). Since
+        // Without env var: `agent` writes blocked — one of the two
+        // `allowRuntimeCreate: false` kinds (platform-owned, ADR-0063; the
+        // other is `job`, a code artifact — #4509). Since
         // the test registry has no artifact at this name, the protocol
         // returns `not_creatable` (the precise reason); for artifact-backed
         // names the code would be `not_overridable`. Both indicate the gate

@@ -1,58 +1,58 @@
 {
   "type": "job",
-  "_note": "JobSchema. The file-authored path is healthy: `defineStack({ jobs })` → app-plugin kernel:ready → IJobService.schedule (packages/runtime/src/app-plugin.ts:766-802) → the service-job adapters honor every schedule shape (packages/services/service-job/src/cron-job-adapter.ts:71-88) and runWithPolicy enforces retryPolicy/timeout (#3494 — these used to be parsed-but-ignored). `retryPolicy` here is the ENFORCED spelling ({maxRetries, backoffMs, backoffMultiplier}); do not confuse it with the datasource `retryPolicy`, which is dead and spells its delay differently. TYPE-LEVEL GAP, recorded not hidden: `job` is registered `allowRuntimeCreate: true` (metadata-plugin.zod.ts:640) but ONLY the compiled bundle's `jobs` reach the scheduler — no code path schedules a runtime-authored `job` metadata item (a Studio-created job saves cleanly and never runs; its `handler` could not even resolve, since the function map lives in the bundle). Same disconnect class as webhook (#3461) — tracked in #4509. Seeded 2026-08-01.",
+  "_note": "JobSchema. The file-authored path is healthy: `defineStack({ jobs })` → app-plugin kernel:ready → IJobService.schedule (packages/runtime/src/app-plugin.ts:790-855) → the service-job adapters honor every schedule shape (packages/services/service-job/src/cron-job-adapter.ts:71-88) and runWithPolicy enforces retryPolicy/timeout (#3494 — these used to be parsed-but-ignored). `retryPolicy` here is the ENFORCED spelling ({maxRetries, backoffMs, backoffMultiplier}); do not confuse it with the datasource `retryPolicy`, which is dead and spells its delay differently. TYPE-LEVEL GAP CLOSED 2026-08-02 (#4509) by CLOSING THE DOOR, not building a bridge: `job` was registered `allowRuntimeCreate: true` while only the compiled bundle's `jobs` ever reached the scheduler, so a Studio-created job saved cleanly and never ran. Unlike the webhook (#3461) and email_template (#4509 item 1) disconnects, this one could not be bridged: `handler` names a function in the compiled bundle's function table (`collectBundleFunctions`, app-plugin.ts:812), which a runtime writer does not have and cannot name — the missing piece is a handler-binding design, not an ingestion path. So `allowRuntimeCreate` AND `allowOrgOverride` are now both false (metadata-plugin.zod.ts, with the rationale block), leaving `*.job.ts` / `defineStack({ jobs })` as the supported doors. The kind stays registered: its file loader is genuinely consumed, so it still passes the ADR-0088 admission test. Evidence lines restamped 2026-08-02 — the seeded set pointed at app-plugin.ts:767-791, which had drifted ~25 lines (the gate resolves paths, not line numbers, so nothing failed; this is the rot mode `verifiedAt` exists to catch). Seeded 2026-08-01.",
   "props": {
     "id": {
       "status": "dead",
-      "verifiedAt": "2026-08-01",
+      "verifiedAt": "2026-08-02",
       "authorWarn": true,
-      "authorHint": "Delete it — `name` is the job's identity everywhere: the scheduling key (app-plugin.ts:784), the sys_job row key (db-job-adapter upserts by `name` and mints its own row id), and the JobExecution.jobId stamp. Nothing reads `id`, so two jobs differing only in `id` are the same job.",
+      "authorHint": "Delete it — `name` is the job's identity everywhere: the scheduling key (app-plugin.ts:833), the sys_job row key (db-job-adapter upserts by `name` and mints its own row id), and the JobExecution.jobId stamp. Nothing reads `id`, so two jobs differing only in `id` are the same job.",
       "note": "The describe() text ('defaults to `name` when omitted') implies an identity override that does not exist."
     },
     "name": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/runtime/src/app-plugin.ts:767, packages/runtime/src/app-plugin.ts:784",
+      "verifiedAt": "2026-08-02",
+      "evidence": "packages/runtime/src/app-plugin.ts:815, packages/runtime/src/app-plugin.ts:833",
       "note": "scheduling identity; a job without one is skipped loudly."
     },
     "label": {
       "status": "dead",
-      "verifiedAt": "2026-08-01",
+      "verifiedAt": "2026-08-02",
       "note": "display metadata; no runtime consumer (sys_job stores name/schedule only). Docs-shaped annotation, deliberately KEPT and not authorWarn'd — the hook.label/description precedent, exempt from enforce-or-remove (ADR-0033)."
     },
     "description": {
       "status": "dead",
-      "verifiedAt": "2026-08-01",
+      "verifiedAt": "2026-08-02",
       "note": "same as `label`: docs-shaped, deliberately kept, no warning."
     },
     "schedule": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/runtime/src/app-plugin.ts:786, packages/services/service-job/src/cron-job-adapter.ts:71-88, packages/services/service-job/src/db-job-adapter.ts:83",
+      "verifiedAt": "2026-08-02",
+      "evidence": "packages/runtime/src/app-plugin.ts:834, packages/services/service-job/src/cron-job-adapter.ts:71-88, packages/services/service-job/src/db-job-adapter.ts:83",
       "note": "all three variants enforced: cron `expression` + per-job `timezone` (cron-job-adapter.ts:76-77), interval `intervalMs` (:82), once `at` (:87); the db adapter persists the shape onto sys_job (db-job-adapter.ts:233-245). WALK BOUNDARY: a discriminated union — the gate classifies it as one property; the per-variant keys are covered by the adapter evidence above, not by ledger rows."
     },
     "handler": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/runtime/src/app-plugin.ts:776",
-      "note": "resolved against the bundle's function map; a missing handler skips the job with a warning rather than scheduling a no-op."
+      "verifiedAt": "2026-08-02",
+      "evidence": "packages/runtime/src/app-plugin.ts:824-830",
+      "note": "resolved against the bundle's function map (`collectBundleFunctions`, app-plugin.ts:812); a missing handler skips the job with a warning rather than scheduling a no-op. This resolution is ALSO why the type is closed to runtime creation (#4509): the function table is a bundle artifact, so a handler string authored at runtime has nothing to resolve against."
     },
     "retryPolicy": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/runtime/src/app-plugin.ts:791, packages/services/service-job/src/run-with-policy.ts:58-65",
+      "verifiedAt": "2026-08-02",
+      "evidence": "packages/runtime/src/app-plugin.ts:838-841, packages/services/service-job/src/run-with-policy.ts:58-65",
       "note": "maxRetries/backoffMs/backoffMultiplier all drive the exponential-backoff retry loop (delay = backoffMs * multiplier^(retry-1)). Enforced since #3494. This is the `retryPolicy` the datasource ledger warns about confusing with its dead namesake."
     },
     "timeout": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
+      "verifiedAt": "2026-08-02",
       "evidence": "packages/services/service-job/src/run-with-policy.ts:25-33",
       "note": "per-attempt limit; an over-limit run records execution status 'timeout' (JobTimeoutError). The in-flight handler is abandoned, not cancelled — as documented."
     },
     "enabled": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/runtime/src/app-plugin.ts:772",
+      "verifiedAt": "2026-08-02",
+      "evidence": "packages/runtime/src/app-plugin.ts:820",
       "note": "`enabled: false` skips scheduling entirely at registration — genuinely enforced, unlike the retired flow.active/tool.active."
     }
   }

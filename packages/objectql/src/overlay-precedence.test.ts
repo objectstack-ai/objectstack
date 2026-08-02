@@ -167,9 +167,11 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
     //     (artifact-free) names succeed. Tested separately below.
     //
     //  2. Types with `allowRuntimeCreate: false` — after ADR-0088 retired the
-    //     router/function/service placeholder kinds, `agent` (platform-owned,
-    //     ADR-0063) is the remaining member — blocked for ANY write in
-    //     project-kernel mode.
+    //     router/function/service placeholder kinds, the members are `agent`
+    //     (platform-owned, ADR-0063) and `job` (a code artifact: its `handler`
+    //     names a function in the compiled bundle's function table, so a
+    //     runtime-created job could never be scheduled — #4509) — blocked for
+    //     ANY write in project-kernel mode.
     //
     //     NOTE: `datasource` moved to cohort #1 with the ADR-0015 Addendum
     //     (runtime-UI-creatable datasources). Brand-new runtime datasources
@@ -185,6 +187,11 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
                 type: 'agent',
                 reason: 'agents are platform-owned (ADR-0063); per-org agent forks are withdrawn',
                 item: { name: 'my_agent', label: 'My Agent' },
+            },
+            {
+                type: 'job',
+                reason: 'jobs are code artifacts (#4509): `handler` resolves only through the compiled bundle function table, so a runtime-created job could never be scheduled',
+                item: { name: 'nightly_sync', label: 'Nightly Sync', schedule: '0 2 * * *', handler: 'syncAll' },
             },
         ];
 

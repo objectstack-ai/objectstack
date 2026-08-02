@@ -66,8 +66,15 @@ import { DEFAULT_METADATA_TYPE_REGISTRY } from './metadata-plugin.zod';
 
 /**
  * Built-in mapping from metadata type identifier → its canonical Zod
- * schema. Types omitted here have no runtime-editable form (and are
- * marked `allowRuntimeCreate: false` in `DEFAULT_METADATA_TYPE_REGISTRY`).
+ * schema. A type omitted here has no runtime-editable form.
+ *
+ * The converse does NOT hold: presence here is about schema RESOLUTION
+ * (validation, diagnostics, generated docs), not about the runtime-create
+ * door. `agent` (ADR-0063 §2) and `job` (#4509) are both listed and both carry
+ * `allowRuntimeCreate: false` in `DEFAULT_METADATA_TYPE_REGISTRY` — they are
+ * authored in code and still need their schema resolvable. That registry is
+ * the authority on who may write at runtime; this map only says what shape a
+ * given type has.
  */
 const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = {
   // Data Protocol
