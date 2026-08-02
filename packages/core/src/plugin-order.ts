@@ -27,6 +27,16 @@
  *    Declare only unconditional registrations: a conditional service (e.g.
  *    one gated behind an option) would indict this plugin for orderings it
  *    cannot actually satisfy.
+ *
+ * Declaring is NOT voluntary (#4471). Everything above can only enforce what
+ * a plugin declares — a plugin that resolves `getService('X')` during init()
+ * and declares nothing was invisible to all of it, failing only under
+ * unlucky composition orders (#4085, and #4420 at data-consistency cost).
+ * `scripts/check-init-service-contract.mjs` (CI: `check:init-service-contract`)
+ * closes that gap: it walks every plugin's init() call graph and errors on
+ * any init-reachable getService of a workspace-provided service that no
+ * declaration covers. Best-effort tolerance is declared IN the plugin via
+ * `optionalDependencies`, never exempted in the checker.
  */
 
 /**

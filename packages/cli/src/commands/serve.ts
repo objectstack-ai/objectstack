@@ -1270,6 +1270,11 @@ export default class Serve extends Command {
         const guardPlugin: any = {
           name: 'com.objectstack.cli.unknown-hostname-guard',
           version: '1.0.0',
+          // init() resolves the `http.server` service the hono server plugin
+          // provides — order-if-present so the middleware install is
+          // deterministic (ADR-0116, #4471). Soft: without a server plugin the
+          // guard degrades on purpose (warn + not installed).
+          optionalDependencies: ['com.objectstack.server.hono'],
           init: async (ctx: any) => {
             try {
               const httpServer: any = ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
@@ -2375,6 +2380,11 @@ export default class Serve extends Command {
           const adminRoutePlugin: any = {
             name: 'com.objectstack.cli.datasource-admin-routes',
             version: '1.0.0',
+            // init() resolves the `http.server` service the hono server plugin
+            // provides — order-if-present so route registration is
+            // deterministic (ADR-0116, #4471). Soft: without a server plugin
+            // the routes degrade on purpose (warn + not installed).
+            optionalDependencies: ['com.objectstack.server.hono'],
             init: async (ctx: any) => {
               try {
                 const httpServer: any =

@@ -121,6 +121,13 @@ export class StorageServicePlugin implements Plugin {
    * kernel name this plugin when a consumer requires one before it inits.
    */
   providesServices = ['file-storage'];
+  /**
+   * init() registers sys_file / sys_upload_session / sys_attachment through
+   * the `manifest` service ObjectQLPlugin provides — order-if-present so the
+   * registration is deterministic (ADR-0116, #4471). Soft, not hard: without
+   * an engine the plugin degrades on purpose (storage service still up).
+   */
+  optionalDependencies = ['com.objectstack.engine.objectql'];
   version = '1.0.0';
   type = 'standard';
 

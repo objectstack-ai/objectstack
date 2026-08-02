@@ -161,6 +161,14 @@ export class AnalyticsServicePlugin implements Plugin {
   version = '1.0.0';
   type = 'standard' as const;
   dependencies: string[] = [];
+  /**
+   * init() probes the `data` engine ObjectQLPlugin provides for the
+   * auto-bridge — order-if-present so the probe verdict is deterministic
+   * (ADR-0116, #4471). Soft, not hard: without an engine the plugin
+   * degrades on purpose (per-query lazy resolution / explicit
+   * `executeAggregate`).
+   */
+  optionalDependencies: string[] = ['com.objectstack.engine.objectql'];
 
   private service?: AnalyticsService;
   private readonly options: AnalyticsServicePluginOptions;

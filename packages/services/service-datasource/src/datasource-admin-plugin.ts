@@ -175,6 +175,13 @@ export class DatasourceAdminServicePlugin implements Plugin {
   version = '1.0.0';
   type = 'standard' as const;
   dependencies: string[] = [];
+  /**
+   * init() contributes the Setup-app nav entry through the `manifest`
+   * service ObjectQLPlugin provides — order-if-present so the contribution
+   * is deterministic (ADR-0116, #4471). Soft, not hard: without an engine
+   * the plugin degrades on purpose (no nav entry, admin service still up).
+   */
+  optionalDependencies: string[] = ['com.objectstack.engine.objectql'];
 
   private service?: DatasourceAdminService;
   private config?: DatasourceAdminServiceConfig;

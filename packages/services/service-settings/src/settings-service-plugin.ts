@@ -78,6 +78,13 @@ export class SettingsServicePlugin implements Plugin {
    * kernel name this plugin when a consumer requires one before it inits.
    */
   providesServices = ['settings'];
+  /**
+   * init() registers the settings K/V object through the `manifest` service
+   * ObjectQLPlugin provides — order-if-present so the registration is
+   * deterministic (ADR-0116, #4471). Soft, not hard: lean test kernels
+   * without an engine degrade on purpose (no sys table, service still up).
+   */
+  optionalDependencies = ['com.objectstack.engine.objectql'];
   version = SETTINGS_PLUGIN_VERSION;
   type = 'standard' as const;
 

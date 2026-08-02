@@ -41,6 +41,7 @@
     "check:route-envelope": "node scripts/check-route-envelope.mjs --self-test && node scripts/check-route-envelope.mjs",
     "check:error-code-casing": "node scripts/check-error-code-casing.mjs --self-test && node scripts/check-error-code-casing.mjs",
     "check:wildcard-fallthrough": "node scripts/check-wildcard-fallthrough.mjs --self-test && node scripts/check-wildcard-fallthrough.mjs",
+    "check:init-service-contract": "node scripts/check-init-service-contract.mjs --self-test && node scripts/check-init-service-contract.mjs",
     "check:console-sha": "node scripts/check-console-sha.mjs",
     "check:release-notes": "node scripts/check-release-notes.mjs",
     "check:node-version": "node scripts/check-node-version.mjs",

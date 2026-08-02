@@ -32,7 +32,14 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
     return {
         name: 'com.objectstack.rest.api',
         version: '1.0.0',
-        
+        /**
+         * init() registers sys_import_job through the `manifest` service
+         * ObjectQLPlugin provides — order-if-present so the registration is
+         * deterministic (ADR-0116, #4471). Soft, not hard: on an engine-less
+         * kernel the plugin degrades on purpose (warn + no import-job object).
+         */
+        optionalDependencies: ['com.objectstack.engine.objectql'],
+
         init: async (ctx: PluginContext) => {
             // Register the async-import job object so its state/progress/history
             // is queryable in Studio and readable by the import-job routes.
