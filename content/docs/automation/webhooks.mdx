@@ -192,9 +192,33 @@ Five stages, each implemented as a thin layer over an existing primitive.
 
 Producers (the ObjectQL engine's insert/update/delete handlers) call
 `IRealtimeService.publish(event)` after the write commits, where `event` is a
-plain `{ type, object, payload, timestamp }` record — e.g.
-`{ type: 'data.record.updated', object: 'account', payload: { recordId,
-changes, after }, timestamp: <ISO 8601 string> }`.
+plain `{ type, object, payload, timestamp }` transport envelope whose `payload`
+is the spec's `DataEvent` (`@objectstack/spec/api`) — validated against
+`DataEventSchema` before it is published (#4626):
+
+```ts
+{
+  type: 'data.record.updated',
+  object: 'account',
+  timestamp: '<ISO 8601>',
+  payload: {
+    id: '<uuid>',                 // unique event id
+    type: 'data.record.updated',
+    object: 'account',
+    recordId: 'acc_1',            // REQUIRED — the record the event is about
+    changes: { status: 'active' },// update only: the submitted payload
+    after: { id: 'acc_1', … },    // create/update only: the written row
+    userId: 'usr_1',              // when the write names an actor
+    timestamp: '<ISO 8601>',
+  },
+}
+```
+
+> **A multi-row write emits no record event.** `updateMany` / `deleteMany`
+> (`multi: true`) return only an affected count, so there is no record for a
+> `DataEvent` to name and the engine publishes nothing rather than an event
+> with an empty `recordId` — meaning webhooks do **not** fire for bulk writes
+> today. Tracked in [#4639](https://github.com/objectstack-ai/objectstack/issues/4639).
 
 > **Not yet cluster-aware.** The only shipped `IRealtimeService` implementation
 > is `InMemoryRealtimeAdapter`, an in-process, single-node pub/sub with no

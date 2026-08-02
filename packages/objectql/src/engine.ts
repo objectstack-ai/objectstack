@@ -59,6 +59,7 @@ export type InsertManyRowOutcome =
   | { ok: false; error: unknown };
 import { CoreServiceName, StorageNameMapping } from '@objectstack/spec/system';
 import { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
+import { DataEventSchema, type DataEvent } from '@objectstack/spec/api';
 import type { ICryptoProvider, CryptoHandle } from '@objectstack/spec/contracts';
 import {
   collectSecretFields,
@@ -602,6 +603,55 @@ function isEmptyReferenceValue(v: unknown): boolean {
   if (v === null || v === undefined || v === '') return true;
   if (Array.isArray(v)) return v.length === 0 || v.every((e) => e === null || e === undefined || e === '');
   return false;
+}
+
+/**
+ * RFC-4122 v4 uuid for the realtime `DataEvent.id` (#4626).
+ *
+ * The twin of the generator `MetadataManager` uses for `MetadataEvent.id`
+ * (#4602/#4628) — same shape, same fallback, kept local rather than shared so
+ * the engine's `core` import closure gains nothing (ADR-0076 D2 ratchet).
+ * Prefers `crypto.randomUUID`; the fallback keeps browser-compatible (Pure)
+ * environments without WebCrypto working while still satisfying
+ * `DataEventSchema`'s `z.string().uuid()`.
+ */
+function generateEventUuid(): string {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === 'function') {
+    return c.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/**
+ * Coerce a driver-returned primary key into `DataEvent.recordId` (a required
+ * `string`). Returns `undefined` when the write has no single record identity
+ * — a bulk `updateMany`/`deleteMany` returns only a count — so the caller can
+ * decline to publish rather than fabricate one (#4626).
+ */
+function eventRecordId(value: unknown): string | undefined {
+  if (typeof value === 'string') return value === '' ? undefined : value;
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+  return undefined;
+}
+
+/** `DataEvent.changes`/`before`/`after` are `z.record(...)` — only a plain object qualifies. */
+function eventRecordBody(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** `DataEvent.userId` — the acting user, when the execution context names one. */
+function eventUserId(execCtx?: ExecutionContextInput): string | undefined {
+  const userId = execCtx?.userId;
+  if (userId == null) return undefined;
+  const asString = String(userId);
+  return asString === '' ? undefined : asString;
 }
 
 export class ObjectQL implements IObjectQLEngine {
@@ -1936,6 +1986,85 @@ export class ObjectQL implements IObjectQLEngine {
   setRealtimeService(service: IRealtimeService): void {
     this.realtimeService = service;
     this.logger.info('RealtimeService configured for data events');
+  }
+
+  /**
+   * Publish a realtime {@link DataEvent} for a record write (#4626 —
+   * contract-first, the data-side twin of #4602/#4628).
+   *
+   * What reaches a `subscribeData` callback must BE the spec's `DataEvent`
+   * (`@objectstack/spec/api`): top-level `id` (uuid), `type`, `object`,
+   * `recordId` (REQUIRED), plus `changes`/`after`/`userId` when they apply.
+   * The transport keeps its `RealtimeEventPayload` envelope — `payload`
+   * carries the complete `DataEvent`, and the client SDK unwraps + validates
+   * it at the boundary instead of double-casting the envelope.
+   *
+   * Two loud-by-design gates:
+   *  - **No record identity → no event.** `DataEvent.recordId` is required and
+   *    a bulk `updateMany`/`deleteMany` returns only a count, so a multi-row
+   *    write has no truthful per-record event to publish. It publishes NONE
+   *    (warn log naming the gap) instead of the pre-#4626 fabrication
+   *    (`recordId: ''`, `after: <affected count>`) that every schema-compliant
+   *    consumer must reject. Tracked for a real bulk contract in #4639.
+   *  - The event body is `DataEventSchema.parse`d before publish, so a
+   *    malformed producer fails here (warn log, event not published) rather
+   *    than delivering a lie downstream.
+   *
+   * Never throws and never fails the write: a realtime transport problem must
+   * not roll back a committed record.
+   */
+  private async publishDataEvent(
+    action: 'created' | 'updated' | 'deleted',
+    object: string,
+    input: {
+      recordId: unknown;
+      changes?: unknown;
+      after?: unknown;
+      context?: ExecutionContextInput;
+    },
+  ): Promise<void> {
+    if (!this.realtimeService) return;
+
+    const recordId = eventRecordId(input.recordId);
+    if (!recordId) {
+      this.logger.warn(
+        `No data.record.${action} event published for '${object}': the write names no single record ` +
+          `(a multi-row updateMany/deleteMany returns only an affected count), and DataEvent.recordId ` +
+          `is required — refusing to publish an off-contract event ` +
+          `(#4626; bulk event contract tracked in #4639)`,
+        { object },
+      );
+      return;
+    }
+
+    try {
+      const timestamp = new Date().toISOString();
+      const changes = eventRecordBody(input.changes);
+      const after = eventRecordBody(input.after);
+      const userId = eventUserId(input.context);
+      const event: DataEvent = DataEventSchema.parse({
+        id: generateEventUuid(),
+        type: `data.record.${action}`,
+        object,
+        recordId,
+        ...(changes !== undefined ? { changes } : {}),
+        ...(after !== undefined ? { after } : {}),
+        ...(userId !== undefined ? { userId } : {}),
+        timestamp,
+      });
+
+      const envelope: RealtimeEventPayload = {
+        type: event.type,
+        object,
+        payload: { ...event },
+        timestamp,
+      };
+
+      await this.realtimeService.publish(envelope);
+      this.logger.debug(`Published data.record.${action} event`, { object, recordId });
+    } catch (error) {
+      this.logger.warn('Failed to publish data event', { object, recordId, error });
+    }
   }
 
   /**
@@ -4055,39 +4184,17 @@ export class ObjectQL implements IObjectQLEngine {
         // Roll-up: recompute parent summary fields that aggregate this object.
         const summaryFailures = await this.recomputeSummaries(object, result, null, opCtx.context);
 
-        // Publish data.record.created event to realtime service
+        // Publish one data.record.created DataEvent per written record (#4626).
+        // A batch insert is N record events, not one event about N records —
+        // `DataEvent.recordId` is per record.
         if (this.realtimeService) {
-          try {
-            if (Array.isArray(result)) {
-              // Bulk insert - publish event for each record
-              for (const record of result) {
-                const event: RealtimeEventPayload = {
-                  type: 'data.record.created',
-                  object,
-                  payload: {
-                    recordId: record.id,
-                    after: record,
-                  },
-                  timestamp: new Date().toISOString(),
-                };
-                await this.realtimeService.publish(event);
-              }
-              this.logger.debug(`Published ${result.length} data.record.created events`, { object });
-            } else {
-              const event: RealtimeEventPayload = {
-                type: 'data.record.created',
-                object,
-                payload: {
-                  recordId: result.id,
-                  after: result,
-                },
-                timestamp: new Date().toISOString(),
-              };
-              await this.realtimeService.publish(event);
-              this.logger.debug('Published data.record.created event', { object, recordId: result.id });
-            }
-          } catch (error) {
-            this.logger.warn('Failed to publish data event', { object, error });
+          const createdRows: any[] = Array.isArray(result) ? result : [result];
+          for (const record of createdRows) {
+            await this.publishDataEvent('created', object, {
+              recordId: record?.id,
+              after: record,
+              context: opCtx.context,
+            });
           }
         }
 
@@ -4402,26 +4509,17 @@ export class ObjectQL implements IObjectQLEngine {
            // that moved to a different parent updates BOTH old and new parent.
            const summaryFailures = await this.recomputeSummaries(object, result, priorRecord, opCtx.context);
 
-           // Publish data.record.updated event to realtime service
+           // Publish the data.record.updated DataEvent (#4626). A multi-row
+           // update names no single record (`updateMany` returns a count), so
+           // `publishDataEvent` declines rather than fabricating a recordId.
            if (this.realtimeService) {
-             try {
-               const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
-               const recordId = String(hookContext.input.id || resultId || '');
-               const event: RealtimeEventPayload = {
-                 type: 'data.record.updated',
-                 object,
-                 payload: {
-                   recordId,
-                   changes: hookContext.input.data,
-                   after: result,
-                 },
-                 timestamp: new Date().toISOString(),
-               };
-               await this.realtimeService.publish(event);
-               this.logger.debug('Published data.record.updated event', { object, recordId });
-             } catch (error) {
-               this.logger.warn('Failed to publish data event', { object, error });
-             }
+             const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
+             await this.publishDataEvent('updated', object, {
+               recordId: hookContext.input.id ?? resultId,
+               changes: hookContext.input.data,
+               after: result,
+               context: opCtx.context,
+             });
            }
 
            // The record IS updated; a summary that could not recompute after
@@ -4653,24 +4751,15 @@ export class ObjectQL implements IObjectQLEngine {
             ? await this.recomputeSummaries(object, null, summaryPrev, opCtx.context)
             : [];
 
-          // Publish data.record.deleted event to realtime service
+          // Publish the data.record.deleted DataEvent (#4626). Same rule as
+          // update: a multi-row delete (`deleteMany` → count) names no record,
+          // so no per-record event is fabricated for it.
           if (this.realtimeService) {
-            try {
-              const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
-              const recordId = String(hookContext.input.id || resultId || '');
-              const event: RealtimeEventPayload = {
-                type: 'data.record.deleted',
-                object,
-                payload: {
-                  recordId,
-                },
-                timestamp: new Date().toISOString(),
-              };
-              await this.realtimeService.publish(event);
-              this.logger.debug('Published data.record.deleted event', { object, recordId });
-            } catch (error) {
-              this.logger.warn('Failed to publish data event', { object, error });
-            }
+            const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
+            await this.publishDataEvent('deleted', object, {
+              recordId: hookContext.input.id ?? resultId,
+              context: opCtx.context,
+            });
           }
 
           // The record IS deleted; a summary that could not recompute after

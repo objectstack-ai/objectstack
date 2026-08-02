@@ -16,7 +16,9 @@
  *   - The deterministic dedupKey (`<webhookId>:<eventId>`) collapses replays.
  */
 
+import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { DataEventSchema } from '@objectstack/spec/api';
 import type {
     IDataEngine,
     IRealtimeService,
@@ -132,18 +134,27 @@ function webhook(over: Partial<any> = {}): any {
     };
 }
 
+/**
+ * A `data.record.*` envelope whose `payload` is a full `DataEvent`
+ * (`@objectstack/spec/api`) — what the engine publishes since #4626. Built
+ * through the spec schema so the fixture cannot drift from the contract the
+ * enqueuer now reads (`recordId` is a required top-level string).
+ */
 function event(
     type: 'created' | 'updated' | 'deleted',
     object: string,
     record: any,
     timestamp = '2026-05-24T00:00:00.000Z',
 ): RealtimeEventPayload {
-    return {
+    const payload = DataEventSchema.parse({
+        id: randomUUID(),
         type: `data.record.${type}`,
         object,
-        payload: { recordId: record.id, after: record },
+        recordId: String(record.id),
+        ...(type === 'deleted' ? {} : { after: record }),
         timestamp,
-    };
+    });
+    return { type: payload.type, object, payload: { ...payload }, timestamp };
 }
 
 async function flush() {
@@ -171,6 +182,43 @@ describe('AutoEnqueuer', () => {
         expect(calls[0].url).toBe('https://hooks.example/wh');
         expect(calls[0].label).toBe('data.record.created');
         expect((calls[0].payload as any).recordId).toBe('c-1');
+        // [#4626] The delivered body carries the fulfilled DataEvent — the
+        // record itself stays nested under `after`, and the envelope keys
+        // (object/recordId/action/timestamp) still win.
+        expect((calls[0].payload as any).after).toEqual({ id: 'c-1', name: 'Alice' });
+        expect((calls[0].payload as any).object).toBe('contact');
+        expect((calls[0].payload as any).action).toBe('created');
+        await ae.stop();
+    });
+
+    it('[#4626] drops an off-contract data event instead of enqueuing it as "unknown"', async () => {
+        // Pre-#4626 the enqueuer read `recordId ?? id ?? after?.id ?? 'unknown'`,
+        // so a payload that named no record still produced a delivery whose
+        // recordId was the literal string 'unknown'. The payload IS a DataEvent
+        // now: no top-level string `recordId` means the producer is broken, and
+        // the event is dropped loudly rather than tolerated here.
+        const engine = new FakeEngine({ sys_webhook: [webhook()] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const warn = vi.fn();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, {
+            refreshIntervalMs: 0,
+            logger: { warn } as any,
+        });
+        await ae.start();
+
+        await realtime.publish({
+            type: 'data.record.created',
+            object: 'contact',
+            // The pre-fix engine shape for a bulk write: no usable record id.
+            payload: { recordId: '', after: 2 },
+            timestamp: '2026-05-24T00:00:00.000Z',
+        });
+        await flush();
+
+        expect(calls).toHaveLength(0);
+        expect(warn).toHaveBeenCalled();
+        expect(String(warn.mock.calls[0][0])).toContain('off-contract');
         await ae.stop();
     });
 
