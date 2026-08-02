@@ -90,6 +90,8 @@ export const BlueprintFieldSchema = lazySchema(() => z.object({
   })).optional().describe('Choices for select / multiselect / radio fields'),
   summaryOperations: BlueprintSummaryOperationsSchema.optional()
     .describe('REQUIRED when `type` is "summary" (a roll-up of child records: 任务总数 / 报名人数 / 合计金额 / 已完成任务数). Names the child object, the aggregation, and — for a qualified count/sum — the condition. A "summary" field without it materializes runtime-dead.'),
+  expression: z.string().optional()
+    .describe('REQUIRED when `type` is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer" for a composed title. A "formula" field without it materializes runtime-dead: the engine builds its formula plan only from fields that HAVE an expression, so the field reads null everywhere, forever. Same failure shape as a "summary" with no `summaryOperations`. Note `nameField` on the object recommends a formula for numbered entities (invoice/ticket) — that formula needs THIS key, or the record title is blank on every card, lookup chip and breadcrumb.'),
 }));
 export type BlueprintField = z.infer<typeof BlueprintFieldSchema>;
 
@@ -271,6 +273,8 @@ const StrictField = z.object({
     .describe('Choices for select-family fields, or null'),
   summaryOperations: StrictSummaryOperations.nullable()
     .describe('REQUIRED when type is "summary" (a roll-up of child records onto this parent: 任务总数 / 报名人数 / 合计金额 / 已完成任务数); null for every other field type. A "summary" field without it is runtime-dead — it reads 0/empty everywhere.'),
+  expression: z.string().nullable()
+    .describe('REQUIRED when type is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer" for a composed record title; null for every other field type. A "formula" field without it is runtime-dead — it reads null everywhere, forever. This is the formula analogue of summaryOperations: name the type and you must supply the body.'),
 });
 
 const StrictObject = z.object({

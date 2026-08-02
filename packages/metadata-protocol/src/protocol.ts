@@ -1720,6 +1720,14 @@ export class ObjectStackProtocolImplementation implements
     private storedConversionWarned = new Set<string>();
 
     /**
+     * Once-per-process dedupe (`type|name`) for the warning `saveMetaItem`
+     * emits when the flow canonicalizer throws and the save falls back to the
+     * raw body (#4580). Studio autosaves the same draft over and over, and a
+     * WIP cycle throws on every one of them.
+     */
+    private flowCanonicalizeFallbackWarned = new Set<string>();
+
+    /**
      * Canonicalize a stored `sys_metadata` body on rehydration (#3903;
      * ADR-0087 addendum "stored metadata replays the chain").
      *
@@ -6250,7 +6258,7 @@ export class ObjectStackProtocolImplementation implements
                 let result: StoredFlowCanonicalization | undefined;
                 try {
                     result = canonicalizeFlow(request.name, request.item);
-                } catch {
+                } catch (e: any) {
                     // `canonicalizeStoredFlow` is STRICTER than the gate below
                     // (strict parse + cycle detection + control-flow region
                     // validation). A work-in-progress draft with a temporary
@@ -6258,6 +6266,31 @@ export class ObjectStackProtocolImplementation implements
                     // and let today's gate stay the arbiter — in draft AND
                     // publish mode; `registerFlow` refuses to arm a malformed
                     // flow either way.
+                    //
+                    // Say so (#4580). The fallback is correct but it is the one
+                    // posture here with no signal of its own: a save that
+                    // skipped canonicalization is otherwise indistinguishable
+                    // from one that healed the row, and a body that is BOTH a
+                    // legacy dialect and unparseable re-persists verbatim —
+                    // the #4542 symptom, silently, against a boot warning that
+                    // told the author re-saving would fix it. Every other link
+                    // in the chain is loud (ADR-0087 D2): conversions emit
+                    // notices, `convertStoredItem` warns on read,
+                    // `migrateStoredMetadata` reports `failed`.
+                    //
+                    // Deduped per flow per process, like {@link
+                    // storedConversionWarned} — Studio autosave writes the same
+                    // draft repeatedly and this must not become a spam loop.
+                    const key = `${singularType}|${request.name}`;
+                    if (!this.flowCanonicalizeFallbackWarned.has(key)) {
+                        this.flowCanonicalizeFallbackWarned.add(key);
+                        console.warn(
+                            `[Protocol] flow/${request.name} was saved WITHOUT canonicalization: `
+                            + `${e?.message ?? String(e)} The body was persisted as submitted, so a `
+                            + `pre-protocol shape in it stays legacy on disk. Run `
+                            + `"os migrate meta --stored" to see the row's status.`,
+                        );
+                    }
                     result = undefined;
                 }
                 if (result) {

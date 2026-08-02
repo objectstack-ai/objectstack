@@ -1,0 +1,45 @@
+{
+  "//": "ADR anchors — see scripts/check-adr-anchors.mjs. Each entry pins the ADR ids that MUST stay referenced in a file whose behaviour an accepted ADR decided. Add an entry when an ADR's decision is realized in code that would look arbitrary (or wrong) to someone reading the file alone.",
+  "anchors": [
+    {
+      "file": "packages/spec/src/identity/membership-role.ts",
+      "adrs": ["ADR-0090", "ADR-0108"],
+      "invariant": "The membership-role vocabulary is CLOSED and framework-owned (owner/admin/delegated_admin/member). Capability travels through positions, never through `sys_member.role`."
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/auth-manager.ts",
+      "adrs": ["ADR-0108"],
+      "invariant": "better-auth's organization roles map registers the closed framework vocabulary ONLY. App-declared `position` / `permission` names are not organization roles — registering one makes it storable in `sys_member.role`, which `resolve-authz-context` projects into `current_user.positions`."
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/auth-plugin.ts",
+      "adrs": ["ADR-0108"],
+      "invariant": "Nothing widens the `sys_member.role` / `sys_invitation.role` selects at boot, and there is no organization-role derivation hook. The objects are registered as authored."
+    },
+    {
+      "file": "packages/platform-objects/src/identity/sys-member.object.ts",
+      "adrs": ["ADR-0108"],
+      "invariant": "`role` is the closed four-name select. It is enforced on write, and that is the guardrail making an ungoverned capability grant unrepresentable — not a limitation to work around."
+    },
+    {
+      "file": "packages/platform-objects/src/identity/sys-invitation.object.ts",
+      "adrs": ["ADR-0105", "ADR-0108"],
+      "invariant": "`role` mirrors `sys_member.role` (the value that lands there on acceptance). Capability rides in the `positions` placement field, authorized against the issuer's adminScope."
+    },
+    {
+      "file": "packages/core/src/security/resolve-authz-context.ts",
+      "adrs": ["ADR-0095"],
+      "invariant": "No enforcement-time code path may consult the better-auth role directly. `mapMembershipRole` is a grant-PROVISIONING concern here; posture and adjudication run off the resulting capability grants."
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/delegated-admin-gate.ts",
+      "adrs": ["ADR-0090"],
+      "invariant": "Administration is a scoped capability (D12). Writes to the RBAC link tables and `sys_member` are governed: subtree anchoring, assignable-set allowlist, strict containment."
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/invitation-role-cap.ts",
+      "adrs": ["ADR-0105"],
+      "invariant": "An invitation may add a person, never authority above the issuer's own grade. An issuer below admin grade may invite as plain `member` only."
+    }
+  ]
+}

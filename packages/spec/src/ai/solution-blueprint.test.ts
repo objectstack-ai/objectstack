@@ -245,7 +245,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
         label: null,
         description: null,
         fields: [
-          { name: 'name', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null },
+          { name: 'name', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null },
         ],
       },
     ],
@@ -284,7 +284,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const badField = {
       ...strictBp,
       objects: [
-        { name: 'x', label: null, description: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null }] },
+        { name: 'x', label: null, description: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null }] },
       ],
     };
     // `f` is missing the (nullable, required) `label` key.
@@ -307,11 +307,11 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
           description: null,
           fields: [
             {
-              name: 'task_total', label: '任务总数', type: 'summary', required: null, reference: null, options: null,
+              name: 'task_total', label: '任务总数', type: 'summary', required: null, reference: null, options: null, expression: null,
               summaryOperations: { object: 'task', function: 'count', field: 'id', relationshipField: null, conditions: null },
             },
             {
-              name: 'completed_task_count', label: '已完成任务数', type: 'summary', required: null, reference: null, options: null,
+              name: 'completed_task_count', label: '已完成任务数', type: 'summary', required: null, reference: null, options: null, expression: null,
               summaryOperations: {
                 object: 'task', function: 'count', field: 'id', relationshipField: null,
                 conditions: [{ field: 'status', op: 'eq', value: 'completed' }],
@@ -358,5 +358,56 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
       dashboards: [{ name: 'd', label: null, widgets: [{ id: 'w', title: null, object: null, chart: null }] }],
     };
     expect(() => SolutionBlueprintStrictSchema.parse(missingKeys)).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The mirror and the lenient schema must not diverge.
+//
+// This pin is the actual lesson of the `formula` gap it was added with. The
+// blueprint could name `type: 'formula'` (it uses the full `FieldType` enum)
+// but had no `expression` key in EITHER schema — so a model could declare a
+// formula field and had no way, anywhere on this surface, to say what it
+// computes. It materialized runtime-dead, cloud's graph-lint correctly flagged
+// `formula_without_expression`, and the prescribed fix ("set the expression")
+// was unwritable in the blueprint the agent was holding. Detected, but
+// unfixable on the surface that produced it.
+//
+// A key that exists in one schema and not the other is the same defect waiting
+// to happen: the mirror is what the model may EMIT, the lenient schema is what
+// downstream READS. Drift in either direction silently drops authored config.
+// ---------------------------------------------------------------------------
+describe('strict mirror ↔ lenient schema — key parity', () => {
+  const lenientFieldKeys = () =>
+    Object.keys((SolutionBlueprintSchema as any).shape.objects.element.shape.fields.element.shape).sort();
+  const strictFieldKeys = () =>
+    Object.keys((SolutionBlueprintStrictSchema as any).shape.objects.element.shape.fields.element.shape).sort();
+
+  it('the field schemas carry exactly the same keys', () => {
+    expect(strictFieldKeys()).toEqual(lenientFieldKeys());
+  });
+
+  it('carries `expression`, so a formula field can state what it computes', () => {
+    // Guards the specific hole: `FieldType` includes `formula`, so this surface
+    // can always NAME one. If it cannot also carry the body, every formula it
+    // produces is dead on arrival.
+    expect(lenientFieldKeys()).toContain('expression');
+    expect(strictFieldKeys()).toContain('expression');
+  });
+
+  it('round-trips a formula field with its expression through the lenient schema', () => {
+    const parsed = SolutionBlueprintSchema.parse({
+      summary: 's',
+      objects: [{
+        name: 'invoice',
+        nameField: 'title',
+        fields: [
+          { name: 'order_no', type: 'text' },
+          { name: 'customer', type: 'text' },
+          { name: 'title', type: 'formula', expression: "record.order_no + ' · ' + record.customer" },
+        ],
+      }],
+    });
+    expect(parsed.objects[0].fields[2].expression).toBe("record.order_no + ' · ' + record.customer");
   });
 });

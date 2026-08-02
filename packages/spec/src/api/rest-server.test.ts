@@ -12,8 +12,7 @@ import {
   EndpointRegistrySchema,
   RestApiConfig,
   RestServerConfig,
-  WebhookEventSchema,
-  WebhookConfigSchema,
+  OpenApiWebhookEventSchema,
   CallbackSchema,
   OpenApi31ExtensionsSchema,
   type RestApiConfig as RestApiConfigType,
@@ -656,9 +655,9 @@ describe('Integration Tests', () => {
 // OpenAPI 3.1 Webhooks & Callbacks Tests
 // ==========================================
 
-describe('WebhookEventSchema', () => {
+describe('OpenApiWebhookEventSchema', () => {
   it('should accept valid webhook event', () => {
-    const event = WebhookEventSchema.parse({
+    const event = OpenApiWebhookEventSchema.parse({
       name: 'record_created',
       description: 'Fired when a record is created',
       payloadSchema: '#/components/schemas/RecordCreated',
@@ -671,7 +670,7 @@ describe('WebhookEventSchema', () => {
   });
 
   it('should enforce snake_case name', () => {
-    expect(() => WebhookEventSchema.parse({
+    expect(() => OpenApiWebhookEventSchema.parse({
       name: 'RecordCreated',
       description: 'Bad name',
       payloadSchema: '#/ref',
@@ -680,7 +679,7 @@ describe('WebhookEventSchema', () => {
   });
 
   it('should accept event with custom headers', () => {
-    const event = WebhookEventSchema.parse({
+    const event = OpenApiWebhookEventSchema.parse({
       name: 'sync_completed',
       description: 'Sync finished',
       payloadSchema: '#/ref',
@@ -693,7 +692,7 @@ describe('WebhookEventSchema', () => {
 
   it('should accept all security methods', () => {
     const methods = ['hmac_sha256', 'basic', 'bearer', 'api_key'] as const;
-    const event = WebhookEventSchema.parse({
+    const event = OpenApiWebhookEventSchema.parse({
       name: 'test_event',
       description: 'Test',
       payloadSchema: '#/ref',
@@ -701,44 +700,27 @@ describe('WebhookEventSchema', () => {
     });
     expect(event.security).toHaveLength(4);
   });
-});
 
-describe('WebhookConfigSchema', () => {
-  it('should accept config with defaults', () => {
-    const config = WebhookConfigSchema.parse({
-      events: [
-        {
-          name: 'record_created',
-          description: 'Record created',
-          payloadSchema: '#/ref',
-          security: ['hmac_sha256'],
-        },
-      ],
-      deliveryConfig: {},
-    });
-
-    expect(config.enabled).toBe(false);
-    expect(config.deliveryConfig.maxRetries).toBe(3);
-    expect(config.deliveryConfig.timeoutMs).toBe(30000);
-    expect(config.deliveryConfig.signatureHeader).toBe('X-Signature-256');
-    expect(config.registrationEndpoint).toBe('/webhooks');
-  });
-
-  it('should accept full delivery config', () => {
-    const config = WebhookConfigSchema.parse({
-      enabled: true,
-      events: [],
-      deliveryConfig: {
-        maxRetries: 5,
-        retryIntervalMs: 10000,
-        timeoutMs: 60000,
-        signatureHeader: 'X-Hub-Signature',
-      },
-      registrationEndpoint: '/hooks',
-    });
-
-    expect(config.deliveryConfig.maxRetries).toBe(5);
-    expect(config.registrationEndpoint).toBe('/hooks');
+  // v17 dual-source cleanup (#4572): the bare names WebhookEvent(Schema) /
+  // WebhookConfig(Schema) now belong to @objectstack/spec/integration alone
+  // (connector event enum + connector webhook config). The ./api pair was the
+  // #4411-style trap: same names, different concepts, different forms
+  // (z.object here vs z.enum there). WebhookConfig(Schema) on ./api was dead
+  // — wired into nothing (not even RestServerConfigSchema) — and was removed
+  // rather than renamed. Pin: this module no longer declares the bare names.
+  // The pin is compile-time (typeof import is type-level only — no runtime
+  // barrel load): if either bare name is re-added here, the conditional type
+  // flips to `true` and the `false` assignment fails `tsc --noEmit`.
+  it('does not re-expose the bare WebhookEvent/WebhookConfig names from ./api', () => {
+    type RestServerModule = typeof import('./rest-server.zod');
+    const hasBareEventSchema: 'WebhookEventSchema' extends keyof RestServerModule
+      ? true
+      : false = false;
+    const hasBareConfigSchema: 'WebhookConfigSchema' extends keyof RestServerModule
+      ? true
+      : false = false;
+    expect(hasBareEventSchema).toBe(false);
+    expect(hasBareConfigSchema).toBe(false);
   });
 });
 

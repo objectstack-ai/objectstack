@@ -102,7 +102,23 @@ known case: accepting a `repo:objectui` PR ⇒ file a `pm:queue` issue in
 `objectstack` — "run `pnpm objectui:refresh` and land the console bump",
 referencing the merged PR, blocked-by it until it actually merges.
 
-**4. One board, no second tracker.** The pm labels above are the state
+**4. Multiple PM sessions shard by repo — never share one queue.** The
+claim protocol makes concurrent PMs *safe*, not *useful*: batch
+independence (file-disjointness) is only checked within one PM's view, so
+two PMs on the same queue can claim different issues that collide on
+shared files, and the merge queue is one lane regardless. Scaling order:
+
+1. One PM, bigger batch (`batch:5` is the maintainer's chosen operating
+   point, riding on the resource discipline above), heavy tasks via
+   `mode:cloud` — adds compute without adding schedulers.
+2. When one PM genuinely can't keep up: a second session takes a **whole
+   repo** as its shard (`/pm-dispatch repo:objectstack-ai/objectui`) —
+   file universes are disjoint by construction. A sharded PM states its
+   shard in every claim comment and **never claims outside it**; cross-repo
+   parent/sub-issue chains stay with the main-backlog PM.
+3. Multiple PMs on the SAME queue: prohibited — all cost, no throughput.
+
+**5. One board, no second tracker.** The pm labels above are the state
 machine; an org-level GitHub Project pulling issues/PRs from all three repos
 gives the maintainer a single view (filter by `repo:*` and `pm:*`). The PM
 maintains no tracking state outside GitHub — that invariant is what keeps
@@ -201,6 +217,16 @@ execute atomically, in order:
 Dev agents push their branch early — a remote branch is the hardest evidence
 of work in flight, closing the gap between "claimed" and "PR exists".
 
+**Multiple GitHub accounts (colleagues' Claude Code sessions) simplify
+this, not complicate it.** Across accounts the assignee alone already says
+*who*: `assignee isn't you → taken, never touch` is the entire cross-account
+protocol, and it's already the rule. The claim-comment ritual (branch name,
+round, race check) matters *within* one account's sessions. When several
+accounts work the backlog, partition it the same way as multi-PM sharding —
+by repo or by an agreed label per account — and record the assignment table
+once in a pinned issue or the round report so nobody triages another
+account's shard.
+
 **Stale-claim reclaim**: a claim older than ~24 h whose promised branch does
 not exist on the remote and has no PR is presumed dead — comment asking, and
 after another window of silence, remove the assignee (note why) and return
@@ -241,6 +267,19 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
   with your open questions — do not guess.
 Return ONLY the JSON report defined in your agent definition.
 ```
+
+#### Resource limits — parallel agents share ONE container
+
+Memory peaks come from **build + test**, not editing, so the fix is not less
+parallelism but serialized heavy phases: the os-dev definition requires every
+build/test run to hold the container-wide verification lock
+(`flock /tmp/os-heavy-verify.lock`), a `NODE_OPTIONS=--max-old-space-size`
+heap cap, scoped `--filter` builds/tests, capped vitest/turbo workers, and
+worktree cleanup after the PR is up. PM-side: treat `batch:3` as assuming
+normal-sized tasks — for build-heavy ones (dependency-family upgrades, full
+regression passes) drop to `batch:2`, or dispatch that issue via
+`mode:cloud` so it gets its own container. If an agent dies with a
+heap/OOM signature, redispatch it alone rather than into a full batch.
 
 #### Dispatch backends
 
@@ -313,8 +352,36 @@ Verdict per issue:
 
 ### 8. Escalate uncertainties to the maintainer
 
-Whenever a dev returns `needs_decision`, an issue is too vague to dispatch, or
-rework has failed twice:
+**First, apply the escalation bar — most things that FEEL like decisions are
+not.** The maintainer's words: 「明显的问题直接修,不是事事都需要我确认」.
+Escalate ONLY when at least one of these holds:
+
+- the options genuinely diverge on **product semantics or public contract
+  shape** and neither the issue, AGENTS.md, ADRs, nor existing code norms
+  determines the answer;
+- the fix requires a **destructive or hard-to-reverse action** (stored-data
+  migration shape, deleting a shipped capability, force operations).
+
+Everything else is the PM's call — decide, dispatch, and give the maintainer
+a **veto window instead of a permission gate**: state what you decided and
+why in the issue comment and the round report; they can stop it, but you do
+not wait for them. Named non-escalation classes (act immediately):
+
+- **Restore-invariant fixes.** When the repo already states the invariant —
+  one contract version across the family, declared = enforced, a gate must
+  actually compile/run what it claims to check — a finding that the
+  invariant is broken carries its own decision. A dual-version dependency
+  graph, an inert tripwire, an unwired gate: queue it, dispatch it, report
+  it. Asking "may I restore the invariant?" is the anti-pattern.
+- **Sequencing and dependency ordering** between technical tasks.
+- **Verification strategy** (what regression pass a risky-but-decided change
+  needs) — that is scoping the work, not deciding it.
+- A dev's `needs_decision` that, on PM review, falls into the classes above:
+  answer the dev yourself with the decision and rationale; do not relay it
+  upward.
+
+Whenever a dev returns `needs_decision` that passes the bar above, an issue
+is too vague to dispatch, or rework has failed twice:
 
 1. **Default: the decision lives ON the issue it belongs to — never a new
    issue.** Post the analysis as a comment on that issue, add the
