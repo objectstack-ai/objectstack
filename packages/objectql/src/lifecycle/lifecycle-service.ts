@@ -118,6 +118,26 @@ export interface LifecycleServiceOptions {
   getSettings?(): LifecycleSettingsLike | undefined;
   /** Governance alert sink. Defaults to a logger warning. */
   onAlert?(alert: LifecycleGovernanceAlert): void;
+  /**
+   * [#4551] A read-only inspection that rides THIS clock instead of arming a
+   * second one of its own — the dangling-reference scan (`ObjectQL.
+   * inspectDanglingReferences`).
+   *
+   * It is deliberately not part of {@link LifecycleService.sweep}: `sweep()`
+   * is called directly by tooling (`db:clean`, the dogfood growth gate) that
+   * asked for policy enforcement and nothing else, and it must keep answering
+   * exactly that. What the two share is the *clock* — hourly, first run
+   * delayed past boot so seeding and migrations have finished, which is
+   * precisely the window a scan of seed-written references needs.
+   *
+   * Runs AFTER the sweep, not alongside it. Concurrent would race the reaper's
+   * deletes (a target reaped mid-scan reads as a fresh dangling reference) and
+   * would put two full table walks in flight at once.
+   *
+   * Independent: a failure in either leg is logged and never affects the
+   * other. Absent ⇒ the clock runs the sweep alone, exactly as before.
+   */
+  inspectDanglingReferences?(): Promise<unknown>;
 }
 
 /** Per-sweep governance snapshot resolved from the `lifecycle` namespace. */
@@ -251,11 +271,35 @@ export class LifecycleService {
     const initial = this.opts.initialDelayMs ?? DEFAULT_LIFECYCLE_INITIAL_DELAY_MS;
     this.initialTimer = setTimeout(() => {
       this.initialTimer = undefined;
-      void this.sweep();
-      this.timer = setInterval(() => void this.sweep(), interval);
+      void this.tick();
+      this.timer = setInterval(() => void this.tick(), interval);
       this.timer.unref?.();
     }, initial);
     this.initialTimer.unref?.();
+  }
+
+  /**
+   * One turn of the clock: the lifecycle sweep, then the read-only
+   * inspections that ride the same schedule ({@link
+   * LifecycleServiceOptions.inspectDanglingReferences}).
+   *
+   * Each leg is isolated — an inspection failure must never stop retention
+   * from being enforced, and a sweep failure must never hide a finding.
+   */
+  private async tick(): Promise<void> {
+    try {
+      await this.sweep();
+    } catch (err) {
+      this.opts.logger.warn(`[lifecycle] sweep failed (${(err as Error)?.message ?? String(err)})`);
+    }
+    if (!this.opts.inspectDanglingReferences) return;
+    try {
+      await this.opts.inspectDanglingReferences();
+    } catch (err) {
+      this.opts.logger.warn(
+        `[dangling-refs] inspection failed (${(err as Error)?.message ?? String(err)})`,
+      );
+    }
   }
 
   stop(): void {

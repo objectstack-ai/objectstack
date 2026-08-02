@@ -61,6 +61,14 @@ export type {
   DatasourceUnavailableKind,
 } from './driver-connect-errors.js';
 export type { InsertManyRowOutcome } from './engine.js';
+// #4551 — the read-only dangling-reference inspection's report shape, and the
+// bounds/priority the scan runs under. Reports; never rewrites.
+export type { DanglingReference, DanglingReferenceReport } from './engine.js';
+export {
+  REFERENCE_SCAN_PRIORITY_OBJECTS,
+  DANGLING_SCAN_ROWS_PER_OBJECT,
+  DANGLING_SCAN_MAX_ROWS,
+} from './engine.js';
 
 // Export in-memory aggregation fallback (used by engine.aggregate when the
 // driver lacks native groupBy/aggregations support; also useful for tests).

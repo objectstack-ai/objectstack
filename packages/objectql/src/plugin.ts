@@ -293,6 +293,15 @@ export class ObjectQLPlugin implements Plugin {
           return undefined;
         }
       },
+      // #4551 — the residual #4441 left open: an `isSystem` write (seed
+      // replay, package install, boot provisioning) can still store a
+      // reference that points at nothing, and until now nothing said so. The
+      // scan is READ-ONLY; it rides this clock rather than arming its own so
+      // the finding surfaces without an operator knowing to go looking, and
+      // because this clock's first run is already delayed past boot — the
+      // exact moment seed-written references become checkable.
+      inspectDanglingReferences: () =>
+        this.ql?.inspectDanglingReferences() ?? Promise.resolve(),
       ...this.lifecycleOptions,
     });
     ctx.registerService('lifecycle', this.lifecycleService);

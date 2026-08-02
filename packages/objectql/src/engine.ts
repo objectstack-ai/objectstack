@@ -598,6 +598,78 @@ function isEmptyReferenceValue(v: unknown): boolean {
   return false;
 }
 
+/**
+ * [#4551] One stored reference whose target row does not exist. Every field is
+ * a locator: an operator has to be able to go straight to the row without
+ * reconstructing the query.
+ */
+export interface DanglingReference {
+  /** Object whose row holds the reference. */
+  object: string;
+  /** Id of the holding row. */
+  recordId: string;
+  /** Field whose value points at nothing. */
+  field: string;
+  /** Object the field declares as its target. */
+  target: string;
+  /** The id that resolves to no row in `target`. */
+  value: string;
+  /** Tenant of the holding row, when the object is tenant-scoped. */
+  organizationId?: string | null;
+}
+
+/** [#4551] Result of one {@link ObjectQL.inspectDanglingReferences} pass. */
+export interface DanglingReferenceReport {
+  /** Objects actually read (excludes ones with no reference field, and skips). */
+  scannedObjects: number;
+  /** Rows read across every scanned object. */
+  scannedRows: number;
+  /** Reference values probed (after empty/expanded values are skipped). */
+  scannedReferences: number;
+  /** References whose target row does not exist — the finding. */
+  dangling: DanglingReference[];
+  /**
+   * References whose target could NOT be probed (unregistered object, no
+   * driver, probe threw). NOT healthy — unknown. Counted so `dangling: []`
+   * can never be read as "all clear".
+   */
+  undetermined: number;
+  /** Objects that could not be read at all, with the reason. */
+  skipped: Array<{ object: string; reason: string }>;
+  /** A cap stopped the scan before every row was seen. */
+  truncated: boolean;
+}
+
+/**
+ * [#4551] Objects the dangling-reference scan visits FIRST. Ordering only —
+ * nothing is excluded by being absent.
+ *
+ * These are the RBAC link tables. A dangling row in one of them is a
+ * security-surface record that resolves to nothing: an administrator auditing
+ * permissions sees a binding whose target cannot be inspected, and the
+ * audience-anchor gate has to resolve that very permission set to evaluate the
+ * grant — so it is an unevaluable gate input, not merely an untidy row.
+ */
+export const REFERENCE_SCAN_PRIORITY_OBJECTS: readonly string[] = [
+  'sys_position_permission_set',
+  'sys_user_permission_set',
+  'sys_user_position',
+  'sys_team_member',
+];
+
+function priorityRankOf(name: unknown): number {
+  if (typeof name !== 'string') return 0;
+  const idx = REFERENCE_SCAN_PRIORITY_OBJECTS.indexOf(name);
+  return idx === -1 ? 0 : REFERENCE_SCAN_PRIORITY_OBJECTS.length - idx;
+}
+
+/** Rows the dangling-reference scan reads per object in one pass. */
+export const DANGLING_SCAN_ROWS_PER_OBJECT = 1_000;
+/** Rows the dangling-reference scan reads across one whole pass. */
+export const DANGLING_SCAN_MAX_ROWS = 5_000;
+/** Findings named individually in the scan's log line (the rest are counted). */
+const DANGLING_SCAN_LOG_SAMPLE = 20;
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -2104,6 +2176,195 @@ export class ObjectQL implements IObjectQLEngine {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * [#4551] Report stored references that resolve to nothing — the residual
+   * #4441 deliberately left open.
+   *
+   * {@link assertReferencesResolve} exempts `isSystem` writes, and that
+   * exemption is correct: seed replay, package install and boot-time
+   * provisioning legitimately write rows in an order that is self-consistent
+   * only once the batch completes, so failing them closed would turn an
+   * ordering detail into a boot failure. What it leaves behind is a gap the
+   * platform can widen by itself — **the platform can still write a reference
+   * pointing at nothing, and nothing says so.**
+   *
+   * **Reports; never rewrites.** Same posture as the stranded-request
+   * inspection (#4469), for the same reason: the rows genuinely exist and were
+   * genuinely written. Nulling a dangling link would make the stored data
+   * disagree with what happened, and whether the right repair is to create the
+   * missing target, re-run the seed, or delete the holder is a judgement this
+   * cannot make. What an operator needs first is to know: which object, which
+   * row, which field, which id, in which target.
+   *
+   * **Unknown is not healthy.** The probe is {@link referenceExists} — the
+   * SAME one the write path enforces with, so the two can never disagree about
+   * what "exists" means. It answers `false` only when it RAN and found
+   * nothing; `null` (target unregistered, no driver, probe threw) is counted
+   * into `undetermined` and never reported as dangling. Without that split a
+   * datasource outage would read as a clean bill of health.
+   *
+   * ## Scope
+   *
+   * - **Non-`readonly` reference fields**, matching the write-path check's own
+   *   domain (`referenceTargetOf` + the `readonly` skip). A `readonly`
+   *   reference holds a value the platform minted, not a caller's id, and at
+   *   least one of them stores a SENTINEL by design —
+   *   `sys_metadata_history.recorded_by` is a `lookup('sys_user')` filled with
+   *   `actor ?? 'system'`. Reporting that every hour would be a permanent
+   *   false positive, and it is filed on its own terms rather than drowned
+   *   here.
+   * - **Empty values are not references** (`isEmptyReferenceValue`), and an
+   *   already-expanded `{id, …}` in the slot is not an id write — both skipped
+   *   exactly as the write path skips them.
+   * - **RBAC link tables first** ({@link REFERENCE_SCAN_PRIORITY_OBJECTS}). A
+   *   dangling row there is a security-surface record that resolves to
+   *   nothing, and the audience-anchor gate has to resolve that very target to
+   *   evaluate the grant. Ordering only — every other object is still scanned,
+   *   but if a budget runs out the rows that matter most are already covered.
+   *
+   * ## Bounds
+   *
+   * A full referential scan of every table is not something to run hourly
+   * unbounded, so both the per-object read and the total are capped. Hitting a
+   * cap sets `truncated`, which is part of the same honesty rule as
+   * `undetermined`: a report that stopped early must not read as "everything
+   * was checked". Probe results are memoized per scan, so N rows pointing at
+   * one missing id cost one probe.
+   */
+  async inspectDanglingReferences(options?: {
+    /** Rows read per object. Default {@link DANGLING_SCAN_ROWS_PER_OBJECT}. */
+    rowsPerObject?: number;
+    /** Rows read across the whole scan. Default {@link DANGLING_SCAN_MAX_ROWS}. */
+    maxRows?: number;
+    /** Restrict the scan to these objects (tooling / tests); default = all. */
+    objects?: string[];
+  }): Promise<DanglingReferenceReport> {
+    const report: DanglingReferenceReport = {
+      scannedObjects: 0,
+      scannedRows: 0,
+      scannedReferences: 0,
+      dangling: [],
+      undetermined: 0,
+      skipped: [],
+      truncated: false,
+    };
+
+    const rowsPerObject = Math.max(1, options?.rowsPerObject ?? DANGLING_SCAN_ROWS_PER_OBJECT);
+    const maxRows = Math.max(1, options?.maxRows ?? DANGLING_SCAN_MAX_ROWS);
+
+    let objects: any[];
+    try {
+      objects = (this._registry.getAllObjects?.() as any[]) ?? [];
+    } catch (err: any) {
+      this.logger.warn?.('[dangling-refs] could not enumerate objects; scan skipped', {
+        error: err?.message ?? String(err),
+      });
+      return report;
+    }
+    if (options?.objects) {
+      const wanted = new Set(options.objects);
+      objects = objects.filter((o) => wanted.has(o?.name));
+    }
+    // Priority is an ordering, never a filter — see the scope note above.
+    objects = [...objects].sort(
+      (a, b) => priorityRankOf(b?.name) - priorityRankOf(a?.name),
+    );
+
+    // `${target} ${id}` → probe result, so N holders of one missing id
+    // cost one probe. Scoped to this scan: a later sweep must re-ask.
+    const probed = new Map<string, boolean | null>();
+
+    for (const obj of objects) {
+      const name = obj?.name;
+      if (typeof name !== 'string' || !name) continue;
+      const fieldDefs = obj?.fields;
+      if (!fieldDefs || typeof fieldDefs !== 'object') continue;
+
+      const candidates: Array<{ field: string; target: string }> = [];
+      for (const field of Object.keys(fieldDefs)) {
+        const def = (fieldDefs as any)[field];
+        if (def?.readonly === true) continue;
+        const target = referenceTargetOf(def);
+        if (target) candidates.push({ field, target });
+      }
+      if (candidates.length === 0) continue;
+
+      if (report.scannedRows >= maxRows) {
+        report.truncated = true;
+        break;
+      }
+
+      const select = ['id', ...candidates.map((c) => c.field)];
+      if ((fieldDefs as any).organization_id) select.push('organization_id');
+      const limit = Math.min(rowsPerObject, maxRows - report.scannedRows);
+
+      let rows: any[];
+      try {
+        rows = (await this.find(name, {
+          fields: select,
+          limit,
+          context: { isSystem: true },
+        } as any)) ?? [];
+      } catch (err: any) {
+        // Unreadable object ⇒ unknown, not clean. Named in `skipped` rather
+        // than silently dropped, for the same reason `undetermined` exists.
+        report.skipped.push({ object: name, reason: err?.message ?? String(err) });
+        continue;
+      }
+
+      report.scannedObjects += 1;
+      report.scannedRows += rows.length;
+      if (rows.length >= limit) report.truncated = true;
+
+      for (const row of rows) {
+        for (const { field, target } of candidates) {
+          const raw = row?.[field];
+          if (isEmptyReferenceValue(raw)) continue;
+          const values = Array.isArray(raw) ? raw : [raw];
+          for (const v of values) {
+            if (v === null || v === undefined || v === '') continue;
+            if (typeof v === 'object') continue;   // already expanded — not an id write
+            report.scannedReferences += 1;
+            const key = `${target} ${String(v)}`;
+            let resolved = probed.get(key);
+            if (resolved === undefined) {
+              resolved = await this.referenceExists(target, v);
+              probed.set(key, resolved);
+            }
+            if (resolved === null) { report.undetermined += 1; continue; }
+            if (resolved === true) continue;
+            report.dangling.push({
+              object: name,
+              recordId: row?.id === undefined || row?.id === null ? '' : String(row.id),
+              field,
+              target,
+              value: String(v),
+              organizationId: row?.organization_id ?? null,
+            });
+          }
+        }
+      }
+    }
+
+    if (report.dangling.length || report.undetermined || report.truncated) {
+      this.logger.warn?.(
+        '[dangling-refs] stored references that resolve to nothing (reported, never rewritten)',
+        {
+          scannedObjects: report.scannedObjects,
+          scannedRows: report.scannedRows,
+          scannedReferences: report.scannedReferences,
+          dangling: report.dangling.length,
+          undetermined: report.undetermined,
+          truncated: report.truncated,
+          references: report.dangling
+            .slice(0, DANGLING_SCAN_LOG_SAMPLE)
+            .map((d) => `${d.object}.${d.field}[${d.recordId}] → ${d.target}:${d.value}`),
+        },
+      );
+    }
+    return report;
   }
 
   /**
