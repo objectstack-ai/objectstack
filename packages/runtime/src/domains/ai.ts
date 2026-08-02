@@ -142,6 +142,35 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // `ai_seat` is synthesized into ec.permissions by resolveExecutionContext
         // (the single, scope-correct source — security/resolve-execution-context.ts),
         // so it flows through here with no extra per-request lookup.
+        //
+        // [#4705] `permissions` and `systemPermissions` are TWO channels, and
+        // both have to cross this seam — they are not interchangeable and must
+        // never be flattened into one another:
+        //
+        //   - `ec.permissions`       → permission-SET NAMES (`admin_full_access`,
+        //                              `organization_admin`, `member_default`) plus
+        //                              the synthesized `ai_seat`.
+        //                              (core/src/security/resolve-authz-context.ts,
+        //                              `grants.permissions.push(ps.name)`)
+        //   - `ec.systemPermissions` → CAPABILITIES (`manage_metadata`,
+        //                              `studio.access`, `setup.access`, …), the
+        //                              union of every resolved permission set's
+        //                              `systemPermissions[]`. (same file, the
+        //                              `grants.systemPermissions.push(p)` loop)
+        //
+        // Only the first used to be copied, which made `/ai/*` the one route
+        // domain in the repo where a capability check was impossible: every
+        // other surface reads `systemPermissions` (domains/meta.ts, the
+        // `manage_metadata` gate; action-execution.ts; rest-server.ts), so a
+        // capability test written against `req.user.permissions` is
+        // permanently false — closing the route on platform admins too rather
+        // than tightening it. Copying the channel through is transport only:
+        // no route in THIS repo gates on it; the consumer decides.
+        //
+        // Fail-closed default, same as `roles`/`permissions`: a non-array (or
+        // absent — `ExecutionContext.systemPermissions` is optional) becomes
+        // `[]`, never `undefined`, so a consumer reads "holds nothing" instead
+        // of having to tolerate a missing field.
         const user = ec?.userId
             ? {
                 userId: ec.userId,
@@ -150,6 +179,7 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
                 email: ec.userEmail,
                 roles: Array.isArray(ec.positions) ? ec.positions : [],
                 permissions: Array.isArray(ec.permissions) ? ec.permissions : [],
+                systemPermissions: Array.isArray(ec.systemPermissions) ? ec.systemPermissions : [],
                 organizationId: ec.tenantId,
             }
             : undefined;

@@ -1164,6 +1164,25 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     // populated from the ExecutionContext by the /ai/* dispatch path
                     // (http-dispatcher → resolveExecutionContext, the single scope-correct
                     // source). This concrete-route resolver returns an empty set.
+                    //
+                    // [#4705] `systemPermissions` — the CAPABILITY channel
+                    // (`manage_metadata`, `studio.access`, …) that domains/ai.ts
+                    // now carries across from the ExecutionContext — is spelled
+                    // out here as an empty array for the same reason
+                    // `permissions` is: this resolver has no ExecutionContext to
+                    // read, and inventing a capability source for it would hand
+                    // out authority the platform never granted. Written
+                    // explicitly rather than omitted so the two producers of an
+                    // AI-route `req.user` agree on the SHAPE: a consumer sees
+                    // "holds no capabilities", never `undefined`, so it never
+                    // needs a `?? []` of its own to tell the two apart.
+                    //
+                    // Reachability, for the record: these concrete mounts are
+                    // shadowed in practice — `registerAIRoutes` mounts the
+                    // `${prefix}/ai/*` method-wildcards through
+                    // `dispatcher.dispatch()` EARLIER in this same `start()`, so
+                    // the ExecutionContext-backed path is the one that answers a
+                    // real `/api/v1/ai/...` request.
                     return {
                         userId,
                         id: userId,
@@ -1171,6 +1190,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         email: sessionData?.user?.email,
                         positions: [],
                         permissions: [],
+                        systemPermissions: [],
                         organizationId: sessionData?.session?.activeOrganizationId,
                     };
                 } catch {
