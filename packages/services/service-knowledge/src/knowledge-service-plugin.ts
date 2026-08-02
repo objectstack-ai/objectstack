@@ -139,12 +139,31 @@ export class KnowledgeServicePlugin implements Plugin {
         if (!object) return;
         const type = event.type;
         const payload = (event.payload ?? {}) as Record<string, unknown>;
-        if (
-          type === 'record.created' ||
-          type === 'record.updated' ||
-          type === 'data.record.created' ||
-          type === 'data.record.updated'
-        ) {
+
+        // [#4626] `data.record.*` payloads ARE the spec's `DataEvent`
+        // (`@objectstack/spec/api`): the record body lives in `after`, the id
+        // in the required top-level `recordId`. Reading the payload itself as
+        // a record (what the shared branch below did) indexed the ENVELOPE —
+        // `{ recordId, after }` — as if it were the row, so object sources
+        // were syncing documents with none of the record's fields, and a
+        // delete never resolved an id at all. Kept separate from the legacy
+        // `record.*` shape rather than merged behind fallbacks.
+        if (type === 'data.record.created' || type === 'data.record.updated') {
+          const record = payload.after as Record<string, unknown> | undefined;
+          if (record && typeof record === 'object') {
+            await service.handleRecordUpsert(object, record);
+          }
+          return;
+        }
+        if (type === 'data.record.deleted') {
+          const recordId = payload.recordId;
+          if (typeof recordId === 'string' && recordId !== '') {
+            await service.handleRecordDelete(object, recordId);
+          }
+          return;
+        }
+
+        if (type === 'record.created' || type === 'record.updated') {
           const record =
             (payload.record as Record<string, unknown> | undefined) ?? payload;
           if (record && typeof record === 'object') {
@@ -152,7 +171,7 @@ export class KnowledgeServicePlugin implements Plugin {
           }
           return;
         }
-        if (type === 'record.deleted' || type === 'data.record.deleted') {
+        if (type === 'record.deleted') {
           const recordObj = payload.record as Record<string, unknown> | undefined;
           const id =
             (payload.id as string | undefined) ?? (recordObj?.id as string | undefined);

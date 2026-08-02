@@ -20,6 +20,7 @@ import {
 } from '@objectstack/spec';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
+import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
 import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
@@ -953,6 +954,24 @@ export class AuthManager {
       // sees `userCount > 0` and the toggle is enforced again.
       hooks: {
         before: createAuthMiddleware(async (ctx: any) => {
+          // ── #4586: hand the attribution scope its actor resolver ─────
+          // FIRST, and unconditionally: this global before-hook is the one
+          // seam every better-auth endpoint passes through (`matcher: () =>
+          // true`, plugin routes included), and it is the only layer where
+          // the session actor exists at all. Registering here is O(1) — the
+          // resolver is STORED, not run; the session lookup happens only if
+          // a write later asks who to credit, and at most once per request.
+          //
+          // What travels is `attributedUserId`, which no security middleware
+          // reads. The adapter's writes stay `isSystem` (see
+          // `withSystemContext`): better-auth already authorized them under
+          // its own ACL, and re-authorizing as the human would open the
+          // second adjudication track ADR-0095 D3 closed.
+          setAuthActorResolver(async () => {
+            const actor = await this.resolveActor(ctx);
+            return actor?.userId ?? null;
+          });
+
           // ── #2780: per-number OTP send guard (admission control) ─────
           // MUST run BEFORE the phone-number endpoints: better-auth's
           // send-otp handler stores a fresh code and only THEN invokes
@@ -2673,7 +2692,16 @@ export class AuthManager {
     // auto-wrap. We establish the ALS store here so all downstream endpoint
     // calls inherit a valid request-state WeakMap.
     const { runWithRequestState } = await import('@better-auth/core/context');
-    const response = await runWithRequestState(new WeakMap(), () => auth.handler(request));
+    // [#4586] Open the actor-attribution scope around the WHOLE request, so
+    // every write better-auth makes on the way — adapter writes, the
+    // membership reconciler in `user.create.after`, anything a plugin hook
+    // triggers — can be credited to the human who made the request. Opening it
+    // costs nothing: the scope starts empty, the before-hook drops a resolver
+    // in, and the session is looked up only if some write asks. Attribution
+    // only — the authorization subject of those writes is unchanged (system).
+    const response = await runWithAuthActorScope(() =>
+      runWithRequestState(new WeakMap(), () => auth.handler(request)),
+    );
 
     if (response.status >= 500) {
       try {

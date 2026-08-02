@@ -26,6 +26,8 @@
  *     kernel:ready backfill is the self-healing net).
  */
 
+import { authSystemWriteContext } from './auth-actor-attribution.js';
+
 export type MembershipPolicy = 'auto' | 'invite-only';
 
 export type ReconcileOutcome =
@@ -81,7 +83,14 @@ async function insertMembership(engine: any, organizationId: string, userId: str
   await engine.insert(
     'sys_member',
     { id: genMemberId(), organization_id: organizationId, user_id: userId, role: 'member' },
-    { context: SYSTEM_CTX },
+    // [#4586] The bind runs inside better-auth's `user.create.after`, so when
+    // the creation was an ADMIN action (`/admin/create-user`, bulk import) the
+    // acting human is in scope and the membership row's history names them
+    // instead of "system". Self sign-up resolves nothing (no session yet) and
+    // records as the system — correct, nobody else acted. `isSystem` is
+    // constructed here regardless: this is a platform write to a
+    // better-auth-managed table, and attribution never changes that.
+    { context: await authSystemWriteContext() },
   );
 }
 

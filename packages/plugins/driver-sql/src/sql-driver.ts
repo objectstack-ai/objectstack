@@ -1533,17 +1533,11 @@ export class SqlDriver implements IDataDriver {
     return results[0] || null;
   }
 
-  /**
-   * Stream records matching a structured query.
-   * NOTE: Current implementation fetches all results then yields them.
-   * TODO: Use Knex .stream() for true cursor-based streaming on large datasets.
-   */
-  async *findStream(object: string, query: QueryAST, options?: DriverOptions): AsyncGenerator<Record<string, any>> {
-    const results = await this.find(object, query, options);
-    for (const row of results) {
-      yield row;
-    }
-  }
+  // `findStream` was removed with the contract method in 17.0.0 (#4484). This driver's
+  // implementation awaited `find()` in full and then yielded row by row, so it never
+  // avoided the memory it was declared to avoid; nothing called it. Page through
+  // `find()` with `limit`/`offset` until a real Knex `.stream()` read is built to a
+  // caller's requirement.
 
   async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<any> {
     const { _id, ...rest } = data;

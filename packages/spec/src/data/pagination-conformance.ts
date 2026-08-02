@@ -55,8 +55,8 @@
  *
  * # Scope
  *
- * The guarantee is on `find()` (and whatever a driver builds on it, e.g. a
- * `findStream` that delegates), and only where the read is **paged**. It says
+ * The guarantee is on `find()` (and whatever a driver builds on it), and only
+ * where the read is **paged**. It says
  * nothing about an unpaged read with no `orderBy`: nothing is being sliced, so
  * no caller can be shown a partial view of the set, and imposing an order there
  * would change plan selection across the majority of reads to buy nothing.

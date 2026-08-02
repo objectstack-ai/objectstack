@@ -556,6 +556,16 @@ const actionObject = () => strictObject({
    * the body inside the sandbox as `(input, ctx) => Promise<output>` and
    * ignores `target`.
    *
+   * That condition is ENFORCED at both ends, not merely documented (#4352).
+   * Authoring: the refinement on {@link ActionSchema} rejects `body` alongside
+   * any other `type` — the publish gate resolves this same schema through
+   * `getMetadataTypeSchema('action')`, so the contradiction cannot be stored.
+   * Runtime: `actionBodyRunnerFactory` binds no handler unless the type is
+   * `script`, which covers metadata published before that gate existed and
+   * bundles that never parsed. Until #4352 only the sentence existed: the
+   * runtime bound a handler from `body` alone, so flipping `type` from
+   * `script` to `url` left the body running with nothing to say so.
+   *
    * - `{ language: 'expression', source: '...' }` — pure formula (L1).
    * - `{ language: 'js', source: '...', capabilities: [...] }` — sandboxed JS (L2).
    *

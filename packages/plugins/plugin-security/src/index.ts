@@ -23,6 +23,12 @@ export {
 export {
   reconcileOrgAdminGrant,
   backfillOrgAdminGrants,
+  // [#4586] The auto-grant's machine-provenance marker + its `reason` builder.
+  // Exported so a reader of the grant table (explain surfaces, compliance
+  // exports, tests) matches the ONE prefix this writer stamps instead of
+  // re-deriving the string.
+  AUTO_ORG_ADMIN_GRANT_REASON_PREFIX,
+  autoOrgAdminGrantReason,
 } from './auto-org-admin-grant.js';
 export { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
 // [ADR-0105 D8] Scoped-invitation placement — issuance gate + accept-time apply.

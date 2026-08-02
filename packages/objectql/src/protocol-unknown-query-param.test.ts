@@ -74,7 +74,6 @@ function makeMemoryDriver() {
             const from = typeof ast?.offset === 'number' ? ast.offset : 0;
             return typeof ast?.limit === 'number' ? all.slice(from, from + ast.limit) : all.slice(from);
         },
-        findStream() { throw new Error('not implemented'); },
         async findOne(object: string, ast: any) {
             for (const r of storeFor(object).values()) if (matchesWhere(r, ast?.where)) return r;
             return null;

@@ -69,7 +69,6 @@ function makeMemoryDriver() {
         async find(object: string, ast: any) {
             return Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
         },
-        findStream() { throw new Error('not implemented'); },
         async findOne(object: string, ast: any) {
             for (const r of storeFor(object).values()) if (matchesWhere(r, ast?.where)) return r;
             return null;

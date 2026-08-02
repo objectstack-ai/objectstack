@@ -8,7 +8,12 @@
  */
 
 import type { RealtimeEventPayload } from '@objectstack/spec/contracts';
-import { MetadataEventSchema, type MetadataEvent, type DataEvent } from '@objectstack/spec/api';
+import {
+  MetadataEventSchema,
+  DataEventSchema,
+  type MetadataEvent,
+  type DataEvent,
+} from '@objectstack/spec/api';
 
 export interface RealtimeSubscriptionFilter {
   /** Metadata/object type filter */
@@ -121,12 +126,28 @@ export class RealtimeAPI {
         ]
       },
       handler: (event) => {
-        // Type guard and filter
-        if (event.type.startsWith('data.') && event.object === object) {
-          if (!options?.recordId || (event.payload as any)?.recordId === options.recordId) {
-            callback(event as any as DataEvent);
-          }
+        if (!event.type.startsWith('data.') || event.object !== object) return;
+        // Contract boundary (#4626): the wire carries a RealtimeEventPayload
+        // envelope whose `payload` is the producer's DataEvent (the ObjectQL
+        // engine builds and validates it). Validate it here too — the callback
+        // is typed `(event: DataEvent) => void`, so delivering the envelope
+        // itself (what `event as any as DataEvent` used to do) left every
+        // subscriber reading `undefined` for the top-level `recordId` /
+        // `changes` / `id` the type promised. An off-contract payload is
+        // rejected LOUDLY (throw → surfaced by emitEvent's handler-error log),
+        // never coerced or passed through: a malformed event means the
+        // producer is broken and must be fixed there, not tolerated here.
+        const parsed = DataEventSchema.safeParse(event.payload);
+        if (!parsed.success) {
+          throw new Error(
+            `subscribeData('${object}'): event '${event.type}' payload does not satisfy ` +
+            `DataEventSchema — rejecting off-contract event (fix the producer): ${parsed.error.message}`
+          );
         }
+        // Narrow on the FULFILLED event, not the envelope — `recordId` is a
+        // declared top-level field of what the subscriber receives.
+        if (options?.recordId && parsed.data.recordId !== options.recordId) return;
+        callback(parsed.data);
       }
     });
 

@@ -32,9 +32,6 @@ function stubDriver(name: string) {
     async find() {
       return [];
     },
-    findStream() {
-      throw new Error('ns');
-    },
     async findOne() {
       return null;
     },

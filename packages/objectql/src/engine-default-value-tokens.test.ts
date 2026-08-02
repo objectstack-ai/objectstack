@@ -32,7 +32,6 @@ function makeMemoryDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
     async find(object: string) { return Array.from(storeFor(object).values()); },
-    findStream() { throw new Error('not implemented'); },
     async findOne(object: string) { return storeFor(object).values().next().value ?? null; },
     async create(object: string, data: Record<string, unknown>) {
       nextId += 1;

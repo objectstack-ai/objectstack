@@ -390,9 +390,31 @@ describe('validateActionBodyWrites — where action bodies live', () => {
     expect(findings[0].where).toBe('action "close_deal" › body');
   });
 
-  it('checks a body on a non-script action — the runtime binds one regardless of `type`', () => {
+  // [#4352] The inversion of #4344's original assertion. That test pinned
+  // "checks a body on a non-script action — the runtime binds one regardless of
+  // `type`", which was true of the runtime at the time and was recorded as
+  // provisional. The ruling closed the gap at the producer instead: the body
+  // no longer binds (`actionBodyRunnerFactory`) and the pair no longer
+  // publishes (`ActionSchema`). Nothing runs, so there is no write set to
+  // advise about — and a finding here would point at the write when the defect
+  // is the `type`.
+  it('skips a body on a non-script action — nothing binds it, so there is no write to check', () => {
     const findings = validateActionBodyWrites(
       stackWith("await ctx.api.object('crm_deal').update({ stag: 'won' });", { type: 'url', target: '/x' }),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('still checks a body on an action that omits `type` — the spec default is `script`', () => {
+    const findings = validateActionBodyWrites(
+      stackWith("await ctx.api.object('crm_deal').update({ stag: 'won' });"),
+    );
+    expect(findings).toHaveLength(1);
+  });
+
+  it('still checks a body on an explicit `type: "script"` action', () => {
+    const findings = validateActionBodyWrites(
+      stackWith("await ctx.api.object('crm_deal').update({ stag: 'won' });", { type: 'script' }),
     );
     expect(findings).toHaveLength(1);
   });

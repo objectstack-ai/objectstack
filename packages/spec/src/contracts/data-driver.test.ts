@@ -44,7 +44,6 @@ describe('IDataDriver', () => {
       checkHealth: async () => true,
       execute: async () => ({}),
       find: async () => [],
-      findStream: () => (async function* () {})(),
       findOne: async () => null,
       create: async (_obj, data) => ({ id: '1', ...data }),
       update: async (_obj, _id, data) => ({ id: '1', ...data }),
@@ -109,7 +108,6 @@ describe('IDataDriver', () => {
       checkHealth: async () => true,
       execute: async () => ({}),
       find: async () => [],
-      findStream: () => null,
       findOne: async () => null,
       create: async () => ({ id: '1' }),
       update: async () => ({ id: '1' }),
@@ -176,7 +174,6 @@ describe('IDataDriver', () => {
       getPoolStats: () => ({ total: 10, idle: 5, active: 3, waiting: 2 }),
       execute: async () => ({}),
       find: async () => [],
-      findStream: () => null,
       findOne: async () => null,
       create: async () => ({ id: '1' }),
       update: async () => ({ id: '1' }),
@@ -202,5 +199,31 @@ describe('IDataDriver', () => {
     expect(extendedDriver.updateMany).toBeDefined();
     expect(extendedDriver.deleteMany).toBeDefined();
     expect(extendedDriver.explain).toBeDefined();
+  });
+
+  // ===========================================================================
+  // Retired surface (#4484, ADR-0049 enforce-or-remove)
+  // ===========================================================================
+
+  describe('findStream (retired in 17.0.0)', () => {
+    it('is not declared on the contract, so calling it does not type-check', () => {
+      // The pin is the type, not the runtime: `keyof IDataDriver` is resolved by
+      // tsc, so re-adding `findStream(...)` to the interface makes `Retired`
+      // resolve to `never` and this line fails `pnpm typecheck` — which is the
+      // only channel that can catch a *contract* regression. The expect() below
+      // just gives the type assertion a home vitest will run.
+      type Retired = 'findStream' extends keyof IDataDriver ? never : 'absent';
+      const retired: Retired = 'absent';
+      expect(retired).toBe('absent');
+    });
+
+    it('leaves an implementation that still defines it harmless', () => {
+      // A driver written against 16.x keeps compiling: an extra method is not an
+      // excess-property error on a class or on a widened object, it is simply
+      // never reached. The break is on the CALLER side — `driver.findStream(...)`
+      // no longer compiles — and there were no callers to break.
+      const legacyShaped = { findStream: () => undefined };
+      expect('findStream' in legacyShaped).toBe(true);
+    });
   });
 });

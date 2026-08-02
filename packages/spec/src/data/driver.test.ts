@@ -83,7 +83,6 @@ describe('DriverInterfaceSchema', () => {
         checkHealth: async () => true,
         execute: async () => ({}),
         find: async () => [],
-        findStream: async function* () {},
         findOne: async () => null,
         create: async () => ({}),
         update: async () => ({}),
@@ -126,7 +125,6 @@ describe('DriverInterfaceSchema', () => {
       checkHealth: async () => true,
       execute: async () => ({}),
       find: async (object: string, query: any) => [],
-      findStream: async function* (object: string, query: any) {},
       findOne: async (object: string, query: any) => null,
       create: async (object: string, data: any) => data,
       update: async (object: string, id: any, data: any) => data,
@@ -232,7 +230,6 @@ describe('DriverInterfaceSchema', () => {
       checkHealth: async () => true,
       execute: async () => ({}),
       find: async () => [],
-      findStream: async function* () {},
       findOne: async () => null,
       create: async () => ({}),
       update: async () => ({}),
@@ -313,7 +310,6 @@ describe('DriverInterfaceSchema', () => {
       checkHealth: async () => true,
       execute: async () => ({}),
       find: async () => [],
-      findStream: async function* () {},
       findOne: async () => null,
       create: async () => ({}),
       update: async () => ({}),
@@ -377,7 +373,6 @@ describe('DriverInterfaceSchema', () => {
         checkHealth: async () => true,
         execute: async () => ({}),
         find: async () => [],
-        findStream: async function* () {},
         findOne: async () => null,
         create: async () => ({}),
         update: async () => ({}),
@@ -419,7 +414,6 @@ describe('DriverInterfaceSchema', () => {
         checkHealth: async () => true,
         execute: async () => ({}),
         find: async () => [],
-        findStream: async function* () {},
         findOne: async () => null,
         create: async () => ({}),
         update: async () => ({}),
@@ -463,7 +457,6 @@ describe('DriverInterfaceSchema', () => {
         checkHealth: async () => true,
         execute: async () => ({}),
         find: async (object, query) => [],
-        findStream: async function* (object, query) {},
         findOne: async (object, query) => null,
         create: async (object, data) => data,
         update: async (object, id, data) => data,
@@ -505,7 +498,6 @@ describe('DriverInterfaceSchema', () => {
         checkHealth: async () => true,
         execute: async () => ({}),
         find: async (object, query) => [],
-        findStream: async function* (object, query) {},
         findOne: async (object, query) => null,
         create: async (object, data) => data,
         update: async (object, id, data) => data,
@@ -547,7 +539,6 @@ describe('DriverInterfaceSchema', () => {
         checkHealth: async () => true,
         execute: async () => ({}),
         find: async (object, query) => [],
-        findStream: async function* (object, query) {},
         findOne: async (object, query) => null,
         create: async (object, data) => data,
         update: async (object, id, data) => data,
@@ -589,7 +580,6 @@ describe('DriverInterfaceSchema', () => {
         checkHealth: async () => true,
         execute: async () => ({}),
         find: async (object, query) => [],
-        findStream: async function* (object, query) {},
         findOne: async (object, query) => null,
         create: async (object, data) => data,
         update: async (object, id, data) => data,
@@ -631,7 +621,6 @@ describe('DriverInterfaceSchema', () => {
         checkHealth: async () => true,
         execute: async () => ({}),
         find: async (object, query) => [],
-        findStream: async function* (object, query) {},
         findOne: async (object, query) => null,
         create: async (object, data) => data,
         update: async (object, id, data) => data,
@@ -662,6 +651,67 @@ describe('DriverInterfaceSchema', () => {
       };
 
       expect(() => DriverInterfaceSchema.parse(memoryDriver)).not.toThrow();
+    });
+  });
+
+  // ===========================================================================
+  // Retired surface (#4484, ADR-0049 enforce-or-remove)
+  // ===========================================================================
+
+  describe('findStream (retired in 17.0.0)', () => {
+    it('is no longer part of the declared driver shape', () => {
+      expect(DriverInterfaceSchema.shape).not.toHaveProperty('findStream');
+    });
+
+    it('deliberately carries no tombstone — nothing ever parsed a driver with it', () => {
+      // The other retirements in this major tombstone their key so authoring it
+      // fails loudly. That would be noise here: `DriverInterfaceSchema` describes
+      // a TypeScript contract that drivers IMPLEMENT, and nothing in either
+      // repository ever ran a driver object through `.parse()` — the prescription
+      // would have no one to reach. The enforced channel is tsc on `IDataDriver`
+      // (see contracts/data-driver.test.ts), which breaks callers, and there were
+      // none. A stray `findStream` on a driver object therefore just parses and
+      // is dropped, exactly as any other non-contract method on it always has.
+      const withLegacyMethod = {
+        name: 'legacy',
+        version: '1.0.0',
+        connect: async () => {},
+        disconnect: async () => {},
+        checkHealth: async () => true,
+        execute: async () => ({}),
+        find: async () => [],
+        findStream: async function* () {},
+        findOne: async () => null,
+        create: async () => ({}),
+        update: async () => ({}),
+        upsert: async () => ({}),
+        delete: async () => true,
+        count: async () => 0,
+        bulkCreate: async () => [],
+        bulkUpdate: async () => [],
+        bulkDelete: async () => {},
+        beginTransaction: async () => ({}),
+        commit: async () => {},
+        rollback: async () => {},
+        syncSchema: async () => {},
+        dropTable: async () => {},
+        supports: {
+          transactions: true,
+          queryFilters: true,
+          queryAggregations: true,
+          querySorting: true,
+          queryPagination: true,
+          queryWindowFunctions: false,
+          querySubqueries: false,
+          joins: false,
+          fullTextSearch: false,
+          jsonFields: true,
+          arrayFields: true,
+        },
+      };
+
+      const parsed = DriverInterfaceSchema.parse(withLegacyMethod);
+      expect(parsed).not.toHaveProperty('findStream');
     });
   });
 });

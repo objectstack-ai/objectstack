@@ -318,13 +318,25 @@ export class AutoEnqueuer {
         ];
         if (subs.length === 0) return;
 
+        // [#4626] The envelope's `payload` IS the spec's `DataEvent`
+        // (`@objectstack/spec/api`): `recordId` is a REQUIRED top-level string
+        // the ObjectQL engine validates before publishing. Read it directly.
+        // The old `recordId ?? id ?? after?.id ?? before?.id ?? 'unknown'`
+        // chain was consumer-side tolerance for a producer that never filled
+        // the contract (AGENTS.md PD #12) — and its `'unknown'` fallback
+        // silently turned an unnameable record into a delivered webhook. An
+        // off-contract event is now DROPPED loudly: the producer is broken and
+        // gets fixed there.
         const payload = event.payload ?? {};
-        const recordId =
-            (payload as any).recordId ??
-            (payload as any).id ??
-            (payload as any).after?.id ??
-            (payload as any).before?.id ??
-            'unknown';
+        const recordId = (payload as { recordId?: unknown }).recordId;
+        if (typeof recordId !== 'string' || recordId === '') {
+            this.logger.warn?.(
+                '[webhook-auto-enqueuer] dropping off-contract data event: payload is not a DataEvent ' +
+                    '(no top-level string `recordId`) — fix the producer',
+                { type: event.type, object: event.object },
+            );
+            return;
+        }
 
         // Deterministic eventId — same input on any node → same id.
         // Includes timestamp so two distinct updates to the same record
@@ -352,12 +364,13 @@ export class AutoEnqueuer {
                 timeoutMs: sub.timeoutMs,
                 // [#3946] Envelope keys are written LAST so the event payload
                 // cannot rewrite them. Behaviour-neutral for the engine's own
-                // publishers — `data.record.*` payloads are
-                // `{ recordId, after, changes }`, with record fields nested
-                // under `after`, so none of these four keys collide today. It
-                // is the shape that was wrong: a publisher that flattened
-                // record fields into the payload (the `payload.id` fallback
-                // above suggests some do) would have silently rewritten the
+                // publishers — since #4626 a `data.record.*` payload is a
+                // `DataEvent` (`id`, `type`, `object`, `recordId`, `changes?`,
+                // `after?`, `userId?`, `timestamp`), whose `object` /
+                // `recordId` / `timestamp` carry the SAME values written here
+                // and whose record fields stay nested under `after`. It is the
+                // shape that was wrong: a publisher that flattened record
+                // fields into the payload would have silently rewritten the
                 // `object` / `action` / `timestamp` a subscriber receives.
                 payload: {
                     ...payload,

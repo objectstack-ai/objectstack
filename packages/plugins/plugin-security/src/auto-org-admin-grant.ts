@@ -119,6 +119,48 @@ function isAdminRole(raw: unknown): boolean {
 }
 
 /**
+ * [#4586] Machine-provenance marker for rows this module writes.
+ *
+ * The auto-grant is the second hop of the elevation chain
+ * (`sys_member.role` → here → `sys_user_permission_set` → `isTenantAdmin()`),
+ * and it is the hop with no human in it: no operator ever asked for THIS row,
+ * a membership grade did. Stamping that fact in a stable, greppable prefix is
+ * what lets "why is X a tenant admin" be answered from the data — the row says
+ * which writer minted it and which membership triggered it, so the chain is
+ * followable instead of inferred.
+ */
+export const AUTO_ORG_ADMIN_GRANT_REASON_PREFIX = 'auto-org-admin-grant';
+
+/**
+ * The `reason` text for an auto-granted org-admin row: the machine marker, the
+ * `sys_member` row that triggered it, and the grade that qualified.
+ *
+ * Deliberately NOT in `granted_by`: that column is a `sys_user` lookup, and
+ * ADR-0118 D1 admits exactly two values there — a real user id, or `null` for
+ * "the system did this". A marker string in a lookup column is the sentinel
+ * that ADR forbids (it breaks the join and forces every reader to special-case
+ * it). The repo's own vocabulary already splits these roles —
+ * `validate-security-posture` states it as "granted_by = writer,
+ * delegated_from = authority source, reason = why" — so the human goes to
+ * `granted_by` and the why goes here.
+ */
+export function autoOrgAdminGrantReason(
+  member: { id?: unknown; role?: unknown } | undefined,
+  setName: string,
+): string {
+  const memberId = typeof member?.id === 'string' || typeof member?.id === 'number'
+    ? String(member.id)
+    : '';
+  const role = parseRoles(member?.role).join(',');
+  return (
+    `${AUTO_ORG_ADMIN_GRANT_REASON_PREFIX}: granted from membership grade` +
+    (role ? ` '${role}'` : '') +
+    (memberId ? ` (sys_member ${memberId})` : '') +
+    ` → ${setName}`
+  );
+}
+
+/**
  * Resolve the `sys_permission_set.id` for `organization_admin`. Cached
  * across calls per ObjectQL instance via a WeakMap so repeated
  * reconciliations do not re-query.
@@ -158,7 +200,21 @@ export async function reconcileOrgAdminGrant(
   ql: any,
   userId: string,
   orgId: string,
-  options: { logger?: MaybeLogger; posture?: TenancyPosture } = {},
+  options: {
+    logger?: MaybeLogger;
+    posture?: TenancyPosture;
+    /**
+     * [#4586] The human the TRIGGERING `sys_member` write was attributed to
+     * (`ExecutionContext.attributedUserId`), stamped into `granted_by` so the
+     * grant names the admin who caused it rather than nobody. Attribution
+     * only: this reconciler's own writes stay `SYSTEM_CTX`, and nothing here
+     * authorizes against this value. Absent — the kernel:ready backfill, a
+     * boot-time bind, any machine-originated grade change — leaves
+     * `granted_by: null`, the platform's one representation for "the system
+     * did this" (ADR-0118 D1).
+     */
+    attributedUserId?: string;
+  } = {},
 ): Promise<{
   action: 'granted' | 'revoked' | 'noop' | 'skipped';
   reason?: string;
@@ -195,7 +251,10 @@ export async function reconcileOrgAdminGrant(
     { user_id: userId, organization_id: orgId },
     10,
   );
-  const shouldGrant = memberships.some((m: any) => isAdminRole(m?.role));
+  // The row that QUALIFIES is also the row the grant is provenance-linked to
+  // (#4586) — "this capability exists because of that membership".
+  const qualifyingMembership = memberships.find((m: any) => isAdminRole(m?.role));
+  const shouldGrant = qualifyingMembership !== undefined;
 
   // 1b. [ADR-0105 D4] Revoke the OTHER variant for this pair, always. A posture
   //     change (or a downgrade after F2) must converge on exactly one org-admin
@@ -241,7 +300,13 @@ export async function reconcileOrgAdminGrant(
       user_id: userId,
       permission_set_id: permSetId,
       organization_id: orgId,
-      granted_by: null,
+      // [#4586] The provenance the row already had a column for. `granted_by`
+      // is a `sys_user` lookup: the human whose better-auth call triggered the
+      // grade change when one was in scope, else `null` = the system (ADR-0118
+      // D1 — an id or null, never a sentinel). The machine marker and the
+      // triggering membership row live in `reason`, where free text belongs.
+      granted_by: options.attributedUserId ?? null,
+      reason: autoOrgAdminGrantReason(qualifyingMembership, grantSetName),
     });
     if (created) {
       logger?.info?.('[security] granted org-admin capability', {
@@ -249,6 +314,7 @@ export async function reconcileOrgAdminGrant(
         orgId,
         set: grantSetName,
         posture,
+        grantedBy: options.attributedUserId ?? null,
       });
       return { action: 'granted' };
     }

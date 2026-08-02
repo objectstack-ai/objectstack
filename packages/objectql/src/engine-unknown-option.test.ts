@@ -77,7 +77,6 @@ function makeDriver() {
         async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
         async find(o: string, ast: any) { finds.push(ast); return run(o, ast); },
         async findOne(o: string, ast: any) { finds.push(ast); return run(o, ast)[0] ?? null; },
-        findStream() { throw new Error('ns'); },
         async create(o: string, data: any) { nextId += 1; const id = data.id ?? `r_${nextId}`; const row = { ...data, id }; storeFor(o).set(id, row); return row; },
         async update(o: string, id: string, data: any) { const s = storeFor(o); const cur = s.get(id); if (!cur) throw new Error('nf'); const up = { ...cur, ...data, id }; s.set(id, up); return up; },
         async updateMany(o: string, ast: any, data: any) { let n = 0; for (const [id, row] of storeFor(o)) { if (!matches(row, ast?.where)) continue; storeFor(o).set(id, { ...row, ...data, id }); n += 1; } return n; },

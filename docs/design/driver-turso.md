@@ -215,7 +215,6 @@ This does NOT require changes to existing client packages — it would be a new,
 | `getPoolStats()` | 🟡 | Concurrency tracking (no traditional pool) |
 | `execute()` | ✅ | `client.execute(sql, args)` |
 | `find()` | ✅ | SQL SELECT with QueryAST→SQL compiler |
-| `findStream()` | 🟡 | Cursor-based pagination (no native streaming) |
 | `findOne()` | ✅ | `SELECT ... LIMIT 1` |
 | `create()` | ✅ | `INSERT INTO ... RETURNING *` |
 | `update()` | ✅ | `UPDATE ... WHERE id = ? RETURNING *` |

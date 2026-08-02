@@ -199,7 +199,7 @@ export class InMemoryDriver implements IDataDriver {
     fullTextSearch: false,       // @planned: Text tokenization + matching
     jsonQuery: false,
     geospatialQuery: false,
-    streaming: true,             // Implemented via findStream()
+    streaming: true,             // Unread by anything; described findStream(), retired in #4484 — see #4634
     jsonFields: true,            // Native JS object support
     arrayFields: true,           // Native JS array support
     vectorSearch: false,         // @planned: Cosine similarity search
@@ -377,14 +377,10 @@ export class InMemoryDriver implements IDataDriver {
     return results;
   }
 
-  async *findStream(object: string, query: QueryAST, options?: DriverOptions) {
-    this.logger.debug('FindStream operation', { object });
-    
-    const results = await this.find(object, query, options);
-    for (const record of results) {
-      yield record;
-    }
-  }
+  // `findStream` was removed with the contract method in 17.0.0 (#4484). Like the SQL
+  // driver's, this implementation awaited `find()` in full and then yielded row by
+  // row — the whole table was already in memory before the first `yield`. Nothing
+  // called it. Page through `find()` with `limit`/`offset`.
 
   async findOne(object: string, query: QueryAST, options?: DriverOptions) {
     this.logger.debug('FindOne operation', { object, query });

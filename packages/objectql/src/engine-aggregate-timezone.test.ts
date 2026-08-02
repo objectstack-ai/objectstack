@@ -24,7 +24,6 @@ function makeBucketingDriver(rows: any[]) {
     supports: { queryDateGranularity: { day: true, week: true, month: true, quarter: true, year: true } },
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find() { return rows.slice(); },
-    findStream() { throw new Error('ni'); },
     async findOne() { return rows[0] ?? null; },
     async create(_o: string, d: any) { return d; },
     async update(_o: string, _id: string, d: any) { return d; },
