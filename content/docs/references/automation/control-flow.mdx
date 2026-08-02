@@ -149,7 +149,7 @@ const result = FlowRegionSchema.parse(data);
 | **try** | `{ nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }` | ✅ | Protected region |
 | **catch** | `{ nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }` | optional | Handler region run when the try region fails |
 | **errorVariable** | `string` | optional | Variable holding the caught error in the catch region |
-| **retry** | `{ maxRetries?: integer; retryDelayMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Optional retry policy for the try region |
+| **retry** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Optional retry policy for the try region |
 
 
 ---

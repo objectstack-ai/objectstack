@@ -297,14 +297,26 @@ describe('#4586: the better-auth actor reaches sys_member history and the grant'
     expect(String(promotion.id)).not.toBe(String(demotion.id));
     expect(promotion.user_id).toBe(adminUserId);
 
-    // NOTE: whether the org-admin GRANT is revoked on demotion is deliberately
-    // not asserted here. It currently is not — `auto-org-admin-grant`'s only
-    // delete channel calls `ql.delete(object, id, ctx)` while the engine takes
-    // `(object, { where, context })`, so every revoke throws into a swallowing
-    // catch. That is a separate, pre-existing defect (its unit stub implements
-    // the wrong signature, so the suite never saw it) filed as #4640 — a
-    // security behaviour change that deserves its own review and changeset, not
-    // a rider on an attribution PR.
+    // [#4640] …and the CAPABILITY goes with the grade. The grant W2 asserted
+    // above must be gone: that row is what `isTenantAdmin()` reads, so a
+    // demotion that leaves it behind leaves a tenant admin behind. This is the
+    // assertion that could only ever have been made here — the unit suite's
+    // double implemented `delete(object, id)`, a signature the engine has never
+    // had, so it reported every revoke as successful while the real engine
+    // threw on all of them. The reconcile runs in an ObjectQL middleware after
+    // the route's write, which better-auth may settle after the response, so
+    // poll rather than read once.
+    let grants: any[] = [{ pending: true }];
+    for (let i = 0; i < 20 && grants.length > 0; i++) {
+      grants = await findRows(
+        ql,
+        'sys_user_permission_set',
+        { user_id: memberUserId, organization_id: orgId },
+        5,
+      );
+      if (grants.length > 0) await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(grants).toHaveLength(0);
   }, 60_000);
 
   // ── The hard constraint ─────────────────────────────────────────────────

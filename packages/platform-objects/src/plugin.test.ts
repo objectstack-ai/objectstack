@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { PlatformObjectsPlugin } from './plugin.js';
-import { SysMigration, SysSecret } from './system/index.js';
+import { SysMigration, SysMigrationJournal, SysSecret } from './system/index.js';
 
 /**
  * Hand-rolled fake PluginContext (mirrors the service-plugin tests) — this
@@ -34,7 +34,7 @@ function makeCtx() {
 }
 
 describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4243, #4270)', () => {
-  it('registers SysMigration and SysSecret through the manifest service', async () => {
+  it('registers SysMigration, SysMigrationJournal and SysSecret through the manifest service', async () => {
     const ctx = makeCtx();
     const manifests: any[] = [];
     ctx.registerService('manifest', { register: (m: any) => manifests.push(m) });
@@ -44,8 +44,16 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
     expect(manifests).toHaveLength(1);
     expect(manifests[0].id).toBe('com.objectstack.platform-objects');
     expect(manifests[0].scope).toBe('system');
-    expect(manifests[0].objects).toEqual([SysMigration, SysSecret]);
-    expect(manifests[0].objects.map((o: any) => o.name)).toEqual(['sys_migration', 'sys_secret']);
+    expect(manifests[0].objects).toEqual([SysMigration, SysMigrationJournal, SysSecret]);
+    expect(manifests[0].objects.map((o: any) => o.name)).toEqual([
+      'sys_migration',
+      // ADR-0119 D2 (#4617). Registered UNCONDITIONALLY, alongside the flag
+      // ledger rather than by the migration CLI that writes it: recovery has
+      // to be discoverable with zero host wiring, and a journal some kernels
+      // compose and others do not is a journal a boot scanner cannot rely on.
+      'sys_migration_journal',
+      'sys_secret',
+    ]);
   });
 
   /**

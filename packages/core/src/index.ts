@@ -30,6 +30,11 @@ export * from './utils/datetime.js';
 // Export the shared batched-write helper (framework#2678)
 export * from './utils/bulk-write.js';
 
+// Export the migration-journal runner (ADR-0119 D2, #4617) — chunk-atomic
+// migrations with durable recovery, plus the shared `engineCanRollBack` gate
+// that `@objectstack/metadata-protocol`'s atomic `batchData` also uses.
+export * from './utils/migration-journal.js';
+
 // Export the runtime filter-placeholder resolver (framework#3582)
 export * from './utils/filter-tokens.js';
 

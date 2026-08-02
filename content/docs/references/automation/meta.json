@@ -17,12 +17,12 @@
     "webhook",
     "---Approvals & Jobs---",
     "approval",
-    "job",
     "---More---",
     "builtin-node-config",
     "events-core",
     "flow-function",
     "io-node-config",
+    "retry-policy",
     "schemaless-node-config"
   ]
 }

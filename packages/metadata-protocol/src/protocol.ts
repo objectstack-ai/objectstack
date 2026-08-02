@@ -3,7 +3,7 @@
 import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine } from '@objectstack/core';
+import { IDataEngine, engineCanRollBack } from '@objectstack/core';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type { MetadataHostEngine } from './host-engine.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
@@ -815,11 +815,11 @@ function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEve
  * has always emitted (`error: string`, `record`), which diverges from
  * `BatchOperationResultSchema`'s `errors: ApiError[]` / `data` — reconciling
  * the two is a wire-visible change that must not ride along on a bug fix
- * (ADR-0118 D4; tracked separately).
+ * (ADR-0119 D4; tracked separately).
  */
 type BatchDataRowResult = { id?: string; success: boolean; error?: string; record?: any; droppedFields?: DroppedFieldsEvent[] };
 
-/** What one pass of the `batchData` record loop produced (ADR-0118 D4). */
+/** What one pass of the `batchData` record loop produced (ADR-0119 D4). */
 type BatchDataLoopOutcome = { results: BatchDataRowResult[]; succeeded: number; failed: number };
 
 /**
@@ -2298,7 +2298,7 @@ export class ObjectStackProtocolImplementation implements
             // honour a transaction, so `declared === enforced` (Prime Directive
             // #10). The rest-server producer ANDs this with `api.enableBatch` so
             // a server that doesn't mount the route reports `false` at its layer.
-            // (ADR-0118 D1: `transaction` is contract-declared, so this probe
+            // (ADR-0119 D1: `transaction` is contract-declared, so this probe
             // no longer needs a structural cast to ask the question.)
             transactionalBatch: typeof this.engine?.transaction === 'function',
         };
@@ -5233,7 +5233,7 @@ export class ObjectStackProtocolImplementation implements
         // strip context to `undefined`, treating every batch create as non-system).
         const batchSchema = this.engine.registry?.getObject(object);
 
-        // ADR-0118 D4 — `atomic` is REAL or REFUSED, never silent best-effort.
+        // ADR-0119 D4 — `atomic` is REAL or REFUSED, never silent best-effort.
         // This flag used to only `break` the loop: every write before the
         // failure stayed COMMITTED while the response called itself atomic and
         // reported those rows `success: true`. Same class as #4346 — a
@@ -5255,7 +5255,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * The atomic arm of {@link batchData} (ADR-0118 D4): the whole batch runs
+     * The atomic arm of {@link batchData} (ADR-0119 D4): the whole batch runs
      * inside ONE `engine.transaction()`, so the first failure rolls back every
      * prior write — and the response says so, rather than reporting rows that
      * no longer exist as successes.
@@ -5270,21 +5270,24 @@ export class ObjectStackProtocolImplementation implements
     }): Promise<BatchUpdateResponse> {
         const { object, operation, records, options, batchSchema, context } = args;
 
-        const engineTx = typeof this.engine?.transaction === 'function'
-            ? this.engine.transaction.bind(this.engine)
-            : undefined;
-        // Two-level probe. `engine.transaction()` runs the callback with NO
-        // transaction and NO rollback when the default driver lacks
-        // `beginTransaction` — a declared caveat of the contract member
-        // (ADR-0118 D1), and one that would turn "atomic" back into a lie
+        // Two-level probe, shared with the ADR-0119 D2 migration-journal runner
+        // as `engineCanRollBack` (#4617). `engine.transaction()` runs the
+        // callback with NO transaction and NO rollback when the default driver
+        // lacks `beginTransaction` — a declared caveat of the contract member
+        // (ADR-0119 D1), and one that would turn "atomic" back into a lie
         // precisely where it matters. So where the driver registry is
         // inspectable, the driver is checked too; where it is not (test
         // doubles), the engine-level probe is all there is.
-        const defaultDriverName = this.engine.getDefaultDriverName?.();
-        const defaultDriver = defaultDriverName ? this.engine.getDriverByName?.(defaultDriverName) : undefined;
-        const driverCanTransact = !defaultDriver || typeof (defaultDriver as any).beginTransaction === 'function';
+        //
+        // Shared rather than restated: this and the runner's gate were the same
+        // condition written twice, and two copies of "can this runtime actually
+        // roll back?" drift by one clause and leave one caller believing it has
+        // atomicity it does not have.
+        const engineTx = engineCanRollBack(this.engine)
+            ? this.engine.transaction.bind(this.engine)
+            : undefined;
 
-        if (!engineTx || !driverCanTransact) {
+        if (!engineTx) {
             // REFUSE, do not degrade. A caller that asked for atomicity is
             // exactly the caller who must not silently receive best-effort —
             // silent degradation is how this flag came to lie in the first
@@ -5322,7 +5325,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * The per-record loop, shared by both arms of {@link batchData} (ADR-0118
+     * The per-record loop, shared by both arms of {@link batchData} (ADR-0119
      * D4) so atomic and non-atomic cannot drift apart. `atomic` changes exactly
      * two things: it aborts on the first failure regardless of
      * `continueOnError` (whose own contract text already scopes it to
@@ -5387,7 +5390,7 @@ export class ObjectStackProtocolImplementation implements
                                     results.push({ id: created.id, success: true, record: created });
                                 }
                             } catch (err) {
-                                // ADR-0118 D4 — no blind fallback inside a
+                                // ADR-0119 D4 — no blind fallback inside a
                                 // transaction: once the failing statement has
                                 // aborted it, this insert can only fail with a
                                 // secondary error ("current transaction is
@@ -5454,7 +5457,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * The response for an atomic batch that rolled back (ADR-0118 D4).
+     * The response for an atomic batch that rolled back (ADR-0119 D4).
      *
      * Nothing persisted, so nothing may report success — the old code's real
      * damage was not the missing transaction alone but telling the caller that
@@ -7720,7 +7723,7 @@ export class ObjectStackProtocolImplementation implements
         const promoted: PromotedDraft[] = [];
         // (assigned inside the transaction closure — keep the wide type)
         let commit = null as { commitId: string } | null;
-        // ADR-0118 D1 — `transaction` is contract-declared, so this reaches it
+        // ADR-0119 D1 — `transaction` is contract-declared, so this reaches it
         // by name instead of through a structural cast. Bound once up front:
         // the probe and the call must agree on one resolved function.
         const engineTx = typeof this.engine?.transaction === 'function'

@@ -2835,6 +2835,238 @@ const flowNodeScriptBranchKeysRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * `object.managedBy: 'system'` → `'system-data'` (protocol 17, #3355 — the v17
+ * close-out of ADR-0103's v16 enum split).
+ *
+ * v16 split the overloaded `system` bucket ADDITIVELY: the 20 engine-owned
+ * objects moved to the new explicit `engine-owned`, and the 8 admin/user-writable
+ * ones stayed on `system`. The value that remained therefore labelled the exact
+ * opposite of what its name said — writable platform DATA under the word
+ * "system" — and left an author choosing between `system` and `engine-owned` with
+ * nothing in the vocabulary to choose on. v17 renames the residue to
+ * `system-data` and retires the bare value.
+ *
+ * Because v16 already drained the engine side, this is a ONE-TO-ONE mechanical
+ * replacement with no judgement call: every remaining `system` declaration is,
+ * by construction, writable platform data.
+ *
+ * **Retired from the load path** — the enum rejects `'system'` with the
+ * {@link MANAGED_BY_SYSTEM_RETIRED} prescription, and that rejection is the
+ * whole point: a live-window entry at `normalizeStackInput` would run BEFORE the
+ * enum and silently absorb the value, so an author (or a model) would keep
+ * writing the name the rename exists to unteach. Stored `sys_metadata` rows and
+ * `os migrate meta --from 16` are exactly the `includeRetired` seams, so data at
+ * rest is CONVERTED rather than reinterpreted.
+ *
+ * Note the affordance side-effect, which is deliberate and is why this is a
+ * major-window change rather than a docs fix: `system` defaulted LOCKED and each
+ * object opened its writes via `userActions`, while `system-data` defaults
+ * WRITABLE. A converted row that carried no `userActions` therefore gains the
+ * generic affordances — which is the honest reading of the bucket it is being
+ * moved into, and changes no enforcement: the write guard, the delegated-admin
+ * gate, RLS and permission sets all adjudicate independently of the bucket name.
+ */
+const objectManagedBySystemToSystemData: MetadataConversion = {
+  id: 'object-managed-by-system-to-system-data',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'object.managedBy',
+  summary:
+    "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the "
+    + 'engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the '
+    + 'name describing what the bucket actually holds: admin/user-writable platform data)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'objects', (obj, path) => {
+      if (obj.managedBy !== 'system') return obj;
+      emit({ from: 'system', to: 'system-data', path: `${path}.managedBy` });
+      return { ...obj, managedBy: 'system-data' };
+    });
+  },
+  fixture: {
+    before: {
+      objects: [
+        {
+          name: 'sys_user_position',
+          label: 'User Position',
+          managedBy: 'system',
+          userActions: { create: true, edit: true, delete: true },
+        },
+        // every other bucket passes through untouched — including `engine-owned`,
+        // the value v16 already moved the engine side to
+        { name: 'sys_automation_run', label: 'Automation Run', managedBy: 'engine-owned' },
+        { name: 'crm_deal', label: 'Deal' },
+      ],
+    },
+    after: {
+      objects: [
+        {
+          name: 'sys_user_position',
+          label: 'User Position',
+          managedBy: 'system-data',
+          userActions: { create: true, edit: true, delete: true },
+        },
+        { name: 'sys_automation_run', label: 'Automation Run', managedBy: 'engine-owned' },
+        { name: 'crm_deal', label: 'Deal' },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * The retry policy converges to one declaration (protocol 17, #4661 — the
+ * #4535 C8 dual-source cluster).
+ *
+ * `@objectstack/spec/automation` and `@objectstack/spec/system` both exported a
+ * `RetryPolicy` / `RetryPolicySchema`, resolving to DIFFERENT declarations — so
+ * which shape a consumer got depended only on the import path (#4411). They
+ * were never two concepts: `try_catch`'s `retry` region and `job.retryPolicy`
+ * both compute `delay = base * multiplier^(retry-1)`, and the two executors
+ * implemented that identical formula. What differed was cosmetic and
+ * accidental, and this conversion pays for both halves of the merge:
+ *
+ *  1. **The base delay had two spellings.** automation said `retryDelayMs`,
+ *     system said `backoffMs`. `backoffMs` wins — it is what the *enforced*
+ *     retry policies already spell it (`job.retryPolicy` and `hook.retryPolicy`;
+ *     see the `datasource-inert-blocks-removed` note above, which leans on
+ *     exactly that distinction), so the platform drops from three spellings to
+ *     two rather than four. `retryDelayMs` is tombstoned (`retiredKey`) — NOT
+ *     deleted — because neither owning shape is `.strict()`: a plain deletion
+ *     would have Zod silently swallow the authored number and fall back to the
+ *     1000ms default, which is the quiet-failure class ADR-0049 removes.
+ *
+ *  2. **The defaults were opposite, and no gate can see a default.** Pre-17,
+ *     `job.retryPolicy` defaulted `maxRetries: 3` / `backoffMultiplier: 2`
+ *     while the automation shape defaulted 0 / 1. The merged declaration takes
+ *     0 / 1 (retry is opt-in: a retry replays whatever the attempt already did,
+ *     and an implicit replay of side effects is the failure mode hardest to
+ *     catch in tests — the same reading already recorded for flow-level retry
+ *     in `flow-retry-max-retries-required`, #4247). Taken alone that would
+ *     SILENTLY stop existing jobs from retrying, and the authorable-surface
+ *     gate would never notice: it compares key sets, and a default is not a key.
+ *     So this conversion writes the pre-17 numbers into every existing
+ *     `job.retryPolicy` that omitted them. Deployed stacks keep their exact
+ *     behaviour; only a newly authored omission means "no retry".
+ *
+ * Jobs with no `retryPolicy` block at all are left alone — absence already
+ * meant a single attempt on both sides of the change.
+ *
+ * `retiredFromLoadPath` is NOT set: `FlowNodeSchema.config` is an unconstrained
+ * record, so no schema rejection can reach `config.retry.retryDelayMs` and the
+ * conversion layer is the only seam that can declare and retire that spelling.
+ * The `RetryPolicySchema` tombstone still fires for anyone who reaches the
+ * policy through a parsed job.
+ */
+const retryPolicyConverged: MetadataConversion = {
+  id: 'retry-policy-converged',
+  toMajor: 17,
+  surface: 'flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
+  summary:
+    "retry policy unified across job.retryPolicy and try_catch retry: base delay 'retryDelayMs' → 'backoffMs', " +
+    "and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661)",
+  apply(stack, emit) {
+    // ── 1. try_catch nodes: retry.retryDelayMs → retry.backoffMs ──────
+    const withFlows = mapFlowNodes(stack, (node, path) => {
+      if (node.type !== 'try_catch') return node;
+      const config = node.config;
+      if (!config || typeof config !== 'object' || Array.isArray(config)) return node;
+      const configDict = config as Record<string, unknown>;
+      const retry = configDict.retry;
+      if (!retry || typeof retry !== 'object' || Array.isArray(retry)) return node;
+      const renamed = renameKey(retry as Record<string, unknown>, 'retryDelayMs', 'backoffMs');
+      if (renamed === null) return node;
+      emit({ from: 'retryDelayMs', to: 'backoffMs', path: `${path}.config.retry.backoffMs` });
+      return { ...node, config: { ...configDict, retry: renamed } };
+    });
+
+    // ── 2. jobs: materialize the pre-17 implicit defaults ─────────────
+    return mapCollection(withFlows, 'jobs', (job, path) => {
+      const policy = job.retryPolicy;
+      if (!policy || typeof policy !== 'object' || Array.isArray(policy)) return job;
+      const policyDict = policy as Record<string, unknown>;
+      let next = policyDict;
+      if (next.maxRetries === undefined) {
+        next = { ...next, maxRetries: 3 };
+        emit({
+          from: 'maxRetries unset (implied 3)',
+          to: 'maxRetries: 3',
+          path: `${path}.retryPolicy.maxRetries`,
+        });
+      }
+      if (next.backoffMultiplier === undefined) {
+        next = { ...next, backoffMultiplier: 2 };
+        emit({
+          from: 'backoffMultiplier unset (implied 2)',
+          to: 'backoffMultiplier: 2',
+          path: `${path}.retryPolicy.backoffMultiplier`,
+        });
+      }
+      return next === policyDict ? job : { ...job, retryPolicy: next };
+    });
+  },
+  fixture: {
+    before: {
+      flows: [{
+        name: 'sync_orders',
+        nodes: [
+          { id: 'n1', type: 'start' },
+          {
+            id: 'n2',
+            type: 'try_catch',
+            config: {
+              try: { nodes: [], edges: [] },
+              retry: { maxRetries: 3, retryDelayMs: 500, jitter: true },
+            },
+          },
+          // Already canonical — left alone, contributes no notice.
+          {
+            id: 'n3',
+            type: 'try_catch',
+            config: { try: { nodes: [], edges: [] }, retry: { maxRetries: 2, backoffMs: 250 } },
+          },
+        ],
+      }],
+      jobs: [
+        // Omits both defaults — both get written out.
+        { name: 'nightly_sync', schedule: { type: 'cron', expression: '0 0 * * *' }, handler: 'jobs.ts:sync', retryPolicy: { backoffMs: 5000 } },
+        // States both — untouched.
+        { name: 'hourly_roll', schedule: { type: 'cron', expression: '0 * * * *' }, handler: 'jobs.ts:roll', retryPolicy: { maxRetries: 1, backoffMultiplier: 3 } },
+        // No policy block at all — absence already meant one attempt.
+        { name: 'weekly_purge', schedule: { type: 'cron', expression: '0 0 * * 0' }, handler: 'jobs.ts:purge' },
+      ],
+    },
+    after: {
+      flows: [{
+        name: 'sync_orders',
+        nodes: [
+          { id: 'n1', type: 'start' },
+          {
+            id: 'n2',
+            type: 'try_catch',
+            config: {
+              try: { nodes: [], edges: [] },
+              retry: { maxRetries: 3, jitter: true, backoffMs: 500 },
+            },
+          },
+          {
+            id: 'n3',
+            type: 'try_catch',
+            config: { try: { nodes: [], edges: [] }, retry: { maxRetries: 2, backoffMs: 250 } },
+          },
+        ],
+      }],
+      jobs: [
+        { name: 'nightly_sync', schedule: { type: 'cron', expression: '0 0 * * *' }, handler: 'jobs.ts:sync', retryPolicy: { backoffMs: 5000, maxRetries: 3, backoffMultiplier: 2 } },
+        { name: 'hourly_roll', schedule: { type: 'cron', expression: '0 * * * *' }, handler: 'jobs.ts:roll', retryPolicy: { maxRetries: 1, backoffMultiplier: 3 } },
+        { name: 'weekly_purge', schedule: { type: 'cron', expression: '0 0 * * 0' }, handler: 'jobs.ts:purge' },
+      ],
+    },
+    // n2's rename, plus nightly_sync's two materialized defaults.
+    expectedNotices: 3,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -2872,6 +3104,8 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
     // whether `config.function` is set, and that rename is what sets it.
     flowNodeScriptBranchKeysRemoved,
+    retryPolicyConverged,
+    objectManagedBySystemToSystemData,
   ],
 };
 

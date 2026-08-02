@@ -593,6 +593,31 @@ const step17: MigrationStep = {
     + 'source rewrite, and no tombstone: `DriverInterfaceSchema` describes a contract that '
     + 'code IMPLEMENTS and nothing ever `.parse()`d a driver, so tsc is the only channel that '
     + 'could carry the prescription, and it carries it where it matters — at a call site.\n\n'
+    + 'Separately, `object.managedBy: \'system\'` is retired in favour of `\'system-data\'` (#3355), '
+    + 'finishing the split ADR-0103 began in v16. That split was deliberately ADDITIVE: the 20 '
+    + 'engine-owned objects moved to the new explicit `engine-owned`, and the 8 admin/user-'
+    + 'writable ones — the RBAC link tables, `sys_user_preference`, the three messaging config '
+    + 'grids — stayed behind on `system`. What was left is a value whose name describes the half '
+    + 'that had already moved out: "system" sitting on precisely the objects a user writes. That '
+    + 'is not a cosmetic complaint. An author choosing between `system` and `engine-owned` had '
+    + 'nothing in the vocabulary to choose on, so the bucket was re-overloadable by anyone '
+    + 'reading the name in good faith — a model author most of all. `system-data` states both '
+    + 'boundaries: the SCHEMA is the platform\'s (versus `platform`, which is tenant-modelled), '
+    + 'the DATA is the admin\'s or the user\'s (versus `engine-owned`, where the engine owns both). '
+    + 'Reusing `config` was considered and rejected — `sys_user_preference` is user-owned rather '
+    + 'than admin-authored, and `config` suppresses CSV import — as was `platform-data`, which '
+    + 'sits one word away from the unrelated `platform` in the same closed enum and would '
+    + 'reintroduce the confusion at the point of choosing. Because v16 already drained the '
+    + 'engine side, the conversion is a ONE-TO-ONE mechanical value rename with no judgement '
+    + 'call. One deliberate consequence: `system` defaulted LOCKED and each object re-opened its '
+    + 'writes through `userActions`, while `system-data` defaults WRITABLE, so those blocks '
+    + 'become redundant and are deleted (keep `userActions` only to NARROW). No enforcement '
+    + 'moves — the engine write guard, the DelegatedAdminGate, RLS and permission sets all '
+    + 'adjudicate off resolved affordances and the principal, never off the bucket name; '
+    + '`system-data` simply joins `platform`/`config` as a bucket the guard does not cover, '
+    + 'because a writable default has nothing to fail closed on. Retired from the load path: '
+    + 'the enum rejection is what teaches the new spelling, and absorbing `\'system\'` silently at '
+    + 'load would leave every author writing the name this rename exists to retire.\n\n'
     + 'Finally, five keys retire because the advisory lint could never have warned about them '
     + '(#4509): mapping `extractQuery` / `errorPolicy` / `batchSize`, and app '
     + '`contextSelectors[].includeAll` / `.placement`. Four of the five carry schema DEFAULTS, '
@@ -612,7 +637,27 @@ const step17: MigrationStep = {
     + 'ignored it. The mapping prescription for `batchSize` deliberately offers no rename: '
     + 'bulk-action, connector, sync, offline, seed-loader and NoSQL-cursor `batchSize` are all '
     + 'live, but each is a different key sizing its own path — the same trap `datasource.'
-    + 'retryPolicy` vs `hook`/`job` `retryPolicy` had to defuse one issue earlier.',
+    + 'retryPolicy` vs `hook`/`job` `retryPolicy` had to defuse one issue earlier.\n\n'
+    + 'The same window converges the retry policy (#4661). `@objectstack/spec/automation` and '
+    + '`@objectstack/spec/system` each exported a `RetryPolicy`/`RetryPolicySchema` resolving '
+    + 'to a DIFFERENT declaration, so which shape a consumer got depended only on the import '
+    + 'path (#4411) — yet both computed `delay = base * multiplier^(retry-1)` and both '
+    + 'executors implemented that same formula. One declaration now serves both entries with '
+    + 'the union of their capabilities, so `job.retryPolicy` gains the `maxRetryDelayMs` ceiling '
+    + 'and `jitter` (both enforced in `runWithPolicy`, not merely declared — jitter is what stops '
+    + 'a fleet of jobs that failed on one outage from retrying in lockstep). The single '
+    + 'authorable casualty is the automation spelling of the base delay: `retryDelayMs` → '
+    + '`backoffMs`, a pure rename that replays losslessly and is what the already-enforced '
+    + 'retry policies (`job.retryPolicy`, `hook.retryPolicy`) call it.\n\n'
+    + 'The subtle half is the defaults, and it is worth stating because no gate can see it: '
+    + '`job.retryPolicy` defaulted `maxRetries: 3` / `backoffMultiplier: 2` while the automation '
+    + 'shape defaulted 0 / 1, and the authorable-surface gate compares KEY SETS — a changed '
+    + 'default is invisible to it, to the tombstone mechanism and to `spec_changes` alike. The '
+    + 'merged declaration takes 0 / 1 (retry replays side effects, so it is opt-in — the same '
+    + 'reading already recorded in `flow-retry-max-retries-required`), and the conversion writes '
+    + 'the pre-17 numbers into every existing `job.retryPolicy` that omitted them. Deployed '
+    + 'stacks therefore keep their exact behaviour; what changes is only what a NEWLY authored '
+    + 'omission means.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -643,8 +688,29 @@ const step17: MigrationStep = {
     'datasource-read-replicas-removed',
     'datasource-config-driver-key-aliases',
     'flow-node-script-branch-keys-removed',
+    'object-managed-by-system-to-system-data',
+    'retry-policy-converged',
   ],
   semantic: [
+    {
+      id: 'job-retry-policy-constraints-tightened',
+      surface: 'job.retryPolicy.maxRetries (> 10) / job.retryPolicy.backoffMultiplier (< 1)',
+      replacement: 'maxRetries <= 10, and backoffMultiplier >= 1',
+      reason:
+        'The converged RetryPolicy (#4661) keeps the automation side\'s bounds, which the job '
+        + 'side never had: `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1. '
+        + 'Neither has a lossless rewrite. Clamping `maxRetries: 20` to 10 would halve a '
+        + 'retry budget its author chose, and a `backoffMultiplier` below 1 describes a delay '
+        + 'that SHRINKS on each attempt — retrying a failing dependency ever faster, which is '
+        + 'the opposite of backoff and was never a shape the engine meant to offer. Both now '
+        + 'fail at parse time with the bound named, rather than being silently reinterpreted. '
+        + 'Choosing the replacement count (or accepting the cap) is the author\'s call.',
+      acceptanceCriteria:
+        'Every job declaring `retryPolicy` parses: no `maxRetries` above 10 and no '
+        + '`backoffMultiplier` below 1 remain, and each adjusted value was re-chosen knowing a '
+        + 'retry re-runs the handler with its writes and callouts. No job fails to register '
+        + 'with the retry-policy bound prescription.',
+    },
     {
       id: 'flow-retry-max-retries-required',
       surface: "flow.errorHandling.maxRetries (under strategy: 'retry')",

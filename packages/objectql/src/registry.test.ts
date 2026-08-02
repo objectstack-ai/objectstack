@@ -819,19 +819,22 @@ describe('reconcileManagedApiMethods', () => {
         expect(warn).not.toHaveBeenCalled();
     });
 
-    // ADR-0103 — the scope generalization: engine-owned system/append-only
-    // objects derive to reads, while the writable set keeps its verbs.
-    it('strips write verbs from a system-bucket object with no write affordances (engine-owned)', () => {
+    // ADR-0103 — the scope generalization: engine-owned/append-only objects
+    // derive to reads, while the writable set keeps its verbs.
+    it('strips write verbs from an engine-owned object with no write affordances', () => {
         const warn = vi.fn();
         const engineOwned: any = {
             name: 'sys_automation_run',
-            managedBy: 'system',
+            // #3355: this object has been `engine-owned` since the v16 split; the
+            // fixture said `system` only because that value used to double as the
+            // engine-owned default. v17 retired the doubling.
+            managedBy: 'engine-owned',
             enable: { apiEnabled: true, apiMethods: ['get', 'list', 'create', 'update', 'delete'] },
         };
         const out = reconcileManagedApiMethods(engineOwned, { warn });
         expect(out.enable.apiMethods).toEqual(['get', 'list']);
         expect(warn).toHaveBeenCalledTimes(1);
-        expect(warn.mock.calls[0][0]).toContain("managedBy:'system'");
+        expect(warn.mock.calls[0][0]).toContain("managedBy:'engine-owned'");
     });
 
     it('strips write verbs from an append-only object with no write affordances', () => {
@@ -846,12 +849,15 @@ describe('reconcileManagedApiMethods', () => {
         expect(warn).toHaveBeenCalledTimes(1);
     });
 
-    it('keeps CRUD on a system-bucket object whose userActions open the writes (writable set)', () => {
+    it('keeps CRUD on a `system-data` object — the bucket default grants the writes (#3355)', () => {
         const warn = vi.fn();
         const writable: any = {
             name: 'sys_user_position',
-            managedBy: 'system',
-            userActions: { create: true, edit: true, delete: true },
+            // #3355: was `managedBy: 'system'` + a `userActions` re-open block.
+            // The rename made full CRUD the bucket default, so the reconciliation
+            // must reach the same "strip nothing" answer with no `userActions` at
+            // all — that equivalence is the whole claim of the rename.
+            managedBy: 'system-data',
             enable: { apiEnabled: true, apiMethods: ['get', 'list', 'create', 'update', 'delete'] },
         };
         const out = reconcileManagedApiMethods(writable, { warn });

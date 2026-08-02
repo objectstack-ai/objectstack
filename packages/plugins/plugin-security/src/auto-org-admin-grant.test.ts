@@ -8,9 +8,92 @@ import {
   autoOrgAdminGrantReason,
 } from './auto-org-admin-grant.js';
 
+// ---------------------------------------------------------------------------
+// [#4640] The double speaks the ENGINE's signatures — or it proves nothing.
+//
+// The previous stub implemented `delete(object, id)`, a signature ObjectQL has
+// never had. The module called `ql.delete(object, id, ctx)`; the stub happily
+// deleted the row, every revoke test in this file went green, and in production
+// the id landed in the option-bag slot where `rejectUnknownEngineOptions` reads its
+// character indices as unknown keys and throws — straight into a swallowing
+// `catch`. So for this module's entire life NOTHING was ever revoked: demoted
+// admins kept `organization_admin`, hence tenant admin.
+//
+// A double looser than the real thing is not a weaker test — it is a test of a
+// different program. This one therefore mirrors the engine's entry-point
+// contract (`packages/objectql/src/engine.ts`) on both axes that matter:
+//
+//   1. ARITY AND ARGUMENT ROLES, which is where this bug lived:
+//        find(object, query: EngineQueryOptions, options?: EngineReadOptions)
+//        insert(object, data, options?)          ← context in the 3rd arg
+//        delete(object, options?)                ← context in the 2nd arg
+//   2. `rejectUnknownEngineOptions`'s rule that an option key the engine does
+//      not execute is an ERROR — never something to quietly ignore. A
+//      positional argument in the bag slot fails this the same way it fails in
+//      the engine, so the same drift is loud here next time.
+// ---------------------------------------------------------------------------
+
+/** Mirrors `ENGINE_FIND_OPTION_KEYS` in `packages/objectql/src/engine.ts`. */
+const FIND_QUERY_KEYS = new Set([
+  'context', 'where', 'fields', 'orderBy', 'limit', 'offset', 'search', 'searchFields', 'expand',
+]);
+/** Mirrors `ENGINE_DELETE_OPTION_KEYS` — note `where`, and note NO id argument. */
+const DELETE_OPTION_KEYS = new Set(['context', 'where', 'multi']);
+/** The trailing read/write options bag (`EngineReadOptions` and friends). */
+const TRAILING_OPTION_KEYS = new Set(['context']);
+
 /**
- * Tiny in-memory ObjectQL stub: just enough surface for the reconciler
- * (find / insert / delete) with isSystem context passthrough.
+ * The engine's own unknown-key rule, applied to a double.
+ *
+ * Rejecting a non-object bag is the half that catches a positional argument:
+ * `Object.entries('ups_1')` yields `'0'/'1'/'2'…`, which is exactly how the
+ * real engine reports a mis-shaped call — the message just reads better here.
+ */
+function assertOptionBag(
+  operation: string,
+  object: string,
+  bag: unknown,
+  legal: ReadonlySet<string>,
+): void {
+  if (bag === undefined || bag === null) return;
+  if (typeof bag !== 'object' || Array.isArray(bag)) {
+    throw new Error(
+      `${operation}('${object}') takes an OPTION BAG in this position, got ${typeof bag} ` +
+        `(${String(bag)}). The engine names rows by \`where\`, never positionally — ` +
+        `e.g. delete(object, { where: { id }, context }).`,
+    );
+  }
+  const unknown = Object.entries(bag as Record<string, unknown>)
+    .filter(([k, v]) => v != null && !legal.has(k))
+    .map(([k]) => k);
+  if (unknown.length > 0) {
+    throw new Error(
+      `${operation}('${object}') does not recognise option${unknown.length > 1 ? 's' : ''} ` +
+        `${unknown.map((k) => `'${k}'`).join(', ')}. The engine executes none of them, so the ` +
+        `call would succeed with the option silently ignored (#4371). ` +
+        `Legal keys for ${operation}: ${[...legal].sort().join(', ')}.`,
+    );
+  }
+}
+
+/**
+ * This module's writes must run as the system (better-auth's identity tables
+ * refuse user-context writes — ADR-0092 D2). Dropping the context was the
+ * *other* casualty of the three-arg delete, so the double checks for it too.
+ */
+function assertSystemContext(operation: string, object: string, context: any): void {
+  if (!context || context.isSystem !== true) {
+    throw new Error(
+      `${operation}('${object}') reached the datastore without a system context ` +
+        `(got ${JSON.stringify(context) ?? 'undefined'}). The reconciler's own writes are ` +
+        `system writes; a dropped context is how a call shape silently loses its privileges.`,
+    );
+  }
+}
+
+/**
+ * Tiny in-memory ObjectQL double: just enough surface for the reconciler
+ * (find / insert / delete), with the engine's call shapes ENFORCED.
  */
 function makeStub(seed: {
   sys_permission_set?: any[];
@@ -22,6 +105,8 @@ function makeStub(seed: {
     sys_member: seed.sys_member ?? [],
     sys_user_permission_set: seed.sys_user_permission_set ?? [],
   };
+  /** Every delete the module issued, as the engine received it. */
+  const deleteCalls: Array<{ object: string; options: any }> = [];
 
   const matches = (row: any, where: any) => {
     for (const [k, v] of Object.entries(where ?? {})) {
@@ -37,19 +122,47 @@ function makeStub(seed: {
 
   return {
     tables,
-    async find(object: string, args: any) {
-      const rows = tables[object] ?? [];
-      return rows.filter((r) => matches(r, args?.where));
+    deleteCalls,
+    // find(object, query, options) — `where`/`limit` in the query, execution
+    // context in either bag (`options.context` wins, as in the engine).
+    async find(object: string, query?: any, options?: any) {
+      assertOptionBag('find', object, query, FIND_QUERY_KEYS);
+      assertOptionBag('find', object, options, TRAILING_OPTION_KEYS);
+      assertSystemContext('find', object, options?.context ?? query?.context);
+      const rows = (tables[object] ?? []).filter((r) => matches(r, query?.where));
+      return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
     },
-    async insert(object: string, data: any) {
+    // insert(object, data, options) — context in the TRAILING bag.
+    async insert(object: string, data: any, options?: any) {
+      assertOptionBag('insert', object, options, TRAILING_OPTION_KEYS);
+      assertSystemContext('insert', object, options?.context);
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        throw new Error(`insert('${object}') takes a record object as its second argument.`);
+      }
       const id = data.id ?? `${object}_${tables[object].length + 1}`;
       const row = { ...data, id };
       tables[object] = [...(tables[object] ?? []), row];
       return row;
     },
-    async delete(object: string, id: string) {
-      tables[object] = (tables[object] ?? []).filter((r) => r.id !== id);
-      return true;
+    // delete(object, options) — TWO arguments. The row is named by
+    // `where.id`; there is no positional id and no third argument.
+    async delete(object: string, options?: any) {
+      assertOptionBag('delete', object, options, DELETE_OPTION_KEYS);
+      assertSystemContext('delete', object, options?.context);
+      deleteCalls.push({ object, options });
+      const where = options?.where;
+      const id = where && typeof where === 'object' ? (where as any).id : undefined;
+      const scalarId = typeof id === 'string' || typeof id === 'number' ? id : undefined;
+      if (scalarId === undefined && options?.multi !== true) {
+        // The engine's own refusal — an unscoped delete never runs by accident.
+        throw new Error('Delete requires an ID or options.multi=true');
+      }
+      const before = tables[object] ?? [];
+      tables[object] =
+        scalarId !== undefined
+          ? before.filter((r) => r.id !== scalarId)
+          : before.filter((r) => !matches(r, where));
+      return before.length - tables[object].length;
     },
   };
 }
@@ -367,5 +480,99 @@ describe('[#4586] the auto-grant records its provenance', () => {
     const row = stub.tables.sys_user_permission_set[0];
     expect(row.granted_by).toBeNull();
     expect(row.reason).toContain('mem_7');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#4640] The revoke channel, pinned at the call SHAPE.
+//
+// Every `revoked` assertion in this file was already green while production
+// revoked nothing, because the double implemented the wrong signature. The
+// tests below pin the two things that green-ness depended on and nobody was
+// checking: the exact call the module hands the engine, and the double's
+// refusal to accept anything else.
+// ---------------------------------------------------------------------------
+describe('[#4640] revoke speaks the engine\'s delete signature', () => {
+  const seedDemoted = () =>
+    makeStub({
+      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'member' }],
+      sys_user_permission_set: [
+        { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
+      ],
+    });
+
+  it('names the row by `where.id` in a TWO-argument call carrying the system context', async () => {
+    const stub = seedDemoted();
+    const res = await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
+
+    expect(res.action).toBe('revoked');
+    expect(stub.deleteCalls).toHaveLength(1);
+    const [call] = stub.deleteCalls;
+    expect(call.object).toBe('sys_user_permission_set');
+    // The whole bug in one assertion: the id belongs INSIDE the option bag.
+    expect(call.options).toEqual({ where: { id: 'ups1' }, context: { isSystem: true } });
+  });
+
+  it('the double refuses the three-argument call the module used to make', async () => {
+    // The drift guard. If a future edit reverts the call shape — or loosens
+    // this double back toward `delete(object, id)` — this is what goes red
+    // instead of the whole feature going silently inert.
+    const stub = seedDemoted();
+    await expect(
+      (stub as any).delete('sys_user_permission_set', 'ups1', { context: { isSystem: true } }),
+    ).rejects.toThrow(/takes an OPTION BAG/);
+    expect(stub.tables.sys_user_permission_set).toHaveLength(1);
+  });
+
+  it('a delete the datastore rejects is REPORTED — never a silent no-op', async () => {
+    // The other half of why this survived: the wrapper's `catch {}` turned a
+    // throwing revoke into `false` and told nobody. The capability is still in
+    // force, so that has to reach an operator.
+    const stub = seedDemoted();
+    stub.delete = async () => {
+      throw new Error('driver exploded');
+    };
+    const warnings: Array<{ msg: string; meta?: any }> = [];
+    const logger = { warn: (msg: string, meta?: any) => warnings.push({ msg, meta }) };
+
+    const res = await reconcileOrgAdminGrant(stub, 'u1', 'o1', { ...WALLED, logger });
+
+    expect(res).toEqual({ action: 'skipped', reason: 'delete_failed' });
+    // The grant row is still there — the state the warning is about.
+    expect(stub.tables.sys_user_permission_set).toHaveLength(1);
+    expect(warnings.map((w) => w.msg)).toEqual([
+      '[security] org-admin grant revoke FAILED — capability still in force',
+      '[security] org-admin capability could NOT be revoked — grant rows remain',
+    ]);
+    expect(warnings[0].meta.error).toBe('driver exploded');
+  });
+
+  it('"nothing to revoke" stays distinguishable from "revoke failed"', async () => {
+    // `noop` and `skipped/delete_failed` are different facts about the
+    // platform's state; collapsing them is how the failure hid.
+    const stub = makeStub({
+      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'member' }],
+      sys_user_permission_set: [],
+    });
+    const res = await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
+    expect(res).toEqual({ action: 'noop' });
+    expect(stub.deleteCalls).toHaveLength(0);
+  });
+
+  it('membership removal revokes through the same channel', async () => {
+    // The `sys_member` delete path: no membership row at all, grant still there.
+    const stub = makeStub({
+      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_member: [],
+      sys_user_permission_set: [
+        { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
+      ],
+    });
+    const res = await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
+    expect(res.action).toBe('revoked');
+    expect(stub.tables.sys_user_permission_set).toHaveLength(0);
+    expect(stub.deleteCalls[0].options.where).toEqual({ id: 'ups1' });
   });
 });

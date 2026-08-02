@@ -165,18 +165,22 @@ export type ParallelConfigParsed = z.infer<typeof ParallelConfigSchema>;
 
 /**
  * Structured retry policy — surfaces the engine's existing exponential-backoff
- * retry (`FlowSchema.errorHandling`) as a per-construct policy. Mirrors that
- * shape so the engine can reuse one backoff implementation.
+ * retry (`FlowSchema.errorHandling`) as a per-construct policy.
+ *
+ * The declaration moved to `shared/retry-policy.zod.ts` in 17.0.0 (#4661): the
+ * identically-named `system/job.zod.ts` shape was the same concept under a
+ * different spelling, so `@objectstack/spec/automation` and
+ * `@objectstack/spec/system` handed out two different `RetryPolicy` types for
+ * one idea (the #4411 trap). One declaration now serves both entries. For THIS
+ * entry the visible change is the base delay: `retryDelayMs` → `backoffMs`
+ * (tombstoned, with a conversion), plus `maxRetries`/`backoffMultiplier`
+ * defaults that are unchanged here — 0 and 1 were already the automation values.
+ *
+ * Re-exported so `./automation` keeps publishing the name (and its
+ * `automation/RetryPolicy` JSON-Schema def, which is keyed by entry namespace).
  */
-export const RetryPolicySchema = lazySchema(() => z.object({
-  maxRetries: z.number().int().min(0).max(10).default(0).describe('Retry attempts before giving up'),
-  retryDelayMs: z.number().int().min(0).default(1000).describe('Base delay between retries (ms)'),
-  backoffMultiplier: z.number().min(1).default(1).describe('Exponential backoff multiplier'),
-  maxRetryDelayMs: z.number().int().min(0).default(30000).describe('Maximum delay between retries (ms)'),
-  jitter: z.boolean().default(false).describe('Add random jitter to retry delay'),
-}));
-
-export type RetryPolicy = z.input<typeof RetryPolicySchema>;
+export { RetryPolicySchema, type RetryPolicy, type RetryPolicyParsed } from '../shared/retry-policy.zod';
+import { RetryPolicySchema } from '../shared/retry-policy.zod';
 
 /**
  * `try_catch` config — structured error handling. The `try` region runs; if it

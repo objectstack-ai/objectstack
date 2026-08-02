@@ -3,7 +3,7 @@
 "@objectstack/metadata-protocol": minor
 ---
 
-feat(spec,metadata-protocol): `IObjectQLEngine.transaction` joins the slot contract, and `batchData`'s `atomic` flag becomes real — rollback or refusal, never silent best-effort (ADR-0118 D1/D4, #4612)
+feat(spec,metadata-protocol): `IObjectQLEngine.transaction` joins the slot contract, and `batchData`'s `atomic` flag becomes real — rollback or refusal, never silent best-effort (ADR-0119 D1/D4, #4612)
 
 **D1 — the contract fix.** `ObjectQL.transaction()` — ADR-0034's ambient
 transaction, shipped since v8.0.0 — was reachable from plugin space only
@@ -53,7 +53,7 @@ If you were passing `atomic: true` and relying on partial results surviving a
 failure, that was the bug — switch to `atomic: false` (or omit it) for
 best-effort semantics.
 
-ADR-0118 also rules on two items landing separately: D2 specifies a
+ADR-0119 also rules on two items landing separately: D2 specifies a
 framework-owned migration-journal runner for multi-step migrations too large
 for one transaction, and D3 retires the declared-but-unimplemented
 `IDataEngine.batch?`.

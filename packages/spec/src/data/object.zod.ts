@@ -759,6 +759,33 @@ const objectUnknownKeyError: z.core.$ZodErrorMap = (issue) =>
  * across `platform-objects` and the three example apps uses only declared
  * top-level keys.
  */
+/**
+ * Prescription for the retired `managedBy: 'system'` bucket (#3355, the v17
+ * close-out of ADR-0103's v16 split).
+ *
+ * ADR-0103 split the overloaded `system` bucket ADDITIVELY: the 20 engine-owned
+ * objects moved to the new explicit `engine-owned`, and the 8 admin/user-writable
+ * ones stayed behind on `system`. That left the name pointing at the half it no
+ * longer described — "system" on precisely the objects a user writes — which is
+ * the kind of residual overload an author (especially a model author) resolves by
+ * guessing. v17 finishes the split by renaming the residue to `system-data` and
+ * retiring the bare value.
+ *
+ * Because v16 already drained the engine side, `system` → `system-data` is a
+ * ONE-TO-ONE mechanical replacement: there is no judgement call in the upgrade,
+ * which is why the message can prescribe a single answer.
+ */
+const MANAGED_BY_SYSTEM_RETIRED =
+  "`object.managedBy: 'system'` was removed in @objectstack/spec 17 (#3355, ADR-0103 v17 "
+  + 'addendum) — v16 moved every engine-owned object to `engine-owned`, leaving `system` '
+  + 'labelling admin/user-writable platform DATA under a name that says the opposite. '
+  + "Use `managedBy: 'system-data'` (platform-defined schema, admin/user-writable data; "
+  + 'authz stays the DelegatedAdminGate / RLS / permission sets). Rename the value; nothing '
+  + 'else about the object changes. Note `system-data` defaults to FULL CRUD affordances '
+  + '(the old `system` default was locked), so a `userActions` block that existed only to '
+  + 're-open create/edit/delete is now redundant and can be deleted — keep it only to '
+  + 'NARROW. Run `os migrate meta --from 16` to rewrite it automatically.';
+
 const ObjectSchemaBase = z.object({
   /**
    * Identity & Metadata
@@ -797,15 +824,22 @@ const ObjectSchemaBase = z.object({
    *   purpose-built "Import definition (JSON)" action instead). Example:
    *   `sys_sharing_rule`, `sys_position`, `sys_permission_set`, `sys_view`,
    *   `sys_app`.
-   * - `system`       — Platform-defined schema that holds **admin/user-writable
+   * - `system-data`  — Platform-defined schema that holds **admin/user-writable
    *   DATA**: the RBAC link tables (`sys_user_position`,
    *   `sys_user_permission_set`, `sys_position_permission_set`, governed by
    *   the `DelegatedAdminGate`), `sys_user_preference`, the messaging config
-   *   grids (`sys_notification_subscription`, `_template`, `_preference`). The
-   *   bucket DEFAULT is locked; each object declares {@link userActions} to
-   *   open the writes it takes. The affordance is a declaration only — the real
-   *   authz stays the delegated-admin gate / RLS. (For rows the engine owns end
-   *   to end with no user writes, use `engine-owned`.)
+   *   grids (`sys_notification_subscription`, `_template`, `_preference`). Two
+   *   boundaries define it: the SCHEMA is the platform's (versioned with the
+   *   release, not tenant-modelled — that is `platform`), while the DATA is the
+   *   admin's or the user's, written through a governed path (not the engine's —
+   *   that is `engine-owned`). The bucket DEFAULT is therefore WRITABLE (full
+   *   CRUD); narrow it with {@link userActions} where an object takes less. The
+   *   affordance is a declaration only — the real authz stays the
+   *   delegated-admin gate / RLS / permission sets.
+   *   (Renamed from the residual `system` in v17 — #3355. `system` named the
+   *   bucket after the half of the overload v16 had already moved out to
+   *   `engine-owned`, so it read as "the engine owns this" on precisely the
+   *   objects users write.)
    * - `engine-owned` — Runtime rows whose lifecycle a platform service owns
    *   end to end (the approval engine, the sharing engine, the job runner, the
    *   metadata store, …), written only via `isSystem` / a service `SYSTEM_CTX` /
@@ -815,8 +849,8 @@ const ObjectSchemaBase = z.object({
    *   `sys_approval_request`, `sys_record_share`, `sys_notification`,
    *   `sys_automation_run`, `sys_job`, `sys_metadata`, `sys_secret`. (ADR-0103;
    *   the explicit successor to the old engine-owned-DEFAULT overload of
-   *   `system`. `system` / `append-only` objects granting no resolved write are
-   *   also treated as engine-owned by the write guard, so the split is a
+   *   `system`. `append-only` objects granting no resolved write are also
+   *   treated as engine-owned by the write guard, so the split is a
    *   self-documenting relabel, not an enforcement change.)
    * - `append-only`  — Immutable audit log. No New / Import / Edit /
    *   Delete; only View and Export. Example: `sys_approval_action`,
@@ -834,20 +868,29 @@ const ObjectSchemaBase = z.object({
    * is {@link resolveCrudAffordances} (bucket default + `userActions`).
    * Enforcement happens in three places:
    *   1. Default permission sets ({@link packages/platform-objects/src/security/default-permission-sets.ts})
-   *      deny direct CRUD for `system` / `engine-owned` / `append-only` / `better-auth`.
+   *      deny direct CRUD for `engine-owned` / `append-only` / `better-auth`.
    *   2. UI clients honour {@link resolveCrudAffordances} to gate the
    *      New / Import / Edit / Delete / Export buttons accordingly.
    *   3. Engine write guards fail-closed on user-context generic writes to a
    *      managed object whose resolved affordances forbid the verb —
    *      `better-auth` via plugin-auth's identity write guard (ADR-0092),
-   *      `system` / `engine-owned` / `append-only` via plugin-security's system
+   *      `engine-owned` / `append-only` via plugin-security's engine-owned
    *      write guard (ADR-0103). `isSystem` / context-less engine writes bypass.
+   *      `system-data` — like `platform` / `config` — is writable by default and
+   *      carries no such guard; its writes are adjudicated by the delegated-admin
+   *      gate / RLS / permission sets.
    *
    * Use {@link userActions} to override the default matrix for a single
    * field (e.g. an "append-only" table that should still allow Export).
    */
-  managedBy: z.enum(['platform', 'config', 'system', 'engine-owned', 'append-only', 'better-auth']).optional().describe(
-    'Lifecycle bucket — platform (user CRUD) | config (admin authored) | system (engine-managed schema, writable via userActions) | engine-owned (engine owns the lifecycle, no user writes) | append-only (audit) | better-auth (identity). UI clients honour the resolved affordance matrix.',
+  managedBy: z.enum(['platform', 'config', 'system-data', 'engine-owned', 'append-only', 'better-auth'], {
+    // Only the value that USED to be legal gets the retirement prescription —
+    // telling the author of `managedBy: 'sytem'` that their value "was removed"
+    // would misinform. Everything else keeps zod's own enum message, which
+    // already lists the legal values.
+    error: (issue) => (issue.input === 'system' ? MANAGED_BY_SYSTEM_RETIRED : undefined),
+  }).optional().describe(
+    'Lifecycle bucket — platform (user CRUD) | config (admin authored) | system-data (platform-defined schema, admin/user-writable data) | engine-owned (engine owns the lifecycle, no user writes) | append-only (audit) | better-auth (identity). UI clients honour the resolved affordance matrix.',
   ),
 
   /**
@@ -1495,6 +1538,58 @@ function warnGenericPasswordFields(
 }
 
 /**
+ * [#3355] Authoring-time refusal for the ONE way `system-data` can be
+ * mis-assigned: declaring it on an object that grants no user write at all.
+ *
+ * The v17 rename fixed a name that lied. This keeps it from lying again. The two
+ * halves of `system-data` are "platform-defined SCHEMA" and "admin/user-writable
+ * DATA"; an object whose resolved affordances forbid create AND edit AND delete
+ * satisfies the first half and contradicts the second, and the value it is
+ * actually describing is `engine-owned` (or `append-only` for an audit log).
+ * That contradiction is fully computable from the declaration alone — no call
+ * graph needed — so it is refused rather than reviewed.
+ *
+ * This matters more under the v17 defaults than it would have under v16. `system`
+ * defaulted LOCKED, so a mislabelled engine-owned object inherited a harmless
+ * read-only matrix; `system-data` defaults WRITABLE, so the same mistake now
+ * hands a table generic CRUD affordances it should never advertise. The write
+ * guard does not cover `system-data` (nothing to fail closed on when the default
+ * grants the write), so authoring time is the only place this can be caught —
+ * hence a throw, not a `console.warn`.
+ *
+ * Threshold is "no write verb at all", not "any narrowing": `system-data` +
+ * `userActions: { create: false, delete: false }` (an editable-only config grid)
+ * is a legitimate NARROW and passes. Only the all-writes-false shape is a
+ * contradiction, and it has no honest reading.
+ *
+ * Lives at `create()` — the authoring surface (ADR-0077) — alongside
+ * {@link warnGenericPasswordFields}, rather than in raw `.parse()`: stored rows
+ * arriving through the protocol-17 conversion are a 1:1 rename of values that
+ * were already writable, and failing a LOAD on metadata already at rest would
+ * turn an authoring defect into an outage.
+ */
+function assertSystemDataIsWritable(
+  objectName: unknown,
+  managedBy: unknown,
+  userActions: unknown,
+): void {
+  if (managedBy !== 'system-data') return;
+  const aff = resolveCrudAffordances({ managedBy, userActions } as never);
+  if (aff.create || aff.edit || aff.delete) return;
+  const name = typeof objectName === 'string' && objectName.length > 0 ? objectName : '<unnamed>';
+  throw new Error(
+    `ObjectSchema.create('${name}'): \`managedBy: 'system-data'\` declares "platform-defined `
+    + 'schema, admin/user-writable DATA", but this object\'s resolved affordances grant no '
+    + 'create, edit or delete — so nothing about it is user-writable and the bucket name is '
+    + 'false. Use `managedBy: \'engine-owned\'` for rows a platform service owns end to end '
+    + '(written via `isSystem` / a service SYSTEM_CTX), or `append-only` for an immutable '
+    + 'audit log. If the object IS user-writable, drop the `userActions` entries closing '
+    + 'create/edit/delete — the `system-data` default is full CRUD, and `userActions` is for '
+    + 'NARROWING only (#3355).',
+  );
+}
+
+/**
  * [ADR-0079] Back-compat alias normalization: an object authored with the
  * deprecated `displayNameField` key still parses by mapping it onto the
  * canonical `nameField` when `nameField` is absent. `displayNameField` is
@@ -1609,6 +1704,10 @@ export const ObjectSchema = lazySchema(() => {
     // rest, not hashed. `create()` is the authoring surface (ADR-0077), so the
     // steer lives here rather than in raw `.parse()`.
     warnGenericPasswordFields(cfg.name, cfg.fields, cfg.managedBy);
+    // [#3355] `system-data` on an object that grants no user write is a
+    // contradiction with no honest reading — refuse it here, where it is cheap
+    // to fix, rather than shipping a bucket whose name lies again.
+    assertSystemDataIsWritable(cfg.name, cfg.managedBy, cfg.userActions);
     const withDefaults = {
       ...cfg,
       label: cfg.label ?? snakeCaseToLabel(cfg.name as string),
@@ -1685,14 +1784,16 @@ export interface RowCrudPredicates {
  *   config       — admin authored: New/Edit/Delete OK, no CSV import
  *                  (definitions have nested envelopes; admins should use
  *                  a purpose-built "Import definition" action instead)
- *   system       — platform-defined schema holding admin/user-writable data
+ *   system-data  — platform-defined schema holding admin/user-writable data
  *                  (RBAC link tables, prefs, messaging config). DEFAULT is
- *                  locked; each object opens its writes via `userActions` — the
- *                  affordance declaration only; authz stays the delegated-admin
- *                  gate / RLS (ADR-0103)
+ *                  WRITABLE — the bucket exists to say "the data is yours" —
+ *                  and an object that takes less NARROWS via `userActions`.
+ *                  Affordance declaration only; authz stays the delegated-admin
+ *                  gate / RLS / permission sets (ADR-0103, renamed from the
+ *                  locked-default `system` in v17 — #3355)
  *   engine-owned — runtime rows the engine owns end to end; no user writes.
- *                  Same locked matrix as `system`; the explicit, self-
- *                  documenting successor to system's old engine-owned default
+ *                  The explicit, self-documenting successor to the old
+ *                  engine-owned DEFAULT of `system`
  *   append-only  — audit log: View + Export only
  *   better-auth  — identity tables owned by better-auth driver; CRUD
  *                  routed through purpose-built actions (Invite, Reset
@@ -1701,7 +1802,7 @@ export interface RowCrudPredicates {
 const CRUD_AFFORDANCE_DEFAULTS: Record<NonNullable<ServiceObject['managedBy']> | 'platform', CrudAffordances> = {
   platform:       { create: true,  import: true,  edit: true,  delete: true,  exportCsv: true },
   config:         { create: true,  import: false, edit: true,  delete: true,  exportCsv: true },
-  system:         { create: false, import: false, edit: false, delete: false, exportCsv: true },
+  'system-data':  { create: true,  import: true,  edit: true,  delete: true,  exportCsv: true },
   'engine-owned': { create: false, import: false, edit: false, delete: false, exportCsv: true },
   'append-only':  { create: false, import: false, edit: false, delete: false, exportCsv: true },
   'better-auth':  { create: false, import: false, edit: false, delete: false, exportCsv: true },

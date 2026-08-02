@@ -56,16 +56,31 @@ export type OnceSchedule = z.infer<typeof OnceScheduleSchema>;
 // name: `Schedule`.
 
 /**
- * Retry Policy Schema
- * Configuration for job retry behavior with exponential backoff
+ * Retry Policy Schema — job retry behaviour with exponential backoff.
+ *
+ * The declaration moved to `shared/retry-policy.zod.ts` in 17.0.0 (#4661).
+ * `@objectstack/spec/automation` exported an identically-named, differently
+ * shaped `RetryPolicy` for the `try_catch` node's `retry` region, so which type
+ * a consumer got depended only on the import path (the #4411 trap) — and they
+ * were never two concepts: both compute
+ * `delay = base * multiplier^(retry-1)`. Re-exported so `./system` keeps
+ * publishing the name (and its `system/RetryPolicy` def, keyed by entry
+ * namespace).
+ *
+ * Three things change for job authors, all covered by the
+ * `retry-policy-converged` conversion:
+ *
+ *  - `maxRetryDelayMs` and `jitter` are now available here (they were
+ *    automation-only). Both are honoured by `runWithPolicy`.
+ *  - `maxRetries` now defaults to **0**, not 3, and `backoffMultiplier` to 1,
+ *    not 2 — the conversion writes the old values into existing documents, so
+ *    no deployed job changes behaviour; only a NEWLY authored omission means
+ *    "no retry".
+ *  - `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1 (the
+ *    automation constraints). Both reject loudly at parse time.
  */
-export const RetryPolicySchema = lazySchema(() => z.object({
-  maxRetries: z.number().int().min(0).default(3).describe('Maximum number of retry attempts'),
-  backoffMs: z.number().int().positive().default(1000).describe('Initial backoff delay in milliseconds'),
-  backoffMultiplier: z.number().positive().default(2).describe('Multiplier for exponential backoff'),
-}));
-
-export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
+export { RetryPolicySchema, type RetryPolicy, type RetryPolicyParsed } from '../shared/retry-policy.zod';
+import { RetryPolicySchema } from '../shared/retry-policy.zod';
 
 /**
  * Job Schema
@@ -99,7 +114,7 @@ export const JobSchema = lazySchema(() => strictObject({
   description: z.string().optional().describe('Job description / purpose'),
   schedule: ScheduleSchema.describe('Job schedule configuration'),
   handler: z.string().describe('Handler function name (must match a key in `defineStack({ functions })`)'),
-  retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = backoffMs * backoffMultiplier^(retry-1)) up to maxRetries retries after the initial attempt (#3494). Omit for the legacy single-attempt behavior.'),
+  retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt (#3494). Omit the block for a single attempt; declaring it without `maxRetries` also means no retry since 17.0.0 (#4661) — state a count to opt in.'),
   timeout: z.number().int().positive().optional().describe('Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout" (#3494). The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit.'),
   enabled: z.boolean().default(true).describe('Whether the job is enabled'),
 

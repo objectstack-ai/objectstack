@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// ADR-0118 (#4612), end-to-end: the real `ObjectQL` engine + the real metadata
+// ADR-0119 (#4612), end-to-end: the real `ObjectQL` engine + the real metadata
 // protocol + a driver whose transactions actually roll back. The unit pins in
 // `metadata-protocol/src/protocol.batch-atomic.test.ts` prove `batchData` asks
 // for the right things; these prove the stack delivers them — that the rows are
@@ -102,7 +102,7 @@ function makeSnapshotDriver() {
     return { driver, seen, rowsOf: (o: string) => Array.from(storeFor(o).values()) };
 }
 
-describe('atomic batchData over the real engine (ADR-0118 D4 / ADR-0034)', () => {
+describe('atomic batchData over the real engine (ADR-0119 D4 / ADR-0034)', () => {
     let engine: ObjectQL;
     let protocol: ObjectStackProtocolImplementation;
     let d: ReturnType<typeof makeSnapshotDriver>;
@@ -216,7 +216,7 @@ describe('atomic batchData over the real engine (ADR-0118 D4 / ADR-0034)', () =>
     });
 });
 
-describe('ADR-0118 D1 — transaction is reachable through the contract', () => {
+describe('ADR-0119 D1 — transaction is reachable through the contract', () => {
     it('calls transaction() on an engine typed as IObjectQLEngine, with no cast', async () => {
         const engine = new ObjectQL();
         const d = makeSnapshotDriver();
@@ -224,7 +224,7 @@ describe('ADR-0118 D1 — transaction is reachable through the contract', () => 
         await engine.init();
         engine.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } } as any);
 
-        // The point of the pin is the TYPE, not the runtime: before ADR-0118 D1
+        // The point of the pin is the TYPE, not the runtime: before ADR-0119 D1
         // this line could not compile — `transaction` was absent from the
         // contract, so every cross-package consumer reached it through
         // `as unknown as { transaction: ... }`.

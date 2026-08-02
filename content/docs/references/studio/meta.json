@@ -4,6 +4,7 @@
     "action",
     "flow-builder",
     "object-designer",
-    "plugin"
+    "plugin",
+    "plugin-runtime"
   ]
 }

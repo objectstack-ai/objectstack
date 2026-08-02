@@ -184,12 +184,45 @@ describe('RetryPolicySchema', () => {
     expect(() => RetryPolicySchema.parse(policy)).not.toThrow();
   });
 
-  it('should apply default values', () => {
+  // #4661: retry is opt-in since 17.0.0. `maxRetries` defaulted to 3 and
+  // `backoffMultiplier` to 2 while this shape was job-only; the converged
+  // declaration takes the automation side's 0 / 1, because a retry replays the
+  // handler's writes and callouts and that has to be asked for. Existing job
+  // documents keep the old numbers — `retry-policy-converged` writes them in —
+  // so what changed is only what a NEWLY authored omission means.
+  it('applies opt-in defaults: a declared but empty policy does not retry', () => {
     const policy = RetryPolicySchema.parse({});
 
-    expect(policy.maxRetries).toBe(3);
+    expect(policy.maxRetries).toBe(0);
     expect(policy.backoffMs).toBe(1000);
-    expect(policy.backoffMultiplier).toBe(2);
+    expect(policy.backoffMultiplier).toBe(1);
+    expect(policy.maxRetryDelayMs).toBe(30000);
+    expect(policy.jitter).toBe(false);
+  });
+
+  // The two keys the convergence brought over from the automation side. They
+  // are declared here only because `runWithPolicy` actually honours them
+  // (ADR-0049: declared IS enforced).
+  it('accepts the maxRetryDelayMs ceiling and jitter', () => {
+    const policy = RetryPolicySchema.parse({ maxRetries: 5, maxRetryDelayMs: 60000, jitter: true });
+
+    expect(policy.maxRetryDelayMs).toBe(60000);
+    expect(policy.jitter).toBe(true);
+  });
+
+  it('rejects the retired `retryDelayMs` spelling with the rename prescription', () => {
+    const parse = () => RetryPolicySchema.parse({ retryDelayMs: 500 });
+
+    expect(parse).toThrow(/backoffMs/);
+    expect(parse).toThrow(/retryDelayMs/);
+  });
+
+  // Bounds the job side did not have before the merge. Both fail loudly rather
+  // than being silently reinterpreted — see the
+  // `job-retry-policy-constraints-tightened` semantic migration note.
+  it('enforces the converged bounds (maxRetries <= 10, backoffMultiplier >= 1)', () => {
+    expect(() => RetryPolicySchema.parse({ maxRetries: 20 })).toThrow();
+    expect(() => RetryPolicySchema.parse({ backoffMultiplier: 0.5 })).toThrow();
   });
 
   it('should accept zero retries', () => {
