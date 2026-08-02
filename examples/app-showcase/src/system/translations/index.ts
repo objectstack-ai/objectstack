@@ -160,6 +160,12 @@ export const ShowcaseTranslationBundle = {
           combo_count_vs_progress: { title: 'Task Count vs Avg Progress' },
         },
       },
+      showcase_revenue_pulse: {
+        widgets: {
+          kpi_paid_rate: { title: 'Paid Rate' },
+          table_rate_by_status: { title: 'Paid Rate by Status' },
+        },
+      },
     },
   },
   'zh-CN': {
@@ -374,6 +380,16 @@ export const ShowcaseTranslationBundle = {
       showcase_chart_gallery: {
         widgets: {
           combo_count_vs_progress: { title: '任务数与平均进度' },
+        },
+      },
+      // Same rule as the gallery above: these two widgets are born with the
+      // percent-scale fix, so they are translated at birth. Revenue Pulse's
+      // other widget titles predate the ratchet and stay in the frozen
+      // baseline. objectui#3136.
+      showcase_revenue_pulse: {
+        widgets: {
+          kpi_paid_rate: { title: '已付比例' },
+          table_rate_by_status: { title: '各状态已付比例' },
         },
       },
     },
