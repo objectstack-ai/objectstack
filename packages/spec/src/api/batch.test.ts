@@ -54,7 +54,7 @@ describe('BatchOptionsSchema', () => {
   it('should use default values', () => {
     const options = BatchOptionsSchema.parse({});
 
-    // ADR-0118 D4 — `atomic` defaults to FALSE. It declared `true` for as long
+    // ADR-0119 D4 — `atomic` defaults to FALSE. It declared `true` for as long
     // as no batch surface honoured it; the declaration was aligned down to the
     // enforced behaviour so that opting in is explicit and nobody's failure
     // semantics changed silently.

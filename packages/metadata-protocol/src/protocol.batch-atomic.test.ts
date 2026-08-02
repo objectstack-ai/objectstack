@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// ADR-0118 D4 (#4612) — `batchData`'s `atomic` flag is REAL or REFUSED.
+// ADR-0119 D4 (#4612) — `batchData`'s `atomic` flag is REAL or REFUSED.
 //
 // It used to be neither. The flag advertised "rollback entire batch on any
 // failure (transaction mode)" and opened no transaction at all: it `break`-ed
@@ -71,7 +71,7 @@ function makeTransactionalEngine(opts: { driverCanTransact?: boolean } = {}) {
     return { engine, insert, update, findOne, del, commits, rollbacks, handle };
 }
 
-describe('batchData atomic — rollback is real and the response admits it (ADR-0118 D4)', () => {
+describe('batchData atomic — rollback is real and the response admits it (ADR-0119 D4)', () => {
     it('rolls back the whole batch on the first failure and reports ZERO successes', async () => {
         const t = makeTransactionalEngine();
         const p = new ObjectStackProtocolImplementation(t.engine);
@@ -162,7 +162,7 @@ describe('batchData atomic — rollback is real and the response admits it (ADR-
     });
 });
 
-describe('batchData atomic — refuses rather than degrading (ADR-0118 D4)', () => {
+describe('batchData atomic — refuses rather than degrading (ADR-0119 D4)', () => {
     it('refuses with 501 when the engine has no transaction(), attempting NO writes', async () => {
         const t = makeTransactionalEngine();
         delete t.engine.transaction;
@@ -180,7 +180,7 @@ describe('batchData atomic — refuses rather than degrading (ADR-0118 D4)', () 
     it('refuses when the default driver cannot begin a transaction, even though the engine exposes transaction()', async () => {
         // The subtle case: `engine.transaction()` silently runs the callback
         // with NO transaction when the driver lacks `beginTransaction`
-        // (ADR-0118 D1's declared caveat). Probing only the engine would let
+        // (ADR-0119 D1's declared caveat). Probing only the engine would let
         // "atomic" go back to meaning best-effort precisely here.
         const t = makeTransactionalEngine({ driverCanTransact: false });
         const p = new ObjectStackProtocolImplementation(t.engine);
@@ -195,7 +195,7 @@ describe('batchData atomic — refuses rather than degrading (ADR-0118 D4)', () 
     });
 });
 
-describe('batchData atomic — precedence and opt-in (ADR-0118 D4)', () => {
+describe('batchData atomic — precedence and opt-in (ADR-0119 D4)', () => {
     it('atomic outranks continueOnError: the batch aborts and rolls back instead of continuing', async () => {
         const t = makeTransactionalEngine();
         const p = new ObjectStackProtocolImplementation(t.engine);
@@ -236,7 +236,7 @@ describe('batchData atomic — precedence and opt-in (ADR-0118 D4)', () => {
     });
 });
 
-describe('batchData non-atomic — unchanged (ADR-0118 D4 regression net)', () => {
+describe('batchData non-atomic — unchanged (ADR-0119 D4 regression net)', () => {
     it('opens no transaction and keeps prior successes when atomic is absent', async () => {
         const t = makeTransactionalEngine();
         const p = new ObjectStackProtocolImplementation(t.engine);

@@ -128,7 +128,7 @@ export interface SysMetadataEngine {
    * `ObjectQL.transaction` semantics). Repository code must not rely on
    * rollback for correctness against in-memory drivers.
    *
-   * Typed off the `objectql` slot contract (ADR-0118 D1) rather than restated
+   * Typed off the `objectql` slot contract (ADR-0119 D1) rather than restated
    * by hand, so this stub surface cannot drift from `ObjectQL.transaction`.
    */
   transaction?: IObjectQLEngine['transaction'];

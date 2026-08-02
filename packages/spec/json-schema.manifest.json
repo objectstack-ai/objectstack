@@ -1366,6 +1366,7 @@
     "system/MiddlewareConfig",
     "system/MiddlewareType",
     "system/MigrationDependency",
+    "system/MigrationJournalEvent",
     "system/MigrationOperation",
     "system/MigrationPlan",
     "system/MigrationStatement",

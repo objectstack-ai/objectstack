@@ -3,6 +3,7 @@
 import { SetupAppTranslations } from './apps/translations/index.js';
 import { MetadataFormsTranslations } from './metadata-translations/index.js';
 import { SysMigration } from './system/sys-migration.object.js';
+import { SysMigrationJournal } from './system/sys-migration-journal.object.js';
 import { SysSecret } from './system/sys-secret.object.js';
 import { attestFreshDatastore } from './system/migration-flag.js';
 import type { II18nService, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -21,6 +22,14 @@ import type { II18nService, IObjectQLEngine } from '@objectstack/spec/contracts'
  *    file collection, the engine's strict value-shape gates (#3438/#4235)
  *    and the migration CLI all read the same ledger, and none of them
  *    should have to drag an unrelated service into the boot to find it.
+ *  - **`sys_migration_journal`** — the per-RUN crash-recovery trace
+ *    (ADR-0119 D2, #4617). Distinct from the flag ledger above in grain
+ *    and purpose: that one records the durable verdict for a named
+ *    migration, this one records what happened inside a single run, so a
+ *    restarted process can tell whether chunk 7 committed. Registered
+ *    unconditionally alongside it because recovery must be discoverable
+ *    with ZERO host wiring — a journal composed by some kernels and not
+ *    others is ADR-0078's silently-inert failure in another costume.
  *  - **`sys_secret`** — the environment's encrypted-secret store
  *    (ADR-0066 D2/④). Same shape as the ledger, sharper stakes (#4270):
  *    its producers span domains — the settings service's encrypted
@@ -73,7 +82,7 @@ export class PlatformObjectsPlugin {
         version: this.version,
         type: 'plugin',
         scope: 'system',
-        objects: [SysMigration, SysSecret],
+        objects: [SysMigration, SysMigrationJournal, SysSecret],
       });
     } catch {
       // No manifest service (lean / i18n-only kernels) — the ledger stays
