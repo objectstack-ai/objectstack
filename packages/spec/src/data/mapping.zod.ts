@@ -4,7 +4,8 @@ import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { QuerySchema } from './query.zod';
+// `QuerySchema` left with `extractQuery` in 17.0.0 (#4509) — a mapping no
+// longer carries a query of its own.
 
 /**
  * Shared history for this file (#4001).
@@ -18,6 +19,62 @@ import { QuerySchema } from './query.zod';
 const MAPPING_HISTORY =
   'Until #4001 closed this shape these were dropped silently — the mapping still ran to '
   + 'completion and reported success, minus whatever the key was meant to control.';
+
+/**
+ * Keys retired from `MappingSchema` in 17.0.0 (#4509, ADR-0049).
+ *
+ * All three parsed, stored, and controlled nothing. They are grouped here
+ * rather than inlined because two of them were **unwarnable**: `errorPolicy`
+ * and `batchSize` carried schema defaults, and a default materialises at parse
+ * time, so the liveness lint could not tell an authored value from one the
+ * schema filled in (`_authorWarnSkipped` in `liveness/mapping.json`). A key the
+ * advisory lint structurally cannot warn about has exactly one way to become
+ * audible to its author, and this is it — which is why they went out in the
+ * 17.0.0 window rather than waiting to be "warned about first".
+ *
+ * The old alias spellings (`query`, `onError`, `errorHandling`, `errorMode`,
+ * `batch`, `chunkSize`, `skipErrors`) are listed too: an author who learned the
+ * alias should land on the prescription, not on a "did you mean" pointing at a
+ * key that is also gone. A `guidance` entry suppresses the rename suggestion,
+ * which is the behaviour we want here.
+ */
+const RETIRED_EXTRACT_QUERY =
+  '`mapping.extractQuery` was removed in @objectstack/spec 17.0.0 (#4509, ADR-0049) — no '
+  + 'exporter ever read a mapping artifact, so "Query to run for export only" promised an '
+  + 'export path that does not exist. Delete the key. Exports run through the ordinary '
+  + 'query API (`POST /api/v1/data/:object/query`); if a mapping-driven export is ever '
+  + 'designed, this is where it plugs back in. Run `os migrate meta --from 16` to rewrite '
+  + 'existing sources automatically.';
+
+const RETIRED_ERROR_POLICY =
+  '`mapping.errorPolicy` was removed in @objectstack/spec 17.0.0 (#4509, ADR-0049) — no '
+  + 'import code ever read it, so `skip` / `abort` / `retry` selected between three '
+  + 'behaviours that were all the same behaviour. Delete the key. Error handling on the '
+  + 'import path belongs to the import REQUEST\'s own options, not to the stored mapping. '
+  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+
+const RETIRED_BATCH_SIZE =
+  '`mapping.batchSize` was removed in @objectstack/spec 17.0.0 (#4509, ADR-0049) — no '
+  + 'import code ever batched by it; the write path sizes its own batches. Delete the key. '
+  + 'CAREFUL — do NOT "fix" this by relocating the value to a neighbouring `batchSize`: '
+  + '`bulkActionDef.batchSize`, `connector.batchSize`, `sync.batchSize`, `offline.batchSize`, '
+  + 'the seed loader\'s and the NoSQL driver cursor\'s are all LIVE and enforced — but each is '
+  + 'a DIFFERENT key on a different type sizing its own path, and none of them sizes a '
+  + 'mapping import. Run `os migrate meta --from 16` to rewrite existing sources '
+  + 'automatically.';
+
+const MAPPING_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
+  extractQuery: RETIRED_EXTRACT_QUERY,
+  query: RETIRED_EXTRACT_QUERY,
+  errorPolicy: RETIRED_ERROR_POLICY,
+  onError: RETIRED_ERROR_POLICY,
+  errorHandling: RETIRED_ERROR_POLICY,
+  errorMode: RETIRED_ERROR_POLICY,
+  skipErrors: RETIRED_ERROR_POLICY,
+  batchSize: RETIRED_BATCH_SIZE,
+  batch: RETIRED_BATCH_SIZE,
+  chunkSize: RETIRED_BATCH_SIZE,
+};
 
 /**
  * Transformation Logic
@@ -115,15 +172,18 @@ export const MappingSchema = lazySchema(() => strictObject({
     format: 'sourceFormat', source: 'sourceFormat', sourceType: 'sourceFormat',
     mappings: 'fieldMapping', fields: 'fieldMapping', columns: 'fieldMapping', fieldMappings: 'fieldMapping',
     key: 'upsertKey', matchOn: 'upsertKey', externalId: 'upsertKey', externalIdField: 'upsertKey',
-    query: 'extractQuery',
-    onError: 'errorPolicy', errorHandling: 'errorPolicy', errorMode: 'errorPolicy',
-    batch: 'batchSize', chunkSize: 'batchSize',
+    // NOTE: `query` / `onError` / `errorHandling` / `errorMode` / `batch` /
+    // `chunkSize` were aliases onto `extractQuery` / `errorPolicy` /
+    // `batchSize`, all three removed in 17.0.0 (#4509). An alias pointing at a
+    // key that no longer exists is worse than no alias — it routes the author
+    // into a second rejection. Their spellings now fall through to the
+    // `guidance` prescriptions below, which is where the real answer is.
   },
   guidance: {
     // `mode: 'upsert'` needs `upsertKey`; an author reaching for a
     // dedup/matching knob under another name is describing that pair.
     dedupe: 'deduplication is `mode: \'upsert\'` plus `upsertKey: [<field>]` — there is no separate dedupe switch',
-    skipErrors: "`errorPolicy: 'skip'` is the default and already does this — remove the key",
+    ...MAPPING_RETIRED_KEY_GUIDANCE,
   },
 }, {
   /** Identity */
@@ -141,12 +201,11 @@ export const MappingSchema = lazySchema(() => strictObject({
   mode: z.enum(['insert', 'update', 'upsert']).default('insert'),
   upsertKey: z.array(z.string()).optional().describe('Fields to match for upsert (e.g. email)'),
 
-  /** Extract Logic (For Export) */
-  extractQuery: QuerySchema.optional().describe('Query to run for export only'),
-
-  /** Error Handling */
-  errorPolicy: z.enum(['skip', 'abort', 'retry']).default('skip'),
-  batchSize: z.number().default(1000),
+  // `extractQuery`, `errorPolicy` and `batchSize` were removed in 17.0.0
+  // (#4509) — see MAPPING_RETIRED_KEY_GUIDANCE above for what each promised and
+  // what actually controls it. The live mechanisms: exports go through the
+  // ordinary query API, and both error handling and batch sizing belong to the
+  // import request / write path, neither of which consults the mapping.
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `mapping` is a registered metadata type, so `MetadataPlugin`'s loader

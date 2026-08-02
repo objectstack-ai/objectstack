@@ -696,6 +696,44 @@ export const NavigationAreaSchema = lazySchema(() => z.object({
  *   params: { type: 'object', package: '{active_package}' } }
  * ```
  */
+/**
+ * Keys retired from {@link AppContextSelectorSchema} in 17.0.0 (#4509, ADR-0049).
+ *
+ * Both carried schema defaults, so the liveness advisory lint could never warn
+ * on them — a default materialises at parse time, making an authored value
+ * indistinguishable from one the schema supplied (`_authorWarnSkipped` in
+ * `liveness/app.json`). Removal was the only channel that could reach an
+ * author, which is why they went out inside the 17.0.0 window.
+ *
+ * `includeAll` is the more important of the two: it was not merely unread, it
+ * was deliberately DISOBEYED, and for a security reason.
+ */
+const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
+  includeAll:
+    '`contextSelectors[].includeAll` was removed in @objectstack/spec 17.0.0 (#4509, '
+    + 'ADR-0049) — the shell deliberately ignored it. A context selector is a MANDATORY '
+    + 'scope: an "All" row would clear the scope on a surface that exists to be scoped, and '
+    + "on Studio's package selector that means listing the platform's own system/cloud "
+    + 'kernel metadata to a developer who scoped to their own package. The renderer never '
+    + 'offered an All row regardless of this flag, so `includeAll: false` hardened nothing '
+    + 'and `includeAll: true` unlocked nothing. Delete the key. To widen what a selector '
+    + 'offers, widen `optionsSource.filter` instead. Run `os migrate meta --from 16` to '
+    + 'rewrite existing sources automatically.',
+  showall:
+    '`contextSelectors[].includeAll` (which `showall` aliased) was removed in '
+    + '@objectstack/spec 17.0.0 (#4509) — selectors are mandatory-scope and never render an '
+    + '"All" row. Delete the key; widen `optionsSource.filter` to widen the choices.',
+  placement:
+    '`contextSelectors[].placement` was removed in @objectstack/spec 17.0.0 (#4509, '
+    + 'ADR-0049) — no renderer ever read it. Selectors always render in the sidebar header '
+    + "block, and `'topbar'` placed nothing in the topbar. Delete the key. Run "
+    + '`os migrate meta --from 16` to rewrite existing sources automatically.',
+  location:
+    '`contextSelectors[].placement` (which `location` aliased) was removed in '
+    + '@objectstack/spec 17.0.0 (#4509) — selectors always render in the sidebar header. '
+    + 'Delete the key.',
+};
+
 export const AppContextSelectorSchema = lazySchema(() => z.object({
   /**
    * Identifier — also the template-variable name the selected value is
@@ -763,24 +801,31 @@ export const AppContextSelectorSchema = lazySchema(() => z.object({
     }),
   }).strict().describe('Option data source'),
 
-  /** Whether to prepend an "All" option that clears the scope. */
-  includeAll: z.boolean().default(true).describe('Prepend an "All" option that clears the scope'),
+  // `includeAll` and `placement` were removed in 17.0.0 (#4509) — see
+  // CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE above.
 
-  /** Value emitted when "All" is selected (empty string = no filter). */
-  allValue: z.string().default('').describe('Template value when "All" is selected (empty = no filter)'),
+  /**
+   * The "nothing concrete is selected" sentinel.
+   *
+   * NOT an "All option" value — there is no All option (see the `includeAll`
+   * prescription above). This is the value the scope variable holds before the
+   * user picks a row: the shell auto-selects the first option when this is the
+   * current value, and omits the query parameter while the selection equals it.
+   * Empty string is almost always right; set it only if a real option value
+   * would collide with `''`.
+   */
+  allValue: z.string().default('')
+    .describe('Sentinel value meaning "no concrete selection yet" (empty string is almost always right)'),
 
   /** How the selection is persisted across navigation. */
   persist: z.enum(['query', 'session', 'none']).default('query')
     .describe('Persist selection via URL query, sessionStorage, or not at all'),
-
-  /** Where the dropdown is rendered. */
-  placement: z.enum(['sidebar_header', 'topbar']).default('sidebar_header')
-    .describe('Render location in the app chrome'),
 }, {
   error: strictUnknownKeyError({
     surface: 'this app context selector',
-    knownKeys: ['id', 'label', 'icon', 'optionsSource', 'includeAll', 'allValue', 'persist', 'placement'],
-    aliases: { name: 'id', title: 'label', source: 'optionsSource', options: 'optionsSource', showall: 'includeAll', location: 'placement' },
+    knownKeys: ['id', 'label', 'icon', 'optionsSource', 'allValue', 'persist'],
+    aliases: { name: 'id', title: 'label', source: 'optionsSource', options: 'optionsSource' },
+    guidance: CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE,
     history:
       'Until #4001 these were dropped silently — the selector still parsed, so its scope ' +
       'variable behaved differently than declared.',

@@ -13,6 +13,7 @@ import {
   type Book,
   type ResolverDoc,
 } from './book.zod';
+import { DocSchema } from './doc.zod';
 
 const docs = (names: string[]): ResolverDoc[] => names.map((name) => ({ name }));
 
@@ -51,6 +52,36 @@ describe('resolveBookTree — derived membership (the AI-safety core)', () => {
     expect(tree.groups.map((g) => g.key)).toEqual(['guides', 'ref']);
     expect(tree.groups[0].entries.map((e) => e.doc)).toEqual(['crm_guide_deal', 'crm_guide_lead']); // alpha
     expect(tree.groups[1].entries.map((e) => e.doc)).toEqual(['crm_ref_api']);
+  });
+
+  it('derives membership by TAG include — the variant DocSchema.tags finally makes reachable', () => {
+    // #4509: the tag branch of `matchesInclude` shipped long before anything
+    // could feed it. `DocSchema` is strict and had no `tags` key, so authoring
+    // tags was a parse error, every doc arrived with `tags === undefined`, and
+    // this variant could not match a single doc in any stack. Declaring
+    // `DocSchema.tags` was the whole fix — the matcher, the REST transport and
+    // `ResolverDoc.tags` were all already in place.
+    const book: Book = {
+      name: 'crm',
+      groups: [{ key: 'tut', label: 'Tutorials', include: { tag: 'tutorial' } }],
+    };
+    const tree = resolveBookTree(book, [
+      { name: 'crm_guide_lead', tags: ['tutorial'] },
+      { name: 'setup_sso', tags: ['tutorial', 'admin'] },
+      { name: 'crm_ref_api', tags: ['reference'] },
+      { name: 'crm_ref_bare' }, // no tags at all
+    ]);
+    // Tags cut ACROSS the naming convention — that is the point of the variant:
+    // a glob could not have collected these two.
+    expect(tree.groups[0].entries.map((e) => e.doc)).toEqual(['crm_guide_lead', 'setup_sso']);
+  });
+
+  it('accepts `tags` on an authored doc (the strict schema used to reject it)', () => {
+    expect(() => DocSchema.parse({
+      name: 'crm_guide_lead',
+      content: '# Leads',
+      tags: ['tutorial', 'crm'],
+    })).not.toThrow();
   });
 
   it('a NEW doc matching a rule appears with zero edits to the book (create-and-forget)', () => {

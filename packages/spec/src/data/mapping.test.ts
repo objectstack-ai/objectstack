@@ -184,9 +184,7 @@ describe('MappingSchema', () => {
         { source: 'name', target: 'full_name' }
       ],
       mode: 'upsert',
-      upsertKey: ['email'],
-      errorPolicy: 'skip',
-      batchSize: 500
+      upsertKey: ['email']
     };
 
     expect(() => MappingSchema.parse(fullMapping)).not.toThrow();
@@ -221,8 +219,6 @@ describe('MappingSchema', () => {
 
     expect(mapping.sourceFormat).toBe('csv');
     expect(mapping.mode).toBe('insert');
-    expect(mapping.errorPolicy).toBe('skip');
-    expect(mapping.batchSize).toBe(1000);
   });
 
   it('should accept different source formats', () => {
@@ -265,45 +261,69 @@ describe('MappingSchema', () => {
     expect(mapping.upsertKey).toEqual(['email', 'phone']);
   });
 
-  it('should accept different error policies', () => {
-    const policies: Array<Mapping['errorPolicy']> = ['skip', 'abort', 'retry'];
-    
-    policies.forEach(policy => {
-      const mapping = MappingSchema.parse({
-        name: 'test_mapping',
-        targetObject: 'object',
-        fieldMapping: [],
-        errorPolicy: policy
-      });
-      expect(mapping.errorPolicy).toBe(policy);
-    });
+  // ── Retired in 17.0.0 (#4509, ADR-0049) ───────────────────────────────────
+  //
+  // `extractQuery` / `errorPolicy` / `batchSize` parsed and controlled nothing.
+  // These pin the REJECTION, not just the absence: the schema is strict, so a
+  // bare "unrecognized key" would already fail the parse — what has to survive
+  // refactors is that the author is handed the prescription. Two of the three
+  // were unwarnable (schema defaults materialise at parse, so the liveness lint
+  // could never distinguish authored from supplied), which made this rejection
+  // the ONLY channel that reaches them.
+
+  const base = { name: 'test_mapping', targetObject: 'object', fieldMapping: [] };
+
+  it('rejects the retired `extractQuery` with the export-path prescription', () => {
+    expect(() => MappingSchema.parse({
+      ...base,
+      extractQuery: { object: 'contact', fields: ['id', 'email'] },
+    })).toThrow(/extractQuery.*removed.*17\.0\.0.*export path that does not exist/s);
   });
 
-  it('should accept custom batch size', () => {
-    const mapping = MappingSchema.parse({
-      name: 'test_mapping',
-      targetObject: 'object',
-      fieldMapping: [],
-      batchSize: 100
-    });
-
-    expect(mapping.batchSize).toBe(100);
+  it('rejects the retired `errorPolicy` and points at the import request', () => {
+    expect(() => MappingSchema.parse({ ...base, errorPolicy: 'abort' }))
+      .toThrow(/errorPolicy.*removed.*17\.0\.0.*import REQUEST/s);
   });
 
-  it('should accept extractQuery for export', () => {
+  it('rejects the retired `batchSize` WITHOUT offering a rename', () => {
+    // The trap this pins: `batchSize` is a live, enforced key on bulk-action,
+    // connector, sync, offline, the seed loader and the NoSQL driver cursor. An
+    // author (or an agent) reading "removed" is one step from relocating the
+    // value onto one of those, so the message must name them as DIFFERENT keys
+    // rather than as a migration target. Same shape as the `datasource`
+    // `retryPolicy` → `hook`/`job` `backoffMs` trap defused in #4583.
+    const parse = () => MappingSchema.parse({ ...base, batchSize: 100 });
+    expect(parse).toThrow(/batchSize.*removed.*17\.0\.0/s);
+    // NB: matched against the serialised ZodError, where inner quotes arrive
+    // escaped — so the assertion deliberately avoids the quoted word.
+    expect(parse).toThrow(/this by relocating the value to a neighbouring/s);
+    expect(parse).toThrow(/connector\.batchSize|sync\.batchSize/s);
+  });
+
+  it('routes the retired ALIAS spellings to the same prescriptions', () => {
+    // `onError` / `batch` / `query` aliased the three removed keys. Leaving them
+    // in `aliases` would have answered "did you mean `errorPolicy`?" — a rename
+    // suggestion pointing at a key that is also gone, i.e. a second rejection.
+    expect(() => MappingSchema.parse({ ...base, onError: 'abort' }))
+      .toThrow(/errorPolicy.*removed/s);
+    expect(() => MappingSchema.parse({ ...base, chunkSize: 100 }))
+      .toThrow(/batchSize.*removed/s);
+    expect(() => MappingSchema.parse({ ...base, query: {} }))
+      .toThrow(/extractQuery.*removed/s);
+  });
+
+  it('leaves the surviving mapping surface intact', () => {
     const mapping = MappingSchema.parse({
-      name: 'export_mapping',
+      ...base,
       targetObject: 'contact',
-      fieldMapping: [{ source: 'email', target: 'email' }],
-      extractQuery: {
-        object: 'contact',
-        fields: ['id', 'email', 'name'],
-        filters: ['status', '=', 'active']
-      }
+      fieldMapping: [{ source: 'Email', target: 'email' }],
+      mode: 'upsert',
+      upsertKey: ['email'],
     });
-
-    expect(mapping.extractQuery).toBeDefined();
-    expect(mapping.extractQuery?.object).toBe('contact');
+    expect(mapping).not.toHaveProperty('errorPolicy');
+    expect(mapping).not.toHaveProperty('batchSize');
+    expect(mapping).not.toHaveProperty('extractQuery');
+    expect(mapping.upsertKey).toEqual(['email']);
   });
 
   it('should handle CSV import mapping', () => {

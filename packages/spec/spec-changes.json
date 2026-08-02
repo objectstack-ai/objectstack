@@ -147,8 +147,8 @@
         "toMajor": 17
       },
       {
-        "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation",
-        "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' removed (2026-06 liveness audit — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented)",
+        "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement",
+        "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' plus contextSelectors 'includeAll'/'placement' removed (liveness audits #4001, #4509 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, and includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope)",
         "conversionId": "app-dead-authoring-keys-removed",
         "toMajor": 17
       },
@@ -222,6 +222,12 @@
         "surface": "datasource.retryPolicy / datasource.healthCheck / datasource.external.label / datasource.external.requirePermission",
         "to": "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (#4583 — nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody)",
         "conversionId": "datasource-inert-blocks-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "mapping.extractQuery / mapping.errorPolicy / mapping.batchSize",
+        "to": "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (#4509 — no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
+        "conversionId": "mapping-inert-keys-removed",
         "toMajor": 17
       },
       {
@@ -673,8 +679,8 @@
           "toMajor": 17
         },
         {
-          "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation",
-          "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' removed (2026-06 liveness audit — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented)",
+          "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement",
+          "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' plus contextSelectors 'includeAll'/'placement' removed (liveness audits #4001, #4509 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, and includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope)",
           "conversionId": "app-dead-authoring-keys-removed",
           "toMajor": 17
         },
@@ -748,6 +754,12 @@
           "surface": "datasource.retryPolicy / datasource.healthCheck / datasource.external.label / datasource.external.requirePermission",
           "to": "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (#4583 — nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody)",
           "conversionId": "datasource-inert-blocks-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "mapping.extractQuery / mapping.errorPolicy / mapping.batchSize",
+          "to": "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (#4509 — no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
+          "conversionId": "mapping-inert-keys-removed",
           "toMajor": 17
         },
         {

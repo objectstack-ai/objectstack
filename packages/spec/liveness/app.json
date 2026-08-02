@@ -1,6 +1,6 @@
 {
   "type": "app",
-  "_note": "AppSchema — the navigation shell, the densest hand-authored surface on the platform. Consumers: the REST read layer's filterAppForUser (packages/rest/src/rest-server.ts:1796-1847 — the SERVER-side authority for app/nav permission + capability gating and ADR-0045 hidden-app visibility), the spec i18n translateApp (i18n-resolver.ts:472), and objectui's shell (@940ba24: app-shell AppSidebar/ConsoleLayout/ContextSelectors, layout NavigationRenderer, console RootLandingRedirect). The #4001/#4142 app step already retired seven dead keys as retiredKey tombstones — they stay in the walked shape, so their rows stay here (tombstone rule, orphans.mts). WALK BOUNDARY (#3095 union rule): `navigation` drills into the union's FIRST member (the `object` variant + base keys); the other variants' payload keys sit outside the walk and were verified by hand — dashboardName (NavigationRenderer.tsx:433), pageName (:435-442), url/target (:462), reportName (:460), componentRef (:464,:644), group `expanded` (:856) all live. The one GAP found there is now CLOSED (#4509, objectui @e8bec83): an `action` item's click dispatches through a host-supplied `onAction` prop that no shipped shell passed, so `actionDef.actionName` reached no dispatcher and every such item dead-clicked. objectui's `useNavActionDispatch` (objectui: packages/app-shell/src/hooks/useNavActionDispatch.ts) resolves the name against `action` metadata and dispatches through the console action runtime, and UnifiedSidebar passes it (objectui: packages/app-shell/src/layout/UnifiedSidebar.tsx:473). A shell that still passes no handler now HIDES action items rather than rendering them dead (objectui: packages/layout/src/NavigationRenderer.tsx:971) — the renderer stops manufacturing the trap. Also note filterAppForUser strips only the TOP-LEVEL `navigation` tree; `areas` trees rely on the client-side per-item gates. Seeded 2026-08-01 (#4488).",
+  "_note": "AppSchema — the navigation shell, the densest hand-authored surface on the platform. Consumers: the REST read layer's filterAppForUser (packages/rest/src/rest-server.ts:1796-1847 — the SERVER-side authority for app/nav permission + capability gating and ADR-0045 hidden-app visibility), the spec i18n translateApp (i18n-resolver.ts:472), and objectui's shell (@940ba24: app-shell AppSidebar/ConsoleLayout/ContextSelectors, layout NavigationRenderer, console RootLandingRedirect). The #4001/#4142 app step already retired seven dead keys as retiredKey tombstones — they stay in the walked shape, so their rows stay here (tombstone rule, orphans.mts). WALK BOUNDARY (#3095 union rule): `navigation` drills into the union's FIRST member (the `object` variant + base keys); the other variants' payload keys sit outside the walk and were verified by hand — dashboardName (NavigationRenderer.tsx:433), pageName (:435-442), url/target (:462), reportName (:460), componentRef (:464,:644), group `expanded` (:856) all live. The one GAP found there is now CLOSED (#4509, objectui @e8bec83): an `action` item's click dispatches through a host-supplied `onAction` prop that no shipped shell passed, so `actionDef.actionName` reached no dispatcher and every such item dead-clicked. objectui's `useNavActionDispatch` (objectui: packages/app-shell/src/hooks/useNavActionDispatch.ts) resolves the name against `action` metadata and dispatches through the console action runtime, and UnifiedSidebar passes it (objectui: packages/app-shell/src/layout/UnifiedSidebar.tsx:473). A shell that still passes no handler now HIDES action items rather than rendering them dead (objectui: packages/layout/src/NavigationRenderer.tsx:971) — the renderer stops manufacturing the trap. Also note filterAppForUser walks ONLY the top-level `navigation` tree — it never reads `item.areas` at all (rest-server.ts:1823 returns early when `navigation` is absent), and the client area switcher renders every area. So area-level `visible` / `requiredPermissions` are FAIL-OPEN gates, not merely unread: a \"hidden\" or permission-gated area shows to everyone. Confirmed 2026-08-02 while removing the contextSelectors keys; filed as #4651 (enforce-or-remove decision, deliberately NOT taken in #4509 so a retirement PR does not invent an authorization mechanism). Seeded 2026-08-01 (#4488). CONTEXT SELECTORS, 17.0.0 (#4509): `includeAll` and `placement` rows DELETED — AppContextSelectorSchema is strict, so the keys left the walked shape and retained rows would report ORPHAN. Both were unwarnable (schema defaults materialize at parse, so the lint could not tell authored from supplied), which made removal the only channel that could reach an author. `includeAll` was the sharp one: not unread but deliberately DISOBEYED — selectors are mandatory-scope, and an All row would clear the scope, which on Studio's package selector means listing the platform's own system/cloud kernel packages. STUDIO_APP authored `includeAll: true` against a renderer that ignored it, and that authoring site went with the key.",
   "props": {
     "name": {
       "status": "live",
@@ -231,29 +231,17 @@
           "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:90-125",
           "note": "endpoint fetched, valueKey/labelKey dotted-path mapped, `filter` predicates applied per row (rowPasses, :69-71)."
         },
-        "includeAll": {
-          "status": "dead",
-          "verifiedAt": "2026-08-01",
-          "_authorWarnSkipped": "default(true) boolean — the lint cannot tell author-set from schema default, so marking it would warn on every selector.",
-          "note": "DELIBERATELY ignored by the renderer (ContextSelectors.tsx:242-246): selectors are mandatory-scope — an 'All' row would unscope the surface and, for Studio's package filter, leak system metadata. The renderer never shows an All option regardless of this flag. Candidate for retiredKey removal (the renderer comment is the prescription)."
-        },
         "allValue": {
           "status": "live",
-          "verifiedAt": "2026-08-01",
+          "verifiedAt": "2026-08-02",
           "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:177, :199, :246",
-          "note": "READ, but only as the 'nothing concrete selected' sentinel for auto-selection and query-param defaulting — its documented purpose ('value emitted when All is selected') can never occur because includeAll is ignored (see above). Live by the letter, vestigial by intent; re-verify if includeAll is ever removed."
+          "note": "RE-VERIFIED 2026-08-02 (#4509) — the re-check the previous note asked for, now that includeAll is gone. Still live, and the reading is unchanged: it is the 'nothing concrete selected' sentinel for auto-selection and query-param defaulting. What changed is the DECLARATION: the describe() no longer calls it 'the value emitted when All is selected', because that event cannot occur and never could — selectors are mandatory-scope and the renderer never offered an All row. Live by the letter AND by the letter now; the vestigial-by-intent caveat retired with includeAll."
         },
         "persist": {
           "status": "live",
           "verifiedAt": "2026-08-01",
           "evidence": "objectui @940ba24: packages/app-shell/src/layout/ContextSelectors.tsx:164",
           "note": "'none' opts out of persistence; query/session honored."
-        },
-        "placement": {
-          "status": "dead",
-          "verifiedAt": "2026-08-01",
-          "_authorWarnSkipped": "enum with default('sidebar_header') — the default materializes at compile, so presence ≠ authored (same rule as errorPolicy on mapping).",
-          "note": "no renderer reads it — selectors always render in the sidebar header block (AppSidebar:469-472); 'topbar' places nothing in the topbar."
         }
       },
       "note": "Drilled because includeAll/placement diverge (dead) from the live core."
