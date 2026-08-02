@@ -242,6 +242,19 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
 Return ONLY the JSON report defined in your agent definition.
 ```
 
+#### Resource limits — parallel agents share ONE container
+
+Memory peaks come from **build + test**, not editing, so the fix is not less
+parallelism but serialized heavy phases: the os-dev definition requires every
+build/test run to hold the container-wide verification lock
+(`flock /tmp/os-heavy-verify.lock`), a `NODE_OPTIONS=--max-old-space-size`
+heap cap, scoped `--filter` builds/tests, capped vitest/turbo workers, and
+worktree cleanup after the PR is up. PM-side: treat `batch:3` as assuming
+normal-sized tasks — for build-heavy ones (dependency-family upgrades, full
+regression passes) drop to `batch:2`, or dispatch that issue via
+`mode:cloud` so it gets its own container. If an agent dies with a
+heap/OOM signature, redispatch it alone rather than into a full batch.
+
 #### Dispatch backends
 
 **`mode:subagent` (default).** The `Agent` tool, as described above. The devs

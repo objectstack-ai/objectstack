@@ -33,6 +33,23 @@ rules that most often get missed:
    consumer (`??` alias, tolerant parse), the bug is at the producer or in the
    spec — fix it there, or return `needs_decision`.
 
+**Resource discipline — parallel agents share ONE container; unbounded
+build/test runs OOM it.** Binding rules:
+
+1. **Serialize the heavy phase.** Wrap every build and test run in the shared
+   verification lock, so editing parallelizes but memory peaks never stack:
+   `flock -w 7200 /tmp/os-heavy-verify.lock -c '<build/test command>'`
+   (one lock file per container; waiting on it is normal, not a hang).
+2. **Cap the heap.** Prefix heavy commands with
+   `NODE_OPTIONS=--max-old-space-size=4096` (raise only with a reason).
+3. **Scope, don't sweep.** Build and test the affected packages
+   (`pnpm --filter <pkg> build/test`), not the whole repo, unless the task
+   explicitly requires a full pass. Cap test parallelism:
+   vitest `--maxWorkers=2`, turbo `--concurrency=2`.
+4. **Clean up when done**: after the PR is up, remove your worktree
+   (`git worktree remove <path> --force`) — leftover `node_modules` trees
+   exhaust the container's disk, which fails as confusingly as OOM.
+
 Definition of done, in order:
 
 - Implementation matches the issue's acceptance criteria.
