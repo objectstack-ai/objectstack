@@ -219,6 +219,12 @@
         "toMajor": 17
       },
       {
+        "surface": "datasource.config",
+        "to": "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' and 'user' → 'username' (#4456 — driver-factory `??` fallback graduation)",
+        "conversionId": "datasource-config-driver-key-aliases",
+        "toMajor": 17
+      },
+      {
         "surface": "flow.node.script.config.actionType / flow.node.script.config.template / flow.node.script.config.recipients / flow.node.script.config.variables / flow.node.script.config.script",
         "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
         "conversionId": "flow-node-script-branch-keys-removed",
@@ -717,6 +723,12 @@
           "surface": "datasource.capabilities",
           "to": "datasource key 'capabilities' removed (#4583 — eleven flags no code read; pushdown comes from the driver's own supports.*, and `readOnly` never made anything read-only)",
           "conversionId": "datasource-capabilities-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "datasource.config",
+          "to": "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' and 'user' → 'username' (#4456 — driver-factory `??` fallback graduation)",
+          "conversionId": "datasource-config-driver-key-aliases",
           "toMajor": 17
         },
         {

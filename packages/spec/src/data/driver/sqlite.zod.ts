@@ -21,12 +21,11 @@ import {
  * fell back to `:memory:`, and their data vanished on restart with every signal
  * saying the datasource was configured.
  *
- * `file` and `database` are a different case — the factory reads them as
- * undeclared `??` fallbacks, so they happened to work while being documented
- * nowhere. They are named as renames here rather than blessed: one strict
- * contract beats a spelling that works only because a reader is lenient
- * (AGENTS.md Prime Directive #12). The factory keeps its tolerance for records
- * already persisted that way; no new one can be authored.
+ * `file` and `database` once also worked, purely because the factory read them
+ * as undeclared `??` fallbacks. That tolerance has graduated into the declared
+ * ADR-0087 conversion `datasource-config-driver-key-aliases` (#4456): stored
+ * rows are rewritten to `filename` at load, the factory reads one spelling,
+ * and authoring rejects both with the rename hint below.
  */
 const SQLITE_CONFIG_KEYS = ['filename', 'autoMigrate'] as const;
 

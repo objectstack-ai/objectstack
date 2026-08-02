@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { IDatasourceAdminService, IDatasourceDriverFactory } from '../contracts/index.js';
+import type { DatasourceAdminService } from '../datasource-admin-service.js';
 import {
   DatasourceAdminServicePlugin,
   type DatasourceAdminServicePluginOptions,
@@ -283,6 +284,48 @@ describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
     const after = await b2.service.listDatasources();
     expect(after.map((d) => d.name)).toContain('demo_ext');
     expect(after.find((d) => d.name === 'demo_ext')?.origin).toBe('runtime');
+  });
+
+  // #4456 — this restore path is a stored-row rehydration seam (ADR-0087 D2
+  // addendum, #3903): it reads sys_metadata directly, so it must replay the
+  // conversion chain itself. A row persisted before the #4410 config gate may
+  // carry the legacy spellings the factory's deleted `??` fallbacks used to
+  // tolerate; without the replay, a sqlite `file:` row would silently fall
+  // back to `:memory:` — the data-loss shape the conversion exists to prevent.
+  it('restores a pre-#4410 row with legacy config keys CANONICAL (conversion chain replayed)', async () => {
+    const data = fakeSysMetadataEngine();
+    const now = new Date().toISOString();
+    for (const [name, driver, config] of [
+      ['legacy_sqlite', 'sqlite', { file: '/tmp/legacy.db' }],
+      ['legacy_pg', 'postgres', { connectionString: 'postgresql://db.internal/analytics', user: 'analyst' }],
+      ['legacy_mongo', 'mongo', { uri: 'mongodb://mongo.internal:27017/events' }],
+    ] as const) {
+      data.rows.push({
+        id: `meta_${name}`,
+        name,
+        type: 'datasource',
+        scope: 'platform',
+        metadata: JSON.stringify({ name, driver, config, origin: 'runtime' }),
+        state: 'active',
+        version: 1,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+
+    const b = await boot({ services: { data } });
+    await b.plugin.start(b.ctx);
+    // The list DTO is a summary; `getDatasource` (concrete service) is the
+    // config-bearing read the admin routes serve.
+    const svc = b.service as unknown as DatasourceAdminService;
+    expect((await svc.getDatasource('legacy_sqlite'))?.config).toEqual({ filename: '/tmp/legacy.db' });
+    expect((await svc.getDatasource('legacy_pg'))?.config).toEqual({
+      url: 'postgresql://db.internal/analytics',
+      username: 'analyst',
+    });
+    expect((await svc.getDatasource('legacy_mongo'))?.config).toEqual({
+      url: 'mongodb://mongo.internal:27017/events',
+    });
   });
 
   it('removes the durable sys_metadata row when a datasource is deleted', async () => {
