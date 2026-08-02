@@ -34,7 +34,8 @@ export const ShowcaseExternalDatasource = defineDatasource({
   // same place the fixture writes it. Sits next to the managed standalone.db.
   config: { filename: '.objectstack/data/showcase_external.db' },
   external: {
-    label: 'External Analytics DB — read-only federation demo (ADR-0015)',
+    // `external.label` was removed in #4583 — nothing read the federation
+    // block's own label; the top-level `label` above is what Setup renders.
     allowWrites: false,
     validation: { onMismatch: 'warn', checkOnBoot: true },
   },

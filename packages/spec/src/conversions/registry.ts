@@ -2231,6 +2231,89 @@ const flowNodeWaitTimeoutKeysRemoved: MetadataConversion = {
 };
 
 /**
+ * The remaining inert datasource blocks removed (protocol 17, #4583 B/C/D).
+ *
+ * Three clusters, one finding each — declared, `.strict()`-guarded, read by no
+ * runtime path:
+ *
+ *  - `retryPolicy` (4 keys): no connect or query path ever retried on it.
+ *    Connection failure is the boot policy in the datasource connection service
+ *    (degraded boot / `bootCritical` fail-fast), which does not retry on a
+ *    schedule.
+ *  - `healthCheck` (3 keys): nothing scheduled a probe, so `enabled` enabled
+ *    nothing and the timeouts bounded nothing. Liveness is probed ON DEMAND via
+ *    the driver handle's `ping()` / `checkHealth()`.
+ *  - `external.label` / `external.requirePermission`: the federation block's own
+ *    label was never read (the top-level `label` is what Setup renders), and no
+ *    authorization check ever consulted the permission — naming one gated
+ *    nothing, which is the false-compliance shape ADR-0049 removes.
+ *
+ * `retryPolicy` is the one with a booby trap, and it is a NAME collision rather
+ * than a behaviour question: `hook.retryPolicy` and `job.retryPolicy` ARE
+ * enforced. They are different keys on different types and spell the delay
+ * `backoffMs`, not `baseDelayMs` — which is itself the evidence nothing read
+ * the datasource one, since no code reads both spellings. The conversion
+ * therefore touches ONLY `datasources`, and the schema's rejection message
+ * spells the distinction out rather than offering a rename.
+ *
+ * `retiredFromLoadPath`: every affected shape is `.strict()` and rejects with
+ * its prescription (`RETIRED_DATASOURCE_BLOCKS`).
+ */
+const datasourceInertBlocksRemoved: MetadataConversion = {
+  id: 'datasource-inert-blocks-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'datasource.retryPolicy / datasource.healthCheck / datasource.external.label / datasource.external.requirePermission',
+  summary: "datasource keys 'retryPolicy'/'healthCheck' and external 'label'/'requirePermission' removed (#4583 — nothing retried, nothing probed on a schedule, and the federation label/permission were read by nobody)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'datasources', (ds, path) => {
+      const next = stripKeys(ds, ['retryPolicy', 'healthCheck'], emit, path);
+      // `external.*` sits one level down, so stripKeys (top-level only) cannot
+      // reach it — drill in, and copy-on-write so an untouched datasource keeps
+      // its identity for the caller's change detection.
+      const external = next.external;
+      if (!external || typeof external !== 'object' || Array.isArray(external)) return next;
+      const strippedExternal = stripKeys(
+        external as Record<string, unknown>,
+        ['label', 'requirePermission'],
+        emit,
+        `${path}.external`,
+      );
+      if (strippedExternal === external) return next;
+      return { ...next, external: strippedExternal };
+    });
+  },
+  fixture: {
+    before: {
+      datasources: [{
+        name: 'warehouse',
+        driver: 'postgres',
+        config: { host: 'db.internal', database: 'analytics' },
+        healthCheck: { enabled: true, intervalMs: 30000, timeoutMs: 5000 },
+        retryPolicy: { maxRetries: 3, baseDelayMs: 1000, maxDelayMs: 30000, backoffMultiplier: 2 },
+        schemaMode: 'external',
+        external: {
+          label: 'Warehouse — ANALYTICS / PROD',
+          allowWrites: false,
+          requirePermission: 'analytics_admin',
+        },
+      }],
+    },
+    // Four notices: one per removed key, counting the two nested ones.
+    after: {
+      datasources: [{
+        name: 'warehouse',
+        driver: 'postgres',
+        config: { host: 'db.internal', database: 'analytics' },
+        schemaMode: 'external',
+        external: { allowWrites: false },
+      }],
+    },
+    expectedNotices: 4,
+  },
+};
+
+/**
  * `datasource.capabilities` removed (protocol 17, #4583).
  *
  * Eleven boolean flags, declared and strict-guarded, read by nothing. Pushdown
@@ -2534,6 +2617,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowNodeWaitTimeoutKeysRemoved,
     datasourceReadReplicasRemoved,
     datasourceCapabilitiesRemoved,
+    datasourceInertBlocksRemoved,
     // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
     // whether `config.function` is set, and that rename is what sets it.
     flowNodeScriptBranchKeysRemoved,
