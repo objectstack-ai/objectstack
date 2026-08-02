@@ -7,11 +7,16 @@ process.env.OS_EAGER_SCHEMAS = '1';
 
 import fs from 'fs';
 import path from 'path';
+import { spawnSync } from 'child_process';
 import { z } from 'zod';
 import { schemaNameFromExportKey } from './lib/schema-name';
 import { RENAMED_DEFS, carryAuthorableKey, checkRenameTable } from './lib/renamed-defs';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
 import { MIGRATIONS_BY_MAJOR } from '../src/migrations/registry';
+import {
+  getMetadataTypeSchema,
+  listMetadataTypeSchemaTypes,
+} from '../src/kernel/metadata-type-schemas';
 import * as AI from '../src/ai';
 import * as API from '../src/api';
 import * as Automation from '../src/automation';
@@ -170,6 +175,11 @@ let errorCount = 0;
 // surface stale/ENOENT entries between write and immediate read).
 const generatedSchemas = new Map<string, Record<string, unknown>>();
 
+// The live Zod instance behind each emitted def, so the authorable-surface
+// deletion check (#4650) can BFS the REAL schema graph from the metadata-type
+// roots instead of approximating reachability from names or imports.
+const zodByDefKey = new Map<string, z.ZodType>();
+
 // Error messages for schema types that inherently cannot be represented in JSON Schema.
 // These are expected warnings, not build-breaking errors.
 const KNOWN_UNSUPPORTED_PATTERNS = [
@@ -246,6 +256,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
 
           writeFileWithRetry(filePath, JSON.stringify(jsonSchema, null, 2));
           generatedSchemas.set(`${categorySlug}/${schemaName}`, jsonSchema);
+          zodByDefKey.set(`${categorySlug}/${schemaName}`, value);
           console.log(`  ✓ ${namespaceName.toLowerCase()}/${fileName}${io === 'input' ? ' (input shape)' : ''}`);
           count++;
           if (io === 'input') inputModeCount++;
@@ -448,9 +459,11 @@ const currentEntries = [...currentKeys.entries()]
   .map(([k, retired]) => (retired ? k + RETIRED_MARK : k))
   .sort();
 
+let surfaceRaw: string | null = null;
 let surfaceDoc: AuthorableSurface | null = null;
 if (fs.existsSync(AUTHORABLE_SURFACE_PATH)) {
-  surfaceDoc = JSON.parse(fs.readFileSync(AUTHORABLE_SURFACE_PATH, 'utf-8')) as AuthorableSurface;
+  surfaceRaw = fs.readFileSync(AUTHORABLE_SURFACE_PATH, 'utf-8');
+  surfaceDoc = JSON.parse(surfaceRaw) as AuthorableSurface;
 }
 
 if (surfaceDoc) {
@@ -547,37 +560,439 @@ if (surfaceDoc) {
   }
 }
 
-const surfaceChanged =
-  !surfaceDoc || JSON.stringify(surfaceDoc.keys) !== JSON.stringify(currentEntries);
+// ─── (c) A deleted baseline line must prove itself (#4650) ─────────────
+//
+// Checks (a0)/(a)/(b) read authorable-surface.json from THIS commit — a file
+// the same commit can freely edit. Deleting a baseline line therefore deleted
+// the very evidence check (a) runs on: #4638 and #4643 both removed authorable
+// keys with zero registered conversions and a green gate, and #4662 later
+// proved the file had been hand-edited. So deletions are ratcheted here
+// against a baseline the PR cannot rewrite: the file at the merge base with
+// origin/main. (Comparing against `HEAD:` would be vacuous exactly where it
+// matters — in CI, HEAD IS the PR's own commit, so both sides always match
+// and the check never fires.)
+//
+// A deletion is legitimate on exactly one of three proofs, each computed
+// inside this gate — never argued in a PR description:
+//
+//   1. aged-out tombstone — the base entry carried `[RETIRED]` AND its surface
+//      is registered in CONVERSIONS_BY_MAJOR / MIGRATIONS_BY_MAJOR at a major
+//      ≥ TOMBSTONE_AGE_MAJORS behind the current one (the "~two majors" this
+//      file's description has always promised, now enforced);
+//   2. the def is not reachable from the metadata-type roots (2026-08-02
+//      ruling on #4650): no metadata document is ever parsed by it, so its
+//      entry was over-collection and there is no author to tombstone for.
+//      This waives ONLY this file's tombstone requirement — it is NOT a
+//      license to change the schema (plugin manifests, connector configs and
+//      other non-metadata authoring go through their own gates);
+//   3. the whole def is no longer emitted — whole-schema removals are
+//      adjudicated by the json-schema.manifest.json ratchet (#2978) and
+//      check:api-surface, not by this per-key ratchet.
+
+/** A tombstone may be deleted once its registration is this many majors old. */
+const TOMBSTONE_AGE_MAJORS = 2;
+const CURRENT_MAJOR = Number.parseInt(SPEC_VERSION, 10);
+
+/**
+ * Every ' / '-separated surface clause registered across the ADR-0087
+ * registries, mapped to the EARLIEST major that registered it — the moment the
+ * retirement became visible to consumers, which is when its aging clock
+ * started. Same clause vocabulary as check (b) above (#4659 tracks the shared
+ * leaf-name matching).
+ */
+function registeredClauseMajors(): Map<string, number> {
+  const out = new Map<string, number>();
+  const add = (clause: string, major: number): void => {
+    const prev = out.get(clause);
+    if (prev === undefined || major < prev) out.set(clause, major);
+  };
+  for (const [major, list] of Object.entries(CONVERSIONS_BY_MAJOR)) {
+    for (const c of list) for (const clause of c.surface.split(' / ')) add(clause, Number(major));
+  }
+  for (const [major, step] of Object.entries(MIGRATIONS_BY_MAJOR)) {
+    for (const sem of step.semantic ?? []) {
+      for (const clause of sem.surface.split(' / ')) add(clause, Number(major));
+    }
+  }
+  return out;
+}
+
+function zodDefOf(schema: z.ZodType): Record<string, unknown> | null {
+  const def = (schema as unknown as { _zod?: { def?: unknown } })._zod?.def;
+  return def && typeof def === 'object' ? (def as Record<string, unknown>) : null;
+}
+
+/**
+ * Every Zod schema instance a node's def references directly: shape values,
+ * union options, pipe in/out, record key/value, array element, wrapper inner
+ * types — found by walking the def's plain objects/arrays generically instead
+ * of enumerating node kinds (which would silently miss the next kind Zod
+ * adds). Two edges a generic def walk cannot see are added explicitly:
+ * `z.lazy` hides its target behind `getter()`, and check-clones (`.refine()`,
+ * `.describe()`, …) point back at the schema they cloned via `_zod.parent` —
+ * the clone is what a parent schema embeds (`ViewSchema.refine(…)` inside
+ * ViewMetadataSchema), while the BASELINE def is the original.
+ */
+function zodChildSchemas(schema: z.ZodType): z.ZodType[] {
+  const out: z.ZodType[] = [];
+  const def = zodDefOf(schema);
+  if (!def) return out;
+  const seen = new Set<unknown>();
+  const walk = (v: unknown): void => {
+    if (v == null) return;
+    if (v instanceof z.ZodType) {
+      out.push(v);
+      return;
+    }
+    if (typeof v !== 'object') return;
+    if (seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x);
+      return;
+    }
+    if (v instanceof Map) {
+      for (const x of v.values()) walk(x);
+      return;
+    }
+    const proto = Object.getPrototypeOf(v);
+    if (proto === Object.prototype || proto === null) {
+      for (const x of Object.values(v)) walk(x);
+    }
+  };
+  walk(def);
+  if (def.type === 'lazy' && typeof def.getter === 'function') {
+    try {
+      const inner = (def.getter as () => unknown)();
+      if (inner instanceof z.ZodType) out.push(inner);
+    } catch {
+      // An unresolvable lazy getter has no graph to traverse; the schema it
+      // would have produced cannot be parsed against either.
+    }
+  }
+  const parent = (schema as unknown as { _zod?: { parent?: unknown } })._zod?.parent;
+  if (parent instanceof z.ZodType) out.push(parent);
+  return out;
+}
+
+/** Unwrap pipes/wrappers/lazies down to a plain object def's shape, if any. */
+function zodShapeOf(schema: z.ZodType, depth = 0): Record<string, unknown> | null {
+  if (depth > 12) return null;
+  const def = zodDefOf(schema);
+  if (!def) return null;
+  if (def.type === 'object') {
+    const shape = def.shape;
+    return shape && typeof shape === 'object' ? (shape as Record<string, unknown>) : null;
+  }
+  if (def.type === 'pipe' && def.in instanceof z.ZodType) return zodShapeOf(def.in, depth + 1);
+  if (def.type === 'lazy' && typeof def.getter === 'function') {
+    try {
+      const inner = (def.getter as () => unknown)();
+      if (inner instanceof z.ZodType) return zodShapeOf(inner, depth + 1);
+    } catch {
+      return null;
+    }
+  }
+  const wrappers = new Set(['optional', 'nullable', 'default', 'catch', 'readonly', 'nonoptional']);
+  if (typeof def.type === 'string' && wrappers.has(def.type) && def.innerType instanceof z.ZodType) {
+    return zodShapeOf(def.innerType, depth + 1);
+  }
+  return null;
+}
+
+interface SurfaceReachability {
+  /** The metadata-type roots the BFS started from. */
+  rootTypes: string[];
+  /** How a def is reachable, or null when it is not. */
+  reachableVia(defKey: string): 'root-graph' | 'derived-clone' | null;
+}
+
+/**
+ * Reachability of every emitted def from the metadata-type roots —
+ * BUILTIN_METADATA_TYPE_SCHEMAS plus the EXTRA_METADATA_TYPE_SCHEMAS overlay
+ * (both behind listMetadataTypeSchemaTypes / getMetadataTypeSchema), i.e. the
+ * schemas a metadata document is actually parsed against. Computed by BFS over
+ * THIS build's in-memory Zod graph, per the 2026-08-02 ruling on #4650 — a
+ * static import/regex approximation misses alias imports, runtime
+ * registration and casts, so it is deliberately not used here.
+ *
+ * 'root-graph': the def's own instance is in the BFS closure.
+ * 'derived-clone': the closure holds a derived copy of it — `.extend()` /
+ * `.strip()` clones share no identity with (and no `_zod.parent` link to) the
+ * original, but they DO share its per-property schema instances, so a def
+ * whose shape entry (same name, same instance) appears in any visited object
+ * node is authorable through that clone. Judged conservatively: one shared
+ * entry marks the whole def reachable — a false "reachable" demands a
+ * tombstone too many, a false "unreachable" would waive one silently.
+ */
+function computeSurfaceReachability(): SurfaceReachability {
+  const rootTypes: string[] = [];
+  const roots: z.ZodType[] = [];
+  for (const type of listMetadataTypeSchemaTypes()) {
+    const schema = getMetadataTypeSchema(type);
+    if (schema) {
+      rootTypes.push(type);
+      roots.push(schema);
+    }
+  }
+  const visited = new Set<z.ZodType>();
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const node = queue.pop()!;
+    if (visited.has(node)) continue;
+    visited.add(node);
+    for (const child of zodChildSchemas(node)) queue.push(child);
+  }
+  // (propName → propSchemaInstance) pairs of every visited object node — the
+  // bridge that recognises derived clones of a def the closure never names.
+  const bridged = new Map<unknown, Set<string>>();
+  for (const node of visited) {
+    const shape = zodShapeOf(node);
+    if (!shape) continue;
+    for (const [name, prop] of Object.entries(shape)) {
+      if (!(prop instanceof z.ZodType)) continue;
+      let names = bridged.get(prop);
+      if (!names) {
+        names = new Set<string>();
+        bridged.set(prop, names);
+      }
+      names.add(name);
+    }
+  }
+  return {
+    rootTypes,
+    reachableVia(defKey: string): 'root-graph' | 'derived-clone' | null {
+      const schema = zodByDefKey.get(defKey);
+      if (!schema) return null;
+      if (visited.has(schema)) return 'root-graph';
+      const shape = zodShapeOf(schema);
+      if (!shape) {
+        // Emitted with authorable keys but no derivable object shape: nothing
+        // to bridge on, so fail closed — demand the tombstone route rather
+        // than silently widening the exception.
+        return 'root-graph';
+      }
+      for (const [name, prop] of Object.entries(shape)) {
+        if (prop instanceof z.ZodType && bridged.get(prop)?.has(name)) return 'derived-clone';
+      }
+      return null;
+    },
+  };
+}
+
+/**
+ * The committed authorable-surface.json this PR started from: its content at
+ * the merge base of HEAD and origin/main. Returns null (with a note) only
+ * when no baseline existed there at all; failure to ANCHOR the base is fatal —
+ * a deletion check that silently skips is the #4650 bypass with extra steps.
+ */
+function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
+  const cwd = path.dirname(AUTHORABLE_SURFACE_PATH);
+  const git = (...args: string[]) => spawnSync('git', args, { cwd, encoding: 'utf-8' as const });
+
+  // CI's typecheck job checks out shallow with no branch refs, so fetch the
+  // one ref this check needs (depth 1 — a single snapshot) before giving up.
+  let tipProbe = git('rev-parse', '--verify', '--quiet', 'origin/main^{commit}');
+  if (tipProbe.status !== 0) {
+    git('fetch', '--quiet', '--depth=1', 'origin', '+refs/heads/main:refs/remotes/origin/main');
+    tipProbe = git('rev-parse', '--verify', '--quiet', 'origin/main^{commit}');
+  }
+  if (tipProbe.status !== 0) {
+    console.error(
+      `\n❌ Cannot resolve origin/main to anchor the authorable-surface deletion check (#4650).\n\n` +
+        `   Deleted baseline lines are validated against authorable-surface.json at the\n` +
+        `   merge base with origin/main — a baseline this commit cannot rewrite. Without\n` +
+        `   that anchor the tombstone gate can be bypassed by hand-editing the file, so\n` +
+        `   this build fails instead of silently skipping the check.\n\n` +
+        `   Fix: \`git fetch origin main\` (or point refs/remotes/origin/main at your\n` +
+        `   upstream main) and re-run.`,
+    );
+    process.exit(1);
+  }
+  const tip = tipProbe.stdout.trim();
+  // Merge base, so a branch behind origin/main is compared against what it
+  // FORKED from (keys added on main since then are not "deleted" here). In a
+  // shallow clone there is no walkable ancestry — fall back to the tip, which
+  // on a PR's synthetic merge commit is the merge base anyway.
+  const mergeBase = git('merge-base', 'HEAD', tip);
+  const rev = mergeBase.status === 0 ? mergeBase.stdout.trim() : tip;
+  if (mergeBase.status !== 0) {
+    console.log(`   (shallow history — using origin/main tip ${tip.slice(0, 12)} as the baseline anchor)`);
+  }
+  const fileName = path.basename(AUTHORABLE_SURFACE_PATH);
+  const show = git('show', `${rev}:./${fileName}`);
+  if (show.status !== 0) {
+    if (/does not exist in|exists on disk, but not in/.test(show.stderr)) {
+      console.log(
+        `ℹ️  authorable-surface deletion check: no ${fileName} at base ${rev.slice(0, 12)} — nothing to compare.`,
+      );
+      return null;
+    }
+    console.error(
+      `\n❌ Failed to read ${fileName} at base ${rev.slice(0, 12)} (#4650):\n${show.stderr}`,
+    );
+    process.exit(1);
+  }
+  try {
+    return { rev, doc: JSON.parse(show.stdout) as AuthorableSurface };
+  } catch (error) {
+    console.error(`\n❌ ${fileName} at base ${rev.slice(0, 12)} is not valid JSON (#4650): ${error}`);
+    process.exit(1);
+  }
+}
+
+{
+  const base = resolveSurfaceBase();
+  if (base) {
+    // Carry base keys through declared def renames first — same discipline as
+    // the snapshot carry above — so a rename is never misread as a deletion.
+    const baseSnapshot = new Map<string, boolean>();
+    for (const entry of base.doc.keys ?? []) {
+      const key = entry.replace(RETIRED_MARK, '');
+      baseSnapshot.set(carryAuthorableKey(key), entry.endsWith(RETIRED_MARK));
+    }
+    const deletedKeys = [...baseSnapshot.keys()].filter((k) => !currentKeys.has(k));
+    if (deletedKeys.length > 0) {
+      const baseRev = base.rev.slice(0, 12);
+      const clauseMajors = registeredClauseMajors();
+      const reachability = computeSurfaceReachability();
+      const allowed: string[] = [];
+      const violations: string[] = [];
+      const goneDefs = new Map<string, number>(); // def no longer emitted -> deleted key count
+      for (const key of deletedKeys) {
+        const sep = key.indexOf(':');
+        const defKey = key.slice(0, sep);
+        const prop = key.slice(sep + 1);
+        if (!generatedSchemas.has(defKey)) {
+          goneDefs.set(defKey, (goneDefs.get(defKey) ?? 0) + 1);
+          continue;
+        }
+        const via = reachability.reachableVia(defKey);
+        if (via === null) {
+          allowed.push(
+            `${key} — def not reachable from the ${reachability.rootTypes.length} metadata-type roots\n` +
+              `       (BUILTIN_METADATA_TYPE_SCHEMAS + EXTRA_METADATA_TYPE_SCHEMAS overlay; BFS over this\n` +
+              `       build's in-memory Zod graph): an over-collected entry, never parsed against a\n` +
+              `       metadata document. This waives ONLY the tombstone requirement of this file — it is\n` +
+              `       not a license to change the schema (#4650).`,
+          );
+          continue;
+        }
+        const wasRetired = baseSnapshot.get(key) === true;
+        const how =
+          via === 'root-graph'
+            ? 'reachable from the metadata-type roots'
+            : 'authorable through a derived clone of a root-reachable schema';
+        if (!wasRetired) {
+          violations.push(`${key} — def ${how}; the entry at ${baseRev} was LIVE (never tombstoned).`);
+          continue;
+        }
+        const matches = [...clauseMajors.entries()].filter(([clause]) => clause.endsWith('.' + prop));
+        if (matches.length === 0) {
+          violations.push(
+            `${key} — def ${how}; tombstoned, but no conversion/migration clause matching '.${prop}'\n` +
+              `       is registered in the ADR-0087 registries, so the retirement never reached\n` +
+              `       spec-changes.json or \`os migrate meta\`.`,
+          );
+          continue;
+        }
+        const registeredAt = Math.min(...matches.map(([, major]) => major));
+        if (CURRENT_MAJOR - registeredAt < TOMBSTONE_AGE_MAJORS) {
+          violations.push(
+            `${key} — def ${how}; tombstone registered at major ${registeredAt}, current major is\n` +
+              `       ${CURRENT_MAJOR} — a tombstone must age ≥ ${TOMBSTONE_AGE_MAJORS} majors before its line is deleted.`,
+          );
+          continue;
+        }
+        allowed.push(
+          `${key} — [RETIRED] at ${baseRev} and registered at major ${registeredAt} ` +
+            `(current ${CURRENT_MAJOR}): tombstone aged out.`,
+        );
+      }
+      for (const [defKey, keyCount] of goneDefs) {
+        allowed.push(
+          `${defKey}:* (${keyCount} line(s)) — def no longer emitted by this build; whole-schema\n` +
+            `       removals are adjudicated by json-schema.manifest.json (#2978) and check:api-surface.`,
+        );
+      }
+      if (allowed.length > 0) {
+        console.log(`\nℹ️  ${allowed.length} baseline deletion(s) since ${baseRev} carry their own proof (#4650):`);
+        for (const line of allowed) console.log(`     - ${line}`);
+      }
+      if (violations.length > 0) {
+        console.error(`\n❌ ${violations.length} authorable baseline line(s) were deleted without proof (#4650):`);
+        for (const line of violations) console.error(`     - ${line}`);
+        console.error(
+          `\n   authorable-surface.json is generated evidence, not an editable list: deleting a\n` +
+            `   line deletes exactly what check (a) above needs to see — #4638 and #4643 both\n` +
+            `   removed authorable keys that way with a green gate. Deletions are therefore\n` +
+            `   compared against the baseline at merge base ${baseRev} with origin/main,\n` +
+            `   which this commit cannot rewrite.\n\n` +
+            `   A line may only leave this file when:\n` +
+            `     1. its key was tombstoned (\`retiredKey()\` → "[RETIRED]") with a D2 conversion\n` +
+            `        (src/conversions/registry.ts) or migration step registered for its surface,\n` +
+            `        AND that registration is ≥ ${TOMBSTONE_AGE_MAJORS} majors old (≤ v${CURRENT_MAJOR - TOMBSTONE_AGE_MAJORS}); or\n` +
+            `     2. its def is not reachable from the metadata-type roots — this gate computes\n` +
+            `        that itself (it would have said so above); or\n` +
+            `     3. its whole def stopped being emitted (adjudicated by the manifest ratchet).\n\n` +
+            `   Restore the line(s) — \`pnpm --filter @objectstack/spec gen:schema\` regenerates\n` +
+            `   the file — or complete the retirement route (#4650, ADR-0104, and the\n` +
+            `   spec-property-retirement skill in .claude/skills/).`,
+        );
+        process.exit(1);
+      }
+    }
+  }
+}
+
+// The whole FILE is compared against its canonical serialization, not just the
+// key array. #4662 caught a hand-normalized description dash the keys-only
+// comparison could never see — proof the file's content was not this script's
+// output. Any non-generated byte is a hand-edit (or a stale writer), and
+// hand-edits are exactly how deletions hid from check (a) (#4650, comment 2).
+const canonicalSurface: AuthorableSurface = {
+  description:
+    'Ratchet of every AUTHORABLE key in the spec — what a metadata author may write, which ' +
+    'for this platform IS the third-party API. Auto-updated on additions (commit the change). ' +
+    'A key that disappears without a tombstone fails gen:schema, because these schemas are ' +
+    'not .strict() and Zod would silently strip it. "[RETIRED]" marks a tombstoned key that ' +
+    'still rejects with an upgrade prescription. See #3855, ADR-0059 §5.',
+  keys: currentEntries,
+};
+const canonicalSurfaceText = JSON.stringify(canonicalSurface, null, 2) + '\n';
+const surfaceChanged = surfaceRaw !== canonicalSurfaceText;
 if (surfaceChanged && CHECK) {
   // Removals already exited above; reaching here in check mode means the snapshot
-  // is behind on ADDITIONS. Left unnoticed that is not cosmetic: an unrecorded key
-  // is one this ratchet can never miss later, because it was never in the baseline.
+  // is behind on ADDITIONS, or differs without any key change at all — a hand-edit.
   const before = new Set(surfaceDoc?.keys ?? []);
   const addedKeys = currentEntries.filter((k) => !before.has(k));
-  console.error(
-    `\n❌ authorable-surface.json is out of date (${addedKeys.length} key(s) not recorded).`,
-  );
-  for (const k of addedKeys.slice(0, 20)) console.error(`     + ${k}`);
-  if (addedKeys.length > 20) console.error(`     … and ${addedKeys.length - 20} more`);
-  console.error(
-    `\n   Run \`pnpm --filter @objectstack/spec gen:schema\` and commit the result. An\n` +
-    `   unrecorded key is invisible to this ratchet forever after — it can only detect\n` +
-    `   the disappearance of something it once saw.`,
-  );
+  if (addedKeys.length > 0) {
+    console.error(
+      `\n❌ authorable-surface.json is out of date (${addedKeys.length} key(s) not recorded).`,
+    );
+    for (const k of addedKeys.slice(0, 20)) console.error(`     + ${k}`);
+    if (addedKeys.length > 20) console.error(`     … and ${addedKeys.length - 20} more`);
+    console.error(
+      `\n   Run \`pnpm --filter @objectstack/spec gen:schema\` and commit the result. An\n` +
+      `   unrecorded key is invisible to this ratchet forever after — it can only detect\n` +
+      `   the disappearance of something it once saw.`,
+    );
+  } else {
+    console.error(
+      `\n❌ authorable-surface.json does not match its generated form (key set unchanged).`,
+    );
+    console.error(
+      `\n   The recorded keys are current, but the file's bytes are not what gen:schema\n` +
+      `   writes — a hand-edit or stale formatting (#4662 found a manually normalized\n` +
+      `   description dash exactly this way; see #4650). This file is generated evidence:\n` +
+      `   every difference must come from the generator.\n\n` +
+      `   Run \`pnpm --filter @objectstack/spec gen:schema\` and commit the result.`,
+    );
+  }
   process.exit(1);
 }
 if (surfaceChanged && !CHECK) {
-  const updated: AuthorableSurface = {
-    description:
-      'Ratchet of every AUTHORABLE key in the spec — what a metadata author may write, which ' +
-      'for this platform IS the third-party API. Auto-updated on additions (commit the change). ' +
-      'A key that disappears without a tombstone fails gen:schema, because these schemas are ' +
-      'not .strict() and Zod would silently strip it. "[RETIRED]" marks a tombstoned key that ' +
-      'still rejects with an upgrade prescription. See #3855, ADR-0059 §5.',
-    keys: currentEntries,
-  };
-  fs.writeFileSync(AUTHORABLE_SURFACE_PATH, JSON.stringify(updated, null, 2) + '\n');
+  fs.writeFileSync(AUTHORABLE_SURFACE_PATH, canonicalSurfaceText);
   console.log(
     `\n🔑 authorable-surface.json ${surfaceDoc ? 'updated' : 'created'} (${currentEntries.length} keys) — commit it.`,
   );
