@@ -243,6 +243,12 @@
         "toMajor": 17
       },
       {
+        "surface": "flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier",
+        "to": "retry policy unified across job.retryPolicy and try_catch retry: base delay 'retryDelayMs' → 'backoffMs', and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661)",
+        "conversionId": "retry-policy-converged",
+        "toMajor": 17
+      },
+      {
         "surface": "object.managedBy",
         "to": "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the name describing what the bucket actually holds: admin/user-writable platform data)",
         "conversionId": "object-managed-by-system-to-system-data",
@@ -319,6 +325,13 @@
         "migrationId": "dashboard-widget-strict-unknown-keys",
         "toMajor": 16,
         "rationale": "The `.strict()` flip turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: bind a `dataset` and select `dimensions`/`values`, move a renderer setting under `options`, or delete the dead key."
+      },
+      {
+        "surface": "job.retryPolicy.maxRetries (> 10) / job.retryPolicy.backoffMultiplier (< 1)",
+        "replacement": "maxRetries <= 10, and backoffMultiplier >= 1",
+        "migrationId": "job-retry-policy-constraints-tightened",
+        "toMajor": 17,
+        "rationale": "The converged RetryPolicy (#4661) keeps the automation side's bounds, which the job side never had: `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1. Neither has a lossless rewrite. Clamping `maxRetries: 20` to 10 would halve a retry budget its author chose, and a `backoffMultiplier` below 1 describes a delay that SHRINKS on each attempt — retrying a failing dependency ever faster, which is the opposite of backoff and was never a shape the engine meant to offer. Both now fail at parse time with the bound named, rather than being silently reinterpreted. Choosing the replacement count (or accepting the cap) is the author's call."
       },
       {
         "surface": "flow.errorHandling.maxRetries (under strategy: 'retry')",
@@ -782,6 +795,12 @@
           "toMajor": 17
         },
         {
+          "surface": "flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier",
+          "to": "retry policy unified across job.retryPolicy and try_catch retry: base delay 'retryDelayMs' → 'backoffMs', and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661)",
+          "conversionId": "retry-policy-converged",
+          "toMajor": 17
+        },
+        {
           "surface": "object.managedBy",
           "to": "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the name describing what the bucket actually holds: admin/user-writable platform data)",
           "conversionId": "object-managed-by-system-to-system-data",
@@ -789,6 +808,13 @@
         }
       ],
       "migrated": [
+        {
+          "surface": "job.retryPolicy.maxRetries (> 10) / job.retryPolicy.backoffMultiplier (< 1)",
+          "replacement": "maxRetries <= 10, and backoffMultiplier >= 1",
+          "migrationId": "job-retry-policy-constraints-tightened",
+          "toMajor": 17,
+          "rationale": "The converged RetryPolicy (#4661) keeps the automation side's bounds, which the job side never had: `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1. Neither has a lossless rewrite. Clamping `maxRetries: 20` to 10 would halve a retry budget its author chose, and a `backoffMultiplier` below 1 describes a delay that SHRINKS on each attempt — retrying a failing dependency ever faster, which is the opposite of backoff and was never a shape the engine meant to offer. Both now fail at parse time with the bound named, rather than being silently reinterpreted. Choosing the replacement count (or accepting the cap) is the author's call."
+        },
         {
           "surface": "flow.errorHandling.maxRetries (under strategy: 'retry')",
           "replacement": "an explicit count >= 1 (e.g. maxRetries: 3), or strategy: 'fail'",

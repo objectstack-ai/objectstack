@@ -18,8 +18,6 @@
     "PackageDependencySchema — [./cloud (const)] ≠ [./kernel (const)]",
     "RateLimitConfig — [./integration (type)] ≠ [./shared (type)]",
     "RateLimitConfigSchema — [./integration (const)] ≠ [./shared (const)]",
-    "RetryPolicy — [./automation (type)] ≠ [./system (type)]",
-    "RetryPolicySchema — [./automation (const)] ≠ [./system (const)]",
     "TenantPlan — [./cloud (type)] ≠ [./system (type)]",
     "TenantPlanSchema — [./cloud (const)] ≠ [./system (const)]"
   ]

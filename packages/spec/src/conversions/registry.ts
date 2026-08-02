@@ -2914,6 +2914,159 @@ const objectManagedBySystemToSystemData: MetadataConversion = {
   },
 };
 
+/**
+ * The retry policy converges to one declaration (protocol 17, #4661 — the
+ * #4535 C8 dual-source cluster).
+ *
+ * `@objectstack/spec/automation` and `@objectstack/spec/system` both exported a
+ * `RetryPolicy` / `RetryPolicySchema`, resolving to DIFFERENT declarations — so
+ * which shape a consumer got depended only on the import path (#4411). They
+ * were never two concepts: `try_catch`'s `retry` region and `job.retryPolicy`
+ * both compute `delay = base * multiplier^(retry-1)`, and the two executors
+ * implemented that identical formula. What differed was cosmetic and
+ * accidental, and this conversion pays for both halves of the merge:
+ *
+ *  1. **The base delay had two spellings.** automation said `retryDelayMs`,
+ *     system said `backoffMs`. `backoffMs` wins — it is what the *enforced*
+ *     retry policies already spell it (`job.retryPolicy` and `hook.retryPolicy`;
+ *     see the `datasource-inert-blocks-removed` note above, which leans on
+ *     exactly that distinction), so the platform drops from three spellings to
+ *     two rather than four. `retryDelayMs` is tombstoned (`retiredKey`) — NOT
+ *     deleted — because neither owning shape is `.strict()`: a plain deletion
+ *     would have Zod silently swallow the authored number and fall back to the
+ *     1000ms default, which is the quiet-failure class ADR-0049 removes.
+ *
+ *  2. **The defaults were opposite, and no gate can see a default.** Pre-17,
+ *     `job.retryPolicy` defaulted `maxRetries: 3` / `backoffMultiplier: 2`
+ *     while the automation shape defaulted 0 / 1. The merged declaration takes
+ *     0 / 1 (retry is opt-in: a retry replays whatever the attempt already did,
+ *     and an implicit replay of side effects is the failure mode hardest to
+ *     catch in tests — the same reading already recorded for flow-level retry
+ *     in `flow-retry-max-retries-required`, #4247). Taken alone that would
+ *     SILENTLY stop existing jobs from retrying, and the authorable-surface
+ *     gate would never notice: it compares key sets, and a default is not a key.
+ *     So this conversion writes the pre-17 numbers into every existing
+ *     `job.retryPolicy` that omitted them. Deployed stacks keep their exact
+ *     behaviour; only a newly authored omission means "no retry".
+ *
+ * Jobs with no `retryPolicy` block at all are left alone — absence already
+ * meant a single attempt on both sides of the change.
+ *
+ * `retiredFromLoadPath` is NOT set: `FlowNodeSchema.config` is an unconstrained
+ * record, so no schema rejection can reach `config.retry.retryDelayMs` and the
+ * conversion layer is the only seam that can declare and retire that spelling.
+ * The `RetryPolicySchema` tombstone still fires for anyone who reaches the
+ * policy through a parsed job.
+ */
+const retryPolicyConverged: MetadataConversion = {
+  id: 'retry-policy-converged',
+  toMajor: 17,
+  surface: 'flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
+  summary:
+    "retry policy unified across job.retryPolicy and try_catch retry: base delay 'retryDelayMs' → 'backoffMs', " +
+    "and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661)",
+  apply(stack, emit) {
+    // ── 1. try_catch nodes: retry.retryDelayMs → retry.backoffMs ──────
+    const withFlows = mapFlowNodes(stack, (node, path) => {
+      if (node.type !== 'try_catch') return node;
+      const config = node.config;
+      if (!config || typeof config !== 'object' || Array.isArray(config)) return node;
+      const configDict = config as Record<string, unknown>;
+      const retry = configDict.retry;
+      if (!retry || typeof retry !== 'object' || Array.isArray(retry)) return node;
+      const renamed = renameKey(retry as Record<string, unknown>, 'retryDelayMs', 'backoffMs');
+      if (renamed === null) return node;
+      emit({ from: 'retryDelayMs', to: 'backoffMs', path: `${path}.config.retry.backoffMs` });
+      return { ...node, config: { ...configDict, retry: renamed } };
+    });
+
+    // ── 2. jobs: materialize the pre-17 implicit defaults ─────────────
+    return mapCollection(withFlows, 'jobs', (job, path) => {
+      const policy = job.retryPolicy;
+      if (!policy || typeof policy !== 'object' || Array.isArray(policy)) return job;
+      const policyDict = policy as Record<string, unknown>;
+      let next = policyDict;
+      if (next.maxRetries === undefined) {
+        next = { ...next, maxRetries: 3 };
+        emit({
+          from: 'maxRetries unset (implied 3)',
+          to: 'maxRetries: 3',
+          path: `${path}.retryPolicy.maxRetries`,
+        });
+      }
+      if (next.backoffMultiplier === undefined) {
+        next = { ...next, backoffMultiplier: 2 };
+        emit({
+          from: 'backoffMultiplier unset (implied 2)',
+          to: 'backoffMultiplier: 2',
+          path: `${path}.retryPolicy.backoffMultiplier`,
+        });
+      }
+      return next === policyDict ? job : { ...job, retryPolicy: next };
+    });
+  },
+  fixture: {
+    before: {
+      flows: [{
+        name: 'sync_orders',
+        nodes: [
+          { id: 'n1', type: 'start' },
+          {
+            id: 'n2',
+            type: 'try_catch',
+            config: {
+              try: { nodes: [], edges: [] },
+              retry: { maxRetries: 3, retryDelayMs: 500, jitter: true },
+            },
+          },
+          // Already canonical — left alone, contributes no notice.
+          {
+            id: 'n3',
+            type: 'try_catch',
+            config: { try: { nodes: [], edges: [] }, retry: { maxRetries: 2, backoffMs: 250 } },
+          },
+        ],
+      }],
+      jobs: [
+        // Omits both defaults — both get written out.
+        { name: 'nightly_sync', schedule: { type: 'cron', expression: '0 0 * * *' }, handler: 'jobs.ts:sync', retryPolicy: { backoffMs: 5000 } },
+        // States both — untouched.
+        { name: 'hourly_roll', schedule: { type: 'cron', expression: '0 * * * *' }, handler: 'jobs.ts:roll', retryPolicy: { maxRetries: 1, backoffMultiplier: 3 } },
+        // No policy block at all — absence already meant one attempt.
+        { name: 'weekly_purge', schedule: { type: 'cron', expression: '0 0 * * 0' }, handler: 'jobs.ts:purge' },
+      ],
+    },
+    after: {
+      flows: [{
+        name: 'sync_orders',
+        nodes: [
+          { id: 'n1', type: 'start' },
+          {
+            id: 'n2',
+            type: 'try_catch',
+            config: {
+              try: { nodes: [], edges: [] },
+              retry: { maxRetries: 3, jitter: true, backoffMs: 500 },
+            },
+          },
+          {
+            id: 'n3',
+            type: 'try_catch',
+            config: { try: { nodes: [], edges: [] }, retry: { maxRetries: 2, backoffMs: 250 } },
+          },
+        ],
+      }],
+      jobs: [
+        { name: 'nightly_sync', schedule: { type: 'cron', expression: '0 0 * * *' }, handler: 'jobs.ts:sync', retryPolicy: { backoffMs: 5000, maxRetries: 3, backoffMultiplier: 2 } },
+        { name: 'hourly_roll', schedule: { type: 'cron', expression: '0 * * * *' }, handler: 'jobs.ts:roll', retryPolicy: { maxRetries: 1, backoffMultiplier: 3 } },
+        { name: 'weekly_purge', schedule: { type: 'cron', expression: '0 0 * * 0' }, handler: 'jobs.ts:purge' },
+      ],
+    },
+    // n2's rename, plus nightly_sync's two materialized defaults.
+    expectedNotices: 3,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -2951,6 +3104,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
     // whether `config.function` is set, and that rename is what sets it.
     flowNodeScriptBranchKeysRemoved,
+    retryPolicyConverged,
     objectManagedBySystemToSystemData,
   ],
 };

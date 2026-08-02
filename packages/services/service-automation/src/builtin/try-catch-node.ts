@@ -59,7 +59,9 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
             type: 'object',
             properties: {
               maxRetries: { type: 'integer', minimum: 0, maximum: 10 },
-              retryDelayMs: { type: 'integer', minimum: 0 },
+              // `backoffMs` (was `retryDelayMs`) since spec 17.0.0 — one retry
+              // policy spelling across job.retryPolicy and try_catch (#4661).
+              backoffMs: { type: 'integer', minimum: 0 },
               backoffMultiplier: { type: 'number', minimum: 1 },
               maxRetryDelayMs: { type: 'integer', minimum: 0 },
               jitter: { type: 'boolean' },
@@ -72,9 +74,11 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
     async execute(node, variables, context) {
       // Parse against the ADR-0031 contract. Note the retry defaults now come
       // from the CONTRACT (RetryPolicySchema): a declared `retry` block that
-      // omits `retryDelayMs` gets the documented 1000ms base delay, where this
+      // omits `backoffMs` gets the documented 1000ms base delay, where this
       // executor historically filled in 0 — the declared default is the
-      // enforced one (#4277).
+      // enforced one (#4277). Since spec 17.0.0 that contract is one shared
+      // declaration with `job.retryPolicy`, and the base delay is spelled
+      // `backoffMs` (was `retryDelayMs`, tombstoned + converted — #4661).
       const parsed = parseNodeConfig<TryCatchConfigParsed>('try_catch', node.id, TryCatchConfigSchema, node.config);
       if (!parsed.ok) return parsed.refusal;
       const cfg = parsed.config;
@@ -85,7 +89,7 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
 
       const ctxOrEmpty = context ?? ({} as AutomationContext);
       const maxRetries = retry?.maxRetries ?? 0;
-      const baseDelay = retry?.retryDelayMs ?? 0;
+      const baseDelay = retry?.backoffMs ?? 0;
       const multiplier = retry?.backoffMultiplier ?? 1;
       const maxDelay = retry?.maxRetryDelayMs ?? 30000;
       const useJitter = retry?.jitter === true;

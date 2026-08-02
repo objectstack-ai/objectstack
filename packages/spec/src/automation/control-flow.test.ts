@@ -104,10 +104,37 @@ describe('TryCatchConfigSchema', () => {
     const parsed = TryCatchConfigSchema.parse({
       try: { nodes: [node('t')] },
       catch: { nodes: [node('c')] },
-      retry: { maxRetries: 3, retryDelayMs: 500 },
+      retry: { maxRetries: 3, backoffMs: 500 },
     });
     expect(parsed.errorVariable).toBe('$error');
     expect(parsed.retry?.maxRetries).toBe(3);
+    expect(parsed.retry?.backoffMs).toBe(500);
+  });
+
+  // #4661: `retryDelayMs` was the automation spelling of `backoffMs` before the
+  // retry policy converged onto one declaration. It is TOMBSTONED rather than
+  // deleted precisely because this schema is not `.strict()` — a plain removal
+  // would have Zod swallow the authored number and silently fall back to the
+  // 1000ms default. Assert the loud rejection, not merely its absence.
+  it('rejects the retired `retryDelayMs` spelling with the rename prescription', () => {
+    const parse = () => TryCatchConfigSchema.parse({
+      try: { nodes: [node('t')] },
+      retry: { maxRetries: 3, retryDelayMs: 500 },
+    });
+    expect(parse).toThrow(/backoffMs/);
+    expect(parse).toThrow(/retryDelayMs/);
+  });
+
+  it('retry is opt-in: a declared but empty retry block does not retry', () => {
+    const parsed = TryCatchConfigSchema.parse({
+      try: { nodes: [node('t')] },
+      retry: {},
+    });
+    expect(parsed.retry?.maxRetries).toBe(0);
+    expect(parsed.retry?.backoffMs).toBe(1000);
+    expect(parsed.retry?.backoffMultiplier).toBe(1);
+    expect(parsed.retry?.maxRetryDelayMs).toBe(30000);
+    expect(parsed.retry?.jitter).toBe(false);
   });
 });
 
