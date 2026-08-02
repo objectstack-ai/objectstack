@@ -228,6 +228,42 @@ Even inside your own worktree, operate defensively:
      commit itself — that second CI round is where joint breakage surfaces, and
      the guards in `scripts/check-*.mjs` exist largely because this class of
      breakage is invisible to `git merge`.
+11. **Generated artifacts don't text-merge — a driver defers them and
+   `pre-commit` collects the debt.** §10's "never trust git's textual merge of a
+   generated file" is now mechanical (#4675). `.gitattributes` routes the
+   generator-owned artifacts (`spec-changes.json`, `authorable-surface.json`,
+   `api-surface*.json`, `json-schema.manifest.json`,
+   `docs/protocol-upgrade-guide.md`, `content/docs/references/**`) to
+   `merge=os-regen`, so a merge that used to stop on conflicts across all of
+   them now stops only on the hand-written files that actually need you.
+
+   The driver does **not** regenerate. Git runs merge drivers *while* it merges,
+   in index order, so the worktree still holds pre-merge sources — a generator
+   run there would describe a half-merged tree and write a confidently wrong
+   artifact, which is strictly worse than the conflict it replaced. Instead it
+   records each path in `$GIT_DIR/os-regen-pending`, and `pre-commit` refuses the
+   commit until those artifacts check clean. So the sequence after a merge is
+   unchanged from §9 — rebuild, then `check:generated --fix` — you just cannot
+   forget it.
+
+   Two things worth knowing:
+   - **Registration is per clone.** `pnpm install` does it (`prepare` →
+     `scripts/setup-git-hooks.mjs`). A clone where that never ran falls back to
+     git's default text merge — pre-#4675 behaviour, not breakage — so nothing
+     depends on every machine being set up.
+   - **The ratchets are deliberately excluded**
+     (`docs-import-surface.baseline.json`, `dual-source-exports.baseline.json`,
+     the hand-written `migrations`/`conversions` registries, `variant-docs.json`).
+     Recomputing a shrink-only ratchet can *widen* it, which would launder a new
+     exemption in as merge noise. Those conflicts are yours to read. See
+     `NOT_DRIVER_MANAGED` in `scripts/regen-artifacts.mjs` for why, per path.
+
+   Related: `check:generated --fix` now **refuses** to run `gen:api-surface` on a
+   stale `dist` rather than warning about it (§9's trap, made unsurvivable on the
+   one path that writes).
+
+   `pnpm check:merge-driver` reconciles `.gitattributes` against that table in
+   both directions and proves the driver end to end against real git.
 
 ---
 

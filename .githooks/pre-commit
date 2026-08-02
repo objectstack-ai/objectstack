@@ -1,0 +1,11 @@
+#!/bin/sh
+# Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+#
+# Registered by `scripts/setup-git-hooks.mjs` via `core.hooksPath=.githooks`,
+# which `pnpm install` runs. Cheap by construction: with no pending marker it
+# exits before doing any work, which is every commit that did not just merge a
+# generator-owned artifact (#4675).
+
+if [ -z "$OS_SKIP_REGEN_CHECK" ]; then
+  node "$(git rev-parse --show-toplevel)/scripts/check-regen-pending.mjs" || exit 1
+fi

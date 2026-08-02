@@ -30,6 +30,11 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// One staleness rule, shared with the merge driver's pre-commit half (#4675) —
+// two copies of "is dist older than src" would drift, and the direction they
+// drift in is the one that writes a wrong artifact.
+import { distIsStale } from '../../../scripts/check-regen-pending.mjs';
+
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
@@ -232,6 +237,24 @@ if (!fix) {
 console.log(`\n--fix: regenerating the ${stale.length} stale artifact(s). Review the diff before committing.\n`);
 let failed = 0;
 for (const s of stale) {
+  // The `readsDist` warning above is advice a reader can ignore; here it must
+  // become a refusal. `gen:api-surface` on a stale dist does not fail — it
+  // writes a plausible surface with every export added since the last build
+  // missing, and `gen:docs` then ratchets a baseline exemption in to cover the
+  // hole. That landed unnoticed on #4687 and was caught only by diffing the
+  // generated files against `main`. --fix is the one path that WRITES, so it is
+  // the one place the trap is unsurvivable: a visible conflict is recoverable,
+  // a confidently wrong artifact is not (#4675).
+  if (s.readsDist && distIsStale()) {
+    failed++;
+    console.log(`  ✗ ${s.gen} — REFUSED`);
+    console.error(
+      `      packages/spec/dist is missing or older than packages/spec/src.\n`
+        + `      Regenerating now would write a surface describing a build that no longer exists.\n`
+        + `      pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec ${s.gen}`,
+    );
+    continue;
+  }
   const { ok, output } = run(s.gen);
   console.log(`  ${ok ? '✓' : '✗'} ${s.gen}`);
   if (!ok) {
