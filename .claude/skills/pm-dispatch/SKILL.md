@@ -32,7 +32,7 @@ genuinely requires their call.
 | arg | meaning | default |
 |---|---|---|
 | `label:<name>` | backlog filter label; `label:all` = every open unassigned issue | `pm:queue` |
-| `repo:<owner/name>` | which repo's backlog to work | `objectstack-ai/objectstack` |
+| `repo:<owner/name>` | which repo's **backlog** to scan (the target repo per issue comes from `repo:*` labels — see "Multi-repo coordination") | `objectstack-ai/objectstack` |
 | `batch:<n>` | max developer agents in flight at once | `3` |
 | `rounds:<n>` | stop after N rounds | until queue empty |
 | `mode:subagent` \| `mode:cloud` | dispatch backend — see "Dispatch backends" | `subagent` |
@@ -55,13 +55,56 @@ write state only through these signals:
 **One-time setup** (idempotent, run at the start of the first round):
 
 ```bash
-gh label create pm:queue            -c 0e8a16 -d "Ready for the PM dispatch loop" || true
-gh label create pm:dispatched       -c 1d76db -d "Dispatched to a dev agent by /pm-dispatch" || true
-gh label create needs-user-decision -c d93f0b -d "Blocked on a maintainer decision — do not dispatch" || true
+for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud; do
+  gh label create pm:queue            -R "$R" -c 0e8a16 -d "Ready for the PM dispatch loop" || true
+  gh label create pm:dispatched       -R "$R" -c 1d76db -d "Dispatched to a dev agent by /pm-dispatch" || true
+  gh label create needs-user-decision -R "$R" -c d93f0b -d "Blocked on a maintainer decision — do not dispatch" || true
+done
+# routing labels exist only on the main backlog repo:
+gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Lands in objectui (frontend)" || true
+gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Lands in cloud" || true
 ```
 
 (Use the GitHub MCP tools instead of `gh` when the CLI is unavailable — the
 protocol is identical.)
+
+## Multi-repo coordination (backend / frontend / cloud)
+
+The product spans three repos with a fixed dependency direction:
+`objectstack` (backend; `packages/spec` is the single contract) →
+`objectui` (frontend; its build flows back via `pnpm objectui:refresh`) and
+`cloud`. The loop coordinates them with four rules:
+
+**1. One main backlog.** Feature-level issues live in `objectstack`,
+whatever repo the code lands in. A `repo:objectui` / `repo:cloud` label
+routes the dev agent's working repo; no routing label = backend. The dev
+still branches/pushes/PRs **in the target repo** (its own worktree there —
+one worktree per repo, as always). Repo-local trivia may still be filed in
+the sibling repos directly; to drain such a local queue, run
+`/pm-dispatch repo:objectstack-ai/objectui` (the pm labels exist there too).
+
+**2. Contract-first splitting.** A cross-repo feature is never one dispatch.
+Split it: a parent issue plus one sub-issue per repo (native GitHub
+sub-issues), and the **spec/backend sub-issue goes first** — it fixes the
+contract. Downstream sub-issues carry a body line
+`Blocked-by: <owner/repo>#<n>`. The PM never dispatches an issue whose
+`Blocked-by` references are not yet closed (issue) or merged (PR) — verify
+against GitHub at selection time, not from memory. Batch independence is
+cross-repo: two issues linked by `Blocked-by` or sharing a parent never
+ride in the same batch.
+
+**3. Linkage chores are issues, not memory.** When an accepted PR's
+artifacts flow into another repo, the PM immediately files the follow-up in
+the consuming repo's backlog instead of relying on anyone remembering. The
+known case: accepting a `repo:objectui` PR ⇒ file a `pm:queue` issue in
+`objectstack` — "run `pnpm objectui:refresh` and land the console bump",
+referencing the merged PR, blocked-by it until it actually merges.
+
+**4. One board, no second tracker.** The pm labels above are the state
+machine; an org-level GitHub Project pulling issues/PRs from all three repos
+gives the maintainer a single view (filter by `repo:*` and `pm:*`). The PM
+maintains no tracking state outside GitHub — that invariant is what keeps
+the loop resumable and the board honest.
 
 ## The round loop
 
@@ -96,7 +139,8 @@ in parallel in the background. Prompt template — fill every placeholder, paste
 the full issue body, never a summary:
 
 ```
-You are working repo {repo}, issue #{n}.
+Your task is issue {backlog_repo}#{n}. The code lands in {target_repo}
+(from the issue's repo:* routing label; same repo when unlabeled).
 
 ISSUE TITLE: {title}
 ISSUE BODY:
@@ -107,10 +151,12 @@ PREVIOUS ATTEMPT REVIEW — fix all of these before returning:
 {feedback}
 
 Follow your operating procedure (you are the os-dev agent). Non-negotiables:
-- Branch: claude/issue-{n}-{slug} off origin/main, in a DEDICATED worktree.
+- Work in {target_repo}: branch claude/issue-{n}-{slug} off origin/main,
+  in a DEDICATED worktree of that repo.
 - The issue is already claimed; do not touch its assignee.
-- Deliver: implementation + tests + changeset, pushed, as a DRAFT PR whose
-  body starts with "Fixes #{n}". Never merge anything.
+- Deliver: implementation + tests + changeset, pushed, as a DRAFT PR in
+  {target_repo} whose body starts with "Fixes {backlog_repo}#{n}".
+  Never merge anything.
 - If the issue underspecifies a decision that changes the public contract
   (spec schema, API shape, naming), STOP and return status "needs_decision"
   with your open questions — do not guess.
