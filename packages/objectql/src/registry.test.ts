@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { SchemaRegistry, applySystemFields, reconcileManagedApiMethods, warnStrippedLegacyApiMethods, computeFQN, parseFQN } from './registry';
+import { SchemaRegistry, applySystemFields, reconcileManagedApiMethods, warnStrippedLegacyApiMethods, warnFunctionalCompleteness, computeFQN, parseFQN } from './registry';
 import { AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 
 describe('SchemaRegistry', () => {
@@ -922,5 +922,104 @@ describe('warnStrippedLegacyApiMethods (#3543)', () => {
         warnStrippedLegacyApiMethods(schema, { warn });
         warnStrippedLegacyApiMethods(schema, { warn });
         expect(warn).toHaveBeenCalledTimes(1);
+    });
+});
+
+// ==========================================
+// warnFunctionalCompleteness — ADR-0078 Phase 4
+// Registration-time twin of `validate-functional-completeness`: the registry
+// is the one choke point every metadata door goes through, including the ones
+// that skip Zod and lint (#3896, raw registerObject). Same shared predicate,
+// same rule ids. Pure observation — never mutates the schema, never throws.
+// ==========================================
+describe('warnFunctionalCompleteness (ADR-0078 Phase 4)', () => {
+    it('diagnoses a bare summary field with the SAME rule id the lint reports', () => {
+        const warn = vi.fn();
+        warnFunctionalCompleteness(
+            { name: 'fc_room', fields: { registration_count: { type: 'summary', label: 'Registrations' } } } as any,
+            { warn },
+        );
+        expect(warn).toHaveBeenCalledTimes(1);
+        const msg = warn.mock.calls[0][0] as string;
+        expect(msg).toContain('fc_room');
+        expect(msg).toContain('registration_count');
+        expect(msg).toContain('field/summary-without-operations');
+        expect(msg).toContain('ADR-0078');
+        // The prescription rides along — a warning with no fix is a dead end.
+        expect(msg).toContain('summaryOperations');
+    });
+
+    it('aggregates every inert field into ONE line (greppable, not spam)', () => {
+        const warn = vi.fn();
+        warnFunctionalCompleteness(
+            {
+                name: 'fc_multi',
+                fields: {
+                    total: { type: 'summary' },
+                    rate: { type: 'formula' },
+                    acct: { type: 'lookup' },
+                    ok: { type: 'text', label: 'Fine' },
+                },
+            } as any,
+            { warn },
+        );
+        expect(warn).toHaveBeenCalledTimes(1);
+        const msg = warn.mock.calls[0][0] as string;
+        expect(msg).toContain('field/summary-without-operations');
+        expect(msg).toContain('field/formula-without-expression');
+        expect(msg).toContain('field/relationship-without-reference');
+        expect(msg).not.toContain('" ok:'); // the healthy field is not named
+    });
+
+    it('stays silent for a complete schema — the predicate decides, not this wrapper', () => {
+        const warn = vi.fn();
+        warnFunctionalCompleteness(
+            {
+                name: 'fc_clean',
+                fields: {
+                    total: { type: 'summary', summaryOperations: { object: 'line', field: 'amt', function: 'sum' } },
+                    acct: { type: 'lookup', reference: 'account' },
+                    stage: { type: 'select', options: [{ label: 'New', value: 'new' }] },
+                    tags: { type: 'multiselect' }, // the pinned NON-rule stays a NON-rule here too
+                },
+            } as any,
+            { warn },
+        );
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('stays silent for fieldless / malformed schemas (never the thing that crashes a boot)', () => {
+        const warn = vi.fn();
+        warnFunctionalCompleteness({ name: 'fc_nofields' } as any, { warn });
+        warnFunctionalCompleteness({ name: 'fc_badfields', fields: 'nope' } as any, { warn });
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('warns only once per object name (hot path stays free)', () => {
+        const warn = vi.fn();
+        const schema: any = { name: 'fc_once', fields: { t: { type: 'summary' } } };
+        warnFunctionalCompleteness(schema, { warn });
+        warnFunctionalCompleteness(schema, { warn });
+        expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('fires through registerObject — the choke point every door shares', () => {
+        // The integration half: a raw registerObject call (no Zod, no lint —
+        // the #3896 class of door) still gets the diagnostic.
+        const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const registry = new SchemaRegistry();
+            registry.registerObject(
+                { name: 'fc_via_register', label: 'X', fields: { dead: { type: 'formula' } } } as any,
+                'test-pkg',
+            );
+            const hit = spy.mock.calls.find(
+                (c) => typeof c[0] === 'string' && (c[0] as string).includes('fc_via_register'),
+            );
+            expect(hit).toBeDefined();
+            expect(hit![0]).toContain('field/formula-without-expression');
+        } finally {
+            spy.mockRestore();
+        }
     });
 });
