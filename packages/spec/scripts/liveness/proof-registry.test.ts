@@ -113,6 +113,11 @@ describe('registry invariants', () => {
         'position/delegatable',
         'object/lifecycle',
         'webhook/object',
+        // Bound 2026-08-02 (#4509) — the second materializer bridge. Authored
+        // email templates now reach sendTemplate, and `subject` is the
+        // representative prop for a pipeline that had THREE independent breaks
+        // on it, so its `live` status is exactly what the proof gates.
+        'email_template/subject',
         // Bound when the 13 orphan `@proof:` tags were registered — the five
         // classes that had an authorable property whose `live` status they
         // actually gate (the other eight record a blockedReason instead).
@@ -153,6 +158,7 @@ describe('real proof wiring resolves', () => {
     object: 'packages/spec/liveness/object.json',
     position: 'packages/spec/liveness/position.json',
     webhook: 'packages/spec/liveness/webhook.json',
+    email_template: 'packages/spec/liveness/email_template.json',
   };
 
   function ledgerEntry(type: string, path: string): any {

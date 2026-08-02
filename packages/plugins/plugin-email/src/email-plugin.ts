@@ -11,6 +11,16 @@ import { EmailService, LogTransport, type EmailPersistence, type TemplateLoader,
 import { makeTransport } from './transports/index.js';
 import { BUILTIN_AUTH_TEMPLATES } from './templates/auth-templates.js';
 import type { EmailTemplateDefinition as EmailTemplate } from '@objectstack/spec/system';
+import {
+  bootstrapDeclaredEmailTemplates,
+  upsertDeclaredEmailTemplate,
+  deactivateDeclaredEmailTemplate,
+  mapTemplateToRow,
+} from './bootstrap-declared-email-templates.js';
+import {
+  bindEmailTemplateProvenanceStamp,
+  unbindEmailTemplateProvenanceStamp,
+} from './email-template-provenance.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -68,6 +78,10 @@ export class EmailServicePlugin implements Plugin {
 
   private readonly options: EmailServicePluginOptions;
   private service?: EmailService;
+  /** Engine carrying the template provenance hook — unbound in dispose(). */
+  private boundEngine?: IDataEngine;
+  /** Live `email_template` metadata subscription — detached in dispose(). */
+  private unsubscribeTemplates?: () => void;
 
   constructor(options: EmailServicePluginOptions = {}) {
     this.options = options;
@@ -369,7 +383,89 @@ export class EmailServicePlugin implements Plugin {
         }
         ctx.logger.info(`EmailServicePlugin: seeded ${all.length} template row(s)`);
       }
+
+      // ── DECLARED email_template METADATA → sys_email_template (#4509) ──
+      // The second door: everything authored as `email_template` metadata
+      // (stack `emailTemplates:`, `*.email-template.ts`, Studio, PUT /meta)
+      // materializes into the rows sendTemplate actually reads. Gated on the
+      // DATA ENGINE alone — materializing rows is a pure write, so it must not
+      // sit behind transport/settings availability. (The webhook bridge learned
+      // this the hard way: gated behind its dispatch prerequisites, a
+      // realtime-less deployment silently materialized nothing — the very
+      // no-op class this closes, #3461.)
+      await this.bootDeclaredTemplates(ctx, engine);
     });
+  }
+
+  /**
+   * [#4509] Materialize declared `email_template` metadata, bind the provenance
+   * stamp, and keep the rows live for runtime authoring.
+   *
+   * `email_template` is `allowRuntimeCreate: true` (unlike `webhook`), so a
+   * boot-only sweep would leave a Studio save inert until the next restart —
+   * the same bug, half-fixed. The subscription re-materializes the single
+   * changed item; `MetadataManager.register` notifies watchers only AFTER the
+   * write has landed, so re-reading on the event cannot race the data.
+   */
+  private async bootDeclaredTemplates(ctx: PluginContext, engine: IDataEngine): Promise<void> {
+    // Bind the provenance stamp so an admin edit freezes a seeded row.
+    this.boundEngine = engine;
+    try { bindEmailTemplateProvenanceStamp(engine as any, ctx.logger as any); }
+    catch (err: any) {
+      ctx.logger.warn('EmailServicePlugin: template provenance stamp not bound: ' + (err?.message ?? err));
+    }
+
+    let metadataService: any;
+    try { metadataService = ctx.getService('metadata'); } catch { /* optional */ }
+
+    try {
+      await bootstrapDeclaredEmailTemplates(engine, metadataService, ctx.logger as any);
+    } catch (err: any) {
+      ctx.logger.warn(
+        'EmailServicePlugin: declared email-template bootstrap failed (built-in templates still serve): '
+        + (err?.message ?? err),
+      );
+    }
+
+    // Live path — Studio saves / PUT /meta land as `added`/`changed` events.
+    if (typeof metadataService?.subscribe !== 'function') return;
+    try {
+      this.unsubscribeTemplates = metadataService.subscribe('email_template', (event: any) => {
+        void (async () => {
+          try {
+            const kind = event?.type;
+            if (kind === 'deleted' || kind === 'unlink') {
+              // Delete events carry no locale — deactivate by name, and only
+              // rows this bridge owns.
+              await deactivateDeclaredEmailTemplate(engine, String(event?.name ?? ''), undefined, ctx.logger as any);
+              return;
+            }
+            const raw = event?.data ?? (event?.name
+              ? await metadataService.get?.('email_template', event.name)
+              : undefined);
+            if (!raw) return;
+            await upsertDeclaredEmailTemplate(engine, (raw as any)?.content ?? raw, undefined, ctx.logger as any);
+            ctx.logger.info(`EmailServicePlugin: email template '${event?.name}' materialized from a runtime write`);
+          } catch (err: any) {
+            ctx.logger.warn(
+              `EmailServicePlugin: runtime email-template sync failed for '${event?.name}': ${err?.message ?? err}`,
+            );
+          }
+        })();
+      });
+      ctx.logger.info('EmailServicePlugin: subscribed to email_template metadata changes');
+    } catch (err: any) {
+      ctx.logger.warn('EmailServicePlugin: email_template subscription failed: ' + (err?.message ?? err));
+    }
+  }
+
+  async dispose(): Promise<void> {
+    try { this.unsubscribeTemplates?.(); } catch { /* best effort */ }
+    this.unsubscribeTemplates = undefined;
+    if (this.boundEngine) {
+      try { unbindEmailTemplateProvenanceStamp(this.boundEngine as any); } catch { /* best effort */ }
+      this.boundEngine = undefined;
+    }
   }
 
   /**
@@ -428,25 +524,22 @@ export class EmailServicePlugin implements Plugin {
     }
   }
 
+  /**
+   * Seed a built-in / options-supplied template. Provenance axis here is
+   * `is_system` — see {@link bootstrapDeclaredEmailTemplates} for the DECLARED
+   * metadata door, which uses `managed_by`/`customized` and shares this exact
+   * row mapping via {@link mapTemplateToRow}.
+   *
+   * New rows are stamped `managed_by: 'platform'` — NOT left to the column's
+   * `'admin'` default. The default exists for rows an admin creates through the
+   * data door, and the declared-metadata bridge refuses to overwrite `admin`
+   * rows; an unstamped built-in would therefore masquerade as admin-authored
+   * and permanently outrank a template the app actually declared. That is the
+   * #4509 failure exactly (an authored password-reset mail losing to the
+   * built-in copy), and the ADR-0054 proof pins it.
+   */
   private async upsertTemplate(engine: IDataEngine, tpl: EmailTemplate): Promise<void> {
-    const row = {
-      name: tpl.name,
-      label: tpl.label,
-      category: tpl.category,
-      locale: tpl.locale,
-      subject: tpl.subject,
-      body_html: tpl.bodyHtml,
-      ...(tpl.bodyText ? { body_text: tpl.bodyText } : {}),
-      ...(tpl.fromOverride?.address ? {
-        from_address: tpl.fromOverride.address,
-        ...(tpl.fromOverride.name ? { from_name: tpl.fromOverride.name } : {}),
-      } : {}),
-      ...(tpl.replyTo ? { reply_to: tpl.replyTo } : {}),
-      active: tpl.active,
-      is_system: tpl.isSystem,
-      ...(tpl.description ? { description: tpl.description } : {}),
-      ...(tpl.variables?.length ? { variables_json: JSON.stringify(tpl.variables) } : {}),
-    };
+    const row = mapTemplateToRow(tpl);
     const existing = await (engine as any).find('sys_email_template', {
       where: { name: tpl.name, locale: tpl.locale },
       limit: 1,
@@ -457,11 +550,18 @@ export class EmailServicePlugin implements Plugin {
       // Only re-seed if the existing row is system-managed (is_system=true);
       // never overwrite a tenant-customised row.
       if (existingRow.is_system === false) return;
+      // A row the declared bridge already owns keeps its `package` provenance —
+      // re-stamping it `platform` would hand the built-in door a veto it does
+      // not have.
       await (engine as any).update('sys_email_template', { id: existingRow.id, ...row }, {
         context: SYSTEM_CTX,
       });
     } else {
-      await (engine as any).insert('sys_email_template', row, {
+      await (engine as any).insert('sys_email_template', {
+        ...row,
+        managed_by: 'platform',
+        customized: false,
+      }, {
         context: SYSTEM_CTX,
       });
     }

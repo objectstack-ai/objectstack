@@ -284,9 +284,14 @@ describe('lintLivenessProperties', () => {
     expect(perms!.hint).toMatch(/per item|Per-item/i);
   });
 
-  // email_template: the WHOLE authoring surface is disconnected from
-  // sendTemplate (webhook shape) — one per-artifact warn carried on `name`.
-  it('warns once per email_template artifact via name (#4488)', () => {
+  // email_template used to carry a per-artifact warn on `name`: the WHOLE
+  // authoring surface was disconnected from sendTemplate (the webhook shape).
+  // #4509 built the materializer bridge, so authoring is no longer a no-op and
+  // a well-formed template must warn about NOTHING. The type stays in
+  // TYPE_COLLECTIONS — a listed type with zero warns is the resolved state
+  // (webhook sits there the same way), and keeping it means a future
+  // regression that re-deadens a prop starts warning again on its own.
+  it('does not warn on a well-formed email_template — the bridge closed it (#4509)', () => {
     const findings = lintLivenessProperties({
       emailTemplates: [{
         name: 'crm.welcome',
@@ -295,9 +300,7 @@ describe('lintLivenessProperties', () => {
         bodyHtml: '<p>Welcome</p>',
       }],
     });
-    const hit = findings.find((f) => f.message.includes('`name`'));
-    expect(hit).toBeDefined();
-    expect(hit!.hint).toMatch(/sys_email_template/);
+    expect(findings).toEqual([]);
   });
 
   // translation.validationMessages: pointed at by #3778's own migration table,

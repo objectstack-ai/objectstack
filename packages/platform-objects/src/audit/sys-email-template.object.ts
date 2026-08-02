@@ -145,6 +145,40 @@ export const SysEmailTemplate = ObjectSchema.create({
       group: 'Lifecycle',
     }),
 
+    // ── Provenance (#4509 — record-authoritative seed-not-clobber) ──
+    // Mirrors sys_webhook (#3461) / sys_sharing_rule (#2909). `is_system`
+    // remains the built-in-auth-template axis; these two track the DECLARED
+    // metadata door: bootstrapDeclaredEmailTemplates seeds `package` rows and
+    // re-seeds them every boot, while an admin's edit stamps `customized` and
+    // freezes the row. Both are `readonly` — the engine strips them from
+    // non-system payloads, and only the seeder / stamp hook (isSystem) write
+    // them. Deliberately NOT a write gate: editing a template in Studio is a
+    // first-class admin action, it just has to be remembered.
+    managed_by: Field.select(
+      ['platform', 'package', 'admin'],
+      {
+        label: 'Managed By',
+        required: false,
+        readonly: true,
+        defaultValue: 'admin',
+        description:
+          'Record provenance: platform = framework built-in / package = app/package-declared ' +
+          '(boot-seeded from declared email_template metadata) / admin = created in Studio.',
+        group: 'System',
+      },
+    ),
+
+    customized: Field.boolean({
+      label: 'Customized',
+      required: false,
+      readonly: true,
+      defaultValue: false,
+      description:
+        'Set when an admin edits a package-declared template; boot seeding will no longer ' +
+        'overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows.',
+      group: 'System',
+    }),
+
     created_at: Field.datetime({
       label: 'Created At',
       required: true,

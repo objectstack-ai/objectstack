@@ -1632,6 +1632,12 @@ export class ObjectQL implements IObjectQLEngine {
         'hooks', 'mappings', 'analyticsCubes',
         // Integration Protocol
         'connectors',
+        // System Protocol — outbound mail templates. Registered here so the
+        // email plugin's materializer can read them back into
+        // `sys_email_template` (#4509); without this key an authored
+        // `emailTemplates:` entry never reached the registry at all, which is
+        // the far end of the disconnect the bridge closes.
+        'emailTemplates',
         // System Protocol — package documentation (ADR-0046); inert data
         'docs',
         // Documentation navigation spine (ADR-0046 §6)

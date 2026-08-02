@@ -23,6 +23,19 @@ export {
   type MakeTransportOptions,
 } from './transports/index.js';
 export {
+  bootstrapDeclaredEmailTemplates,
+  upsertDeclaredEmailTemplate,
+  deactivateDeclaredEmailTemplate,
+  mapTemplateToRow,
+  EMAIL_TEMPLATE_OBJECT,
+  type BootstrapDeclaredEmailTemplatesResult,
+} from './bootstrap-declared-email-templates.js';
+export {
+  bindEmailTemplateProvenanceStamp,
+  unbindEmailTemplateProvenanceStamp,
+  EMAIL_TEMPLATE_PROVENANCE_PACKAGE,
+} from './email-template-provenance.js';
+export {
   AUTH_PASSWORD_RESET_TEMPLATE,
   AUTH_VERIFY_EMAIL_TEMPLATE,
   AUTH_MAGIC_LINK_TEMPLATE,

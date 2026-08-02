@@ -1638,6 +1638,9 @@ importers:
       '@objectstack/plugin-auth':
         specifier: workspace:*
         version: link:../../plugins/plugin-auth
+      '@objectstack/plugin-email':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-email
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../../plugins/plugin-security

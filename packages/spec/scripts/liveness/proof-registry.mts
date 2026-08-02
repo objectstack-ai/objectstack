@@ -171,6 +171,20 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     ledgerBindings: [{ type: 'webhook', path: 'object' }],
   },
   {
+    id: 'email-template-materialization',
+    label: 'Email template materialization',
+    summary:
+      'a stack-authored email template is materialized into the sys_email_template row sendTemplate actually reads (#4509) — the authored value crosses manifest-decomposition → the ObjectQL registry (type `email_template`) → the bridge → engine.insert → the TemplateLoader → the renderer, and THREE independent breaks sat on that path at once (the engine never registered `emailTemplates:` into the registry; built-in seeds defaulted to `managed_by: admin` and outranked declared templates; nothing materialized). An admin "fixing" the password-reset mail in Studio saved cleanly and users kept receiving the built-in copy — ADR-0078 false compliance on AUTH mail.',
+    proofId: 'email-template-materialization',
+    proofRef: 'packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts#email-template-materialization',
+    bound: true,
+    // `subject` is the representative prop for the whole authoring→send
+    // pipeline: its `live` status is only true because the bridge runs AND the
+    // authored row outranks the built-in seed, so the proof overrides a
+    // built-in auth template and asserts the authored wording reaches the wire.
+    ledgerBindings: [{ type: 'email_template', path: 'subject' }],
+  },
+  {
     id: 'form-widget',
     label: 'Form layout / section / widget',
     summary: 'server-side form resolution.',
