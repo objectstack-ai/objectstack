@@ -41,9 +41,12 @@ const OUT_DIR = path.resolve(__dirname, '../json-schema');
 // ever emitted. json-schema/ itself is a gitignored build artifact, so this
 // file is the durable "last time" — see the disappearance check below (#2978).
 const MANIFEST_PATH = path.resolve(__dirname, '../json-schema.manifest.json');
-// `--check` verifies the committed authorable-surface snapshot without rewriting
-// it, so CI fails on an uncommitted ADDITION too (the write and check paths share
-// the same code — same discipline as build-docs.ts).
+// `--check` verifies the two committed snapshots — the schema manifest and the
+// authorable surface — without rewriting either, so CI fails on an uncommitted
+// ADDITION too (the write and check paths share the same code — same discipline
+// as build-docs.ts). "Without rewriting" is load-bearing on both: a check that
+// repairs what it detects can never report it, and it silently edits the tree of
+// whoever ran it (#4711).
 const CHECK = process.argv.includes('--check');
 const SPEC_VERSION = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8')).version;
 const SCHEMA_BASE_URL = `https://schema.objectstack.io/v${SPEC_VERSION}`;
@@ -342,7 +345,34 @@ const added = [...generatedKeys].filter((key) => !(manifest?.schemas ?? []).incl
 // existed. Without this the stale key would sit in the manifest forever, kept
 // alive only by its RENAMED_DEFS entry.
 const renamedAway = (manifest?.schemas ?? []).filter((key) => key in RENAMED_DEFS);
-if (!manifest || added.length > 0 || renamedAway.length > 0) {
+const manifestChanged = !manifest || added.length > 0 || renamedAway.length > 0;
+if (manifestChanged && CHECK) {
+  // Removals already exited above; reaching here in check mode means the manifest
+  // is behind on ADDITIONS (or still lists a def that RENAMED_DEFS moved away).
+  // Report it — never write. `--check` is what `check:authorable-surface` (and so
+  // `check:generated`) runs, and a check that edits a tracked file is wrong twice
+  // over: it makes `git stash` / `git worktree` / merge-conflict work fail for
+  // reasons nobody traces back to a gate, and it makes this branch the one
+  // generated artifact of eight that can never go red in CI — "stale ⇒ rewrite it
+  // for you" instead of "stale ⇒ run the generator" (#4711). Same split as the
+  // authorable-surface ratchet below.
+  console.error(
+    manifest
+      ? `\n❌ json-schema.manifest.json is out of date (${added.length} schema(s) not recorded` +
+          `${renamedAway.length > 0 ? `, ${renamedAway.length} renamed-away key(s) still listed` : ''}).`
+      : `\n❌ json-schema.manifest.json is missing (${generatedKeys.size} schema(s) unrecorded).`,
+  );
+  for (const key of added.slice(0, 20)) console.error(`     + json-schema/${key}.json`);
+  if (added.length > 20) console.error(`     … and ${added.length - 20} more`);
+  for (const key of renamedAway) console.error(`     - json-schema/${key}.json  (renamed away)`);
+  console.error(
+    `\n   Run \`pnpm --filter @objectstack/spec gen:schema\` and commit the result. A schema\n` +
+    `   absent from the manifest is one this ratchet can never report as disappeared later,\n` +
+    `   because it was never in the baseline (#2978).`,
+  );
+  process.exit(1);
+}
+if (manifestChanged && !CHECK) {
   const updated: SchemaManifest = {
     description:
       'Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. ' +
