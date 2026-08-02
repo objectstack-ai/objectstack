@@ -3,8 +3,9 @@
 export * from './query.zod';
 export * from './filter.zod';
 // Canonical conformance cases for the filter logical combinators — the shared
-// standard the four independent FilterCondition backends are each checked
-// against, so they cannot drift apart again (#3774).
+// standard the five independent FilterCondition backends are each checked
+// against, so they cannot drift apart again (#3774; the fifth — MongoDB's
+// `translateFilter` — was enrolled by #4405).
 export * from './filter-logic-conformance';
 export * from './temporal-conformance';
 // Canonical conformance cases for deterministic paged reads — the standard

@@ -109,31 +109,29 @@ const CASE_SETS = [
 // One entry per uncovered (driver x case-set) cell. `kind` is DEBT (should be
 // covered, is not yet) or EXEMPT (cannot meaningfully apply). Both are measured
 // claims; neither is a default.
+//
+// EMPTY, as of #4405 — every cell of the matrix is covered by a suite. The two
+// FILTER_LOGIC_CASES rows this ledger opened with are both cleared:
+//
+//   driver-mongodb      `translateFilter` was the independent fifth backend
+//                       #3774 never enrolled when it named "the four". It now
+//                       drives the shared cases twice: server-free over the
+//                       MongoDB documents it emits (the half that always runs,
+//                       because the mongod binary is not always fetchable), and
+//                       against a real mongod.
+//   driver-sqlite-wasm  Inherits SqlDriver's filter compiler, so what its suite
+//                       pins is the sql.js dialect executing the compiled
+//                       predicate — the same seam its temporal and pagination
+//                       suites cover for their clauses. It was tracked as DEBT
+//                       rather than EXEMPT because "inherits, therefore fine" is
+//                       the assumption those suites exist to disprove; the suite
+//                       is what disproves it, not the entry.
+//
+// An empty ledger is the intended steady state, not a reason to delete the
+// mechanism: the next driver that arrives uncovered fails CONSUMED and lands
+// its measured entry here.
 
-const LEDGER = [
-  {
-    driver: 'driver-mongodb',
-    marker: 'FILTER_LOGIC_CASES',
-    kind: 'DEBT',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/4405',
-    why:
-      "`mongodb-filter.ts`'s `translateFilter` is an independent FilterCondition "
-      + 'backend — the fifth, and the one #3774 never enrolled when it named "the four". '
-      + 'Its $and/$or/$not translation shares no code with the SQL or in-memory paths.',
-  },
-  {
-    driver: 'driver-sqlite-wasm',
-    marker: 'FILTER_LOGIC_CASES',
-    kind: 'DEBT',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/4405',
-    why:
-      'Inherits SqlDriver\'s filter compiler, so the risk is the sql.js dialect executing '
-      + 'the compiled predicate, not the predicate being built wrong — the same risk its '
-      + 'temporal and pagination suites already cover for their clauses. Lower value than '
-      + 'the mongodb row above, tracked with it rather than exempted, because "inherits, '
-      + 'therefore fine" is exactly the assumption those two suites exist to disprove.',
-  },
-];
+const LEDGER = [];
 
 // ── Discovery ───────────────────────────────────────────────────────────────
 
