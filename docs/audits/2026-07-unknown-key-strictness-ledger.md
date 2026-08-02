@@ -436,7 +436,7 @@ Classification is per the rule above; **(p)** marks a provisional call made
 from the file's exports/JSDoc rather than a full read — verify before
 tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 
-### `ui/` — 200 sites
+### `ui/` — 198 sites
 
 | File | Sites | Class | Note / next action |
 |---|---|---|---|
@@ -451,7 +451,8 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `page.zod.ts` | 7 | authorable | partially strict (ADR-0089) |
 | `chart.zod.ts` / `i18n.zod.ts` / `responsive.zod.ts` | 6+6+4 | authorable (p) | i18n label shapes are wide-open records by design — verify |
 | `dataset.zod.ts` / `animation.zod.ts` / `dnd.zod.ts` / `keyboard.zod.ts` / `touch.zod.ts` | 4+4+4+4+7 | authorable (p) | interaction configs |
-| `notification.zod.ts` / `offline.zod.ts` / `report.zod.ts` | 3 ea | authorable (p) | |
+| `offline.zod.ts` / `report.zod.ts` | 3 ea | authorable (p) | |
+| `notification.zod.ts` | 1 | authorable (p) | **#4610 dropped two sites** — the `./ui` `Notification` (toast/banner instance) and `NotificationConfig` (toaster global config) shapes were removed: zero importers in all three repos, and both shadowed live names owned elsewhere (`./api` owns the inbox row). What remains is `NotificationActionSchema`, part of the presentation vocabulary the ui entry keeps |
 | `sharing.zod.ts` | 2 | authorable (p) | public-sharing config |
 
 ### `data/` — 162 sites
@@ -543,7 +544,7 @@ it rather than rediscover it.
 | `cloud/` | 83 | wire | multi-tenant runtime |
 | `ai/` | 75 | mixed | agent/tool/skill definitions authored (partially strict already); model/provider payloads wire |
 | `integration/` | 64 | wire | connector payloads — upstream adds fields freely |
-| `identity/` | 34 | mixed | position/user shapes authored (`PositionSchema` **strict as of #4001 step 2**, with the ADR-0010 envelope declared); auth payloads wire |
+| `identity/` | 33 | mixed | position/user shapes authored (`PositionSchema` **strict as of #4001 step 2**, with the ADR-0010 envelope declared); auth payloads wire. **34 → 33 in #4641**: `identity.zod.ts` lost its `SessionSchema` site — a second, importerless declaration of a name `api/auth.zod.ts` already owned (the #4411 dual-source trap), deleted rather than reclassified |
 | `shared/` | 25 | n/a | utilities and building blocks; strictness decided at the consuming schema |
 | `qa/` | 6 | n/a | test fixtures |
 

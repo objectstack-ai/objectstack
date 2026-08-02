@@ -15,18 +15,12 @@
     "FieldMappingSchema — [./data (const)] ≠ [./integration (const)] ≠ [./shared (const)]",
     "HttpMethod — [./api, ./shared (type)] ≠ [./ui (type)]",
     "HttpRequest — [./shared (type)] ≠ [./ui (type)]",
-    "Notification — [./api (type)] ≠ [./ui (type)]",
-    "NotificationConfig — [./system (type)] ≠ [./ui (type)]",
-    "NotificationConfigSchema — [./system (const)] ≠ [./ui (const)]",
-    "NotificationSchema — [./api (const)] ≠ [./ui (const)]",
     "PackageDependency — [./cloud (type)] ≠ [./kernel (type)]",
     "PackageDependencySchema — [./cloud (const)] ≠ [./kernel (const)]",
     "RateLimitConfig — [./integration (type)] ≠ [./shared (type)]",
     "RateLimitConfigSchema — [./integration (const)] ≠ [./shared (const)]",
     "RetryPolicy — [./automation (type)] ≠ [./system (type)]",
     "RetryPolicySchema — [./automation (const)] ≠ [./system (const)]",
-    "Session — [./api (type)] ≠ [./identity (type)]",
-    "SessionSchema — [./api (const)] ≠ [./identity (const)]",
     "TenantPlan — [./cloud (type)] ≠ [./system (type)]",
     "TenantPlanSchema — [./cloud (const)] ≠ [./system (const)]"
   ]

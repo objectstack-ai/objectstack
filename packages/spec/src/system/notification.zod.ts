@@ -232,158 +232,20 @@ export const NotificationChannelSchema = lazySchema(() => z.enum([
   'webhook',
 ]).describe('Notification delivery channel (implemented today: inbox, email, sms — push/slack/teams/webhook are not yet implemented and dead-letter; see #3197)'));
 
-/**
- * Notification Configuration Schema
- * 
- * Unified notification management protocol supporting multiple channels.
- * Includes scheduling, retry policies, and delivery tracking.
- * 
- * @example
- * ```json
- * {
- *   "id": "welcome-notification",
- *   "name": "Welcome Email",
- *   "channel": "email",
- *   "template": {
- *     "id": "tpl-001",
- *     "subject": "Welcome!",
- *     "body": "<h1>Welcome</h1>",
- *     "bodyType": "html"
- *   },
- *   "recipients": {
- *     "to": ["user@example.com"],
- *     "cc": ["admin@example.com"]
- *   },
- *   "schedule": {
- *     "type": "immediate"
- *   },
- *   "retryPolicy": {
- *     "enabled": true,
- *     "maxRetries": 3,
- *     "backoffStrategy": "exponential"
- *   },
- *   "tracking": {
- *     "trackOpens": true,
- *     "trackClicks": true,
- *     "trackDelivery": true
- *   }
- * }
- * ```
- */
-export const NotificationConfigSchema = lazySchema(() => z.object({
-  /**
-   * Unique identifier for this notification configuration
-   */
-  id: z.string().describe('Notification ID'),
-
-  /**
-   * Human-readable name for this notification
-   */
-  name: z.string().describe('Notification name'),
-
-  /**
-   * Delivery channel for the notification
-   */
-  channel: NotificationChannelSchema.describe('Notification channel'),
-
-  /**
-   * Notification template based on channel type
-   */
-  template: z.union([
-    EmailTemplateSchema,
-    SMSTemplateSchema,
-    PushNotificationSchema,
-    InAppNotificationSchema,
-  ]).describe('Notification template'),
-
-  /**
-   * Recipient configuration
-   */
-  recipients: z.object({
-    /**
-     * Primary recipients
-     */
-    to: z.array(z.string()).describe('Primary recipients'),
-
-    /**
-     * CC recipients (email only)
-     */
-    cc: z.array(z.string()).optional().describe('CC recipients'),
-
-    /**
-     * BCC recipients (email only)
-     */
-    bcc: z.array(z.string()).optional().describe('BCC recipients'),
-  }).describe('Recipients'),
-
-  /**
-   * Scheduling configuration
-   */
-  schedule: z.object({
-    /**
-     * Scheduling type
-     */
-    type: z.enum(['immediate', 'delayed', 'scheduled']).describe('Schedule type'),
-
-    /**
-     * Delay in milliseconds (for delayed type)
-     */
-    delay: z.number().optional().describe('Delay in milliseconds'),
-
-    /**
-     * Scheduled send time (Unix timestamp in milliseconds)
-     */
-    scheduledAt: z.number().optional().describe('Scheduled timestamp'),
-  }).optional().describe('Scheduling'),
-
-  /**
-   * Retry policy for failed deliveries
-   */
-  retryPolicy: z.object({
-    /**
-     * Enable automatic retries
-     * @default true
-     */
-    enabled: z.boolean().optional().default(true).describe('Enable retries'),
-
-    /**
-     * Maximum number of retry attempts
-     * @default 3
-     */
-    maxRetries: z.number().optional().default(3).describe('Max retry attempts'),
-
-    /**
-     * Backoff strategy for retries
-     */
-    backoffStrategy: z.enum(['exponential', 'linear', 'fixed']).describe('Backoff strategy'),
-  }).optional().describe('Retry policy'),
-
-  /**
-   * Delivery tracking configuration
-   */
-  tracking: z.object({
-    /**
-     * Track when emails are opened
-     * @default false
-     */
-    trackOpens: z.boolean().optional().default(false).describe('Track opens'),
-
-    /**
-     * Track when links are clicked
-     * @default false
-     */
-    trackClicks: z.boolean().optional().default(false).describe('Track clicks'),
-
-    /**
-     * Track delivery status
-     * @default true
-     */
-    trackDelivery: z.boolean().optional().default(true).describe('Track delivery'),
-  }).optional().describe('Tracking configuration'),
-}));
+// [#4610] `NotificationConfigSchema` / `NotificationConfig` were removed from
+// this module (dual-source cleanup, #4535 C3). The "unified notification
+// management protocol" wrapper (channel + template + recipients + schedule +
+// retryPolicy + tracking) had ZERO consumers across framework, cloud and
+// objectui, was wired into no parent schema, and predates ADR-0030's accepted
+// delivery architecture: the real vocabulary is `NotificationService.emit`
+// (single ingress, `@objectstack/spec/contracts`), the `notify` flow node
+// (`NotifyConfigSchema`, `@objectstack/spec/automation`) and the sys_*
+// notification objects. Its `./ui` twin was removed in the same change; the
+// bare name left the spec export surface entirely. The channel/template
+// vocabulary below stays: `NotificationChannel` is re-exported by
+// `@objectstack/spec/contracts` and consumed by `service-messaging`.
 
 // Type exports
-export type NotificationConfig = z.infer<typeof NotificationConfigSchema>;
 export type NotificationChannel = z.infer<typeof NotificationChannelSchema>;
 export type EmailTemplate = z.infer<typeof EmailTemplateSchema>;
 export type SMSTemplate = z.infer<typeof SMSTemplateSchema>;

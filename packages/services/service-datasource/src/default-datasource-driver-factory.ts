@@ -130,21 +130,17 @@ function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'bett
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
 
   if (client === 'better-sqlite3') {
-    // `file` / `database` are pre-#4410 tolerance for shapes already persisted
-    // by the runtime store. Authoring rejects both with a rename hint
-    // (`SqliteConfigSchema`), so nothing new can arrive spelled this way.
-    const filename =
-      (cfg.filename as string | undefined) ??
-      (cfg.file as string | undefined) ??
-      (cfg.database as string | undefined) ??
-      ':memory:';
-    return { filename };
+    // `filename` is the whole contract (`SqliteConfigSchema`). The legacy
+    // `file`/`database` spellings are rewritten to it at load by the ADR-0087
+    // conversion `datasource-config-driver-key-aliases` (#4456), so no `??`
+    // tolerance survives here; authoring rejects them with a rename hint.
+    return { filename: (cfg.filename as string | undefined) ?? ':memory:' };
   }
 
-  // pg — accept either a connection string (`url`/`connectionString`) or
-  // discrete fields. The secret is the password and is never part of `config`.
+  // pg — accept either a connection string (`url`) or discrete fields. The
+  // secret is the password and is never part of `config`.
   const ssl = resolveSslOption(spec);
-  const url = (cfg.url as string | undefined) ?? (cfg.connectionString as string | undefined);
+  const url = cfg.url as string | undefined;
   if (url) {
     // For a DSN, a separately-supplied secret overrides the embedded password.
     // TLS still applies: `sslmode` in a DSN and the `ssl` option are separate
@@ -160,7 +156,7 @@ function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'bett
     host: cfg.host,
     port: cfg.port,
     database: cfg.database,
-    user: cfg.user ?? cfg.username,
+    user: cfg.username,
     ...(spec.secret ? { password: spec.secret } : cfg.password ? { password: cfg.password } : {}),
     ...(ssl !== undefined ? { ssl } : {}),
     ...pgConnectionExtras(cfg),
@@ -197,13 +193,13 @@ function buildSqlPool(spec: DatasourceConnectionSpec): Record<string, unknown> {
 function buildMysqlConnection(spec: DatasourceConnectionSpec): unknown {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
   const mysqlSsl = resolveSslOption(spec);
-  const url = (cfg.url as string | undefined) ?? (cfg.connectionString as string | undefined);
+  const url = cfg.url as string | undefined;
   if (url) return url;
   return {
     host: cfg.host,
     port: cfg.port,
     database: cfg.database,
-    user: cfg.user ?? cfg.username,
+    user: cfg.username,
     ...(spec.secret ? { password: spec.secret } : cfg.password ? { password: cfg.password } : {}),
     ...(mysqlSsl !== undefined ? { ssl: mysqlSsl } : {}),
   };
@@ -293,14 +289,16 @@ function buildMemoryConfig(spec: DatasourceConnectionSpec): Record<string, unkno
  */
 function buildMongoUrl(spec: DatasourceConnectionSpec): string {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
-  // `uri` is pre-#4410 tolerance for already-persisted shapes; authoring
-  // rejects it with a rename hint to `url` (`MongoConfigSchema`).
-  const explicit = (cfg.url as string | undefined) ?? (cfg.uri as string | undefined);
+  // `url` is the one spelling (`MongoConfigSchema`); the legacy `uri`/`user`
+  // are rewritten to `url`/`username` at load by the ADR-0087 conversion
+  // `datasource-config-driver-key-aliases` (#4456), and authoring rejects
+  // them with a rename hint.
+  const explicit = cfg.url as string | undefined;
   if (explicit) return explicit;
   const host = (cfg.host as string | undefined) ?? 'localhost';
   const port = (cfg.port as number | string | undefined) ?? 27017;
   const db = (cfg.database as string | undefined) ?? '';
-  const user = (cfg.user as string | undefined) ?? (cfg.username as string | undefined);
+  const user = cfg.username as string | undefined;
   const password = spec.secret ?? (cfg.password as string | undefined) ?? '';
   const auth = user ? `${encodeURIComponent(user)}:${encodeURIComponent(password)}@` : '';
   const authSource = cfg.authSource as string | undefined;

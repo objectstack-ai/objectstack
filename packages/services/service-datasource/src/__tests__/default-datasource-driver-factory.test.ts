@@ -263,3 +263,94 @@ describe('createDefaultDatasourceDriverFactory — declared keys reach the drive
     try { await handle.disconnect?.(); } catch { /* pool never opened */ }
   });
 });
+
+// #4456 — the four undeclared read-side `??` fallbacks are DELETED. The factory
+// reads exactly the canonical key of each driver's config contract; the legacy
+// spellings a pre-#4410 stored record may carry are rewritten to canonical at
+// every rehydration seam by the ADR-0087 conversion
+// `datasource-config-driver-key-aliases`, so they must never reach this code —
+// and when one does anyway, it is ignored rather than quietly honoured.
+describe('createDefaultDatasourceDriverFactory — legacy config spellings are no longer read (#4456)', () => {
+  function knexConfigOf(driver: any): any {
+    return driver?.config ?? driver?.knexConfig ?? driver?.options ?? {};
+  }
+
+  async function pgConnection(config: Record<string, unknown>): Promise<any> {
+    const handle: any = await factory().create({ driver: 'postgres', config });
+    try { return knexConfigOf(handle.driver ?? handle).connection; }
+    finally { try { await handle.disconnect?.(); } catch { /* pool never opened */ } }
+  }
+
+  it('pg: `connectionString` no longer selects the DSN path — discrete fields are used instead', async () => {
+    const conn = await pgConnection({
+      connectionString: 'postgresql://legacy@db.internal/analytics',
+      host: 'db.internal',
+      database: 'analytics',
+    });
+    expect(conn.connectionString).toBeUndefined();
+    expect(conn).toMatchObject({ host: 'db.internal', database: 'analytics' });
+  });
+
+  it('pg: `user` no longer reaches the client — only the canonical `username` does', async () => {
+    const legacyOnly = await pgConnection({ host: 'h', database: 'd', user: 'legacy' });
+    expect(legacyOnly.user).toBeUndefined();
+    const both = await pgConnection({ host: 'h', database: 'd', user: 'legacy', username: 'svc' });
+    expect(both.user).toBe('svc');
+  });
+
+  it('mysql: `connectionString`/`user` are ignored the same way', async () => {
+    const handle: any = await factory().create({
+      driver: 'mysql',
+      config: { connectionString: 'mysql://legacy@db/orders', host: 'db', database: 'orders', user: 'legacy' },
+    });
+    const conn = knexConfigOf(handle.driver ?? handle).connection;
+    // Not the DSN string passthrough — the discrete-field object, with no user.
+    expect(typeof conn).toBe('object');
+    expect(conn).toMatchObject({ host: 'db', database: 'orders' });
+    expect(conn.user).toBeUndefined();
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+
+  it('sqlite-wasm: `file`/`database` no longer name the database — the driver builds `:memory:`', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-4456-'));
+    try {
+      const legacyFile = join(dir, 'legacy.db');
+      const handle: any = await factory().create({
+        driver: 'sqlite-wasm',
+        config: { file: legacyFile, database: legacyFile },
+      });
+      const driver = handle.driver ?? handle;
+      await driver.connect();
+      try {
+        await driver.syncSchema('note', { name: 'note', fields: { id: { type: 'text' } } });
+        await driver.create('note', { id: 'n1' });
+      } finally {
+        try { await driver.disconnect(); } catch { /* noop */ }
+      }
+      // An ephemeral `:memory:` database writes nothing at the legacy path.
+      expect(existsSync(legacyFile)).toBe(false);
+    } finally {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* noop */ }
+    }
+  }, 30_000);
+
+  it('mongo: `uri`/`user` are ignored — the URL is composed from canonical keys only', async () => {
+    const handle: any = await factory().create({
+      driver: 'mongo',
+      config: { uri: 'mongodb://legacy.internal:27017/legacy', database: 'events', user: 'legacy' },
+    });
+    const driver: any = handle.driver ?? handle;
+    // No canonical `url`/`host`/`username` → composed from defaults + `database`,
+    // with no auth part; the legacy `uri` never passes through.
+    expect(driver.config.url).toBe('mongodb://localhost:27017/events');
+  });
+
+  it('mongo: the canonical spellings still compose the URL (control)', async () => {
+    const handle: any = await factory().create({
+      driver: 'mongo',
+      config: { host: 'mongo.internal', port: 27017, database: 'events', username: 'svc', password: 'pw' },
+    });
+    const driver: any = handle.driver ?? handle;
+    expect(driver.config.url).toBe('mongodb://svc:pw@mongo.internal:27017/events');
+  });
+});

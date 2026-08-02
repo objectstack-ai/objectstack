@@ -74,6 +74,38 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () =>
     expect(applyConversionsToStoredItem('object', arr)).toBe(arr);
   });
 
+  // #4456 — the driver-factory `??` fallback graduation. A runtime datasource
+  // persisted before the #4410 config gate may carry the legacy spellings; the
+  // stored pass MUST serve it canonical, because the factory now reads exactly
+  // one spelling per key (deleting the fallbacks without this replay would
+  // silently move a sqlite `file:` row's data to `:memory:`).
+  describe('stored datasource rows (datasource-config-driver-key-aliases, #4456)', () => {
+    it.each([
+      ['sqlite', { file: './data/app.db' }, { filename: './data/app.db' }],
+      ['sqlite', { database: './data/app.db' }, { filename: './data/app.db' }],
+      ['postgres', { connectionString: 'postgresql://db/x', user: 'svc' }, { url: 'postgresql://db/x', username: 'svc' }],
+      ['mysql', { host: 'db', database: 'orders', user: 'svc' }, { host: 'db', database: 'orders', username: 'svc' }],
+      ['mongo', { uri: 'mongodb://db/x', user: 'svc' }, { url: 'mongodb://db/x', username: 'svc' }],
+    ])('serves a stored %s row with legacy config keys canonical', (driver, config, expected) => {
+      const row = { name: 'legacy_ds', driver, config, origin: 'runtime' };
+      const out = applyConversionsToStoredItem('datasource', row) as { config: Record<string, unknown> };
+      expect(out.config).toEqual(expected);
+      expect(out).toMatchObject({ name: 'legacy_ds', driver, origin: 'runtime' });
+    });
+
+    it('leaves `database` alone for the drivers where it is canonical', () => {
+      const row = { name: 'wh', driver: 'postgres', config: { host: 'db', database: 'analytics' } };
+      expect(applyConversionsToStoredItem('datasource', row)).toBe(row);
+    });
+
+    it('lets a canonical key win over a shadowed legacy alias', () => {
+      const row = { name: 'ds', driver: 'sqlite', config: { filename: './real.db', file: './stale.db' } };
+      const out = applyConversionsToStoredItem('datasource', row) as { config: Record<string, unknown> };
+      // renameKey convention: canonical present → alias left shadowed, untouched.
+      expect(out.config).toEqual({ filename: './real.db', file: './stale.db' });
+    });
+  });
+
   it('threads the conflict guard context through (flow callers that own a registry)', () => {
     const flow = {
       name: 'notify_flow',

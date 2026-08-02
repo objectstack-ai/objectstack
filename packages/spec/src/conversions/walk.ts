@@ -174,6 +174,21 @@ export function mapPages(stack: Dict, mapper: (page: Dict, path: string) => Dict
 }
 
 /**
+ * Immutably map every datasource in `stack.datasources[]`.
+ *
+ * `mapper` receives each datasource dict and its path (`datasources[i]`) and
+ * returns the same reference (no change) or a new dict. The stack and the
+ * `datasources` array are copied only when a datasource actually changed —
+ * the {@link mapPages} contract, delegated to {@link mapCollection}.
+ */
+export function mapDatasources(
+  stack: Dict,
+  mapper: (datasource: Dict, path: string) => Dict,
+): Dict {
+  return mapCollection(stack, 'datasources', mapper);
+}
+
+/**
  * Immutably map every dict item of a top-level array collection
  * (`stack[key][]`) — the generic form of {@link mapPages}, for conversions
  * targeting `objects`, `books`, `sharingRules`, `views`, ….

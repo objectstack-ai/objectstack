@@ -2,12 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   UserSchema,
   AccountSchema,
-  SessionSchema,
   VerificationTokenSchema,
   ApiKeySchema,
   type User,
   type Account,
-  type Session,
   type VerificationToken,
   type ApiKey,
 } from "./identity.zod";
@@ -140,77 +138,38 @@ describe('AccountSchema', () => {
   });
 });
 
-describe('SessionSchema', () => {
-  it('should accept valid session data', () => {
-    const session: Session = {
-      id: 'session_123',
-      sessionToken: 'session_token_xyz',
-      userId: 'user_123',
-      expires: new Date(Date.now() + 86400000).toISOString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      ipAddress: '192.168.1.1',
-      userAgent: 'Mozilla/5.0',
-      fingerprint: 'fingerprint_xyz',
-    };
-
-    expect(() => SessionSchema.parse(session)).not.toThrow();
-  });
-
-  it('should accept minimal session data', () => {
-    const session = {
-      id: 'session_123',
-      sessionToken: 'session_token_xyz',
-      userId: 'user_123',
-      expires: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    expect(() => SessionSchema.parse(session)).not.toThrow();
-  });
-
-  it('should accept session with device information', () => {
-    const session = {
-      id: 'session_123',
-      sessionToken: 'session_token_xyz',
-      userId: 'user_123',
-      expires: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      ipAddress: '10.0.0.1',
-      userAgent: 'Chrome/120.0.0.0',
-      fingerprint: 'device_fingerprint',
-    };
-
-    expect(() => SessionSchema.parse(session)).not.toThrow();
-  });
-
-  it('should accept session with activeOrganizationId', () => {
-    const session = {
-      id: 'session_123',
-      sessionToken: 'session_token_xyz',
-      userId: 'user_123',
-      activeOrganizationId: 'org_123',
-      expires: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    expect(() => SessionSchema.parse(session)).not.toThrow();
-  });
-
-  it('should accept session without activeOrganizationId', () => {
-    const session = {
-      id: 'session_123',
-      sessionToken: 'session_token_xyz',
-      userId: 'user_123',
-      expires: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    expect(() => SessionSchema.parse(session)).not.toThrow();
+describe('Session is not declared here (#4641)', () => {
+  // Pin: this module no longer declares the bare `SessionSchema` name. The pin is
+  // compile-time (`typeof import` is type-level only — no runtime barrel load):
+  // if the name is re-added here, the conditional type flips to `true` and the
+  // `false` assignment fails `tsc --noEmit`.
+  //
+  // The bare names belong to `@objectstack/spec/api` alone — that declaration is
+  // the live one, embedded in `SessionResponseSchema` (the `/get-session` body).
+  // A second declaration on this entry meant the shape a consumer got depended
+  // only on their import path (#4411), and the two disagreed on field names
+  // (`expires` vs `expiresAt`, `sessionToken` vs `token`).
+  //
+  // Why this asserts at RUNTIME rather than with the `typeof import(...)`
+  // conditional-type pin used by #4581 / #4610: that pin cannot fail here.
+  // `packages/spec/tsconfig.json` excludes `**/*.test.ts`, so `pnpm typecheck`
+  // never compiles this file, and vitest transpiles without typechecking — a
+  // conditional-type assertion in a spec test is inert. (Filed separately; it
+  // silently weakens the pins those two PRs landed.) The module-namespace check
+  // below is cheap — this file already imports the module — and it actually runs.
+  //
+  // Scope, deliberately: this covers the VALUE export. A type-only
+  // `export type Session` has no runtime footprint, so no unit test can see it.
+  // Two things cover the type instead, and neither is vacuous:
+  //   1. house style derives it (`type Session = z.infer< typeof SessionSchema >`),
+  //      so it cannot come back without the const this test already catches; and
+  //   2. `check:dual-source-exports` reads the BUILT entry `.d.ts` and enumerates
+  //      types as well as consts — a re-added `Session` type on `./identity`
+  //      fails it as a new dual-source name, which is how the baseline row that
+  //      this PR deleted was phrased in the first place.
+  it('does not re-expose the bare SessionSchema name from ./identity', async () => {
+    const identityModule = await import('./identity.zod');
+    expect(Object.keys(identityModule)).not.toContain('SessionSchema');
   });
 });
 
@@ -350,21 +309,6 @@ describe('Type inference', () => {
     // This test passes if TypeScript compiles without errors
     expect(account.type).toBe('oauth');
     expect(account.provider).toBe('google');
-  });
-
-  it('should correctly infer Session type', () => {
-    const session: Session = {
-      id: 'session_123',
-      sessionToken: 'token_xyz',
-      userId: 'user_123',
-      expires: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // This test passes if TypeScript compiles without errors
-    expect(session.id).toBe('session_123');
-    expect(session.userId).toBe('user_123');
   });
 
   it('should correctly infer VerificationToken type', () => {
