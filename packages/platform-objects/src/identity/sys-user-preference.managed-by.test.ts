@@ -16,12 +16,19 @@
 
 import { describe, expect, it } from 'vitest';
 import { resolveCrudAffordances } from '@objectstack/spec/data';
-import { SysUserPreference } from './sys-user-preference.object';
+import { SysUserPreference } from './sys-user-preference.object.js';
 
 const V16_EXPECTED = { create: true, import: false, edit: true, delete: true, exportCsv: true };
 const V17_EXPECTED = { create: true, import: true, edit: true, delete: true, exportCsv: true };
 
-const asV16 = { managedBy: 'system', userActions: { create: true, edit: true, delete: true } };
+/**
+ * The v16 shape, reconstructed via `engine-owned` — which ADR-0103 D5 gave the
+ * byte-identical locked default row `system` carried in v16. The retired literal
+ * cannot be used: v17 deleted its row from `CRUD_AFFORDANCE_DEFAULTS`, so it would
+ * fall through to the `platform` default and reconstruct the wrong baseline. The
+ * `toEqual(V16_EXPECTED)` assertion below keeps the stand-in honest.
+ */
+const asV16 = { managedBy: 'engine-owned', userActions: { create: true, edit: true, delete: true } };
 
 describe('#3355 — sys_user_preference moves to `system-data` with its affordances intact', () => {
   it('declares the new bucket and no longer carries a redundant `userActions` block', () => {

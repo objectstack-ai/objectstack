@@ -15,15 +15,28 @@
 
 import { describe, expect, it } from 'vitest';
 import { resolveCrudAffordances } from '@objectstack/spec/data';
-import { NotificationTemplate } from './notification-template.object';
-import { NotificationSubscription } from './notification-subscription.object';
-import { NotificationPreference } from './notification-preference.object';
+import { NotificationTemplate } from './notification-template.object.js';
+import { NotificationSubscription } from './notification-subscription.object.js';
+import { NotificationPreference } from './notification-preference.object.js';
 
 const V16_EXPECTED = { create: true, import: false, edit: true, delete: true, exportCsv: true };
 const V17_EXPECTED = { create: true, import: true, edit: true, delete: true, exportCsv: true };
 
+/**
+ * The v16 declaration shape, reconstructed so the equivalence is COMPUTED rather
+ * than asserted twice.
+ *
+ * It is spelled `engine-owned`, not `system`, on purpose: v17 deleted the `system`
+ * row from `CRUD_AFFORDANCE_DEFAULTS`, so passing the retired literal would fall
+ * through to the `platform` default and quietly reconstruct the wrong baseline
+ * (that mistake is what this comment exists to prevent — it read green-ish and was
+ * wrong). ADR-0103 D5 gave `engine-owned` the byte-identical locked row `system`
+ * carried in v16 — `{create,import,edit,delete: false, exportCsv: true}` — so it is
+ * an exact stand-in for the old bucket default. `expect(v16).toEqual(V16_EXPECTED)`
+ * below is the check that this stand-in stayed honest.
+ */
 const asV16 = (obj: { userActions?: unknown }) => ({
-  managedBy: 'system',
+  managedBy: 'engine-owned',
   userActions: obj.userActions ?? { create: true, edit: true, delete: true },
 });
 

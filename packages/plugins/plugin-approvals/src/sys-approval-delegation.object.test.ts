@@ -27,7 +27,14 @@ import { SysApprovalDelegation } from './sys-approval-delegation.object';
 describe('#3355 — sys_approval_delegation moves to `system-data` with its affordances intact', () => {
   const V16_EXPECTED = { create: true, import: false, edit: true, delete: true, exportCsv: true };
   const V17_EXPECTED = { create: true, import: true, edit: true, delete: true, exportCsv: true };
-  const asV16 = { managedBy: 'system', userActions: { create: true, edit: true, delete: true } };
+  /**
+   * The v16 shape, reconstructed via `engine-owned` — which ADR-0103 D5 gave the
+   * byte-identical locked default row `system` carried in v16. The retired
+   * literal cannot be used: v17 deleted its row from `CRUD_AFFORDANCE_DEFAULTS`,
+   * so it would fall through to the `platform` default and reconstruct the wrong
+   * baseline. The `toEqual(V16_EXPECTED)` assertion below keeps it honest.
+   */
+  const asV16 = { managedBy: 'engine-owned', userActions: { create: true, edit: true, delete: true } };
 
   it('declares the new bucket and no longer carries a redundant `userActions` block', () => {
     expect(SysApprovalDelegation.managedBy).toBe('system-data');
