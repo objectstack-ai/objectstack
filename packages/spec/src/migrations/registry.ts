@@ -577,7 +577,27 @@ const step17: MigrationStep = {
     + 'installed; a `connector_action` with the Slack connector, or an `http` node posting to a '
     + 'webhook, for Slack; a registered function for an inline body). Retired from the load path '
     + 'for the same reason as the rest: absorbing `actionType: \'email\'` silently would let an '
-    + 'author keep believing the flow sends mail.',
+    + 'author keep believing the flow sends mail.\n\n'
+    + 'Finally, five keys retire because the advisory lint could never have warned about them '
+    + '(#4509): mapping `extractQuery` / `errorPolicy` / `batchSize`, and app '
+    + '`contextSelectors[].includeAll` / `.placement`. Four of the five carry schema DEFAULTS, '
+    + 'and a default materialises at parse time — so the liveness lint cannot tell a value the '
+    + 'author wrote from one the schema supplied, and marking them would have warned on every '
+    + 'mapping and every selector in existence. For a key in that state removal is not the '
+    + 'escalation after a warning; it is the only channel that ever reaches the author, which '
+    + 'is why they ship inside the 17.0.0 window rather than after a deprecation cycle. What '
+    + 'they claimed: `extractQuery` promised an export path no exporter implements (exports go '
+    + 'through the ordinary query API); `errorPolicy` offered skip/abort/retry where error '
+    + 'handling belongs to the import REQUEST; `batchSize` sized batches the write path sizes '
+    + 'itself; `placement` offered a topbar that places nothing. `includeAll` is the one worth '
+    + 'reading twice — it was not unread but deliberately DISOBEYED, because context selectors '
+    + 'are mandatory-scope and an "All" row would clear the scope: on Studio\'s package selector '
+    + 'that means listing the platform\'s own system/cloud kernel packages to a developer who '
+    + 'scoped to their package. `STUDIO_APP` authored `includeAll: true` against a renderer that '
+    + 'ignored it. The mapping prescription for `batchSize` deliberately offers no rename: '
+    + 'bulk-action, connector, sync, offline, seed-loader and NoSQL-cursor `batchSize` are all '
+    + 'live, but each is a different key sizing its own path — the same trap `datasource.'
+    + 'retryPolicy` vs `hook`/`job` `retryPolicy` had to defuse one issue earlier.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -603,6 +623,7 @@ const step17: MigrationStep = {
     'stack-api-require-auth-removed',
     'datasource-capabilities-removed',
     'datasource-inert-blocks-removed',
+    'mapping-inert-keys-removed',
     'flow-node-wait-timeout-keys-removed',
     'datasource-read-replicas-removed',
     'datasource-config-driver-key-aliases',

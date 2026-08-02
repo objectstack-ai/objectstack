@@ -1591,16 +1591,59 @@ const flowNodeScriptConfigAliases: MetadataConversion = {
  *
  * `retiredFromLoadPath`: the schema tombstones each key (`retiredKey`, tsc
  * `never` + a parse-time prescription), same posture as its step-17 siblings.
+ *
+ * ## Extended by #4509 — the two context-selector keys
+ *
+ * `contextSelectors[].includeAll` and `contextSelectors[].placement` join the
+ * same conversion rather than opening a second `app` entry: both target major
+ * 17, both are pure deletes on the same collection, and a separate entry would
+ * have to keep its fixture disjoint from this one's for no gain.
+ *
+ * They differ from the seven above in why they went out. Both carried schema
+ * defaults, which the liveness advisory lint cannot warn on — a default
+ * materialises at parse time, so an authored value is indistinguishable from a
+ * supplied one. Removal was the only channel that could reach an author.
+ *
+ * `includeAll` was the sharper of the two: not unread but deliberately
+ * DISOBEYED. Context selectors are mandatory-scope, so the shell never rendered
+ * an "All" row — on Studio's package selector an All row would undo the
+ * selector's own `filter` and list the platform's system/cloud kernel packages.
+ * `STUDIO_APP` authored `includeAll: true` against a renderer that ignored it,
+ * which is what a flag reading alive while doing nothing looks like from the
+ * inside.
  */
 const appDeadAuthoringKeysRemoved: MetadataConversion = {
   id: 'app-dead-authoring-keys-removed',
   toMajor: 17,
   retiredFromLoadPath: true,
-  surface: 'app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation',
-  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' removed (2026-06 liveness audit — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented)",
+  surface:
+    'app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / '
+    + 'app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement',
+  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' plus contextSelectors 'includeAll'/'placement' removed (liveness audits #4001, #4509 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, and includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope)",
   apply(stack, emit) {
     const RETIRED = ['version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation'];
-    return mapCollection(stack, 'apps', (app, path) => stripKeys(app, RETIRED, emit, path));
+    const RETIRED_SELECTOR = ['includeAll', 'placement'];
+    return mapCollection(stack, 'apps', (app, path) => {
+      const next = stripKeys(app, RETIRED, emit, path);
+      // `contextSelectors` is an ARRAY one level down, so stripKeys (top-level
+      // only) cannot reach it. Drill in and copy-on-write at both levels, so an
+      // app with nothing to strip keeps its identity for change detection.
+      const selectors = next.contextSelectors;
+      if (!Array.isArray(selectors)) return next;
+      let touched = false;
+      const nextSelectors = selectors.map((sel, i) => {
+        if (!sel || typeof sel !== 'object' || Array.isArray(sel)) return sel;
+        const stripped = stripKeys(
+          sel as Record<string, unknown>,
+          RETIRED_SELECTOR,
+          emit,
+          `${path}.contextSelectors[${i}]`,
+        );
+        if (stripped !== sel) touched = true;
+        return stripped;
+      });
+      return touched ? { ...next, contextSelectors: nextSelectors } : next;
+    });
   },
   fixture: {
     before: {
@@ -1611,6 +1654,13 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
         sharing: { enabled: true },
         embed: { enabled: true },
         mobileNavigation: { mode: 'bottom_nav' },
+        contextSelectors: [{
+          id: 'active_package',
+          label: 'Package',
+          optionsSource: { endpoint: '/api/v1/packages', valueKey: 'id', labelKey: 'name' },
+          includeAll: true,
+          placement: 'sidebar_header',
+        }],
         navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
       }],
     },
@@ -1618,10 +1668,17 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
       apps: [{
         name: 'portal',
         label: 'Portal',
+        contextSelectors: [{
+          id: 'active_package',
+          label: 'Package',
+          optionsSource: { endpoint: '/api/v1/packages', valueKey: 'id', labelKey: 'name' },
+        }],
         navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
       }],
     },
-    expectedNotices: 4,
+    // Six notices: four top-level keys (`version`, `sharing`, `embed`,
+    // `mobileNavigation`) plus the two on the single context selector.
+    expectedNotices: 6,
   },
 };
 
@@ -2315,6 +2372,74 @@ const datasourceInertBlocksRemoved: MetadataConversion = {
 };
 
 /**
+ * `mapping.extractQuery` / `errorPolicy` / `batchSize` removed (protocol 17,
+ * #4509, ADR-0049).
+ *
+ * Three keys on the import/export mapping artifact that parsed, stored, and
+ * controlled nothing:
+ *
+ * - `extractQuery` — "Query to run for export only" against an export path that
+ *   does not exist: no exporter reads a mapping artifact at all. A whole
+ *   `QuerySchema` subtree hung off it, which is what made it read as a designed
+ *   feature rather than an aspiration.
+ * - `errorPolicy` — `skip` / `abort` / `retry` selecting between three
+ *   behaviours that were one behaviour. Error handling on the import path is
+ *   the import REQUEST's own options; nothing consults the mapping.
+ * - `batchSize` — the write path sizes its own batches and never asked.
+ *
+ * Two of the three were **unwarnable**, which is why they went out now rather
+ * than after a deprecation window: `errorPolicy` and `batchSize` carried schema
+ * defaults, and a default materialises at parse time, so the liveness advisory
+ * lint could not distinguish an authored value from a supplied one
+ * (`_authorWarnSkipped` in `liveness/mapping.json`). For a key in that state,
+ * removal is not the escalation after a warning — it is the only channel that
+ * ever reaches the author.
+ *
+ * `batchSize` is also the name most likely to be "fixed" by relocation, so the
+ * schema prescription says outright that `bulkActionDef` / `connector` / `sync`
+ * / `offline` / seed-loader / NoSQL-cursor `batchSize` are live and are all
+ * different keys sizing different paths. Same shape as the `retryPolicy` /
+ * `backoffMs` trap #4583 had to defuse on `datasource`.
+ *
+ * `retiredFromLoadPath`: the schema is `.strict()`, so the keys are gone from
+ * the shape and rejected with a `guidance` prescription rather than tombstoned.
+ */
+const mappingInertKeysRemoved: MetadataConversion = {
+  id: 'mapping-inert-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'mapping.extractQuery / mapping.errorPolicy / mapping.batchSize',
+  summary: "mapping keys 'extractQuery'/'errorPolicy'/'batchSize' removed (#4509 — no exporter reads a mapping, error handling belongs to the import request, and the write path sizes its own batches)",
+  apply(stack, emit) {
+    const RETIRED = ['extractQuery', 'errorPolicy', 'batchSize'];
+    // Scoped to the `mappings` collection deliberately: `batchSize` is live on
+    // connector, sync, bulk-action and offline shapes, and a stack-wide strip
+    // would delete an enforced key from all of them.
+    return mapCollection(stack, 'mappings', (m, path) => stripKeys(m, RETIRED, emit, path));
+  },
+  fixture: {
+    before: {
+      mappings: [{
+        name: 'csv_import_contacts',
+        targetObject: 'contact',
+        fieldMapping: [{ source: 'Email', target: 'email' }],
+        extractQuery: { object: 'contact', fields: ['email'] },
+        errorPolicy: 'abort',
+        batchSize: 500,
+      }],
+    },
+    after: {
+      mappings: [{
+        name: 'csv_import_contacts',
+        targetObject: 'contact',
+        fieldMapping: [{ source: 'Email', target: 'email' }],
+      }],
+    },
+    expectedNotices: 3,
+  },
+};
+
+/**
  * `datasource.capabilities` removed (protocol 17, #4583).
  *
  * Eleven boolean flags, declared and strict-guarded, read by nothing. Pushdown
@@ -2742,6 +2867,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     datasourceReadReplicasRemoved,
     datasourceCapabilitiesRemoved,
     datasourceInertBlocksRemoved,
+    mappingInertKeysRemoved,
     datasourceConfigDriverKeyAliases,
     // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
     // whether `config.function` is set, and that rename is what sets it.

@@ -323,9 +323,11 @@ describe('lintLivenessProperties', () => {
   });
 
   // book: both inline translations maps are dead (the doc-level map two files
-  // over works, which is what makes these read alive); job.id and
-  // mapping.extractQuery are the other flat dead keys.
-  it('warns on book/job/mapping dead keys (#4488)', () => {
+  // over works, which is what makes these read alive); job.id is the other flat
+  // dead key. `mapping.extractQuery` used to be asserted here too — it was
+  // REMOVED in 17.0.0 (#4509), so the strict parse owns it now and this
+  // advisory lint correctly says nothing about it.
+  it('warns on book/job dead keys (#4488)', () => {
     const findings = lintLivenessProperties({
       books: [{
         name: 'crm_guide',
@@ -339,25 +341,25 @@ describe('lintLivenessProperties', () => {
         schedule: { type: 'cron', expression: '0 0 * * *' },
         handler: 'syncAll',
       }],
-      mappings: [{
-        name: 'csv_import_contacts',
-        targetObject: 'contact',
-        fieldMapping: [],
-        extractQuery: { object: 'contact', fields: ['name'] },
-      }],
     });
     const msgs = paths(findings);
     expect(msgs.some((m) => m.includes('`translations`'))).toBe(true);
     expect(msgs.some((m) => m.includes('groups.translations'))).toBe(true);
     expect(msgs.some((m) => m.includes('`id`'))).toBe(true);
-    expect(msgs.some((m) => m.includes('extractQuery'))).toBe(true);
   });
 
-  // The unwarnable-default rule, negative direction: errorPolicy/batchSize
-  // (mapping) and includeAll/placement (app selectors) materialize from schema
-  // defaults on every compiled artifact, so their dead entries carry
-  // _authorWarnSkipped instead of authorWarn — a compiled stack that only has
-  // defaults must stay silent.
+  // The unwarnable-default rule, and what became of it.
+  //
+  // mapping `errorPolicy`/`batchSize` and selector `includeAll`/`placement`
+  // were the four keys this lint structurally COULD NOT warn about: their
+  // schema defaults materialize on every compiled artifact, so presence never
+  // implied authorship, and their ledger entries carried `_authorWarnSkipped`
+  // rather than `authorWarn`. That is precisely why they were REMOVED in 17.0.0
+  // (#4509) instead of being warned about first — the strict schemas reject
+  // them now, which is the only channel that ever reached those authors.
+  //
+  // The surviving assertion is the rule itself, not those four keys: a compiled
+  // artifact carrying only materialized defaults must stay silent.
   it('stays silent on schema-default values and live-only artifacts (#4488)', () => {
     const findings = lintLivenessProperties({
       mappings: [{
@@ -366,10 +368,8 @@ describe('lintLivenessProperties', () => {
         fieldMapping: [{ source: 'Total', target: 'total' }],
         mode: 'upsert',
         upsertKey: ['external_ref'],
-        // materialized defaults — must NOT warn:
+        // materialized default — must NOT warn:
         sourceFormat: 'csv',
-        errorPolicy: 'skip',
-        batchSize: 1000,
       }],
       apps: [{
         name: 'sales',
@@ -379,10 +379,8 @@ describe('lintLivenessProperties', () => {
           label: 'Region',
           optionsSource: { endpoint: '/api/v1/regions', valueKey: 'id', labelKey: 'name' },
           // materialized defaults — must NOT warn:
-          includeAll: true,
           allValue: '',
           persist: 'query',
-          placement: 'sidebar_header',
         }],
       }],
       seeds: [],
