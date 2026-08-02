@@ -75,6 +75,7 @@
 import {
   validateStackExpressions,
   validateListViewMode,
+  validateFunctionalCompleteness,
   validateViewContainers,
   validateWidgetBindings,
   validateDashboardActionRefs,
@@ -228,6 +229,24 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-list-view-mode.ts',
     run: (stack) => validateListViewMode(stack),
+  },
+  // [ADR-0078] A Zod-VALID instance that silently does nothing: a `summary`
+  // with no `summaryOperations`, a `lookup` with no `reference`, a `select`
+  // with no `options`. Every key is one we know, so #4001's unknown-key
+  // rejection cannot see it, and the liveness ledger cannot either (it is
+  // per-property; the properties ARE live). This is the gate between them.
+  //
+  // `gating` because the error-severity shapes are fully inert — the field
+  // reads 0 forever while authoring reports success, which is the failure the
+  // ADR was written for (cloud#687). Pre-parse so the findings survive an
+  // unrelated schema error elsewhere in the stack.
+  {
+    name: 'validateFunctionalCompleteness',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-functional-completeness.ts',
+    run: (stack) => validateFunctionalCompleteness(stack),
   },
   // A flat list-view object in `views: []` parses to an EMPTY container
   // (ViewSchema strips unknown keys): the schema step passes, zero views

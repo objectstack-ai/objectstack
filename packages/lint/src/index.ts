@@ -28,6 +28,16 @@ export { validateStackExpressions } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
 
 export { validateListViewMode, LIST_VIEW_FILTERS_IN_VIEWS_MODE } from './validate-list-view-mode.js';
+
+// [ADR-0078] The functional-completeness gate. All judgement lives in the shared
+// predicate in `@objectstack/spec/kernel` (sibling of `isIncoherentAggregate`),
+// so cloud graph-lint can re-home its duplicate rules onto the same source and
+// the AI-build path cannot drift from the framework.
+export { validateFunctionalCompleteness } from './validate-functional-completeness.js';
+export type {
+  FunctionalCompletenessFinding,
+  FunctionalCompletenessSeverity,
+} from './validate-functional-completeness.js';
 export type { ListViewModeFinding, ListViewModeSeverity } from './validate-list-view-mode.js';
 export {
   validateFlowTriggerReadiness,

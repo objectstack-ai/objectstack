@@ -131,7 +131,26 @@ export const FieldZoo = ObjectSchema.create({
       label: 'Formula (number × percent)',
       expression: cel`(record.f_number == null ? 0 : record.f_number) * (record.f_percent == null ? 0 : record.f_percent) / 100`,
     }),
-    f_summary: Field.summary({ label: 'Roll-up Summary' }),
+    // NO `summary` field here, deliberately — it is the one type this zoo
+    // cannot demonstrate. A roll-up aggregates a CHILD object into its parent,
+    // and the zoo is a leaf: `f_master_detail` below makes it a child of
+    // `showcase_project`, and nothing is a child of the zoo. A `Field.summary`
+    // with no `summaryOperations` is not a demo of the type — the engine's
+    // summary index skips it, so it reads 0 forever.
+    //
+    // It sat here as exactly that until the ADR-0078 completeness gate flagged
+    // it on its first run against a real app (#4544). Worth noting where it
+    // was: in the object whose whole job is to show what each field type looks
+    // like, one line below an `f_formula` that IS complete. The canonical
+    // example of a roll-up in this repo computed nothing — and the rule it
+    // broke was this file's own: "relationship types point at the other
+    // showcase objects so they have REAL targets".
+    //
+    // `summary` stays covered stack-wide (`collectFieldTypes` walks every
+    // object): `showcase_invoice.total` is the plain sum, and
+    // `showcase_expense_report.total_amount` / `approved_amount` show the
+    // `summaryOperations.filter` variant that rolls ONE child object into two
+    // different totals.
     f_autonumber: Field.autonumber({ label: 'Auto Number' }),
 
     // ── Embedded structured values (stored as JSON on the row) ───────────
