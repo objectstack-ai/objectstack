@@ -13,8 +13,8 @@ import {
 //
 // The previous stub implemented `delete(object, id)`, a signature ObjectQL has
 // never had. The module called `ql.delete(object, id, ctx)`; the stub happily
-// deleted the row, every revoke test above went green, and in production the
-// id landed in the option-bag slot where `rejectUnknownEngineOptions` reads its
+// deleted the row, every revoke test in this file went green, and in production
+// the id landed in the option-bag slot where `rejectUnknownEngineOptions` reads its
 // character indices as unknown keys and throws — straight into a swallowing
 // `catch`. So for this module's entire life NOTHING was ever revoked: demoted
 // admins kept `organization_admin`, hence tenant admin.
