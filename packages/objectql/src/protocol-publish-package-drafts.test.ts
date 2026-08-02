@@ -279,7 +279,20 @@ describe('protocol.publishMetaItem — seed self-apply', () => {
     (protocol as any).isArtifactBacked = () => false;
     (protocol as any).applyObjectRegistryMutation = () => {};
     (protocol as any).ensureObjectStorage = async () => {};
+    // The double must be as WIDE as `SysMetadataRepository`, not as narrow as
+    // the one call the test happens to care about. `promoteDraftForPublish`
+    // reads the pending draft before promoting it (#4463 — the author-time
+    // rules gate the draft→active transition, or `?mode=draft` + `POST
+    // /publish` would be a free way around the gate `saveMetaItem` applies).
+    // A double missing `get` failed with `repo.get is not a function`, which
+    // is the #4550 shape: a stand-in narrower than the contract it stands in
+    // for turns an unrelated feature into a phantom regression in another
+    // package. Answering `null` (no draft pending) is also legitimate — the
+    // point is that the method EXISTS; here it returns the body under test so
+    // the gate sees what the promotion will actually publish.
     (protocol as any).getOverlayRepo = () => ({
+      get: async (_ref: unknown, opts?: { state?: string }) =>
+        opts?.state === 'draft' ? { body } : null,
       promoteDraft: async () => ({ version: 'sha256:x', seq: 7, item: { body } }),
     });
     const applySeedBodies = vi
