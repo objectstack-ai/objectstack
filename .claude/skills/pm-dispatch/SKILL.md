@@ -149,6 +149,25 @@ routing isn't already decided:
   maintainer.** If after reading the code you genuinely cannot tell where a
   change lands, the issue is underspecified: escalate the *underlying
   product question* (step 8), not the routing.
+- **Cross-repo dedup — check the sibling repos for this issue's shadow**
+  before it can be dispatched: follow every cross-repo reference on the
+  issue's body/timeline, AND keyword-search open issues/PRs in the other two
+  repos (module names, error strings). What you find decides the action:
+  - shadow **claimed / PR in flight** → do not dispatch; write
+    `Blocked-by: <repo>#<n>` + a comment, revisit for *remaining* work when
+    it lands;
+  - shadow **open, unclaimed** → converge first: cross-link, make it a
+    sub-issue of the backlog issue (or close one as duplicate) so one thing
+    has exactly one dispatch entry — then queue normally;
+  - shadow **already done** → the backlog issue may be stale: verify what
+    remains, recommend closing if nothing does;
+  - **nothing found** → dispatch normally.
+  The main backlog is the only scheduling authority — two queues must never
+  dispatch the same work. Re-verify assignees (issue *and* linked shadows)
+  at claim time, not just at triage: the gap between them is where races
+  live. Known blind spot: work in a local worktree with no claim, no
+  branch, no PR is invisible — that is what the claim-first rule (step 4)
+  exists to shrink.
 
 ### 3. Select the batch
 
@@ -162,16 +181,40 @@ not dispatch.
 
 ### 4. Claim
 
-For each selected issue, **before dispatching** (repo rule: claim before code):
-assign it to yourself (`@me`) and add labels + a comment in Chinese, e.g.
-「已由 PM 循环派发给开发 agent(第 N 轮)。」Skip — and drop from the batch —
-any issue that acquired an assignee since step 1.
+All agents share one GitHub identity, so the assignee alone says "some agent
+claimed this" but never *which* — the claim comment carries the identity. For
+each selected issue, **before dispatching** (repo rule: claim before code),
+execute atomically, in order:
+
+1. **Assign** to yourself (`@me`) and add `pm:dispatched`. Skip — and drop
+   from the batch — any issue that acquired an assignee since step 1.
+2. **Claim comment** (Chinese), fixed shape — the branch name is the key,
+   every later artifact (worktree, push, PR) hangs off it:
+   > 认领:PM 循环第 N 轮
+   > 分支:`claude/issue-<n>-<slug>`
+   > Worktree:`<repo>-issue-<n>`
+3. **Race check**: assignment is idempotent, so two agents can both
+   "succeed". Re-read the comments; if an earlier claim comment with a
+   *different* branch name exists, you lost — touch nothing of theirs,
+   reply 「已有认领,让行」, and pick another issue. First comment wins.
+
+Dev agents push their branch early — a remote branch is the hardest evidence
+of work in flight, closing the gap between "claimed" and "PR exists".
+
+**Stale-claim reclaim**: a claim older than ~24 h whose promised branch does
+not exist on the remote and has no PR is presumed dead — comment asking, and
+after another window of silence, remove the assignee (note why) and return
+the issue to the queue. Never reclaim a claim that has a live branch with
+commits.
 
 ### 5. Dispatch
 
 One `Agent` call per issue, `subagent_type: "os-dev"` (fall back to
 `general-purpose` with the same prompt if the custom agent isn't loaded), run
-in parallel in the background. Prompt template — fill every placeholder, paste
+in parallel in the background. **Model split (maintainer policy): pass
+`model: "opus"` on every dev dispatch.** The PM session itself stays on the
+stronger orchestration model — triage, review, and decision framing are where
+its judgment pays; implementation goes to Opus. Prompt template — fill every placeholder, paste
 the full issue body, never a summary:
 
 ```
@@ -268,10 +311,19 @@ Verdict per issue:
 Whenever a dev returns `needs_decision`, an issue is too vague to dispatch, or
 rework has failed twice:
 
-1. **File a new issue** titled `[决策] <一句话说清要拍板什么>`, labeled
-   `needs-user-decision`, body in Chinese: 背景、具体问题、可选方案、你的
-   建议、关联的原 issue / PR / 分支。**每个方案必须沿两条固定评估轴分析,
-   这是决策分析的核心原则,不是可选项:**
+1. **Default: the decision lives ON the issue it belongs to — never a new
+   issue.** Post the analysis as a comment on that issue, add the
+   `needs-user-decision` label, drop it from the active queue. The label is
+   the maintainer's inbox (filter `label:needs-user-decision` shows
+   everything awaiting them); when they answer, the label comes off and the
+   issue re-enters the queue. No bookkeeping issues accumulate. File a
+   separate issue (titled `[决策] <一句话说清要拍板什么>`, same label) ONLY
+   when the decision has no natural anchor — it spans several issues (file
+   one, link it from each rather than duplicating the analysis) or arose
+   with no issue of its own.
+2. The analysis, wherever it lands (Chinese): 背景、具体问题、可选方案、
+   你的建议、关联的 issue / PR / 分支。**每个方案必须沿两条固定评估轴
+   分析,这是决策分析的核心原则,不是可选项:**
    - **项目长远合理性** — 哪个方案符合北极星方向与可持续架构(Prime
      Directive #5 no workarounds、#8 North Star、#12 contract-first),
      而不是眼下最省事;临时补丁式的选项要明说其长期代价。
@@ -282,11 +334,9 @@ rework has failed twice:
      绝不让 AI 能声明一个运行时不兑现的能力。
    推荐意见必须基于这两条轴给出理由;两轴冲突时如实呈现权衡,交维护者
    拍板。
-2. Comment on the original issue linking the decision issue, add
-   `needs-user-decision` to it too, and drop it from the active queue.
 3. If the session is interactive, additionally raise it via `AskUserQuestion`;
-   the filed issue remains the durable record either way. **Never** answer a
-   product/architecture question on the maintainer's behalf.
+   the labeled issue remains the durable record either way. **Never** answer
+   a product/architecture question on the maintainer's behalf.
 
 ### 9. Round report, then next round
 
