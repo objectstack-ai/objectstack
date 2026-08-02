@@ -68,7 +68,7 @@ const result = BulkDataEventSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique event identifier |
-| **type** | `Enum<'data.record.created' \| 'data.record.updated' \| 'data.record.deleted' \| 'data.field.changed'>` | ✅ | Event type |
+| **type** | `Enum<'data.record.created' \| 'data.record.updated' \| 'data.record.deleted'>` | ✅ | Event type |
 | **object** | `string` | ✅ | Object name |
 | **recordId** | `string` | ✅ | Record ID |
 | **changes** | `Record<string, any>` | optional | Changed fields |
@@ -87,7 +87,6 @@ const result = BulkDataEventSchema.parse(data);
 * `data.record.created`
 * `data.record.updated`
 * `data.record.deleted`
-* `data.field.changed`
 
 
 ---

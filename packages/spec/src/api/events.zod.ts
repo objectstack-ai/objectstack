@@ -63,12 +63,26 @@ export type MetadataEventType = z.infer<typeof MetadataEventType>;
  *
  * Triggered when data records are created, updated, or deleted.
  * Follows the pattern: `data.record.{action}`
+ *
+ * Only event names with a REAL producer are declared here — a subscriber must
+ * not be able to wait on something that never fires (the same rule
+ * `WebhookTriggerType` states for its own vocabulary). The engine's
+ * `publishDataEvent` emits exactly these three.
+ *
+ * REMOVED in 17.0.0 (#4673, ADR-0049 enforce-or-remove): `data.field.changed`.
+ * Nothing in either repository ever emitted it, and `DataEventSchema` has no
+ * `field` / `oldValue` / `newValue` slot to carry per-field semantics anyway —
+ * it is record-shaped. Per-field detail is already on the record event: a
+ * `data.record.updated` payload carries `changes` (the changed fields),
+ * `before` and `after`. A consumer that keyed on `data.field.changed` was
+ * keying on an event no producer sent (ADR-0078's silently-inert declaration).
+ * If a genuine per-field stream is ever needed it gets its own honest contract
+ * — the precedent #4639 set for bulk writes — rather than an empty member here.
  */
 export const DataEventType = z.enum([
   'data.record.created',
   'data.record.updated',
   'data.record.deleted',
-  'data.field.changed',
 ]);
 
 export type DataEventType = z.infer<typeof DataEventType>;
