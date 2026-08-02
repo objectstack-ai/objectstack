@@ -137,8 +137,7 @@ export const getMongoConfigJsonSchema = driverConfigJsonSchema(MongoConfigSchema
 // ==========================================================================
 
 /**
- * The static definition of the Mongo driver's capabilities and default
- * metadata, satisfying the `DriverDefinitionSchema` contract (proved by
+ * The static definition of the Mongo driver's default metadata, satisfying the `DriverDefinitionSchema` contract (proved by
  * `mongo.test.ts`, which parses this constant).
  *
  * `configSchema` is a getter so the JSON-Schema projection is computed on first
@@ -157,21 +156,6 @@ export const MongoDriverSpec = {
   icon: 'database',
   get configSchema() {
     return getMongoConfigJsonSchema();
-  },
-  capabilities: {
-    transactions: true,
-    // Query
-    queryFilters: true,
-    queryAggregations: true,
-    querySorting: true,
-    queryPagination: true,
-    queryWindowFunctions: false,
-    querySubqueries: false,
-    joins: false,
-    fullTextSearch: true,
-    readOnly: false,
-    // Schema
-    dynamicSchema: true,
   },
 } satisfies DriverDefinition;
 

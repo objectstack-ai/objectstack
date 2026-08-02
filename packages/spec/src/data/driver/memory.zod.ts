@@ -307,8 +307,7 @@ export const getMemoryConfigJsonSchema = driverConfigJsonSchema(MemoryConfigSche
 // ==========================================================================
 
 /**
- * The static definition of the Memory driver's capabilities and default
- * metadata, satisfying the `DriverDefinitionSchema` contract (proved by
+ * The static definition of the Memory driver's default metadata, satisfying the `DriverDefinitionSchema` contract (proved by
  * `memory.test.ts`, which parses this constant).
  *
  * `configSchema` was `{}` here — a declared slot that nothing filled and
@@ -323,24 +322,6 @@ export const MemoryDriverSpec = {
   icon: 'memory',
   get configSchema() {
     return getMemoryConfigJsonSchema();
-  },
-  capabilities: {
-    transactions: true,
-    // Query
-    queryFilters: true,
-    queryAggregations: true,
-    querySorting: true,
-    queryPagination: true,
-    // No join, window function, or subquery support
-    joins: false,
-    queryWindowFunctions: false,
-    querySubqueries: false,
-    // No full-text search (linear scan)
-    fullTextSearch: false,
-    // Not read-only
-    readOnly: false,
-    // Dynamic schema (no DDL needed)
-    dynamicSchema: true,
   },
 } satisfies DriverDefinition;
 

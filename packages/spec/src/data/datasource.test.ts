@@ -1,13 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   DatasourceSchema,
-  DatasourceCapabilities,
   DriverDefinitionSchema,
   DriverType,
   SchemaModeSchema,
   ExternalDatasourceSettingsSchema,
   type Datasource,
-  type DatasourceCapabilitiesType,
 } from './datasource.zod';
 
 describe('DriverType', () => {
@@ -18,77 +16,51 @@ describe('DriverType', () => {
   });
 });
 
-describe('DatasourceCapabilities', () => {
-  it('should accept empty capabilities with defaults', () => {
-    const capabilities = DatasourceCapabilities.parse({});
-
-    expect(capabilities.transactions).toBe(false);
-    expect(capabilities.queryFilters).toBe(false);
-    expect(capabilities.queryAggregations).toBe(false);
-    expect(capabilities.querySorting).toBe(false);
-    expect(capabilities.queryPagination).toBe(false);
-    expect(capabilities.queryWindowFunctions).toBe(false);
-    expect(capabilities.querySubqueries).toBe(false);
-    expect(capabilities.joins).toBe(false);
-    expect(capabilities.fullTextSearch).toBe(false);
-    expect(capabilities.readOnly).toBe(false);
-    expect(capabilities.dynamicSchema).toBe(false);
-  });
-
-  it('should accept full capabilities for SQL database', () => {
-    const capabilities = DatasourceCapabilities.parse({
-      transactions: true,
-      queryFilters: true,
-      queryAggregations: true,
-      querySorting: true,
-      queryPagination: true,
-      queryWindowFunctions: true,
-      querySubqueries: true,
-      joins: true,
-      fullTextSearch: true,
-      readOnly: false,
-      dynamicSchema: false,
+describe('datasource.capabilities — RETIRED (#4583)', () => {
+  // These used to be five tests asserting the eleven flags parsed and defaulted.
+  // They did, faithfully, for a block no runtime ever read — the shape #4001
+  // named: a schema that is loose (or here, merely unread) eventually grows a
+  // test asserting that state, and the assertion reads like intent.
+  //
+  // The replacement asserts the removal, and that the author is told where the
+  // enforced gate actually is.
+  it('rejects a `capabilities` block on a datasource', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'analytics',
+      driver: 'sqlite',
+      config: { filename: ':memory:' },
+      capabilities: { readOnly: true },
     });
 
-    expect(capabilities.transactions).toBe(true);
-    expect(capabilities.queryWindowFunctions).toBe(true);
+    expect(result.success).toBe(false);
   });
 
-  it('should accept limited capabilities for NoSQL database', () => {
-    const capabilities = DatasourceCapabilities.parse({
-      transactions: false,
-      queryFilters: true,
-      queryAggregations: true,
-      querySorting: true,
-      queryPagination: true,
-      joins: false,
-      dynamicSchema: true,
-    });
-
-    expect(capabilities.joins).toBe(false);
-    expect(capabilities.dynamicSchema).toBe(true);
-  });
-
-  it('should accept read-only capabilities', () => {
-    const capabilities = DatasourceCapabilities.parse({
+  it('tells a `readOnly` author that no managed read-only gate exists, rather than renaming the key', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'analytics',
+      driver: 'sqlite',
+      config: { filename: ':memory:' },
       readOnly: true,
-      queryFilters: true,
-      querySorting: true,
     });
 
-    expect(capabilities.readOnly).toBe(true);
+    expect(result.success).toBe(false);
+    const msg = JSON.stringify(result.error?.issues ?? []);
+    // The prescription must name the enforced gate AND its limit. Naming only
+    // `external.allowWrites` would repeat the defect this removal closes: the
+    // author's datasource is managed, so that key would not gate it either.
+    expect(msg).toContain('external.allowWrites');
+    expect(msg).toMatch(/managed/);
   });
 
-  it('should accept capabilities for Excel/CSV', () => {
-    const capabilities = DatasourceCapabilities.parse({
-      transactions: false,
-      queryFilters: true,
-      querySorting: true,
-      joins: false,
-      readOnly: false,
+  it('rejects `capabilities` on a driver definition too', () => {
+    const result = DriverDefinitionSchema.safeParse({
+      id: 'sqlite',
+      label: 'SQLite',
+      configSchema: {},
+      capabilities: { transactions: true },
     });
 
-    expect(capabilities.transactions).toBe(false);
+    expect(result.success).toBe(false);
   });
 });
 
@@ -128,15 +100,9 @@ describe('DriverDefinitionSchema', () => {
           password: { type: 'string' },
         },
       },
-      capabilities: {
-        transactions: true,
-        queryFilters: true,
-        queryAggregations: true,
-      },
     });
 
     expect(driver.description).toBe('PostgreSQL database driver');
-    expect(driver.capabilities).toBeDefined();
   });
 
   it('should accept MongoDB driver definition', () => {
@@ -229,18 +195,12 @@ describe('DatasourceSchema', () => {
         password: '${DB_PASSWORD}',
         ssl: true,
       },
-      capabilities: {
-        transactions: true,
-        queryFilters: true,
-        queryAggregations: true,
-      },
       description: 'Main production PostgreSQL database',
       active: true,
     });
 
     expect(datasource.label).toBe('Production Database');
     expect(datasource.description).toBeDefined();
-    expect(datasource.capabilities).toBeDefined();
   });
 
   it('should accept PostgreSQL datasource', () => {
@@ -364,19 +324,6 @@ describe('DatasourceSchema', () => {
     expect(datasource.active).toBe(false);
   });
 
-  it('should accept datasource with capability overrides', () => {
-    const datasource = DatasourceSchema.parse({
-      name: 'custom_db',
-      driver: 'postgres',
-      config: { database: 'mydb' },
-      capabilities: {
-        queryWindowFunctions: false,
-        querySubqueries: false,
-      },
-    });
-
-    expect(datasource.capabilities?.queryWindowFunctions).toBe(false);
-  });
 
   it('should accept datasource with environment variables in config', () => {
     const datasource = DatasourceSchema.parse({

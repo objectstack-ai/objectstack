@@ -41,7 +41,7 @@ import { validateDriverConfig } from './driver/config-registry.zod';
  */
 
 /** Keys {@link DriverDefinitionSchema} declares (drift-guarded by datasource.test.ts). */
-const DRIVER_DEFINITION_KEYS = ['id', 'label', 'description', 'icon', 'configSchema', 'capabilities'] as const;
+const DRIVER_DEFINITION_KEYS = ['id', 'label', 'description', 'icon', 'configSchema'] as const;
 
 /** Keys {@link ExternalDatasourceSettingsSchema} declares (drift-guarded by datasource.test.ts). */
 const EXTERNAL_SETTINGS_KEYS = [
@@ -54,7 +54,7 @@ const EXTERNAL_VALIDATION_KEYS = ['onMismatch', 'checkOnBoot', 'checkIntervalMs'
 
 /** Keys {@link DatasourceSchema} declares (drift-guarded by datasource.test.ts). */
 const DATASOURCE_KEYS = [
-  'name', 'label', 'driver', 'config', 'pool', 'capabilities',
+  'name', 'label', 'driver', 'config', 'pool',
   'healthCheck', 'ssl', 'retryPolicy', 'description', 'active', 'autoConnect',
   'schemaMode', 'external', 'origin',
 ] as const;
@@ -70,6 +70,35 @@ const SSL_KEYS = ['enabled', 'rejectUnauthorized', 'ca', 'cert', 'key'] as const
 
 /** Keys the datasource `retryPolicy` block declares (drift-guarded by datasource.test.ts). */
 const DATASOURCE_RETRY_POLICY_KEYS = ['maxRetries', 'baseDelayMs', 'maxDelayMs', 'backoffMultiplier'] as const;
+
+const CAPABILITIES_REMOVED_PREFIX =
+  '`datasource.capabilities` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — '
+  + 'all eleven flags were declared, strict-guarded and read by nobody. ';
+
+/**
+ * Tombstone for the retired `capabilities` block (#4583).
+ *
+ * Each flag gets its own prescription rather than one shared line, because the
+ * mechanism that actually decides the behaviour differs per flag — and a
+ * prescription that names the wrong mechanism is worse than none (#4001 landed
+ * four of those before the sweep caught them).
+ */
+const RETIRED_CAPABILITIES: Record<string, string> = {
+  capabilities:
+    CAPABILITIES_REMOVED_PREFIX
+    + 'Pushdown is decided by the runtime driver\'s own `supports.*` object, not by datasource '
+    + 'metadata, so declaring a capability here never changed which engine path ran. Delete the '
+    + 'block. If you wrote `readOnly: true`, read its note below — it did NOT make anything '
+    + 'read-only. Run `os migrate meta --from 16` to rewrite it automatically.',
+  readOnly:
+    CAPABILITIES_REMOVED_PREFIX
+    + '`readOnly` in particular NEVER made a datasource read-only: no write path consulted it, '
+    + 'so a datasource labelled a read replica accepted writes exactly like any other. The one '
+    + 'enforced datasource-wide write gate is `external.allowWrites: false`, and it applies ONLY '
+    + 'to a federated datasource (`schemaMode` other than `managed`) — for a managed datasource '
+    + 'there is currently no read-only gate at all, so delete the key rather than trusting it. '
+    + 'Tracked in #4584.',
+};
 
 /**
  * A connection detail written one level too high — it belongs inside `config`.
@@ -109,7 +138,10 @@ const driverDefinitionUnknownKeyError = strictUnknownKeyError({
     title: 'label',
     config: 'configSchema',
     schema: 'configSchema',
-    capability: 'capabilities',
+  },
+  guidance: {
+    capabilities: RETIRED_CAPABILITIES.capabilities,
+    capability: RETIRED_CAPABILITIES.capabilities,
   },
   history: 'Until #4001 these were dropped silently — the driver still registered.',
 });
@@ -223,6 +255,8 @@ const datasourceUnknownKeyError = strictUnknownKeyError({
       + '`external.credentialsRef`.',
     readReplicas: RETIRED_READ_REPLICAS,
     replicas: RETIRED_READ_REPLICAS,
+    capabilities: RETIRED_CAPABILITIES.capabilities,
+    readOnly: RETIRED_CAPABILITIES.readOnly,
   },
   history:
     'Until #4001 these were dropped silently — a connection key written one level too high '
@@ -303,35 +337,7 @@ const datasourceRetryPolicyUnknownKeyError = strictUnknownKeyError({
     + 'retryPolicy spells its delay `backoffMs`; a datasource spells it `baseDelayMs`.',
 });
 
-const capabilitiesUnknownKeyError = strictUnknownKeyError({
-  surface: 'these datasource capabilities',
-  knownKeys: [
-    'transactions', 'queryFilters', 'queryAggregations', 'querySorting',
-    'queryPagination', 'queryWindowFunctions', 'querySubqueries', 'joins',
-    'fullTextSearch', 'readOnly', 'dynamicSchema',
-  ],
-  aliases: {
-    transaction: 'transactions',
-    filters: 'queryFilters',
-    filtering: 'queryFilters',
-    aggregations: 'queryAggregations',
-    aggregation: 'queryAggregations',
-    sorting: 'querySorting',
-    sort: 'querySorting',
-    pagination: 'queryPagination',
-    windowfunctions: 'queryWindowFunctions',
-    subqueries: 'querySubqueries',
-    join: 'joins',
-    fulltext: 'fullTextSearch',
-    search: 'fullTextSearch',
-    readonly: 'readOnly',
-    schemaless: 'dynamicSchema',
-  },
-  history:
-    'Until #4001 these were dropped silently — and a capability that fails to register '
-    + 'reads as FALSE, so the engine quietly stopped pushing that work down to the driver '
-    + 'and recomputed it in memory instead.',
-});
+
 
 export const DriverType = z.string().describe('Underlying driver identifier');
 
@@ -363,68 +369,11 @@ export const DriverDefinitionSchema = lazySchema(() => z.object({
    */
   configSchema: z.record(z.string(), z.unknown()).describe('JSON Schema for connection configuration'),
 
-  /**
-   * Default Capabilities
-   * What this driver supports out-of-the-box.
-   */
-  capabilities: z.lazy(() => DatasourceCapabilities).optional(),
 }, { error: driverDefinitionUnknownKeyError }).strict());
 
 /** A driver definition — {@link DriverDefinitionSchema}'s parsed shape. */
 export type DriverDefinition = z.infer<typeof DriverDefinitionSchema>;
 
-/**
- * Datasource Capabilities Schema
- * Declares what this datasource naturally supports.
- * The ObjectQL engine uses this to determine what logic to push down
- * and what to compute in memory.
- */
-export const DatasourceCapabilities = z.object({
-  // ============================================================================
-  // Transaction & Connection Management
-  // ============================================================================
-  
-  /** Can handle ACID transactions? */
-  transactions: z.boolean().default(false),
-  
-  // ============================================================================
-  // Query Operations
-  // ============================================================================
-  
-  /** Can execute WHERE clause filters natively? */
-  queryFilters: z.boolean().default(false),
-  
-  /** Can perform aggregation (group by, sum, avg)? */
-  queryAggregations: z.boolean().default(false),
-  
-  /** Can perform ORDER BY sorting? */
-  querySorting: z.boolean().default(false),
-  
-  /** Can perform LIMIT/OFFSET pagination? */
-  queryPagination: z.boolean().default(false),
-  
-  /** Can perform window functions? */
-  queryWindowFunctions: z.boolean().default(false),
-  
-  /** Can perform subqueries? */
-  querySubqueries: z.boolean().default(false),
-  
-  /** Can execute SQL-like joins natively? */
-  joins: z.boolean().default(false),
-  
-  // ============================================================================
-  // Advanced Features
-  // ============================================================================
-  
-  /** Can perform full-text search? */
-  fullTextSearch: z.boolean().default(false),
-  
-  /** Is read-only? */
-  readOnly: z.boolean().default(false),
-  
-  /** Is scheme-less (needs schema inference)? */
-  dynamicSchema: z.boolean().default(false),
-}, { error: capabilitiesUnknownKeyError }).strict();
 
 /**
  * Schema Ownership Mode (ADR-0015)
@@ -541,7 +490,6 @@ export const DatasourceSchema = lazySchema(() => z.object({
    * Capability Overrides
    * Manually override what the driver claims to support.
    */
-  capabilities: DatasourceCapabilities.optional().describe('Capability overrides'),
   
   /** Health Check */
   healthCheck: z.object({
@@ -650,7 +598,6 @@ export const DatasourceSchema = lazySchema(() => z.object({
 export type Datasource = z.infer<typeof DatasourceSchema>;
 /** Authoring input for {@link Datasource} — defaulted fields are optional. */
 export type DatasourceInput = z.input<typeof DatasourceSchema>;
-export type DatasourceCapabilitiesType = z.infer<typeof DatasourceCapabilities>;
 
 /**
  * Type-safe factory for an external data connection (datasource). Validates at authoring time via

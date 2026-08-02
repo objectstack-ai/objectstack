@@ -111,27 +111,4 @@ describe('MongoDriverSpec', () => {
   it('should have an icon', () => {
     expect(MongoDriverSpec.icon).toBe('database');
   });
-
-  it('should have capabilities defined', () => {
-    expect(MongoDriverSpec.capabilities).toBeDefined();
-  });
-
-  it('should support transactions', () => {
-    expect(MongoDriverSpec.capabilities!.transactions).toBe(true);
-  });
-
-  it('should support query features', () => {
-    expect(MongoDriverSpec.capabilities!.queryFilters).toBe(true);
-    expect(MongoDriverSpec.capabilities!.queryAggregations).toBe(true);
-    expect(MongoDriverSpec.capabilities!.querySorting).toBe(true);
-    expect(MongoDriverSpec.capabilities!.queryPagination).toBe(true);
-  });
-
-  it('should support full text search', () => {
-    expect(MongoDriverSpec.capabilities!.fullTextSearch).toBe(true);
-  });
-
-  it('should support dynamic schema', () => {
-    expect(MongoDriverSpec.capabilities!.dynamicSchema).toBe(true);
-  });
 });

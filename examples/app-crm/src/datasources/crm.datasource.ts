@@ -21,21 +21,26 @@ export const CrmDatasource = defineDatasource({
 });
 
 /**
- * Read-replica for analytics queries — demonstrates datasource routing.
+ * Second datasource for analytics queries — demonstrates datasource routing.
  *
- * `readOnly` is a datasource CAPABILITY, not sqlite config. It sat inside
- * `config` here until #4410 gave that slot a gate — a key no driver read, so
- * the "read replica" was writable while every signal said it was not.
+ * This used to declare `capabilities: { readOnly: true }` and call itself a read
+ * replica. It was neither: the key had no reader, so the "read replica" accepted
+ * writes exactly like the primary — the third spelling of the same defect, after
+ * the same claim sat inertly in `config` (#4410) and then in `capabilities`
+ * (#4465). #4583 removed the key rather than move it a fourth time.
+ *
+ * The label no longer promises read-only, because nothing here can deliver it:
+ * `external.allowWrites: false` is the one enforced write gate and it applies
+ * only to FEDERATED datasources, while this one is local and managed. Whether a
+ * managed datasource should have a read-only gate at all is #4584 — until that
+ * is answered, the honest demo is routing, not a safety claim.
  */
 export const CrmAnalyticsDatasource = defineDatasource({
   name: 'crm_analytics',
-  label: 'CRM Analytics Read Replica',
+  label: 'CRM Analytics',
   driver: 'sqlite',
   config: {
     filename: ':memory:',
-  },
-  capabilities: {
-    readOnly: true,
   },
   active: true,
 });

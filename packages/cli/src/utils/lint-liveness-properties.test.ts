@@ -195,42 +195,47 @@ describe('lintLivenessProperties', () => {
   // the type that most needed it: 20 of its 43 props have no runtime consumer,
   // and until #4487 nothing told an author so.
 
-  it('warns on the dead datasource blocks — capabilities / healthCheck / retryPolicy (#4487)', () => {
+  it('warns on the dead datasource blocks that remain — healthCheck / retryPolicy (#4487)', () => {
+    // `capabilities` left this list in #4583: the block was REMOVED from the
+    // schema, so an author who writes it now gets a hard parse rejection with a
+    // prescription — a stronger signal than a lint warning, and the reason its
+    // ledger rows are gone rather than flipped. healthCheck / retryPolicy are
+    // still authorable and still dead (batches B and C of #4583).
     const findings = lintLivenessProperties({
       datasources: [{
         name: 'warehouse',
         driver: 'postgres',
         config: { host: 'db.internal', database: 'analytics' },
-        capabilities: { transactions: true, queryAggregations: true },
         healthCheck: { enabled: true, intervalMs: 30000 },
         retryPolicy: { maxRetries: 5, baseDelayMs: 1000 },
       }],
     });
     const msgs = paths(findings);
-    expect(msgs.some((m) => m.includes('capabilities.transactions'))).toBe(true);
-    expect(msgs.some((m) => m.includes('capabilities.queryAggregations'))).toBe(true);
     expect(msgs.some((m) => m.includes('healthCheck.enabled'))).toBe(true);
     expect(msgs.some((m) => m.includes('healthCheck.intervalMs'))).toBe(true);
     expect(msgs.some((m) => m.includes('retryPolicy.maxRetries'))).toBe(true);
     expect(msgs.some((m) => m.includes('retryPolicy.baseDelayMs'))).toBe(true);
+    // The removed block must no longer be reported by the lint at all.
+    expect(msgs.some((m) => m.includes('capabilities'))).toBe(false);
   });
 
-  // The entry the whole audit was worth doing for. `capabilities.readOnly` reads
-  // as a safety switch and gates nothing, and two shipped prescriptions pointed
-  // authors AT it until #4487. The hint has to name the gate that IS enforced,
-  // or the warning just relocates the author's confusion.
-  it('warns on capabilities.readOnly and names the real write gate (#4487)', () => {
+  // The entry the whole audit was worth doing for. `capabilities.readOnly` read
+  // as a safety switch and gated nothing — a datasource labelled a read replica
+  // took writes like any other. #4583 REMOVED it rather than warn about it for
+  // another release, so the check moved up a level: the lint no longer has an
+  // opinion because the schema refuses the key outright. The prescription that
+  // replaces the hint is asserted in `packages/spec` (datasource.test.ts), where
+  // it can also assert the part a hint could not carry — that the enforced gate
+  // does NOT cover managed datasources (#4584).
+  it('no longer warns on capabilities.readOnly — the key is gone, not merely flagged (#4583)', () => {
     const findings = lintLivenessProperties({
       datasources: [{
         name: 'reporting',
         driver: 'postgres',
         config: { host: 'ro.internal', database: 'reporting' },
-        capabilities: { readOnly: true },
       }],
     });
-    const hit = findings.find((f) => f.message.includes('capabilities.readOnly'));
-    expect(hit).toBeDefined();
-    expect(hit!.hint).toMatch(/allowWrites/);
+    expect(findings.some((f) => f.message.includes('capabilities'))).toBe(false);
   });
 
   it('stays silent on a datasource that only sets live properties (#4487)', () => {
