@@ -2114,11 +2114,15 @@ covers are folded into the list below rather than left to the changelog.)
 - **Type importers:** replace `ObjectStackProtocol` / `ObjectStackProtocolSchema`
   with the narrowest per-domain slices; drop GraphQL types and any of the removed
   dead spec clusters. If you imported `MetadataFormat`, `MetadataStats`,
-  `MetadataLoadOptions`, `MetadataSaveOptions`, `MetadataExportOptions`,
-  `MetadataImportOptions`, `MetadataLoadResult`, `MetadataSaveResult`,
-  `MetadataWatchEvent`, `MetadataCollectionInfo` or `MetadataLoaderContract`
-  from `@objectstack/spec/kernel`, change the path to `@objectstack/spec/system`
-  — same names, and that copy is the one the runtime has always emitted. It is
+  `MetadataLoadOptions`, `MetadataSaveOptions`, `MetadataLoadResult`,
+  `MetadataSaveResult`, `MetadataWatchEvent`, `MetadataCollectionInfo` or
+  `MetadataLoaderContract` from `@objectstack/spec/kernel`, change the path to
+  `@objectstack/spec/system` — same names, and that copy is the one the runtime
+  has always emitted. (`MetadataExportOptions` / `MetadataImportOptions` moved
+  again in #4538: the system-side option bags turned out to have zero consumers
+  and were deleted, so those two names now come from
+  `@objectstack/spec/contracts` — the shape `MetadataManager` actually
+  implements.) It is
   the *looser* of the two, so a reader may need new narrowing: notably
   `metadataType`/`name`/`timestamp` are optional there. (`MetadataWatchEvent.type`
   briefly also declared the raw watcher values `add`/`change`/`unlink`; they had
