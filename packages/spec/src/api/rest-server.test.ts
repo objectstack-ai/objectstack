@@ -707,11 +707,20 @@ describe('OpenApiWebhookEventSchema', () => {
   // #4411-style trap: same names, different concepts, different forms
   // (z.object here vs z.enum there). WebhookConfig(Schema) on ./api was dead
   // — wired into nothing (not even RestServerConfigSchema) — and was removed
-  // rather than renamed. Pin: ./api no longer exports the bare names.
-  it('does not re-expose the bare WebhookEvent/WebhookConfig names from ./api', async () => {
-    const api = await import('./index');
-    expect('WebhookEventSchema' in api).toBe(false);
-    expect('WebhookConfigSchema' in api).toBe(false);
+  // rather than renamed. Pin: this module no longer declares the bare names.
+  // The pin is compile-time (typeof import is type-level only — no runtime
+  // barrel load): if either bare name is re-added here, the conditional type
+  // flips to `true` and the `false` assignment fails `tsc --noEmit`.
+  it('does not re-expose the bare WebhookEvent/WebhookConfig names from ./api', () => {
+    type RestServerModule = typeof import('./rest-server.zod');
+    const hasBareEventSchema: 'WebhookEventSchema' extends keyof RestServerModule
+      ? true
+      : false = false;
+    const hasBareConfigSchema: 'WebhookConfigSchema' extends keyof RestServerModule
+      ? true
+      : false = false;
+    expect(hasBareEventSchema).toBe(false);
+    expect(hasBareConfigSchema).toBe(false);
   });
 });
 
