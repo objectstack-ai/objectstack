@@ -2,6 +2,10 @@
 
 import type { Lifecycle } from '@objectstack/spec/data';
 import { parseLifecycleDuration } from './duration.js';
+import type {
+  DanglingReferenceAuditOptions,
+  DanglingReferenceReport,
+} from '../integrity/dangling-reference-audit.js';
 
 /**
  * LifecycleService — the single platform-owned enforcer of ADR-0057
@@ -68,6 +72,14 @@ export interface LifecycleEngineLike {
   datasource?(name: string): unknown;
   /** Row reads for governance (tenant enumeration); optional. */
   find?(object: string, options: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
+  /**
+   * [#4551] Read-only referential-integrity audit. Optional — an engine
+   * without it simply contributes no finding (and the report says so by
+   * omitting the key, rather than by reporting zero).
+   */
+  inspectDanglingReferences?(
+    options?: DanglingReferenceAuditOptions,
+  ): Promise<DanglingReferenceReport>;
 }
 
 export interface LifecycleObjectLike {
@@ -118,6 +130,12 @@ export interface LifecycleServiceOptions {
   getSettings?(): LifecycleSettingsLike | undefined;
   /** Governance alert sink. Defaults to a logger warning. */
   onAlert?(alert: LifecycleGovernanceAlert): void;
+  /**
+   * [#4551] Referential-integrity audit tuning. The audit rides this sweep's
+   * clock deliberately (see {@link LifecycleService.sweep}); `enabled: false`
+   * drops that leg while leaving lifecycle enforcement alone.
+   */
+  referenceAudit?: DanglingReferenceAuditOptions & { enabled?: boolean };
 }
 
 /** Per-sweep governance snapshot resolved from the `lifecycle` namespace. */
@@ -170,6 +188,12 @@ export interface LifecycleSweepReport {
   reclaimed: string[];
   /** Governance alerts raised this sweep (quota breaches, growth spikes). */
   alerts: LifecycleGovernanceAlert[];
+  /**
+   * [#4551] Read-only referential-integrity finding for this sweep, when the
+   * engine offers the audit. Absent on an engine that does not (older engine,
+   * a test double) — which is itself honest: no report is not "clean".
+   */
+  danglingReferences?: DanglingReferenceReport;
 }
 
 interface ReclaimCapableDriver {
@@ -345,6 +369,19 @@ export class LifecycleService {
       // never a delete beyond the declared policy.
       await this.checkGovernance(engine, declared, report);
 
+      // [#4551] Referential-integrity audit — READ-ONLY, and the only leg of
+      // this sweep that writes nothing at all.
+      //
+      // It rides this clock for one reason: an operator must not have to know
+      // the finding exists in order to go looking for it (the same argument
+      // that put #4469's stranded-request inspection on the approvals SLA
+      // clock). Its subject is unrelated to retention, and that is fine — a
+      // clock is scheduling, not scope.
+      //
+      // Failure is isolated like every other leg: an audit that cannot run must
+      // never cost a sweep its reaping.
+      await this.auditReferences(engine, report);
+
       if (report.swept.length > 0 || report.errors.length > 0 || report.alerts.length > 0) {
         // ADR-0057 §3.3: cleanup must not re-feed the tables it drains — one
         // aggregate log line per sweep is the entire trace it leaves.
@@ -358,6 +395,32 @@ export class LifecycleService {
       return report;
     } finally {
       this.sweeping = false;
+    }
+  }
+
+  /**
+   * [#4551] Run the read-only dangling-reference audit as one leg of the sweep.
+   *
+   * Deliberately contributes NOTHING to `report.errors` on failure: those
+   * entries mean "a lifecycle policy did not get applied", and an audit that
+   * could not run has applied no policy either way. It logs instead, and its
+   * own report already carries `unreadableObjects` / `undetermined` so a
+   * partial run is never mistaken for a clean one.
+   */
+  private async auditReferences(
+    engine: LifecycleEngineLike,
+    report: LifecycleSweepReport,
+  ): Promise<void> {
+    const cfg = this.opts.referenceAudit;
+    if (cfg?.enabled === false) return;
+    if (typeof engine.inspectDanglingReferences !== 'function') return;
+    try {
+      const { enabled: _enabled, ...auditOptions } = cfg ?? {};
+      report.danglingReferences = await engine.inspectDanglingReferences(auditOptions);
+    } catch (err) {
+      this.opts.logger.warn(
+        `[lifecycle] reference audit failed (${(err as Error)?.message ?? err})`,
+      );
     }
   }
 

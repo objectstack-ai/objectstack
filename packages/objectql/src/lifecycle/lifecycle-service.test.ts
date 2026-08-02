@@ -721,3 +721,80 @@ describe('LifecycleService timers', () => {
     }
   });
 });
+
+/**
+ * [#4551] The read-only referential-integrity audit rides this sweep's clock.
+ *
+ * It is here — rather than on a clock of its own — so an operator does not have
+ * to know the finding exists in order to go looking for it (the same argument
+ * that put #4469's stranded-request inspection on the approvals SLA clock).
+ * Its subject is unrelated to retention; a clock is scheduling, not scope.
+ */
+describe('LifecycleService reference audit leg (#4551)', () => {
+  it('runs the audit on every sweep and carries the finding in the report', async () => {
+    const { engine } = captureEngine([]);
+    const finding = {
+      scanned: 2,
+      dangling: [{
+        objectName: 'sys_position_permission_set', recordId: 'ppr_1',
+        field: 'permission_set_id', target: 'sys_permission_set', value: 'ps_gone',
+      }],
+      undetermined: 0, unreadableObjects: [], truncatedObjects: [],
+    };
+    engine.inspectDanglingReferences = async () => finding;
+
+    const report = await service(engine).sweep();
+    expect(report.danglingReferences).toEqual(finding);
+  });
+
+  it('an engine without the audit reports NOTHING rather than an empty finding', async () => {
+    // Absence of a report is honest ("nobody looked"); a zeroed report would
+    // read as "looked and found nothing", which is the misreading #4551 is
+    // specifically trying to prevent.
+    const { engine } = captureEngine([]);
+    const report = await service(engine).sweep();
+    expect('danglingReferences' in report).toBe(false);
+  });
+
+  it('an audit that throws never costs the sweep its reaping', async () => {
+    const { engine, deletes } = captureEngine([
+      { name: 'sys_job_run', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } },
+    ]);
+    engine.inspectDanglingReferences = async () => { throw new Error('probe store down'); };
+
+    const report = await service(engine).sweep();
+    expect(deletes).toHaveLength(1);
+    // …and a failed AUDIT is not a failed POLICY: `errors` means "a lifecycle
+    // policy did not get applied", which is not what happened here.
+    expect(report.errors).toEqual([]);
+    expect(report.danglingReferences).toBeUndefined();
+  });
+
+  it('`referenceAudit.enabled: false` drops the leg and leaves lifecycle alone', async () => {
+    const { engine, deletes } = captureEngine([
+      { name: 'sys_job_run', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } },
+    ]);
+    let called = 0;
+    engine.inspectDanglingReferences = async () => {
+      called += 1;
+      return { scanned: 0, dangling: [], undetermined: 0, unreadableObjects: [], truncatedObjects: [] };
+    };
+
+    const report = await service(engine, { referenceAudit: { enabled: false } }).sweep();
+    expect(called).toBe(0);
+    expect(report.danglingReferences).toBeUndefined();
+    expect(deletes).toHaveLength(1);
+  });
+
+  it('forwards the audit budget and never leaks `enabled` into it', async () => {
+    const { engine } = captureEngine([]);
+    let seen: unknown;
+    engine.inspectDanglingReferences = async (opts: unknown) => {
+      seen = opts;
+      return { scanned: 0, dangling: [], undetermined: 0, unreadableObjects: [], truncatedObjects: [] };
+    };
+
+    await service(engine, { referenceAudit: { enabled: true, rowsPerObject: 7, maxRows: 21 } }).sweep();
+    expect(seen).toEqual({ rowsPerObject: 7, maxRows: 21 });
+  });
+});

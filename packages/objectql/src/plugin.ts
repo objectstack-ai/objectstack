@@ -7,6 +7,7 @@ import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
+import type { DanglingReferenceAuditOptions } from './integrity/dangling-reference-audit.js';
 import { runActionGovernanceInventory } from './action-governance.js';
 import type { IMetadataService } from '@objectstack/spec/contracts';
 
@@ -113,11 +114,15 @@ export interface ObjectQLPluginOptions {
    * `enabled: false` (or env `OS_LIFECYCLE_DISABLED=1`) to disable the
    * periodic sweep entirely; the `lifecycle` service stays registered so
    * tooling can still run `sweep()` explicitly.
+   *
+   * `referenceAudit` tunes the #4551 read-only dangling-reference audit that
+   * rides this same clock. It writes nothing; `enabled: false` drops the leg.
    */
   lifecycle?: {
     enabled?: boolean;
     sweepIntervalMs?: number;
     initialDelayMs?: number;
+    referenceAudit?: DanglingReferenceAuditOptions & { enabled?: boolean };
   };
 }
 

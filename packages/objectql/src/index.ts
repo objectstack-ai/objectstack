@@ -124,6 +124,22 @@ export type {
 export { parseLifecycleDuration } from './lifecycle/duration.js';
 export { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 
+// [#4551] Read-only referential-integrity audit — the reporting half of the
+// `isSystem` exemption #4441 deliberately left in the write-path guard.
+export {
+  auditDanglingReferences,
+  SECURITY_SURFACE_OBJECTS,
+  DEFAULT_ROWS_PER_OBJECT,
+  DEFAULT_MAX_ROWS,
+} from './integrity/dangling-reference-audit.js';
+export type {
+  DanglingReference,
+  DanglingReferenceReport,
+  DanglingReferenceAuditOptions,
+  DanglingReferenceAuditPort,
+  AuditableObject,
+} from './integrity/dangling-reference-audit.js';
+
 // Export MetadataFacade
 export { MetadataFacade } from './metadata-facade.js';
 

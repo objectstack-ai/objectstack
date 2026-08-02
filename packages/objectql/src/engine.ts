@@ -80,6 +80,12 @@ import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, Validat
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import { applyHaving } from './having-filter.js';
+import {
+  auditDanglingReferences,
+  type AuditableObject,
+  type DanglingReferenceAuditOptions,
+  type DanglingReferenceReport,
+} from './integrity/dangling-reference-audit.js';
 
 /**
  * The lifecycle events the engine actually dispatches via `triggerHooks`. This
@@ -2104,6 +2110,39 @@ export class ObjectQL implements IObjectQLEngine {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * [#4551] Report stored references that resolve to nothing. **Read-only** —
+   * this issues no writes at all.
+   *
+   * The follow-up to {@link assertReferencesResolve}'s deliberate `isSystem`
+   * exemption. That exemption stays exactly as #4441 wrote it (seed replay and
+   * boot provisioning must keep their ordering freedom); what it left behind is
+   * a residual — the platform itself can still write a reference into the void
+   * and nothing says so. This is the "something says so".
+   *
+   * The existence oracle passed to the audit is **this engine's own**
+   * {@link referenceExists}, not a second copy: the audit and the write-path
+   * guard therefore answer "does this id exist" — and "could I even tell?" —
+   * with one predicate, so the report can never be more or less strict than the
+   * rule it reports on.
+   *
+   * See {@link auditDanglingReferences} for the judgments (readonly skip, empty
+   * values, unknown ≠ absent) and the bounded-scan honesty of the report.
+   */
+  async inspectDanglingReferences(
+    options?: DanglingReferenceAuditOptions,
+  ): Promise<DanglingReferenceReport> {
+    return auditDanglingReferences(
+      {
+        objects: () => this._registry.getAllObjects() as unknown as AuditableObject[],
+        find: (object, opts) => this.find(object, opts as any) as Promise<Array<Record<string, unknown>>>,
+        probe: (target, id) => this.referenceExists(target, id),
+        warn: (msg, meta) => this.logger?.warn?.(msg, meta as any),
+      },
+      options,
+    );
   }
 
   /**
