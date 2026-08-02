@@ -2150,6 +2150,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "变量（JSON）",
         help: "形如 {name,type,required,description} 的 JSON 数组"
       },
+      managed_by: {
+        label: "Managed By",
+        help: "Record provenance: platform = framework built-in / package = app/package-declared (boot-seeded from declared email_template metadata) / admin = created in Studio.",
+        options: {
+          platform: "platform",
+          package: "package",
+          admin: "admin"
+        }
+      },
+      customized: {
+        label: "Customized",
+        help: "Set when an admin edits a package-declared template; boot seeding will no longer overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows."
+      },
       created_at: {
         label: "创建时间"
       },
