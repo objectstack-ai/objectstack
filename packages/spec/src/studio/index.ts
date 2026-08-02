@@ -23,6 +23,9 @@ export {
   PanelLocationSchema,
   CommandContributionSchema,
   StudioPluginContributionsSchema,
+  // [#4653] `ActivationEventSchema` / `ActivationEvent` are RE-EXPORTS of the
+  // single declaration in `kernel/plugin-runtime.zod.ts`, not a second source.
+  // Studio plugin authors keep importing them from `@objectstack/spec/studio`.
   ActivationEventSchema,
   StudioPluginManifestSchema,
 
@@ -36,6 +39,7 @@ export {
   type CommandContribution,
   type StudioPluginContributions,
   type StudioPluginManifest,
+  type ActivationEvent,
 
   // Helpers
   defineStudioPlugin,

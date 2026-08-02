@@ -59,7 +59,7 @@ export type BatchRecord = z.infer<typeof BatchRecordSchema>;
  * Configuration options for batch operations
  */
 export const BatchOptionsSchema = lazySchema(() => z.object({
-  // ADR-0118 D4. `atomic` declared `.default(true)` while NO enforcement site
+  // ADR-0119 D4. `atomic` declared `.default(true)` while NO enforcement site
   // delivered atomicity: `batchData` merely broke its loop, leaving every prior
   // write committed, and the REST route deliberately forwards the ORIGINAL body
   // rather than the parsed output, so this default never reached the loop at

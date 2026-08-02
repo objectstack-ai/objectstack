@@ -162,7 +162,7 @@ Plugins can be loaded and unloaded at runtime **without restarting the kernel**:
 
 - **`DynamicLoadRequestSchema`** — Load a plugin from `npm`, `local`, `url`, `registry`, or `git` sources with optional integrity verification
 - **`DynamicUnloadRequestSchema`** — Graceful/forceful/drain unload with dependency awareness (`cascade`, `warn`, or `block` dependents)
-- **`ActivationEventSchema`** — Lazy activation triggers: `onCommand`, `onRoute`, `onObject`, `onEvent`, `onService`, `onSchedule`, `onStartup`
+- **`ActivationEventSchema`** — Lazy activation triggers, shaped `{ type, pattern }`. Types: `onCommand`, `onRoute`, `onObject`, `onEvent`, `onService`, `onSchedule`, `onStartup`, `onMetadataType`, `onView`. Since v17 this is the platform's **single** activation vocabulary — `@objectstack/spec/studio` re-exports this exact declaration rather than carrying its own `z.string()` (#4653)
 - **`PluginDiscoveryConfigSchema`** — Runtime discovery from registries and local directories with polling and trust filtering
 - **`DynamicLoadingConfigSchema`** — Subsystem configuration: max dynamic plugins, default sandbox policy, allowed sources, integrity requirements
 

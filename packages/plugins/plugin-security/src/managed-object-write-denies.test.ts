@@ -18,7 +18,7 @@ const schemas = [
   { name: 'sys_user', managedBy: 'better-auth', userActions: { edit: true } }, // intentional divergence
   { name: 'sys_sso_provider', managedBy: 'better-auth' },
   { name: 'crm_lead', managedBy: 'platform' },
-  { name: 'sys_setting', managedBy: 'system' },
+  { name: 'sys_setting', managedBy: 'system-data' }, // #3355: was 'system'
   { name: 'sys_audit_log', managedBy: 'append-only' },
   { name: 'sys_sharing_rule', managedBy: 'config' },
   { name: 'sys_no_bucket' }, // unset
@@ -49,7 +49,7 @@ describe('applyManagedWriteDenies (#3325)', () => {
     expect(s.objects.sys_user.allowEdit).toBe(false);
   });
 
-  it('ignores platform / config / system / append-only / unset buckets (pins the ADR-0103 deferral)', () => {
+  it('ignores platform / config / system-data / append-only / unset buckets (pins the ADR-0103 deferral)', () => {
     const s = set('member_default');
     applyManagedWriteDenies([s], schemas);
     for (const name of ['crm_lead', 'sys_setting', 'sys_audit_log', 'sys_sharing_rule', 'sys_no_bucket']) {

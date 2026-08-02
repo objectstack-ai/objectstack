@@ -61,6 +61,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_jwks',
     'sys_member',
     'sys_migration',
+    'sys_migration_journal',
     'sys_notification',
     'sys_oauth_access_token',
     'sys_oauth_application',

@@ -78,12 +78,12 @@
     },
     {
       "file": "packages/spec/src/contracts/objectql-engine.ts",
-      "adrs": ["ADR-0118"],
+      "adrs": ["ADR-0119"],
       "invariant": "`transaction` is DECLARED on the `objectql` slot contract — plugin space reaches ADR-0034's ambient transaction by name, not through `as unknown as` casts. Required, not optional, per this file's own rule. Its two caveats (default-driver only; the callback runs with NO transaction when the driver lacks `beginTransaction`) are part of the declared meaning, so a caller that cannot lose atomicity silently must fail closed rather than assume it held."
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
-      "adrs": ["ADR-0118"],
+      "adrs": ["ADR-0119"],
       "invariant": "`batchData`'s `atomic` is REAL or REFUSED, never silent best-effort. An explicitly atomic batch runs inside ONE `engine.transaction()`, so a failure rolls back every prior write and the response reports zero successes (rows marked ROLLED_BACK / NOT_ATTEMPTED — reporting a rolled-back row as `success: true` was the original bug, not merely the missing transaction). A runtime that cannot roll back gets 501 NOT_IMPLEMENTED; degrading to best-effort is how the flag came to lie."
     }
   ]

@@ -1409,11 +1409,12 @@ describe('userActions row predicates + resolveCrudAffordances (objectui#2614)', 
     expect(aff.deletePredicates?.visibleWhen).toEqual({ dialect: 'cel', source: 'record.frozen != true' });
   });
 
-  it('engine-owned bucket resolves fully locked (same matrix as system/append-only, ADR-0103)', () => {
+  it('engine-owned bucket resolves fully locked (same matrix as append-only, ADR-0103)', () => {
     const locked = { create: false, import: false, edit: false, delete: false, exportCsv: true };
     expect(resolveCrudAffordances({ managedBy: 'engine-owned' } as never)).toEqual(locked);
-    // Parity with the other engine-owned-default buckets.
-    expect(resolveCrudAffordances({ managedBy: 'system' } as never)).toEqual(locked);
+    // Parity with the other engine-owned-default bucket. `system` used to sit
+    // here too; #3355 renamed it to the writable-default `system-data`, which is
+    // pinned against this matrix below.
     expect(resolveCrudAffordances({ managedBy: 'append-only' } as never)).toEqual(locked);
     // The enum accepts the new value.
     expect(ObjectSchema.safeParse({ name: 'sys_thing', label: 'T', fields: { id: { type: 'text' } }, managedBy: 'engine-owned' }).success).toBe(true);
@@ -1586,5 +1587,101 @@ describe('#3543 apiMethods legacy-value strip (ObjectCapabilities)', () => {
     const clean = ObjectCapabilities.parse({ apiMethods: ['get', 'list', 'bulk'] });
     expect(clean.apiMethods).toEqual(['get', 'list', 'bulk']);
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #3355 — the v17 retirement of the residual `managedBy: 'system'` bucket.
+ *
+ * ADR-0103 split the overloaded value additively in v16 (the 20 engine-owned
+ * objects moved out to the new `engine-owned`), which left `system` naming the
+ * half that had already gone: writable platform data under a word that says the
+ * engine owns it. v17 renames the residue `system-data` and retires the bare
+ * value from the load path.
+ *
+ * These are the pin tests for that contract. Every one of them fails on the
+ * pre-fix tree.
+ */
+describe('managedBy: retiring the overloaded `system` bucket (#3355)', () => {
+  const object = (managedBy: string, extra: Record<string, unknown> = {}) => ({
+    name: 'sys_thing',
+    label: 'Thing',
+    fields: { id: { type: 'text' } },
+    managedBy,
+    ...extra,
+  });
+
+  it('rejects the retired `system` value', () => {
+    const result = ObjectSchema.safeParse(object('system'));
+    expect(result.success).toBe(false);
+  });
+
+  it('the rejection carries the prescription, not "invalid enum value"', () => {
+    const result = ObjectSchema.safeParse(object('system'));
+    expect(result.success).toBe(false);
+    const msg = JSON.stringify(result.error?.issues ?? []);
+    // The retirement kit's contract: name the key, say it was removed, name the
+    // replacement, and hand over the automated fix.
+    expect(msg).toMatch(/managedBy/s);
+    expect(msg).toMatch(/removed in @objectstack\/spec 17/s);
+    expect(msg).toMatch(/system-data/s);
+    expect(msg).toMatch(/os migrate meta --from 16/s);
+  });
+
+  it('accepts the replacement value', () => {
+    expect(ObjectSchema.safeParse(object('system-data')).success).toBe(true);
+  });
+
+  it('a genuine typo still gets zod\'s own enum message, NOT the retirement prescription', () => {
+    // Telling the author of `managedBy: 'sytem'` that their value "was removed
+    // in v17" would misinform — they never had it. Only the value that used to
+    // be legal earns the tombstone.
+    const result = ObjectSchema.safeParse(object('sytem'));
+    expect(result.success).toBe(false);
+    const msg = JSON.stringify(result.error?.issues ?? []);
+    expect(msg).not.toMatch(/removed in @objectstack\/spec 17/s);
+  });
+
+  it('`system-data` defaults to full CRUD — the bucket says the data is yours', () => {
+    expect(resolveCrudAffordances({ managedBy: 'system-data' } as never)).toEqual({
+      create: true, import: true, edit: true, delete: true, exportCsv: true,
+    });
+  });
+
+  it('`userActions` on `system-data` NARROWS, and narrowing still resolves', () => {
+    const aff = resolveCrudAffordances({
+      managedBy: 'system-data',
+      userActions: { delete: false, import: false },
+    } as never);
+    expect(aff).toEqual({
+      create: true, import: false, edit: true, delete: false, exportCsv: true,
+    });
+  });
+
+  /**
+   * The mis-assignment guard. `system` defaulted LOCKED, so an engine-owned
+   * object mislabelled into it inherited a harmless read-only matrix.
+   * `system-data` defaults WRITABLE, so the same mistake now advertises generic
+   * CRUD on a table that should never take a user write — and the engine write
+   * guard does NOT cover `system-data` (a writable default has nothing to fail
+   * closed on), so authoring time is the only place it can be caught.
+   */
+  describe('refuses a `system-data` object that grants no user write at all', () => {
+    it('throws at create() naming the bucket it should have used', () => {
+      expect(() => ObjectSchema.create(object('system-data', {
+        userActions: { create: false, edit: false, delete: false },
+      }) as never)).toThrow(/system-data.*no create, edit or delete.*engine-owned/s);
+    });
+
+    it('permits a partial narrow — only the all-writes-false shape is a contradiction', () => {
+      expect(() => ObjectSchema.create(object('system-data', {
+        userActions: { create: false, delete: false },
+      }) as never)).not.toThrow();
+    });
+
+    it('leaves every other bucket alone (engine-owned is legitimately write-less)', () => {
+      expect(() => ObjectSchema.create(object('engine-owned') as never)).not.toThrow();
+      expect(() => ObjectSchema.create(object('append-only') as never)).not.toThrow();
+    });
   });
 });

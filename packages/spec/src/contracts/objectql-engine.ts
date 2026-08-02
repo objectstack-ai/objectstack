@@ -164,7 +164,7 @@ export interface IObjectQLEngine extends IDataEngine {
     /** Drop the memoized migration-flag reads (the attestation may race a fast boot's first read). */
     invalidateDataMigrationFlags(): void;
 
-    // ── Transactions (ADR-0118 D1) ───────────────────────────────────────
+    // ── Transactions (ADR-0119 D1) ───────────────────────────────────────
     /**
      * Run `callback` inside ONE driver transaction — the ADR-0034 ambient
      * transaction. The callback receives a context carrying the handle, which
@@ -184,13 +184,13 @@ export interface IObjectQLEngine extends IDataEngine {
      * header; callers that tolerate test doubles keep their runtime
      * `typeof === 'function'` probes, which types do not replace.
      *
-     * TWO CAVEATS ARE PART OF THE DECLARED MEANING (ADR-0118 D1), not
+     * TWO CAVEATS ARE PART OF THE DECLARED MEANING (ADR-0119 D1), not
      * behaviour to be discovered: this covers the DEFAULT driver only — objects
      * routed elsewhere by `setDatasourceMapping` are written outside it — and
      * when that driver has no `beginTransaction` the callback runs with NO
      * transaction and NO rollback. A caller that cannot tolerate silently
      * losing atomicity must fail closed itself rather than assume it held; see
-     * `batchData`'s atomic gate (ADR-0118 D4). Tightening both is tracked by
+     * `batchData`'s atomic gate (ADR-0119 D4). Tightening both is tracked by
      * the ADR's follow-up.
      *
      * `trxCtx`/`baseContext` are the engine-local execution-context shape, left

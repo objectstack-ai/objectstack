@@ -13,6 +13,7 @@ export { SysSetting } from './sys-setting.object.js';
 export { SysSecret } from './sys-secret.object.js';
 export { SysSettingAudit } from './sys-setting-audit.object.js';
 export { SysMigration } from './sys-migration.object.js';
+export { SysMigrationJournal } from './sys-migration-journal.object.js';
 export {
   readDataMigrationFlag,
   isDataMigrationVerified,

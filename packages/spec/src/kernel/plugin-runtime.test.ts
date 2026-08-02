@@ -88,11 +88,31 @@ describe('Plugin Runtime Management Protocol', () => {
       const types = [
         'onCommand', 'onRoute', 'onObject',
         'onEvent', 'onService', 'onSchedule', 'onStartup',
+        // [#4653] Widened to the union of the two pre-v17 vocabularies when
+        // `./studio` converged onto this declaration.
+        'onMetadataType', 'onView',
       ];
       types.forEach((type) => {
         const result = ActivationEventSchema.parse({ type, pattern: '*' });
         expect(result.type).toBe(type);
       });
+    });
+
+    // [#4653] The whole point of converging on the structured form: a mistyped
+    // trigger is rejected at authoring time. The pre-v17 studio `z.string()`
+    // accepted every one of these silently.
+    it('rejects a mistyped trigger instead of silently accepting it', () => {
+      for (const type of ['onMetadatType', 'onview', 'banana', '']) {
+        expect(() => ActivationEventSchema.parse({ type, pattern: 'flow' })).toThrow();
+      }
+    });
+
+    // [#4653] The studio string form is not silently coerced — it fails loudly.
+    // That is the migration's whole failure mode, so it is pinned here.
+    it('rejects the pre-v17 studio string form', () => {
+      for (const legacy of ['*', 'onMetadataType:flow', 'onCommand:my.cmd']) {
+        expect(() => ActivationEventSchema.parse(legacy)).toThrow();
+      }
     });
   });
 

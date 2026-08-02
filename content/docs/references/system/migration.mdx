@@ -34,8 +34,8 @@ irreversibly on migrated data gate on the flag instead of the version.
 ## TypeScript Usage
 
 ```typescript
-import { AddFieldOperation, ChangeSetSchema, CreateObjectOperation, DataMigrationFlagSchema, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependencySchema, MigrationOperationSchema, ModifyFieldOperation, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
-import type { ChangeSet, DataMigrationFlag, MigrationOperation } from '@objectstack/spec/system';
+import { AddFieldOperation, ChangeSetSchema, CreateObjectOperation, DataMigrationFlagSchema, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependencySchema, MigrationJournalEventSchema, MigrationOperationSchema, ModifyFieldOperation, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
+import type { ChangeSet, DataMigrationFlag, MigrationJournalEvent, MigrationOperation } from '@objectstack/spec/system';
 
 // Validate data
 const result = AddFieldOperation.parse(data);
@@ -151,6 +151,27 @@ Dependency reference to another migration that must run first
 | :--- | :--- | :--- | :--- |
 | **migrationId** | `string` | ✅ | ID of the migration this depends on |
 | **package** | `string` | optional | Package that owns the dependency migration |
+
+
+---
+
+## MigrationJournalEvent
+
+One event in a migration run journal — the durable trace that lets a killed run be resumed forward or compensated back, with rows proving which
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **run_id** | `string` | ✅ | Identifies one run. Rows are keyed (run_id, seq) |
+| **seq** | `integer` | ✅ | Monotonic per-run sequence. Ordering authority — wall-clock timestamps can tie or skew |
+| **kind** | `Enum<'run_started' \| 'chunk_started' \| 'chunk_done' \| 'compensated' \| 'run_done' \| 'run_failed'>` | ✅ | Event kind |
+| **migration_id** | `string` | optional | The named migration this run belongs to, when it has one — joins to sys_migration.id |
+| **plan_hash** | `string` | optional | On run_started: hash of the plan shape. A resume whose plan hash differs REFUSES rather than resuming a changed plan against an old journal |
+| **chunk_index** | `integer` | optional | On chunk_started / chunk_done / compensated: the run-global chunk index |
+| **attempt** | `integer` | optional | Which attempt produced this event. attempt > 1 means a prior outcome was unknown and the callback was asked to recheck by natural key |
+| **detail** | `string` | optional | JSON-encoded payload — the chunk plan on run_started, the error on run_failed / a failed compensation |
+| **created_at** | `string` | optional | Wall-clock stamp, for humans. Never the ordering authority — that is seq |
 
 
 ---

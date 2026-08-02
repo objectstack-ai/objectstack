@@ -206,3 +206,84 @@ export function isDataMigrationFlagVerified(flag: DataMigrationFlag | null | und
   if (!flag) return false;
   return flag.verified_at != null && flag.verified_at !== '' && flag.blocking === 0;
 }
+
+// --- Migration journal (ADR-0119 D2, #4617) ---
+//
+// The flag above and the journal below answer DIFFERENT questions, and
+// conflating them is the mistake this comment exists to prevent:
+//
+//   `sys_migration`         — "has migration X completed here, and was it
+//                             shown correct?" One row per named migration,
+//                             the durable verdict a consumer gates on.
+//   `sys_migration_journal` — "what happened during run R, and where did it
+//                             stop?" Many rows per RUN, the crash-recovery
+//                             trace nobody reads unless a run died.
+//
+// A flag row is written once, at the end, by a run that finished. A journal
+// exists precisely because a run may NOT finish: it is the only thing that can
+// tell a restarted process whether chunk 7 committed. ADR-0034 transactions
+// cannot answer that alone — a migration too big for one transaction commits
+// in pieces, and a process killed between pieces leaves no in-memory state to
+// consult. So the unit of atomicity is the chunk, and durability ACROSS chunks
+// is this journal.
+
+/**
+ * Object (table) name under which migration-run journal events persist. The
+ * object definition lives in `@objectstack/platform-objects/system`
+ * (`SysMigrationJournal`); the runner that writes it is
+ * `@objectstack/core`'s `runMigrationJournal`.
+ */
+export const MIGRATION_JOURNAL_OBJECT = 'sys_migration_journal';
+
+/**
+ * The event kinds a run emits, in the order a healthy run emits them.
+ *
+ * The pairing of `chunk_started` and `chunk_done` carries the whole recovery
+ * design, so it is worth stating exactly: `chunk_started(i)` is written
+ * AUTONOMOUSLY (its own write, outside the chunk's transaction) BEFORE the
+ * chunk runs, while `chunk_done(i)` is written INSIDE the chunk's transaction.
+ * That asymmetry is deliberate — it makes `done ⇔ committed` a fact rather
+ * than a race, and it gives `started ∧ ¬done` exactly one meaning: **the
+ * outcome is unknown**, which is the state a crash leaves behind and the only
+ * state recovery has to reason about.
+ */
+export const MIGRATION_JOURNAL_KINDS = [
+  'run_started',
+  'chunk_started',
+  'chunk_done',
+  'compensated',
+  'run_done',
+  'run_failed',
+] as const;
+
+export type MigrationJournalKind = (typeof MIGRATION_JOURNAL_KINDS)[number];
+
+export const MigrationJournalEventSchema = lazySchema(() => z.object({
+  run_id: z.string().describe('Identifies one run. Rows are keyed (run_id, seq)'),
+  seq: z.number().int().min(0)
+    .describe('Monotonic per-run sequence. Ordering authority — wall-clock timestamps can tie or skew'),
+  kind: z.enum(MIGRATION_JOURNAL_KINDS).describe('Event kind'),
+  migration_id: z.string().optional()
+    .describe('The named migration this run belongs to, when it has one — joins to sys_migration.id'),
+  plan_hash: z.string().optional()
+    .describe('On run_started: hash of the plan shape. A resume whose plan hash differs REFUSES rather than resuming a changed plan against an old journal'),
+  chunk_index: z.number().int().min(0).optional()
+    .describe('On chunk_started / chunk_done / compensated: the run-global chunk index'),
+  attempt: z.number().int().min(1).optional()
+    .describe('Which attempt produced this event. attempt > 1 means a prior outcome was unknown and the callback was asked to recheck by natural key'),
+  detail: z.string().optional()
+    .describe('JSON-encoded payload — the chunk plan on run_started, the error on run_failed / a failed compensation'),
+  created_at: z.string().datetime().optional().describe('Wall-clock stamp, for humans. Never the ordering authority — that is seq'),
+}).describe('One event in a migration run journal — the durable trace that lets a killed run be resumed forward or compensated back, with rows proving which'));
+export type MigrationJournalEvent = z.infer<typeof MigrationJournalEventSchema>;
+
+/**
+ * What a crashed run should do when it is rediscovered.
+ *
+ * `resume` suits an idempotent forward migration (a backfill that can recheck
+ * by natural key and continue); `compensate` suits work whose partial state is
+ * worse than no state. Per-plan because only the plan's author knows which of
+ * those two its steps are — there is no safe global default, and guessing
+ * would either strand data or undo work that was fine.
+ */
+export type MigrationOnCrashPolicy = 'resume' | 'compensate';

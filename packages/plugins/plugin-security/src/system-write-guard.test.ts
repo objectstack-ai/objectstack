@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// ADR-0103 — engine-owned write guard for the `engine-owned` / `system` / `append-only` buckets.
+// ADR-0103 — engine-owned write guard for the `engine-owned` / `append-only` buckets.
+// #3355 — `system` left this guard in v17: it was renamed `system-data` with a
+// WRITABLE default, which puts it with `platform` / `config` on the unguarded side.
 
 import { describe, it, expect } from 'vitest';
 import { assertEngineOwnedWriteAllowed, ENGINE_OWNED_BUCKETS } from './system-write-guard.js';
@@ -13,12 +15,17 @@ const SYSTEM_CTX = { userId: 'u1', isSystem: true };
 const CONTEXTLESS = { transaction: {} };
 
 const engineOwned = { name: 'sys_automation_run', managedBy: 'engine-owned' };
-// A `system` object with no userActions still resolves locked → engine-owned.
-const lockedSystem = { name: 'sys_thing', managedBy: 'system' };
 const appendOnly = { name: 'sys_audit_log', managedBy: 'append-only' };
+// #3355 — the platform tables that used to be `system` + a `userActions` re-open
+// block. They now sit in `system-data`, which this guard does not cover at all;
+// the pin below asserts they pass for the NEW reason (out of scope) as well as
+// they passed for the old one (userActions opened the verb).
+const systemData = { name: 'sys_user_position', managedBy: 'system-data' };
+// An `append-only` member that opens a verb — the in-scope bucket still honours
+// `userActions`, which is what keeps this guard affordance-keyed, not name-keyed.
 const writable = {
-  name: 'sys_user_position',
-  managedBy: 'system',
+  name: 'sys_audit_note',
+  managedBy: 'append-only',
   userActions: { create: true, edit: true, delete: true },
 };
 
@@ -36,20 +43,23 @@ function expectDenied(fn: () => void): void {
 }
 
 describe('assertEngineOwnedWriteAllowed (ADR-0103)', () => {
-  it('scopes to the engine-owned, system and append-only buckets', () => {
-    expect([...ENGINE_OWNED_BUCKETS].sort()).toEqual(['append-only', 'engine-owned', 'system']);
+  it('scopes to the engine-owned and append-only buckets', () => {
+    expect([...ENGINE_OWNED_BUCKETS].sort()).toEqual(['append-only', 'engine-owned']);
   });
 
-  describe('engine-owned / system / append-only objects', () => {
+  // #3355 pin: the retired bucket must not linger in the guard's scope set, and
+  // its successor must not be added to it. A writable-default bucket has nothing
+  // to fail closed on, and listing it would deny the very writes it exists to allow.
+  it('scopes out the retired `system` bucket and its `system-data` successor', () => {
+    expect(ENGINE_OWNED_BUCKETS.has('system')).toBe(false);
+    expect(ENGINE_OWNED_BUCKETS.has('system-data')).toBe(false);
+  });
+
+  describe('engine-owned / append-only objects', () => {
     it('rejects user-context insert/update/delete on an explicit engine-owned object', () => {
       for (const op of ['insert', 'update', 'delete', 'upsert', 'purge', 'transfer', 'restore']) {
         expectDenied(() => assertEngineOwnedWriteAllowed(engineOwned, op, USER_CTX));
       }
-    });
-
-    it('rejects user-context writes to a locked `system` object (no userActions)', () => {
-      expectDenied(() => assertEngineOwnedWriteAllowed(lockedSystem, 'insert', USER_CTX));
-      expectDenied(() => assertEngineOwnedWriteAllowed(lockedSystem, 'delete', USER_CTX));
     });
 
     it('rejects user-context writes to append-only objects too', () => {
@@ -86,7 +96,7 @@ describe('assertEngineOwnedWriteAllowed (ADR-0103)', () => {
     });
   });
 
-  describe('the writable set (system + userActions)', () => {
+  describe('the writable set (an in-scope bucket + userActions)', () => {
     it('allows user-context insert/update/delete when userActions opened them', () => {
       for (const op of ['insert', 'update', 'delete']) {
         expect(() => assertEngineOwnedWriteAllowed(writable, op, USER_CTX)).not.toThrow();
@@ -94,7 +104,7 @@ describe('assertEngineOwnedWriteAllowed (ADR-0103)', () => {
     });
 
     it('allows only the opened verbs — a partial userActions still guards the rest', () => {
-      const editOnly = { name: 'sys_thing', managedBy: 'system', userActions: { edit: true } };
+      const editOnly = { name: 'sys_thing', managedBy: 'append-only', userActions: { edit: true } };
       expect(() => assertEngineOwnedWriteAllowed(editOnly, 'update', USER_CTX)).not.toThrow();
       expectDenied(() => assertEngineOwnedWriteAllowed(editOnly, 'insert', USER_CTX));
       expectDenied(() => assertEngineOwnedWriteAllowed(editOnly, 'delete', USER_CTX));
@@ -102,8 +112,25 @@ describe('assertEngineOwnedWriteAllowed (ADR-0103)', () => {
   });
 
   describe('out of scope', () => {
-    it('ignores platform / config buckets (no guard)', () => {
-      for (const bucket of ['platform', 'config']) {
+    // #3355 equivalence pin. `sys_user_position` passed this guard in v16 because
+    // its `userActions` block opened the verb; it passes in v17 because the guard
+    // no longer covers its bucket. Same answer, different reason — and this test
+    // is what makes "no enforcement moved" a fact rather than an assertion in a
+    // PR description. It goes red if `system-data` is ever added to
+    // ENGINE_OWNED_BUCKETS (which would deny delegated admin its RBAC writes).
+    it('never denies a `system-data` write, with or without userActions', () => {
+      for (const op of ['insert', 'update', 'delete', 'upsert', 'transfer', 'restore']) {
+        expect(() => assertEngineOwnedWriteAllowed(systemData, op, USER_CTX)).not.toThrow();
+        expect(() => assertEngineOwnedWriteAllowed(
+          { ...systemData, userActions: { create: true, edit: true, delete: true } },
+          op,
+          USER_CTX,
+        )).not.toThrow();
+      }
+    });
+
+    it('ignores platform / config / system-data buckets (no guard)', () => {
+      for (const bucket of ['platform', 'config', 'system-data']) {
         expect(() =>
           assertEngineOwnedWriteAllowed({ name: 'x', managedBy: bucket }, 'delete', USER_CTX),
         ).not.toThrow();

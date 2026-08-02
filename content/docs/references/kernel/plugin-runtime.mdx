@@ -38,12 +38,26 @@ This protocol enables:
 ## TypeScript Usage
 
 ```typescript
-import { DynamicLoadRequestSchema, DynamicPluginOperationSchema, DynamicPluginResultSchema, DynamicUnloadRequestSchema, PluginSourceSchema } from '@objectstack/spec/kernel';
-import type { DynamicLoadRequest, DynamicPluginOperation, DynamicPluginResult, DynamicUnloadRequest, PluginSource } from '@objectstack/spec/kernel';
+import { ActivationEventSchema, DynamicLoadRequestSchema, DynamicPluginOperationSchema, DynamicPluginResultSchema, DynamicUnloadRequestSchema, PluginSourceSchema } from '@objectstack/spec/kernel';
+import type { ActivationEvent, DynamicLoadRequest, DynamicPluginOperation, DynamicPluginResult, DynamicUnloadRequest, PluginSource } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = DynamicLoadRequestSchema.parse(data);
+const result = ActivationEventSchema.parse(data);
 ```
+
+---
+
+## ActivationEvent
+
+Lazy activation trigger for a dynamic plugin
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'onCommand' \| 'onRoute' \| 'onObject' \| 'onEvent' \| 'onService' \| 'onSchedule' \| 'onStartup' \| 'onMetadataType' \| 'onView'>` | ✅ | Trigger type for lazy activation |
+| **pattern** | `string` | ✅ | Match pattern for the activation trigger |
+
 
 ---
 
@@ -57,7 +71,7 @@ Request to dynamically load a plugin at runtime
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ | Unique plugin identifier |
 | **source** | `{ type: Enum<'npm' \| 'local' \| 'url' \| 'registry' \| 'git'>; location: string; version?: string; integrity?: string }` | ✅ | Plugin source location for dynamic resolution |
-| **activationEvents** | `{ type: Enum<'onCommand' \| 'onRoute' \| 'onObject' \| 'onEvent' \| 'onService' \| 'onSchedule' \| 'onStartup'>; pattern: string }[]` | optional | Lazy activation triggers; if omitted plugin starts immediately |
+| **activationEvents** | `{ type: Enum<'onCommand' \| 'onRoute' \| 'onObject' \| 'onEvent' \| 'onService' \| 'onSchedule' \| 'onStartup' \| 'onMetadataType' \| 'onView'>; pattern: string }[]` | optional | Lazy activation triggers; if omitted plugin starts immediately |
 | **config** | `Record<string, any>` | optional | Runtime configuration overrides |
 | **priority** | `integer` | ✅ | Loading priority (lower is higher) |
 | **sandbox** | `boolean` | ✅ | Run in an isolated sandbox |
