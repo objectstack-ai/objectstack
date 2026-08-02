@@ -126,13 +126,43 @@ the loop resumable and the board honest.
 
 ## The round loop
 
+### 0. Backlog sweep — classification is a standing duty, not a request
+
+The maintainer does not pre-sort the backlog. On every round (and every
+idle check-in), sweep issues that carry no `pm:*` / `needs-user-decision`
+label and classify each:
+
+- **Auto-queue (`pm:queue`)**: a concrete defect with a named location or
+  repro; a scoped tooling/gate fix; a restore-invariant finding; a
+  test-only pin. Nothing to ask — label it and it becomes dispatchable.
+- **Maintainer confirm (`needs-user-decision`)**: design cards, feature/
+  contract-shape proposals, multi-week programs needing appetite and
+  sequencing, anything touching stored-data migration shape or removing a
+  shipped capability. The label alone is the inbox entry; the deep two-axis
+  analysis is written when the card is actually taken up.
+- **Repair first**: a body truncated by GitHub's sanitizer (bare `<x>`
+  swallows the rest at rest) cannot be dispatched — comment the repair
+  instruction and move on.
+
 ### 1. Fetch candidates
 
 List open issues matching the filter, excluding anything assigned or labeled
 `needs-user-decision`. **Open sub-issues of a matching parent are candidates
 too** — they inherit the parent's queue membership and need no label of their
-own. Read each candidate's full body — triage, batch selection (steps 2–3)
-and the dispatch prompt all need it.
+own. Read each candidate's full body **and its comments** — a comment may
+record that half the work already shipped (#4075's step 1 had been merged
+for three days; the claim went out without reading the comment that said
+so). Triage, batch selection (steps 2–3) and the dispatch prompt all need
+the full picture.
+
+**Stale-premise check before every dispatch.** Issues describe the repo as
+of their filing date; main moves ~18 merges a day. Before dispatching,
+check the named files/subsystem against recent main history (`git log
+--oneline -20 -- <paths>`, or search merged PRs referencing the issue's
+keywords). Three same-day cases: #4525 (spec key landed 3 days before
+filing), #4379 (fix merged via #4459 with the exact proposed sketch),
+#4075 (step 1 shipped via objectui#3032). A dispatch that starts with "is
+this still true?" costs minutes; one that doesn't costs an agent-run.
 
 ### 2. Triage — routing is the PM's job, never the maintainer's
 

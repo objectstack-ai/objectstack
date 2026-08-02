@@ -49,6 +49,11 @@ build/test runs OOM it.** Binding rules:
 4. **Clean up when done**: after the PR is up, remove your worktree
    (`git worktree remove <path> --force`) — leftover `node_modules` trees
    exhaust the container's disk, which fails as confusingly as OOM.
+5. **Never kill by process name.** `pkill -f vitest` (or any name-matched
+   kill) can take down a parallel agent's run — AGENTS.md's server rule,
+   applied to every process. Record the PID of what you start and operate
+   on that PID only (`kill $PID`, liveness via `kill -0 $PID` — a
+   `pgrep -f` pattern can match your own watcher and never terminate).
 
 Definition of done, in order:
 
