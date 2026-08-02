@@ -101,6 +101,14 @@ jobs:
       - name: Reserved-word ("role") docs ratchet
         run: pnpm check:role-word
 
+      # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
+      # That incident reversed three accepted ADRs with a patch-level changeset,
+      # and the mechanism was simply that the edited file never mentioned them —
+      # so the author could not have known. Presence check only; the invariant
+      # travels in the failure message (scripts/adr-anchors.json).
+      - name: ADR anchors (governed code names its decision)
+        run: pnpm check:adr-anchors
+
       # #3280/#3290 org-identifier guard: `organizationId` is the blessed
       # developer-facing name for the caller's active org in hook/action bodies;
       # the `session.tenantId` alias was REMOVED in v11 (#3290). Keeps our own
