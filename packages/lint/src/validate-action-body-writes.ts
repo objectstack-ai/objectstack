@@ -218,10 +218,20 @@ function actionObjectBinding(action: AnyRec, parentObject?: string): string | un
  * The top-level entry is walked first, so a merged action reports at
  * `actions[i]` — the authored location, not the derived copy.
  *
- * `type` is deliberately not consulted: the runtime binds a handler from
- * `action.body` alone (`actionBodyRunnerFactory` never reads `type`), so a body
- * on a non-`script` action still runs and still fails silently. Checking what
- * executes beats checking what the schema says should.
+ * Only `type: 'script'` bodies are walked (`type` omitted counts, since
+ * `ActionType.default('script')` makes that the same declaration).
+ *
+ * This rule USED to be deliberately type-blind, on the grounds that the
+ * runtime bound a handler from `action.body` alone and so a body on a
+ * non-`script` action still ran and still failed silently — checking what
+ * executes beat checking what the schema said should. That comment predicted
+ * its own revision ("定了之后 lint 那边要跟着调"), and #4352 is the ruling:
+ * `actionBodyRunnerFactory` now refuses to bind a handler unless the type is
+ * `script`, and `ActionSchema` rejects the contradictory pair at publish. So
+ * what executes and what the schema says are the same set again, and walking
+ * a non-`script` body here would produce advice about writes that provably
+ * never happen — noise pointing at metadata whose real defect is the `type`,
+ * which the publish gate already names with its own prescription.
  */
 function collectActionBodies(stack: AnyRec): ActionBodySite[] {
   const sites: ActionBodySite[] = [];
@@ -229,6 +239,11 @@ function collectActionBodies(stack: AnyRec): ActionBodySite[] {
 
   const collect = (actions: unknown, pathPrefix: string, parentObject?: string): void => {
     asArray(actions).forEach((action, index) => {
+      // Same default the spec declares, and the same one the runtime gate
+      // applies — a stack may reach lint unparsed, so an omitted `type` is
+      // `'script'`, not "unknown".
+      const type = typeof action.type === 'string' ? action.type : 'script';
+      if (type !== 'script') return;
       const body = action.body;
       if (!isRec(body) || body.language !== 'js') return;
       const source = body.source;

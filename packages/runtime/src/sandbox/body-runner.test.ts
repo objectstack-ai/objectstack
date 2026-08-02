@@ -166,6 +166,64 @@ describe('actionBodyRunnerFactory', () => {
     expect(factory({ name: 'noop' })).toBeUndefined();
   });
 
+  // ─── [#4352] the `type` gate ──────────────────────────────────────────────
+  // `ActionSchema.body` always said "Only used when type is `script`"; the
+  // runtime never read `type`, so a `type: 'url'` action carrying a leftover
+  // body still bound a handler and still executed. These pin the enforcement.
+  describe('binds a body only for `type: "script"` (#4352)', () => {
+    const body = { language: 'js', source: 'return { ran: true };', capabilities: [] } as const;
+
+    for (const type of ['url', 'modal', 'flow', 'api', 'form'] as const) {
+      it(`binds no handler for type: '${type}' and says why`, () => {
+        const warnings: string[] = [];
+        const factory = actionBodyRunnerFactory(runner, {
+          ql: {},
+          appId: 'crm',
+          logger: { warn: (msg: string) => warnings.push(msg) },
+        });
+        expect(factory({ name: 'leftover', object: 'lead', type, body })).toBeUndefined();
+        // Refusing silently would only relocate the invisibility the issue is about.
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("type: '" + type + "'");
+        expect(warnings[0]).toContain('#4352');
+      });
+    }
+
+    it("binds for an explicit type: 'script'", async () => {
+      const factory = actionBodyRunnerFactory(runner, { ql: {}, appId: 'crm' });
+      const fn = factory({ name: 'ok', object: 'lead', type: 'script', body });
+      expect(typeof fn).toBe('function');
+      await expect(fn!({ params: {} })).resolves.toEqual({ ran: true });
+    });
+
+    it('binds when `type` is omitted — the spec default is `script`', async () => {
+      // The collectors walk RAW bundle objects; a `strict: false` defineStack or
+      // a legacy `manifest.actions[]` never passed through `ActionType.default`,
+      // so an omitted type must still mean `script` here.
+      const warnings: string[] = [];
+      const factory = actionBodyRunnerFactory(runner, {
+        ql: {},
+        appId: 'crm',
+        logger: { warn: (msg: string) => warnings.push(msg) },
+      });
+      const fn = factory({ name: 'ok', object: 'lead', body });
+      expect(typeof fn).toBe('function');
+      await expect(fn!({ params: {} })).resolves.toEqual({ ran: true });
+      expect(warnings).toEqual([]);
+    });
+
+    it('stays silent for a non-script action with no body — nothing is contradictory', () => {
+      const warnings: string[] = [];
+      const factory = actionBodyRunnerFactory(runner, {
+        ql: {},
+        appId: 'crm',
+        logger: { warn: (msg: string) => warnings.push(msg) },
+      });
+      expect(factory({ name: 'open_docs', type: 'url' })).toBeUndefined();
+      expect(warnings).toEqual([]);
+    });
+  });
+
   it('runs an L2 action body and returns its value', async () => {
     const factory = actionBodyRunnerFactory(runner, { ql: {}, appId: 'crm' });
     const fn = factory({

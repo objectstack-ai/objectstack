@@ -1441,6 +1441,15 @@ export function collectBundleHooks(bundle: any): any[] {
  *
  * Each returned record is a shallow copy with `object` set when the action
  * originated under an object (and not already present on the action itself).
+ *
+ * Deliberately type-BLIND, and it must stay that way: this collects every
+ * declared action, most of which (`url`, `modal`, `flow`, `api`, `form`)
+ * legitimately have no body and bind nothing. The `type: 'script'` gate that
+ * decides whether a `body` becomes an executable handler lives at the single
+ * bind point — `actionBodyRunnerFactory` (#4352) — because the other binder
+ * (`engine.setDefaultActionRunner`, for Studio-authored actions) never walks
+ * this collector at all. Re-filtering here would duplicate half the rule and
+ * leave the other binder ungated.
  */
 export function collectBundleActions(
     bundle: any,

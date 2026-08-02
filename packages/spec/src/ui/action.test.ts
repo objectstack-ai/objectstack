@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ActionSchema, ActionParamSchema, Action, type Action as ActionType, ACTION_LOCATIONS, ActionLocationSchema, type ActionLocation } from './action.zod';
+import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
+import { ObjectSchema } from '../data/object.zod';
 
 describe('ActionParamSchema', () => {
   it('should accept minimal action parameter', () => {
@@ -1189,6 +1191,68 @@ describe('ActionSchema - target validation', () => {
       target: 'log_call',
       params: [{ name: 'subject', label: 'Call Subject', type: 'text', required: true }],
     })).not.toThrow();
+  });
+});
+
+/**
+ * [#4352] The refinement above is only half the guarantee. The other half is
+ * the WIRING: the publish gate does not import `ActionSchema` directly — it
+ * resolves the judging schema by metadata type through
+ * `getMetadataTypeSchema()` (`metadata-protocol`'s save-time validation and
+ * `metadata-diagnostics` both go through it), and an object's inline actions
+ * are judged by `ObjectSchema.actions`.
+ *
+ * So a re-point of either registration would silently reopen the hole while
+ * every test above stayed green — the schema would still reject, and nothing
+ * would still ask it. #4352's ruling puts the rejection ON the publish gate,
+ * which is what these pin.
+ */
+describe('ActionSchema - the publish gate resolves to it (#4352)', () => {
+  const contradictory = {
+    name: 'open_docs',
+    label: 'Open Docs',
+    type: 'url' as const,
+    target: 'https://docs.example.com',
+    body: { language: 'js' as const, source: 'return 1;', capabilities: ['api.write'] },
+  };
+
+  it("rejects `body` + `type: 'url'` through getMetadataTypeSchema('action')", () => {
+    const schema = getMetadataTypeSchema('action');
+    expect(schema, "the 'action' metadata type must resolve to a schema").toBeDefined();
+    const result = schema!.safeParse(contradictory);
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toMatch(/script/);
+  });
+
+  it("accepts the same action once its `body` is dropped", () => {
+    const { body: _body, ...withoutBody } = contradictory;
+    expect(getMetadataTypeSchema('action')!.safeParse(withoutBody).success).toBe(true);
+  });
+
+  it('rejects the same contradiction nested in `object.actions[]`', () => {
+    const result = ObjectSchema.safeParse({
+      name: 'crm_deal',
+      label: 'Deal',
+      fields: { stage: { label: 'Stage', type: 'text' } },
+      actions: [contradictory],
+    });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toMatch(/script/);
+  });
+
+  it("accepts a `type: 'script'` body nested in `object.actions[]` — unchanged", () => {
+    const result = ObjectSchema.safeParse({
+      name: 'crm_deal',
+      label: 'Deal',
+      fields: { stage: { label: 'Stage', type: 'text' } },
+      actions: [{
+        name: 'close_deal',
+        label: 'Close Deal',
+        type: 'script',
+        body: { language: 'js', source: 'return 1;', capabilities: ['api.write'] },
+      }],
+    });
+    expect(result.success).toBe(true);
   });
 });
 

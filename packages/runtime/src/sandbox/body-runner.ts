@@ -102,16 +102,60 @@ export function hookBodyRunnerFactory(
  * Returns a handler with the shape ObjectQL's `executeAction` expects:
  * `(actionCtx) => Promise<unknown>`. The action's return value bubbles up
  * to the HTTP dispatcher which JSON-serialises it back to the caller.
+ *
+ * This is the ONE choke point where an `action.body` becomes an executable
+ * handler — both bind paths go through it (`AppPlugin`'s bundle walk over
+ * `collectBundleActions`, and `engine.setDefaultActionRunner` for the
+ * Studio-authored `action` metadata ObjectQLPlugin re-syncs). So the
+ * `type` gate below is enforced here rather than at either call site: a
+ * second copy at the collector would be a rule that can drift from this one.
  */
 export function actionBodyRunnerFactory(
   runner: ScriptRunner,
   opts: FactoryOptions,
-): (action: { name: string; body?: unknown; object?: string; timeoutMs?: number }) =>
+): (action: { name: string; body?: unknown; object?: string; type?: string; timeoutMs?: number }) =>
   | ((actionCtx: any) => Promise<unknown>)
   | undefined {
   return (action) => {
     const raw = action.body;
     if (!raw) return undefined;
+
+    // [#4352] `body` binds a handler ONLY for `type: 'script'` — the rule the
+    // spec always stated (`ActionSchema.body`: "Only used when type is
+    // `script`") and the runtime never enforced. Every other type dispatches
+    // on `target` (the URL, page, flow or endpoint), so a body alongside one
+    // is self-contradictory metadata: two implementations, only one of which
+    // the author can see running.
+    //
+    // Binding it anyway produced the worst-shaped bug this repo has a name
+    // for — an author flips `type` from `script` to `url`, reasonably reads
+    // that as "the body no longer runs", and it keeps running, reachable
+    // through `ql.object(o).execute(name)` (the ObjectQL proxy calls
+    // `executeAction` with no type branching of its own) and counted by the
+    // ADR-0110 D5 governance inventory as a live handler.
+    //
+    // `?? 'script'` is the schema's own default (`ActionType.default('script')`),
+    // not a tolerant fallback: the collectors walk RAW bundle objects, which
+    // for a `strict: false` `defineStack` or a legacy `manifest.actions[]`
+    // never went through `ActionSchema`, so an omitted `type` still has to
+    // mean what the spec says it means. An action that EXPLICITLY declares
+    // another type is the only one whose behavior changes.
+    //
+    // The publish gate rejects this shape at authoring time (`ActionSchema`'s
+    // non-script-body refinement, #4438), so anything arriving here is either
+    // data at rest published before that gate existed or a bundle that never
+    // parsed. Refusing silently would just relocate the invisibility, so the
+    // refusal is logged with the same prescription the schema gives.
+    const type = action.type ?? 'script';
+    if (type !== 'script') {
+      opts.logger?.warn?.(
+        `[BodyRunner] action '${action.name}' declares \`type: '${type}'\` and carries a \`body\` — ` +
+          `no handler was bound. \`body\` only runs for \`type: 'script'\`; a '${type}' action dispatches ` +
+          `on \`target\`. Set \`type: 'script'\` to run the body, or drop the \`body\`. See #4352.`,
+        { appId: opts.appId, action: action.name, object: action.object, type },
+      );
+      return undefined;
+    }
 
     const parsed = HookBodySchema.safeParse(raw);
     if (!parsed.success) {
