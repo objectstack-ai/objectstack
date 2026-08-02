@@ -17,7 +17,7 @@
 
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 import { lintConfig } from '../commands/lint.js';
-import type { LintIssue, Severity } from './data-model-rules.js';
+import type { LintIssue, Severity } from '@objectstack/lint';
 
 /** Penalty weights per issue class. Schema errors are the most severe. */
 export const SCORE_WEIGHTS = {

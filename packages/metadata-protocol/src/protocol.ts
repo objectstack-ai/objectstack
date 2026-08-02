@@ -6,6 +6,7 @@ import type {
 import { IDataEngine, engineCanRollBack } from '@objectstack/core';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type { MetadataHostEngine } from './host-engine.js';
+import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import { ConflictError, assertProtocolCompat, type MetadataItem } from '@objectstack/metadata-core';
 import type {
@@ -1924,6 +1925,56 @@ export class ObjectStackProtocolImplementation implements
             isArtifactBacked: artifactBacked,
             ...(declaredBody !== undefined ? { declaredBody } : {}),
         });
+    }
+
+    /**
+     * The #4463 runtime authoring gate — the fourth door.
+     *
+     * Runs the SHARED author-time rule registry (`@objectstack/lint`'s
+     * `AUTHORING_RULES`, the same table `os validate` / `os build` / `os lint`
+     * run) over a body about to go `active`, and throws the 422 its gating
+     * findings earn. Draft saves are never gated (D1) — publishing the draft
+     * runs this.
+     *
+     * Deliberately NOT a {@link registerAuthoringGate} registration: those are
+     * per-type and single-slot, owned by the domain plugin that registers them
+     * (plugin-security holds `object`). This is the platform's own gate and it
+     * must be unconditional — a plugin cannot displace it, and no surface can
+     * skip it, because every surface reaches this class.
+     *
+     * The rules resolve names against the LIVE object universe, which is
+     * strictly better information than the CLI's single-package view — the
+     * inversion #4463 D2 points out: the same rule can be more decisive here
+     * than it can be at build time.
+     */
+    private assertRuntimeAuthoringRules(evt: {
+        type: string; name: string; state: 'draft' | 'active'; body: unknown;
+    }): void {
+        if (this.environmentId === undefined) return;
+        if (evt.state !== 'active') return;
+        const singular = PLURAL_TO_SINGULAR[evt.type] ?? evt.type;
+
+        // Resolution context. Best-effort: a host without a registry (a
+        // metadata-only test double) still writes, it just gets the rules that
+        // need no object universe. Never let context-gathering fail a write.
+        let objects: unknown[] = [];
+        try {
+            if (typeof this.engine.registry?.listItems === 'function') {
+                objects = [...this.engine.registry.listItems('object')];
+                if (objects.length === 0) objects = [...this.engine.registry.listItems('objects')];
+            }
+        } catch {
+            objects = [];
+        }
+
+        const err = evaluateRuntimeAuthoringGate({
+            type: singular,
+            name: evt.name,
+            state: evt.state,
+            body: evt.body,
+            objects,
+        });
+        if (err) throw err;
     }
 
     /**
@@ -6616,6 +6667,19 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
+        // The #4463 runtime authoring gate — the shared author-time rule
+        // registry, on the write path. `active` saves only (D1): this is the
+        // publish verb, and it is the same table `os build` gates on. Placed
+        // immediately after the schema check because a rule reads a body the
+        // schema already accepted — a Zod failure is the more basic verdict and
+        // must be the one the author sees first.
+        this.assertRuntimeAuthoringRules({
+            type: request.type,
+            name: request.name,
+            state: mode === 'draft' ? 'draft' : 'active',
+            body: request.item,
+        });
+
         // Pre-persistence authoring gate (#3050): a domain plugin may veto the
         // body before it persists (throws propagate to the caller with their
         // status/code). Runs for BOTH draft and publish-mode saves, so a later
@@ -7352,6 +7416,26 @@ export class ObjectStackProtocolImplementation implements
         await this.ensureOverlayIndex();
         const orgId = request.organizationId ?? null;
         const repo = this.getOverlayRepo(orgId);
+
+        // #4463 D1 — the OTHER way a body reaches `active`. `saveMetaItem`
+        // gates a direct active save and deliberately lets every draft through;
+        // that permission is only sound if the draft→active promotion gates.
+        // Without this the gate would be trivially bypassable by anyone who
+        // saves `?mode=draft` and then POSTs `/publish` — which is exactly what
+        // Studio's designer surface does on every edit.
+        const draftForGate = await repo.get(
+            { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
+            { state: 'draft' },
+        );
+        if (draftForGate) {
+            this.assertRuntimeAuthoringRules({
+                type: singularType,
+                name: request.name,
+                state: 'active',
+                body: draftForGate.body,
+            });
+        }
+
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked
             ? 'override-artifact' : 'runtime-only';

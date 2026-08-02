@@ -1,9 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// The ratchet behind `lint/authoring-rules.ts` (#4409). Supersedes
-// `reference-integrity-wiring.test.ts`, which guarded the same seam for one
-// rule family (#3583 §5 D5, #4384) — the suite is now one entry in the registry
-// this file guards, so its invariants are carried below rather than duplicated.
+// The ratchet behind `authoring-rules.ts` (#4409; extended to the runtime
+// surface in #4463). Supersedes `reference-integrity-wiring.test.ts`, which
+// guarded the same seam for one rule family (#3583 §5 D5, #4384) — the suite is
+// now one entry in the registry this file guards, so its invariants are carried
+// below rather than duplicated.
+//
+// It moved here from `packages/cli/src/commands/` with the registry itself: the
+// table is no longer the CLI's, and a guard that lives in one of the four
+// consumers reads as if that consumer were privileged. It scans all four by
+// repo-relative path.
 //
 // ## Why a test and not a comment
 //
@@ -11,6 +17,14 @@
 // produces no failing assertion anywhere. Every command's own tests pass, every
 // rule's unit tests pass, and the only symptom is that `os validate`, `os build`
 // and `os lint` quietly disagree about the same stack.
+//
+// #4463 is the same defect with the doors counted properly. The three commands
+// agreed with each other perfectly — and the runtime write path, the only door
+// a Studio tenant or an MCP/AI author has, ran none of the 26 rules at all. A
+// guard that asks "do the three commands agree?" answers YES on that state,
+// which is why invariant 5 below asks the different question: is every SURFACE
+// on the table, and does each one consume the table rather than a list of its
+// own?
 //
 // That failure mode was repaired four times before anyone guarded the mode
 // itself: the reference-integrity suite (#3583), the four CLI-local authoring
@@ -36,6 +50,10 @@
 //     anywhere asked whether its coverage should follow.
 //  4. No command hand-wires a rule. Every remaining direct call is on the
 //     ratchet below with a reason, and adding one is an explicit edit.
+//  5. Every rule answers the SURFACE question — it either runs on the runtime
+//     publish gate (with the metadata types it judges) or records why not — and
+//     the runtime gate consumes this table rather than naming rules itself
+//     (#4463).
 //
 // ## Why it scans source
 //
@@ -44,22 +62,25 @@
 // reason `@objectstack/lint`'s `lazy-deps.test.ts` scans `src/` rather than
 // probing a module cache. Behavioural coverage of what each rule FINDS lives in
 // that rule's own tests; this file guards only the seam between the registry and
-// the three call sites.
+// its four call sites.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
-import { REFERENCE_INTEGRITY_RULES } from '@objectstack/lint';
+import { REFERENCE_INTEGRITY_RULES } from './reference-integrity-suite.js';
 import {
   AUTHORING_COMMANDS,
   AUTHORING_RULES,
+  AUTHORING_SURFACES,
   authoringRulesFor,
   type AuthoringCommand,
-} from '../lint/authoring-rules.js';
+} from './authoring-rules.js';
+import { runtimeAuthoringRulesFor, runtimeGatedTypes, stackKeyForType } from './runtime-gate.js';
 
-const commandsDir = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(commandsDir, '..', '..', '..', '..');
+const srcDir = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(srcDir, '..', '..', '..');
+const commandsDir = join(repoRoot, 'packages/cli/src/commands');
 
 /** The command source file each authoring command lives in. */
 const COMMAND_FILES: Readonly<Record<AuthoringCommand, string>> = {
@@ -67,6 +88,13 @@ const COMMAND_FILES: Readonly<Record<AuthoringCommand, string>> = {
   build: 'compile.ts',
   lint: 'lint.ts',
 };
+
+/**
+ * The runtime surface's own call site: the ONE place the metadata write path
+ * reaches the shared core. Scanned for the same two things the command files
+ * are — that it runs the registry, and that it names no rule of its own.
+ */
+const RUNTIME_GATE_FILE = 'packages/metadata-protocol/src/runtime-authoring-gate.ts';
 
 const sourceOf = (file: string) => readFileSync(join(commandsDir, file), 'utf8');
 
@@ -112,6 +140,22 @@ const LINT_IMPORT_RATCHET: Readonly<Record<string, string>> = {
   diffAccessMatrix:
     'The other half of the D6 snapshot gate: it compares a committed `access-matrix.json` against the ' +
     'matrix above. Reads a file next to the config, so it cannot run where that file may not exist.',
+  // The registry's own API. Importing THESE is the sanctioned wiring — it is
+  // importing a RULE that is not (#4409). They became cross-package imports in
+  // #4463 when the table moved to `@objectstack/lint`, so the import scan sees
+  // them where it previously saw a relative path.
+  runAuthoringRules:
+    'The registry runner itself — the ONE call every surface is required to make. Ratcheted so the ' +
+    'import scan does not read the sanctioned wiring as a hand-wired rule.',
+  authoringRulesFor:
+    'Registry query (which rules does this command run), used to report coverage in `--json` output. ' +
+    'Reads the table; runs nothing.',
+  splitBySeverity:
+    'Pure partition of a finding list into gating vs advisory. Carries no rule identity at all.',
+  lintDataModel:
+    "`os lint`'s data-model best-practice sweep — see DIRECT_CALL_RATCHET above for why it is " +
+    'deliberately lint-only. It relocated into `@objectstack/lint` with the rest of the rules in ' +
+    '#4463, so the import scan now sees it too.',
 };
 
 /** Every registry rule name, plus the member names of the suite it embeds. */
@@ -131,6 +175,15 @@ const REGISTRY_NAMES = new Set<string>([
  * not ledgered.
  */
 const UNWIRED_RULE_LEDGER: Readonly<Record<string, string>> = {};
+
+/**
+ * Names the unwired-rule closure treats as wired-with-a-reason: anything the
+ * DIRECT_CALL_RATCHET already justifies. Before #4463 those rules lived in the
+ * CLI and never appeared on `@objectstack/lint`'s export surface, so the two
+ * ratchets could not overlap; the relocation made them overlap, and answering
+ * the same question twice in two ledgers is how ledgers rot.
+ */
+const ratchetedElsewhere = (name: string) => name in DIRECT_CALL_RATCHET;
 
 /**
  * Every `validate*` / `lint*` symbol the lint package's public barrel exports —
@@ -218,7 +271,7 @@ describe('authoring-rule registry wiring (#4409)', () => {
       unratcheted,
       `${COMMAND_FILES[command]} hand-wires ${unratcheted.length} rule(s) the registry does not know ` +
         `about: ${unratcheted.join(', ')}.\n` +
-        `Add each to AUTHORING_RULES in packages/cli/src/lint/authoring-rules.ts so all three commands ` +
+        `Add each to AUTHORING_RULES in packages/lint/src/authoring-rules.ts so all three commands ` +
         `run it — or, if it genuinely is not a shared author-time rule (it needs the filesystem, the ` +
         `emitted artifact, or it belongs to os lint's own style rubric), add it to DIRECT_CALL_RATCHET ` +
         `in this file WITH the reason. Silence is the one option that is not available.`,
@@ -289,6 +342,114 @@ describe('authoring-rule registry wiring (#4409)', () => {
     ).toEqual([]);
   });
 
+  // ── The fourth door: the runtime publish gate (#4463) ────────────────
+  //
+  // Everything above measures the three CLI commands against each other. They
+  // agreed with each other perfectly on the day #4463 was filed, and the
+  // metadata write path — the only door a Studio tenant, a REST `/meta` client
+  // or an MCP/AI author has — ran zero of the 26 rules. These four cases ask
+  // the question that state answers NO to.
+
+  describe('runtime publish surface', () => {
+    it('every rule answers the surface question — runs there, or says why not', () => {
+      const silent = AUTHORING_RULES.filter((r) => !r.surfaces.includes('runtime-publish'))
+        .filter((r) => (r.surfaceReason ?? '').trim().length < 40)
+        .map((r) => r.name);
+
+      expect(
+        silent,
+        `${silent.length} rule(s) neither run on the runtime publish gate nor record why: ` +
+          `${silent.join(', ')}.\n` +
+          `Set \`surfaces: CLI_AND_RUNTIME\` with \`runtimeTypes\`, or record a substantive ` +
+          `\`surfaceReason\`. Silence is what #4409 fixed on the command axis and what #4463 found ` +
+          `still true on the surface axis — a rule nobody decided about runs nowhere by default, and ` +
+          `the default door is the one every tenant uses.`,
+      ).toEqual([]);
+    });
+
+    it('every runtime-wired rule declares the metadata types it judges', () => {
+      const undeclared = AUTHORING_RULES.filter((r) => r.surfaces.includes('runtime-publish'))
+        .filter((r) => (r.runtimeTypes ?? []).length === 0)
+        .map((r) => r.name);
+
+      expect(
+        undeclared,
+        `${undeclared.join(', ')} claim(s) the runtime surface without naming a metadata type. The ` +
+          `gate dispatches on the written item's type, so an empty \`runtimeTypes\` is a rule that ` +
+          `is wired and runs on nothing — the #4449 shape, one surface over.`,
+      ).toEqual([]);
+    });
+
+    it('every runtime-gated metadata type maps to a stack key', () => {
+      // Without a mapping the gate silently no-ops for that type: it would find
+      // the rules, build no snapshot, and return clean. Exactly the "looks
+      // wired, enforces nothing" state this whole file exists to make loud.
+      const unmapped = runtimeGatedTypes().filter((t) => stackKeyForType(t) === null);
+      expect(
+        unmapped,
+        `runtime-gated type(s) with no stack-key mapping in runtime-gate.ts: ${unmapped.join(', ')}. ` +
+          `The gate cannot build a snapshot for them, so the rules that declare them run on nothing.`,
+      ).toEqual([]);
+    });
+
+    it('the runtime gate consumes the registry and names no rule of its own', () => {
+      const path = join(repoRoot, RUNTIME_GATE_FILE);
+      expect(existsSync(path), `${RUNTIME_GATE_FILE} must exist — it IS the runtime surface`).toBe(true);
+      const source = readFileSync(path, 'utf8');
+
+      expect(source, `${RUNTIME_GATE_FILE} must run the shared core`).toMatch(
+        /\brunRuntimeAuthoringRules\s*\(/,
+      );
+
+      // The same subtraction the three commands get: a rule named at the gate
+      // is a rule that can drift from the table.
+      const handWired = ruleCallsIn(source).filter((name) => REGISTRY_NAMES.has(name));
+      expect(
+        handWired,
+        `${RUNTIME_GATE_FILE} calls registry rule(s) directly: ${handWired.join(', ')}.\n` +
+          `The runtime gate must reach them ONLY through runRuntimeAuthoringRules(). Hand-wiring one ` +
+          `here rebuilds, on a fourth surface, the exact drift #3583 → #4409 took five repairs to end.`,
+      ).toEqual([]);
+
+      // And it must not reach past the kernel-safe entry: `@objectstack/lint`'s
+      // root barrel pulls the react/jsx rules' module graph, which is the one
+      // thing the boot path may not name (`lazy-deps.test.ts`).
+      expect(
+        source,
+        `${RUNTIME_GATE_FILE} must import from '@objectstack/lint/runtime', not the root barrel — ` +
+          `the root entry reaches the typescript/sucrase rules the kernel boot path must not name.`,
+      ).not.toMatch(/from\s*['"]@objectstack\/lint['"]/);
+    });
+
+    it('the runtime gate and the CLI commands read the SAME array', () => {
+      // The property the issue asked to be provable: delete a rule from
+      // AUTHORING_RULES and BOTH sides lose it in the same commit. Asserted by
+      // identity of membership, not by an import statement — an import proves a
+      // module was loaded, never that the rule set came from it.
+      for (const rule of AUTHORING_RULES) {
+        if (!rule.surfaces.includes('runtime-publish')) continue;
+        for (const type of rule.runtimeTypes ?? []) {
+          expect(
+            runtimeAuthoringRulesFor(type).map((r) => r.name),
+            `${rule.name} declares runtime type '${type}' but the runtime gate does not run it`,
+          ).toContain(rule.name);
+        }
+        expect(
+          authoringRulesFor('build').map((r) => r.name),
+          `${rule.name} runs at the runtime publish gate but not on os build — the two publish verbs ` +
+            `must not disagree`,
+        ).toContain(rule.name);
+      }
+
+      // Non-vacuous: #4463's worked example really is on both sides.
+      expect(runtimeGatedTypes()).toContain('flow');
+      expect(runtimeAuthoringRulesFor('flow').map((r) => r.name)).toContain('validateApprovalApprovers');
+      expect(runtimeAuthoringRulesFor('flow').map((r) => r.name)).toContain('validateStackExpressions');
+      // A type nobody gated returns nothing rather than everything.
+      expect(runtimeAuthoringRulesFor('translation')).toEqual([]);
+    });
+  });
+
   it('every rule declares a source file that exists', () => {
     const missing = AUTHORING_RULES.filter((r) => !existsSync(join(repoRoot, r.source))).map(
       (r) => `${r.name} → ${r.source}`,
@@ -329,6 +490,7 @@ describe('authoring-rule registry wiring (#4409)', () => {
   it('every rule @objectstack/lint exports is wired into a registry', () => {
     const unwired = exportedLintRules()
       .filter((name) => !REGISTRY_NAMES.has(name))
+      .filter((name) => !ratchetedElsewhere(name))
       .filter((name) => !(name in UNWIRED_RULE_LEDGER));
 
     expect(
@@ -337,7 +499,7 @@ describe('authoring-rule registry wiring (#4409)', () => {
         `${unwired.join(', ')}.\n` +
         `A rule on the public export surface reads — to a human and to an AI author alike — as a ` +
         `check the platform performs. Either register it in AUTHORING_RULES ` +
-        `(packages/cli/src/lint/authoring-rules.ts) so all three commands run it, or add it to ` +
+        `(packages/lint/src/authoring-rules.ts) so all three commands run it, or add it to ` +
         `UNWIRED_RULE_LEDGER in this file WITH the real consumer that justifies it — or delete it ` +
         `under ADR-0049 enforce-or-remove. Advertising it while running it nowhere is the one option ` +
         `that is not available (Prime Directive #10).`,
@@ -404,6 +566,12 @@ describe('authoring-rule registry wiring (#4409)', () => {
     expect(REFERENCE_INTEGRITY_RULES.length).toBeGreaterThan(0);
     // The rule whose absence from `os lint` motivated the suite's own guard.
     expect(REFERENCE_INTEGRITY_RULES.map((r) => r.name)).toContain('validateReadonlyFlowWrites');
+    // #4463: every entry declares `cli`, and at least one declares the runtime
+    // gate — a table where nothing does would pass every surface case above by
+    // vacuity, which is precisely the state the issue was filed about.
+    expect(AUTHORING_SURFACES).toEqual(['cli', 'runtime-publish']);
+    expect(AUTHORING_RULES.every((r) => r.surfaces.includes('cli'))).toBe(true);
+    expect(AUTHORING_RULES.filter((r) => r.surfaces.includes('runtime-publish')).length).toBeGreaterThan(0);
   });
 
   it('the source scans still match something (non-vacuous)', () => {

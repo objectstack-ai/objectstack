@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lintDataModel, lintUniqueDeclarations } from '../src/lint/data-model-rules';
+import { lintDataModel, lintUniqueDeclarations } from '@objectstack/lint';
 import { lintConfig } from '../src/commands/lint';
 
 const rulesOf = (issues: { rule: string }[]) => issues.map((i) => i.rule);

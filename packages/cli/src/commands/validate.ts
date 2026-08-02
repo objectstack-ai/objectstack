@@ -13,7 +13,7 @@ import {
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
-import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '../lint/authoring-rules.js';
+import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
