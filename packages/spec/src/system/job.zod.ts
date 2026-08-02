@@ -87,13 +87,33 @@ export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
  *   }
  * }
  */
+/**
+ * `job.id`, retired in 17.0.0 (#4667, ADR-0049).
+ *
+ * The `describe()` did the damage: "defaults to `name` when omitted" implies an
+ * identity OVERRIDE that never existed. Nothing read the key. `name` is the
+ * job's identity at every layer that has one — the scheduling key, the `sys_job`
+ * row key (the DB adapter upserts by `name` and mints its own row id), and the
+ * `JobExecution.jobId` stamp — so two jobs differing only in `id` were never two
+ * jobs, they were one job declared twice, with the second silently winning.
+ */
+const JOB_ID_RETIRED =
+  '`job.id` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — nothing ever read '
+  + 'it, and its own description ("defaults to `name` when omitted") advertised an identity '
+  + 'override that did not exist. `name` IS the job\'s identity everywhere: the scheduling '
+  + 'key, the `sys_job` row key, and the `JobExecution.jobId` stamp. Two jobs differing only '
+  + 'in `id` were the same job. Delete the key; rename the job via `name` if you need a '
+  + 'different identity. Run `os migrate meta --from 16` to rewrite existing sources '
+  + 'automatically.';
+
 export const JobSchema = lazySchema(() => strictObject({
   surface: 'this job',
   history:
     'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
   aliases: { cron: 'schedule', interval: 'schedule', fn: 'handler', function: 'handler', retry: 'retryPolicy', enabled_: 'enabled', timeoutMs: 'timeout' },
+  guidance: { id: JOB_ID_RETIRED },
 }, {
-  id: z.string().optional().describe('Unique job identifier (defaults to `name` when omitted)'),
+  // `id` removed in 17.0.0 (#4667) — see JOB_ID_RETIRED. `name` is the identity.
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Job name (snake_case)'),
   label: z.string().optional().describe('Human-readable label'),
   description: z.string().optional().describe('Job description / purpose'),
