@@ -455,12 +455,12 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `notification.zod.ts` | 1 | authorable (p) | **#4610 dropped two sites** — the `./ui` `Notification` (toast/banner instance) and `NotificationConfig` (toaster global config) shapes were removed: zero importers in all three repos, and both shadowed live names owned elsewhere (`./api` owns the inbox row). What remains is `NotificationActionSchema`, part of the presentation vocabulary the ui entry keeps |
 | `sharing.zod.ts` | 2 | authorable (p) | public-sharing config |
 
-### `data/` — 162 sites
+### `data/` — 161 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
 | `object.zod.ts` | 20 | authorable | top-level already guarded (#1535); inner blocks partially strict |
-| `data-engine.zod.ts` | 14 | wire (p) | engine contract shapes |
+| `data-engine.zod.ts` | 13 | wire (p) | engine contract shapes (was 14 — `DataEngineBatchRequestSchema` retired with `IDataEngine.batch?`, #4618) |
 | `external-lookup.zod.ts` | 12 | mixed (p) | authored config + wire results |
 | `seed-loader.zod.ts` | 12 | mixed (p) | seed file shapes are authored; loader state is runtime |
 | `field.zod.ts` | 11 | authorable | partially strict |
