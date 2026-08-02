@@ -399,10 +399,16 @@ export type RouteGenerationConfigInput = z.input<typeof RouteGenerationConfigSch
 // ==========================================
 
 /**
- * Webhook Event Schema
- * Defines an event that can trigger a webhook delivery
+ * OpenAPI Webhook Event Schema
+ * Defines a webhook event as declared in an OpenAPI 3.1 document's top-level
+ * `webhooks` section — an API-documentation descriptor, NOT a runtime
+ * subscription. (Renamed from `WebhookEventSchema` in v17 — that bare name
+ * collided with the connector event enum in `@objectstack/spec/integration`,
+ * a different concept AND a different form: z.object here vs z.enum there.
+ * The outbound webhook an author configures is `WebhookSchema` in
+ * `@objectstack/spec/automation`.)
  */
-export const WebhookEventSchema = lazySchema(() => z.object({
+export const OpenApiWebhookEventSchema = lazySchema(() => z.object({
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Webhook event identifier (snake_case)'),
   description: z.string().describe('Human-readable event description'),
   method: HttpMethod.default('POST').describe('HTTP method for webhook delivery'),
@@ -413,25 +419,7 @@ export const WebhookEventSchema = lazySchema(() => z.object({
   ).describe('Supported authentication methods for webhook verification'),
 }));
 
-export type WebhookEvent = z.infer<typeof WebhookEventSchema>;
-
-/**
- * Webhook Configuration Schema
- * Top-level webhook configuration for the REST API
- */
-export const WebhookConfigSchema = lazySchema(() => z.object({
-  enabled: z.boolean().default(false).describe('Enable webhook support'),
-  events: z.array(WebhookEventSchema).describe('Registered webhook events'),
-  deliveryConfig: z.object({
-    maxRetries: z.number().int().default(3).describe('Maximum delivery retry attempts'),
-    retryIntervalMs: z.number().int().default(5000).describe('Milliseconds between retry attempts'),
-    timeoutMs: z.number().int().default(30000).describe('Delivery request timeout in milliseconds'),
-    signatureHeader: z.string().default('X-Signature-256').describe('Header name for webhook signature'),
-  }).describe('Webhook delivery configuration'),
-  registrationEndpoint: z.string().default('/webhooks').describe('URL path for webhook registration'),
-}));
-
-export type WebhookConfig = z.infer<typeof WebhookConfigSchema>;
+export type OpenApiWebhookEvent = z.infer<typeof OpenApiWebhookEventSchema>;
 
 /**
  * Callback Schema
@@ -451,7 +439,7 @@ export type Callback = z.infer<typeof CallbackSchema>;
  * Extensions specific to OpenAPI 3.1 specification
  */
 export const OpenApi31ExtensionsSchema = lazySchema(() => z.object({
-  webhooks: z.record(z.string(), WebhookEventSchema).optional()
+  webhooks: z.record(z.string(), OpenApiWebhookEventSchema).optional()
     .describe('OpenAPI 3.1 webhooks (top-level webhook definitions)'),
   callbacks: z.record(z.string(), z.array(CallbackSchema)).optional()
     .describe('OpenAPI 3.1 callbacks (async response definitions)'),
