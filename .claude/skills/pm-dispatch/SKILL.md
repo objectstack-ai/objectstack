@@ -35,6 +35,7 @@ genuinely requires their call.
 | `repo:<owner/name>` | which repo's backlog to work | `objectstack-ai/objectstack` |
 | `batch:<n>` | max developer agents in flight at once | `3` |
 | `rounds:<n>` | stop after N rounds | until queue empty |
+| `mode:subagent` \| `mode:cloud` | dispatch backend — see "Dispatch backends" | `subagent` |
 | `#12 #34 …` | explicit issue list — overrides the label query entirely | — |
 
 ## State model — all state lives in GitHub, none locally
@@ -116,11 +117,44 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
 Return ONLY the JSON report defined in your agent definition.
 ```
 
+#### Dispatch backends
+
+**`mode:subagent` (default).** The `Agent` tool, as described above. The devs
+run inside the PM's own session container — which in Claude Code on the web is
+already a cloud container, so the whole loop runs server-side and survives the
+browser tab closing. Reports come back directly as the subagent's final
+message. Prefer this mode: it is simpler, and the report channel is lossless.
+
+**`mode:cloud`.** Each issue becomes an **independent cloud session** in the
+same environment — its own container and fresh clone, decoupled from the PM
+session's lifetime. Use it when devs need resources/lifetime beyond one
+container, or the maintainer asks for it. Requires the `Claude_Code_Remote`
+MCP tools (available in remote/web sessions; if absent, say so and fall back
+to `mode:subagent`). Per issue:
+
+1. `create_trigger` with `create_new_session_on_fire: true` and no schedule
+   (poke-only), name `pm-dispatch-issue-<n>`, prompt = the dispatch template
+   below **made fully standalone**: the fired session starts with zero
+   conversation context (it does get the repo clone, so it can be told to
+   follow `.claude/agents/os-dev.md`), and — since an independent session
+   cannot return a message to the PM — it must be told to **post the JSON
+   report as a comment on the issue** (prefixed `<!-- os-dev-report -->`)
+   instead of returning it, in addition to opening the draft PR.
+2. `fire_trigger` to launch it, then `delete_trigger` once the report has
+   been collected (step 5) so poke-only triggers don't accumulate.
+
 ### 5. Collect
 
-Wait for the background task notifications — do not poll, do not fabricate a
-pending agent's result. A dev that dies or returns malformed output counts as
-`status: "blocked"` with its raw output attached.
+**Subagent mode:** wait for the background task notifications — do not poll,
+do not fabricate a pending agent's result. A dev that dies or returns
+malformed output counts as `status: "blocked"` with its raw output attached.
+
+**Cloud mode:** there is no direct return channel — collect through GitHub.
+Arm a `send_later` check-in (~15 min); on each wake, sweep the dispatched
+issues for `<!-- os-dev-report -->` comments and linked PRs, then re-arm
+silently until every dispatch of the round has reported or a dispatch has
+been silent for over ~2 h (count it as `blocked` and move on). Never treat
+the absence of a report as success.
 
 ### 6. Review each report
 
