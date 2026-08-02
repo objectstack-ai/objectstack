@@ -22,15 +22,12 @@ export const SysUserPreference = ObjectSchema.create({
   pluralLabel: 'User Preferences',
   icon: 'settings',
   isSystem: true,
-  // managedBy: 'system' — preferences are per-user state authored from
-  // the user's own settings page, never created by an admin. The list
-  // surface in Setup is a support/diagnostic view only.
-  managedBy: 'system',
-  // [ADR-0103] Admin/user-writable DATA on a platform-defined schema: a user
-  // authors their own preferences (RLS self-grant). Affordance only — RLS is the
-  // authz; opening it here keeps the system write guard from rejecting the
-  // legitimate self-service write.
-  userActions: { create: true, edit: true, delete: true },
+  // [ADR-0103, #3355] Admin/user-writable DATA on a platform-defined schema:
+  // preferences are per-user state authored from the user's own settings page
+  // (RLS self-grant), never created by an admin — the list surface in Setup is a
+  // support/diagnostic view only. The bucket default is full CRUD, so no
+  // `userActions` block is needed; RLS remains the authz.
+  managedBy: 'system-data',
   description: 'Per-user key-value preferences (theme, locale, etc.)',
   nameField: 'key', // [ADR-0079] canonical primary-title pointer (single-field titleFormat)
   titleFormat: '{key}',

@@ -22,11 +22,11 @@ export const NotificationTemplate = ObjectSchema.create({
     pluralLabel: 'Notification Templates',
     icon: 'file-text',
     isSystem: true,
-    managedBy: 'system',
-    // [ADR-0103] Admin-writable DATA on a platform-defined schema: authored from
-    // the Setup "Notification Templates" grid. Affordance only — opening it keeps
-    // the system write guard from rejecting the admin authoring write.
-    userActions: { create: true, edit: true, delete: true },
+    // [ADR-0103, #3355] Admin-writable DATA on a platform-defined schema: authored
+    // from the Setup "Notification Templates" grid. The bucket default is full
+    // CRUD, so no `userActions` block is needed — affordance is a declaration
+    // only; permission sets remain the authz.
+    managedBy: 'system-data',
     description: 'Per (topic × channel × locale) render template for notifications.',
     titleFormat: '{topic} · {channel} · {locale}',
     highlightFields: ['topic', 'channel', 'locale', 'is_active'],

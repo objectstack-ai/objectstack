@@ -34,12 +34,11 @@ export const SysUserPosition = ObjectSchema.create({
   pluralLabel: 'User Positions',
   icon: 'user-cog',
   isSystem: true,
-  managedBy: 'system',
-  // [ADR-0103] Admin/user-writable DATA on a platform-defined schema: delegated
-  // "add position" writes this under the caller's context. Affordance only —
-  // the DelegatedAdminGate is the authz; opening it here keeps the system write
-  // guard from rejecting the legitimate write.
-  userActions: { create: true, edit: true, delete: true },
+  // [ADR-0103, #3355] Admin/user-writable DATA on a platform-defined schema:
+  // delegated "add position" writes this under the caller's context. The bucket
+  // default is full CRUD, so no `userActions` block is needed — the affordance is
+  // a declaration only; the DelegatedAdminGate is the authz.
+  managedBy: 'system-data',
   description: 'Assigns a position (sys_position.name) to a user. Platform-owned (ADR-0057 D4, ADR-0090 D3).',
   titleFormat: '{user_id} → {position}',
   highlightFields: ['user_id', 'position', 'business_unit_id', 'organization_id'],
