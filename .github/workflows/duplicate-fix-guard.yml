@@ -48,9 +48,20 @@ jobs:
               'gi',
             );
 
+            // Strip fenced blocks and inline code spans before matching.
+            // GitHub's own closing-keyword parser ignores code formatting, and
+            // this guard must not be stricter than the linker it protects:
+            // this very PR's first run counted its own DISCUSSION of
+            // `Fixes #4551` (in backticks, describing the incident) as a
+            // declaration. Benign there — #4551 is closed — but a prose
+            // mention of an issue some other open PR really fixes would have
+            // been a spurious red.
             const declaredIssues = (body) => {
+              const prose = (body || '')
+                .replace(/```[\s\S]*?```/g, ' ')
+                .replace(/`[^`\n]*`/g, ' ');
               const found = new Set();
-              for (const [, owner, repo, number] of (body || '').matchAll(pattern)) {
+              for (const [, owner, repo, number] of prose.matchAll(pattern)) {
                 // A qualified reference to ANOTHER repo is not ours to judge.
                 if (owner && `${owner}/${repo}`.toLowerCase() !== thisRepo.toLowerCase()) continue;
                 found.add(Number(number));
