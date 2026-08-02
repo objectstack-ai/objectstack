@@ -74,6 +74,39 @@ export const DataEventType = z.enum([
 export type DataEventType = z.infer<typeof DataEventType>;
 
 /**
+ * Bulk Data Event Types
+ *
+ * Triggered when a predicate write touches an unbounded set of records:
+ * `ObjectQL.update()` / `delete()` with `options.multi = true`, which reach
+ * `IDataDriver.updateMany` / `deleteMany`. Follows the pattern
+ * `data.records.{action}` — plural, to read differently at a glance from the
+ * per-record `data.record.{action}` above.
+ *
+ * These exist because the driver contract for a multi-row write returns an
+ * affected COUNT and nothing else (`Promise<number>` — see
+ * `contracts/data-driver.ts`), so there is no record identity to put in
+ * {@link DataEventSchema}'s required `recordId`. Before #4639 the engine had
+ * only two options, and both were wrong: fabricate a per-record event with
+ * `recordId: ''` (which every schema-compliant consumer must reject — the
+ * pre-#4626 behaviour), or publish nothing at all (#4626's honest-but-silent
+ * stopgap). A bulk write now gets its OWN contract instead of impersonating a
+ * per-record one: a consumer that receives `data.records.updated` can see from
+ * the type alone that no `recordId` is coming, rather than discovering it as an
+ * empty string at runtime.
+ *
+ * There is deliberately no `data.records.created`: a batch insert knows every
+ * row it wrote, so the engine publishes N per-record `data.record.created`
+ * events for it (each with its own event id) — a count would be strictly less
+ * information than the contract already delivers.
+ */
+export const BulkDataEventType = z.enum([
+  'data.records.updated',
+  'data.records.deleted',
+]);
+
+export type BulkDataEventType = z.infer<typeof BulkDataEventType>;
+
+/**
  * Metadata Event Payload
  *
  * Represents a metadata change event (create, update, delete).
@@ -143,3 +176,55 @@ export const DataEventSchema = lazySchema(() => z.object({
 }));
 
 export type DataEvent = z.infer<typeof DataEventSchema>;
+
+/**
+ * Bulk Data Event Payload
+ *
+ * Represents a predicate write (`multi: true` update/delete) that affected
+ * `matched` records without naming any of them. Travels in the same
+ * `RealtimeEventPayload` envelope as {@link DataEventSchema}, and is validated
+ * by the producer before publish — but it is a SEPARATE contract, not a
+ * degraded `DataEvent`: there is no `recordId`, no `before`/`after`, and no
+ * `changes`, because a multi-row driver call returns none of them.
+ *
+ * **What a consumer can and cannot do with this.** It can count, alert, audit
+ * at aggregate level, or mark a derived index as needing reconciliation. It
+ * CANNOT incrementally maintain a per-record projection (search index, cache,
+ * mirror) from it — `matched: 40` names no rows. A consumer whose correctness
+ * depends on knowing *which* records changed must reconcile against the source
+ * of truth; that is a property of the driver contract, not a gap in this
+ * schema, and no field added here could fix it.
+ *
+ * **Why there is no `where`.** The only predicate in hand at publish time is
+ * the middleware-COMPOSED query AST — the caller's filter after the security
+ * layer injected its row scoping (RLS write filter, sharing's editable-rows
+ * filter). Publishing it would ship tenant scoping internals to whatever
+ * external URL a webhook points at. The caller's own pre-composition filter is
+ * no better: it is a second, divergent answer to "what did this write touch".
+ * So the event reports the count it can state truthfully and stops there.
+ */
+export const BulkDataEventSchema = lazySchema(() => z.object({
+  /** Unique event identifier */
+  id: z.string().uuid().describe('Unique event identifier'),
+
+  /** Event type (data.records.{action}) */
+  type: BulkDataEventType.describe('Event type'),
+
+  /** Object name */
+  object: z.string().describe('Object name'),
+
+  /**
+   * Number of records the predicate write affected. The ObjectQL engine does
+   * not publish an event at all when this would be `0` — a predicate that
+   * matched nothing changed no data — so a consumer will not see idle sweeps.
+   */
+  matched: z.number().int().nonnegative().describe('Number of records affected'),
+
+  /** User who triggered the event */
+  userId: z.string().optional().describe('User who triggered the event'),
+
+  /** Event timestamp (ISO 8601) */
+  timestamp: z.string().datetime().describe('Event timestamp'),
+}));
+
+export type BulkDataEvent = z.infer<typeof BulkDataEventSchema>;

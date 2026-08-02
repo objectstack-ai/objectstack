@@ -130,6 +130,8 @@
     "api/BatchRecord",
     "api/BatchUpdateRequest",
     "api/BatchUpdateResponse",
+    "api/BulkDataEvent",
+    "api/BulkDataEventType",
     "api/BulkRequest",
     "api/BulkResponse",
     "api/CacheControl",

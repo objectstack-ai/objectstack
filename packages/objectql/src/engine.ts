@@ -59,7 +59,12 @@ export type InsertManyRowOutcome =
   | { ok: false; error: unknown };
 import { CoreServiceName, StorageNameMapping } from '@objectstack/spec/system';
 import { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
-import { DataEventSchema, type DataEvent } from '@objectstack/spec/api';
+import {
+  BulkDataEventSchema,
+  DataEventSchema,
+  type BulkDataEvent,
+  type DataEvent,
+} from '@objectstack/spec/api';
 import type { ICryptoProvider, CryptoHandle } from '@objectstack/spec/contracts';
 import {
   collectSecretFields,
@@ -652,6 +657,21 @@ function eventUserId(execCtx?: ExecutionContextInput): string | undefined {
   if (userId == null) return undefined;
   const asString = String(userId);
   return asString === '' ? undefined : asString;
+}
+
+/**
+ * Coerce a multi-row driver result into `BulkDataEvent.matched` (#4639).
+ *
+ * `IDataDriver.updateMany`/`deleteMany` are contracted to resolve the affected
+ * row count (`Promise<number>`). A driver that resolves something else has not
+ * met that contract, and the count is the ONLY substantive thing a bulk event
+ * says — so this returns `undefined` and the caller declines to publish rather
+ * than inventing a `matched: 0` that reads as "nothing was affected" when rows
+ * very likely were.
+ */
+function eventMatchedCount(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return undefined;
+  return value;
 }
 
 export class ObjectQL implements IObjectQLEngine {
@@ -2010,13 +2030,19 @@ export class ObjectQL implements IObjectQLEngine {
    * carries the complete `DataEvent`, and the client SDK unwraps + validates
    * it at the boundary instead of double-casting the envelope.
    *
+   * Only per-record writes reach here. A predicate (`multi: true`) write has
+   * its own contract — see {@link publishBulkDataEvent} (#4639) — and the
+   * multi branches of `update()`/`delete()` route to it directly, so they
+   * never arrive at the identity gate below.
+   *
    * Two loud-by-design gates:
-   *  - **No record identity → no event.** `DataEvent.recordId` is required and
-   *    a bulk `updateMany`/`deleteMany` returns only a count, so a multi-row
-   *    write has no truthful per-record event to publish. It publishes NONE
-   *    (warn log naming the gap) instead of the pre-#4626 fabrication
-   *    (`recordId: ''`, `after: <affected count>`) that every schema-compliant
-   *    consumer must reject. Tracked for a real bulk contract in #4639.
+   *  - **No record identity → no event.** `DataEvent.recordId` is required, so
+   *    a write that names no record has no truthful per-record event to
+   *    publish. It publishes NONE (warn log) instead of the pre-#4626
+   *    fabrication (`recordId: ''`, `after: <affected count>`) that every
+   *    schema-compliant consumer must reject. Reaching this gate now means a
+   *    single-id write whose driver returned no usable primary key — a driver
+   *    bug — because the bulk callers no longer come through here.
    *  - The event body is `DataEventSchema.parse`d before publish, so a
    *    malformed producer fails here (warn log, event not published) rather
    *    than delivering a lie downstream.
@@ -2039,10 +2065,10 @@ export class ObjectQL implements IObjectQLEngine {
     const recordId = eventRecordId(input.recordId);
     if (!recordId) {
       this.logger.warn(
-        `No data.record.${action} event published for '${object}': the write names no single record ` +
-          `(a multi-row updateMany/deleteMany returns only an affected count), and DataEvent.recordId ` +
-          `is required — refusing to publish an off-contract event ` +
-          `(#4626; bulk event contract tracked in #4639)`,
+        `No data.record.${action} event published for '${object}': the write names no single record, ` +
+          `and DataEvent.recordId is required — refusing to publish an off-contract event. ` +
+          `A predicate write publishes data.records.${action} instead (#4639), so reaching this ` +
+          `means a single-id write whose driver returned no usable primary key (#4626)`,
         { object },
       );
       return;
@@ -2075,6 +2101,87 @@ export class ObjectQL implements IObjectQLEngine {
       this.logger.debug(`Published data.record.${action} event`, { object, recordId });
     } catch (error) {
       this.logger.warn('Failed to publish data event', { object, recordId, error });
+    }
+  }
+
+  /**
+   * Publish a realtime {@link BulkDataEvent} for a predicate write (#4639).
+   *
+   * The `multi: true` branches of `update()`/`delete()` reach
+   * `IDataDriver.updateMany`/`deleteMany`, which resolve an affected COUNT and
+   * nothing else. That is too little for the per-record `DataEvent` contract
+   * (`recordId` is required), so those writes were silent from #4626 until now
+   * — honest, but it meant webhooks and every other event consumer saw
+   * nothing at all when a predicate write emptied half a table.
+   *
+   * They now get their own event instead of impersonating a per-record one:
+   * `data.records.updated` / `data.records.deleted`, carrying the object and
+   * the count. A consumer reading the type knows immediately that no
+   * `recordId` is coming — the failure mode of the pre-#4626 fabrication,
+   * where `recordId: ''` looked like a record until you tried to use it.
+   *
+   * Deliberately NOT carried: the query predicate. The only one in hand here
+   * is the middleware-composed AST, whose `where` embeds the security layer's
+   * injected row scoping (RLS, sharing) — publishing it would ship tenant
+   * internals to whatever external URL a webhook points at. See
+   * `BulkDataEventSchema`'s TSDoc for the full reasoning.
+   *
+   * Same two disciplines as the per-record twin: validate before publish, and
+   * never throw — a realtime transport problem must not roll back a committed
+   * write.
+   */
+  private async publishBulkDataEvent(
+    action: 'updated' | 'deleted',
+    object: string,
+    input: { matched: unknown; context?: ExecutionContextInput },
+  ): Promise<void> {
+    if (!this.realtimeService) return;
+
+    const matched = eventMatchedCount(input.matched);
+    if (matched === undefined) {
+      this.logger.warn(
+        `No data.records.${action} event published for '${object}': the driver's multi-row result is ` +
+          `not an affected-row count (IDataDriver.updateMany/deleteMany are contracted to resolve ` +
+          `a number). The count is the only thing a bulk event states, so publishing one here would ` +
+          `assert something unverified (#4639)`,
+        { object },
+      );
+      return;
+    }
+
+    // A predicate that matched nothing changed no data, so it is not a data
+    // event — the per-record path is silent for the same reason (no rows
+    // written, no events). This is what keeps an idle hourly LifecycleService
+    // sweep from becoming a webhook delivery per object per hour saying
+    // "0 records". Debug, not warn: matching nothing is normal, not a fault.
+    if (matched === 0) {
+      this.logger.debug(`No data.records.${action} event for '${object}': predicate matched no rows`, { object });
+      return;
+    }
+
+    try {
+      const timestamp = new Date().toISOString();
+      const userId = eventUserId(input.context);
+      const event: BulkDataEvent = BulkDataEventSchema.parse({
+        id: generateEventUuid(),
+        type: `data.records.${action}`,
+        object,
+        matched,
+        ...(userId !== undefined ? { userId } : {}),
+        timestamp,
+      });
+
+      const envelope: RealtimeEventPayload = {
+        type: event.type,
+        object,
+        payload: { ...event },
+        timestamp,
+      };
+
+      await this.realtimeService.publish(envelope);
+      this.logger.debug(`Published data.records.${action} event`, { object, matched });
+    } catch (error) {
+      this.logger.warn('Failed to publish bulk data event', { object, matched, error });
     }
   }
 
@@ -4371,6 +4478,14 @@ export class ObjectQL implements IObjectQLEngine {
 
        try {
            let result;
+           // [#4639] Which event contract this write reports under. A predicate
+           // write publishes the aggregate `data.records.updated`; anything else
+           // publishes the per-record `data.record.updated`. Recorded at the
+           // branch that made the choice rather than re-derived at the publish
+           // site from an absent id — the two are the same today, and a future
+           // driver returning a row from `updateMany` would silently reroute a
+           // bulk write onto the per-record contract if we inferred it.
+           let isPredicateWrite = false;
            // Pre-update snapshot. Exposed to after-hooks via `hookContext.previous`
            // (the HookContext contract documents `previous` for update/delete) and
            // reused for object-level validation rules. Fetched once, only for
@@ -4501,6 +4616,7 @@ export class ObjectQL implements IObjectQLEngine {
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                );
                result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+               isPredicateWrite = true;
            } else {
                throw new Error('Update requires an ID or options.multi=true');
            }
@@ -4520,17 +4636,25 @@ export class ObjectQL implements IObjectQLEngine {
            // that moved to a different parent updates BOTH old and new parent.
            const summaryFailures = await this.recomputeSummaries(object, result, priorRecord, opCtx.context);
 
-           // Publish the data.record.updated DataEvent (#4626). A multi-row
-           // update names no single record (`updateMany` returns a count), so
-           // `publishDataEvent` declines rather than fabricating a recordId.
+           // Publish the update event under whichever contract this write can
+           // honour: per-record `data.record.updated` (#4626), or the aggregate
+           // `data.records.updated` for a predicate write, whose driver call
+           // returns an affected count and names no row (#4639).
            if (this.realtimeService) {
-             const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
-             await this.publishDataEvent('updated', object, {
-               recordId: hookContext.input.id ?? resultId,
-               changes: hookContext.input.data,
-               after: result,
-               context: opCtx.context,
-             });
+             if (isPredicateWrite) {
+               await this.publishBulkDataEvent('updated', object, {
+                 matched: result,
+                 context: opCtx.context,
+               });
+             } else {
+               const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
+               await this.publishDataEvent('updated', object, {
+                 recordId: hookContext.input.id ?? resultId,
+                 changes: hookContext.input.data,
+                 after: result,
+                 context: opCtx.context,
+               });
+             }
            }
 
            // The record IS updated; a summary that could not recompute after
@@ -4722,6 +4846,9 @@ export class ObjectQL implements IObjectQLEngine {
 
       try {
           let result;
+          // [#4639] See update()'s twin: recorded at the branch that chose the
+          // driver call, not inferred later from a missing id.
+          let isPredicateWrite = false;
           // Capture the row's FK values BEFORE deletion so roll-up summaries can
           // recompute the (now-orphaned) parent. Only when a summary aggregates
           // this object — avoids an extra read on every delete.
@@ -4749,6 +4876,7 @@ export class ObjectQL implements IObjectQLEngine {
                    );
                }
                result = await driver.deleteMany(object, ast, hookContext.input.options as any);
+               isPredicateWrite = true;
           } else {
                throw new Error('Delete requires an ID or options.multi=true');
           }
@@ -4762,15 +4890,22 @@ export class ObjectQL implements IObjectQLEngine {
             ? await this.recomputeSummaries(object, null, summaryPrev, opCtx.context)
             : [];
 
-          // Publish the data.record.deleted DataEvent (#4626). Same rule as
-          // update: a multi-row delete (`deleteMany` → count) names no record,
-          // so no per-record event is fabricated for it.
+          // Same split as update(): per-record `data.record.deleted` (#4626),
+          // or the aggregate `data.records.deleted` when the delete was by
+          // predicate (#4639).
           if (this.realtimeService) {
-            const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
-            await this.publishDataEvent('deleted', object, {
-              recordId: hookContext.input.id ?? resultId,
-              context: opCtx.context,
-            });
+            if (isPredicateWrite) {
+              await this.publishBulkDataEvent('deleted', object, {
+                matched: result,
+                context: opCtx.context,
+              });
+            } else {
+              const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
+              await this.publishDataEvent('deleted', object, {
+                recordId: hookContext.input.id ?? resultId,
+                context: opCtx.context,
+              });
+            }
           }
 
           // The record IS deleted; a summary that could not recompute after

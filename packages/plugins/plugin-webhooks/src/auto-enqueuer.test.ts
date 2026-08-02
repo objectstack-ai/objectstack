@@ -18,7 +18,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { DataEventSchema } from '@objectstack/spec/api';
+import { BulkDataEventSchema, DataEventSchema } from '@objectstack/spec/api';
 import type {
     IDataEngine,
     IRealtimeService,
@@ -152,6 +152,28 @@ function event(
         object,
         recordId: String(record.id),
         ...(type === 'deleted' ? {} : { after: record }),
+        timestamp,
+    });
+    return { type: payload.type, object, payload: { ...payload }, timestamp };
+}
+
+/**
+ * A `data.records.*` envelope whose `payload` is a full `BulkDataEvent`
+ * (#4639) — what the engine publishes for a predicate (`multi: true`) write.
+ * Built through the spec schema for the same reason as {@link event}: the
+ * fixture cannot drift from the contract the enqueuer reads.
+ */
+function bulkEvent(
+    type: 'updated' | 'deleted',
+    object: string,
+    matched: number,
+    timestamp = '2026-05-24T00:00:00.000Z',
+): RealtimeEventPayload {
+    const payload = BulkDataEventSchema.parse({
+        id: randomUUID(),
+        type: `data.records.${type}`,
+        object,
+        matched,
         timestamp,
     });
     return { type: payload.type, object, payload: { ...payload }, timestamp };
@@ -501,6 +523,158 @@ describe('AutoEnqueuer', () => {
         expect(calls).toHaveLength(1);
         expect(calls[0].url).toBe('https://good.test');
         expect(warn).toHaveBeenCalled();
+        await ae.stop();
+    });
+});
+
+/**
+ * #4639 — predicate writes dispatch under their OWN opt-in triggers.
+ *
+ * A `multi: true` update/delete publishes `data.records.*` carrying a count and
+ * no record. Routing that to the existing `update`/`delete` subscribers would
+ * hand them a body missing every field they read, so it gets its own trigger
+ * pair: `bulk_update` / `bulk_delete`.
+ */
+describe('AutoEnqueuer — bulk data events (#4639)', () => {
+    it('dispatches data.records.updated to a bulk_update subscriber', async () => {
+        const engine = new FakeEngine({ sys_webhook: [webhook({ triggers: 'bulk_update' })] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
+        await ae.start();
+
+        await realtime.publish(bulkEvent('updated', 'contact', 40));
+        await flush();
+
+        expect(calls).toHaveLength(1);
+        expect(calls[0].label).toBe('data.records.updated');
+        const payload = calls[0].payload as any;
+        expect(payload.matched).toBe(40);
+        expect(payload.object).toBe('contact');
+        expect(payload.action).toBe('updated');
+        // No record to name — that is the contract, not an omission.
+        expect(payload.recordId).toBeUndefined();
+        expect(payload.after).toBeUndefined();
+        await ae.stop();
+    });
+
+    it('dispatches data.records.deleted to a bulk_delete subscriber', async () => {
+        const engine = new FakeEngine({ sys_webhook: [webhook({ triggers: ['bulk_delete'] })] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
+        await ae.start();
+
+        await realtime.publish(bulkEvent('deleted', 'contact', 7));
+        await flush();
+
+        expect(calls).toHaveLength(1);
+        expect(calls[0].label).toBe('data.records.deleted');
+        expect((calls[0].payload as any).matched).toBe(7);
+        await ae.stop();
+    });
+
+    it('does NOT deliver a bulk event to a per-record update subscriber', async () => {
+        // The opt-in half of the decision: an existing `update` webhook keeps
+        // receiving only bodies shaped the way it already reads them.
+        const engine = new FakeEngine({ sys_webhook: [webhook({ triggers: 'create,update,delete' })] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
+        await ae.start();
+
+        await realtime.publish(bulkEvent('updated', 'contact', 40));
+        await realtime.publish(bulkEvent('deleted', 'contact', 40));
+        await flush();
+
+        expect(calls).toHaveLength(0);
+        await ae.stop();
+    });
+
+    it('does NOT deliver a per-record event to a bulk-only subscriber', async () => {
+        const engine = new FakeEngine({ sys_webhook: [webhook({ triggers: 'bulk_update,bulk_delete' })] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
+        await ae.start();
+
+        await realtime.publish(event('updated', 'contact', { id: 'c-1' }));
+        await flush();
+
+        expect(calls).toHaveLength(0);
+        await ae.stop();
+    });
+
+    it('drops an off-contract bulk event instead of guessing a count', async () => {
+        const engine = new FakeEngine({ sys_webhook: [webhook({ triggers: 'bulk_update' })] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const warn = vi.fn();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+        await ae.start();
+
+        // `matched` is the entire substance of a bulk delivery: a wrong one is
+        // worse than none, so the event is dropped loudly (same discipline as
+        // the #4626 per-record `recordId` check).
+        await realtime.publish({
+            type: 'data.records.updated',
+            object: 'contact',
+            payload: { id: randomUUID(), type: 'data.records.updated', object: 'contact' },
+            timestamp: '2026-05-24T00:00:00.000Z',
+        });
+        await flush();
+
+        expect(calls).toHaveLength(0);
+        expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining('BulkDataEvent'),
+            expect.anything(),
+        );
+        await ae.stop();
+    });
+
+    it('dedups on the event uuid, so same-millisecond sweeps do not collapse', async () => {
+        const engine = new FakeEngine({ sys_webhook: [webhook({ triggers: 'bulk_delete' })] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
+        await ae.start();
+
+        // Two DISTINCT sweeps sharing a timestamp. A `${object}:${action}:${ts}`
+        // key would silently drop the second; the producer's per-event uuid
+        // keeps them apart.
+        const ts = '2026-05-24T00:00:00.000Z';
+        const first = bulkEvent('deleted', 'contact', 3, ts);
+        const second = bulkEvent('deleted', 'contact', 5, ts);
+        await realtime.publish(first);
+        await realtime.publish(second);
+        await flush();
+        expect(calls).toHaveLength(2);
+
+        // …while a genuine redelivery of the SAME event still collapses.
+        await realtime.publish(first);
+        await flush();
+        expect(calls).toHaveLength(2);
+        await ae.stop();
+    });
+
+    it('self-heals the cache when sys_webhook is changed by a predicate write', async () => {
+        // Deactivating every webhook on an object is a bulk update. If only
+        // `data.record.*` refreshed the cache, the enqueuer would keep
+        // dispatching from rows the admin just turned off.
+        const engine = new FakeEngine({ sys_webhook: [webhook()] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
+        await ae.start();
+
+        engine.rows.sys_webhook[0].active = false;
+        await realtime.publish(bulkEvent('updated', 'sys_webhook', 1));
+        await flush();
+
+        await realtime.publish(event('created', 'contact', { id: 'c-1' }));
+        await flush();
+
+        expect(calls).toHaveLength(0);
         await ae.stop();
     });
 });

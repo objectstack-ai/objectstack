@@ -11,8 +11,10 @@ import type { RealtimeEventPayload } from '@objectstack/spec/contracts';
 import {
   MetadataEventSchema,
   DataEventSchema,
+  BulkDataEventSchema,
   type MetadataEvent,
   type DataEvent,
+  type BulkDataEvent,
 } from '@objectstack/spec/api';
 
 export interface RealtimeSubscriptionFilter {
@@ -127,6 +129,14 @@ export class RealtimeAPI {
       },
       handler: (event) => {
         if (!event.type.startsWith('data.') || event.object !== object) return;
+        // [#4639] An aggregate `data.records.*` from a predicate write is not
+        // off-contract — it satisfies a DIFFERENT one — so it must be skipped
+        // before the `DataEventSchema` check below rejects it as malformed.
+        // Excluded by its own namespace rather than by narrowing the guard to
+        // `data.record.`, which would also silently drop `data.field.changed`
+        // (declared in `DataEventType`, no producer today — see #4673) if it
+        // ever gains one. Bulk events are delivered by `subscribeBulkData`.
+        if (event.type.startsWith('data.records.')) return;
         // Contract boundary (#4626): the wire carries a RealtimeEventPayload
         // envelope whose `payload` is the producer's DataEvent (the ObjectQL
         // engine builds and validates it). Validate it here too — the callback
@@ -155,6 +165,65 @@ export class RealtimeAPI {
     this.startPolling();
 
     // Return unsubscribe function
+    return () => {
+      this.subscriptions.delete(subscriptionId);
+      if (this.subscriptions.size === 0) {
+        this.stopPolling();
+      }
+    };
+  }
+
+  /**
+   * Subscribe to aggregate bulk-write events for an object (#4639).
+   *
+   * A predicate write (`multi: true` update/delete) reaches
+   * `IDataDriver.updateMany`/`deleteMany`, which report an affected COUNT and
+   * name no rows — so it publishes `data.records.updated` /
+   * `data.records.deleted` rather than the per-record events
+   * {@link subscribeData} delivers. The callback receives a
+   * {@link BulkDataEvent}: `object` and `matched`, no `recordId`, no record
+   * body.
+   *
+   * Kept as a separate method on purpose. Delivering these through
+   * `subscribeData` would hand a `(event: DataEvent) => void` callback an
+   * object whose `recordId` is missing — reintroducing, from the producer
+   * side, exactly the "typed field that is `undefined` at runtime" defect
+   * #4626 removed. A caller that wants both subscribes twice, and the types
+   * make the difference unmissable.
+   *
+   * Use it to invalidate a whole view, show "40 records changed", or schedule
+   * a refetch — not to patch a per-record cache, which a count cannot drive.
+   */
+  subscribeBulkData(
+    object: string,
+    callback: (event: BulkDataEvent) => void
+  ): () => void {
+    const subscriptionId = `bulk-data-${object}-${Date.now()}`;
+
+    this.subscriptions.set(subscriptionId, {
+      filter: {
+        type: object,
+        eventTypes: ['data.records.updated', 'data.records.deleted']
+      },
+      handler: (event) => {
+        if (!event.type.startsWith('data.records.') || event.object !== object) return;
+        // Same boundary discipline as subscribeData: the envelope's `payload`
+        // is the producer's BulkDataEvent, validated here too. Off-contract is
+        // rejected LOUDLY (throw → surfaced by emitEvent's handler-error log),
+        // never coerced — a malformed event means the producer is broken.
+        const parsed = BulkDataEventSchema.safeParse(event.payload);
+        if (!parsed.success) {
+          throw new Error(
+            `subscribeBulkData('${object}'): event '${event.type}' payload does not satisfy ` +
+            `BulkDataEventSchema — rejecting off-contract event (fix the producer): ${parsed.error.message}`
+          );
+        }
+        callback(parsed.data);
+      }
+    });
+
+    this.startPolling();
+
     return () => {
       this.subscriptions.delete(subscriptionId);
       if (this.subscriptions.size === 0) {

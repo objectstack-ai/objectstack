@@ -163,6 +163,31 @@ export class KnowledgeServicePlugin implements Plugin {
           return;
         }
 
+        // [#4639] Aggregate events from a predicate write (`multi: true`).
+        // A knowledge index is a PER-RECORD projection, and `matched: 40`
+        // names no record — there is no upsert or delete this handler could
+        // derive from it, and none of the adapters take a predicate. So the
+        // index is now stale in a way this subscription cannot repair.
+        //
+        // Say so rather than falling through to the `return` below: a silent
+        // no-op here reads identically to "nothing happened", which is how the
+        // gap stayed invisible before #4639 gave bulk writes an event at all.
+        // The durable fix is a reconciliation pass over the object source
+        // (events keep the index FRESH; reconciliation keeps it CORRECT) —
+        // tracked separately in #4672.
+        if (type === 'data.records.updated' || type === 'data.records.deleted') {
+          const matched = payload.matched;
+          ctx.logger.warn?.(
+            `KnowledgeServicePlugin: '${object}' had a predicate write (${type}) affecting ` +
+              `${typeof matched === 'number' ? matched : 'an unreported number of'} record(s). ` +
+              'A bulk event carries a count, not records, so the knowledge index for this object ' +
+              'may now be stale and cannot be repaired from the event stream (#4639; ' +
+              'reconciliation tracked in #4672).',
+            { object, type, matched },
+          );
+          return;
+        }
+
         if (type === 'record.created' || type === 'record.updated') {
           const record =
             (payload.record as Record<string, unknown> | undefined) ?? payload;

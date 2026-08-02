@@ -35,6 +35,14 @@ const VALID_EVENT = {
   timestamp: '2026-08-02T12:00:00.000Z',
 } as const;
 
+const VALID_BULK_EVENT = {
+  id: '3f2504e0-4f89-41d3-9a0c-0305e82c3301',
+  type: 'data.records.updated',
+  object: 'project_task',
+  matched: 40,
+  timestamp: '2026-08-02T12:00:00.000Z',
+} as const;
+
 function envelopeOf(
   payload: Record<string, unknown>,
   type = 'data.record.updated',
@@ -171,6 +179,110 @@ describe('#4626 — RealtimeAPI.subscribeData contract boundary', () => {
 
     off();
     deliver(envelopeOf({ ...VALID_EVENT }));
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores an aggregate bulk event rather than rejecting it as off-contract', () => {
+    // [#4639] `data.records.updated` satisfies a DIFFERENT contract, so it must
+    // not reach `DataEventSchema` here. The pre-#4639 guard tested
+    // `startsWith('data.')`, which would have thrown on every predicate write.
+    const callback = vi.fn();
+    api.subscribeData('project_task', callback);
+
+    expect(() =>
+      deliver(envelopeOf({ ...VALID_BULK_EVENT }, 'data.records.updated')),
+    ).not.toThrow();
+    expect(callback).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #4639 — `subscribeBulkData` carries the aggregate contract for predicate
+ * writes (`multi: true` → `updateMany`/`deleteMany`, which report a count).
+ *
+ * Separate from `subscribeData` on purpose: a `BulkDataEvent` has no
+ * `recordId` and no record body, so delivering it through a
+ * `(event: DataEvent) => void` callback would recreate the exact defect #4626
+ * removed — a typed field that is `undefined` at runtime.
+ */
+describe('#4639 — RealtimeAPI.subscribeBulkData contract boundary', () => {
+  let api: RealtimeAPI;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    api = new RealtimeAPI('http://localhost:3000');
+  });
+
+  afterEach(() => {
+    api.disconnect();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function deliver(envelope: RealtimeEventPayload): void {
+    api._bufferEvent(envelope);
+    vi.advanceTimersByTime(2000);
+  }
+
+  it('delivers the BulkDataEvent with its top-level count', () => {
+    const seen: any[] = [];
+    api.subscribeBulkData('project_task', (event) => seen.push(event));
+
+    deliver(envelopeOf({ ...VALID_BULK_EVENT }, 'data.records.updated'));
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].type).toBe('data.records.updated');
+    expect(seen[0].matched).toBe(40);
+    expect(seen[0].object).toBe('project_task');
+    expect(seen[0].recordId).toBeUndefined();
+  });
+
+  it('rejects an off-contract bulk payload LOUDLY instead of coercing it', () => {
+    const callback = vi.fn();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    api.subscribeBulkData('project_task', callback);
+
+    // `matched` missing — the one field a bulk event exists to carry.
+    const { matched: _dropped, ...withoutMatched } = VALID_BULK_EVENT;
+    deliver(envelopeOf({ ...withoutMatched }, 'data.records.updated'));
+
+    expect(callback).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalled();
+  });
+
+  it('does not receive per-record events', () => {
+    const callback = vi.fn();
+    api.subscribeBulkData('project_task', callback);
+
+    deliver(envelopeOf({ ...VALID_EVENT }));
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('ignores bulk events for another object', () => {
+    const callback = vi.fn();
+    api.subscribeBulkData('project_task', callback);
+
+    deliver(
+      envelopeOf(
+        { ...VALID_BULK_EVENT, object: 'other_object' },
+        'data.records.deleted',
+        'other_object',
+      ),
+    );
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('unsubscribe stops delivery', () => {
+    const callback = vi.fn();
+    const off = api.subscribeBulkData('project_task', callback);
+
+    deliver(envelopeOf({ ...VALID_BULK_EVENT }, 'data.records.updated'));
+    expect(callback).toHaveBeenCalledTimes(1);
+
+    off();
+    deliver(envelopeOf({ ...VALID_BULK_EVENT }, 'data.records.updated'));
     expect(callback).toHaveBeenCalledTimes(1);
   });
 });

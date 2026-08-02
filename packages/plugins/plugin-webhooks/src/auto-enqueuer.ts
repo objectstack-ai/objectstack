@@ -1,7 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { IDataEngine, IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
+import type { WebhookTriggerType } from '@objectstack/spec/automation';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
+
+/**
+ * The authored trigger vocabulary, taken from the spec rather than restated
+ * here — this file both validates authored triggers and maps events onto them,
+ * so a locally-spelled union would be a second contract free to drift from the
+ * one authors are validated against.
+ */
+type WebhookTrigger = WebhookTriggerType;
 
 /**
  * Enqueue callback into the shared `service-messaging` HTTP outbox (ADR-0018 M3).
@@ -29,7 +38,7 @@ interface CachedSubscription {
     id: string;
     name: string;
     objectName: string | undefined; // empty = matches all objects
-    triggers: Set<'create' | 'update' | 'delete'>;
+    triggers: Set<WebhookTrigger>;
     url: string;
     method?: string;
     headers?: Record<string, string>;
@@ -90,6 +99,11 @@ export interface AutoEnqueuerOptions {
  * `eventId` is computed from `${object}:${recordId}:${type}:${timestamp}`
  * so the outbox dedup index catches duplicates that could arise from
  * upstream replay or buggy producers — and is stable across nodes.
+ *
+ * An aggregate `data.records.*` event (#4639) has no record to key on, so it
+ * dedups on the producer's event uuid instead: two predicate sweeps in the
+ * same millisecond are genuinely different events and must not collapse into
+ * one delivery, which a timestamp-based key would do.
  */
 export class AutoEnqueuer {
     private readonly subscriptions = new Map<string, CachedSubscription[]>();
@@ -236,12 +250,13 @@ export class AutoEnqueuer {
         if (unknown.length > 0) {
             this.logger.warn?.(
                 `[webhook-auto-enqueuer] webhook '${(row.name as string) ?? row.id}' declares trigger(s) the engine never emits: ` +
-                    `${unknown.join(', ')} — ignored. Dispatchable triggers: create, update, delete.`,
+                    `${unknown.join(', ')} — ignored. Dispatchable triggers: ` +
+                    `${[...DISPATCHABLE_WEBHOOK_TRIGGERS].join(', ')}.`,
                 { id: row.id, unknown },
             );
         }
         const triggers = new Set(
-            normalized.filter((t) => DISPATCHABLE_WEBHOOK_TRIGGERS.has(t)) as Array<'create' | 'update' | 'delete'>,
+            normalized.filter((t) => DISPATCHABLE_WEBHOOK_TRIGGERS.has(t)) as WebhookTrigger[],
         );
         if (triggers.size === 0) {
             // [ADR-0078 Phase 4] No dispatchable triggers — the webhook can
@@ -260,7 +275,8 @@ export class AutoEnqueuer {
                 `[webhook-auto-enqueuer] webhook '${(row.name as string) ?? row.id}' has no dispatchable ` +
                     `triggers — it will NEVER fire (rule webhook/without-triggers): there is no manual fire ` +
                     `path (#3196), so this row is dead while looking armed in Setup. Declare ` +
-                    `triggers: ['create'|'update'|'delete'], or set it inactive if it should be off.`,
+                    `one of: ${[...DISPATCHABLE_WEBHOOK_TRIGGERS].join(', ')}, or set it inactive if it ` +
+                    `should be off.`,
                 { id: row.id },
             );
             return null;
@@ -303,9 +319,17 @@ export class AutoEnqueuer {
      * webhook persistence.
      */
     private handleEvent(event: RealtimeEventPayload): void {
-        if (!event.type?.startsWith('data.record.')) return;
         if (!event.object) return;
         if (event.object === this.subscriptionsObject) return; // self-heal handles its own
+
+        // [#4639] A predicate write publishes the aggregate `data.records.*`
+        // instead, which has no record to describe — separate path, separate
+        // trigger, separate delivery shape.
+        if (event.type?.startsWith('data.records.')) {
+            this.handleBulkEvent(event);
+            return;
+        }
+        if (!event.type?.startsWith('data.record.')) return;
 
         const action = event.type.slice('data.record.'.length) as
             | 'created' | 'updated' | 'deleted' | string;
@@ -389,9 +413,101 @@ export class AutoEnqueuer {
         }
     }
 
+    /**
+     * Handler for aggregate `data.records.*` events — a predicate write
+     * (`multi: true`) that the driver reports only as an affected-row count
+     * (#4639).
+     *
+     * Deliberately NOT folded into {@link handleEvent}'s per-record path. The
+     * delivered body has no `recordId` and no record fields, so a subscriber
+     * to `update` that started receiving these would get a payload missing
+     * everything it reads — which is how the pre-#4626 `recordId: ''`
+     * fabrication broke consumers, just arriving from the other side. A
+     * webhook opts in with `bulk_update` / `bulk_delete`.
+     */
+    private handleBulkEvent(event: RealtimeEventPayload): void {
+        const action = event.type.slice('data.records.'.length);
+        const trigger = mapBulkActionToTrigger(action);
+        if (!trigger) return;
+
+        const subs = [
+            ...(this.subscriptions.get(event.object!) ?? []),
+            ...(this.subscriptions.get('*') ?? []),
+        ];
+        if (subs.length === 0) return;
+
+        // Same contract discipline as the per-record path: the payload IS the
+        // spec's `BulkDataEvent`, whose `matched` the engine validates before
+        // publishing. An off-contract event is dropped loudly rather than
+        // delivered with a guessed count — `matched` is the entire substance
+        // of a bulk delivery, so a wrong one is worse than none.
+        const payload = event.payload ?? {};
+        const matched = (payload as { matched?: unknown }).matched;
+        if (typeof matched !== 'number' || !Number.isInteger(matched) || matched < 0) {
+            this.logger.warn?.(
+                '[webhook-auto-enqueuer] dropping off-contract bulk data event: payload is not a ' +
+                    'BulkDataEvent (no top-level non-negative integer `matched`) — fix the producer',
+                { type: event.type, object: event.object },
+            );
+            return;
+        }
+
+        // A predicate write has no natural key to build a deterministic id
+        // from — `${object}:${action}:${timestamp}` would collide between two
+        // sweeps landing in the same millisecond, and silently drop the
+        // second. The producer's own event uuid is generated once and travels
+        // with the event, so it dedups redelivery of the SAME event without
+        // ever conflating two distinct ones.
+        const eventUuid = (payload as { id?: unknown }).id;
+        if (typeof eventUuid !== 'string' || eventUuid === '') {
+            this.logger.warn?.(
+                '[webhook-auto-enqueuer] dropping off-contract bulk data event: payload has no ' +
+                    'top-level string `id` to dedup on — fix the producer',
+                { type: event.type, object: event.object },
+            );
+            return;
+        }
+        const eventId = `${event.object}:${event.type}:${eventUuid}`;
+
+        for (const sub of subs) {
+            if (!sub.triggers.has(trigger)) continue;
+
+            void this.enqueue({
+                source: 'webhook',
+                refId: sub.id,
+                dedupKey: `${sub.id}:${eventId}`,
+                label: event.type,
+                url: sub.url,
+                method: sub.method,
+                headers: sub.headers,
+                signingSecret: sub.secret,
+                timeoutMs: sub.timeoutMs,
+                // [#3946] Envelope keys last so the payload cannot rewrite them.
+                payload: {
+                    ...payload,
+                    object: event.object,
+                    matched,
+                    action,
+                    timestamp: event.timestamp,
+                },
+            }).catch((err) =>
+                this.logger.warn?.('[webhook-auto-enqueuer] bulk enqueue failed', {
+                    webhook: sub.name,
+                    eventId,
+                    err: (err as Error)?.message ?? err,
+                }),
+            );
+        }
+    }
+
     private handleSelfHealEvent(event: RealtimeEventPayload): void {
         if (event.object !== this.subscriptionsObject) return;
-        if (!event.type?.startsWith('data.record.')) return;
+        // [#4639] A predicate write over `sys_webhook` (deactivate every
+        // webhook on an object, say) changes the subscription set exactly like
+        // a per-record edit does, so it must refresh the cache too — matching
+        // only `data.record.` would leave the enqueuer dispatching from rows
+        // the admin just turned off.
+        if (!event.type?.startsWith('data.record.') && !event.type?.startsWith('data.records.')) return;
         this.refresh().catch((err) =>
             this.logger.warn?.('[webhook-auto-enqueuer] self-heal refresh failed', err),
         );
@@ -418,5 +534,23 @@ function mapActionToTrigger(
     }
 }
 
+/** [#4639] `data.records.{action}` → its opt-in bulk trigger. */
+function mapBulkActionToTrigger(action: string): 'bulk_update' | 'bulk_delete' | null {
+    switch (action) {
+        case 'updated':
+            return 'bulk_update';
+        case 'deleted':
+            return 'bulk_delete';
+        default:
+            return null;
+    }
+}
+
 /** The trigger values the enqueuer can actually map from an emitted record event. */
-const DISPATCHABLE_WEBHOOK_TRIGGERS: ReadonlySet<string> = new Set(['create', 'update', 'delete']);
+const DISPATCHABLE_WEBHOOK_TRIGGERS: ReadonlySet<string> = new Set([
+    'create',
+    'update',
+    'delete',
+    'bulk_update',
+    'bulk_delete',
+]);
