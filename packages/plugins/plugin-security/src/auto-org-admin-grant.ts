@@ -74,28 +74,69 @@ function genId(prefix: string): string {
   return `${prefix}_${ts}${rand}`;
 }
 
-async function tryFind(ql: any, object: string, where: any, limit = 50): Promise<any[]> {
+/**
+ * [#4640] The engine call shapes this module speaks, spelled out because
+ * getting one wrong here is silent: every wrapper below swallows the throw,
+ * so a call that no longer matches `ObjectQL`'s signature degrades into a
+ * no-op that still reports "nothing to do".
+ *
+ * `packages/objectql/src/engine.ts` — the only signatures that exist:
+ *
+ *   find(object, query: EngineQueryOptions, options?: EngineReadOptions)
+ *   insert(object, data, options?: DataEngineInsertOptions)
+ *   delete(object, options?: EngineDeleteOptions)   ← TWO args; the row is
+ *                                                     named by `where`, and
+ *                                                     the context rides in
+ *                                                     the same bag
+ *
+ * `delete` is the odd one out: reads and inserts take their execution context
+ * in a THIRD argument, deletes take it in the second. A `delete(object, id,
+ * ctx)` call therefore hands the id in as the option bag, where
+ * `rejectUnknownEngineOptions` reads its character indices as unknown option
+ * keys and throws — and drops the system context on the floor along the way.
+ * That was this module's only revoke channel for its whole life (#4640).
+ */
+
+async function tryFind(ql: any, object: string, where: any, limit = 50, logger?: MaybeLogger): Promise<any[]> {
   try {
     const rows = await ql.find(object, { where, limit }, { context: SYSTEM_CTX });
     return Array.isArray(rows) ? rows : Array.isArray(rows?.records) ? rows.records : [];
-  } catch {
+  } catch (e) {
+    // Reads legitimately fail before the tables exist (boot ordering), so this
+    // is debug rather than warn — but it is no longer nothing (#4640).
+    logger?.debug?.('[security] org-admin reconcile read failed — treated as no rows', {
+      object,
+      error: (e as Error)?.message,
+    });
     return [];
   }
 }
 
-async function tryInsert(ql: any, object: string, data: any): Promise<any | null> {
+async function tryInsert(ql: any, object: string, data: any, logger?: MaybeLogger): Promise<any | null> {
   try {
     return await ql.insert(object, data, { context: SYSTEM_CTX });
-  } catch {
+  } catch (e) {
+    logger?.warn?.('[security] org-admin grant insert failed — capability NOT granted', {
+      object,
+      error: (e as Error)?.message,
+    });
     return null;
   }
 }
 
-async function tryDelete(ql: any, object: string, id: string): Promise<boolean> {
+async function tryDelete(ql: any, object: string, id: string, logger?: MaybeLogger): Promise<boolean> {
   try {
-    await ql.delete(object, id, { context: SYSTEM_CTX });
+    await ql.delete(object, { where: { id }, context: SYSTEM_CTX });
     return true;
-  } catch {
+  } catch (e) {
+    // [#4640] A failed revoke means a capability the platform decided to take
+    // away is still in force — the one failure in this module that must never
+    // be silent, whatever the caller does with the `false`.
+    logger?.warn?.('[security] org-admin grant revoke FAILED — capability still in force', {
+      object,
+      id,
+      error: (e as Error)?.message,
+    });
     return false;
   }
 }
@@ -167,7 +208,11 @@ export function autoOrgAdminGrantReason(
  */
 const permissionSetIdCache = new WeakMap<object, Map<string, string>>();
 
-async function resolvePermissionSetId(ql: any, name: string): Promise<string | null> {
+async function resolvePermissionSetId(
+  ql: any,
+  name: string,
+  logger?: MaybeLogger,
+): Promise<string | null> {
   let perQl = permissionSetIdCache.get(ql);
   if (!perQl) {
     perQl = new Map<string, string>();
@@ -175,7 +220,7 @@ async function resolvePermissionSetId(ql: any, name: string): Promise<string | n
   }
   const cached = perQl.get(name);
   if (cached) return cached;
-  const rows = await tryFind(ql, 'sys_permission_set', { name }, 1);
+  const rows = await tryFind(ql, 'sys_permission_set', { name }, 1, logger);
   const id = rows[0]?.id;
   if (typeof id === 'string' && id.length > 0) {
     perQl.set(name, id);
@@ -234,7 +279,7 @@ export async function reconcileOrgAdminGrant(
   const grantSetName = orgAdminSetNameForPosture(posture);
   const supersededSetName = supersededOrgAdminSetName(posture);
 
-  const permSetId = await resolvePermissionSetId(ql, grantSetName);
+  const permSetId = await resolvePermissionSetId(ql, grantSetName, logger);
   if (!permSetId) {
     // The permission set isn't seeded yet (boot ordering) — caller can retry
     // later (e.g. via kernel:ready backfill).
@@ -250,6 +295,7 @@ export async function reconcileOrgAdminGrant(
     'sys_member',
     { user_id: userId, organization_id: orgId },
     10,
+    logger,
   );
   // The row that QUALIFIES is also the row the grant is provenance-linked to
   // (#4586) — "this capability exists because of that membership".
@@ -259,16 +305,17 @@ export async function reconcileOrgAdminGrant(
   // 1b. [ADR-0105 D4] Revoke the OTHER variant for this pair, always. A posture
   //     change (or a downgrade after F2) must converge on exactly one org-admin
   //     grant; leaving the superseded row would keep the old bits in force.
-  const supersededSetId = await resolvePermissionSetId(ql, supersededSetName);
+  const supersededSetId = await resolvePermissionSetId(ql, supersededSetName, logger);
   if (supersededSetId) {
     const stale = await tryFind(
       ql,
       'sys_user_permission_set',
       { user_id: userId, organization_id: orgId, permission_set_id: supersededSetId },
       5,
+      logger,
     );
     for (const row of stale) {
-      if (row?.id && (await tryDelete(ql, 'sys_user_permission_set', String(row.id)))) {
+      if (row?.id && (await tryDelete(ql, 'sys_user_permission_set', String(row.id), logger))) {
         logger?.info?.('[security] revoked superseded org-admin grant', {
           userId,
           orgId,
@@ -285,29 +332,35 @@ export async function reconcileOrgAdminGrant(
     'sys_user_permission_set',
     { user_id: userId, organization_id: orgId, permission_set_id: permSetId },
     5,
+    logger,
   );
 
   if (shouldGrant) {
     if (existingGrants.length > 0) {
       // Deduplicate stale duplicates if any slipped through.
       for (const extra of existingGrants.slice(1)) {
-        if (extra?.id) await tryDelete(ql, 'sys_user_permission_set', String(extra.id));
+        if (extra?.id) await tryDelete(ql, 'sys_user_permission_set', String(extra.id), logger);
       }
       return { action: 'noop' };
     }
-    const created = await tryInsert(ql, 'sys_user_permission_set', {
-      id: genId('ups'),
-      user_id: userId,
-      permission_set_id: permSetId,
-      organization_id: orgId,
-      // [#4586] The provenance the row already had a column for. `granted_by`
-      // is a `sys_user` lookup: the human whose better-auth call triggered the
-      // grade change when one was in scope, else `null` = the system (ADR-0118
-      // D1 — an id or null, never a sentinel). The machine marker and the
-      // triggering membership row live in `reason`, where free text belongs.
-      granted_by: options.attributedUserId ?? null,
-      reason: autoOrgAdminGrantReason(qualifyingMembership, grantSetName),
-    });
+    const created = await tryInsert(
+      ql,
+      'sys_user_permission_set',
+      {
+        id: genId('ups'),
+        user_id: userId,
+        permission_set_id: permSetId,
+        organization_id: orgId,
+        // [#4586] The provenance the row already had a column for. `granted_by`
+        // is a `sys_user` lookup: the human whose better-auth call triggered the
+        // grade change when one was in scope, else `null` = the system (ADR-0118
+        // D1 — an id or null, never a sentinel). The machine marker and the
+        // triggering membership row live in `reason`, where free text belongs.
+        granted_by: options.attributedUserId ?? null,
+        reason: autoOrgAdminGrantReason(qualifyingMembership, grantSetName),
+      },
+      logger,
+    );
     if (created) {
       logger?.info?.('[security] granted org-admin capability', {
         userId,
@@ -327,7 +380,7 @@ export async function reconcileOrgAdminGrant(
   }
   let removed = 0;
   for (const row of existingGrants) {
-    if (row?.id && (await tryDelete(ql, 'sys_user_permission_set', String(row.id)))) {
+    if (row?.id && (await tryDelete(ql, 'sys_user_permission_set', String(row.id), logger))) {
       removed += 1;
     }
   }
@@ -340,6 +393,16 @@ export async function reconcileOrgAdminGrant(
     });
     return { action: 'revoked' };
   }
+  // [#4640] Rows were found and none could be removed: the user keeps an
+  // org-admin capability the platform just decided they should not have. The
+  // `skipped` return already said so; nothing was reading it, which is how the
+  // broken call shape survived — so say it out loud as well.
+  logger?.warn?.('[security] org-admin capability could NOT be revoked — grant rows remain', {
+    userId,
+    orgId,
+    set: grantSetName,
+    remaining: existingGrants.length,
+  });
   return { action: 'skipped', reason: 'delete_failed' };
 }
 
@@ -359,7 +422,7 @@ export async function backfillOrgAdminGrants(
   const summary = { scanned: 0, granted: 0, revoked: 0, skipped: 0 };
   if (!ql || typeof ql.find !== 'function') return summary;
 
-  const permSetId = await resolvePermissionSetId(ql, orgAdminSetNameForPosture(posture));
+  const permSetId = await resolvePermissionSetId(ql, orgAdminSetNameForPosture(posture), logger);
   if (!permSetId) {
     logger?.debug?.('[security] org-admin backfill skipped — permission set missing');
     return summary;
@@ -367,9 +430,13 @@ export async function backfillOrgAdminGrants(
   // [ADR-0105 D4] The orphan sweep below must see BOTH variants: a boot that
   // changed posture leaves grants of the superseded set behind, and those are
   // exactly the rows whose bits must stop applying.
-  const supersededId = await resolvePermissionSetId(ql, supersededOrgAdminSetName(posture));
+  const supersededId = await resolvePermissionSetId(
+    ql,
+    supersededOrgAdminSetName(posture),
+    logger,
+  );
 
-  const members = await tryFind(ql, 'sys_member', {}, limit);
+  const members = await tryFind(ql, 'sys_member', {}, limit, logger);
   // De-duplicate by (user_id, organization_id) pair — a user with two
   // membership rows (e.g. legacy duplicates) only needs one reconcile.
   const seen = new Set<string>();
@@ -396,6 +463,7 @@ export async function backfillOrgAdminGrants(
     'sys_user_permission_set',
     { permission_set_id: { $in: grantSetIds } },
     limit,
+    logger,
   );
   for (const g of allGrants) {
     const userId = String(g?.user_id ?? '');
