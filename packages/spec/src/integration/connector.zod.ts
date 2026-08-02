@@ -295,9 +295,21 @@ export const RateLimitStrategySchema = lazySchema(() => z.enum([
 export type RateLimitStrategy = z.infer<typeof RateLimitStrategySchema>;
 
 /**
- * Rate Limiting Configuration
+ * Rate Limiting Configuration — connector-side (OUTBOUND throttling).
+ *
+ * `Connector`-prefixed because `shared/http.zod.ts` exports a different
+ * `RateLimitConfig` for INBOUND API rate limiting (`enabled` / `windowMs` /
+ * `maxRequests`, all defaulted). The two describe opposite directions and are
+ * not interchangeable: this one throttles the calls *we* make to an external
+ * system (token bucket, burst capacity, and the upstream `X-RateLimit-*`
+ * response headers we read back), while the shared one limits the calls
+ * *others* make to us — where `respectUpstreamLimits` / `rateLimitHeaders` are
+ * structurally meaningless. Same name, different units (`windowSeconds` vs
+ * `windowMs`) and different requiredness, so an author copying a snippet from
+ * one side to the other got a clean parse with the foreign keys silently
+ * stripped (#4684, ADR-0104). They may not share a name (ADR-0112 D9a).
  */
-export const RateLimitConfigSchema = lazySchema(() => z.object({
+export const ConnectorRateLimitConfigSchema = lazySchema(() => z.object({
   /**
    * Rate limiting strategy
    */
@@ -333,7 +345,7 @@ export const RateLimitConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Custom rate limit headers'),
 }));
 
-export type RateLimitConfig = z.infer<typeof RateLimitConfigSchema>;
+export type ConnectorRateLimitConfig = z.infer<typeof ConnectorRateLimitConfigSchema>;
 
 /**
  * Retry Strategy — connector-side.
@@ -671,7 +683,7 @@ export const ConnectorSchema = lazySchema(() => z.object({
   /**
    * Rate limiting configuration
    */
-  rateLimitConfig: RateLimitConfigSchema.optional().describe('Rate limiting configuration'),
+  rateLimitConfig: ConnectorRateLimitConfigSchema.optional().describe('Rate limiting configuration'),
   
   /**
    * Retry configuration

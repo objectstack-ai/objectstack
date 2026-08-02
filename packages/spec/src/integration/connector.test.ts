@@ -14,7 +14,7 @@ import {
   WebhookEventSchema,
   
   // Rate Limiting & Retry
-  RateLimitConfigSchema,
+  ConnectorRateLimitConfigSchema,
   RetryConfigSchema,
   
   // Base Connector
@@ -269,7 +269,7 @@ describe('WebhookConfigSchema', () => {
 // Rate Limiting & Retry Tests
 // ============================================================================
 
-describe('RateLimitConfigSchema', () => {
+describe('ConnectorRateLimitConfigSchema', () => {
   it('should accept valid rate limit configuration', () => {
     const config = {
       strategy: 'token_bucket',
@@ -279,7 +279,7 @@ describe('RateLimitConfigSchema', () => {
       respectUpstreamLimits: true,
     };
     
-    expect(() => RateLimitConfigSchema.parse(config)).not.toThrow();
+    expect(() => ConnectorRateLimitConfigSchema.parse(config)).not.toThrow();
   });
   
   it('should use default values', () => {
@@ -288,7 +288,7 @@ describe('RateLimitConfigSchema', () => {
       windowSeconds: 60,
     };
     
-    const parsed = RateLimitConfigSchema.parse(config);
+    const parsed = ConnectorRateLimitConfigSchema.parse(config);
     expect(parsed.strategy).toBe('token_bucket');
     expect(parsed.respectUpstreamLimits).toBe(true);
   });
@@ -652,5 +652,145 @@ describe('ConnectorHealthSchema', () => {
     });
 
     expect(connector.errorMapping?.rules).toHaveLength(1);
+  });
+});
+
+// ─── [#4684] Dual-source regression pin ──────────────────────────────
+//
+// RUNTIME + compiler-API assertions, deliberately. #4642 established that a
+// compile-time pin in `packages/spec` is a no-op: `tsconfig.json` excludes
+// `**/*.test.ts` and `vitest.config.ts` never enables `typecheck`, so an
+// `Assert< Equal< … > >` here would be dead text. The third test below is the
+// only shape in this repo that actually pins a TYPE.
+//
+// What these defend: `RateLimitConfig` naming exactly ONE declaration across
+// the published entries. `./shared` limits INBOUND API traffic (`enabled` /
+// `windowMs` / `maxRequests`, every key defaulted); `./integration` throttles
+// OUTBOUND connector calls (`strategy` / `maxRequests` / `windowSeconds`
+// required, plus the upstream `X-RateLimit-*` header names). Neither is a
+// superset of the other and neither schema is `.strict()`, so before #4684 a
+// snippet copied from one side to the other PARSED CLEAN with its foreign keys
+// silently stripped — ADR-0104's silent-strip class, in the export surface
+// rather than in stored metadata. ADR-0112 D9a's remedy applies: the
+// connector-side name gets a `Connector` prefix so one name means one thing.
+describe('[#4684] RateLimitConfig no longer names two declarations', () => {
+  it('./integration exposes the connector shape only under its prefixed name', async () => {
+    const integrationEntry = await import('./index');
+
+    expect(integrationEntry.ConnectorRateLimitConfigSchema).toBeDefined();
+    // The bare name must be gone from this entry — an alias re-export kept "for
+    // compatibility" would be a THIRD declaration of the same name and would
+    // re-open the trap this issue closed.
+    expect('RateLimitConfigSchema' in integrationEntry).toBe(false);
+  });
+
+  it('./shared keeps the inbound declaration untouched', async () => {
+    const sharedEntry = await import('../shared/index');
+
+    // Same object identity as before the rename, same three defaulted keys.
+    expect(sharedEntry.RateLimitConfigSchema.parse({})).toEqual({
+      enabled: false,
+      windowMs: 60000,
+      maxRequests: 100,
+    });
+  });
+
+  it('the two schemas remain distinct declarations that reject each other’s shape', async () => {
+    const integrationEntry = await import('./index');
+    const sharedEntry = await import('../shared/index');
+
+    expect(integrationEntry.ConnectorRateLimitConfigSchema).not.toBe(
+      sharedEntry.RateLimitConfigSchema,
+    );
+
+    // The outbound shape demands what the inbound shape defaults away.
+    expect(integrationEntry.ConnectorRateLimitConfigSchema.safeParse({}).success).toBe(false);
+    // And the inbound shape still strips outbound keys — which is exactly why
+    // the two must not answer to one name. Pinned, not fixed: it is correct
+    // behaviour for a non-strict schema; the defect was the shared NAME.
+    expect(sharedEntry.RateLimitConfigSchema.parse({ windowSeconds: 60, strategy: 'token_bucket' }))
+      .toEqual({ enabled: false, windowMs: 60000, maxRequests: 100 });
+  });
+
+  // The load-bearing one. `RateLimitConfig` / `ConnectorRateLimitConfig` are
+  // TYPES — erased before any runtime assertion can see them — so every test
+  // above would stay green if `./integration` re-added `export type
+  // RateLimitConfig = z.infer<…>`, which is precisely the defect. This resolves
+  // each entry's exports through their alias chains to the ORIGINAL
+  // declaration: the same symbol-identity measurement
+  // `check:dual-source-exports` makes, but over `src/` so it runs in `pnpm test`
+  // without a build.
+  it('no name resolves to two declarations across ./shared and ./integration (types included)', async () => {
+    const ts = (await import('typescript')).default;
+    const { resolve, relative, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+
+    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    const entries = {
+      './shared': resolve(specDir, 'src/shared/index.ts'),
+      './integration': resolve(specDir, 'src/integration/index.ts'),
+    };
+    const program = ts.createProgram(Object.values(entries), {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      skipLibCheck: true,
+      noEmit: true,
+    });
+    const checker = program.getTypeChecker();
+    const unalias = (s: import('typescript').Symbol) =>
+      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
+
+    /** entry → exported name → `file:line` of the ORIGINAL declaration. */
+    const originsByEntry = new Map<string, Map<string, string>>();
+    for (const [sub, file] of Object.entries(entries)) {
+      const sf = program.getSourceFile(file);
+      const moduleSym = sf && checker.getSymbolAtLocation(sf);
+      // Without this, a resolution failure would make every assertion below
+      // pass vacuously — the exact way a gate goes dormant (#4642).
+      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
+
+      const origins = new Map<string, string>();
+      for (const exported of checker.getExportsOfModule(moduleSym!)) {
+        const decl = unalias(exported).declarations?.[0];
+        if (!decl) continue;
+        const declFile = decl.getSourceFile();
+        origins.set(
+          exported.getName(),
+          `${relative(specDir, declFile.fileName)}:${
+            declFile.getLineAndCharacterOfPosition(decl.getStart()).line + 1
+          }`,
+        );
+      }
+      // Guard #2: an entry that resolved to nothing would also pass vacuously.
+      expect(origins.size, `${sub} must export something`).toBeGreaterThan(20);
+      originsByEntry.set(sub, origins);
+    }
+
+    const shared = originsByEntry.get('./shared')!;
+    const integration = originsByEntry.get('./integration')!;
+
+    // The names this issue is about: present on the right entry, absent from
+    // the wrong one, and each resolving to its own file.
+    expect(integration.get('ConnectorRateLimitConfig')).toMatch(
+      /^src\/integration\/connector\.zod\.ts:\d+$/,
+    );
+    expect(integration.get('ConnectorRateLimitConfigSchema')).toMatch(
+      /^src\/integration\/connector\.zod\.ts:\d+$/,
+    );
+    expect(integration.get('RateLimitConfig')).toBeUndefined();
+    expect(integration.get('RateLimitConfigSchema')).toBeUndefined();
+    expect(shared.get('RateLimitConfig')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
+    expect(shared.get('RateLimitConfigSchema')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
+
+    // And the general invariant for this pair of entries: any name they BOTH
+    // export must resolve to one and the same declaration. `FieldMapping` /
+    // `FieldMappingSchema` are the remaining known offenders (#4535 C12) — they
+    // stay listed here so this pin fails the moment a NEW one appears, instead
+    // of being written as a blanket "no shared names" that never held.
+    const KNOWN_STILL_DUAL_SOURCE = ['FieldMapping', 'FieldMappingSchema'];
+    const conflicts = [...shared.keys()]
+      .filter((name) => integration.has(name) && integration.get(name) !== shared.get(name))
+      .sort();
+    expect(conflicts).toEqual(KNOWN_STILL_DUAL_SOURCE);
   });
 });
