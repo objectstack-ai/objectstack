@@ -86,7 +86,7 @@ const result = BatchConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **atomic** | `boolean` | ✅ | If true, rollback entire batch on any failure (transaction mode) |
+| **atomic** | `boolean` | ✅ | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes with rows marked ROLLED_BACK / NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
 | **returnRecords** | `boolean` | ✅ | If true, return full record data in response |
 | **continueOnError** | `boolean` | ✅ | If true (and atomic=false), continue processing remaining records after errors |
 | **validateOnly** | `any` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |

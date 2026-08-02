@@ -68,6 +68,7 @@ import type {
 } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
+import type { IObjectQLEngine } from '@objectstack/core';
 
 /**
  * Overlay-row lifecycle state.
@@ -126,8 +127,11 @@ export interface SysMetadataEngine {
    * underlying driver lacks ACID support (matches the real
    * `ObjectQL.transaction` semantics). Repository code must not rely on
    * rollback for correctness against in-memory drivers.
+   *
+   * Typed off the `objectql` slot contract (ADR-0118 D1) rather than restated
+   * by hand, so this stub surface cannot drift from `ObjectQL.transaction`.
    */
-  transaction?<T>(callback: (trxCtx: any) => Promise<T>, baseContext?: any): Promise<T>;
+  transaction?: IObjectQLEngine['transaction'];
 }
 
 export interface SysMetadataRepositoryOptions {

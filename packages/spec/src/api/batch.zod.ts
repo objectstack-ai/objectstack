@@ -59,7 +59,23 @@ export type BatchRecord = z.infer<typeof BatchRecordSchema>;
  * Configuration options for batch operations
  */
 export const BatchOptionsSchema = lazySchema(() => z.object({
-  atomic: z.boolean().optional().default(true).describe('If true, rollback entire batch on any failure (transaction mode)'),
+  // ADR-0118 D4. `atomic` declared `.default(true)` while NO enforcement site
+  // delivered atomicity: `batchData` merely broke its loop, leaving every prior
+  // write committed, and the REST route deliberately forwards the ORIGINAL body
+  // rather than the parsed output, so this default never reached the loop at
+  // all. Now that the flag is real, the declaration is aligned DOWN to what
+  // every site already does rather than up to what none of them did — honouring
+  // the old `true` would silently flip the failure semantics of every existing
+  // batch caller and hard-fail ordinary batches on any driver that cannot
+  // transact. Callers who were explicitly sending `atomic: true` now get what
+  // they asked for; callers sending nothing keep today's behaviour exactly.
+  atomic: z.boolean().optional().default(false).describe(
+    'Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: '
+    + 'the first failure rolls back every prior write, and the response reports zero successes with rows '
+    + 'marked ROLLED_BACK / NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request '
+    + '(501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe '
+    + '`capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. '
+    + 'Default false: sequential best-effort.'),
   returnRecords: z.boolean().optional().default(false).describe('If true, return full record data in response'),
   continueOnError: z.boolean().optional().default(false).describe('If true (and atomic=false), continue processing remaining records after errors'),
   // `validateOnly` promised a dry-run — "validate records without persisting" —

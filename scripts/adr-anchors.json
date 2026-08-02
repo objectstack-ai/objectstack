@@ -75,6 +75,16 @@
       "file": "packages/plugins/plugin-security/src/permission-evaluator.ts",
       "adrs": ["ADR-0057", "ADR-0066"],
       "invariant": "The superuser bypass derives solely from a resolved set carrying the `objects['*']` wildcard with `viewAllRecords`/`modifyAllRecords` (ADR-0066 D2) — no stored boolean, no role fast-path. Scope depth (own/unit/unit_and_below/org) resolves to an effective access depth per operation class (ADR-0057 D1); an unenforceable depth is a compile error, never silent fail-open (ADR-0049)."
+    },
+    {
+      "file": "packages/spec/src/contracts/objectql-engine.ts",
+      "adrs": ["ADR-0118"],
+      "invariant": "`transaction` is DECLARED on the `objectql` slot contract — plugin space reaches ADR-0034's ambient transaction by name, not through `as unknown as` casts. Required, not optional, per this file's own rule. Its two caveats (default-driver only; the callback runs with NO transaction when the driver lacks `beginTransaction`) are part of the declared meaning, so a caller that cannot lose atomicity silently must fail closed rather than assume it held."
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "adrs": ["ADR-0118"],
+      "invariant": "`batchData`'s `atomic` is REAL or REFUSED, never silent best-effort. An explicitly atomic batch runs inside ONE `engine.transaction()`, so a failure rolls back every prior write and the response reports zero successes (rows marked ROLLED_BACK / NOT_ATTEMPTED — reporting a rolled-back row as `success: true` was the original bug, not merely the missing transaction). A runtime that cannot roll back gets 501 NOT_IMPLEMENTED; degrading to best-effort is how the flag came to lie."
     }
   ]
 }

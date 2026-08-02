@@ -163,4 +163,39 @@ export interface IObjectQLEngine extends IDataEngine {
     wasDatastoreCreatedFromEmpty(): boolean;
     /** Drop the memoized migration-flag reads (the attestation may race a fast boot's first read). */
     invalidateDataMigrationFlags(): void;
+
+    // ── Transactions (ADR-0118 D1) ───────────────────────────────────────
+    /**
+     * Run `callback` inside ONE driver transaction — the ADR-0034 ambient
+     * transaction. The callback receives a context carrying the handle, which
+     * callers thread to downstream engine calls as `{ context: trxCtx }`;
+     * operations issued during the callback ALSO bind to it ambiently
+     * (`AsyncLocalStorage`), so hook bodies, validation predicates and internal
+     * reference reads reuse the transaction's connection without threading it
+     * by hand. Commit on resolve, rollback and re-throw on reject. A nested
+     * call JOINS the open transaction rather than opening a second one, leaving
+     * the outermost caller the sole owner of commit/rollback (ADR-0067 D2).
+     *
+     * Declared here under this file's evidence bar — three cross-package
+     * consumers already call it through the slot, each having reached around
+     * the type system to do so: the metadata protocol's atomic publish
+     * (`publishPackageDrafts`) and its `transactionalBatch` discovery probe,
+     * and the sys-metadata repository's `withTxn`. REQUIRED per this file's
+     * header; callers that tolerate test doubles keep their runtime
+     * `typeof === 'function'` probes, which types do not replace.
+     *
+     * TWO CAVEATS ARE PART OF THE DECLARED MEANING (ADR-0118 D1), not
+     * behaviour to be discovered: this covers the DEFAULT driver only — objects
+     * routed elsewhere by `setDatasourceMapping` are written outside it — and
+     * when that driver has no `beginTransaction` the callback runs with NO
+     * transaction and NO rollback. A caller that cannot tolerate silently
+     * losing atomicity must fail closed itself rather than assume it held; see
+     * `batchData`'s atomic gate (ADR-0118 D4). Tightening both is tracked by
+     * the ADR's follow-up.
+     *
+     * `trxCtx`/`baseContext` are the engine-local execution-context shape, left
+     * loose here per this file's edge-typing rule; consumers narrow at the call
+     * site.
+     */
+    transaction<T>(callback: (trxCtx: any) => Promise<T>, baseContext?: any): Promise<T>;
 }

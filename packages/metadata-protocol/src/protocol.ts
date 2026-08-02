@@ -811,6 +811,18 @@ function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEve
 }
 
 /**
+ * One row of a `batchData` result. Deliberately the shape the implementation
+ * has always emitted (`error: string`, `record`), which diverges from
+ * `BatchOperationResultSchema`'s `errors: ApiError[]` / `data` — reconciling
+ * the two is a wire-visible change that must not ride along on a bug fix
+ * (ADR-0118 D4; tracked separately).
+ */
+type BatchDataRowResult = { id?: string; success: boolean; error?: string; record?: any; droppedFields?: DroppedFieldsEvent[] };
+
+/** What one pass of the `batchData` record loop produced (ADR-0118 D4). */
+type BatchDataLoopOutcome = { results: BatchDataRowResult[]; succeeded: number; failed: number };
+
+/**
  * The canonical `QueryAST` surface (`spec/data/query.zod.ts`), enumerated.
  *
  * Typed as `Record<keyof QueryAST, true>` so `tsc` pins it to the spec in BOTH
@@ -2286,7 +2298,9 @@ export class ObjectStackProtocolImplementation implements
             // honour a transaction, so `declared === enforced` (Prime Directive
             // #10). The rest-server producer ANDs this with `api.enableBatch` so
             // a server that doesn't mount the route reports `false` at its layer.
-            transactionalBatch: typeof (this.engine as { transaction?: unknown })?.transaction === 'function',
+            // (ADR-0118 D1: `transaction` is contract-declared, so this probe
+            // no longer needs a structural cast to ask the question.)
+            transactionalBatch: typeof this.engine?.transaction === 'function',
         };
 
         // Convert flat booleans → hierarchical capability objects
@@ -5221,9 +5235,6 @@ export class ObjectStackProtocolImplementation implements
         const { object, request: batchReq, context } = request;
         this.assertObjectRegistered(object); // [#3770]
         const { operation, records, options } = batchReq;
-        const results: Array<{ id?: string; success: boolean; error?: string; record?: any; droppedFields?: DroppedFieldsEvent[] }> = [];
-        let succeeded = 0;
-        let failed = 0;
 
         // [#3043] The batch endpoint is an external ingress: strip forged
         // read-only columns on create. [#3455] It DOES resolve an execution
@@ -5232,6 +5243,118 @@ export class ObjectStackProtocolImplementation implements
         // system caller is correctly exempt (the pre-#3455 code hard-coded the
         // strip context to `undefined`, treating every batch create as non-system).
         const batchSchema = this.engine.registry?.getObject(object);
+
+        // ADR-0118 D4 — `atomic` is REAL or REFUSED, never silent best-effort.
+        // This flag used to only `break` the loop: every write before the
+        // failure stayed COMMITTED while the response called itself atomic and
+        // reported those rows `success: true`. Same class as #4346 — a
+        // write-path guarantee declared but not enforced, silent and
+        // destructive exactly when it matters.
+        //
+        // Opt-in is an explicit `=== true`. `BatchOptionsSchema` declared
+        // `.default(true)` while no enforcement site ever delivered atomicity
+        // (REST forwards the original body, so the parsed default never reached
+        // this loop), so treating "absent" as atomic would silently flip every
+        // existing caller's failure semantics. The declaration is aligned to
+        // the enforced value instead; see the schema's note.
+        if (options?.atomic === true) {
+            return await this.runAtomicBatchData({ object, operation, records, options, batchSchema, context });
+        }
+
+        const outcome = await this.runBatchDataLoop({ object, operation, records, options, batchSchema, context, atomic: false });
+        return this.buildBatchDataResponse(operation, records, options, outcome);
+    }
+
+    /**
+     * The atomic arm of {@link batchData} (ADR-0118 D4): the whole batch runs
+     * inside ONE `engine.transaction()`, so the first failure rolls back every
+     * prior write — and the response says so, rather than reporting rows that
+     * no longer exist as successes.
+     */
+    private async runAtomicBatchData(args: {
+        object: string;
+        operation: BatchUpdateRequest['operation'];
+        records: BatchUpdateRequest['records'];
+        options: BatchUpdateRequest['options'];
+        batchSchema: any;
+        context: any;
+    }): Promise<BatchUpdateResponse> {
+        const { object, operation, records, options, batchSchema, context } = args;
+
+        const engineTx = typeof this.engine?.transaction === 'function'
+            ? this.engine.transaction.bind(this.engine)
+            : undefined;
+        // Two-level probe. `engine.transaction()` runs the callback with NO
+        // transaction and NO rollback when the default driver lacks
+        // `beginTransaction` — a declared caveat of the contract member
+        // (ADR-0118 D1), and one that would turn "atomic" back into a lie
+        // precisely where it matters. So where the driver registry is
+        // inspectable, the driver is checked too; where it is not (test
+        // doubles), the engine-level probe is all there is.
+        const defaultDriverName = this.engine.getDefaultDriverName?.();
+        const defaultDriver = defaultDriverName ? this.engine.getDriverByName?.(defaultDriverName) : undefined;
+        const driverCanTransact = !defaultDriver || typeof (defaultDriver as any).beginTransaction === 'function';
+
+        if (!engineTx || !driverCanTransact) {
+            // REFUSE, do not degrade. A caller that asked for atomicity is
+            // exactly the caller who must not silently receive best-effort —
+            // silent degradation is how this flag came to lie in the first
+            // place. Mirrors the cross-object /batch route's refusal; the
+            // condition is generic, so it uses the standard error catalog
+            // rather than registering an ADR-0112 synonym.
+            const err: any = new Error(
+                `Atomic batch on '${object}' requires engine transaction support; this runtime cannot roll back. ` +
+                `Retry without options.atomic, or probe capabilities.transactionalBatch on /discovery first.`,
+            );
+            err.status = 501;
+            err.code = 'NOT_IMPLEMENTED';
+            throw err;
+        }
+
+        // Identity-checked sentinel: aborting the transaction is how a rollback
+        // is requested, but the abort itself is not an error to propagate.
+        const ABORT = new Error('atomic batch aborted — rolled back');
+        let aborted: BatchDataLoopOutcome | undefined;
+        try {
+            return await engineTx(async (trxCtx: any) => {
+                const outcome = await this.runBatchDataLoop({ object, operation, records, options, batchSchema, context: trxCtx, atomic: true });
+                if (outcome.failed > 0) {
+                    aborted = outcome;
+                    throw ABORT;
+                }
+                return this.buildBatchDataResponse(operation, records, options, outcome);
+            }, context);
+        } catch (err) {
+            if (err === ABORT && aborted) {
+                return this.buildRolledBackBatchResponse(operation, records, aborted);
+            }
+            throw err;
+        }
+    }
+
+    /**
+     * The per-record loop, shared by both arms of {@link batchData} (ADR-0118
+     * D4) so atomic and non-atomic cannot drift apart. `atomic` changes exactly
+     * two things: it aborts on the first failure regardless of
+     * `continueOnError` (whose own contract text already scopes it to
+     * `atomic=false`), and it forbids the upsert fallback — inside an aborted
+     * transaction a fallback insert can only fail with a secondary error that
+     * masks the real cause.
+     */
+    private async runBatchDataLoop(args: {
+        object: string;
+        operation: BatchUpdateRequest['operation'];
+        records: BatchUpdateRequest['records'];
+        options: BatchUpdateRequest['options'];
+        batchSchema: any;
+        context: any;
+        atomic: boolean;
+    }): Promise<BatchDataLoopOutcome> {
+        const { object, operation, records, options, batchSchema, context, atomic } = args;
+        const results: BatchDataRowResult[] = [];
+        let succeeded = 0;
+        let failed = 0;
+
         // Spread form for options objects that already carry `where`/`onFieldsDropped`
         // (`{}` spread is a safe no-op); arg form for `insert`, whose whole options
         // arg is `undefined` when there is no context — exact parity with createData.
@@ -5274,7 +5397,13 @@ export class ObjectStackProtocolImplementation implements
                                     const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, insertCtx as any);
                                     results.push({ id: created.id, success: true, record: created });
                                 }
-                            } catch {
+                            } catch (err) {
+                                // ADR-0118 D4 — no blind fallback inside a
+                                // transaction: once the failing statement has
+                                // aborted it, this insert can only fail with a
+                                // secondary error ("current transaction is
+                                // aborted") that buries the real cause.
+                                if (atomic) throw err;
                                 const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, insertCtx as any);
                                 results.push({ id: created.id, success: true, record: created });
                             }
@@ -5299,8 +5428,10 @@ export class ObjectStackProtocolImplementation implements
             } catch (err: any) {
                 results.push({ id: record.id, success: false, error: err.message });
                 failed++;
-                if (options?.atomic) {
-                    // Abort remaining operations on first failure in atomic mode
+                if (atomic) {
+                    // Abort on the first failure; the caller rolls back. Atomic
+                    // outranks `continueOnError` — there is nothing to continue
+                    // toward when every write so far is about to be undone.
                     break;
                 }
                 if (!options?.continueOnError) {
@@ -5309,6 +5440,17 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
+        return { results, succeeded, failed };
+    }
+
+    /** The ordinary (committed) batch response — every row reports what it did. */
+    private buildBatchDataResponse(
+        operation: BatchUpdateRequest['operation'],
+        records: BatchUpdateRequest['records'],
+        options: BatchUpdateRequest['options'],
+        outcome: BatchDataLoopOutcome,
+    ): BatchUpdateResponse {
+        const { results, succeeded, failed } = outcome;
         return {
             success: failed === 0,
             operation,
@@ -5321,7 +5463,49 @@ export class ObjectStackProtocolImplementation implements
             results: options?.returnRecords !== false ? results : results.map(r => ({ id: r.id, success: r.success, error: r.error, ...(r.droppedFields ? { droppedFields: r.droppedFields } : {}) })),
         } as BatchUpdateResponse;
     }
-    
+
+    /**
+     * The response for an atomic batch that rolled back (ADR-0118 D4).
+     *
+     * Nothing persisted, so nothing may report success — the old code's real
+     * damage was not the missing transaction alone but telling the caller that
+     * rows it had just undone were `success: true`. Rows are classified from
+     * what actually happened: a row that had succeeded is now `ROLLED_BACK`,
+     * the row that failed keeps its causal error, and rows the abort never
+     * reached are `NOT_ATTEMPTED`. `returnRecords` is moot — no record exists
+     * to return, and a `droppedFields` warning about a reverted write would
+     * only mislead.
+     */
+    private buildRolledBackBatchResponse(
+        operation: BatchUpdateRequest['operation'],
+        records: BatchUpdateRequest['records'],
+        outcome: BatchDataLoopOutcome,
+    ): BatchUpdateResponse {
+        const attempted = outcome.results;
+        const causeIndex = attempted.findIndex(r => !r.success);
+        const cause = causeIndex >= 0 ? attempted[causeIndex]?.error : undefined;
+
+        const results: BatchDataRowResult[] = records.map((record, i) => {
+            const attempt = attempted[i];
+            if (!attempt) {
+                return { id: record.id, success: false, error: `NOT_ATTEMPTED: atomic batch aborted by record ${causeIndex}` };
+            }
+            if (attempt.success) {
+                return { id: attempt.id ?? record.id, success: false, error: `ROLLED_BACK: record ${causeIndex} failed — ${cause ?? 'unknown error'}` };
+            }
+            return { id: attempt.id ?? record.id, success: false, error: attempt.error };
+        });
+
+        return {
+            success: false,
+            operation,
+            total: records.length,
+            succeeded: 0,
+            failed: records.length,
+            results,
+        } as BatchUpdateResponse;
+    }
+
     async createManyData(request: { object: string, records: any[], context?: any }): Promise<any> {
         this.assertObjectRegistered(request.object); // [#3770]
         // [#3043] Ingress-level static-`readonly` strip (per row) — mirrors
@@ -7452,10 +7636,14 @@ export class ObjectStackProtocolImplementation implements
         const promoted: PromotedDraft[] = [];
         // (assigned inside the transaction closure — keep the wide type)
         let commit = null as { commitId: string } | null;
+        // ADR-0118 D1 — `transaction` is contract-declared, so this reaches it
+        // by name instead of through a structural cast. Bound once up front:
+        // the probe and the call must agree on one resolved function.
+        const engineTx = typeof this.engine?.transaction === 'function'
+            ? this.engine.transaction.bind(this.engine)
+            : undefined;
         const inTxn: <T>(cb: () => Promise<T>) => Promise<T> =
-            typeof (this.engine as { transaction?: unknown })?.transaction === 'function'
-                ? (cb) => (this.engine as unknown as { transaction: <R>(fn: () => Promise<R>) => Promise<R> }).transaction(() => cb())
-                : (cb) => cb();
+            engineTx ? (cb) => engineTx(() => cb()) : (cb) => cb();
         try {
             await inTxn(async () => {
                 for (const d of ordered) {

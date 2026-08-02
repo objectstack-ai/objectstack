@@ -54,7 +54,11 @@ describe('BatchOptionsSchema', () => {
   it('should use default values', () => {
     const options = BatchOptionsSchema.parse({});
 
-    expect(options.atomic).toBe(true);
+    // ADR-0118 D4 — `atomic` defaults to FALSE. It declared `true` for as long
+    // as no batch surface honoured it; the declaration was aligned down to the
+    // enforced behaviour so that opting in is explicit and nobody's failure
+    // semantics changed silently.
+    expect(options.atomic).toBe(false);
     expect(options.returnRecords).toBe(false);
     expect(options.continueOnError).toBe(false);
   });
