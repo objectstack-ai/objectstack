@@ -26,11 +26,11 @@ Based on the Protocol-Oriented Architecture pattern similar to:
 ## TypeScript Usage
 
 ```typescript
-import { CapabilityConformanceLevel, ExtensionPoint, PluginCapability, PluginCapabilityManifest, PluginDependency, PluginInterface, ProtocolFeature, ProtocolReference, ProtocolVersion } from '@objectstack/spec/kernel';
+import { CapabilityConformanceLevelSchema, ExtensionPointSchema, PluginCapabilitySchema, PluginCapabilityManifestSchema, PluginDependencySchema, PluginInterfaceSchema, ProtocolFeatureSchema, ProtocolReferenceSchema, ProtocolVersionSchema } from '@objectstack/spec/kernel';
 import type { CapabilityConformanceLevel, ExtensionPoint, PluginCapability, PluginCapabilityManifest, PluginDependency, PluginInterface, ProtocolFeature, ProtocolReference, ProtocolVersion } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = CapabilityConformanceLevel.parse(data);
+const result = CapabilityConformanceLevelSchema.parse(data);
 ```
 
 ---

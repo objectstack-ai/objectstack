@@ -54,11 +54,11 @@ design (industry references, 4-layer model, audit trail).
 ## TypeScript Usage
 
 ```typescript
-import { MetadataLock, MetadataLockSource, MetadataProvenance } from '@objectstack/spec/kernel';
+import { MetadataLockSchema, MetadataLockSourceSchema, MetadataProvenanceSchema } from '@objectstack/spec/kernel';
 import type { MetadataLock, MetadataLockSource, MetadataProvenance } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = MetadataLock.parse(data);
+const result = MetadataLockSchema.parse(data);
 ```
 
 ---

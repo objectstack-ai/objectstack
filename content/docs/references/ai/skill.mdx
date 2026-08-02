@@ -18,11 +18,11 @@ Allows context-aware activation based on object type, user role, etc.
 ## TypeScript Usage
 
 ```typescript
-import { Skill, SkillTriggerCondition } from '@objectstack/spec/ai';
+import { SkillSchema, SkillTriggerConditionSchema } from '@objectstack/spec/ai';
 import type { Skill, SkillTriggerCondition } from '@objectstack/spec/ai';
 
 // Validate data
-const result = Skill.parse(data);
+const result = SkillSchema.parse(data);
 ```
 
 ---

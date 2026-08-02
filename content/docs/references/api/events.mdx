@@ -26,11 +26,11 @@ Examples:
 ## TypeScript Usage
 
 ```typescript
-import { DataEvent, DataEventType, MetadataEventType } from '@objectstack/spec/api';
+import { DataEventSchema, DataEventType, MetadataEventType } from '@objectstack/spec/api';
 import type { DataEvent, DataEventType, MetadataEventType } from '@objectstack/spec/api';
 
 // Validate data
-const result = DataEvent.parse(data);
+const result = DataEventSchema.parse(data);
 ```
 
 ---

@@ -16,11 +16,11 @@ Can be a built-in driver or a plugin-contributed driver (e.g., "com.vendor.snowf
 ## TypeScript Usage
 
 ```typescript
-import { Datasource, DatasourceCapabilities, DriverDefinition, DriverType, ExternalDatasourceSettings, ModeSchema } from '@objectstack/spec/data';
-import type { Datasource, DatasourceCapabilities, DriverDefinition, DriverType, ExternalDatasourceSettings, Mode } from '@objectstack/spec/data';
+import { DatasourceSchema, DatasourceCapabilities, DriverDefinitionSchema, DriverType, ExternalDatasourceSettingsSchema } from '@objectstack/spec/data';
+import type { Datasource, DriverDefinition, ExternalDatasourceSettings } from '@objectstack/spec/data';
 
 // Validate data
-const result = Datasource.parse(data);
+const result = DatasourceSchema.parse(data);
 ```
 
 ---

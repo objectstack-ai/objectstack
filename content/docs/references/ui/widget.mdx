@@ -44,11 +44,11 @@ onValidate: "return value.length > 0 ? null : 'Required field'"
 ## TypeScript Usage
 
 ```typescript
-import { WidgetEvent, WidgetLifecycle, WidgetManifest, WidgetProperty, WidgetSource } from '@objectstack/spec/ui';
+import { WidgetEventSchema, WidgetLifecycleSchema, WidgetManifestSchema, WidgetPropertySchema, WidgetSourceSchema } from '@objectstack/spec/ui';
 import type { WidgetEvent, WidgetLifecycle, WidgetManifest, WidgetProperty, WidgetSource } from '@objectstack/spec/ui';
 
 // Validate data
-const result = WidgetEvent.parse(data);
+const result = WidgetEventSchema.parse(data);
 ```
 
 ---

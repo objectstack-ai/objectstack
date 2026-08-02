@@ -24,11 +24,11 @@ See also: https://www.iso.org/standard/27001
 ## TypeScript Usage
 
 ```typescript
-import { Incident, IncidentCategory, IncidentNotificationMatrix, IncidentNotificationRule, IncidentResponsePhase, IncidentResponsePolicy, IncidentSeverity, IncidentStatus } from '@objectstack/spec/system';
+import { IncidentSchema, IncidentCategorySchema, IncidentNotificationMatrixSchema, IncidentNotificationRuleSchema, IncidentResponsePhaseSchema, IncidentResponsePolicySchema, IncidentSeveritySchema, IncidentStatusSchema } from '@objectstack/spec/system';
 import type { Incident, IncidentCategory, IncidentNotificationMatrix, IncidentNotificationRule, IncidentResponsePhase, IncidentResponsePolicy, IncidentSeverity, IncidentStatus } from '@objectstack/spec/system';
 
 // Validate data
-const result = Incident.parse(data);
+const result = IncidentSchema.parse(data);
 ```
 
 ---

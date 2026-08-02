@@ -30,11 +30,11 @@ See also: [api/odata.zod.ts](/docs/references/api/odata) - OData API configurati
 ## TypeScript Usage
 
 ```typescript
-import { ODataQueryAdapter, OperatorMapping, QueryAdapterConfig, QueryAdapterTarget, RestQueryAdapter } from '@objectstack/spec/api';
+import { ODataQueryAdapterSchema, OperatorMappingSchema, QueryAdapterConfigSchema, QueryAdapterTargetSchema, RestQueryAdapterSchema } from '@objectstack/spec/api';
 import type { ODataQueryAdapter, OperatorMapping, QueryAdapterConfig, QueryAdapterTarget, RestQueryAdapter } from '@objectstack/spec/api';
 
 // Validate data
-const result = ODataQueryAdapter.parse(data);
+const result = ODataQueryAdapterSchema.parse(data);
 ```
 
 ---

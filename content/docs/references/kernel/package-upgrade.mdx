@@ -48,11 +48,11 @@ and rollback capabilities.
 ## TypeScript Usage
 
 ```typescript
-import { MetadataChangeType, MetadataDiffItem, RollbackPackageRequest, RollbackPackageResponse, UpgradeImpactLevel, UpgradePackageRequest, UpgradePackageResponse, UpgradePhase, UpgradePlan, UpgradeSnapshot } from '@objectstack/spec/kernel';
+import { MetadataChangeTypeSchema, MetadataDiffItemSchema, RollbackPackageRequestSchema, RollbackPackageResponseSchema, UpgradeImpactLevelSchema, UpgradePackageRequestSchema, UpgradePackageResponseSchema, UpgradePhaseSchema, UpgradePlanSchema, UpgradeSnapshotSchema } from '@objectstack/spec/kernel';
 import type { MetadataChangeType, MetadataDiffItem, RollbackPackageRequest, RollbackPackageResponse, UpgradeImpactLevel, UpgradePackageRequest, UpgradePackageResponse, UpgradePhase, UpgradePlan, UpgradeSnapshot } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = MetadataChangeType.parse(data);
+const result = MetadataChangeTypeSchema.parse(data);
 ```
 
 ---

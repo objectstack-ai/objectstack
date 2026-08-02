@@ -16,11 +16,11 @@ Defines the lifecycle and mutability of a metadata item.
 ## TypeScript Usage
 
 ```typescript
-import { MetadataCollectionInfo, MetadataDiffResult, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataHistoryRecord, MetadataHistoryRetentionPolicy, MetadataLoadOptions, MetadataLoadResult, MetadataLoaderContract, MetadataRecord, MetadataSaveOptions, MetadataSaveResult, MetadataScope, MetadataSource, MetadataState, MetadataStats, MetadataWatchEvent, PackagePublishResult } from '@objectstack/spec/system';
-import type { MetadataCollectionInfo, MetadataDiffResult, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataHistoryRecord, MetadataHistoryRetentionPolicy, MetadataLoadOptions, MetadataLoadResult, MetadataLoaderContract, MetadataRecord, MetadataSaveOptions, MetadataSaveResult, MetadataScope, MetadataSource, MetadataState, MetadataStats, MetadataWatchEvent, PackagePublishResult } from '@objectstack/spec/system';
+import { MetadataCollectionInfoSchema, MetadataDiffResultSchema, MetadataHistoryQueryOptionsSchema, MetadataHistoryQueryResultSchema, MetadataHistoryRecordSchema, MetadataHistoryRetentionPolicySchema, MetadataLoadOptionsSchema, MetadataLoadResultSchema, MetadataLoaderContractSchema, MetadataRecordSchema, MetadataSaveOptionsSchema, MetadataSaveResultSchema, MetadataScopeSchema, MetadataSourceSchema, MetadataStateSchema, MetadataStatsSchema, MetadataWatchEventSchema, PackagePublishResultSchema } from '@objectstack/spec/system';
+import type { MetadataCollectionInfo, MetadataDiffResult, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataHistoryRecord, MetadataHistoryRetentionPolicy, MetadataLoadOptions, MetadataLoadResult, MetadataLoaderContract, MetadataRecord, MetadataSaveOptions, MetadataSaveResult, MetadataScope, MetadataSource, MetadataStats, MetadataWatchEvent, PackagePublishResult } from '@objectstack/spec/system';
 
 // Validate data
-const result = MetadataCollectionInfo.parse(data);
+const result = MetadataCollectionInfoSchema.parse(data);
 ```
 
 ---

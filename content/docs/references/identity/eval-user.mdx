@@ -34,11 +34,11 @@ See also: docs/adr/0068-unified-user-context-and-built-in-identity-roles.md
 ## TypeScript Usage
 
 ```typescript
-import { EvalUser } from '@objectstack/spec/identity';
+import { EvalUserSchema } from '@objectstack/spec/identity';
 import type { EvalUser } from '@objectstack/spec/identity';
 
 // Validate data
-const result = EvalUser.parse(data);
+const result = EvalUserSchema.parse(data);
 ```
 
 ---

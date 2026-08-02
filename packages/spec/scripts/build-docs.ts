@@ -15,10 +15,17 @@
 // Usage:
 //   tsx scripts/build-docs.ts            # write
 //   tsx scripts/build-docs.ts --check    # verify in sync (CI); exit 1 on drift
+//   tsx scripts/build-docs.ts --update-import-baseline   # re-ratchet the import-surface baseline (review the diff!)
 
 import fs from 'fs';
 import path from 'path';
 
+import {
+  evaluateBaseline,
+  loadEntrySurfaces,
+  resolveImports,
+  type CategorySurface,
+} from './lib/docs-import-surface';
 import { createSink } from './lib/generated-output';
 
 const SCHEMA_DIR = path.resolve(__dirname, '../json-schema');
@@ -27,8 +34,11 @@ const SRC_DIR = path.resolve(__dirname, '../src');
 // ⚠️  Everything inside category sub-folders is auto-generated and disposable.
 const DOCS_ROOT = path.resolve(__dirname, '../../../content/docs/references');
 const REPO_ROOT = path.resolve(__dirname, '../../..');
+const API_SURFACE_PATH = path.resolve(__dirname, '../api-surface.json');
+const IMPORT_BASELINE_PATH = path.resolve(__dirname, '../docs-import-surface.baseline.json');
 
 const CHECK = process.argv.includes('--check');
+const UPDATE_IMPORT_BASELINE = process.argv.includes('--update-import-baseline');
 
 // ── Output sink ──────────────────────────────────────────────────────────────
 // Shared with the spec's other generators — see lib/generated-output.ts for why
@@ -141,6 +151,32 @@ function sourcePathFor(category: string, zodFile: string): string | undefined {
 }
 
 scanCategories();
+
+// ── Import examples: the package's real export surface ───────────────────────
+// `api-surface.json` is the committed record of every `name (kind)` per public
+// entry point, kept honest by `check:api-surface`. Import examples are spelled
+// from it rather than from the schema file name, so a page can only advertise
+// an import that actually exists (#4570). Names it cannot account for are
+// collected here and ratcheted against the committed baseline after flush().
+
+const ENTRY_SURFACES: ReadonlyMap<string, CategorySurface> = loadEntrySurfaces(
+  JSON.parse(fs.readFileSync(API_SURFACE_PATH, 'utf-8')),
+);
+
+/** Every unresolvable import name this run met, one stable line each. */
+const importGaps = new Set<string>();
+
+const IMPORT_BASELINE_COMMENT =
+  'Accepted gaps between the reference docs\' import examples and the real export surface of ' +
+  '@objectstack/spec (#4570): a documented JSON Schema whose entry point exports no matching type ' +
+  'alias ("no type export") or no matching schema const ("no schema const export"). The name is ' +
+  'omitted from the generated import line — the docs never advertise an import that cannot compile ' +
+  '— and listed here so the omission is countable instead of silent. Shrink-only ratchet: a NEW gap ' +
+  'fails check:docs (fix it by adding `export type X = z.infer<typeof XSchema>;` next to the schema ' +
+  'and regenerating api-surface.json, or by retiring the schema together with its alias), and a ' +
+  'stale entry fails until its line is deleted. Growing this list is a maintainer decision that ' +
+  'shows up as this file in the diff. Regenerate with: ' +
+  'tsx scripts/build-docs.ts --update-import-baseline (after gen:schema).';
 
 /**
  * Context a page needs to turn a `$ref` into a link that actually resolves.
@@ -456,22 +492,30 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
     md += `</Callout>\n\n`;
   }
   
-  // Add TypeScript usage example
-  const schemaNames = schemas.map(s => s.name).join(', ');
-  const typeNames = schemas.map(s => s.name.replace(/Schema$/, '')).join(', ');
-  
-  md += `## TypeScript Usage\n\n`;
-  md += `\`\`\`typescript\n`;
-  md += `import { ${schemaNames} } from '@objectstack/spec/${category}';\n`;
-  md += `import type { ${typeNames} } from '@objectstack/spec/${category}';\n\n`;
-  // Add simple example
-  const firstSchema = schemas[0];
-  if (firstSchema) {
-    md += `// Validate data\n`;
-    md += `const result = ${firstSchema.name}.parse(data);\n`;
+  // TypeScript usage example — spelled from the package's real export surface,
+  // never from the schema file name. A name the entry point does not export is
+  // dropped here and reported by the import-surface ratchet below, so the page
+  // cannot advertise an import that fails to compile (#4570).
+  const imports = resolveImports(category, schemas.map(s => s.name), ENTRY_SURFACES);
+  for (const gap of imports.gaps) importGaps.add(gap);
+
+  if (imports.valueNames.length || imports.typeNames.length) {
+    md += `## TypeScript Usage\n\n`;
+    md += `\`\`\`typescript\n`;
+    if (imports.valueNames.length) {
+      md += `import { ${imports.valueNames.join(', ')} } from '@objectstack/spec/${category}';\n`;
+    }
+    if (imports.typeNames.length) {
+      md += `import type { ${imports.typeNames.join(', ')} } from '@objectstack/spec/${category}';\n`;
+    }
+    md += `\n`;
+    if (imports.exampleValue) {
+      md += `// Validate data\n`;
+      md += `const result = ${imports.exampleValue}.parse(data);\n`;
+    }
+    md += `\`\`\`\n\n`;
+    md += `---\n\n`;
   }
-  md += `\`\`\`\n\n`;
-  md += `---\n\n`;
 
   // Generate markdown for each schema in the file
   schemas.forEach(({name, content}) => {
@@ -725,7 +769,75 @@ const meta = {
 };
 emit(path.join(DOCS_ROOT, 'meta.json'), JSON.stringify(meta, null, 2));
 
-// 4. Disposition: write the tree, or report drift against it.
+// 4. Import-surface ratchet — the backstop `check:docs` alone cannot be.
+//
+// Diffing generated output against committed docs proves the two agree; it
+// cannot prove either is TRUE. Now that import examples are spelled from
+// `api-surface.json`, a schema whose type alias is missing quietly loses its
+// name from the `import type` line — correct output, silent regression. The
+// baseline turns that silence into a red gate: a NEW gap fails (that is #4539
+// exactly — deleting a zero-consumer type alias while its schema keeps its
+// page), and a stale line fails too, so the ledger can only shrink.
+//
+// Deliberately NOT wired into any `gen:` script: `--update-import-baseline` is
+// a hand-run, reviewed act, for the same reason the dual-source baseline is
+// (#4446) — a fix command that rewrites the ledger admits new debt by reflex
+// instead of by decision.
+//
+// Runs BEFORE flush() because flush() exits on drift, and one failure must not
+// hide the other. The exit is deferred to after flush() so a write run still
+// produces the corrected pages.
+let importSurfaceFailed = false;
+if (managedCount > 0) {
+  const gaps = [...importGaps].sort();
+
+  if (UPDATE_IMPORT_BASELINE) {
+    fs.writeFileSync(
+      IMPORT_BASELINE_PATH,
+      JSON.stringify({ _comment: IMPORT_BASELINE_COMMENT, entries: gaps }, null, 2) + '\n',
+    );
+    console.log(`Wrote ${gaps.length} import-surface gap(s) to ${path.relative(REPO_ROOT, IMPORT_BASELINE_PATH)} — review the diff before committing.`);
+  } else {
+    const baseline: { entries?: string[] } = fs.existsSync(IMPORT_BASELINE_PATH)
+      ? JSON.parse(fs.readFileSync(IMPORT_BASELINE_PATH, 'utf-8'))
+      : {};
+    const { fresh, stale } = evaluateBaseline(gaps, baseline.entries ?? []);
+
+    if (fresh.length > 0) {
+      importSurfaceFailed = true;
+      console.error(
+        `\n✗ ${fresh.length} reference page import example(s) name an export that '@objectstack/spec' no longer has:\n\n` +
+          fresh.map(f => `    • ${f}`).join('\n') +
+          `\n\nThe name was dropped from the page rather than published as a dead import, so the docs are\n` +
+          `still correct — but a schema that documents itself without its type alias is a hole in the\n` +
+          `machine-readable surface, and the import line is the line an AI metadata author copies.\n\n` +
+          `Fix it at the declaration, not the ledger:\n` +
+          `  - add the missing alias next to the schema (\`export type X = z.infer<typeof XSchema>;\`),\n` +
+          `    then \`pnpm --filter @objectstack/spec gen:api-surface\`; or\n` +
+          `  - retire the schema with its alias, so no page documents it either.\n\n` +
+          `If a maintainer decides the gap must stand, re-ratchet it deliberately:\n` +
+          `  pnpm --filter @objectstack/spec exec tsx scripts/build-docs.ts --update-import-baseline`,
+      );
+    }
+
+    if (stale.length > 0) {
+      importSurfaceFailed = true;
+      console.error(
+        `\n✗ ${stale.length} stale import-surface baseline entr${stale.length === 1 ? 'y' : 'ies'} — the gap is gone, delete the line(s):\n\n` +
+          stale.map(s => `    • ${s}`).join('\n') +
+          `\n\nThe baseline is shrink-only. A stale line stays available to excuse the NEXT missing export\n` +
+          `under the last one's justification, which is how a ratchet quietly stops ratcheting.\n` +
+          `  pnpm --filter @objectstack/spec exec tsx scripts/build-docs.ts --update-import-baseline`,
+      );
+    }
+
+    if (!importSurfaceFailed) {
+      console.log(`✅ import examples resolve against api-surface.json (${gaps.length} accepted gap(s) in the baseline)`);
+    }
+  }
+}
+
+// 5. Disposition: write the tree, or report drift against it.
 flush({
   surface: 'content/docs/references/',
   regenerate:
@@ -740,3 +852,6 @@ flush({
         '  Run `pnpm --filter @objectstack/spec gen:schema` first (`check:docs` does this for you).'
       : null,
 });
+
+// Deferred so a write run still lands the corrected pages before failing.
+if (importSurfaceFailed) process.exit(1);

@@ -24,11 +24,11 @@ tools (Camunda, Activiti, jBPM, etc.) via a plugin-based approach.
 ## TypeScript Usage
 
 ```typescript
-import { BpmnDiagnostic, BpmnElementMapping, BpmnExportOptions, BpmnImportOptions, BpmnInteropResult, BpmnUnmappedStrategy, BpmnVersion } from '@objectstack/spec/automation';
+import { BpmnDiagnosticSchema, BpmnElementMappingSchema, BpmnExportOptionsSchema, BpmnImportOptionsSchema, BpmnInteropResultSchema, BpmnUnmappedStrategySchema, BpmnVersionSchema } from '@objectstack/spec/automation';
 import type { BpmnDiagnostic, BpmnElementMapping, BpmnExportOptions, BpmnImportOptions, BpmnInteropResult, BpmnUnmappedStrategy, BpmnVersion } from '@objectstack/spec/automation';
 
 // Validate data
-const result = BpmnDiagnostic.parse(data);
+const result = BpmnDiagnosticSchema.parse(data);
 ```
 
 ---

@@ -56,11 +56,11 @@ matches). Object-level requests (no `recordId`) stay byte-compatible.
 ## TypeScript Usage
 
 ```typescript
-import { AccessMatrix, AccessMatrixEntry, AuthzPosture, ExplainDecision, ExplainLayer, ExplainMatchedRule, ExplainOperation, ExplainRecordAttribution, ExplainRequest } from '@objectstack/spec/security';
+import { AccessMatrixSchema, AccessMatrixEntrySchema, AuthzPostureSchema, ExplainDecisionSchema, ExplainLayerSchema, ExplainMatchedRuleSchema, ExplainOperationSchema, ExplainRecordAttributionSchema, ExplainRequestSchema } from '@objectstack/spec/security';
 import type { AccessMatrix, AccessMatrixEntry, AuthzPosture, ExplainDecision, ExplainLayer, ExplainMatchedRule, ExplainOperation, ExplainRecordAttribution, ExplainRequest } from '@objectstack/spec/security';
 
 // Validate data
-const result = AccessMatrix.parse(data);
+const result = AccessMatrixSchema.parse(data);
 ```
 
 ---

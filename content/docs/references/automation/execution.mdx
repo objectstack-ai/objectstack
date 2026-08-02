@@ -22,11 +22,11 @@ AWS Step Functions execution logs.
 ## TypeScript Usage
 
 ```typescript
-import { Checkpoint, ConcurrencyPolicy, ExecutionError, ExecutionErrorSeverity, ExecutionLog, ExecutionStatus, ExecutionStepLog, ExecutionStepMetrics, ExecutionStepSkipReason, FlowRunGateSummary, FlowRunNodeSummary, FlowRunSummary, ScheduleState } from '@objectstack/spec/automation';
+import { CheckpointSchema, ConcurrencyPolicySchema, ExecutionErrorSchema, ExecutionErrorSeverity, ExecutionLogSchema, ExecutionStatus, ExecutionStepLogSchema, ExecutionStepMetricsSchema, ExecutionStepSkipReasonSchema, FlowRunGateSummarySchema, FlowRunNodeSummarySchema, FlowRunSummarySchema, ScheduleStateSchema } from '@objectstack/spec/automation';
 import type { Checkpoint, ConcurrencyPolicy, ExecutionError, ExecutionErrorSeverity, ExecutionLog, ExecutionStatus, ExecutionStepLog, ExecutionStepMetrics, ExecutionStepSkipReason, FlowRunGateSummary, FlowRunNodeSummary, FlowRunSummary, ScheduleState } from '@objectstack/spec/automation';
 
 // Validate data
-const result = Checkpoint.parse(data);
+const result = CheckpointSchema.parse(data);
 ```
 
 ---

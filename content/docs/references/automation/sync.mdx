@@ -142,11 +142,11 @@ schedule: '0 * * * *' // Hourly
 ## TypeScript Usage
 
 ```typescript
-import { DataDestinationConfig, DataSourceConfig, SyncDirection, SyncExecutionResult, SyncExecutionStatus, SyncMode } from '@objectstack/spec/automation';
+import { DataDestinationConfigSchema, DataSourceConfigSchema, SyncDirectionSchema, SyncExecutionResultSchema, SyncExecutionStatusSchema, SyncModeSchema } from '@objectstack/spec/automation';
 import type { DataDestinationConfig, DataSourceConfig, SyncDirection, SyncExecutionResult, SyncExecutionStatus, SyncMode } from '@objectstack/spec/automation';
 
 // Validate data
-const result = DataDestinationConfig.parse(data);
+const result = DataDestinationConfigSchema.parse(data);
 ```
 
 ---

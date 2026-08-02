@@ -72,11 +72,11 @@ cohesive plugin that "takes over" the entire platform's metadata management:
 ## TypeScript Usage
 
 ```typescript
-import { MetadataBulkRegisterRequest, MetadataBulkResult, MetadataDependency, MetadataEvent, MetadataPluginConfig, MetadataPluginManifest, MetadataQuery, MetadataQueryResult, MetadataType, MetadataTypeRegistryEntry, MetadataValidationResult } from '@objectstack/spec/kernel';
+import { MetadataBulkRegisterRequestSchema, MetadataBulkResultSchema, MetadataDependencySchema, MetadataEventSchema, MetadataPluginConfigSchema, MetadataPluginManifestSchema, MetadataQuerySchema, MetadataQueryResultSchema, MetadataTypeSchema, MetadataTypeRegistryEntrySchema, MetadataValidationResultSchema } from '@objectstack/spec/kernel';
 import type { MetadataBulkRegisterRequest, MetadataBulkResult, MetadataDependency, MetadataEvent, MetadataPluginConfig, MetadataPluginManifest, MetadataQuery, MetadataQueryResult, MetadataType, MetadataTypeRegistryEntry, MetadataValidationResult } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = MetadataBulkRegisterRequest.parse(data);
+const result = MetadataBulkRegisterRequestSchema.parse(data);
 ```
 
 ---

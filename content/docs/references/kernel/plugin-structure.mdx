@@ -20,11 +20,11 @@ See also: PLUGIN_STANDARDS.md
 ## TypeScript Usage
 
 ```typescript
-import { OpsDomainModule, OpsFilePath, OpsPluginStructure } from '@objectstack/spec/kernel';
+import { OpsDomainModuleSchema, OpsFilePathSchema, OpsPluginStructureSchema } from '@objectstack/spec/kernel';
 import type { OpsDomainModule, OpsFilePath, OpsPluginStructure } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = OpsDomainModule.parse(data);
+const result = OpsDomainModuleSchema.parse(data);
 ```
 
 ---

@@ -58,11 +58,11 @@ extensions on top of the shared identity layer:
 ## TypeScript Usage
 
 ```typescript
-import { AnalyticsTimeRange, CreateListingRequest, ListingActionRequest, PublisherProfile, PublishingAnalyticsRequest, PublishingAnalyticsResponse, ReleaseChannel, TimeSeriesPoint, UpdateListingRequest, VersionRelease } from '@objectstack/spec/cloud';
+import { AnalyticsTimeRangeSchema, CreateListingRequestSchema, ListingActionRequestSchema, PublisherProfileSchema, PublishingAnalyticsRequestSchema, PublishingAnalyticsResponseSchema, ReleaseChannelSchema, TimeSeriesPointSchema, UpdateListingRequestSchema, VersionReleaseSchema } from '@objectstack/spec/cloud';
 import type { AnalyticsTimeRange, CreateListingRequest, ListingActionRequest, PublisherProfile, PublishingAnalyticsRequest, PublishingAnalyticsResponse, ReleaseChannel, TimeSeriesPoint, UpdateListingRequest, VersionRelease } from '@objectstack/spec/cloud';
 
 // Validate data
-const result = AnalyticsTimeRange.parse(data);
+const result = AnalyticsTimeRangeSchema.parse(data);
 ```
 
 ---

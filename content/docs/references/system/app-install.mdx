@@ -32,11 +32,11 @@ Install pipeline:
 ## TypeScript Usage
 
 ```typescript
-import { AppCompatibilityCheck, AppInstallRequest, AppInstallResult, AppManifest } from '@objectstack/spec/system';
+import { AppCompatibilityCheckSchema, AppInstallRequestSchema, AppInstallResultSchema, AppManifestSchema } from '@objectstack/spec/system';
 import type { AppCompatibilityCheck, AppInstallRequest, AppInstallResult, AppManifest } from '@objectstack/spec/system';
 
 // Validate data
-const result = AppCompatibilityCheck.parse(data);
+const result = AppCompatibilityCheckSchema.parse(data);
 ```
 
 ---

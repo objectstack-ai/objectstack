@@ -30,11 +30,11 @@ Architecture Alignment:
 ## TypeScript Usage
 
 ```typescript
-import { VersionDefinition, VersionNegotiationResponse, VersionStatus, VersioningConfig, VersioningStrategy } from '@objectstack/spec/api';
+import { VersionDefinitionSchema, VersionNegotiationResponseSchema, VersionStatus, VersioningConfigSchema, VersioningStrategy } from '@objectstack/spec/api';
 import type { VersionDefinition, VersionNegotiationResponse, VersionStatus, VersioningConfig, VersioningStrategy } from '@objectstack/spec/api';
 
 // Validate data
-const result = VersionDefinition.parse(data);
+const result = VersionDefinitionSchema.parse(data);
 ```
 
 ---

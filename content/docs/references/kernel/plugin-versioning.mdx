@@ -28,11 +28,11 @@ Based on semantic versioning (SemVer) with extensions for:
 ## TypeScript Usage
 
 ```typescript
-import { BreakingChange, CompatibilityLevel, CompatibilityMatrixEntry, DependencyConflict, DeprecationNotice, MultiVersionSupport, PluginCompatibilityMatrix, PluginDependencyResolutionResult, PluginVersionMetadata, SemanticVersion, VersionConstraint } from '@objectstack/spec/kernel';
+import { BreakingChangeSchema, CompatibilityLevelSchema, CompatibilityMatrixEntrySchema, DependencyConflictSchema, DeprecationNoticeSchema, MultiVersionSupportSchema, PluginCompatibilityMatrixSchema, PluginDependencyResolutionResultSchema, PluginVersionMetadataSchema, SemanticVersionSchema, VersionConstraintSchema } from '@objectstack/spec/kernel';
 import type { BreakingChange, CompatibilityLevel, CompatibilityMatrixEntry, DependencyConflict, DeprecationNotice, MultiVersionSupport, PluginCompatibilityMatrix, PluginDependencyResolutionResult, PluginVersionMetadata, SemanticVersion, VersionConstraint } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = BreakingChange.parse(data);
+const result = BreakingChangeSchema.parse(data);
 ```
 
 ---

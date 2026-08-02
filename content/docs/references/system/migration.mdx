@@ -34,8 +34,8 @@ irreversibly on migrated data gate on the flag instead of the version.
 ## TypeScript Usage
 
 ```typescript
-import { AddFieldOperation, ChangeSet, CreateObjectOperation, DataMigrationFlag, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependency, MigrationOperation, ModifyFieldOperation, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
-import type { AddFieldOperation, ChangeSet, CreateObjectOperation, DataMigrationFlag, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependency, MigrationOperation, ModifyFieldOperation, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
+import { AddFieldOperation, ChangeSetSchema, CreateObjectOperation, DataMigrationFlagSchema, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependencySchema, MigrationOperationSchema, ModifyFieldOperation, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
+import type { ChangeSet, DataMigrationFlag, MigrationOperation } from '@objectstack/spec/system';
 
 // Validate data
 const result = AddFieldOperation.parse(data);

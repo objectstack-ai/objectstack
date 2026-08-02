@@ -34,11 +34,11 @@ Configuration for async event processing queue
 ## TypeScript Usage
 
 ```typescript
-import { EventQueueConfig, EventReplayConfig, EventSourcingConfig } from '@objectstack/spec/kernel';
+import { EventQueueConfigSchema, EventReplayConfigSchema, EventSourcingConfigSchema } from '@objectstack/spec/kernel';
 import type { EventQueueConfig, EventReplayConfig, EventSourcingConfig } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = EventQueueConfig.parse(data);
+const result = EventQueueConfigSchema.parse(data);
 ```
 
 ---

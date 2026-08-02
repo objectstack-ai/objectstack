@@ -42,11 +42,11 @@ Design Principles:
 ## TypeScript Usage
 
 ```typescript
-import { EqualityOperator, FieldReference, FilterCondition, QueryFilter, SetOperator, SpecialOperator, StringOperator } from '@objectstack/spec/data';
-import type { EqualityOperator, FieldReference, FilterCondition, QueryFilter, SetOperator, SpecialOperator, StringOperator } from '@objectstack/spec/data';
+import { EqualityOperatorSchema, FieldReferenceSchema, FilterConditionSchema, QueryFilterSchema, SetOperatorSchema, SpecialOperatorSchema, StringOperatorSchema } from '@objectstack/spec/data';
+import type { FieldReference, FilterCondition, QueryFilter } from '@objectstack/spec/data';
 
 // Validate data
-const result = EqualityOperator.parse(data);
+const result = EqualityOperatorSchema.parse(data);
 ```
 
 ---

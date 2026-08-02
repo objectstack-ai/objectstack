@@ -36,11 +36,11 @@ Architecture alignment:
 ## TypeScript Usage
 
 ```typescript
-import { DispatcherConfig, DispatcherErrorCode, DispatcherErrorResponse, DispatcherRoute } from '@objectstack/spec/api';
+import { DispatcherConfigSchema, DispatcherErrorCode, DispatcherErrorResponseSchema, DispatcherRouteSchema } from '@objectstack/spec/api';
 import type { DispatcherConfig, DispatcherErrorCode, DispatcherErrorResponse, DispatcherRoute } from '@objectstack/spec/api';
 
 // Validate data
-const result = DispatcherConfig.parse(data);
+const result = DispatcherConfigSchema.parse(data);
 ```
 
 ---

@@ -30,11 +30,11 @@ Configuration for sending events to webhooks
 ## TypeScript Usage
 
 ```typescript
-import { EventMessageQueueConfig, EventWebhookConfig, RealTimeNotificationConfig } from '@objectstack/spec/kernel';
+import { EventMessageQueueConfigSchema, EventWebhookConfigSchema, RealTimeNotificationConfigSchema } from '@objectstack/spec/kernel';
 import type { EventMessageQueueConfig, EventWebhookConfig, RealTimeNotificationConfig } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = EventMessageQueueConfig.parse(data);
+const result = EventMessageQueueConfigSchema.parse(data);
 ```
 
 ---

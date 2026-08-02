@@ -66,11 +66,11 @@ Position names MUST be lowercase snake_case to prevent security issues.
 ## TypeScript Usage
 
 ```typescript
-import { Position } from '@objectstack/spec/identity';
+import { PositionSchema } from '@objectstack/spec/identity';
 import type { Position } from '@objectstack/spec/identity';
 
 // Validate data
-const result = Position.parse(data);
+const result = PositionSchema.parse(data);
 ```
 
 ---

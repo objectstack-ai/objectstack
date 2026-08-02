@@ -42,11 +42,11 @@ only per-doc storage is the scalar `doc.order`, which merges cleanly.
 ## TypeScript Usage
 
 ```typescript
-import { Book, BookAudience, BookGroup, BookInclude, BookNode } from '@objectstack/spec/system';
+import { BookSchema, BookAudienceSchema, BookGroupSchema, BookIncludeSchema, BookNodeSchema } from '@objectstack/spec/system';
 import type { Book, BookAudience, BookGroup, BookInclude, BookNode } from '@objectstack/spec/system';
 
 // Validate data
-const result = Book.parse(data);
+const result = BookSchema.parse(data);
 ```
 
 ---

@@ -24,11 +24,11 @@ The Data Engine acts as the "Driver" layer in the Hexagonal Architecture.
 ## TypeScript Usage
 
 ```typescript
-import { BaseEngineOptions, DataEngineAggregateOptions, DataEngineAggregateRequest, DataEngineBatchRequest, DataEngineCountOptions, DataEngineCountRequest, DataEngineDeleteOptions, DataEngineDeleteRequest, DataEngineExecuteRequest, DataEngineFilter, DataEngineFindOneRequest, DataEngineFindRequest, DataEngineInsertOptions, DataEngineInsertRequest, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DataEngineUpdateRequest, DataEngineVectorFindRequest, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
-import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineAggregateRequest, DataEngineBatchRequest, DataEngineCountOptions, DataEngineCountRequest, DataEngineDeleteOptions, DataEngineDeleteRequest, DataEngineExecuteRequest, DataEngineFilter, DataEngineFindOneRequest, DataEngineFindRequest, DataEngineInsertOptions, DataEngineInsertRequest, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DataEngineUpdateRequest, DataEngineVectorFindRequest, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
+import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineAggregateRequestSchema, DataEngineBatchRequestSchema, DataEngineCountOptionsSchema, DataEngineCountRequestSchema, DataEngineDeleteOptionsSchema, DataEngineDeleteRequestSchema, DataEngineExecuteRequestSchema, DataEngineFilterSchema, DataEngineFindOneRequestSchema, DataEngineFindRequestSchema, DataEngineInsertOptionsSchema, DataEngineInsertRequestSchema, DataEngineQueryOptionsSchema, DataEngineRequestSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DataEngineUpdateRequestSchema, DataEngineVectorFindRequestSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema } from '@objectstack/spec/data';
+import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineFilter, DataEngineInsertOptions, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
 
 // Validate data
-const result = BaseEngineOptions.parse(data);
+const result = BaseEngineOptionsSchema.parse(data);
 ```
 
 ---

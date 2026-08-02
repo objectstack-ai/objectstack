@@ -26,11 +26,11 @@ drift is detected by diffing a fresh introspection against the snapshot.
 ## TypeScript Usage
 
 ```typescript
-import { ExternalCatalog, ExternalColumn, ExternalTable } from '@objectstack/spec/data';
+import { ExternalCatalogSchema, ExternalColumnSchema, ExternalTableSchema } from '@objectstack/spec/data';
 import type { ExternalCatalog, ExternalColumn, ExternalTable } from '@objectstack/spec/data';
 
 // Validate data
-const result = ExternalCatalog.parse(data);
+const result = ExternalCatalogSchema.parse(data);
 ```
 
 ---

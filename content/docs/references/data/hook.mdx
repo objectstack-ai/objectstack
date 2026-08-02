@@ -16,11 +16,11 @@ Defines the interception points in the ObjectQL execution pipeline.
 ## TypeScript Usage
 
 ```typescript
-import { HookContext, HookEvent } from '@objectstack/spec/data';
-import type { HookContext, HookEvent } from '@objectstack/spec/data';
+import { HookContextSchema, HookEvent } from '@objectstack/spec/data';
+import type { HookContext } from '@objectstack/spec/data';
 
 // Validate data
-const result = HookContext.parse(data);
+const result = HookContextSchema.parse(data);
 ```
 
 ---

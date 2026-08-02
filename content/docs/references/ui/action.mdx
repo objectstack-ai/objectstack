@@ -62,11 +62,11 @@ to the field name and is used as the request-body key).
 ## TypeScript Usage
 
 ```typescript
-import { Action, ActionAi, ActionLocation, ActionParam, ActionType, InlineAction } from '@objectstack/spec/ui';
-import type { Action, ActionAi, ActionLocation, ActionParam, ActionType, InlineAction } from '@objectstack/spec/ui';
+import { ActionSchema, ActionAiSchema, ActionLocationSchema, ActionParamSchema, ActionType, InlineActionSchema } from '@objectstack/spec/ui';
+import type { Action, ActionAi, ActionLocation, ActionParam, InlineAction } from '@objectstack/spec/ui';
 
 // Validate data
-const result = Action.parse(data);
+const result = ActionSchema.parse(data);
 ```
 
 ---

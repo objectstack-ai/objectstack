@@ -32,11 +32,11 @@ engine.find('account', \{ context: \{ userId: '...', tenantId: '...' \} \})
 ## TypeScript Usage
 
 ```typescript
-import { ExecutionContext } from '@objectstack/spec/kernel';
+import { ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = ExecutionContext.parse(data);
+const result = ExecutionContextSchema.parse(data);
 ```
 
 ---

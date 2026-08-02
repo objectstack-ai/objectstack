@@ -44,11 +44,11 @@ relationship resolution, dependency ordering, and multi-pass insertion.
 ## TypeScript Usage
 
 ```typescript
-import { ObjectDependencyGraph, ObjectDependencyNode, ReferenceResolution, ReferenceResolutionError, SeedIdentity, SeedLoadResult, SeedLoaderConfig, SeedLoaderRequest, SeedLoaderResult } from '@objectstack/spec/data';
+import { ObjectDependencyGraphSchema, ObjectDependencyNodeSchema, ReferenceResolutionSchema, ReferenceResolutionErrorSchema, SeedIdentitySchema, SeedLoadResultSchema, SeedLoaderConfigSchema, SeedLoaderRequestSchema, SeedLoaderResultSchema } from '@objectstack/spec/data';
 import type { ObjectDependencyGraph, ObjectDependencyNode, ReferenceResolution, ReferenceResolutionError, SeedIdentity, SeedLoadResult, SeedLoaderConfig, SeedLoaderRequest, SeedLoaderResult } from '@objectstack/spec/data';
 
 // Validate data
-const result = ObjectDependencyGraph.parse(data);
+const result = ObjectDependencyGraphSchema.parse(data);
 ```
 
 ---

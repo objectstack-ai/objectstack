@@ -116,11 +116,11 @@ Architecture Alignment:
 ## TypeScript Usage
 
 ```typescript
-import { ErrorHandlingConfig, HandlerStatus, OpenApiGenerationConfig, RequestValidationConfig, ResponseEnvelopeConfig, RestApiEndpoint, RestApiPluginConfig, RestApiRouteCategory, RestApiRouteRegistration, RouteCoverageEntry, RouteCoverageReport, ValidationMode } from '@objectstack/spec/api';
+import { ErrorHandlingConfigSchema, HandlerStatusSchema, OpenApiGenerationConfigSchema, RequestValidationConfigSchema, ResponseEnvelopeConfigSchema, RestApiEndpointSchema, RestApiPluginConfigSchema, RestApiRouteCategory, RestApiRouteRegistrationSchema, RouteCoverageEntrySchema, RouteCoverageReportSchema, ValidationMode } from '@objectstack/spec/api';
 import type { ErrorHandlingConfig, HandlerStatus, OpenApiGenerationConfig, RequestValidationConfig, ResponseEnvelopeConfig, RestApiEndpoint, RestApiPluginConfig, RestApiRouteCategory, RestApiRouteRegistration, RouteCoverageEntry, RouteCoverageReport, ValidationMode } from '@objectstack/spec/api';
 
 // Validate data
-const result = ErrorHandlingConfig.parse(data);
+const result = ErrorHandlingConfigSchema.parse(data);
 ```
 
 ---

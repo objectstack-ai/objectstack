@@ -36,11 +36,11 @@ const fieldName = FieldNameSchema.parse('task_name');     // FieldName
 ## TypeScript Usage
 
 ```typescript
-import { AppName, FieldName, FlowName, ObjectName, RoleName, ViewName } from '@objectstack/spec/shared';
+import { AppNameSchema, FieldNameSchema, FlowNameSchema, ObjectNameSchema, RoleNameSchema, ViewNameSchema } from '@objectstack/spec/shared';
 import type { AppName, FieldName, FlowName, ObjectName, RoleName, ViewName } from '@objectstack/spec/shared';
 
 // Validate data
-const result = AppName.parse(data);
+const result = AppNameSchema.parse(data);
 ```
 
 ---

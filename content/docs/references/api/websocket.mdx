@@ -30,11 +30,11 @@ runtime today.
 ## TypeScript Usage
 
 ```typescript
-import { AckMessage, CursorMessage, CursorPosition, DocumentState, EditMessage, EditOperation, EditOperationType, ErrorMessage, EventMessage, EventPattern, EventSubscription, PingMessage, PongMessage, PresenceMessage, PresenceState, PresenceUpdate, SimpleCursorPosition, SimplePresenceState, SubscribeMessage, UnsubscribeMessage, UnsubscribeRequest, WebSocketConfig, WebSocketEvent, WebSocketMessage, WebSocketMessageType, WebSocketPresenceStatus, WebSocketServerConfig } from '@objectstack/spec/api';
+import { AckMessageSchema, CursorMessageSchema, CursorPositionSchema, DocumentStateSchema, EditMessageSchema, EditOperationSchema, EditOperationType, ErrorMessageSchema, EventMessageSchema, EventPatternSchema, EventSubscriptionSchema, PingMessageSchema, PongMessageSchema, PresenceMessageSchema, PresenceStateSchema, PresenceUpdateSchema, SimpleCursorPositionSchema, SimplePresenceStateSchema, SubscribeMessageSchema, UnsubscribeMessageSchema, UnsubscribeRequestSchema, WebSocketConfigSchema, WebSocketEventSchema, WebSocketMessageSchema, WebSocketMessageType, WebSocketPresenceStatus, WebSocketServerConfigSchema } from '@objectstack/spec/api';
 import type { AckMessage, CursorMessage, CursorPosition, DocumentState, EditMessage, EditOperation, EditOperationType, ErrorMessage, EventMessage, EventPattern, EventSubscription, PingMessage, PongMessage, PresenceMessage, PresenceState, PresenceUpdate, SimpleCursorPosition, SimplePresenceState, SubscribeMessage, UnsubscribeMessage, UnsubscribeRequest, WebSocketConfig, WebSocketEvent, WebSocketMessage, WebSocketMessageType, WebSocketPresenceStatus, WebSocketServerConfig } from '@objectstack/spec/api';
 
 // Validate data
-const result = AckMessage.parse(data);
+const result = AckMessageSchema.parse(data);
 ```
 
 ---

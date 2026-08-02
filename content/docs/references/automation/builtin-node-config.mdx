@@ -92,11 +92,11 @@ objectui, reconciled by a test there).
 ## TypeScript Usage
 
 ```typescript
-import { CreateRecordConfig, DeleteRecordConfig, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
+import { CreateRecordConfigSchema, DeleteRecordConfigSchema, GetRecordConfigSchema, MapConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
 import type { CreateRecordConfig, DeleteRecordConfig, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
 
 // Validate data
-const result = CreateRecordConfig.parse(data);
+const result = CreateRecordConfigSchema.parse(data);
 ```
 
 ---

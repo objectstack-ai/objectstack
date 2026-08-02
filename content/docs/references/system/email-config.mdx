@@ -30,11 +30,11 @@ Resolution order in `serve.ts`:
 ## TypeScript Usage
 
 ```typescript
-import { EmailAddressConfig, EmailProvider, EmailServiceConfig } from '@objectstack/spec/system';
+import { EmailAddressConfigSchema, EmailProviderSchema, EmailServiceConfigSchema } from '@objectstack/spec/system';
 import type { EmailAddressConfig, EmailProvider, EmailServiceConfig } from '@objectstack/spec/system';
 
 // Validate data
-const result = EmailAddressConfig.parse(data);
+const result = EmailAddressConfigSchema.parse(data);
 ```
 
 ---

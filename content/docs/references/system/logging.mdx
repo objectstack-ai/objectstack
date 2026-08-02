@@ -28,11 +28,11 @@ Unified logging protocol that combines:
 ## TypeScript Usage
 
 ```typescript
-import { ConsoleDestinationConfig, ExtendedLogLevel, ExternalServiceDestinationConfig, FileDestinationConfig, HttpDestinationConfig, LogDestination, LogDestinationType, LogEnrichmentConfig, LogEntry, LogFormat, LogLevel, LoggerConfig, LoggingConfig, StructuredLogEntry } from '@objectstack/spec/system';
+import { ConsoleDestinationConfigSchema, ExtendedLogLevel, ExternalServiceDestinationConfigSchema, FileDestinationConfigSchema, HttpDestinationConfigSchema, LogDestinationSchema, LogDestinationType, LogEnrichmentConfigSchema, LogEntrySchema, LogFormat, LogLevel, LoggerConfigSchema, LoggingConfigSchema, StructuredLogEntrySchema } from '@objectstack/spec/system';
 import type { ConsoleDestinationConfig, ExtendedLogLevel, ExternalServiceDestinationConfig, FileDestinationConfig, HttpDestinationConfig, LogDestination, LogDestinationType, LogEnrichmentConfig, LogEntry, LogFormat, LogLevel, LoggerConfig, LoggingConfig, StructuredLogEntry } from '@objectstack/spec/system';
 
 // Validate data
-const result = ConsoleDestinationConfig.parse(data);
+const result = ConsoleDestinationConfigSchema.parse(data);
 ```
 
 ---

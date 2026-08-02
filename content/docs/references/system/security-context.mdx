@@ -44,11 +44,11 @@ See also: https://www.iso.org/standard/27001
 ## TypeScript Usage
 
 ```typescript
-import { ComplianceAuditRequirement, ComplianceEncryptionRequirement, ComplianceFramework, DataClassification, DataClassificationPolicy, MaskingVisibilityRule, SecurityContextConfig, SecurityEventCorrelation } from '@objectstack/spec/system';
+import { ComplianceAuditRequirementSchema, ComplianceEncryptionRequirementSchema, ComplianceFrameworkSchema, DataClassificationSchema, DataClassificationPolicySchema, MaskingVisibilityRuleSchema, SecurityContextConfigSchema, SecurityEventCorrelationSchema } from '@objectstack/spec/system';
 import type { ComplianceAuditRequirement, ComplianceEncryptionRequirement, ComplianceFramework, DataClassification, DataClassificationPolicy, MaskingVisibilityRule, SecurityContextConfig, SecurityEventCorrelation } from '@objectstack/spec/system';
 
 // Validate data
-const result = ComplianceAuditRequirement.parse(data);
+const result = ComplianceAuditRequirementSchema.parse(data);
 ```
 
 ---

@@ -24,11 +24,11 @@ Refined with enterprise data lifecycle controls:
 ## TypeScript Usage
 
 ```typescript
-import { AdminScope, EffectiveObjectPermission, FieldPermission, ObjectAccessScope, ObjectPermission, PermissionSet } from '@objectstack/spec/security';
+import { AdminScopeSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema, ObjectAccessScopeSchema, ObjectPermissionSchema, PermissionSetSchema } from '@objectstack/spec/security';
 import type { AdminScope, EffectiveObjectPermission, FieldPermission, ObjectAccessScope, ObjectPermission, PermissionSet } from '@objectstack/spec/security';
 
 // Validate data
-const result = AdminScope.parse(data);
+const result = AdminScopeSchema.parse(data);
 ```
 
 ---

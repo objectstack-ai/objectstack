@@ -22,11 +22,11 @@ Industry alignment: Google Docs, Figma, VSCode Live Share, Yjs
 ## TypeScript Usage
 
 ```typescript
-import { AwarenessEvent, AwarenessSession, AwarenessUpdate, AwarenessUserState, CRDTMergeResult, CRDTState, CRDTType, CollaborationMode, CollaborationSession, CollaborationSessionConfig, CollaborativeCursor, CounterOperation, CursorColorPreset, CursorSelection, CursorStyle, CursorUpdate, GCounter, LWWRegister, ORSet, ORSetElement, OTComponent, OTOperation, OTOperationType, OTTransformResult, PNCounter, TextCRDTOperation, TextCRDTState, UserActivityStatus, VectorClock } from '@objectstack/spec/system';
+import { AwarenessEventSchema, AwarenessSessionSchema, AwarenessUpdateSchema, AwarenessUserStateSchema, CRDTMergeResultSchema, CRDTStateSchema, CRDTType, CollaborationMode, CollaborationSessionSchema, CollaborationSessionConfigSchema, CollaborativeCursorSchema, CounterOperationSchema, CursorColorPreset, CursorSelectionSchema, CursorStyleSchema, CursorUpdateSchema, GCounterSchema, LWWRegisterSchema, ORSetSchema, ORSetElementSchema, OTComponentSchema, OTOperationSchema, OTOperationType, OTTransformResultSchema, PNCounterSchema, TextCRDTOperationSchema, TextCRDTStateSchema, UserActivityStatus, VectorClockSchema } from '@objectstack/spec/system';
 import type { AwarenessEvent, AwarenessSession, AwarenessUpdate, AwarenessUserState, CRDTMergeResult, CRDTState, CRDTType, CollaborationMode, CollaborationSession, CollaborationSessionConfig, CollaborativeCursor, CounterOperation, CursorColorPreset, CursorSelection, CursorStyle, CursorUpdate, GCounter, LWWRegister, ORSet, ORSetElement, OTComponent, OTOperation, OTOperationType, OTTransformResult, PNCounter, TextCRDTOperation, TextCRDTState, UserActivityStatus, VectorClock } from '@objectstack/spec/system';
 
 // Validate data
-const result = AwarenessEvent.parse(data);
+const result = AwarenessEventSchema.parse(data);
 ```
 
 ---

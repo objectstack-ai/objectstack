@@ -36,11 +36,11 @@ contract to look supported.
 ## TypeScript Usage
 
 ```typescript
-import { DriverSslToggle, SqlAutoMigrate } from '@objectstack/spec/data';
-import type { DriverSslToggle, SqlAutoMigrate } from '@objectstack/spec/data';
+import { DriverSslToggleSchema, SqlAutoMigrateSchema } from '@objectstack/spec/data';
+import type { SqlAutoMigrate } from '@objectstack/spec/data';
 
 // Validate data
-const result = DriverSslToggle.parse(data);
+const result = DriverSslToggleSchema.parse(data);
 ```
 
 ---

@@ -68,11 +68,11 @@ tags: ['customer', 'crm']
 ## TypeScript Usage
 
 ```typescript
-import { ApiDiscoveryQuery, ApiDiscoveryResponse, ApiEndpointRegistration, ApiMetadata, ApiParameter, ApiProtocolType, ApiRegistry, ApiRegistryEntry, ApiResponse, ConflictResolutionStrategy, HttpStatusCode, ObjectQLReference, SchemaDefinition } from '@objectstack/spec/api';
+import { ApiDiscoveryQuerySchema, ApiDiscoveryResponseSchema, ApiEndpointRegistrationSchema, ApiMetadataSchema, ApiParameterSchema, ApiProtocolType, ApiRegistrySchema, ApiRegistryEntrySchema, ApiResponseSchema, ConflictResolutionStrategy, HttpStatusCode, ObjectQLReferenceSchema, SchemaDefinition } from '@objectstack/spec/api';
 import type { ApiDiscoveryQuery, ApiDiscoveryResponse, ApiEndpointRegistration, ApiMetadata, ApiParameter, ApiProtocolType, ApiRegistry, ApiRegistryEntry, ApiResponse, ConflictResolutionStrategy, HttpStatusCode, ObjectQLReference, SchemaDefinition } from '@objectstack/spec/api';
 
 // Validate data
-const result = ApiDiscoveryQuery.parse(data);
+const result = ApiDiscoveryQuerySchema.parse(data);
 ```
 
 ---

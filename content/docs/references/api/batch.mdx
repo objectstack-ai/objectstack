@@ -30,11 +30,11 @@ Industry alignment: Salesforce Bulk API, Microsoft Dynamics Bulk Operations
 ## TypeScript Usage
 
 ```typescript
-import { BatchConfig, BatchOperationResult, BatchOperationType, BatchOptions, BatchRecord, BatchUpdateRequest, BatchUpdateResponse, CrossObjectBatchDroppedFields, CrossObjectBatchOperation, CrossObjectBatchRequest, CrossObjectBatchResponse, DeleteManyRequest, UpdateManyRecord, UpdateManyRequest } from '@objectstack/spec/api';
+import { BatchConfigSchema, BatchOperationResultSchema, BatchOperationType, BatchOptionsSchema, BatchRecordSchema, BatchUpdateRequestSchema, BatchUpdateResponseSchema, CrossObjectBatchDroppedFieldsSchema, CrossObjectBatchOperationSchema, CrossObjectBatchRequestSchema, CrossObjectBatchResponseSchema, DeleteManyRequestSchema, UpdateManyRecordSchema, UpdateManyRequestSchema } from '@objectstack/spec/api';
 import type { BatchConfig, BatchOperationResult, BatchOperationType, BatchOptions, BatchRecord, BatchUpdateRequest, BatchUpdateResponse, CrossObjectBatchDroppedFields, CrossObjectBatchOperation, CrossObjectBatchRequest, CrossObjectBatchResponse, DeleteManyRequest, UpdateManyRecord, UpdateManyRequest } from '@objectstack/spec/api';
 
 // Validate data
-const result = BatchConfig.parse(data);
+const result = BatchConfigSchema.parse(data);
 ```
 
 ---

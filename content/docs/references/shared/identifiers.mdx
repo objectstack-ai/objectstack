@@ -84,11 +84,11 @@ Enforces lowercase with underscores or dots to ensure:
 ## TypeScript Usage
 
 ```typescript
-import { EventName, SnakeCaseIdentifier, SystemIdentifier } from '@objectstack/spec/shared';
+import { EventNameSchema, SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '@objectstack/spec/shared';
 import type { EventName, SnakeCaseIdentifier, SystemIdentifier } from '@objectstack/spec/shared';
 
 // Validate data
-const result = EventName.parse(data);
+const result = EventNameSchema.parse(data);
 ```
 
 ---

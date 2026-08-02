@@ -16,11 +16,11 @@ GDPR/HIPAA/PCI-DSS compliant
 ## TypeScript Usage
 
 ```typescript
-import { EncryptionAlgorithm, EncryptionConfig, FieldEncryption, KeyManagementProvider, KeyRotationPolicy } from '@objectstack/spec/system';
+import { EncryptionAlgorithmSchema, EncryptionConfigSchema, FieldEncryptionSchema, KeyManagementProviderSchema, KeyRotationPolicySchema } from '@objectstack/spec/system';
 import type { EncryptionAlgorithm, EncryptionConfig, FieldEncryption, KeyManagementProvider, KeyRotationPolicy } from '@objectstack/spec/system';
 
 // Validate data
-const result = EncryptionAlgorithm.parse(data);
+const result = EncryptionAlgorithmSchema.parse(data);
 ```
 
 ---

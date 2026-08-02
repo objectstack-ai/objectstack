@@ -32,11 +32,11 @@ Features:
 ## TypeScript Usage
 
 ```typescript
-import { DependencyGraph, DependencyGraphNode, PackageDependency, PackageDependencyConflict, PackageDependencyResolutionResult, PluginProvenance, PluginTrustScore, SBOM, SBOMEntry, SecurityPolicy, SecurityScanResult, SecurityVulnerability, VulnerabilitySeverity } from '@objectstack/spec/kernel';
+import { DependencyGraphSchema, DependencyGraphNodeSchema, PackageDependencySchema, PackageDependencyConflictSchema, PackageDependencyResolutionResultSchema, PluginProvenanceSchema, PluginTrustScoreSchema, SBOMSchema, SBOMEntrySchema, SecurityPolicySchema, SecurityScanResultSchema, SecurityVulnerabilitySchema, VulnerabilitySeverity } from '@objectstack/spec/kernel';
 import type { DependencyGraph, DependencyGraphNode, PackageDependency, PackageDependencyConflict, PackageDependencyResolutionResult, PluginProvenance, PluginTrustScore, SBOM, SBOMEntry, SecurityPolicy, SecurityScanResult, SecurityVulnerability, VulnerabilitySeverity } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = DependencyGraph.parse(data);
+const result = DependencyGraphSchema.parse(data);
 ```
 
 ---
