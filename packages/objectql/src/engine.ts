@@ -17,7 +17,7 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken } from '@objectstack/spec/data';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
@@ -1379,13 +1379,20 @@ export class ObjectQL implements IObjectQLEngine {
             object, field: f.name, error: result.error,
           });
         }
-      } else if (dv === 'current_user') {
+      } else if (isCurrentUserDefaultToken(dv)) {
         // `current_user` token → the acting user's id at insert time. Declarative
         // counterpart to writing a beforeInsert hook; mirrors the 'NOW()' string
         // convention and is resolved app-side per request (driver-agnostic), so
         // `Field.user({ defaultValue: 'current_user' })` auto-fills the actor.
         // When there is no authenticated user (system/anonymous), leave it unset
         // and let required-validation decide — never stamp a bogus owner.
+        //
+        // The token spelling comes from `@objectstack/spec/data`
+        // (`DEFAULT_VALUE_TOKENS`), the one place the family is declared, so a
+        // driver's DDL reads the SAME set when deciding which `defaultValue`s
+        // may become a physical column DEFAULT. When the two sides disagreed,
+        // SQL emitted `DEFAULT 'current_user'` and the DATABASE overrode the
+        // "leave it unset" decision below with a literal non-id (#4560).
         if (execCtx?.userId != null) out[f.name] = String(execCtx.userId);
       } else {
         out[f.name] = dv;
