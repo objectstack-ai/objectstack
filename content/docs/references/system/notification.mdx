@@ -50,8 +50,8 @@ Supports variables for personalization and file attachments.
 ## TypeScript Usage
 
 ```typescript
-import { EmailTemplateSchema, InAppNotificationSchema, NotificationChannelSchema, NotificationConfigSchema, PushNotificationSchema, SMSTemplateSchema } from '@objectstack/spec/system';
-import type { EmailTemplate, InAppNotification, NotificationChannel, NotificationConfig, PushNotification, SMSTemplate } from '@objectstack/spec/system';
+import { EmailTemplateSchema, InAppNotificationSchema, NotificationChannelSchema, PushNotificationSchema, SMSTemplateSchema } from '@objectstack/spec/system';
+import type { EmailTemplate, InAppNotification, NotificationChannel, PushNotification, SMSTemplate } from '@objectstack/spec/system';
 
 // Validate data
 const result = EmailTemplateSchema.parse(data);
@@ -104,24 +104,6 @@ Notification delivery channel (implemented today: inbox, email, sms — push/sla
 * `slack`
 * `teams`
 * `webhook`
-
-
----
-
-## NotificationConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Notification ID |
-| **name** | `string` | ✅ | Notification name |
-| **channel** | `Enum<'email' \| 'sms' \| 'push' \| 'in-app' \| 'slack' \| 'teams' \| 'webhook'>` | ✅ | Notification channel |
-| **template** | `{ id: string; subject: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; body: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; bodyType?: Enum<'text' \| 'html' \| 'markdown'>; … } \| { id: string; message: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; maxLength?: number; variables?: string[] } \| { title: string; body: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; icon?: string; badge?: number; … } \| { title: string; message: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; type: Enum<'info' \| 'success' \| 'warning' \| 'error'>; actionUrl?: string; … }` | ✅ | Notification template |
-| **recipients** | `{ to: string[]; cc?: string[]; bcc?: string[] }` | ✅ | Recipients |
-| **schedule** | `{ type: Enum<'immediate' \| 'delayed' \| 'scheduled'>; delay?: number; scheduledAt?: number }` | optional | Scheduling |
-| **retryPolicy** | `{ enabled?: boolean; maxRetries?: number; backoffStrategy: Enum<'exponential' \| 'linear' \| 'fixed'> }` | optional | Retry policy |
-| **tracking** | `{ trackOpens?: boolean; trackClicks?: boolean; trackDelivery?: boolean }` | optional | Tracking configuration |
 
 
 ---

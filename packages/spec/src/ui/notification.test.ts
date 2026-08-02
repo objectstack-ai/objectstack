@@ -4,14 +4,10 @@ import {
   NotificationSeveritySchema,
   NotificationPositionSchema,
   NotificationActionSchema,
-  NotificationSchema,
-  NotificationConfigSchema,
   type NotificationType,
   type NotificationSeverity,
   type NotificationPosition,
   type NotificationAction,
-  type Notification,
-  type NotificationConfig,
 } from './notification.zod';
 
 describe('NotificationTypeSchema', () => {
@@ -79,118 +75,33 @@ describe('NotificationActionSchema', () => {
   });
 });
 
-describe('NotificationSchema', () => {
-  it('should apply defaults for minimal config', () => {
-    const result = NotificationSchema.parse({ message: 'Something happened' });
-    expect(result.type).toBe('toast');
-    expect(result.severity).toBe('info');
-    expect(result.dismissible).toBe(true);
-  });
-
-  it('should accept full config with title, message, actions, and position', () => {
-    const notification: Notification = {
-      type: 'banner',
-      severity: 'error',
-      title: 'System Error',
-      message: 'An unexpected error occurred',
-      icon: 'error_outline',
-      duration: 10000,
-      dismissible: false,
-      actions: [
-        { label: 'Retry', action: 'retry', variant: 'primary' },
-        { label: 'Dismiss', action: 'dismiss', variant: 'link' },
-      ],
-      position: 'top_center',
-    };
-    const result = NotificationSchema.parse(notification);
-    expect(result.type).toBe('banner');
-    expect(result.severity).toBe('error');
-    expect(result.title).toBe('System Error');
-    expect(result.actions).toHaveLength(2);
-    expect(result.position).toBe('top_center');
-    expect(result.dismissible).toBe(false);
-  });
-
-  it('should reject missing message', () => {
-    expect(() => NotificationSchema.parse({ type: 'toast', severity: 'info' })).toThrow();
-  });
-
-  it('should leave optional fields undefined when not provided', () => {
-    const result = NotificationSchema.parse({ message: 'Hello' });
-    expect(result.title).toBeUndefined();
-    expect(result.icon).toBeUndefined();
-    expect(result.duration).toBeUndefined();
-    expect(result.actions).toBeUndefined();
-    expect(result.position).toBeUndefined();
-  });
-});
-
-describe('NotificationConfigSchema', () => {
-  it('should apply all defaults for empty config', () => {
-    const result = NotificationConfigSchema.parse({});
-    expect(result.defaultPosition).toBe('top_right');
-    expect(result.defaultDuration).toBe(5000);
-    expect(result.maxVisible).toBe(5);
-    expect(result.stackDirection).toBe('down');
-    expect(result.pauseOnHover).toBe(true);
-  });
-
-  it('should accept full config override', () => {
-    const config: NotificationConfig = {
-      defaultPosition: 'bottom_left',
-      defaultDuration: 3000,
-      maxVisible: 3,
-      stackDirection: 'up',
-      pauseOnHover: false,
-    };
-    const result = NotificationConfigSchema.parse(config);
-    expect(result.defaultPosition).toBe('bottom_left');
-    expect(result.defaultDuration).toBe(3000);
-    expect(result.maxVisible).toBe(3);
-    expect(result.stackDirection).toBe('up');
-    expect(result.pauseOnHover).toBe(false);
-  });
-});
-
 describe('Type exports', () => {
   it('should have valid type exports', () => {
     const type: NotificationType = 'toast';
     const severity: NotificationSeverity = 'info';
     const position: NotificationPosition = 'top_right';
     const action: NotificationAction = { label: 'OK', action: 'confirm', variant: 'primary' };
-    const notification: Notification = { type: 'toast', severity: 'info', message: 'Test', dismissible: true };
-    const config: NotificationConfig = { defaultPosition: 'top_right', defaultDuration: 5000, maxVisible: 5, stackDirection: 'down', pauseOnHover: true };
     expect(type).toBeDefined();
     expect(severity).toBeDefined();
     expect(position).toBeDefined();
     expect(action).toBeDefined();
-    expect(notification).toBeDefined();
-    expect(config).toBeDefined();
-  });
-});
-
-describe('ARIA integration', () => {
-  it('should accept ARIA props on NotificationSchema', () => {
-    const result = NotificationSchema.parse({
-      message: 'File saved',
-      ariaLabel: 'Success notification',
-      role: 'alert',
-    });
-    expect(result.ariaLabel).toBe('Success notification');
-    expect(result.role).toBe('alert');
   });
 
-  it('should reject I18n ariaLabel on NotificationSchema', () => {
-    expect(() => NotificationSchema.parse({
-      message: 'Error occurred',
-      ariaLabel: { key: 'notifications.error_alert', defaultValue: 'Error alert' },
-    })).toThrow();
-  });
-
-  it('should leave ARIA fields undefined when not provided', () => {
-    const result = NotificationSchema.parse({ message: 'Test' });
-    expect(result.ariaLabel).toBeUndefined();
-    expect(result.ariaDescribedBy).toBeUndefined();
-    expect(result.role).toBeUndefined();
+  // Pin: this module no longer declares the bare Notification(Config) names.
+  // The pin is compile-time (typeof import is type-level only — no runtime
+  // barrel load): if either bare name is re-added here, the conditional type
+  // flips to `true` and the `false` assignment fails `tsc --noEmit`. The bare
+  // `Notification(Schema)` belongs to `@objectstack/spec/api` alone (#4610);
+  // `NotificationConfig(Schema)` left the spec surface entirely.
+  it('does not re-expose the bare Notification/NotificationConfig names from ./ui (#4610)', () => {
+    type UiNotificationModule = typeof import('./notification.zod');
+    const hasNotificationSchema: 'NotificationSchema' extends keyof UiNotificationModule
+      ? true
+      : false = false;
+    const hasNotificationConfigSchema: 'NotificationConfigSchema' extends keyof UiNotificationModule
+      ? true
+      : false = false;
+    expect(hasNotificationSchema).toBe(false);
+    expect(hasNotificationConfigSchema).toBe(false);
   });
 });
