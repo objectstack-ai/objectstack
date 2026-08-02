@@ -263,6 +263,31 @@ describe('runtime authoring gate on saveMetaItem (#4463)', () => {
         expect(flowRows(rows).length).toBe(1);
     });
 
+    it('does not gate `os migrate meta --stored`, which rewrites rows that already exist', async () => {
+        // D4's other half. The migration heals stored bodies into the current
+        // dialect; it is not an author publishing anything. Gating it would
+        // mean a tenant holding one pre-existing violation could never
+        // canonicalize that row — the migration would report `failed` and
+        // leave the body in the OLDER dialect, which is worse than the state
+        // it was asked to improve. `source` is server-stated (never forwarded
+        // from a request), so this cannot be spelled past the gate by a caller.
+        const { protocol, rows } = makeProtocol();
+        const result = await save(protocol, brokenApprovalFlow(), { source: 'migrate-stored' });
+        expect(result.success).toBe(true);
+        expect(flowRows(rows).length).toBe(1);
+    });
+
+    it('DOES gate an ordinary save that merely looks like one (no source spoofing)', async () => {
+        // The carve-out is on one exact server-stated token; anything else —
+        // including a caller's guess at it — still meets the gate.
+        const { protocol } = makeProtocol();
+        for (const source of [undefined, 'protocol.saveMetaItem', 'migrate', 'migrate-stored-ish']) {
+            const err = await save(protocol, brokenApprovalFlow(), source ? { source } : {})
+                .catch((e: any) => e);
+            expect(err?.status, `source=${String(source)} must still be gated`).toBe(422);
+        }
+    });
+
     it('does not gate a metadata type no rule declares (P1 wires `flow` only)', async () => {
         // `object` writes are deliberately outside P1 — see the registry's
         // RUNTIME_OBJECT_WRITES_P2 reason. A type nobody declared must pass

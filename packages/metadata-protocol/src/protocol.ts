@@ -1948,10 +1948,25 @@ export class ObjectStackProtocolImplementation implements
      * than it can be at build time.
      */
     private assertRuntimeAuthoringRules(evt: {
-        type: string; name: string; state: 'draft' | 'active'; body: unknown;
+        type: string; name: string; state: 'draft' | 'active'; body: unknown; source?: string;
     }): void {
         if (this.environmentId === undefined) return;
         if (evt.state !== 'active') return;
+        // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
+        // into the current dialect. It is not an author publishing anything —
+        // it is the platform healing its own storage — and #4463 D4 is explicit
+        // that the gate blocks new writes while stored rows keep their
+        // ADR-0087 path. Gating it would invert the tool: a tenant with one
+        // pre-existing violation could never canonicalize that row, and the
+        // migration would report `failed` while leaving the body in the OLDER
+        // dialect — strictly worse than the state it was asked to improve.
+        //
+        // Safe as a carve-out because `source` is stated by the SERVER, never
+        // forwarded from a request (see the note at the top of `saveMetaItem`):
+        // no caller can spell its way past the gate. `duplicatePackage` is
+        // deliberately NOT here — it mints brand-new rows under new names, and
+        // a copy of a broken flow is a new broken flow.
+        if (evt.source === 'migrate-stored') return;
         const singular = PLURAL_TO_SINGULAR[evt.type] ?? evt.type;
 
         // Resolution context. Best-effort: a host without a registry (a
@@ -6678,6 +6693,7 @@ export class ObjectStackProtocolImplementation implements
             name: request.name,
             state: mode === 'draft' ? 'draft' : 'active',
             body: request.item,
+            source: writeSource,
         });
 
         // Pre-persistence authoring gate (#3050): a domain plugin may veto the
