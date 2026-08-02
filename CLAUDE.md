@@ -15,6 +15,12 @@ conflicting shapes for one problem. Already assigned to someone else? It is take
 another or ask; never reassign it to yourself. File findings unassigned when you are only
 recording them; assign at the moment you start.
 
+All agents share one GitHub identity, so the assignee field can't tell you whether a claim
+is **yours** — a claim is assign **plus a claim comment with your session ID and branch**
+(`claude/issue-<n>-<slug>`), and before writing code you must re-read the comments: an
+earlier claim with a different session ID means it's taken, whatever the assignee says.
+(#4551 was implemented twice in one morning because this read was skipped — see #4588.)
+
 ## ⛔ Worktree-first — before your FIRST file edit (AGENTS.md Prime Directive #11)
 
 This repo — **and every sibling repo you touch (`objectui`, `cloud`)** — is edited by

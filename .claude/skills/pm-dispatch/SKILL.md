@@ -189,14 +189,20 @@ execute atomically, in order:
 1. **Assign** to yourself (`@me`) and add `pm:dispatched`. Skip — and drop
    from the batch — any issue that acquired an assignee since step 1.
 2. **Claim comment** (Chinese), fixed shape — the branch name is the key,
-   every later artifact (worktree, push, PR) hangs off it:
+   every later artifact (worktree, push, PR) hangs off it. The session ID is
+   NOT optional: under the shared identity it is the only line that lets a
+   later reader — including your own future self after a context reset —
+   answer "is this claim mine?". A claim without it caused the #4555/#4559
+   duplicate (#4588): the second session saw its own shared name as assignee
+   and could not tell the claim was someone else's.
    > 认领:PM 循环第 N 轮
+   > 会话:`session_<id>`
    > 分支:`claude/issue-<n>-<slug>`
    > Worktree:`<repo>-issue-<n>`
 3. **Race check**: assignment is idempotent, so two agents can both
    "succeed". Re-read the comments; if an earlier claim comment with a
-   *different* branch name exists, you lost — touch nothing of theirs,
-   reply 「已有认领,让行」, and pick another issue. First comment wins.
+   *different* session ID or branch name exists, you lost — touch nothing of
+   theirs, reply 「已有认领,让行」, and pick another issue. First comment wins.
 
 Dev agents push their branch early — a remote branch is the hardest evidence
 of work in flight, closing the gap between "claimed" and "PR exists".
