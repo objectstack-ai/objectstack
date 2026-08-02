@@ -41,7 +41,11 @@ export const IsolationLevelEnum = z.enum([
 ]).describe('Transaction isolation levels (snake_case standard)');
 export type IsolationLevel = z.infer<typeof IsolationLevelEnum>;
 
-/** Cache eviction strategies */
-export const CacheStrategyEnum = z.enum(['lru', 'lfu', 'ttl', 'fifo'])
-  .describe('Cache eviction strategy');
-export type CacheStrategy = z.infer<typeof CacheStrategyEnum>;
+// `CacheStrategyEnum` lived here as a second declaration of the cache eviction
+// vocabulary next to `CacheStrategySchema` (`system/cache.zod.ts`) — same
+// `CacheStrategy` type name on two entry points, diverged on the values (this
+// one lacked `adaptive`). It had zero importers in this repo, objectui, or
+// cloud, while the system schema is the one `CacheTier.strategy` gates on.
+// Removed rather than reconciled, for the same reason as
+// `AggregationFunctionEnum` above: a second name for one concept is how the
+// vocabularies drifted apart in the first place. #4537.

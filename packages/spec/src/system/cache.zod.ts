@@ -28,12 +28,20 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
  * @see ../../api/http-cache.zod.ts for HTTP-level caching
  */
 import { lazySchema } from '../shared/lazy-schema';
+
+/**
+ * Cache eviction strategy — the single declaration of the `CacheStrategy`
+ * vocabulary (#4537). `shared/enums.zod.ts` carried a second, diverged copy
+ * (`CacheStrategyEnum`, no importers anywhere) that was removed rather than
+ * reconciled. `adaptive` ("dynamic strategy selection") was declared only on
+ * this side and had zero producers in this repo, objectui and cloud — dropped
+ * so the enum carries only the values both declarations ever agreed on.
+ */
 export const CacheStrategySchema = lazySchema(() => z.enum([
   'lru',          // Least Recently Used
   'lfu',          // Least Frequently Used
   'fifo',         // First In First Out
   'ttl',          // Time To Live only
-  'adaptive',     // Dynamic strategy selection
 ]).describe('Cache eviction strategy'));
 
 export type CacheStrategy = z.infer<typeof CacheStrategySchema>;

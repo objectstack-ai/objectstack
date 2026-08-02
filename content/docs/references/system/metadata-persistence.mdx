@@ -16,8 +16,8 @@ Defines the lifecycle and mutability of a metadata item.
 ## TypeScript Usage
 
 ```typescript
-import { MetadataCollectionInfo, MetadataDiffResult, MetadataExportOptions, MetadataFormat, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataHistoryRecord, MetadataHistoryRetentionPolicy, MetadataImportOptions, MetadataLoadOptions, MetadataLoadResult, MetadataLoaderContract, MetadataRecord, MetadataSaveOptions, MetadataSaveResult, MetadataScope, MetadataSource, MetadataState, MetadataStats, MetadataWatchEvent, PackagePublishResult } from '@objectstack/spec/system';
-import type { MetadataCollectionInfo, MetadataDiffResult, MetadataExportOptions, MetadataFormat, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataHistoryRecord, MetadataHistoryRetentionPolicy, MetadataImportOptions, MetadataLoadOptions, MetadataLoadResult, MetadataLoaderContract, MetadataRecord, MetadataSaveOptions, MetadataSaveResult, MetadataScope, MetadataSource, MetadataState, MetadataStats, MetadataWatchEvent, PackagePublishResult } from '@objectstack/spec/system';
+import { MetadataCollectionInfo, MetadataDiffResult, MetadataExportOptions, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataHistoryRecord, MetadataHistoryRetentionPolicy, MetadataImportOptions, MetadataLoadOptions, MetadataLoadResult, MetadataLoaderContract, MetadataRecord, MetadataSaveOptions, MetadataSaveResult, MetadataScope, MetadataSource, MetadataState, MetadataStats, MetadataWatchEvent, PackagePublishResult } from '@objectstack/spec/system';
+import type { MetadataCollectionInfo, MetadataDiffResult, MetadataExportOptions, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataHistoryRecord, MetadataHistoryRetentionPolicy, MetadataImportOptions, MetadataLoadOptions, MetadataLoadResult, MetadataLoaderContract, MetadataRecord, MetadataSaveOptions, MetadataSaveResult, MetadataScope, MetadataSource, MetadataState, MetadataStats, MetadataWatchEvent, PackagePublishResult } from '@objectstack/spec/system';
 
 // Validate data
 const result = MetadataCollectionInfo.parse(data);
@@ -66,22 +66,7 @@ const result = MetadataCollectionInfo.parse(data);
 | **types** | `string[]` | optional |  |
 | **namespaces** | `string[]` | optional |  |
 | **output** | `string` | ✅ | Output directory or file |
-| **format** | `Enum<'json' \| 'yaml' \| 'yml' \| 'ts' \| 'js' \| 'typescript' \| 'javascript'>` | ✅ |  |
-
-
----
-
-## MetadataFormat
-
-### Allowed Values
-
-* `json`
-* `yaml`
-* `yml`
-* `ts`
-* `js`
-* `typescript`
-* `javascript`
+| **format** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>` | ✅ | Metadata file format |
 
 
 ---
@@ -194,7 +179,7 @@ const result = MetadataCollectionInfo.parse(data);
 | :--- | :--- | :--- | :--- |
 | **data** | `any` | ✅ |  |
 | **stats** | `{ path?: string; size?: number; mtime?: string; hash?: string; … }` | optional |  |
-| **format** | `Enum<'json' \| 'yaml' \| 'yml' \| 'ts' \| 'js' \| 'typescript' \| 'javascript'>` | optional |  |
+| **format** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>` | optional | Metadata file format |
 | **source** | `string` | optional |  |
 | **fromCache** | `boolean` | optional |  |
 | **etag** | `string` | optional |  |
@@ -264,7 +249,7 @@ const result = MetadataCollectionInfo.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **format** | `Enum<'json' \| 'yaml' \| 'yml' \| 'ts' \| 'js' \| 'typescript' \| 'javascript'>` | optional |  |
+| **format** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>` | optional | Metadata file format |
 | **create** | `boolean` | ✅ |  |
 | **overwrite** | `boolean` | ✅ |  |
 | **path** | `string` | optional |  |
@@ -342,7 +327,7 @@ const result = MetadataCollectionInfo.parse(data);
 | **hash** | `string` | optional |  |
 | **etag** | `string` | optional |  |
 | **modifiedAt** | `string` | optional |  |
-| **format** | `Enum<'json' \| 'yaml' \| 'yml' \| 'ts' \| 'js' \| 'typescript' \| 'javascript'>` | optional |  |
+| **format** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>` | optional | Metadata file format |
 
 
 ---

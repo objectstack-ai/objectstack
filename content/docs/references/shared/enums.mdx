@@ -14,26 +14,12 @@ Sort direction used across query, data-engine, analytics
 ## TypeScript Usage
 
 ```typescript
-import { CacheStrategyEnum, IsolationLevelEnum, MutationEventEnum, SortDirectionEnum, SortItem } from '@objectstack/spec/shared';
-import type { CacheStrategyEnum, IsolationLevelEnum, MutationEventEnum, SortDirectionEnum, SortItem } from '@objectstack/spec/shared';
+import { IsolationLevelEnum, MutationEventEnum, SortDirectionEnum, SortItem } from '@objectstack/spec/shared';
+import type { IsolationLevelEnum, MutationEventEnum, SortDirectionEnum, SortItem } from '@objectstack/spec/shared';
 
 // Validate data
-const result = CacheStrategyEnum.parse(data);
+const result = IsolationLevelEnum.parse(data);
 ```
-
----
-
-## CacheStrategyEnum
-
-Cache eviction strategy
-
-### Allowed Values
-
-* `lru`
-* `lfu`
-* `ttl`
-* `fifo`
-
 
 ---
 

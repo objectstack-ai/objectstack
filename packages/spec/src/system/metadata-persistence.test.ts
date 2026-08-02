@@ -182,7 +182,7 @@ describe('MetadataRecordSchema', () => {
 
 describe('MetadataFormatSchema', () => {
   it('should accept valid formats', () => {
-    const formats = ['json', 'yaml', 'yml', 'ts', 'js', 'typescript', 'javascript'];
+    const formats = ['json', 'yaml', 'typescript', 'javascript'];
     formats.forEach((format) => {
       expect(() => MetadataFormatSchema.parse(format)).not.toThrow();
     });
@@ -190,6 +190,16 @@ describe('MetadataFormatSchema', () => {
 
   it('should reject invalid formats', () => {
     expect(() => MetadataFormatSchema.parse('xml')).toThrow();
+  });
+
+  // Pin (#4537): the extension-style aliases the system-side copy used to
+  // carry had zero producers — every loader normalizes at the boundary
+  // (FilesystemLoader.detectFormat maps .yml/.ts/.js to the canonical names).
+  // They must stay rejected so the alias vocabulary cannot silently return.
+  it('should reject the retired yml/ts/js aliases', () => {
+    ['yml', 'ts', 'js'].forEach((alias) => {
+      expect(() => MetadataFormatSchema.parse(alias)).toThrow();
+    });
   });
 });
 

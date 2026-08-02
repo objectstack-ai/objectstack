@@ -128,7 +128,6 @@ Cache eviction strategy
 * `lfu`
 * `fifo`
 * `ttl`
-* `adaptive`
 
 
 ---
@@ -145,7 +144,7 @@ Configuration for a single cache tier in the hierarchy
 | **type** | `Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>` | ✅ | Cache backend type |
 | **maxSize** | `number` | optional | Max size in MB |
 | **ttl** | `number` | ✅ | Default TTL in seconds |
-| **strategy** | `Enum<'lru' \| 'lfu' \| 'fifo' \| 'ttl' \| 'adaptive'>` | ✅ | Eviction strategy |
+| **strategy** | `Enum<'lru' \| 'lfu' \| 'fifo' \| 'ttl'>` | ✅ | Eviction strategy |
 | **warmup** | `boolean` | ✅ | Pre-populate cache on startup |
 
 

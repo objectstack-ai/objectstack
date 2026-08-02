@@ -14,8 +14,8 @@ Supported metadata file formats
 ## TypeScript Usage
 
 ```typescript
-import { BaseMetadataRecord } from '@objectstack/spec/shared';
-import type { BaseMetadataRecord } from '@objectstack/spec/shared';
+import { BaseMetadataRecord, MetadataFormat } from '@objectstack/spec/shared';
+import type { BaseMetadataRecord, MetadataFormat } from '@objectstack/spec/shared';
 
 // Validate data
 const result = BaseMetadataRecord.parse(data);
@@ -35,6 +35,20 @@ Base metadata record fields shared across kernel and system
 | **type** | `string` | ✅ | Metadata type (e.g. "object", "view", "flow") |
 | **name** | `string` | ✅ | Machine name (snake_case) |
 | **format** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>` | optional | Source file format |
+
+
+---
+
+## MetadataFormat
+
+Metadata file format
+
+### Allowed Values
+
+* `yaml`
+* `json`
+* `typescript`
+* `javascript`
 
 
 ---

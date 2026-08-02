@@ -1129,7 +1129,6 @@
     "security/TenancyPosture",
     "shared/AppName",
     "shared/BaseMetadataRecord",
-    "shared/CacheStrategyEnum",
     "shared/CorsConfig",
     "shared/CronExpressionInput",
     "shared/EventName",

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { MetadataFormatSchema } from '../shared/metadata-types.zod';
 
 /**
  * Metadata Scope Enum
@@ -164,7 +165,9 @@ export type PackagePublishResult = z.infer<typeof PackagePublishResultSchema>;
 // ─── Loader / watch envelope types ───────────────────────────────────────────
 //
 // Everything from here to `MetadataSource` below is the SINGLE source for the
-// metadata loader + watch vocabulary. `kernel/metadata-loader.zod` used to
+// metadata loader + watch vocabulary (except `MetadataFormat`, whose one
+// declaration sits in `shared/metadata-types.zod` and is re-exported here —
+// see the note on the re-export). `kernel/metadata-loader.zod` used to
 // declare a differently-shaped copy of each of these names on the
 // `@objectstack/spec/kernel` entry — an import-path coin-flip that no consumer
 // ever won on purpose (every one of them imported from here). The kernel copies
@@ -173,11 +176,20 @@ export type PackagePublishResult = z.infer<typeof PackagePublishResultSchema>;
 /**
  * Metadata Format
  * Supported file formats for metadata serialization.
+ *
+ * Re-exported from `../shared/metadata-types.zod` — the single declaration
+ * (#4537, same shape as the `MetadataManagerConfig` re-export below). This
+ * file used to declare its own 7-member copy with `yml`/`ts`/`js` "aliases";
+ * those values had zero producers in this repo, objectui and cloud: every
+ * loader normalizes at the boundary (`FilesystemLoader.detectFormat` maps
+ * `.yml` → `'yaml'`, `.ts` → `'typescript'`, `.js` → `'javascript'`) and the
+ * database/remote/memory loaders always emit `'json'`. The declaration lives
+ * in `shared/` because both this file and `kernel/metadata-loader.zod`
+ * (`MetadataManagerConfig.formats`, #4411) need it, and kernel ← system is
+ * already taken by the `MetadataManagerConfig` re-export — a system-side
+ * source would close a module cycle.
  */
-export const MetadataFormatSchema = lazySchema(() => z.enum([
-  'json', 'yaml', 'yml', 'ts', 'js',
-  'typescript', 'javascript' // Aliases
-]));
+export { MetadataFormatSchema };
 
 /**
  * Metadata Stats
@@ -347,7 +359,7 @@ export {
   MetadataManagerConfigSchema,
 } from '../kernel/metadata-loader.zod';
 
-export type MetadataFormat = z.infer<typeof MetadataFormatSchema>;
+export type { MetadataFormat } from '../shared/metadata-types.zod';
 export type MetadataStats = z.infer<typeof MetadataStatsSchema>;
 export type MetadataLoaderContract = z.input<typeof MetadataLoaderContractSchema>;
 export type MetadataLoadOptions = z.infer<typeof MetadataLoadOptionsSchema>;

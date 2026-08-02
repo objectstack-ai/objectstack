@@ -4,7 +4,6 @@ import {
   SortItemSchema,
   MutationEventEnum,
   IsolationLevelEnum,
-  CacheStrategyEnum,
 } from './enums.zod';
 
 describe('SortDirectionEnum', () => {
@@ -70,20 +69,5 @@ describe('IsolationLevelEnum', () => {
     expect(() => IsolationLevelEnum.parse('READ_COMMITTED')).toThrow();
     expect(() => IsolationLevelEnum.parse('read-committed')).toThrow();
     expect(() => IsolationLevelEnum.parse('none')).toThrow();
-  });
-});
-
-describe('CacheStrategyEnum', () => {
-  it('should accept all cache strategies', () => {
-    const valid = ['lru', 'lfu', 'ttl', 'fifo'];
-    valid.forEach((v) => {
-      expect(CacheStrategyEnum.parse(v)).toBe(v);
-    });
-  });
-
-  it('should reject invalid values', () => {
-    expect(() => CacheStrategyEnum.parse('LRU')).toThrow();
-    expect(() => CacheStrategyEnum.parse('random')).toThrow();
-    expect(() => CacheStrategyEnum.parse('')).toThrow();
   });
 });

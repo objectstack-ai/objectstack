@@ -7,6 +7,12 @@ import { SnakeCaseIdentifierSchema } from './identifiers.zod';
 // Shared Metadata Types
 // ============================================================================
 
+// The single declaration of the metadata-format vocabulary (#4537), re-exported
+// by `system/metadata-persistence.zod` and consumed by
+// `kernel/metadata-loader.zod` (`MetadataManagerConfig.formats`, #4411). Only
+// the four canonical names: extension-style aliases (`yml`/`ts`/`js`) are
+// normalized away at the loader boundary (`FilesystemLoader.detectFormat`)
+// and never reach a `format` field.
 /** Supported metadata file formats */
 import { lazySchema } from './lazy-schema';
 export const MetadataFormatSchema = lazySchema(() => z.enum(['yaml', 'json', 'typescript', 'javascript'])

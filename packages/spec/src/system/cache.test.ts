@@ -12,7 +12,7 @@ import {
 
 describe('CacheStrategySchema', () => {
   it('should accept valid strategies', () => {
-    const strategies = ['lru', 'lfu', 'fifo', 'ttl', 'adaptive'];
+    const strategies = ['lru', 'lfu', 'fifo', 'ttl'];
 
     strategies.forEach((strategy) => {
       expect(() => CacheStrategySchema.parse(strategy)).not.toThrow();
@@ -22,6 +22,13 @@ describe('CacheStrategySchema', () => {
   it('should reject invalid strategies', () => {
     expect(() => CacheStrategySchema.parse('invalid')).toThrow();
     expect(() => CacheStrategySchema.parse('random')).toThrow();
+  });
+
+  // Pin (#4537): 'adaptive' was declared with zero producers (three-repo scan)
+  // and removed when the shared/system declarations converged. It must stay
+  // rejected so a declared-but-unimplemented strategy cannot silently return.
+  it('should reject the retired adaptive strategy', () => {
+    expect(() => CacheStrategySchema.parse('adaptive')).toThrow();
   });
 });
 
