@@ -351,51 +351,17 @@ export type MetadataQueryResult = z.infer<typeof MetadataQueryResultSchema>;
 // ==========================================
 // Metadata Lifecycle Events
 // ==========================================
-
-/**
- * Metadata Event Schema
- *
- * Events emitted by the metadata plugin when metadata changes.
- * Enables reactive patterns across the platform (cache invalidation,
- * UI refresh, dependency tracking, etc.).
- */
-export const MetadataEventSchema = lazySchema(() => z.object({
-  /** Event type */
-  event: z.enum([
-    'metadata.registered',
-    'metadata.updated',
-    'metadata.unregistered',
-    'metadata.validated',
-    'metadata.deployed',
-    'metadata.overlay.applied',
-    'metadata.overlay.removed',
-    'metadata.imported',
-    'metadata.exported',
-  ]).describe('Event type'),
-
-  /** Metadata type */
-  metadataType: MetadataTypeSchema.describe('Metadata type'),
-
-  /** Item name */
-  name: z.string().describe('Metadata item name'),
-
-  /** Namespace */
-  namespace: z.string().optional().describe('Namespace'),
-
-  /** Package ID (if package-managed) */
-  packageId: z.string().optional().describe('Owning package ID'),
-
-  /** Timestamp */
-  timestamp: z.string().datetime().describe('Event timestamp'),
-
-  /** Actor who caused the event */
-  actor: z.string().optional().describe('User or system that triggered the event'),
-
-  /** Additional event-specific payload */
-  payload: z.record(z.string(), z.unknown()).optional().describe('Event-specific payload'),
-}));
-
-export type MetadataEvent = z.infer<typeof MetadataEventSchema>;
+// v17 dual-source cleanup (#4587): the `MetadataEvent(Schema)` pair that
+// lived here (a `metadata.registered/…/exported` lifecycle-event envelope)
+// was removed. It was the #4411-family dead copy: zero importers outside its
+// own unit test across framework/cloud/objectui, and NOTHING ever emitted
+// its event vocabulary. The bare names now belong to `@objectstack/spec/api`
+// alone (`src/api/events.zod.ts`) — the realtime metadata change feed
+// (`metadata.{type}.{created|updated|deleted}`) that `MetadataManager`
+// publishes and the client SDK (`@objectstack/client`) subscribes to.
+// Runtime *watch* events remain `MetadataWatchEvent` in
+// `@objectstack/spec/system`; repository change-log events are
+// `@objectstack/metadata-core`'s own `MetadataEvent` (ADR-0008).
 
 // ==========================================
 // Metadata Validation
@@ -783,27 +749,19 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
 // ==========================================
 // Bulk Operation Types
 // ==========================================
-
-/**
- * Bulk Register Request
- */
-export const MetadataBulkRegisterRequestSchema = lazySchema(() => z.object({
-  /** Items to register */
-  items: z.array(z.object({
-    type: z.string().describe('Metadata type'),
-    name: z.string().describe('Item name'),
-    data: z.record(z.string(), z.unknown()).describe('Metadata payload'),
-    namespace: z.string().optional().describe('Namespace'),
-  })).min(1).describe('Items to register'),
-
-  /** Continue on individual item failure */
-  continueOnError: z.boolean().default(false).describe('Continue if individual item fails'),
-
-  /** Validate items before registering */
-  validate: z.boolean().default(true).describe('Validate before register'),
-}));
-
-export type MetadataBulkRegisterRequest = z.input<typeof MetadataBulkRegisterRequestSchema>;
+// v17 dual-source cleanup (#4587): `MetadataBulkRegisterRequest(Schema)`
+// was removed from this module. It was a dead copy of the REST request
+// contract — zero importers outside its own unit test across
+// framework/cloud/objectui — and it diverged from the enforced write path:
+// its per-item `namespace` field exists nowhere in
+// `IMetadataService.bulkRegister` (contracts) or
+// `MetadataManager.bulkRegister`, and `namespace` is deprecated repo-wide
+// (Prime Directive #6). The bare names now belong to
+// `@objectstack/spec/api` alone (`src/api/metadata.zod.ts` — the
+// POST /api/meta/bulk/register contract, whose item shape
+// `{type, name, data}` matches what the runtime actually accepts).
+// `MetadataBulkResultSchema` below stays: it is the live result type
+// consumed by `@objectstack/metadata` and re-exported by ./api responses.
 
 /**
  * Bulk Operation Result

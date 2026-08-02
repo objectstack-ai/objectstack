@@ -35,6 +35,7 @@ import {
   // Dependencies
   MetadataDependenciesResponseSchema,
   MetadataDependentsResponseSchema,
+  type MetadataBulkRegisterRequest,
 } from './metadata.zod';
 
 // ==========================================
@@ -468,6 +469,24 @@ describe('MetadataBulkRegisterRequestSchema', () => {
     });
     expect(result.continueOnError).toBe(true);
     expect(result.validate).toBe(false);
+  });
+
+  // v17 (#4587): `MetadataBulkRegisterRequest` moved here from ./kernel,
+  // which carried a dead near-duplicate of this schema (extra per-item
+  // `namespace` that no enforced write path reads). The exported type is the
+  // authoring-side shape (z.input): the defaulted flags stay optional, and a
+  // per-item `namespace` is NOT part of the contract.
+  it('exports the authoring-side MetadataBulkRegisterRequest type (#4587)', () => {
+    const minimal: MetadataBulkRegisterRequest = {
+      items: [{ type: 'object', name: 'account', data: { label: 'Account' } }],
+    };
+    const parsed = MetadataBulkRegisterRequestSchema.parse(minimal);
+    expect(parsed.continueOnError).toBe(false);
+    expect(parsed.validate).toBe(true);
+
+    type Item = MetadataBulkRegisterRequest['items'][number];
+    const hasNamespace: 'namespace' extends keyof Item ? true : false = false;
+    expect(hasNamespace).toBe(false);
   });
 });
 

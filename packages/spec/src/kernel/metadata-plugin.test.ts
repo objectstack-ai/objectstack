@@ -4,11 +4,9 @@ import {
   MetadataTypeRegistryEntrySchema,
   MetadataQuerySchema,
   MetadataQueryResultSchema,
-  MetadataEventSchema,
   MetadataValidationResultSchema,
   MetadataPluginConfigSchema,
   MetadataPluginManifestSchema,
-  MetadataBulkRegisterRequestSchema,
   MetadataBulkResultSchema,
   MetadataDependencySchema,
   DEFAULT_METADATA_TYPE_REGISTRY,
@@ -234,65 +232,27 @@ describe('MetadataPluginProtocol', () => {
     });
   });
 
-  describe('MetadataEventSchema', () => {
-    it('should validate metadata events', () => {
-      const events = [
-        { event: 'metadata.registered', metadataType: 'object', name: 'account', timestamp: new Date().toISOString() },
-        { event: 'metadata.updated', metadataType: 'view', name: 'account_list', timestamp: new Date().toISOString() },
-        { event: 'metadata.unregistered', metadataType: 'flow', name: 'approval_flow', timestamp: new Date().toISOString() },
-      ] as const;
-
-      events.forEach(event => {
-        const validated = MetadataEventSchema.parse(event);
-        expect(validated.event).toBe(event.event);
-        expect(validated.name).toBe(event.name);
-      });
-    });
-
-    it('should accept all event types', () => {
-      const eventTypes = [
-        'metadata.registered', 'metadata.updated', 'metadata.unregistered',
-        'metadata.validated', 'metadata.deployed',
-        'metadata.overlay.applied', 'metadata.overlay.removed',
-        'metadata.imported', 'metadata.exported',
-      ] as const;
-
-      eventTypes.forEach(event => {
-        expect(() => MetadataEventSchema.parse({
-          event,
-          metadataType: 'object',
-          name: 'test',
-          timestamp: new Date().toISOString(),
-        })).not.toThrow();
-      });
-    });
-
-    it('should accept optional fields', () => {
-      const event = {
-        event: 'metadata.registered' as const,
-        metadataType: 'object' as const,
-        name: 'account',
-        namespace: 'crm',
-        packageId: 'com.acme.crm',
-        timestamp: new Date().toISOString(),
-        actor: 'admin@example.com',
-        payload: { version: '1.0.0' },
-      };
-
-      const validated = MetadataEventSchema.parse(event);
-      expect(validated.namespace).toBe('crm');
-      expect(validated.actor).toBe('admin@example.com');
-      expect(validated.payload).toEqual({ version: '1.0.0' });
-    });
-
-    it('should reject invalid event types', () => {
-      expect(() => MetadataEventSchema.parse({
-        event: 'metadata.unknown',
-        metadataType: 'object',
-        name: 'test',
-        timestamp: new Date().toISOString(),
-      })).toThrow();
-    });
+  // v17 dual-source cleanup (#4587): the bare names MetadataEvent(Schema) /
+  // MetadataBulkRegisterRequest(Schema) now belong to @objectstack/spec/api
+  // alone (realtime metadata change feed / POST /api/meta/bulk/register
+  // contract). The copies this module carried were the #4411-style dead side:
+  // zero importers outside this test across framework/cloud/objectui, a
+  // lifecycle-event vocabulary (`metadata.registered/…`) nothing ever
+  // emitted, and a per-item `namespace` field no enforced write path reads.
+  // Pin: this module no longer declares the bare names. The pin is
+  // compile-time (typeof import is type-level only — no runtime barrel
+  // load): if either bare name is re-added here, the conditional type flips
+  // to `true` and the `false` assignment fails `tsc --noEmit`.
+  it('does not re-expose the bare MetadataEvent/MetadataBulkRegisterRequest names from ./kernel (#4587)', () => {
+    type MetadataPluginModule = typeof import('./metadata-plugin.zod');
+    const hasEventSchema: 'MetadataEventSchema' extends keyof MetadataPluginModule
+      ? true
+      : false = false;
+    const hasBulkRegisterSchema: 'MetadataBulkRegisterRequestSchema' extends keyof MetadataPluginModule
+      ? true
+      : false = false;
+    expect(hasEventSchema).toBe(false);
+    expect(hasBulkRegisterSchema).toBe(false);
   });
 
   describe('MetadataValidationResultSchema', () => {
@@ -473,40 +433,6 @@ describe('MetadataPluginProtocol', () => {
         type: 'standard',
         capabilities: {},
       })).toThrow();
-    });
-  });
-
-  describe('MetadataBulkRegisterRequestSchema', () => {
-    it('should validate a bulk register request', () => {
-      const request = {
-        items: [
-          { type: 'object', name: 'account', data: { label: 'Account' } },
-          { type: 'view', name: 'account_list', data: { label: 'Account List' } },
-        ],
-      };
-
-      const result = MetadataBulkRegisterRequestSchema.parse(request);
-      expect(result.items).toHaveLength(2);
-      expect(result.continueOnError).toBe(false);
-      expect(result.validate).toBe(true);
-    });
-
-    it('should reject empty items array', () => {
-      expect(() => MetadataBulkRegisterRequestSchema.parse({
-        items: [],
-      })).toThrow();
-    });
-
-    it('should accept options', () => {
-      const request = {
-        items: [{ type: 'object', name: 'test', data: {} }],
-        continueOnError: true,
-        validate: false,
-      };
-
-      const result = MetadataBulkRegisterRequestSchema.parse(request);
-      expect(result.continueOnError).toBe(true);
-      expect(result.validate).toBe(false);
     });
   });
 

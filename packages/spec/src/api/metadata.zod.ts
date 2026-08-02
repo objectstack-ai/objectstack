@@ -353,6 +353,16 @@ export type MetadataNamesResponse = z.infer<typeof MetadataNamesResponseSchema>;
 export type MetadataExistsResponse = z.infer<typeof MetadataExistsResponseSchema>;
 export type MetadataDeleteResponse = z.infer<typeof MetadataDeleteResponseSchema>;
 export type MetadataQueryResponse = z.infer<typeof MetadataQueryResponseSchema>;
+/**
+ * Authoring-side shape of the bulk register request (`continueOnError` /
+ * `validate` stay optional — they carry defaults).
+ *
+ * v17 (#4587): this name moved here from `@objectstack/spec/kernel`, whose
+ * copy of the schema was a dead duplicate (its extra per-item `namespace`
+ * field matched no enforced write path). `./api` is the single owner of
+ * `MetadataBulkRegisterRequest(Schema)` now.
+ */
+export type MetadataBulkRegisterRequest = z.input<typeof MetadataBulkRegisterRequestSchema>;
 export type MetadataBulkResponse = z.infer<typeof MetadataBulkResponseSchema>;
 export type MetadataOverlayResponse = z.infer<typeof MetadataOverlayResponseSchema>;
 export type MetadataEffectiveResponse = z.infer<typeof MetadataEffectiveResponseSchema>;
