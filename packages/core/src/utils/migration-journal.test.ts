@@ -22,6 +22,7 @@ import {
   planChunks,
   hashMigrationPlan,
   MigrationJournalRefusal,
+  MigrationPlanRegistry,
   type MigrationPlan,
   type MigrationPlanStep,
 } from './migration-journal';
@@ -468,5 +469,33 @@ describe('journal sequence', () => {
 
     const events = await readRunJournal(asEngine(engine), runId);
     expect(events.map((e) => e.seq)).toEqual([...events.map((_, i) => i)]);
+  });
+});
+
+// ── plan registry ─────────────────────────────────────────────────────────
+
+describe('MigrationPlanRegistry (#4617)', () => {
+  it('hands a plan back by id, and answers undefined for one it does not have', () => {
+    const r = new MigrationPlanRegistry();
+    const plan: MigrationPlan = { id: 'backfill', steps: [makeStep(1)] };
+    r.register(plan);
+    expect(r.get('backfill')).toBe(plan);
+    // Undefined, not a throw: an unregistered plan is a REPORTABLE state (the
+    // package owning it is not loaded), not an error in the lookup itself.
+    expect(r.get('absent')).toBeUndefined();
+    expect(r.list()).toEqual([plan]);
+  });
+
+  it('lets a later registration replace an earlier one for the same id', () => {
+    const r = new MigrationPlanRegistry();
+    const v1: MigrationPlan = { id: 'p', steps: [makeStep(1)] };
+    const v2: MigrationPlan = { id: 'p', steps: [makeStep(2)] };
+    r.register(v1);
+    r.register(v2);
+    // Last wins, and the list does not grow — a plan reloaded during dev must
+    // not leave a stale twin that a resume could pick instead. The journal's
+    // plan-hash check is the backstop that catches resuming a CHANGED plan.
+    expect(r.get('p')).toBe(v2);
+    expect(r.list()).toHaveLength(1);
   });
 });
