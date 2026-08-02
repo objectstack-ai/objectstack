@@ -381,16 +381,26 @@ describe('MetadataSaveResultSchema', () => {
 });
 
 describe('MetadataWatchEventSchema', () => {
-  it('should accept valid event types', () => {
-    const types = ['add', 'change', 'unlink', 'added', 'changed', 'deleted'];
+  it('should accept the canonical event types', () => {
+    const types = ['added', 'changed', 'deleted'];
     types.forEach((type) => {
       expect(() => MetadataWatchEventSchema.parse({ type, path: '/test' })).not.toThrow();
     });
   });
 
+  // Pin (#4536): the raw chokidar vocabulary is translated in
+  // NodeMetadataManager's watcher callbacks and never reaches the event
+  // surface — the schema must reject it, not smuggle it back in.
+  it('should reject the raw chokidar event types', () => {
+    const rawTypes = ['add', 'change', 'unlink'];
+    rawTypes.forEach((type) => {
+      expect(() => MetadataWatchEventSchema.parse({ type, path: '/test' })).toThrow();
+    });
+  });
+
   it('should accept full event', () => {
     const event = MetadataWatchEventSchema.parse({
-      type: 'change',
+      type: 'changed',
       path: '/metadata/view.json',
       name: 'account_view',
       stats: { size: 512 },
@@ -408,7 +418,7 @@ describe('MetadataWatchEventSchema', () => {
   });
 
   it('should reject missing path', () => {
-    expect(() => MetadataWatchEventSchema.parse({ type: 'add' })).toThrow();
+    expect(() => MetadataWatchEventSchema.parse({ type: 'added' })).toThrow();
   });
 });
 

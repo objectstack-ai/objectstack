@@ -275,9 +275,15 @@ export const MetadataSaveResultSchema = lazySchema(() => z.object({
 
 /**
  * Metadata Watch Event
+ *
+ * `type` carries only the values the runtime emits. The raw chokidar
+ * vocabulary (`add`/`change`/`unlink`) is translated in NodeMetadataManager's
+ * watcher callbacks (`packages/metadata/src/node-metadata-manager.ts`
+ * `handleFileEvent`) and never reaches the event surface — the raw values had
+ * zero producers when they were declared here (#4536, follow-up to #4411).
  */
 export const MetadataWatchEventSchema = lazySchema(() => z.object({
-  type: z.enum(['add', 'change', 'unlink', 'added', 'changed', 'deleted']),
+  type: z.enum(['added', 'changed', 'deleted']),
   path: z.string(),
   name: z.string().optional(),
   stats: MetadataStatsSchema.optional(),

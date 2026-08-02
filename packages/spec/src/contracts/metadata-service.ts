@@ -36,7 +36,7 @@
  */
 
 import type { MetadataQuery, MetadataQueryResult, MetadataValidationResult, MetadataBulkResult, MetadataDependency } from '../kernel/metadata-plugin.zod';
-// The PERSISTENCE-side watch event (`add`/`added`/`changed`/`deleted`/…, path +
+// The PERSISTENCE-side watch event (`added`/`changed`/`deleted`, path +
 // file stats) — what `MetadataManager.subscribe` relays, as opposed to the
 // registration-level events `watch` forwards (`MetadataWatchCallback` below).
 // Spec used to carry a second, differently-shaped `MetadataWatchEvent` on
@@ -423,7 +423,7 @@ export interface IMetadataService {
      * NOT {@link watch} with a different return shape: the two carry different
      * events. `watch` reports registration-level transitions
      * (`registered`/`updated`/`unregistered`); `subscribe` relays the loader
-     * pipeline's {@link MetadataWatchEvent} (`add`/`changed`/`deleted`, with
+     * pipeline's {@link MetadataWatchEvent} (`added`/`changed`/`deleted`, with
      * path and file stats) — the granularity ObjectQLPlugin's metadata bridge
      * re-syncs runtime-authored hooks/actions from. (The first draft of this
      * member reused `watch`'s callback type; `MetadataManager implements
