@@ -153,6 +153,12 @@
         "toMajor": 17
       },
       {
+        "surface": "app.areas.visible / app.areas.requiredPermissions",
+        "to": "navigation-area keys 'visible'/'requiredPermissions' removed (#4651, ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
+        "conversionId": "app-area-fail-open-gates-removed",
+        "toMajor": 17
+      },
+      {
         "surface": "object.fields.*.required / object.fields.*.storage.notNull",
         "to": "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
         "conversionId": "field-required-notnull-explicit",
@@ -727,6 +733,12 @@
           "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement / app.homePageId / app.areas.order",
           "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits #4001, #4509, #4667 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, the landing page IS the first nav item, and no renderer ever sorted areas)",
           "conversionId": "app-dead-authoring-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "app.areas.visible / app.areas.requiredPermissions",
+          "to": "navigation-area keys 'visible'/'requiredPermissions' removed (#4651, ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
+          "conversionId": "app-area-fail-open-gates-removed",
           "toMajor": 17
         },
         {

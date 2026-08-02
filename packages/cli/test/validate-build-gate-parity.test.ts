@@ -14,7 +14,7 @@ import { join } from 'node:path';
  * ## What changed, and what this file still guards
  *
  * The metadata rules the two commands share now come from ONE table
- * (`src/lint/authoring-rules.ts`, #4409), and its own ratchet —
+ * (`@objectstack/lint`'s `authoring-rules.ts`, #4409/#4463), and its own ratchet —
  * `src/commands/authoring-rule-wiring.test.ts` — proves all three authoring
  * commands run the identical gating set. That is a stronger guarantee than the
  * source diff this file used to do, and it covers `os lint` too.
@@ -60,7 +60,7 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
  * Each entry is a deliberate assertion that the check CANNOT be made read-only
  * — it needs the emitted artifact, the bundler, or filesystem output. A gate
  * that merely *reads* the parsed stack does not belong here; wire it into
- * `validate.ts`, or better, register it in `src/lint/authoring-rules.ts` so all
+ * `validate.ts`, or better, register it in `@objectstack/lint`'s `authoring-rules.ts` so all
  * three authoring commands get it at once.
  */
 const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
@@ -120,7 +120,7 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
     expect(
       missing,
       `os build runs ${missing.length} gate(s) that os validate does not: ${missing.join(', ')}.\n` +
-        `Register it in packages/cli/src/lint/authoring-rules.ts so all three authoring commands run ` +
+        `Register it in packages/lint/src/authoring-rules.ts so all three authoring commands run ` +
         `it, wire it into validate.ts by hand and add it to SHARED_NON_REGISTRY_GATES, or add it to ` +
         `BUILD_ONLY_GATES with a reason.`,
     ).toEqual([]);

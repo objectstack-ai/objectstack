@@ -615,6 +615,55 @@ const AREA_ORDER_RETIRED =
   + '`os migrate meta --from 16` to rewrite existing sources automatically.';
 
 /**
+ * `app.areas[].visible` and `app.areas[].requiredPermissions`, retired in
+ * 17.0.0 (#4651, ADR-0049).
+ *
+ * These were not ordinary dead keys. They were **fail-open capability gates**:
+ * the authoritative server-side filter (`filterAppForUser`,
+ * `packages/rest/src/rest-server.ts`) reads the app's `requiredPermissions` and
+ * then walks ONLY `item.navigation` — it returns early when that tree is
+ * absent and never touches `item.areas` at all — while the client renders every
+ * area in the switcher. So an author who wrote `requiredPermissions:
+ * ['sales.admin']` on an area got a clean parse, a stored value, and an area
+ * visible to everyone.
+ *
+ * What made them read alive is that the SAME key names are genuinely enforced
+ * one level up and one level down: app-level `requiredPermissions` drops the
+ * whole app server-side, and a navigation ITEM's `requiredPermissions` /
+ * `requiresService` are stripped server-side and re-checked in the shell, whose
+ * item-level `visible` is a real CEL gate. Three layers, of which the middle one
+ * was theatre — ADR-0078 false compliance, the `capabilities.readOnly` shape
+ * (#4583).
+ *
+ * Enforcing them instead (route A) was considered and deliberately not taken in
+ * the 17.0.0 window: it needs semantics decided first (does filtering an area
+ * remove its items everywhere? does the server bind `user` for area CEL?), and
+ * a retirement PR must not invent an authorization mechanism. Removing a gate
+ * that never gated is strictly safer than shipping a major with it in place.
+ */
+const AREA_VISIBLE_RETIRED =
+  '`areas[].visible` was removed in @objectstack/spec 17.0.0 (#4651, ADR-0049) — nothing ever '
+  + 'evaluated an area-level predicate, so an area "hidden" by one rendered for EVERYONE: a '
+  + 'gate that fails open, which is worse than no gate at all. Delete the key and gate the '
+  + 'items INSIDE the area — a navigation ITEM\'s `visible` takes the same CEL expression and '
+  + 'IS evaluated per item by the shell. For a gate the SERVER enforces, use '
+  + '`requiredPermissions`: on the app itself, or on items of the app\'s top-level '
+  + '`navigation` tree. Run `os migrate meta --from 16` to rewrite existing sources '
+  + 'automatically.';
+
+const AREA_REQUIRED_PERMISSIONS_RETIRED =
+  '`areas[].requiredPermissions` was removed in @objectstack/spec 17.0.0 (#4651, ADR-0049) — '
+  + 'no layer ever checked it, so a "permission-gated" area was served to, and rendered for, '
+  + 'every user: a fail-open access gate, not merely an unread key. Delete it and move the '
+  + 'gate to a layer that is actually enforced. `requiredPermissions` on the APP is checked '
+  + 'server-side (the app is dropped from /meta entirely for a caller who lacks them), and '
+  + '`requiredPermissions` / `requiresService` on a navigation ITEM are stripped server-side '
+  + 'from the app\'s top-level `navigation` tree and re-checked in the shell. Items nested '
+  + 'under `areas[]` are gated in the shell only — the server does not walk `areas` — so '
+  + 'anything that must never reach the browser belongs in the top-level tree, or in its own '
+  + 'app. Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+
+/**
  * Navigation Area Schema
  * 
  * A logical grouping (zone/section) of navigation items, similar to Salesforce "App Areas"
@@ -624,17 +673,24 @@ const AREA_ORDER_RETIRED =
  * Areas allow large applications to partition navigation by business function while
  * keeping a single AppSchema definition. The runtime may render areas as top-level tabs,
  * sidebar sections, or a switchable navigation context.
- * 
+ *
+ * An area is a LAYOUT grouping, not an access boundary: it carries no gate of
+ * its own. Gate the items inside it (`visible` / `requiredPermissions` on a
+ * navigation item) or gate the app (`requiredPermissions` on the AppSchema) —
+ * see AREA_VISIBLE_RETIRED / AREA_REQUIRED_PERMISSIONS_RETIRED above for why
+ * the area-level keys were removed in 17.0.0.
+ *
  * @example
  * ```ts
  * const salesArea: NavigationArea = {
  *   id: 'area_sales',
  *   label: 'Sales',
  *   icon: 'briefcase',
- *   order: 1,
  *   navigation: [
  *     { id: 'nav_leads', type: 'object', label: 'Leads', objectName: 'lead' },
- *     { id: 'nav_opportunities', type: 'object', label: 'Opportunities', objectName: 'opportunity' },
+ *     // gate per ITEM — the layer that is actually enforced
+ *     { id: 'nav_forecast', type: 'object', label: 'Forecast', objectName: 'forecast',
+ *       requiredPermissions: ['sales.admin'] },
  *   ],
  * };
  * ```
@@ -655,24 +711,33 @@ export const NavigationAreaSchema = lazySchema(() => z.object({
   /** Area description */
   description: I18nLabelSchema.optional().describe('Area description'),
 
-  /** 
-   * Visibility condition.
-   * Formula expression returning boolean.
-   */
-  visible: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) for this area.'),
-
-  /** Permissions required to access this area */
-  requiredPermissions: z.array(z.string()).optional().describe('Permissions required to access this area'),
+  // `visible` and `requiredPermissions` removed in 17.0.0 (#4651) — see
+  // AREA_VISIBLE_RETIRED / AREA_REQUIRED_PERMISSIONS_RETIRED. Both were
+  // FAIL-OPEN gates: no layer read them, while the identically named keys on a
+  // navigation ITEM and on the APP are enforced. Gate the items inside the area
+  // (or the app) instead.
 
   /** Navigation items within this area */
   navigation: z.array(NavigationItemSchema).describe('Navigation items within this area'),
 }, {
   error: strictUnknownKeyError({
     surface: 'this navigation area',
-    knownKeys: ['id', 'label', 'icon', 'description', 'visible', 'requiredPermissions', 'navigation'],
-    // `sort: 'order'` retired with the key it pointed at (#4667).
-    aliases: { visiblewhen: 'visible', visibleon: 'visible', title: 'label', name: 'id', permissions: 'requiredPermissions', items: 'navigation', children: 'navigation' },
-    guidance: { order: AREA_ORDER_RETIRED, sort: AREA_ORDER_RETIRED },
+    knownKeys: ['id', 'label', 'icon', 'description', 'navigation'],
+    // `sort: 'order'` retired with the key it pointed at (#4667); the three
+    // gating aliases (`visibleWhen`/`visibleOn`/`permissions`) retired with
+    // theirs (#4651). An alias must never rename onto a key that is itself
+    // gone — it would answer "unknown key" with a second unknown key — so each
+    // moves to `guidance` and carries the prescription instead.
+    aliases: { title: 'label', name: 'id', items: 'navigation', children: 'navigation' },
+    guidance: {
+      order: AREA_ORDER_RETIRED,
+      sort: AREA_ORDER_RETIRED,
+      visible: AREA_VISIBLE_RETIRED,
+      visibleWhen: AREA_VISIBLE_RETIRED,
+      visibleOn: AREA_VISIBLE_RETIRED,
+      requiredPermissions: AREA_REQUIRED_PERMISSIONS_RETIRED,
+      permissions: AREA_REQUIRED_PERMISSIONS_RETIRED,
+    },
     history:
       'Until #4001 these were dropped silently — the area still parsed, so its gating or ' +
       'ordering was quietly ignored.',

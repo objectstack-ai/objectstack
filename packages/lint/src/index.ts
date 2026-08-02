@@ -348,3 +348,95 @@ export type {
 } from './reference-integrity-suite.js';
 
 export { buildAccessMatrix, diffAccessMatrix } from './build-access-matrix.js';
+
+// ─── Rules relocated from `@objectstack/cli` (#4463) ─────────────────
+//
+// These five lived in `packages/cli/src/{utils,lint}/` while the registry that
+// runs them lived beside them. That was fine while the CLI was the only
+// consumer; it stopped being fine the moment the runtime write path had to run
+// the SAME table, because the kernel cannot depend on the CLI. They moved here
+// — the package the rules always belonged in — so `authoring-rules.ts` can live
+// here too and both surfaces read one array. The CLI now imports them from this
+// barrel; no rule logic changed in the move.
+
+export { lintFlowPatterns } from './lint-flow-patterns.js';
+export type { FlowLintFinding } from './lint-flow-patterns.js';
+export {
+  FLOW_TIME_RELATIVE_ANTIPATTERN,
+  FLOW_DATE_EQUALITY_FILTER,
+  FLOW_PHANTOM_AGGREGATION,
+  FLOW_DOUBLE_BRACE_INTERP,
+  FLOW_BARE_DOLLAR_REF,
+  FLOW_APPROVAL_REVISE_DEAD_END,
+  FLOW_APPROVAL_REVISE_UNMARKED_BACKEDGE,
+  FLOW_APPROVAL_REVISE_DISABLED,
+  FLOW_RUNAS_UNSCOPED,
+  FLOW_ERROR_LABEL_NOT_FAULT,
+  FLOW_BRANCH_LABEL_UNMATCHED,
+  FLOW_DECISION_UNCONDITIONAL_BRANCH,
+  FLOW_DEFAULT_EDGE_WITH_CONDITION,
+  FLOW_MULTIPLE_DEFAULT_EDGES,
+  FLOW_INERT_NODE_CONDITION,
+} from './lint-flow-patterns.js';
+
+export { lintLivenessProperties } from './lint-liveness-properties.js';
+export type { LivenessLintFinding } from './lint-liveness-properties.js';
+export { LIVENESS_DEAD_PROPERTY, LIVENESS_EXPERIMENTAL_PROPERTY } from './lint-liveness-properties.js';
+
+export { lintAutonumberFormats } from './lint-autonumber-formats.js';
+export type { AutonumberLintFinding } from './lint-autonumber-formats.js';
+export {
+  AUTONUMBER_UNKNOWN_FIELD,
+  AUTONUMBER_OPTIONAL_FIELD,
+  AUTONUMBER_SELF_REFERENCE,
+  AUTONUMBER_LITERAL_TOKEN,
+} from './lint-autonumber-formats.js';
+
+export { lintViewRefs } from './lint-view-refs.js';
+export type { ViewRefFinding } from './lint-view-refs.js';
+export {
+  VIEW_KEY_COLLISION,
+  VIEW_REF_FORM_TARGET_MISSING,
+  VIEW_REF_FORM_TARGET_KIND,
+} from './lint-view-refs.js';
+
+export { lintUniqueDeclarations, lintDataModel, UNIQUE_DOUBLE_DECLARATION } from './data-model-rules.js';
+export type { LintIssue, Severity } from './data-model-rules.js';
+
+// ─── The registry itself (#4409, relocated #4463) ────────────────────
+//
+// The single source of truth for WHICH rules run WHERE. `os validate`,
+// `os build`, `os lint` and the runtime metadata publish gate all read this
+// one array — see `authoring-rules.ts` for why any second list is a bug.
+
+export {
+  AUTHORING_RULES,
+  AUTHORING_COMMANDS,
+  AUTHORING_SURFACES,
+  EXPRESSION_INVALID,
+  authoringRulesFor,
+  runAuthoringRules,
+  splitBySeverity,
+} from './authoring-rules.js';
+export type {
+  AuthoringCommand,
+  AuthoringFinding,
+  AuthoringRule,
+  AuthoringRuleContext,
+  AuthoringRuleInputTier,
+  AuthoringRuleRun,
+  AuthoringRuleTier,
+  AuthoringSeverity,
+  AuthoringSurface,
+} from './authoring-rules.js';
+
+// The runtime publish gate over that registry. Also published as the
+// `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports,
+// so a consumer there never names the graph that reaches the source parsers.
+export {
+  runRuntimeAuthoringRules,
+  runtimeAuthoringRulesFor,
+  runtimeGatedTypes,
+  stackKeyForType,
+} from './runtime-gate.js';
+export type { RuntimeGateResult, RuntimeStackContext } from './runtime-gate.js';

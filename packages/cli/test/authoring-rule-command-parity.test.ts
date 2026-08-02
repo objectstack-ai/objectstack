@@ -28,7 +28,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AUTHORING_COMMANDS, runAuthoringRules, type AuthoringCommand } from '../src/lint/authoring-rules.js';
+import { AUTHORING_COMMANDS, runAuthoringRules, type AuthoringCommand } from '@objectstack/lint';
 
 const cliBin = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'bin', 'run-dev.js');
 

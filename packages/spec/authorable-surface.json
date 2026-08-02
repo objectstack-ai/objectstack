@@ -7800,8 +7800,6 @@
     "ui/NavigationArea:id",
     "ui/NavigationArea:label",
     "ui/NavigationArea:navigation",
-    "ui/NavigationArea:requiredPermissions",
-    "ui/NavigationArea:visible",
     "ui/NavigationConfig:mode",
     "ui/NavigationConfig:openNewTab",
     "ui/NavigationConfig:preventNavigation",

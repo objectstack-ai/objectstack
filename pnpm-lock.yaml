@@ -976,6 +976,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
+      '@objectstack/lint':
+        specifier: workspace:*
+        version: link:../lint
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../metadata-core

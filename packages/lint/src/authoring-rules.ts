@@ -1,9 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The author-time rule registry — WHICH rules `os validate`, `os build` and
- * `os lint` run, declared as data, with a written reason for every narrowing
- * (#4409).
+ * The author-time rule registry — WHICH rules each authoring surface runs,
+ * declared as data, with a written reason for every narrowing (#4409, #4463).
+ *
+ * Lives in `@objectstack/lint` (not the CLI) since #4463: the CLI is one
+ * CONSUMER of this table, not its home. The runtime metadata write path
+ * (`saveMetaItem` / `publishMetaItem` — the Studio, REST `/meta` and MCP door)
+ * is the other, and it reads the same array through `./runtime.js`. That is the
+ * whole point: a shared core plus N gates, never N rule engines.
  *
  * ## Why this exists
  *
@@ -26,7 +31,7 @@
  * repair removed an instance and left the MODE — a rule's command coverage was
  * whatever its author remembered to type, and forgetting was silent. This file
  * replaces "remembering" with a table, and the guard in
- * `commands/authoring-rule-wiring.test.ts` makes a narrowing an explicit,
+ * `authoring-rule-wiring.test.ts` makes a narrowing an explicit,
  * reasoned edit instead of an omission.
  *
  * ## The invariant
@@ -34,6 +39,16 @@
  * **Any rule that can emit `error` runs on all three commands.** A gate is only
  * as strong as the weakest command an author or CI happens to run, so a gating
  * rule with partial coverage is not a stricter check — it is a coin flip.
+ *
+ * #4463 is the same sentence one layer out: the three commands are three doors
+ * in ONE wall, and the runtime metadata write path is a fourth wall with no
+ * door at all. A tenant editing in Studio, a REST `/meta` PUT and an MCP/AI
+ * author all reach `saveMetaItem`, which ran a per-type Zod `safeParse` and
+ * nothing else — so the very stack `os build` refuses walked in through the
+ * only door most tenants have. {@link AuthoringRule.surfaces} is what makes
+ * "which rules run at that door?" a table entry rather than a second wiring
+ * list, and `authoring-rule-wiring.test.ts` ratchets it exactly as it ratchets
+ * the three commands.
  *
  * An `advisory` rule (never emits `error`) MAY be scoped to fewer commands, but
  * only with a `scopeReason` recorded here. The distinction that matters is not
@@ -55,6 +70,13 @@
  * fails on a direct import, because that is precisely how a rule ends up running
  * on two commands out of three.
  *
+ * Then answer the fourth-door question in the same edit: does it belong on
+ * `surfaces: ['cli', 'runtime-publish']`? Say yes (with `runtimeTypes`) or say
+ * why not (with `surfaceReason`). There is no third option — the guard rejects
+ * an entry that answers neither, which is the whole mechanism: #4409 was
+ * "nobody wrote down which commands", #4463 was "nobody wrote down which
+ * doors", and both were invisible until someone measured.
+ *
  * ## What is NOT in here
  *
  * This registry covers the rules the three commands SHARE. Two neighbouring
@@ -72,36 +94,37 @@
  *   metadata rules, and each is wired where its input exists.
  */
 
-import {
-  validateStackExpressions,
-  validateListViewMode,
-  validateFunctionalCompleteness,
-  validateViewContainers,
-  validateWidgetBindings,
-  validateDashboardActionRefs,
-  validateFilterTokens,
-  validateReferenceIntegrity,
-  validateResponsiveStyles,
-  validateJsxPages,
-  validateReactPages,
-  validatePageSourceStyling,
-  validateCapabilityReferences,
-  validateFlowTriggerReadiness,
-  validateApprovalApprovers,
-  validateRecordTitle,
-  validateSemanticRoles,
-  validateFormLayout,
-  validateSeedReplaySafety,
-  validateSeedStateMachine,
-  validateVisibilityPredicates,
-  validateSecurityPosture,
-  validateOrgAxisRedLines,
-  validateActionLocations,
-} from '@objectstack/lint';
-import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
-import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
-import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
-import { lintViewRefs } from '../utils/lint-view-refs.js';
+// Imported per-module, never through `./index.js`: the barrel would make this
+// file a cycle partner of its own package entry, and the runtime surface
+// (`./runtime.js`) needs a graph it can reason about rule by rule.
+import { validateStackExpressions } from './validate-expressions.js';
+import { validateListViewMode } from './validate-list-view-mode.js';
+import { validateFunctionalCompleteness } from './validate-functional-completeness.js';
+import { validateViewContainers } from './validate-view-containers.js';
+import { validateWidgetBindings } from './validate-widget-bindings.js';
+import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
+import { validateFilterTokens } from './validate-filter-tokens.js';
+import { validateReferenceIntegrity } from './reference-integrity-suite.js';
+import { validateResponsiveStyles } from './validate-responsive-styles.js';
+import { validateJsxPages } from './validate-jsx-pages.js';
+import { validateReactPages } from './validate-react-pages.js';
+import { validatePageSourceStyling } from './validate-page-source-styling.js';
+import { validateCapabilityReferences } from './validate-capability-references.js';
+import { validateFlowTriggerReadiness } from './validate-flow-trigger-readiness.js';
+import { validateApprovalApprovers } from './validate-approval-approvers.js';
+import { validateRecordTitle } from './validate-record-title.js';
+import { validateSemanticRoles } from './validate-semantic-roles.js';
+import { validateFormLayout } from './validate-form-layout.js';
+import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
+import { validateSeedStateMachine } from './validate-seed-state-machine.js';
+import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
+import { validateSecurityPosture } from './validate-security-posture.js';
+import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
+import { validateActionLocations } from './validate-action-locations.js';
+import { lintFlowPatterns } from './lint-flow-patterns.js';
+import { lintLivenessProperties } from './lint-liveness-properties.js';
+import { lintAutonumberFormats } from './lint-autonumber-formats.js';
+import { lintViewRefs } from './lint-view-refs.js';
 import { lintUniqueDeclarations } from './data-model-rules.js';
 
 type AnyRec = Record<string, unknown>;
@@ -111,6 +134,27 @@ type AnyRec = Record<string, unknown>;
 /** The three commands that hold a stack to the same author-time bar. */
 export const AUTHORING_COMMANDS = ['validate', 'build', 'lint'] as const;
 export type AuthoringCommand = (typeof AUTHORING_COMMANDS)[number];
+
+/**
+ * The authoring SURFACES this registry serves (#4463).
+ *
+ * - `cli` — `os validate` / `os build` / `os lint`. Which of the three is a
+ *   separate axis ({@link AuthoringRule.commands}); every rule here runs on the
+ *   `cli` surface, because that is where the registry was born.
+ * - `runtime-publish` — the metadata write path's PUBLISH gate: a
+ *   `state: 'active'` `saveMetaItem`, and the draft→active promotion in
+ *   `publishMetaItem`. Studio saves, REST `/meta` item CRUD and MCP/AI
+ *   authoring all funnel through those two, so wiring the surface once covers
+ *   all three doors (the maintainer ruling on #4463: one shared core, one
+ *   runtime gate, not a gate per surface).
+ *
+ * Draft saves are deliberately NOT a surface: a draft is allowed to be a
+ * half-finished thing, and gating one would break the Studio editing loop for
+ * no safety gain — the draft cannot execute until it is published, and
+ * publishing runs this table (#4463 D1).
+ */
+export const AUTHORING_SURFACES = ['cli', 'runtime-publish'] as const;
+export type AuthoringSurface = (typeof AUTHORING_SURFACES)[number];
 
 /** `error` gates. `warning` advises. `info` is a suggestion (`os lint` grades it as one). */
 export type AuthoringSeverity = 'error' | 'warning' | 'info';
@@ -179,11 +223,81 @@ export interface AuthoringRule {
   source: string;
   /** REQUIRED when `commands` is not all three: why this rule is scoped. */
   scopeReason?: string;
+  /**
+   * Which authoring surfaces run this rule (#4463). Always contains `'cli'`.
+   *
+   * Adding `'runtime-publish'` is what puts the rule on the metadata write
+   * path's publish gate; {@link runtimeTypes} then says which metadata types'
+   * writes it inspects. Leaving it off REQUIRES {@link surfaceReason} — the
+   * same discipline `scopeReason` applies to the command axis, for the same
+   * reason: the whole defect class #4409 and #4463 describe is coverage that
+   * narrowed silently.
+   */
+  surfaces: readonly AuthoringSurface[];
+  /**
+   * REQUIRED when `surfaces` includes `'runtime-publish'`: the SINGULAR
+   * metadata type names whose runtime write this rule inspects (e.g. `flow`).
+   *
+   * The runtime gate builds a per-write stack snapshot and only runs the rules
+   * that declare the written type, which is #4463 D2 option (c) expressed as
+   * data. Widening a rule to another type is a one-line edit here, not new
+   * wiring at the gate.
+   */
+  runtimeTypes?: readonly string[];
+  /** REQUIRED when `surfaces` omits `'runtime-publish'`: why the runtime gate does not run it. */
+  surfaceReason?: string;
   run: (stack: AnyRec, ctx: AuthoringRuleContext) => readonly AuthoringFinding[];
 }
 
 /** Every command runs every rule unless an entry says otherwise. */
 const ALL: readonly AuthoringCommand[] = AUTHORING_COMMANDS;
+
+/** The CLI-only surface set — the default for a rule the runtime gate does not (yet) run. */
+const CLI_ONLY: readonly AuthoringSurface[] = ['cli'];
+/** Runs on both the three CLI commands and the runtime publish gate. */
+const CLI_AND_RUNTIME: readonly AuthoringSurface[] = ['cli', 'runtime-publish'];
+
+// ─── Why a rule is not on the runtime publish gate ──────────────────
+//
+// #4463's P1 slice deliberately wires ONE metadata type (`flow`) and the four
+// rule families the issue named (flow / approval / expression / reference).
+// Every other rule carries one of the reasons below rather than silence. They
+// are shared constants because the reason really is the same for a group of
+// rules — writing twenty near-identical sentences would hide which ones differ.
+
+/**
+ * The rule reads a stack-wide COLLECTION the per-write snapshot does not carry
+ * (pages, dashboards, navigation, translations, seeds, permission sets). The
+ * runtime universe can answer these — it is strictly more complete than the
+ * CLI's single-package view — but building that snapshot is #4463 P2, and
+ * shipping the rule against a partial snapshot would invent findings for
+ * metadata the tenant simply did not include in THIS write. A false 422 on the
+ * only door a Studio tenant has is worse than the gap it would close.
+ */
+const RUNTIME_NEEDS_FULL_SNAPSHOT =
+  'P2 (#4463): reads a stack-wide collection the per-write snapshot does not carry, so running it ' +
+  'now would report the rest of the tenant\'s metadata as missing rather than judging this write.';
+
+/**
+ * The rule parses authored SOURCE (react/jsx page bodies, L2 JS hook/action
+ * bodies) through `typescript` / `sucrase`. Those are exactly the dependencies
+ * `lazy-deps.test.ts` keeps off the kernel boot path, and `@objectstack/lint`'s
+ * runtime entry is guarded to load neither. Studio's page editor has its own
+ * save-time compile path; this gate is not where that check belongs.
+ */
+const RUNTIME_HEAVY_SOURCE_PARSE =
+  'Not runtime-safe: parses authored source through typescript/sucrase, the two dependencies the ' +
+  'kernel boot path must never load (lazy-deps.test.ts). Studio compiles page source on its own path.';
+
+/**
+ * The rule judges an OBJECT/field declaration. Object writes are the hottest
+ * metadata path there is (every Studio field edit) and the blast radius of a
+ * wrong 422 there is the whole product, so P1 does not gate them — the issue's
+ * own worked example, and every acceptance criterion on it, is a flow.
+ */
+const RUNTIME_OBJECT_WRITES_P2 =
+  'P2 (#4463): judges an object/field declaration. Object writes are the hottest metadata path in ' +
+  'the product, so P1 gates `flow` first and widens once the gate has real traffic behind it.';
 
 /**
  * `ExprIssue` is the one rule finding that carries no rule id of its own — it
@@ -209,6 +323,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-expressions.ts',
+    // Runtime publish gate (#4463): the EXPRESSION family. On a flow write it
+    // checks every script-node callable and every declared predicate the flow
+    // carries, against the live object universe — the same parse `os build`
+    // runs, now at the door Studio/REST/MCP authors actually use.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
     run: (stack) =>
       validateStackExpressions(stack).map((i) => ({
         severity: i.severity ?? 'error',
@@ -228,6 +348,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-list-view-mode.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateListViewMode(stack),
   },
   // [ADR-0078] A Zod-VALID instance that silently does nothing: a `summary`
@@ -246,6 +368,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-functional-completeness.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
     run: (stack) => validateFunctionalCompleteness(stack),
   },
   // A flat list-view object in `views: []` parses to an EMPTY container
@@ -257,6 +381,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-view-containers.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateViewContainers(stack),
   },
   // ADR-0021 (#1719/#1721) — a widget's `dataset`/`dimensions`/`values` and its
@@ -267,6 +393,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-widget-bindings.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateWidgetBindings(stack),
   },
   // ADR-0049 / #3367 — a header or widget action naming a `script`/`modal`
@@ -278,6 +406,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-dashboard-action-refs.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateDashboardActionRefs(stack),
   },
   // #3574 — a filter value like `{current_user}` resolves in no vocabulary,
@@ -290,6 +420,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-filter-tokens.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateFilterTokens(stack),
   },
   // The reference-integrity suite (#3583 §5 D5) — itself a registry, of the
@@ -303,6 +435,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/reference-integrity-suite.ts',
+    // Runtime publish gate (#4463): the REFERENCE family. On a flow snapshot the
+    // members that answer a flow question run (`validateFlowTemplatePaths`,
+    // `validateFlowNodeWrites`, `validateReadonlyFlowWrites`,
+    // `validateObjectReferences`); the page/nav/AI members see no such
+    // collection in the snapshot and return nothing, and the two that would
+    // load `typescript` need a hook/action/react body the snapshot never
+    // carries — which is what `runtime-lazy-deps.test.ts` pins.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
     run: (stack) => validateReferenceIntegrity(stack),
   },
   // ADR-0065 — a styled node's responsiveStyles must be scopable (needs an
@@ -313,6 +454,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-responsive-styles.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateResponsiveStyles(stack),
   },
   // ADR-0080 — a `kind:'jsx'` page's `source` is parsed (never executed) and
@@ -324,6 +467,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-jsx-pages.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_HEAVY_SOURCE_PARSE,
     run: (stack, ctx) =>
       validateJsxPages(stack, ctx.sduiManifest ? { manifest: ctx.sduiManifest as never } : {}),
   },
@@ -336,6 +481,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-react-pages.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_HEAVY_SOURCE_PARSE,
     run: (stack) => validateReactPages(stack),
   },
   // ADR-0065, source tier — Tailwind `className` in a `kind:'html'`/`'react'`
@@ -346,6 +493,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-page-source-styling.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validatePageSourceStyling(stack),
   },
   // ADR-0066 ⑨ — a `requiredPermissions` entry naming a capability registered
@@ -357,6 +506,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-capability-references.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: 'P2 (#4463): the ONE rule the runtime universe makes strictly stronger — the advisory hedge ("another '
+      + 'installed package may provide it") is decidable against the live capability registry, so it '
+      + 'graduates from advisory to gating there rather than merely being ported. That promotion is a '
+      + 'severity change on a published rule id and belongs in its own PR, not riding a wiring change.',
     run: (stack) => validateCapabilityReferences(stack),
   },
   // A record-change flow whose start-node objectName matches nothing never
@@ -368,6 +522,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-flow-trigger-readiness.ts',
+    // Runtime publish gate (#4463): the FLOW family. Advisory at this surface
+    // too — its findings are logged, not thrown (P1 gates on `error` only; P2
+    // puts advisories on the response for Studio to render).
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
     run: (stack) => validateFlowTriggerReadiness(stack),
   },
   // ADR-0090 D3 fallout — an approval `{ type: 'role' }` resolves against the
@@ -382,6 +541,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-approval-approvers.ts',
+    // Runtime publish gate (#4463): the APPROVAL family, and the issue's worked
+    // example both times. #4409 fixed it for `os build`; a tenant saving the
+    // same broken expression approver from Studio still sailed through, because
+    // `approver.value` is just a string to Zod. It is not just a string here.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
     run: (stack) => validateApprovalApprovers(stack),
   },
   // ADR-0079 — `titleFormat` is retired in favour of `nameField`, and an object
@@ -393,6 +558,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-record-title.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
     run: (stack) => validateRecordTitle(stack),
   },
   // ADR-0085 — `stageField` / `highlightFields` / `Field.group` are pointers
@@ -404,6 +571,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-semantic-roles.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
     run: (stack) => validateSemanticRoles(stack),
   },
   // #2578 / #4449 — a form section's field reference that resolves to nothing
@@ -419,6 +588,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-form-layout.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateFormLayout(stack),
   },
   // ADR-0078 Phase 3 (Tier-A `action-locations`) — an action that declares no
@@ -433,6 +604,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-action-locations.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateActionLocations(stack),
   },
   // framework#3434 — seeds replay on every boot, so a `mode: 'insert'` dataset
@@ -443,6 +616,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-seed-replay-safety.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateSeedReplaySafety(stack),
   },
   // framework#3433 follow-up — #3433 exempts seed writes from the
@@ -455,6 +630,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-seed-state-machine.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateSeedStateMachine(stack),
   },
   // ADR-0089 D3b — deprecated visibility aliases and a mis-layered binding root.
@@ -466,6 +643,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-visibility-predicates.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateVisibilityPredicates(stack),
   },
   // #1874 — flow authoring anti-patterns. Advisory by default; a finding marked
@@ -479,7 +658,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     tier: 'gating',
     input: 'parsed',
     commands: ALL,
-    source: 'packages/cli/src/utils/lint-flow-patterns.ts',
+    source: 'packages/lint/src/lint-flow-patterns.ts',
+    // Runtime publish gate (#4463): the FLOW family's anti-pattern half. Its
+    // three `error` rules are the sharpest fit for a publish gate that exists —
+    // `flow-runas-unscoped` is metadata the automation engine REFUSES to
+    // execute, so publishing it can only ever produce a broken flow.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
     run: (stack) =>
       lintFlowPatterns(stack).map((f) => ({
         severity: f.severity ?? 'warning',
@@ -499,7 +684,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     tier: 'advisory',
     input: 'parsed',
     commands: ALL,
-    source: 'packages/cli/src/utils/lint-liveness-properties.ts',
+    source: 'packages/lint/src/lint-liveness-properties.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
     run: (stack) =>
       lintLivenessProperties(stack).map((f) => ({
         severity: 'warning' as const,
@@ -518,7 +705,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     tier: 'gating',
     input: 'parsed',
     commands: ALL,
-    source: 'packages/cli/src/utils/lint-autonumber-formats.ts',
+    source: 'packages/lint/src/lint-autonumber-formats.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
     run: (stack) =>
       lintAutonumberFormats(stack).map((f) => ({
         severity: f.severity,
@@ -537,7 +726,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     tier: 'gating',
     input: 'parsed',
     commands: ALL,
-    source: 'packages/cli/src/utils/lint-view-refs.ts',
+    source: 'packages/lint/src/lint-view-refs.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) =>
       lintViewRefs(stack).map((f) => ({
         severity: f.severity,
@@ -556,7 +747,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     tier: 'advisory',
     input: 'parsed',
     commands: ['validate', 'build'],
-    source: 'packages/cli/src/lint/data-model-rules.ts',
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
     scopeReason:
       "`os lint` already reports this rule through `lintDataModel`, which calls it directly as R10 of " +
       'its best-practice sweep — registering it for `lint` as well would report every finding twice. ' +
@@ -581,6 +774,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-security-posture.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: 'Already gated at this surface by a DIFFERENT mechanism: plugin-security registers an ADR-0094 '
+      + 'authoring gate on `object` (`registerAuthoringGate`) that enforces the same OWD posture rules on '
+      + 'every runtime write. Running the linter here as well would double-report one refusal in two '
+      + 'vocabularies. Consolidating the two onto this table is P2 (#4463), and is a merge, not a hole.',
     run: (stack) => validateSecurityPosture(stack),
   },
   // ADR-0105 D6 — the org tree is a REPORTING dimension. An RLS policy or
@@ -593,6 +791,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-org-axis-red-lines.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateOrgAxisRedLines(stack),
   },
 ];
