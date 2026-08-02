@@ -674,34 +674,32 @@ export const DataEngineVectorFindRequestSchema = lazySchema(() => z.object({
   threshold: z.number().optional()
 }));
 
-/**
- * Data Engine Batch Request
- * Execute multiple operations in a single transaction/request efficiently.
- */
-export const DataEngineBatchRequestSchema = lazySchema(() => z.object({
-  method: z.literal('batch'),
-  requests: z.array(z.discriminatedUnion('method', [
-    DataEngineFindRequestSchema,
-    DataEngineFindOneRequestSchema,
-    DataEngineInsertRequestSchema,
-    DataEngineUpdateRequestSchema,
-    DataEngineDeleteRequestSchema,
-    DataEngineCountRequestSchema,
-    DataEngineAggregateRequestSchema,
-    DataEngineExecuteRequestSchema,
-    DataEngineVectorFindRequestSchema
-  ])),
-  /** 
-   * Transaction Mode
-   * - true: All or nothing (Atomic)
-   * - false: Best effort, continue on error
-   */
-  transaction: z.boolean().default(true).optional()
-}));
+// `DataEngineBatchRequestSchema` stood here until ADR-0119 D3 (#4618) retired
+// it with the `IDataEngine.batch?` member it existed to describe. Nothing ever
+// parsed it: no engine implemented `batch`, no caller invoked it, and the
+// wire-side batch route validates with `CrossObjectBatchRequestSchema` /
+// `BatchUpdateRequestSchema` from `../api/batch.zod.ts` — a different schema
+// entirely. Deleted outright rather than tombstoned with `retiredKey()`,
+// because a tombstone's prescription reaches an author through a PARSE, and
+// there was no parse to reach: a prescription nobody can receive is noise
+// (the spec-property-retirement playbook's third route). Its three
+// `authorable-surface.json` baseline lines and its `json-schema.manifest.json`
+// entry go with it, deliberately.
+//
+// The tell that nobody ever designed against it: its `requests` array nested
+// the request union recursively, so a batch could contain batches, with no
+// statement anywhere about what that meant for ordering or rollback.
 
 /**
  * Unified Data Engine Request Union
  * Use this to validate any incoming "Virtual ObjectQL" request.
+ *
+ * NOTE (#4618): every arm below now has zero readers in this repo — there is
+ * no Virtual Data Engine implementation, only this schema describing one. That
+ * makes the whole block an ADR-0049 enforce-or-remove candidate, deliberately
+ * left standing here because retiring a published wire protocol is a different
+ * decision from retiring `batch?`, and it is tracked separately rather than
+ * folded into a removal whose title promised something narrower.
  */
 export const DataEngineRequestSchema = lazySchema(() => z.discriminatedUnion('method', [
   DataEngineFindRequestSchema,
@@ -711,7 +709,6 @@ export const DataEngineRequestSchema = lazySchema(() => z.discriminatedUnion('me
   DataEngineDeleteRequestSchema,
   DataEngineCountRequestSchema,
   DataEngineAggregateRequestSchema,
-  DataEngineBatchRequestSchema,
   DataEngineExecuteRequestSchema,
   DataEngineVectorFindRequestSchema
 ]).describe('Virtual ObjectQL Request Protocol'));

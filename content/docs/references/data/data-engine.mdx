@@ -24,7 +24,7 @@ The Data Engine acts as the "Driver" layer in the Hexagonal Architecture.
 ## TypeScript Usage
 
 ```typescript
-import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineAggregateRequestSchema, DataEngineBatchRequestSchema, DataEngineCountOptionsSchema, DataEngineCountRequestSchema, DataEngineDeleteOptionsSchema, DataEngineDeleteRequestSchema, DataEngineExecuteRequestSchema, DataEngineFilterSchema, DataEngineFindOneRequestSchema, DataEngineFindRequestSchema, DataEngineInsertOptionsSchema, DataEngineInsertRequestSchema, DataEngineQueryOptionsSchema, DataEngineRequestSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DataEngineUpdateRequestSchema, DataEngineVectorFindRequestSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema } from '@objectstack/spec/data';
+import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineAggregateRequestSchema, DataEngineCountOptionsSchema, DataEngineCountRequestSchema, DataEngineDeleteOptionsSchema, DataEngineDeleteRequestSchema, DataEngineExecuteRequestSchema, DataEngineFilterSchema, DataEngineFindOneRequestSchema, DataEngineFindRequestSchema, DataEngineInsertOptionsSchema, DataEngineInsertRequestSchema, DataEngineQueryOptionsSchema, DataEngineRequestSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DataEngineUpdateRequestSchema, DataEngineVectorFindRequestSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema } from '@objectstack/spec/data';
 import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineFilter, DataEngineInsertOptions, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
 
 // Validate data
@@ -69,19 +69,6 @@ Options for DataEngine.aggregate operations
 | **method** | `'aggregate'` | ✅ |  |
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: string[]; aggregations?: { function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]; … }` | ✅ |  |
-
-
----
-
-## DataEngineBatchRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `'batch'` | ✅ |  |
-| **requests** | `{ method: 'find'; object: string; query?: object } \| { method: 'findOne'; object: string; query?: object } \| { method: 'insert'; object: string; data: Record<string, any> \| Record<string, any>[]; options?: object } \| { method: 'update'; object: string; data: Record<string, any>; id?: string \| number; … } \| { method: 'delete'; object: string; id?: string \| number; options?: object } \| { method: 'count'; object: string; query?: object } \| { method: 'aggregate'; object: string; query: object } \| { method: 'execute'; command: any; options?: Record<string, any> } \| { method: 'vectorFind'; object: string; vector: number[]; where?: Record<string, any> \| any; … }[]` | ✅ |  |
-| **transaction** | `boolean` | optional |  |
 
 
 ---
@@ -354,25 +341,13 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `'batch'` | ✅ |  |
-| **requests** | `{ method: 'find'; object: string; query?: object } \| { method: 'findOne'; object: string; query?: object } \| { method: 'insert'; object: string; data: Record<string, any> \| Record<string, any>[]; options?: object } \| { method: 'update'; object: string; data: Record<string, any>; id?: string \| number; … } \| { method: 'delete'; object: string; id?: string \| number; options?: object } \| { method: 'count'; object: string; query?: object } \| { method: 'aggregate'; object: string; query: object } \| { method: 'execute'; command: any; options?: Record<string, any> } \| { method: 'vectorFind'; object: string; vector: number[]; where?: Record<string, any> \| any; … }[]` | ✅ |  |
-| **transaction** | `boolean` | optional |  |
-
----
-
-#### Option 9
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
 | **method** | `'execute'` | ✅ |  |
 | **command** | `any` | ✅ |  |
 | **options** | `Record<string, any>` | optional |  |
 
 ---
 
-#### Option 10
+#### Option 9
 
 ### Properties
 

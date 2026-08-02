@@ -22,7 +22,6 @@ import {
   DataEngineAggregateRequestSchema,
   DataEngineExecuteRequestSchema,
   DataEngineVectorFindRequestSchema,
-  DataEngineBatchRequestSchema,
   DataEngineRequestSchema,
 } from './data-engine.zod';
 
@@ -845,66 +844,10 @@ describe('DataEngineVectorFindRequestSchema', () => {
   });
 });
 
-describe('DataEngineBatchRequestSchema', () => {
-  it('should accept batch request', () => {
-    const request = DataEngineBatchRequestSchema.parse({
-      method: 'batch',
-      requests: [
-        {
-          method: 'find',
-          object: 'account',
-        },
-        {
-          method: 'insert',
-          object: 'contact',
-          data: { name: 'John Doe' },
-        },
-      ],
-    });
-
-    expect(request.method).toBe('batch');
-    expect(request.requests).toHaveLength(2);
-  });
-
-  it('should accept transaction mode', () => {
-    const request = DataEngineBatchRequestSchema.parse({
-      method: 'batch',
-      requests: [
-        { method: 'find', object: 'account' },
-      ],
-      transaction: true,
-    });
-
-    expect(request.transaction).toBe(true);
-  });
-
-  it('should accept non-transactional batch', () => {
-    const request = DataEngineBatchRequestSchema.parse({
-      method: 'batch',
-      requests: [
-        { method: 'find', object: 'account' },
-      ],
-      transaction: false,
-    });
-
-    expect(request.transaction).toBe(false);
-  });
-
-  it('should accept mixed operations batch', () => {
-    const request = DataEngineBatchRequestSchema.parse({
-      method: 'batch',
-      requests: [
-        { method: 'find', object: 'account' },
-        { method: 'count', object: 'contact' },
-        { method: 'insert', object: 'opportunity', data: { name: 'Deal' } },
-        { method: 'update', object: 'task', id: '123', data: { status: 'done' } },
-        { method: 'delete', object: 'note', id: '456' },
-      ],
-    });
-
-    expect(request.requests).toHaveLength(5);
-  });
-});
+// The `DataEngineBatchRequestSchema` suite that stood here was removed with
+// the schema itself (ADR-0119 D3, #4618). Every case parsed a literal through
+// a schema no production code ever called, so it proved the schema matched
+// itself and nothing more.
 
 describe('DataEngineRequestSchema', () => {
   it('should accept all request types', () => {
@@ -918,7 +861,6 @@ describe('DataEngineRequestSchema', () => {
       { method: 'aggregate' as const, object: 'account', query: {} },
       { method: 'execute' as const, command: 'SQL' },
       { method: 'vectorFind' as const, object: 'docs', vector: [0.1] },
-      { method: 'batch' as const, requests: [] },
     ];
 
     requests.forEach(request => {
@@ -1076,33 +1018,4 @@ describe('Integration Tests', () => {
     expect(aggregateRequest.query.aggregations).toHaveLength(3);
   });
 
-  it('should support batch operations', () => {
-    const batchRequest = DataEngineBatchRequestSchema.parse({
-      method: 'batch',
-      transaction: true,
-      requests: [
-        {
-          method: 'insert',
-          object: 'account',
-          data: { name: 'New Account' },
-        },
-        {
-          method: 'update',
-          object: 'contact',
-          id: 'contact_123',
-          data: { account_id: 'account_new' },
-        },
-        {
-          method: 'count',
-          object: 'opportunity',
-          query: {
-            where: { account_id: 'account_new' },
-          },
-        },
-      ],
-    });
-
-    expect(batchRequest.requests).toHaveLength(3);
-    expect(batchRequest.transaction).toBe(true);
-  });
 });

@@ -699,7 +699,6 @@
     "data/CurrencyValue",
     "data/DataEngineAggregateOptions",
     "data/DataEngineAggregateRequest",
-    "data/DataEngineBatchRequest",
     "data/DataEngineCountOptions",
     "data/DataEngineCountRequest",
     "data/DataEngineDeleteOptions",

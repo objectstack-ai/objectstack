@@ -261,7 +261,6 @@
     "DataEngineAggregateOptions (type)",
     "DataEngineAggregateOptionsSchema (const)",
     "DataEngineAggregateRequestSchema (const)",
-    "DataEngineBatchRequestSchema (const)",
     "DataEngineContractSchema (const)",
     "DataEngineCountOptions (type)",
     "DataEngineCountOptionsSchema (const)",
