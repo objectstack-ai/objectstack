@@ -193,7 +193,6 @@ const zh: TranslationData = {
   pages: { landing: { title: '欢迎' } },
   globalActions: { export_csv: { label: '导出 CSV' } },
   messages: { 'common.save': '保存' },
-  validationMessages: { 'discount_limit': '折扣不能超过40%' },
 };
 ```
 
@@ -841,7 +840,7 @@ options: { 'Direct Mail': '直邮' }  // ❌ keyed by the label — never resolv
 options: { 'direct-mail': '直邮' }  // ❌ a variant spelling of the value
 ```
 
-`messages`, `validationMessages`, `settings`, `settingsCommon` and
+`messages`, `settings`, `settingsCommon` and
 `metadataForms` are **not** checked: their keys are owned by application code,
 plugins, and the platform's own metadata-type registry rather than by this
 stack's metadata, so there is no set of legal names to resolve against.

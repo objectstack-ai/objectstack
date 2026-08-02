@@ -235,9 +235,11 @@ up-to-date bundle re-extracts byte-identically.
 
 Honest limits worth knowing before you plan around them:
 
-- **`validationMessages` has no runtime consumer today.** The schema accepts it
-  and the coverage tooling counts it, but nothing reads it back — validation
-  errors are not translated through bundles yet.
+- **Validation messages are not translated through bundles.** The
+  `validationMessages` group was removed in 17.0.0 (#4667): it had no runtime
+  consumer, so a translated rule message was stored and never shown. Author the
+  message on the rule itself (`object.validations[].message`), which the engine
+  returns on every rejected write.
 - **No ICU MessageFormat** — plural/gender formatting isn't available;
   interpolation is always simple `{variable}` substitution.
 - **Runtime authoring is process-wide.** The authored layer is synced across all

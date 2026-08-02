@@ -50,10 +50,6 @@ const crmApp = {
 | `navigation` | `NavigationItem[]` | optional | Navigation tree |
 | `branding` | `AppBranding` | optional | Visual customization |
 | `requiredPermissions` | `string[]` | optional | Required permissions to access |
-| `homePageId` | `string` | optional | ID of the navigation item to serve as the landing page |
-| `objects` | `unknown[]` | optional | Objects belonging to this app |
-| `apis` | `unknown[]` | optional | Custom APIs belonging to this app |
-| `mobileNavigation` | `object` | optional | Mobile-specific navigation |
 
 ## Navigation Items
 
@@ -181,7 +177,8 @@ label — the only keys it accepts are `type`, an optional `id`, and an optional
 
 All navigation items **except `separator`** share these base properties. Every
 item **must** declare a unique `id` (lowercase `snake_case`) — it is required by
-the schema and is referenced by `homePageId` and `mobileNavigation.bottomNavItems`.
+the schema, and it is what `order` sorts and what the landing page resolves to
+(the first item, since `homePageId` was removed in 17.0.0 — see below).
 (On a `separator`, `id` is optional and the remaining properties below are
 rejected — a divider has nothing to label, gate, or badge.)
 
@@ -286,7 +283,9 @@ const projectApp = {
   ],
 
   requiredPermissions: ['pm_access'],
-  homePageId: 'nav_home',
+  // No `homePageId`: the landing page IS the first navigation item (by `order`),
+  // and the ROOT landing follows `isDefault`. The key was removed in 17.0.0 (#4667)
+  // because nothing ever read it.
 };
 ```
 
