@@ -166,8 +166,13 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
     }
   }
 
-  // ── Apps: requiredPermissions can appear at the app, area/tab, and nav-item
-  //    (recursively through groups) levels. Walk each app subtree. ──
+  // ── Apps: requiredPermissions can appear at the app and nav-item
+  //    (recursively through groups) levels. Walk each app subtree. `areas` is
+  //    still traversed, but only to REACH the nav items nested inside it: the
+  //    area itself stopped carrying `requiredPermissions` in 17.0.0 (#4651 — it
+  //    was a fail-open gate nothing enforced), so the generic check below no
+  //    longer fires on an area node. Dropping the traversal would strand every
+  //    area-nested item. ──
   const apps = asArray(stack.apps);
   for (let i = 0; i < apps.length; i++) {
     const app = apps[i];

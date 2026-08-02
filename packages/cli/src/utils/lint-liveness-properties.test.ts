@@ -258,15 +258,19 @@ describe('lintLivenessProperties', () => {
   // ── #4488 — the nine remaining types, governed. Pins run against the REAL
   // ledgers, one per finding class the audit surfaced.
 
-  // The app ledger's most important entries: area-level gating keys that FAIL
-  // OPEN (nothing evaluates them, so a "hidden"/"gated" area shows for
-  // everyone), on the surface whose item-level siblings ARE enforced.
-  // `homePageId` and `areas.order` used to be asserted here too. Both were
-  // RETIRED in 17.0.0 (#4667) — the schema owns them now (a tombstone and a
-  // strict rejection respectively), so this advisory lint correctly says
-  // nothing about them. The two that remain are the ones #4651 still has to
-  // decide, and they are the reason this test exists.
-  it('warns on the fail-open area gates (#4488, tracked as #4651)', () => {
+  // The app ledger's most important entries were the area-level gating keys
+  // that FAILED OPEN — nothing evaluated them, so a "hidden"/"gated" area
+  // showed for everyone, on the surface whose item-level siblings ARE enforced.
+  // This test used to assert the WARNING. #4651 removed the keys (route B),
+  // so the advisory lint must now say nothing about them: `NavigationAreaSchema`
+  // is strict and rejects them at parse with the prescription, which reaches an
+  // author harder and earlier than an advisory line, and warning about a key
+  // that no longer parses is noise. Same disposition `homePageId` and
+  // `areas.order` reached in #4667.
+  //
+  // Kept as a SILENCE pin rather than deleted: a half-reverted retirement
+  // (ledger rows restored without the schema, or vice versa) shows up here.
+  it('is silent on the fail-open area gates — retired in 17.0.0 (#4651)', () => {
     const findings = lintLivenessProperties({
       apps: [{
         name: 'crm',
@@ -281,12 +285,36 @@ describe('lintLivenessProperties', () => {
       }],
     });
     const msgs = paths(findings);
-    expect(msgs.some((m) => m.includes('areas.visible'))).toBe(true);
-    expect(msgs.some((m) => m.includes('areas.requiredPermissions'))).toBe(true);
-    // The gating hints must point at the enforced alternative (per-item gates),
-    // or the warning just relocates the author's confusion.
-    const perms = findings.find((f) => f.message.includes('areas.requiredPermissions'));
-    expect(perms!.hint).toMatch(/per item|Per-item/i);
+    expect(msgs.some((m) => m.includes('areas.visible'))).toBe(false);
+    expect(msgs.some((m) => m.includes('areas.requiredPermissions'))).toBe(false);
+    expect(findings).toEqual([]);
+  });
+
+  // Anti-vacuity guard for the pin above. `lintLivenessProperties` resolves the
+  // shipped ledgers off `@objectstack/spec/package.json` and returns [] when it
+  // cannot find them — so "no findings" is also what a BROKEN lint returns, and
+  // the silence pin alone would pass on a lint that had stopped reading ledgers
+  // entirely. This asserts it still warns on a property that is still marked
+  // `authorWarn` (`object.externalSharingModel`, the last one in tree), in the
+  // same call that authors the retired area gates: same process, same ledger
+  // load, one warning and not three.
+  it('the area-gate silence is a real verdict, not a lint that stopped loading ledgers', () => {
+    const findings = lintLivenessProperties({
+      objects: [{ name: 'widget', externalSharingModel: 'read' }],
+      apps: [{
+        name: 'crm',
+        label: 'CRM',
+        areas: [{
+          id: 'area_sales',
+          label: 'Sales',
+          visible: "'sales' in current_user.positions",
+          requiredPermissions: ['crm.access'],
+          navigation: [],
+        }],
+      }],
+    });
+    expect(paths(findings).some((m) => m.includes('externalSharingModel'))).toBe(true);
+    expect(paths(findings).some((m) => m.includes('areas.'))).toBe(false);
   });
 
   // email_template used to carry a per-artifact warn on `name`: the WHOLE

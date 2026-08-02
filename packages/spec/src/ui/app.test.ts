@@ -888,22 +888,29 @@ describe('NavigationAreaSchema', () => {
   });
 
   it('should accept area with full properties', () => {
+    // The area's own `visible` / `requiredPermissions` went out in 17.0.0
+    // (#4651) — they gated nothing. Every gate this area declares now sits on
+    // an ITEM, which is the layer that is actually evaluated.
     const area = NavigationAreaSchema.parse({
       id: 'area_service',
       label: 'Service',
       icon: 'headset',
       description: 'Customer service management',
-      visible: 'user.has_permission("service.access")',
-      requiredPermissions: ['service.access'],
       navigation: [
-        { id: 'nav_cases', type: 'object', label: 'Cases', objectName: 'case' },
-        { id: 'nav_knowledge', type: 'page', label: 'Knowledge Base', pageName: 'knowledge_base' },
+        {
+          id: 'nav_cases', type: 'object', label: 'Cases', objectName: 'case',
+          requiredPermissions: ['service.access'],
+        },
+        {
+          id: 'nav_knowledge', type: 'page', label: 'Knowledge Base', pageName: 'knowledge_base',
+          visible: 'user.has_permission("service.access")',
+        },
       ],
     });
     expect(area.id).toBe('area_service');
     expect(area.icon).toBe('headset');
-    expect(area.requiredPermissions).toEqual(['service.access']);
     expect(area.navigation).toHaveLength(2);
+    expect(area.navigation[0]).toMatchObject({ requiredPermissions: ['service.access'] });
   });
 
   it('should enforce snake_case for area id', () => {
@@ -942,9 +949,14 @@ describe('AppSchema with areas', () => {
           id: 'area_settings',
           label: 'Settings',
           icon: 'settings',
-          requiredPermissions: ['admin.access'],
           navigation: [
-            { id: 'nav_users', type: 'object', label: 'Users', objectName: 'user' },
+            // The gate moved DOWN one level in 17.0.0 (#4651): on the area it
+            // was fail-open theatre, on the item it is stripped server-side
+            // and re-checked in the shell.
+            {
+              id: 'nav_users', type: 'object', label: 'Users', objectName: 'user',
+              requiredPermissions: ['admin.access'],
+            },
           ],
         },
       ],
@@ -953,7 +965,7 @@ describe('AppSchema with areas', () => {
     expect(app.areas).toHaveLength(3);
     expect(app.areas![0].id).toBe('area_sales');
     expect(app.areas![0].navigation).toHaveLength(2);
-    expect(app.areas![2].requiredPermissions).toEqual(['admin.access']);
+    expect(app.areas![2].navigation[0]).toMatchObject({ requiredPermissions: ['admin.access'] });
   });
 
   it('should accept app with both navigation and areas (backward compatibility)', () => {
@@ -1333,6 +1345,143 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
       });
       expect(app).not.toHaveProperty('homePageId');
       expect(app.areas![0]).not.toHaveProperty('order');
+    });
+  });
+
+  // ── areas[].visible / areas[].requiredPermissions, 17.0.0 (#4651) ─────────
+  //
+  // These were FAIL-OPEN gates, which is why the rejections below assert the
+  // reason and not just the refusal: an author who reads only "removed" goes
+  // looking for the replacement knob on the area, and there is none. The
+  // message has to move them one level down (per item) or one level up (per
+  // app) — the two layers that are actually enforced.
+  describe('retired fail-open area gates (#4651)', () => {
+    const withArea = (extra: Record<string, unknown>) => ({
+      name: 'crm', label: 'CRM',
+      areas: [{ id: 'area_admin', label: 'Admin', navigation: [], ...extra }],
+    });
+
+    it('rejects `areas[].requiredPermissions` and names the layers that DO enforce', () => {
+      const msg = unknownKeyIssue(AppSchema, withArea({ requiredPermissions: ['sales.admin'] }))!.message;
+      expect(msg).toMatch(/requiredPermissions.*removed.*17\.0\.0/s);
+      // The class, not just the fact: fail-open is why this is a defect rather
+      // than dead weight, and it is what tells the author to re-audit anything
+      // they believed this key protected.
+      expect(msg).toMatch(/fail-open|every user/is);
+      // The two enforced layers, named.
+      expect(msg).toMatch(/on the APP/s);
+      expect(msg).toMatch(/navigation ITEM/s);
+      // The honest caveat: the server does not walk areas, so an item gate
+      // INSIDE an area is shell-side only. Without this the prescription would
+      // trade one false belief for a weaker one.
+      expect(msg).toMatch(/shell only|does not walk/is);
+    });
+
+    it('rejects `areas[].visible` and points at the item-level CEL gate that is evaluated', () => {
+      const msg = unknownKeyIssue(AppSchema, withArea({ visible: "'admin' in current_user.positions" }))!.message;
+      expect(msg).toMatch(/visible.*removed.*17\.0\.0/s);
+      expect(msg).toMatch(/fails open|EVERYONE/s);
+      expect(msg).toMatch(/navigation ITEM's `visible`/s);
+    });
+
+    it('routes the retired gating aliases to the same prescriptions', () => {
+      // `visibleWhen` / `visibleOn` / `permissions` used to RENAME onto the two
+      // keys this issue removed. An alias pointing at a key that is itself gone
+      // answers an unknown key with a second unknown key, so each became a
+      // prescription instead (the #4667 `sort` precedent).
+      for (const alias of ['visibleWhen', 'visibleOn']) {
+        expect(unknownKeyIssue(AppSchema, withArea({ [alias]: 'x' }))!.message)
+          .toMatch(/`areas\[\]\.visible` was removed/s);
+      }
+      expect(unknownKeyIssue(AppSchema, withArea({ permissions: ['x'] }))!.message)
+        .toMatch(/`areas\[\]\.requiredPermissions` was removed/s);
+    });
+
+    it('an area gating nothing still parses, and the ITEM-level gates are untouched', () => {
+      // The removal must not take the working gate with it: the item keys are
+      // spelled identically, one level down, and they are the prescription's
+      // destination.
+      const app = AppSchema.parse({
+        name: 'crm', label: 'CRM',
+        areas: [{
+          id: 'area_admin', label: 'Admin',
+          navigation: [{
+            id: 'nav_users', type: 'object', label: 'Users', objectName: 'user',
+            requiredPermissions: ['admin.access'],
+            visible: "'admin' in current_user.positions",
+            requiresService: 'org-scoping',
+          }],
+        }],
+      });
+      expect(app.areas![0]).not.toHaveProperty('visible');
+      expect(app.areas![0]).not.toHaveProperty('requiredPermissions');
+      expect(app.areas![0].navigation[0]).toMatchObject({
+        requiredPermissions: ['admin.access'],
+        requiresService: 'org-scoping',
+      });
+      expect(app.areas![0].navigation[0]).toHaveProperty('visible');
+    });
+
+    it('the APP-level `requiredPermissions` gate is untouched by this removal', () => {
+      // The other enforced layer the prescription names (rest-server's
+      // filterAppForUser drops the whole app). Pinned here so "we removed the
+      // area gate" can never quietly become "we removed the app gate too".
+      const app = AppSchema.parse({
+        name: 'crm', label: 'CRM', requiredPermissions: ['crm.access'],
+        navigation: [{ id: 'nav_home', type: 'object', label: 'Home', objectName: 'account' }],
+      });
+      expect(app.requiredPermissions).toEqual(['crm.access']);
+    });
+
+    // The type-level half, and the only way to measure it that is not a no-op.
+    //
+    // `NavigationArea` is a TYPE — erased before any runtime assertion can see
+    // it — so an `Assert< Equal< … > >` pin written in this file would never
+    // run: `packages/spec/tsconfig.json` excludes `**/*.test.ts` and vitest does
+    // not type-check (#4642). Every assertion above would stay green if the two
+    // keys were re-added to the schema's TS shape while the parse kept
+    // rejecting them. This resolves the exported type through the TypeScript
+    // compiler API and reads its members — the same symbol-identity measurement
+    // `check:dual-source-exports` makes, over `src/`, so it runs in `pnpm test`
+    // without a build.
+    it('the retired gates are gone from the TYPE, not only from the parse (compiler API)', async () => {
+      const ts = (await import('typescript')).default;
+      const { resolve, dirname } = await import('node:path');
+      const { fileURLToPath } = await import('node:url');
+
+      const entry = resolve(dirname(fileURLToPath(import.meta.url)), 'app.zod.ts');
+      const program = ts.createProgram([entry], {
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+        strict: true,
+        skipLibCheck: true,
+        noEmit: true,
+      });
+      const checker = program.getTypeChecker();
+      const sf = program.getSourceFile(entry);
+      // Guard #1: a resolution failure would make every assertion below pass
+      // vacuously — the exact way a gate goes dormant (#4642).
+      expect(sf, 'app.zod.ts must resolve').toBeTruthy();
+      const moduleSym = checker.getSymbolAtLocation(sf!);
+      expect(moduleSym, 'app.zod.ts module symbol must resolve').toBeTruthy();
+
+      const areaSym = checker
+        .getExportsOfModule(moduleSym!)
+        .find((s) => s.getName() === 'NavigationArea');
+      expect(areaSym, 'NavigationArea must be exported').toBeTruthy();
+
+      const props = checker
+        .getDeclaredTypeOfSymbol(areaSym!)
+        .getProperties()
+        .map((p) => p.getName())
+        .sort();
+
+      // Guard #2: the alias really resolved to the object shape. Without this,
+      // a `z.infer` that degraded to `any`/`unknown` would report ZERO members
+      // and the two negatives below would pass while the type said nothing.
+      expect(props).toEqual(['description', 'icon', 'id', 'label', 'navigation']);
+      expect(props).not.toContain('visible');
+      expect(props).not.toContain('requiredPermissions');
     });
   });
 });

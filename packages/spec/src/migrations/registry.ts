@@ -638,6 +638,28 @@ const step17: MigrationStep = {
     + 'bulk-action, connector, sync, offline, seed-loader and NoSQL-cursor `batchSize` are all '
     + 'live, but each is a different key sizing its own path — the same trap `datasource.'
     + 'retryPolicy` vs `hook`/`job` `retryPolicy` had to defuse one issue earlier.\n\n'
+    + 'The sharpest removal in this step is two keys wide: `app.areas[].visible` and '
+    + '`app.areas[].requiredPermissions` (#4651). Read the class before the count — these were '
+    + 'not inert authoring keys but FAIL-OPEN access gates. The server-side authority '
+    + '(`filterAppForUser`) checks the app\'s `requiredPermissions` and then walks ONLY the '
+    + 'top-level `navigation` tree; it never reads `item.areas` at all, and the client renders '
+    + 'every area in the switcher. So an author writing `requiredPermissions: [\'sales.admin\']` '
+    + 'on an area got a clean parse, a stored value, and an area visible to everybody — and had '
+    + 'every reason to believe otherwise, because the SAME key names are genuinely enforced one '
+    + 'level up and one level down: app-level `requiredPermissions` drops the whole app '
+    + 'server-side, and a navigation ITEM\'s `requiredPermissions` / `requiresService` are '
+    + 'stripped server-side and re-checked in the shell, whose item-level `visible` is a real '
+    + 'CEL gate. Three layers, of which the middle one was theatre. Enforcing instead was '
+    + 'weighed and deliberately not taken here: it needs semantics decided first (does '
+    + 'filtering an area remove its items everywhere? does the server bind `user` for area '
+    + 'CEL?), and a retirement must not invent an authorization mechanism — while shipping a '
+    + 'major with the gate still declared would have kept authors writing it for all of 17.x. '
+    + 'The rewrite is lossless in outcome (the keys changed nothing), so what an upgrading '
+    + 'author has to re-decide is only where the gate really goes: onto the items inside the '
+    + 'area, or onto the app. One honest caveat the prescription carries rather than hides — '
+    + 'per-item gating INSIDE an area is enforced by the shell only, since the server does not '
+    + 'walk `areas`, so anything that must never reach the browser belongs in the top-level '
+    + 'tree or in its own app.\n\n'
     + 'The same window converges the retry policy (#4661). `@objectstack/spec/automation` and '
     + '`@objectstack/spec/system` each exported a `RetryPolicy`/`RetryPolicySchema` resolving '
     + 'to a DIFFERENT declaration, so which shape a consumer got depended only on the import '
@@ -688,6 +710,7 @@ const step17: MigrationStep = {
     'permission-rls-priority-removed',
     'tool-inert-authoring-keys-removed',
     'app-dead-authoring-keys-removed',
+    'app-area-fail-open-gates-removed',
     'field-required-notnull-explicit',
     'action-inert-keys-removed',
     'flow-inert-keys-removed',

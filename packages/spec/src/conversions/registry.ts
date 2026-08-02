@@ -1695,6 +1695,122 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
 };
 
 /**
+ * `app.areas[].visible` / `app.areas[].requiredPermissions` removed
+ * (protocol 17, #4651, ADR-0049).
+ *
+ * Deliberately its own conversion rather than two more keys on
+ * `app-dead-authoring-keys-removed` above. That entry's summary is a list of
+ * inert authoring keys; these two are a **security** finding, and the summary
+ * string is what `spec-changes.json`, the generated upgrade guide and the
+ * `spec_changes` MCP tool serve to an upgrading consumer. Folded into the
+ * catch-all, "a gate that never gated has been removed" would arrive buried in
+ * a sentence about `version` and `mobileNavigation` — and it is the one line of
+ * this release an author with a gated area has to read.
+ *
+ * The defect: `filterAppForUser` (`packages/rest/src/rest-server.ts`) checks the
+ * APP's `requiredPermissions`, then walks ONLY `item.navigation` — it never
+ * reads `item.areas` — while the client renders every area in the switcher. An
+ * area declaring `requiredPermissions: ['sales.admin']` parsed, stored, served
+ * and rendered for every user. Fail open, on the surface whose per-ITEM and
+ * per-APP siblings of the same name ARE enforced (ADR-0078 false compliance).
+ *
+ * Stripping is lossless in the only sense that matters: the keys changed no
+ * outcome, so metadata behaves identically with or without them. What the
+ * author loses is the BELIEF that the area was gated — which is the point of
+ * the removal, and why the strict schema's `guidance` prescription (see
+ * `ui/app.zod.ts`) names the two layers that do enforce instead of just saying
+ * "removed".
+ *
+ * `retiredFromLoadPath`: the strict schema refuses the keys outright, so there
+ * is no alias window; the entry exists so `spec-changes.json` carries the
+ * removal and `os migrate meta --from 16` can rewrite authored sources.
+ */
+const appAreaFailOpenGatesRemoved: MetadataConversion = {
+  id: 'app-area-fail-open-gates-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'app.areas.visible / app.areas.requiredPermissions',
+  summary: "navigation-area keys 'visible'/'requiredPermissions' removed (#4651, ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
+  apply(stack, emit) {
+    const RETIRED_AREA_GATES = ['visible', 'requiredPermissions'];
+    return mapCollection(stack, 'apps', (app, path) => {
+      // `areas` is an ARRAY one level down, so `stripKeys` (top-level only)
+      // cannot reach it. Copy-on-write at both levels, so an app with nothing
+      // to strip keeps its identity for change detection.
+      const areas = app.areas;
+      if (!Array.isArray(areas)) return app;
+      let touched = false;
+      const mapped = areas.map((el, i) => {
+        if (!isDict(el)) return el;
+        const stripped = stripKeys(el, RETIRED_AREA_GATES, emit, `${path}.areas[${i}]`);
+        if (stripped !== el) touched = true;
+        return stripped;
+      });
+      return touched ? { ...app, areas: mapped } : app;
+    });
+  },
+  fixture: {
+    // DISJOINT from `app-dead-authoring-keys-removed`'s fixture above and from
+    // every other entry: this app carries none of the keys another conversion
+    // strips, and that fixture's area carries neither gate — so each replays
+    // through the whole table hitting only its own entry.
+    before: {
+      apps: [{
+        name: 'sales_portal',
+        label: 'Sales Portal',
+        areas: [
+          {
+            id: 'area_admin',
+            label: 'Admin',
+            visible: "'sales_admin' in current_user.positions",
+            requiredPermissions: ['sales.admin'],
+            navigation: [{ id: 'nav_forecast', label: 'Forecast', type: 'object', objectName: 'forecast' }],
+          },
+          // Untouched on purpose: the per-ITEM gate inside this area is the
+          // ENFORCED layer the prescription points at, and it spells the two
+          // key names identically. A sweep by key name alone would delete the
+          // working gate along with the fake one.
+          {
+            id: 'area_sales',
+            label: 'Sales',
+            navigation: [{
+              id: 'nav_leads', label: 'Leads', type: 'object', objectName: 'lead',
+              visible: "'sales' in current_user.positions",
+              requiredPermissions: ['sales.access'],
+            }],
+          },
+        ],
+      }],
+    },
+    after: {
+      apps: [{
+        name: 'sales_portal',
+        label: 'Sales Portal',
+        areas: [
+          {
+            id: 'area_admin',
+            label: 'Admin',
+            navigation: [{ id: 'nav_forecast', label: 'Forecast', type: 'object', objectName: 'forecast' }],
+          },
+          {
+            id: 'area_sales',
+            label: 'Sales',
+            navigation: [{
+              id: 'nav_leads', label: 'Leads', type: 'object', objectName: 'lead',
+              visible: "'sales' in current_user.positions",
+              requiredPermissions: ['sales.access'],
+            }],
+          },
+        ],
+      }],
+    },
+    // Two notices: both gates on the ONE area that declared them. The second
+    // area and the nav item inside it must produce none.
+    expectedNotices: 2,
+  },
+};
+
+/**
  * RLS-policy `priority` removed (protocol 17, #3896 security audit).
  *
  * A pure DELETE with no rename target, because the promised semantics never
@@ -3255,6 +3371,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     permissionRlsPriorityRemoved,
     toolInertAuthoringKeysRemoved,
     appDeadAuthoringKeysRemoved,
+    appAreaFailOpenGatesRemoved,
     fieldRequiredNotNullExplicit,
     actionInertKeysRemoved,
     flowInertKeysRemoved,
