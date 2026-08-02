@@ -9148,17 +9148,23 @@ export class ObjectStackProtocolImplementation implements
                             record.packageId || 'sys_metadata',
                         );
                     } else {
-                        // Same envelope graft as the getMetaItems hydration:
-                        // the plain-key entry shadows any packaged artifact,
-                        // so carry the artifact's `_lock`/`_packageId`/
-                        // `_provenance` along (ADR-0010 §3.3). When artifacts
-                        // load after this hydration the merge finds nothing
-                        // and the row registers unchanged — same as before.
-                        const artifact = this.lookupArtifactItem(normalizedType, (data as any)?.name);
-                        this.engine.registry.registerItem(
+                        // Same rule as the getMetaItems read-side hydration and
+                        // the #4521 write-through — the ONE shared
+                        // {@link hydrateOverlayIntoRegistry}: graft the
+                        // artifact's protection envelope (ADR-0010 §3.3) with
+                        // the artifact lookup scoped to the row's OWN package
+                        // (ADR-0048 / #1828 / #4624). Pre-fix this branch kept
+                        // a third inline copy that looked the artifact up
+                        // UNSCOPED, so a name-colliding overlay grafted the
+                        // first-registered package's `_lock`/`_packageId`/
+                        // `_provenance` onto another package's row at boot.
+                        // When artifacts load after this hydration the merge
+                        // finds nothing and the row registers unchanged — same
+                        // as before, scoped or not.
+                        this.hydrateOverlayIntoRegistry(
                             normalizedType,
-                            mergeArtifactProtection(data, artifact) as any,
-                            'name' as any,
+                            data,
+                            (record as { package_id?: string | null }).package_id ?? undefined,
                         );
                     }
                     loaded++;

@@ -45,8 +45,8 @@ const DRIVER_DEFINITION_KEYS = ['id', 'label', 'description', 'icon', 'configSch
 
 /** Keys {@link ExternalDatasourceSettingsSchema} declares (drift-guarded by datasource.test.ts). */
 const EXTERNAL_SETTINGS_KEYS = [
-  'label', 'allowedSchemas', 'allowWrites', 'validation',
-  'credentialsRef', 'queryTimeoutMs', 'requirePermission',
+  'allowedSchemas', 'allowWrites', 'validation',
+  'credentialsRef', 'queryTimeoutMs',
 ] as const;
 
 /** Keys the external `validation` block declares (drift-guarded by datasource.test.ts). */
@@ -55,21 +55,15 @@ const EXTERNAL_VALIDATION_KEYS = ['onMismatch', 'checkOnBoot', 'checkIntervalMs'
 /** Keys {@link DatasourceSchema} declares (drift-guarded by datasource.test.ts). */
 const DATASOURCE_KEYS = [
   'name', 'label', 'driver', 'config', 'pool',
-  'healthCheck', 'ssl', 'retryPolicy', 'description', 'active', 'autoConnect',
+  'ssl', 'description', 'active', 'autoConnect',
   'schemaMode', 'external', 'origin',
 ] as const;
 
 /** Keys the datasource `pool` block declares (drift-guarded by datasource.test.ts). */
 const POOL_KEYS = ['min', 'max', 'idleTimeoutMillis', 'connectionTimeoutMillis'] as const;
 
-/** Keys the datasource `healthCheck` block declares (drift-guarded by datasource.test.ts). */
-const HEALTH_CHECK_KEYS = ['enabled', 'intervalMs', 'timeoutMs'] as const;
-
 /** Keys the datasource `ssl` block declares (drift-guarded by datasource.test.ts). */
 const SSL_KEYS = ['enabled', 'rejectUnauthorized', 'ca', 'cert', 'key'] as const;
-
-/** Keys the datasource `retryPolicy` block declares (drift-guarded by datasource.test.ts). */
-const DATASOURCE_RETRY_POLICY_KEYS = ['maxRetries', 'baseDelayMs', 'maxDelayMs', 'backoffMultiplier'] as const;
 
 const CAPABILITIES_REMOVED_PREFIX =
   '`datasource.capabilities` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — '
@@ -98,6 +92,46 @@ const RETIRED_CAPABILITIES: Record<string, string> = {
     + 'to a federated datasource (`schemaMode` other than `managed`) — for a managed datasource '
     + 'there is currently no read-only gate at all, so delete the key rather than trusting it. '
     + 'Tracked in #4584.',
+};
+
+/**
+ * Tombstones for the three inert blocks retired alongside `capabilities`
+ * (#4583 batches B/C/D).
+ *
+ * Same finding in each case: declared, `.strict()`-guarded, and read by no
+ * runtime path. What differs — and what each prescription has to name — is the
+ * mechanism that DOES decide the behaviour, because pointing an author at the
+ * wrong one is how the `readOnly` defect propagated for three releases.
+ */
+const RETIRED_DATASOURCE_BLOCKS: Record<string, string> = {
+  retryPolicy:
+    '`datasource.retryPolicy` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — no '
+    + 'connect or query path ever retried on it. Connection failure is handled by the boot '
+    + 'policy in the datasource connection service (degraded boot, or `bootCritical` fail-fast), '
+    + 'which does not retry on a schedule. Delete the block. '
+    + 'CAREFUL — do NOT "fix" this by renaming keys: `hook.retryPolicy` and `job.retryPolicy` ARE '
+    + 'enforced, but they are a DIFFERENT key on a different type and spell the delay `backoffMs`, '
+    + 'not `baseDelayMs`. Moving these values onto a hook or a job only makes sense if you '
+    + 'actually want that hook or job retried. Run `os migrate meta --from 16` to remove it.',
+  healthCheck:
+    '`datasource.healthCheck` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — no '
+    + 'health-check loop ever read it, so `enabled: true` scheduled nothing and the two timeouts '
+    + 'bounded nothing. Connection liveness is probed ON DEMAND through the driver handle '
+    + '(`ping()` / `checkHealth()`), which the datasource admin service calls for "Test '
+    + 'connection". The only recurring datasource timer is `external.validation.checkIntervalMs`, '
+    + 'which checks SCHEMA DRIFT — a different concern, not a liveness probe. Delete the block. '
+    + 'Run `os migrate meta --from 16` to remove it.',
+  externalLabel:
+    '`external.label` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — nothing read '
+    + "the federation block's own label. Use the datasource's TOP-LEVEL `label`, which is what "
+    + 'Setup → Datasources actually renders. Run `os migrate meta --from 16` to remove it.',
+  externalRequirePermission:
+    '`external.requirePermission` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — no '
+    + 'authorization check ever consulted it, so a permission named here gated nothing. Access to '
+    + "a federated datasource's data is governed by the ordinary object permission sets and RLS, "
+    + 'exactly as for a managed datasource. Naming a permission that is never required is the '
+    + 'false-compliance shape ADR-0049 exists to remove — grant or withhold the object '
+    + 'permissions instead. Run `os migrate meta --from 16` to remove it.',
 };
 
 /**
@@ -158,9 +192,11 @@ const externalSettingsUnknownKeyError = strictUnknownKeyError({
     secretref: 'credentialsRef',
     timeoutms: 'queryTimeoutMs',
     querytimeout: 'queryTimeoutMs',
-    permission: 'requirePermission',
   },
   guidance: {
+    label: RETIRED_DATASOURCE_BLOCKS.externalLabel,
+    requirePermission: RETIRED_DATASOURCE_BLOCKS.externalRequirePermission,
+    permission: RETIRED_DATASOURCE_BLOCKS.externalRequirePermission,
     password:
       '`password` must never be inlined. Put the secret in the secrets store and reference '
       + 'it with `credentialsRef` (e.g. `credentialsRef: "secret:warehouse/password"`).',
@@ -237,7 +273,6 @@ const datasourceUnknownKeyError = strictUnknownKeyError({
     mode: 'schemaMode',
     schema_mode: 'schemaMode',
     federation: 'external',
-    retry: 'retryPolicy',
     tls: 'ssl',
   },
   guidance: {
@@ -257,6 +292,10 @@ const datasourceUnknownKeyError = strictUnknownKeyError({
     replicas: RETIRED_READ_REPLICAS,
     capabilities: RETIRED_CAPABILITIES.capabilities,
     readOnly: RETIRED_CAPABILITIES.readOnly,
+    retryPolicy: RETIRED_DATASOURCE_BLOCKS.retryPolicy,
+    retry: RETIRED_DATASOURCE_BLOCKS.retryPolicy,
+    healthCheck: RETIRED_DATASOURCE_BLOCKS.healthCheck,
+    healthcheck: RETIRED_DATASOURCE_BLOCKS.healthCheck,
   },
   history:
     'Until #4001 these were dropped silently — a connection key written one level too high '
@@ -282,18 +321,6 @@ const poolUnknownKeyError = strictUnknownKeyError({
     + 'no matter what was written. Note both timeouts end in `Millis`, not `Ms`.',
 });
 
-const healthCheckUnknownKeyError = strictUnknownKeyError({
-  surface: "this datasource's healthCheck config",
-  knownKeys: HEALTH_CHECK_KEYS,
-  aliases: {
-    active: 'enabled',
-    interval: 'intervalMs',
-    intervalmillis: 'intervalMs',
-    timeout: 'timeoutMs',
-    timeoutmillis: 'timeoutMs',
-  },
-  history: 'Until #4001 these were dropped silently — health checks ran on the defaults.',
-});
 
 const sslUnknownKeyError = strictUnknownKeyError({
   surface: "this datasource's ssl config",
@@ -319,23 +346,6 @@ const sslUnknownKeyError = strictUnknownKeyError({
     + 'effect looked identical to one that did.',
 });
 
-const datasourceRetryPolicyUnknownKeyError = strictUnknownKeyError({
-  surface: "this datasource's retryPolicy",
-  knownKeys: DATASOURCE_RETRY_POLICY_KEYS,
-  aliases: {
-    retries: 'maxRetries',
-    attempts: 'maxRetries',
-    backoffms: 'baseDelayMs',
-    basedelay: 'baseDelayMs',
-    delayms: 'baseDelayMs',
-    maxdelay: 'maxDelayMs',
-    multiplier: 'backoffMultiplier',
-    backoff: 'backoffMultiplier',
-  },
-  history:
-    'Until #4001 these were dropped silently — reconnects ran on the defaults. Note a hook '
-    + 'retryPolicy spells its delay `backoffMs`; a datasource spells it `baseDelayMs`.',
-});
 
 
 
@@ -400,8 +410,6 @@ export type SchemaMode = z.infer<typeof SchemaModeSchema>;
  * boot/drift validation behaviour, credentials reference, and query caps.
  */
 export const ExternalDatasourceSettingsSchema = z.object({
-  label: z.string().optional()
-    .describe('Display label, e.g. "Snowflake — ANALYTICS / PROD"'),
   allowedSchemas: z.array(z.string()).optional()
     .describe('Whitelist of remote schemas/databases that may be exposed.'),
   allowWrites: z.boolean().default(false)
@@ -419,8 +427,6 @@ export const ExternalDatasourceSettingsSchema = z.object({
     .describe('Reference into the secrets store; never inline credentials.'),
   queryTimeoutMs: z.number().default(30_000)
     .describe('Hard cap on per-query execution time.'),
-  requirePermission: z.string().optional()
-    .describe('Optional convenience: gate the entire datasource behind a single role.'),
 }, { error: externalSettingsUnknownKeyError }).strict()
   .describe('External datasource federation settings (schemaMode != "managed")');
 
@@ -491,12 +497,6 @@ export const DatasourceSchema = lazySchema(() => z.object({
    * Manually override what the driver claims to support.
    */
   
-  /** Health Check */
-  healthCheck: z.object({
-    enabled: z.boolean().default(true).describe('Enable health check endpoint'),
-    intervalMs: z.number().default(30000).describe('Health check interval in milliseconds'),
-    timeoutMs: z.number().default(5000).describe('Health check timeout in milliseconds'),
-  }, { error: healthCheckUnknownKeyError }).strict().optional().describe('Datasource health check configuration'),
 
   /** SSL/TLS Configuration */
   ssl: z.object({
@@ -507,13 +507,6 @@ export const DatasourceSchema = lazySchema(() => z.object({
     key: z.string().optional().describe('Client private key (PEM format or path to file)'),
   }, { error: sslUnknownKeyError }).strict().optional().describe('SSL/TLS configuration for secure database connections'),
 
-  /** Retry Policy */
-  retryPolicy: z.object({
-    maxRetries: z.number().default(3).describe('Maximum number of retry attempts'),
-    baseDelayMs: z.number().default(1000).describe('Base delay between retries in milliseconds'),
-    maxDelayMs: z.number().default(30000).describe('Maximum delay between retries in milliseconds'),
-    backoffMultiplier: z.number().default(2).describe('Exponential backoff multiplier'),
-  }, { error: datasourceRetryPolicyUnknownKeyError }).strict().optional().describe('Connection retry policy for transient failures'),
 
   /** Description */
   description: z.string().optional().describe('Internal description'),

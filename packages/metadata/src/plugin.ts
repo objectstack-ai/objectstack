@@ -206,6 +206,14 @@ export class MetadataPlugin implements Plugin {
      * initializes.
      */
     providesServices = ['metadata'];
+    /**
+     * init() registers the metadata system objects through the `manifest`
+     * service ObjectQLPlugin provides — order-if-present so that
+     * registration is deterministic instead of "whichever init ran first"
+     * (ADR-0116, #4471). Soft, not hard: without an engine the plugin
+     * degrades on purpose (objects are discovered via the legacy fallback).
+     */
+    optionalDependencies = ['com.objectstack.engine.objectql'];
 
     private manager: NodeMetadataManager;
     private options: MetadataPluginOptions;

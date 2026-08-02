@@ -165,6 +165,15 @@ export interface MetadataWriteOptions {
      * that nothing else announces is exactly how runtime consumers go stale.
      */
     notify?: boolean;
+
+    /**
+     * The user (actor) performing this write, when known. Carried into the
+     * realtime `MetadataEvent` (`@objectstack/spec/api`) published for the
+     * write as its `userId` field (#4602). Omit for system-initiated writes
+     * (boot registration, package install) — `MetadataEvent.userId` is
+     * optional and absence means "no human actor".
+     */
+    userId?: string;
 }
 
 export interface IMetadataService {

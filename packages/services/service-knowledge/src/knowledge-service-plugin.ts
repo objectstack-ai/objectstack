@@ -59,6 +59,13 @@ export class KnowledgeServicePlugin implements Plugin {
   name = 'com.objectstack.service.knowledge';
   version = '0.1.0';
   type = 'standard';
+  /**
+   * init() resolves the `objectql` engine for RLS re-checks —
+   * order-if-present so the resolution is deterministic (ADR-0116, #4471).
+   * Soft, not hard: without an engine the service degrades on purpose
+   * (pure-search mode with conservative RLS).
+   */
+  optionalDependencies = ['com.objectstack.engine.objectql'];
 
   private service: KnowledgeService | null = null;
   private subscriptionId: string | undefined;

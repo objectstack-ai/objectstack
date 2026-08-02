@@ -486,7 +486,12 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
       driver: 'postgres',
       config: { url: 'postgres://user@warehouse.internal/analytics' },
       schemaMode: 'external',
-      external: { label: 'Analytics Warehouse' },
+      // An empty `external: {}` is enough — every key below is a default. It
+      // used to say `{ label: … }`, which #4583 removed: the federation block
+      // never had a display name of its own (the top-level `label` is what
+      // Setup renders), so the key was only ever making this literal look less
+      // bare.
+      external: {},
     });
     expect(ds.schemaMode).toBe('external');
     // ExternalDatasourceSettingsSchema defaults
@@ -535,16 +540,75 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
 
   it('should parse a fully-specified external settings block', () => {
     const settings = ExternalDatasourceSettingsSchema.parse({
-      label: 'Snowflake — ANALYTICS / PROD',
       allowedSchemas: ['public', 'mart'],
       allowWrites: true,
       validation: { onMismatch: 'warn', checkOnBoot: false, checkIntervalMs: 60_000 },
       credentialsRef: 'secret:warehouse/readonly',
       queryTimeoutMs: 15_000,
-      requirePermission: 'analytics_admin',
     });
     expect(settings.allowedSchemas).toEqual(['public', 'mart']);
     expect(settings.validation.onMismatch).toBe('warn');
     expect(settings.validation.checkIntervalMs).toBe(60_000);
+  });
+
+  // ── #4583 batches B/C/D — the remaining inert datasource surface ──────────
+  //
+  // Same finding as `capabilities`: declared, strict-guarded, read by nothing.
+  // Each rejection has to name the mechanism that DOES decide the behaviour,
+  // which is why these assert the message and not merely the failure.
+
+  it('rejects the `retryPolicy` block, and does NOT send the author to hook/job retryPolicy', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'warehouse',
+      driver: 'sqlite',
+      config: { filename: ':memory:' },
+      retryPolicy: { maxRetries: 5, baseDelayMs: 1000 },
+    });
+
+    expect(result.success).toBe(false);
+    const msg = JSON.stringify(result.error?.issues ?? []);
+    // The trap this pins: `hook.retryPolicy` / `job.retryPolicy` ARE enforced
+    // and spell the delay `backoffMs`. An author who reads "retryPolicy is
+    // dead" and renames the key onto a datasource anyway, or moves these
+    // values to a hook expecting the datasource to retry, has not been helped.
+    expect(msg).toMatch(/backoffMs/);
+    expect(msg).toMatch(/hook|job/);
+  });
+
+  it('rejects the `healthCheck` block and points at the on-demand probe', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'warehouse',
+      driver: 'sqlite',
+      config: { filename: ':memory:' },
+      healthCheck: { enabled: true, intervalMs: 30_000 },
+    });
+
+    expect(result.success).toBe(false);
+    const msg = JSON.stringify(result.error?.issues ?? []);
+    expect(msg).toMatch(/ping|checkHealth/);
+    // Must not be confused with the one recurring datasource timer, which
+    // checks schema drift rather than liveness.
+    expect(msg).toMatch(/checkIntervalMs/);
+  });
+
+  it('rejects `external.label` in favour of the top-level label', () => {
+    const result = ExternalDatasourceSettingsSchema.safeParse({
+      label: 'Snowflake — ANALYTICS / PROD',
+      allowWrites: false,
+    });
+
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues ?? [])).toMatch(/top-level/i);
+  });
+
+  it('rejects `external.requirePermission` — it gated nothing', () => {
+    const result = ExternalDatasourceSettingsSchema.safeParse({
+      requirePermission: 'analytics_admin',
+      allowWrites: false,
+    });
+
+    expect(result.success).toBe(false);
+    // The prescription must point at what really governs access.
+    expect(JSON.stringify(result.error?.issues ?? [])).toMatch(/permission set|RLS/i);
   });
 });

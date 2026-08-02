@@ -48,6 +48,14 @@ export class JobServicePlugin implements Plugin {
    * kernel name this plugin when a consumer requires one before it inits.
    */
   providesServices = ['job'];
+  /**
+   * init() registers sys_job/sys_job_run through the `manifest` service
+   * ObjectQLPlugin provides, and probes the `cluster` service for the cron
+   * adapter's leader election — order-if-present so both resolutions are
+   * deterministic (ADR-0116, #4471). Soft, not hard: without either the
+   * plugin degrades on purpose (in-memory adapter, single-node cron).
+   */
+  optionalDependencies = ['com.objectstack.engine.objectql', 'com.objectstack.service.cluster'];
   version = '1.1.0';
   type = 'standard';
 

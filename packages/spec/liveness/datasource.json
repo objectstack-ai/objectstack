@@ -1,6 +1,6 @@
 {
   "type": "datasource",
-  "_note": "DatasourceSchema. Consumers: @objectstack/service-datasource (DatasourceConnectionService.toSpec → DatasourceConnectionSpec → createDefaultDatasourceDriverFactory), @objectstack/objectql (engine.ts federation write gate), @objectstack/runtime (external-validation-plugin). Seeded 2026-08-01 (#4487) after #4465/#4481 found six inert keys BY HAND on a type no gate governed. Method: the authoritative boundary is what crosses into `ConnectableDatasource` (datasource-connection-service.ts:45-74) and `DatasourceConnectionSpec` (contracts/datasource-driver-factory.ts:25-59) — a block on neither reaches no driver. objectui's DatasourcePreview renders `pool`/`ssl`/`retryPolicy`/`healthCheck` as SideBlocks and is NOT counted as evidence for any entry (see README, 'An authoring/preview renderer is NOT a runtime consumer' — the #4481 precedent was exactly this). Framework provenance/lock fields auto-live. RETIREMENT 2026-08-02 (#4583): the whole `capabilities` block (11 flags, every one dead and authorWarn'd) was REMOVED from the schema rather than bridged — pushdown is decided by the runtime driver's own `supports.*`, a different mechanism, so there was nothing to connect it to. Its rows are deleted rather than flipped, per the strict-removal route (the keys left the walked shape, so a kept row would read as an ORPHAN). `readOnly` is called out separately in the tombstone: deleting it does NOT hand the author a working alternative, because `external.allowWrites` only gates FEDERATED datasources — a managed datasource has no read-only gate at all, which is #4584 rather than something this removal invented.",
+  "_note": "DatasourceSchema. Consumers: @objectstack/service-datasource (DatasourceConnectionService.toSpec → DatasourceConnectionSpec → createDefaultDatasourceDriverFactory), @objectstack/objectql (engine.ts federation write gate), @objectstack/runtime (external-validation-plugin). Seeded 2026-08-01 (#4487) after #4465/#4481 found six inert keys BY HAND on a type no gate governed. Method: the authoritative boundary is what crosses into `ConnectableDatasource` (datasource-connection-service.ts:45-74) and `DatasourceConnectionSpec` (contracts/datasource-driver-factory.ts:25-59) — a block on neither reaches no driver. objectui's DatasourcePreview renders `pool`/`ssl`/`retryPolicy`/`healthCheck` as SideBlocks and is NOT counted as evidence for any entry (see README, 'An authoring/preview renderer is NOT a runtime consumer' — the #4481 precedent was exactly this). Framework provenance/lock fields auto-live. RETIREMENT 2026-08-02 (#4583): the whole `capabilities` block (11 flags, every one dead and authorWarn'd) was REMOVED from the schema rather than bridged — pushdown is decided by the runtime driver's own `supports.*`, a different mechanism, so there was nothing to connect it to. Its rows are deleted rather than flipped, per the strict-removal route (the keys left the walked shape, so a kept row would read as an ORPHAN). `readOnly` is called out separately in the tombstone: deleting it does NOT hand the author a working alternative, because `external.allowWrites` only gates FEDERATED datasources — a managed datasource has no read-only gate at all, which is #4584 rather than something this removal invented. BATCHES B/C/D CLOSED 2026-08-02 (#4583): `retryPolicy` (4) and `healthCheck` (3) were removed as whole blocks and `external.label` / `external.requirePermission` as individual keys — all nine dead, all authorWarn'd, none bridgeable because each already had a DIFFERENT live mechanism: connection failure is the boot policy (degraded boot / bootCritical), liveness is the driver handle's on-demand ping()/checkHealth(), the federation label is the top-level `label`, and federated access is governed by ordinary permission sets + RLS. Rows deleted rather than flipped (strict-removal route). The retryPolicy rejection deliberately does NOT offer a rename: hook/job retryPolicy ARE enforced but spell the delay `backoffMs`, and that very inconsistency is the evidence nothing read the datasource one. datasource now carries ZERO dead properties.",
   "props": {
     "name": {
       "status": "live",
@@ -45,26 +45,6 @@
         }
       }
     },
-    "healthCheck": {
-      "children": {
-        "enabled": {
-          "status": "dead",
-          "authorWarn": true,
-          "authorHint": "Delete it. No health-check loop reads this block. Connection liveness is probed on demand via the driver handle's `ping()` / `checkHealth()` (contracts/datasource-driver-factory.ts:88-92), which the admin service calls for `testConnection` — not on any interval this could enable."
-        },
-        "intervalMs": {
-          "status": "dead",
-          "authorWarn": true,
-          "authorHint": "Delete it. Nothing schedules a datasource health check, so there is no interval to set. The only recurring datasource timer is `external.validation.checkIntervalMs` (schema-drift checking, a different concern)."
-        },
-        "timeoutMs": {
-          "status": "dead",
-          "authorWarn": true,
-          "authorHint": "Delete it. See `healthCheck.intervalMs` — there is no probe loop for this to bound."
-        }
-      },
-      "note": "All 3 dead, verified 2026-08-01. `healthCheck` is absent from ConnectableDatasource and DatasourceConnectionSpec. Every `healthCheck` hit in the monorepo belongs to a DIFFERENT surface — the PLUGIN health monitor (core/src/health-monitor.ts, core/src/plugin-loader.ts:316), the AI model registry, the integration connector, `StartupOrchestratorOptions.healthCheck`. Name collision, not a consumer. Easy to mis-verify: a bare grep for 'healthCheck' returns 20 hits and none of them is this block."
-    },
     "ssl": {
       "children": {
         "enabled": {
@@ -91,31 +71,6 @@
       },
       "note": "Live only since #4465. Before that the whole block stopped at the record — nothing put it on the connection spec, so a TLS configuration with a CA certificate in it configured nothing while looking identical to one that worked. A security-shaped property that was silently inert; exactly the ADR-0078 class this ledger exists to catch, and it was found by hand rather than by a gate."
     },
-    "retryPolicy": {
-      "children": {
-        "maxRetries": {
-          "status": "dead",
-          "authorWarn": true,
-          "authorHint": "Delete it. No connect or query path retries on this block. Connection failure handling is the boot policy in datasource-connection-service.ts (degraded boot / `bootCritical` fail-fast), which does not retry on a schedule. Do not confuse this with `hook.retryPolicy` (enforced, objectql/src/hook-wrappers.ts:105) or `job.retryPolicy` (enforced, runtime/src/app-plugin.ts:791) — same key name, different types, different shapes."
-        },
-        "baseDelayMs": {
-          "status": "dead",
-          "authorWarn": true,
-          "authorHint": "Delete it — see `retryPolicy.maxRetries`. Note this key does not even exist on the two retryPolicy blocks that ARE enforced: `hook.retryPolicy` spells its delay `backoffMs`."
-        },
-        "maxDelayMs": {
-          "status": "dead",
-          "authorWarn": true,
-          "authorHint": "Delete it — see `retryPolicy.maxRetries`."
-        },
-        "backoffMultiplier": {
-          "status": "dead",
-          "authorWarn": true,
-          "authorHint": "Delete it — see `retryPolicy.maxRetries`."
-        }
-      },
-      "note": "All 4 dead, verified 2026-08-01. Absent from ConnectableDatasource and DatasourceConnectionSpec. The trap here is the name: `retryPolicy` IS enforced on `hook` and on `job`, so a grep for the key looks alive and a reader who stops there concludes the datasource one works too. The shapes differ — hook uses `{maxRetries, backoffMs}`, this declares `{maxRetries, baseDelayMs, maxDelayMs, backoffMultiplier}` — which is itself the tell that nothing reads both."
-    },
     "description": {
       "status": "live",
       "note": "internal documentation. No runtime consumer by design — ADR-0033 docs-shaped, deliberately kept, not authorWarn'd."
@@ -137,11 +92,6 @@
     },
     "external": {
       "children": {
-        "label": {
-          "status": "dead",
-          "authorWarn": true,
-          "authorHint": "Delete it. Nothing reads the federation block's own label — use the datasource's top-level `label`, which the Setup list renders."
-        },
         "allowedSchemas": {
           "status": "live",
           "evidence": "packages/services/service-datasource/src/external-datasource-service.ts:145",
@@ -166,11 +116,6 @@
           "status": "live",
           "evidence": "packages/services/service-datasource/src/datasource-admin-service.ts:220",
           "note": "carried into the external-datasource probe options as `timeoutMs`."
-        },
-        "requirePermission": {
-          "status": "dead",
-          "authorWarn": true,
-          "authorHint": "Delete it. No authorization check consults it — a permission named here gates nothing, and access to a federated datasource's data is governed by the ordinary object permission sets and RLS. Naming a permission that is never required is the same false-compliance shape as the retired `tool.permissions` (#3896)."
         }
       },
       "note": "5 of 7 live. The two dead ones are opposite in risk: `external.label` is cosmetic, `external.requirePermission` is security-shaped — it reads as an access gate and is not one."

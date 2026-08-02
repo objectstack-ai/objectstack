@@ -8,7 +8,7 @@
  */
 
 import type { RealtimeEventPayload } from '@objectstack/spec/contracts';
-import type { MetadataEvent, DataEvent } from '@objectstack/spec/api';
+import { MetadataEventSchema, type MetadataEvent, type DataEvent } from '@objectstack/spec/api';
 
 export interface RealtimeSubscriptionFilter {
   /** Metadata/object type filter */
@@ -67,10 +67,23 @@ export class RealtimeAPI {
         ]
       },
       handler: (event) => {
-        // Type guard and filter
-        if (event.type.startsWith('metadata.')) {
-          callback(event as any as MetadataEvent);
+        if (!event.type.startsWith('metadata.')) return;
+        // Contract boundary (#4602): the wire carries a RealtimeEventPayload
+        // envelope whose `payload` is the producer's MetadataEvent. Validate
+        // it here — the callback is typed `(event: MetadataEvent) => void`,
+        // so delivering anything else would be a lie the type system can't
+        // catch. An off-contract payload is rejected LOUDLY (throw → surfaced
+        // by emitEvent's handler-error log), never coerced or passed through:
+        // a malformed event means the producer is broken and must be fixed
+        // there, not tolerated here.
+        const parsed = MetadataEventSchema.safeParse(event.payload);
+        if (!parsed.success) {
+          throw new Error(
+            `subscribeMetadata('${type}'): event '${event.type}' payload does not satisfy ` +
+            `MetadataEventSchema — rejecting off-contract event (fix the producer): ${parsed.error.message}`
+          );
         }
+        callback(parsed.data);
       }
     });
 

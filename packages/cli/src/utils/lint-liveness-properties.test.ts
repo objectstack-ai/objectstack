@@ -195,28 +195,27 @@ describe('lintLivenessProperties', () => {
   // the type that most needed it: 20 of its 43 props have no runtime consumer,
   // and until #4487 nothing told an author so.
 
-  it('warns on the dead datasource blocks that remain — healthCheck / retryPolicy (#4487)', () => {
-    // `capabilities` left this list in #4583: the block was REMOVED from the
-    // schema, so an author who writes it now gets a hard parse rejection with a
-    // prescription — a stronger signal than a lint warning, and the reason its
-    // ledger rows are gone rather than flipped. healthCheck / retryPolicy are
-    // still authorable and still dead (batches B and C of #4583).
+  it('no longer warns on ANY datasource block — the whole dead surface is gone (#4583)', () => {
+    // This assertion has now inverted twice, and the direction of travel is the
+    // point. It began (#4487) asserting warnings on capabilities/healthCheck/
+    // retryPolicy; batch A removed `capabilities`, so it narrowed to the other
+    // two; batches B/C/D removed those as well. Every one of the twenty dead
+    // datasource properties is now a hard parse rejection carrying its own
+    // prescription — strictly stronger than an advisory lint warning, which is
+    // why their ledger rows are deleted rather than flipped.
+    //
+    // Kept (rather than deleted) as a REGRESSION GUARD: it runs against the
+    // real shipped ledger, so re-introducing a dead+authorWarn datasource
+    // property fails here rather than shipping quietly.
     const findings = lintLivenessProperties({
       datasources: [{
         name: 'warehouse',
+        label: 'Warehouse',
         driver: 'postgres',
         config: { host: 'db.internal', database: 'analytics' },
-        healthCheck: { enabled: true, intervalMs: 30000 },
-        retryPolicy: { maxRetries: 5, baseDelayMs: 1000 },
       }],
     });
-    const msgs = paths(findings);
-    expect(msgs.some((m) => m.includes('healthCheck.enabled'))).toBe(true);
-    expect(msgs.some((m) => m.includes('healthCheck.intervalMs'))).toBe(true);
-    expect(msgs.some((m) => m.includes('retryPolicy.maxRetries'))).toBe(true);
-    expect(msgs.some((m) => m.includes('retryPolicy.baseDelayMs'))).toBe(true);
-    // The removed block must no longer be reported by the lint at all.
-    expect(msgs.some((m) => m.includes('capabilities'))).toBe(false);
+    expect(findings).toEqual([]);
   });
 
   // The entry the whole audit was worth doing for. `capabilities.readOnly` read
