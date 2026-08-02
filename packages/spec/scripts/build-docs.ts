@@ -27,6 +27,7 @@ import {
   type CategorySurface,
 } from './lib/docs-import-surface';
 import { createSink } from './lib/generated-output';
+import { schemaNameFromExportKey } from './lib/schema-name';
 
 const SCHEMA_DIR = path.resolve(__dirname, '../json-schema');
 const SRC_DIR = path.resolve(__dirname, '../src');
@@ -130,7 +131,8 @@ function scanCategories() {
       let match;
       while ((match = regex.exec(content)) !== null) {
         const rawName = match[1];
-        const finalName = rawName.endsWith('Schema') ? rawName.replace('Schema', '') : rawName;
+        // Suffix-only strip — shared with build-schemas.ts; see lib/schema-name.ts (#4592).
+        const finalName = schemaNameFromExportKey(rawName);
         schemaCategoryMap.set(finalName, category);
         schemaZodFileMap.set(finalName, slug);
       }

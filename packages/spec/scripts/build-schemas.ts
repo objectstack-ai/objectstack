@@ -8,6 +8,7 @@ process.env.OS_EAGER_SCHEMAS = '1';
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
+import { schemaNameFromExportKey } from './lib/schema-name';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
 import { MIGRATIONS_BY_MAJOR } from '../src/migrations/registry';
 import * as AI from '../src/ai';
@@ -197,7 +198,8 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
     for (const [key, value] of Object.entries(namespaceExports)) {
       // Check if it looks like a Zod Schema
       if (value instanceof z.ZodType) {
-        const schemaName = key.endsWith('Schema') ? key.replace('Schema', '') : key;
+        // Suffix-only strip — shared with build-docs.ts; see lib/schema-name.ts (#4592).
+        const schemaName = schemaNameFromExportKey(key);
 
         try {
           // Convert to JSON Schema using Zod v4's built-in toJSONSchema().

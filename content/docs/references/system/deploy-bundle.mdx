@@ -28,30 +28,12 @@ Target: 2-5 second deploys vs. 2-15 minute traditional Docker/CI/CD.
 ## TypeScript Usage
 
 ```typescript
-import { DeployBundleSchema, DeployDiffSchema, DeployManifestSchema, DeployStatusEnum, DeployValidationIssueSchema, DeployValidationResultSchema, MigrationPlanSchema, MigrationStatementSchema } from '@objectstack/spec/system';
-import type { DeployBundle, DeployDiff, DeployManifest, DeployValidationIssue, DeployValidationResult, MigrationPlan, MigrationStatement } from '@objectstack/spec/system';
+import { DeployBundleSchema, DeployDiffSchema, DeployManifestSchema, DeployStatusEnum, DeployValidationIssueSchema, DeployValidationResultSchema, MigrationPlanSchema, MigrationStatementSchema, SchemaChangeSchema } from '@objectstack/spec/system';
+import type { DeployBundle, DeployDiff, DeployManifest, DeployValidationIssue, DeployValidationResult, MigrationPlan, MigrationStatement, SchemaChange } from '@objectstack/spec/system';
 
 // Validate data
 const result = DeployBundleSchema.parse(data);
 ```
-
----
-
-## ChangeSchema
-
-Individual schema change
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **entityType** | `Enum<'object' \| 'field' \| 'index' \| 'view' \| 'flow' \| 'permission'>` | ✅ | Entity type |
-| **entityName** | `string` | ✅ | Entity name |
-| **parentEntity** | `string` | optional | Parent entity name |
-| **changeType** | `Enum<'added' \| 'modified' \| 'removed'>` | ✅ | Change type |
-| **oldValue** | `any` | optional | Previous value |
-| **newValue** | `any` | optional | New value |
-
 
 ---
 
@@ -184,6 +166,24 @@ Single DDL migration statement
 | **reversible** | `boolean` | ✅ | Whether the statement can be reversed |
 | **rollbackSql** | `string` | optional | Reverse SQL for rollback |
 | **order** | `integer` | ✅ | Execution order |
+
+
+---
+
+## SchemaChange
+
+Individual schema change
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **entityType** | `Enum<'object' \| 'field' \| 'index' \| 'view' \| 'flow' \| 'permission'>` | ✅ | Entity type |
+| **entityName** | `string` | ✅ | Entity name |
+| **parentEntity** | `string` | optional | Parent entity name |
+| **changeType** | `Enum<'added' \| 'modified' \| 'removed'>` | ✅ | Change type |
+| **oldValue** | `any` | optional | Previous value |
+| **newValue** | `any` | optional | New value |
 
 
 ---

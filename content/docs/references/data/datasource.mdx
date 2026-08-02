@@ -16,8 +16,8 @@ Can be a built-in driver or a plugin-contributed driver (e.g., "com.vendor.snowf
 ## TypeScript Usage
 
 ```typescript
-import { DatasourceSchema, DriverDefinitionSchema, DriverType, ExternalDatasourceSettingsSchema } from '@objectstack/spec/data';
-import type { Datasource, DriverDefinition, ExternalDatasourceSettings } from '@objectstack/spec/data';
+import { DatasourceSchema, DriverDefinitionSchema, DriverType, ExternalDatasourceSettingsSchema, SchemaModeSchema } from '@objectstack/spec/data';
+import type { Datasource, DriverDefinition, ExternalDatasourceSettings, SchemaMode } from '@objectstack/spec/data';
 
 // Validate data
 const result = DatasourceSchema.parse(data);
@@ -93,7 +93,7 @@ External datasource federation settings (schemaMode != "managed")
 
 ---
 
-## ModeSchema
+## SchemaMode
 
 Schema ownership mode
 
