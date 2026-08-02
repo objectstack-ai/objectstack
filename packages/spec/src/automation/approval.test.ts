@@ -396,6 +396,38 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       expect(unknownKeyIssue(DecisionOutputDefSchema, { key: 'k', widget: 'user' })!.message)
         .toContain('`widget` → `type`');
     });
+
+    /**
+     * #4525: `required` is the one decision-output key the RUNTIME enforces —
+     * `ApprovalService.decide()` refuses an approve whose required outputs are
+     * blank. The spec has declared it since objectui#2955, but nothing at the
+     * schema level pinned it: the schema is `.strict()`, so dropping the key
+     * would turn every author's `required: true` into an unknown-key rejection,
+     * and the only guard against that was `authorable-surface.json` — a
+     * REGENERATED baseline, which a `gen:schema` run silently rewrites. These
+     * cases fail loudly instead, which is what "declared = enforced" needs on
+     * the declaring side.
+     */
+    it('accepts `required` — the key the runtime enforces (#4525)', () => {
+      expect(DecisionOutputDefSchema.parse({ key: 'next_reviewers', required: true }))
+        .toEqual({ key: 'next_reviewers', required: true });
+      expect(DecisionOutputDefSchema.parse({ key: 'note', required: false }))
+        .toEqual({ key: 'note', required: false });
+    });
+
+    it('leaves `required` optional — an unflagged output stays unflagged', () => {
+      // Absent must stay absent rather than defaulting to `false`: the parsed
+      // shape is what `normalizeDecisionOutputs` ships to every decision UI.
+      expect(DecisionOutputDefSchema.parse({ key: 'note' })).toEqual({ key: 'note' });
+    });
+
+    it('rejects a non-boolean `required` instead of coercing it', () => {
+      // A truthy string is exactly how an AI-authored flow would spell it; the
+      // runtime compares `d.required === true`, so a coerced 'true' would
+      // declare a constraint the server then never enforces.
+      expect(() => DecisionOutputDefSchema.parse({ key: 'note', required: 'true' })).toThrow();
+      expect(() => DecisionOutputDefSchema.parse({ key: 'note', required: 1 })).toThrow();
+    });
   });
 
   it('publishes additionalProperties:false through the JSON schema (Studio + registerFlow)', () => {
