@@ -57,6 +57,25 @@ export class LegacyStorageDriver extends SqlDriver {
     this.canonicalTimeFields[table]?.delete(field);
   }
 
+  /**
+   * Does this dialect still owe a `Field.datetime` column the read-side legacy
+   * repair? (#4245)
+   *
+   * The driver's own rule, exposed so a matrix consumer can ASSERT which
+   * dialects have a legacy storage form instead of asserting it in a comment.
+   * True only on SQLite — the typeless store where INTEGER epoch ms can sit
+   * next to zone-naive TEXT in one column — and only while the column's
+   * canonical marker is clear, so call it after {@link forgetCanonical}.
+   */
+  legacyDatetimeRepairApplies(table: string, field: string): boolean {
+    return this.needsLegacyDatetimeRepair(table, field);
+  }
+
+  /** The `Field.time` twin of {@link legacyDatetimeRepairApplies} (#4245). */
+  legacyTimeRepairApplies(table: string, field: string): boolean {
+    return this.needsLegacyTimeRepair(table, field);
+  }
+
   /** Raw stored form of a column, for asserting on the fixture's premise. */
   async storedForms(table: string, field: string): Promise<Array<{ id: string; type: string; value: unknown }>> {
     const res: any = await this.knex.raw(
