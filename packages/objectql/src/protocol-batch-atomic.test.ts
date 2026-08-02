@@ -49,7 +49,6 @@ function makeSnapshotDriver() {
         async checkHealth() { return true; },
         async execute() { return null; },
         async find(object: string) { return Array.from(storeFor(object).values()); },
-        findStream() { throw new Error('not implemented'); },
         async findOne(object: string, ast: any, options: any) {
             seen.findOne.push({ object, transaction: options?.transaction });
             const id = ast?.where?.id ?? ast?.filters?.id;

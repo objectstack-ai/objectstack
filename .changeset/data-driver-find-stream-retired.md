@@ -1,8 +1,8 @@
 ---
-"@objectstack/spec": minor
-"@objectstack/driver-sql": minor
-"@objectstack/driver-memory": minor
-"@objectstack/driver-mongodb": minor
+"@objectstack/spec": major
+"@objectstack/driver-sql": major
+"@objectstack/driver-memory": major
+"@objectstack/driver-mongodb": major
 ---
 
 refactor(spec,drivers)!: retire `IDataDriver.findStream` — a required method with no caller, whose two main implementations did the opposite of what it promised (#4484, ADR-0049 enforce-or-remove)
