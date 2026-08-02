@@ -57,6 +57,17 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // #4684 / ADR-0112 D9a — the connector-side (outbound throttling) config no
   // longer shares a name with `shared/RateLimitConfig` (inbound API limiting).
   'integration/RateLimitConfig': 'integration/ConnectorRateLimitConfig',
+
+  // #4703 / ADR-0112 D9a — `FieldMapping` was published by THREE defs at once.
+  // The two domain-specific sides take a domain prefix; `shared/FieldMapping`
+  // is the BASE that this rename's target (and `data/ExternalFieldMapping`)
+  // extend, so it keeps the bare name and is deliberately absent from this
+  // table. Note what an `extend` means for the invariants below: the target
+  // def's key set is a superset of the base's, so every carried key is found,
+  // while the base def is emitted unchanged and is neither a source nor a
+  // target here.
+  'integration/FieldMapping': 'integration/ConnectorFieldMapping', // 7 keys carried
+  'data/FieldMapping': 'data/ImportFieldMapping', //                  4 keys carried
 };
 
 /**
@@ -80,12 +91,16 @@ export function carryAuthorableKey(
  *
  * Returns one human-readable problem line per broken entry; an empty array
  * means the table is honest about this build.
+ *
+ * The last two rules are about entries *interacting*, and only bind once the
+ * table holds more than one entry — which #4703 is the first change to do.
  */
 export function checkRenameTable(
   emittedDefs: ReadonlySet<string>,
   renames: Readonly<Record<string, string>> = RENAMED_DEFS,
 ): string[] {
   const problems: string[] = [];
+  const claimedBy = new Map<string, string>(); // target def -> first source claiming it
   for (const [from, to] of Object.entries(renames)) {
     if (from === to) {
       problems.push(`${from} → ${to}: source and target are the same def.`);
@@ -104,6 +119,43 @@ export function checkRenameTable(
           `Either the new name is misspelled here, or the renamed schema was ` +
           `since deleted — in which case its keys really did leave the contract ` +
           `and need the tombstone route, not this table.`,
+      );
+    }
+    // Two sources onto one target is a MERGE, not two renames. Left unchecked
+    // it defeats the table's own reason to exist: `build-schemas.ts` carries
+    // the snapshot into a `prev` map keyed by the NEW key, so the two defs'
+    // entries for the same property name collapse — last one wins — and with
+    // them the property's recorded retired state. A key that was live under
+    // one def and tombstoned under the other would then read as "already
+    // retired", and check (b) — every live → retired transition needs a
+    // registered ADR-0087 conversion — would never fire for it. That is a key
+    // leaving the contract with the table's blessing, the one thing it must
+    // not be able to explain (#4684). Converging two defs is a real change:
+    // make it one rename plus an explicit retirement.
+    const first = claimedBy.get(to);
+    if (first !== undefined) {
+      problems.push(
+        `${from} → ${to}: the TARGET def is already claimed by ${first}. ` +
+          `Two sources onto one target is a merge, not a rename: the carried key ` +
+          `sets (and their retired states) would silently collapse into one.`,
+      );
+    } else {
+      claimedBy.set(to, from);
+    }
+  }
+  // A chain (A → B → C) is rejected above as "B is not emitted", which is true
+  // but misdiagnoses it as a typo. Say what it is: a def that is renamed away
+  // cannot also be a rename target, or the carry is order-dependent — `prev`
+  // is built in one pass and never re-visits a key it has already rewritten.
+  for (const [from, to] of Object.entries(renames)) {
+    // A self-rename is `to in renames` by construction; rule 1 already named it,
+    // and reporting it twice would just bury the real diagnosis.
+    if (from === to) continue;
+    if (Object.hasOwn(renames, to)) {
+      problems.push(
+        `${from} → ${to}: the TARGET def is itself renamed away (${to} → ${renames[to]}). ` +
+          `Chained renames are not supported — the carry is a single pass. Point ` +
+          `${from} straight at the final name.`,
       );
     }
   }

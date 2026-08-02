@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { 
   MappingSchema, 
-  FieldMappingSchema, 
+  ImportFieldMappingSchema, 
   TransformType,
   type Mapping, 
-  type FieldMapping 
+  type ImportFieldMapping 
 } from './mapping.zod';
 
 describe('TransformType', () => {
@@ -23,18 +23,18 @@ describe('TransformType', () => {
   });
 });
 
-describe('FieldMappingSchema', () => {
+describe('ImportFieldMappingSchema', () => {
   it('should accept valid minimal field mapping', () => {
-    const validMapping: FieldMapping = {
+    const validMapping: ImportFieldMapping = {
       source: 'first_name',
       target: 'firstName'
     };
 
-    expect(() => FieldMappingSchema.parse(validMapping)).not.toThrow();
+    expect(() => ImportFieldMappingSchema.parse(validMapping)).not.toThrow();
   });
 
   it('should accept field mapping with single source and target', () => {
-    const mapping = FieldMappingSchema.parse({
+    const mapping = ImportFieldMappingSchema.parse({
       source: 'email',
       target: 'email_address',
       transform: 'none'
@@ -45,7 +45,7 @@ describe('FieldMappingSchema', () => {
   });
 
   it('should accept field mapping with array sources', () => {
-    const mapping = FieldMappingSchema.parse({
+    const mapping = ImportFieldMappingSchema.parse({
       source: ['first_name', 'last_name'],
       target: 'full_name',
       transform: 'join',
@@ -56,7 +56,7 @@ describe('FieldMappingSchema', () => {
   });
 
   it('should accept field mapping with array targets', () => {
-    const mapping = FieldMappingSchema.parse({
+    const mapping = ImportFieldMappingSchema.parse({
       source: 'full_name',
       target: ['first_name', 'last_name'],
       transform: 'split',
@@ -67,7 +67,7 @@ describe('FieldMappingSchema', () => {
   });
 
   it('should apply default transform type', () => {
-    const mapping = FieldMappingSchema.parse({
+    const mapping = ImportFieldMappingSchema.parse({
       source: 'field1',
       target: 'field2'
     });
@@ -76,7 +76,7 @@ describe('FieldMappingSchema', () => {
   });
 
   it('should accept constant transform', () => {
-    const mapping = FieldMappingSchema.parse({
+    const mapping = ImportFieldMappingSchema.parse({
       source: 'unused',
       target: 'status',
       transform: 'constant',
@@ -88,7 +88,7 @@ describe('FieldMappingSchema', () => {
   });
 
   it('should accept lookup transform', () => {
-    const mapping = FieldMappingSchema.parse({
+    const mapping = ImportFieldMappingSchema.parse({
       source: 'account_name',
       target: 'account_id',
       transform: 'lookup',
@@ -107,7 +107,7 @@ describe('FieldMappingSchema', () => {
   });
 
   it('should accept map transform', () => {
-    const mapping = FieldMappingSchema.parse({
+    const mapping = ImportFieldMappingSchema.parse({
       source: 'status',
       target: 'status_code',
       transform: 'map',
@@ -125,7 +125,7 @@ describe('FieldMappingSchema', () => {
   });
 
   it('should accept split transform', () => {
-    const mapping = FieldMappingSchema.parse({
+    const mapping = ImportFieldMappingSchema.parse({
       source: 'full_name',
       target: ['first_name', 'last_name'],
       transform: 'split',
@@ -137,7 +137,7 @@ describe('FieldMappingSchema', () => {
   });
 
   it('should accept join transform', () => {
-    const mapping = FieldMappingSchema.parse({
+    const mapping = ImportFieldMappingSchema.parse({
       source: ['street', 'city', 'zip'],
       target: 'full_address',
       transform: 'join',
@@ -149,7 +149,7 @@ describe('FieldMappingSchema', () => {
   });
 
   it('should accept javascript transform', () => {
-    const mapping = FieldMappingSchema.parse({
+    const mapping = ImportFieldMappingSchema.parse({
       source: 'raw_data',
       target: 'processed_data',
       transform: 'javascript',

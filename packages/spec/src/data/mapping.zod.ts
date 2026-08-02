@@ -92,9 +92,31 @@ export const TransformType = z.enum([
 ]);
 
 /**
- * Field Mapping Item
+ * Import Field Mapping Item — one column of an import mapping.
+ *
+ * Renamed from `FieldMappingSchema` / `FieldMapping` (#4703, ADR-0112 D9a).
+ * Three entry points published that name for three declarations, so which type
+ * an importer got depended only on the import path (the #4411 trap). This one
+ * was never a spelling variant of the other two: it maps **source columns of a
+ * file onto object fields** for `MappingSchema`'s import pipeline, not fields
+ * of a connector's remote object. Three ways the shapes are incompatible, each
+ * pinned in `src/integration/connector.test.ts` (the cross-entry block, next to
+ * the #4684 one) so a future "let's just unify these" has to argue with a red
+ * test:
+ *
+ * 1. `transform` is a plain {@link TransformType} enum defaulting to `'none'`,
+ *    steering a flat `params` bag. `shared`/`integration` use the discriminated
+ *    union `FieldMappingTransformSchema` (`{ type: 'cast', targetType }` …).
+ *    Same key name, mutually unparseable values.
+ * 2. `source` / `target` accept `string | string[]` here — one target field may
+ *    be composed from several columns (`split` / `join`). The other two take a
+ *    single `string`.
+ * 3. This schema is a {@link strictObject} (#4001): an unknown key THROWS with
+ *    an alias/typo prescription. The other two are plain `z.object` and strip
+ *    silently. Opposite failure modes under one name is exactly how a snippet
+ *    copied across domains "works" and quietly does nothing.
  */
-export const FieldMappingSchema = lazySchema(() => strictObject({
+export const ImportFieldMappingSchema = lazySchema(() => strictObject({
   surface: 'this field mapping',
   history: MAPPING_HISTORY,
   aliases: {
@@ -195,7 +217,7 @@ export const MappingSchema = lazySchema(() => strictObject({
   targetObject: z.string().describe('Target Object Name'),
 
   /** Column Mappings */
-  fieldMapping: z.array(FieldMappingSchema),
+  fieldMapping: z.array(ImportFieldMappingSchema),
 
   /** Upsert Logic */
   mode: z.enum(['insert', 'update', 'upsert']).default('insert'),
@@ -227,4 +249,4 @@ export type MappingInput = z.input<typeof MappingSchema>;
 export function defineMapping(config: z.input<typeof MappingSchema>): Mapping {
   return MappingSchema.parse(config);
 }
-export type FieldMapping = z.infer<typeof FieldMappingSchema>;
+export type ImportFieldMapping = z.infer<typeof ImportFieldMappingSchema>;

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
   // Field Mapping
-  FieldMappingSchema,
+  ConnectorFieldMappingSchema,
   
   // Data Sync
   DataSyncConfigSchema,
@@ -34,7 +34,7 @@ import {
   
   // Types
   type Connector,
-  type FieldMapping,
+  type ConnectorFieldMapping,
   type DataSyncConfig,
   type WebhookConfig,
 } from './connector.zod';
@@ -159,16 +159,16 @@ describe('ConnectorAuthConfigSchema (Authentication)', () => {
 // Field Mapping Tests
 // ============================================================================
 
-describe('FieldMappingSchema', () => {
+describe('ConnectorFieldMappingSchema', () => {
   it('should accept valid field mapping', () => {
-    const mapping: FieldMapping = {
+    const mapping: ConnectorFieldMapping = {
       source: 'firstName',
       target: 'first_name',
       dataType: 'string',
       syncMode: 'bidirectional',
     };
     
-    expect(() => FieldMappingSchema.parse(mapping)).not.toThrow();
+    expect(() => ConnectorFieldMappingSchema.parse(mapping)).not.toThrow();
   });
   
   it('should accept field with transformation', () => {
@@ -181,7 +181,7 @@ describe('FieldMappingSchema', () => {
       },
     };
     
-    const parsed = FieldMappingSchema.parse(mapping);
+    const parsed = ConnectorFieldMappingSchema.parse(mapping);
     expect(parsed.transform?.type).toBe('javascript');
   });
   
@@ -191,7 +191,7 @@ describe('FieldMappingSchema', () => {
       target: 'field_1',
     };
     
-    const parsed = FieldMappingSchema.parse(mapping);
+    const parsed = ConnectorFieldMappingSchema.parse(mapping);
     expect(parsed.required).toBe(false);
     expect(parsed.syncMode).toBe('bidirectional');
   });
@@ -783,14 +783,297 @@ describe('[#4684] RateLimitConfig no longer names two declarations', () => {
     expect(shared.get('RateLimitConfigSchema')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
 
     // And the general invariant for this pair of entries: any name they BOTH
-    // export must resolve to one and the same declaration. `FieldMapping` /
-    // `FieldMappingSchema` are the remaining known offenders (#4535 C12) — they
-    // stay listed here so this pin fails the moment a NEW one appears, instead
-    // of being written as a blanket "no shared names" that never held.
-    const KNOWN_STILL_DUAL_SOURCE = ['FieldMapping', 'FieldMappingSchema'];
+    // export must resolve to one and the same declaration. The list stayed
+    // explicit rather than being written as a blanket "no shared names" that
+    // never held — so that a NEW offender fails here instead of hiding inside a
+    // permanently-red assertion. #4535 C12 (#4703) cleared its last two
+    // entries (`FieldMapping` / `FieldMappingSchema`), so it is now empty and
+    // the invariant has finally graduated to the blanket form it always wanted
+    // to be. **Do not "fix" a failure here by adding a name back to this list**
+    // — that is the dual-source trap re-opening.
+    const KNOWN_STILL_DUAL_SOURCE: string[] = [];
     const conflicts = [...shared.keys()]
       .filter((name) => integration.has(name) && integration.get(name) !== shared.get(name))
       .sort();
     expect(conflicts).toEqual(KNOWN_STILL_DUAL_SOURCE);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #4535 C12 / #4703 — `FieldMapping` named THREE declarations
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Same defect class as #4684 above, one entry worse: `FieldMapping` /
+// `FieldMappingSchema` resolved to a different declaration on EACH of
+// `./shared`, `./integration` and `./data`.
+//
+//   ./shared       — the base. plain `z.object`, 4 keys.
+//   ./integration  — `Base.extend({ dataType, required, syncMode })`, 7 keys.
+//                    A superset, and a connector's remote-field mapping.
+//   ./data         — an INDEPENDENT `strictObject`, 4 keys, and a different
+//                    CONCEPT: the column mapping of a CSV/table import.
+//
+// The first two are base-and-superset, so "converge them" is a tempting read.
+// It is wrong in both directions: widening the base to 7 keys pushes connector
+// sync semantics onto `automation/sync.zod.ts` and `data/external-lookup.zod.ts`
+// which also extend it, and narrowing the connector side to 4 is a retirement of
+// three live keys, not a naming fix. ADR-0112 D9a's prefix remedy applies, and
+// the file next door already demonstrates it: `data/ExternalFieldMappingSchema`
+// extends the same base and, purely because it carries a prefix, never entered
+// the dual-source baseline at all.
+//
+// The `./data` side is not a spelling variant of anything. The tests below pin
+// the three incompatibilities, because they are the ARGUMENT for the rename and
+// the thing a future "let's just unify these" has to defeat.
+describe('[#4703] FieldMapping no longer names three declarations', () => {
+  it('each entry exposes exactly one field-mapping name, and not the others’', async () => {
+    const integrationEntry = await import('./index');
+    const dataEntry = await import('../data/index');
+    const sharedEntry = await import('../shared/index');
+
+    expect(integrationEntry.ConnectorFieldMappingSchema).toBeDefined();
+    expect(dataEntry.ImportFieldMappingSchema).toBeDefined();
+    // The base keeps the bare name — it is the incumbent, and two other defs
+    // extend it.
+    expect(sharedEntry.FieldMappingSchema).toBeDefined();
+
+    // No compatibility alias on either renamed side. Re-exporting the old name
+    // would be a third declaration of it and would re-open the trap.
+    expect('FieldMappingSchema' in integrationEntry).toBe(false);
+    expect('FieldMappingSchema' in dataEntry).toBe(false);
+    expect('ConnectorFieldMappingSchema' in dataEntry).toBe(false);
+    expect('ImportFieldMappingSchema' in integrationEntry).toBe(false);
+  });
+
+  it('./shared keeps the base declaration byte-for-byte', async () => {
+    const sharedEntry = await import('../shared/index');
+    const integrationEntry = await import('./index');
+
+    // Four keys, `transform` a discriminated union, `source`/`target` required.
+    expect(
+      sharedEntry.FieldMappingSchema.parse({
+        source: 'FirstName',
+        target: 'first_name',
+        transform: { type: 'cast', targetType: 'string' },
+        defaultValue: '',
+      }),
+    ).toEqual({
+      source: 'FirstName',
+      target: 'first_name',
+      transform: { type: 'cast', targetType: 'string' },
+      defaultValue: '',
+    });
+
+    // And it is a DIFFERENT object from the connector superset that extends it
+    // — `.extend()` builds a new schema, which is why both were in the baseline.
+    expect(integrationEntry.ConnectorFieldMappingSchema).not.toBe(
+      sharedEntry.FieldMappingSchema,
+    );
+  });
+
+  // ── Difference 1: `transform` is the same key name with mutually
+  //    unparseable value types. The hardest evidence that these are two
+  //    concepts rather than three spellings of one.
+  it('`transform` means a discriminated union on two sides and a flat enum on the third', async () => {
+    const dataEntry = await import('../data/index');
+    const sharedEntry = await import('../shared/index');
+    const integrationEntry = await import('./index');
+
+    const unionForm = { type: 'cast' as const, targetType: 'string' as const };
+
+    // shared / integration: the object form parses…
+    expect(
+      sharedEntry.FieldMappingSchema.parse({ source: 'a', target: 'b', transform: unionForm })
+        .transform,
+    ).toEqual(unionForm);
+    expect(
+      integrationEntry.ConnectorFieldMappingSchema.parse({
+        source: 'a',
+        target: 'b',
+        transform: unionForm,
+      }).transform,
+    ).toEqual(unionForm);
+    // …and the enum form does NOT.
+    expect(
+      sharedEntry.FieldMappingSchema.safeParse({ source: 'a', target: 'b', transform: 'join' })
+        .success,
+    ).toBe(false);
+
+    // data: exactly the other way round — a bare enum steering a flat `params`
+    // bag, defaulting to 'none'.
+    expect(
+      dataEntry.ImportFieldMappingSchema.parse({ source: 'a', target: 'b' }).transform,
+    ).toBe('none');
+    expect(
+      dataEntry.ImportFieldMappingSchema.parse({
+        source: 'a',
+        target: 'b',
+        transform: 'join',
+        params: { separator: ' ' },
+      }).params?.separator,
+    ).toBe(' ');
+    expect(
+      dataEntry.ImportFieldMappingSchema.safeParse({
+        source: 'a',
+        target: 'b',
+        transform: unionForm,
+      }).success,
+    ).toBe(false);
+  });
+
+  // ── Difference 2: cardinality. An import may compose one target field from
+  //    several source columns; a connector mapping is 1:1.
+  it('./data accepts arrays for source/target where the other two take a single string', async () => {
+    const dataEntry = await import('../data/index');
+    const sharedEntry = await import('../shared/index');
+    const integrationEntry = await import('./index');
+
+    const composed = { source: ['first_name', 'last_name'], target: 'full_name' };
+
+    expect(dataEntry.ImportFieldMappingSchema.parse({ ...composed, transform: 'join' }).source)
+      .toEqual(['first_name', 'last_name']);
+    expect(
+      dataEntry.ImportFieldMappingSchema.parse({
+        source: 'full_name',
+        target: ['first_name', 'last_name'],
+        transform: 'split',
+      }).target,
+    ).toEqual(['first_name', 'last_name']);
+
+    expect(sharedEntry.FieldMappingSchema.safeParse(composed).success).toBe(false);
+    expect(integrationEntry.ConnectorFieldMappingSchema.safeParse(composed).success).toBe(false);
+  });
+
+  // ── Difference 3: OPPOSITE failure modes for an unknown key. This is what
+  //    made one shared name actively dangerous: the same typo is a hard error
+  //    on one side and a silent no-op on the other (ADR-0104's silent-strip
+  //    class), so a snippet moved between domains "works" and does nothing.
+  it('an unknown key THROWS on ./data and is silently stripped by the other two', async () => {
+    const dataEntry = await import('../data/index');
+    const sharedEntry = await import('../shared/index');
+    const integrationEntry = await import('./index');
+
+    // `strictObject` (#4001) — rejects, and prescribes the canonical spelling.
+    const rejected = dataEntry.ImportFieldMappingSchema.safeParse({
+      source: 'a',
+      target: 'b',
+      sourceField: 'a', // a real alias, deliberately: the message must name it
+    });
+    expect(rejected.success).toBe(false);
+    expect(JSON.stringify(rejected.error?.issues)).toContain('source');
+
+    // Plain `z.object` on the other two — the foreign key vanishes and the
+    // parse reports success. Pinned, not fixed: it is correct behaviour for a
+    // non-strict schema. The defect was the shared NAME.
+    expect(
+      sharedEntry.FieldMappingSchema.parse({ source: 'a', target: 'b', syncMode: 'read_only' }),
+    ).toEqual({ source: 'a', target: 'b' });
+    expect(
+      integrationEntry.ConnectorFieldMappingSchema.parse({
+        source: 'a',
+        target: 'b',
+        params: { separator: ' ' }, // a `./data` key, meaningless here
+      }),
+    ).toEqual({ source: 'a', target: 'b', required: false, syncMode: 'bidirectional' });
+  });
+
+  // The load-bearing one, and the reason this block exists at all: `FieldMapping`
+  // is a TYPE. Every runtime assertion above stays green if any entry re-adds
+  // `export type FieldMapping = z.infer<…>`, which IS the defect. #4642 proved a
+  // compile-time `Assert< Equal< … > >` is dead text in this package
+  // (`tsconfig.json` excludes `**/*.test.ts`, vitest never enables `typecheck`),
+  // so this resolves each entry's exports through their alias chains with the
+  // TypeScript compiler API — the same symbol-identity measurement
+  // `check:dual-source-exports` makes against `dist`, run over `src/` so it is
+  // part of `pnpm test`. Three entries means THREE pairs, all checked.
+  it('no name resolves to two declarations across ./shared, ./integration and ./data (types included)', async () => {
+    const ts = (await import('typescript')).default;
+    const { resolve, relative, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+
+    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    const entries = {
+      './shared': resolve(specDir, 'src/shared/index.ts'),
+      './integration': resolve(specDir, 'src/integration/index.ts'),
+      './data': resolve(specDir, 'src/data/index.ts'),
+    };
+    const program = ts.createProgram(Object.values(entries), {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      skipLibCheck: true,
+      noEmit: true,
+    });
+    const checker = program.getTypeChecker();
+    const unalias = (s: import('typescript').Symbol) =>
+      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
+
+    /** entry → exported name → `file:line` of the ORIGINAL declaration. */
+    const originsByEntry = new Map<string, Map<string, string>>();
+    for (const [sub, file] of Object.entries(entries)) {
+      const sf = program.getSourceFile(file);
+      const moduleSym = sf && checker.getSymbolAtLocation(sf);
+      // Without this, a resolution failure would make every assertion below
+      // pass vacuously — the exact way a gate goes dormant (#4642).
+      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
+
+      const origins = new Map<string, string>();
+      for (const exported of checker.getExportsOfModule(moduleSym!)) {
+        const decl = unalias(exported).declarations?.[0];
+        if (!decl) continue;
+        const declFile = decl.getSourceFile();
+        origins.set(
+          exported.getName(),
+          `${relative(specDir, declFile.fileName)}:${
+            declFile.getLineAndCharacterOfPosition(decl.getStart()).line + 1
+          }`,
+        );
+      }
+      // Guard #2: an entry that resolved to nothing would also pass vacuously.
+      expect(origins.size, `${sub} must export something`).toBeGreaterThan(20);
+      originsByEntry.set(sub, origins);
+    }
+
+    const shared = originsByEntry.get('./shared')!;
+    const integration = originsByEntry.get('./integration')!;
+    const data = originsByEntry.get('./data')!;
+
+    // Each renamed name resolves into its own domain's file…
+    for (const name of ['ConnectorFieldMapping', 'ConnectorFieldMappingSchema']) {
+      expect(integration.get(name), name).toMatch(/^src\/integration\/connector\.zod\.ts:\d+$/);
+    }
+    for (const name of ['ImportFieldMapping', 'ImportFieldMappingSchema']) {
+      expect(data.get(name), name).toMatch(/^src\/data\/mapping\.zod\.ts:\d+$/);
+    }
+    // …the base keeps the bare name on `./shared` only…
+    for (const name of ['FieldMapping', 'FieldMappingSchema']) {
+      expect(shared.get(name), name).toMatch(/^src\/shared\/mapping\.zod\.ts:\d+$/);
+      expect(integration.get(name), `${name} must be gone from ./integration`).toBeUndefined();
+      expect(data.get(name), `${name} must be gone from ./data`).toBeUndefined();
+    }
+    // …and neither renamed name leaks onto the other domain's entry.
+    expect(data.get('ConnectorFieldMappingSchema')).toBeUndefined();
+    expect(integration.get('ImportFieldMappingSchema')).toBeUndefined();
+
+    // The general invariant, now over all THREE pairs. `./data` re-exports a
+    // handful of `./shared` declarations (identical origin — that is fine and
+    // is what this measures), so only a name resolving to two DIFFERENT files
+    // counts.
+    const pairs: Array<[string, Map<string, string>, string, Map<string, string>]> = [
+      ['./shared', shared, './integration', integration],
+      ['./shared', shared, './data', data],
+      ['./integration', integration, './data', data],
+    ];
+    const conflicts: string[] = [];
+    for (const [leftName, left, rightName, right] of pairs) {
+      for (const [name, origin] of left) {
+        const other = right.get(name);
+        if (other !== undefined && other !== origin) {
+          conflicts.push(`${name} — ${leftName} ${origin} ≠ ${rightName} ${other}`);
+        }
+      }
+    }
+    // Empty, and it must stay empty. A failure here is a NEW dual-source name;
+    // the fix is to converge or prefix it, never to allow-list it back in.
+    expect(conflicts.sort()).toEqual([]);
   });
 });

@@ -83,6 +83,58 @@ describe('checkRenameTable', () => {
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('source and target are the same def');
   });
+
+  // ─── Rules that only bind with MORE THAN ONE entry (#4703) ──────────────
+  // The table shipped with a single entry, so nothing exercised how two
+  // entries interact. #4703 is the first change to add two at once.
+
+  it('accepts several independent renames in one build', () => {
+    expect(
+      checkRenameTable(new Set(['integration/NewA', 'data/NewB', 'shared/Untouched']), {
+        'integration/OldA': 'integration/NewA',
+        'data/OldB': 'data/NewB',
+      }),
+    ).toEqual([]);
+  });
+
+  it('rejects two sources claiming ONE target — that is a merge, not two renames', () => {
+    // Why this must be fatal: `build-schemas.ts` carries the snapshot into a
+    // map keyed by the NEW key, so `A:foo` and `B:foo` collapse onto `X:foo`
+    // and the surviving entry's RETIRED state is whichever was carried last.
+    // A key that was live under one def and tombstoned under the other reads
+    // as already-retired, and check (b) — live → retired needs a registered
+    // ADR-0087 conversion — never fires. The table would then be explaining a
+    // key leaving the contract, the one thing it may not do.
+    const problems = checkRenameTable(new Set(['integration/X']), {
+      'integration/A': 'integration/X',
+      'integration/B': 'integration/X',
+    });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('already claimed by integration/A');
+  });
+
+  it('rejects a chained rename, and says it is a chain rather than a typo', () => {
+    // A → B → C. The pre-existing "target not emitted" rule already made this
+    // red (B is gone), but named it a misspelling — which invites the wrong
+    // repair. The carry is a single pass, so a chain is unsupported outright.
+    const problems = checkRenameTable(new Set(['integration/C']), {
+      'integration/A': 'integration/B',
+      'integration/B': 'integration/C',
+    });
+    expect(problems.some((p) => p.includes('is itself renamed away'))).toBe(true);
+  });
+
+  it('does not mistake the BASE of an extend for a rename source', () => {
+    // #4703's shape: `integration/ConnectorFieldMapping` is
+    // `shared/FieldMapping.extend(…)`. The base is still emitted under its own
+    // name — it is neither source nor target — and the target's key set is a
+    // superset of the base's, so no carried key can go missing.
+    expect(
+      checkRenameTable(new Set(['shared/FieldMapping', 'integration/ConnectorFieldMapping']), {
+        'integration/FieldMapping': 'integration/ConnectorFieldMapping',
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe('the committed RENAMED_DEFS table', () => {
@@ -98,9 +150,34 @@ describe('the committed RENAMED_DEFS table', () => {
     expect(RENAMED_DEFS['shared/RateLimitConfig']).toBeUndefined();
   });
 
+  it('records the #4703 tri-source FieldMapping renames — both of them', () => {
+    expect(RENAMED_DEFS['integration/FieldMapping']).toBe(
+      'integration/ConnectorFieldMapping',
+    );
+    expect(RENAMED_DEFS['data/FieldMapping']).toBe('data/ImportFieldMapping');
+  });
+
+  it('leaves the shared BASE alone — `shared/FieldMapping` keeps the bare name', () => {
+    // `integration/ConnectorFieldMapping` and `data/ExternalFieldMapping` both
+    // `.extend()` it. Renaming the base would move keys under two other defs
+    // and change nothing about the collision, which was between the two
+    // domain-specific sides and the base's own name.
+    expect(RENAMED_DEFS['shared/FieldMapping']).toBeUndefined();
+  });
+
   it('is well-formed: no self-renames, no two defs claiming one target', () => {
     const targets = Object.values(RENAMED_DEFS);
     for (const [from, to] of Object.entries(RENAMED_DEFS)) expect(from).not.toBe(to);
     expect(new Set(targets).size).toBe(targets.length);
+  });
+
+  it('is internally consistent by its own build-time rules', () => {
+    // The three checks above are hand-written assertions about the committed
+    // table; this one runs the REAL validator over it with a set of emitted
+    // defs synthesised from the table itself. It is what catches a future
+    // entry that is well-formed in isolation but interacts badly — a chain, or
+    // a second source pointed at an existing target.
+    const emitted = new Set(Object.values(RENAMED_DEFS));
+    expect(checkRenameTable(emitted, RENAMED_DEFS)).toEqual([]);
   });
 });

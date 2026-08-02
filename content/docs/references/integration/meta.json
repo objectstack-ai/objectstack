@@ -4,7 +4,6 @@
     "---Connectors---",
     "connector",
     "connector-auth",
-    "mapping",
     "---Transport & Storage---",
     "offline"
   ]

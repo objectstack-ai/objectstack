@@ -97,12 +97,25 @@ import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.
 
 /**
  * Connector Field Mapping Configuration
- * 
- * Extends the base field mapping with connector-specific features
- * like bidirectional sync modes and data type mapping.
+ *
+ * Extends the base field mapping ({@link BaseFieldMappingSchema}, declared in
+ * `shared/mapping.zod.ts`) with connector-specific features like bidirectional
+ * sync modes and data type mapping.
+ *
+ * Renamed from `FieldMappingSchema` / `FieldMapping` (#4703, ADR-0112 D9a):
+ * THREE entry points published that name for three declarations — `./shared`
+ * (this schema's base, 4 keys), `./integration` (this one, 7 keys) and
+ * `./data` (`ImportFieldMappingSchema`, a CSV/table column mapping that is not
+ * a connector mapping at all). Which type an importer got depended only on the
+ * import path — the #4411 trap. Prefixing the domain-specific sides keeps the
+ * base name for the base, matching `ConnectorRateLimitConfig` (#4684),
+ * `ConnectorErrorCategory` and `ConnectorRetryStrategy` in this same file, and
+ * `ExternalFieldMappingSchema` in `data/external-lookup.zod.ts` — which extends
+ * the same base and, precisely because it carries a domain prefix, never
+ * entered the dual-source baseline.
  */
 import { lazySchema } from '../shared/lazy-schema';
-export const FieldMappingSchema = lazySchema(() => BaseFieldMappingSchema.extend({
+export const ConnectorFieldMappingSchema = lazySchema(() => BaseFieldMappingSchema.extend({
   /**
    * Data type mapping (connector-specific)
    */
@@ -131,7 +144,7 @@ export const FieldMappingSchema = lazySchema(() => BaseFieldMappingSchema.extend
   ]).default('bidirectional').describe('Sync mode'),
 }));
 
-export type FieldMapping = z.infer<typeof FieldMappingSchema>;
+export type ConnectorFieldMapping = z.infer<typeof ConnectorFieldMappingSchema>;
 
 // ============================================================================
 // Data Synchronization Configuration
@@ -673,7 +686,7 @@ export const ConnectorSchema = lazySchema(() => z.object({
   /**
    * Field mappings
    */
-  fieldMappings: z.array(FieldMappingSchema).optional().describe('Field mapping rules'),
+  fieldMappings: z.array(ConnectorFieldMappingSchema).optional().describe('Field mapping rules'),
   
   /**
    * Webhook configuration
