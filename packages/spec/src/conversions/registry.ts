@@ -2835,6 +2835,85 @@ const flowNodeScriptBranchKeysRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * `object.managedBy: 'system'` → `'system-data'` (protocol 17, #3355 — the v17
+ * close-out of ADR-0103's v16 enum split).
+ *
+ * v16 split the overloaded `system` bucket ADDITIVELY: the 20 engine-owned
+ * objects moved to the new explicit `engine-owned`, and the 8 admin/user-writable
+ * ones stayed on `system`. The value that remained therefore labelled the exact
+ * opposite of what its name said — writable platform DATA under the word
+ * "system" — and left an author choosing between `system` and `engine-owned` with
+ * nothing in the vocabulary to choose on. v17 renames the residue to
+ * `system-data` and retires the bare value.
+ *
+ * Because v16 already drained the engine side, this is a ONE-TO-ONE mechanical
+ * replacement with no judgement call: every remaining `system` declaration is,
+ * by construction, writable platform data.
+ *
+ * **Retired from the load path** — the enum rejects `'system'` with the
+ * {@link MANAGED_BY_SYSTEM_RETIRED} prescription, and that rejection is the
+ * whole point: a live-window entry at `normalizeStackInput` would run BEFORE the
+ * enum and silently absorb the value, so an author (or a model) would keep
+ * writing the name the rename exists to unteach. Stored `sys_metadata` rows and
+ * `os migrate meta --from 16` are exactly the `includeRetired` seams, so data at
+ * rest is CONVERTED rather than reinterpreted.
+ *
+ * Note the affordance side-effect, which is deliberate and is why this is a
+ * major-window change rather than a docs fix: `system` defaulted LOCKED and each
+ * object opened its writes via `userActions`, while `system-data` defaults
+ * WRITABLE. A converted row that carried no `userActions` therefore gains the
+ * generic affordances — which is the honest reading of the bucket it is being
+ * moved into, and changes no enforcement: the write guard, the delegated-admin
+ * gate, RLS and permission sets all adjudicate independently of the bucket name.
+ */
+const objectManagedBySystemToSystemData: MetadataConversion = {
+  id: 'object-managed-by-system-to-system-data',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'object.managedBy',
+  summary:
+    "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the "
+    + 'engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the '
+    + 'name describing what the bucket actually holds: admin/user-writable platform data)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'objects', (obj, path) => {
+      if (obj.managedBy !== 'system') return obj;
+      emit({ from: 'system', to: 'system-data', path: `${path}.managedBy` });
+      return { ...obj, managedBy: 'system-data' };
+    });
+  },
+  fixture: {
+    before: {
+      objects: [
+        {
+          name: 'sys_user_position',
+          label: 'User Position',
+          managedBy: 'system',
+          userActions: { create: true, edit: true, delete: true },
+        },
+        // every other bucket passes through untouched — including `engine-owned`,
+        // the value v16 already moved the engine side to
+        { name: 'sys_automation_run', label: 'Automation Run', managedBy: 'engine-owned' },
+        { name: 'crm_deal', label: 'Deal' },
+      ],
+    },
+    after: {
+      objects: [
+        {
+          name: 'sys_user_position',
+          label: 'User Position',
+          managedBy: 'system-data',
+          userActions: { create: true, edit: true, delete: true },
+        },
+        { name: 'sys_automation_run', label: 'Automation Run', managedBy: 'engine-owned' },
+        { name: 'crm_deal', label: 'Deal' },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -2872,6 +2951,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
     // whether `config.function` is set, and that rename is what sets it.
     flowNodeScriptBranchKeysRemoved,
+    objectManagedBySystemToSystemData,
   ],
 };
 

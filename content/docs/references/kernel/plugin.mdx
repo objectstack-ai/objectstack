@@ -16,26 +16,11 @@ These are the specialized plugin types common between Manifest (Package) and Plu
 ## TypeScript Usage
 
 ```typescript
-import { ActivationEventSchema, PluginSchema } from '@objectstack/spec/kernel';
-import type { ActivationEvent } from '@objectstack/spec/kernel';
+import { PluginSchema } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = ActivationEventSchema.parse(data);
+const result = PluginSchema.parse(data);
 ```
-
----
-
-## ActivationEvent
-
-Lazy activation trigger for a dynamic plugin
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `Enum<'onCommand' \| 'onRoute' \| 'onObject' \| 'onEvent' \| 'onService' \| 'onSchedule' \| 'onStartup'>` | ✅ | Trigger type for lazy activation |
-| **pattern** | `string` | ✅ | Match pattern for the activation trigger |
-
 
 ---
 

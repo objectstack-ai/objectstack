@@ -88,7 +88,6 @@
     "shared/MutationEventEnum — no type export",
     "shared/SortDirectionEnum — no type export",
     "studio/ActionLocation — no type export",
-    "studio/ActivationEvent — no type export",
     "studio/PanelLocation — no type export",
     "system/AddFieldOperation — no type export",
     "system/CreateObjectOperation — no type export",

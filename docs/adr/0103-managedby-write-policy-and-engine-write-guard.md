@@ -1,6 +1,7 @@
 # ADR-0103: `managedBy` write policy — split the overloaded `system` bucket, enforce engine-owned writes
 
-- **Status**: Accepted
+- **Status**: Accepted (D5 completed in v17 — see the #3355 addendum at the end:
+  the residual `system` bucket is renamed `system-data` and the bare value retired)
 - **Date**: 2026-07-19
 - **Issue**: #3220 (root cause surfaced by the #1591 / #3213 better-auth guard work; safe slice shipped in #3222)
 - **Relates to**: ADR-0049 (no unenforced security properties), ADR-0092 (identity
@@ -192,3 +193,60 @@ renders an unknown `engine-owned` object editable but the server still 405s the
 write (point 1). Removing the overloaded `system` entirely — moving the 8 writable
 objects to a dedicated writable-platform-data bucket (or `config`) and retiring
 `system` — is a genuinely breaking rename deferred to **v17**.
+
+---
+
+## Addendum (v17, #3355) — the deferred half: `system` → `system-data`
+
+The v16 sequencing note above deferred "removing the overloaded `system` entirely"
+to v17. This addendum records that close-out. It **completes** D5 rather than
+revising it; nothing decided above is reversed.
+
+**What the additive split left behind.** D5 moved the 20 engine-owned objects out
+to the explicit `engine-owned` and had the 8 writable ones *keep* `system`. That
+was correct for a release that could not break authors, but the value that
+remained named the half that had just moved out: "system" sitting on precisely the
+objects a user writes. The practical cost is not aesthetic — an author choosing
+between `system` and `engine-owned` had nothing in the vocabulary to choose *on*,
+so the bucket was re-overloadable by anyone reading the name in good faith, and a
+model author most of all ("system table" reads as engine-owned everywhere else).
+
+**Decision.** The residual bucket is renamed **`system-data`** and the bare
+`system` value is retired from the load path (the enum rejects it with a
+prescription; stored metadata is converted by the ADR-0087 D2 entry
+`object-managed-by-system-to-system-data`). The name states both boundaries the
+old one hid: the **schema** is the platform's — versus `platform`, which is
+tenant-modelled — and the **data** is the admin's or the user's, versus
+`engine-owned`, where the engine owns both.
+
+Rejected alternatives: reusing **`config`** (`sys_user_preference` is user-owned,
+not admin-authored, and `config` suppresses CSV import — a fresh overload on day
+one of the bucket that exists to end one), and **`platform-data`**, which sits one
+word from the semantically unrelated `platform` in the same closed enum and would
+reintroduce the confusion at the moment of choosing.
+
+**One deliberate consequence — the default flips.** `system` defaulted LOCKED with
+each object re-opening its writes via `userActions`; `system-data` defaults
+**WRITABLE** (full CRUD), because a bucket whose purpose is to say "the data is
+yours" should not make every member ask for it back. The 8 objects' re-open blocks
+are therefore deleted, and `userActions` on this bucket now only NARROWS. The
+affordance side-effect is that CSV `import` resolves `true` where it resolved
+`false` under the locked default — an affordance change only; every row a CSV
+import writes is still adjudicated by the `DelegatedAdminGate` / RLS / permission
+sets.
+
+**Enforcement is unchanged, as in D5.** `system-data` joins `platform` / `config`
+as a bucket neither `ENGINE_OWNED_BUCKETS` (guard) nor `GUARDED_WRITE_BUCKETS`
+(clamp) covers — a writable default has nothing to fail closed on. The 8 objects
+passed the guard before via `userActions` and pass now via the bucket default, for
+the same resolved-affordance reason; equivalence pins in `plugin-security`,
+`service-messaging`, `plugin-approvals`, `platform-objects` and
+`plugin-hono-server` assert this per object rather than leaving it to argument.
+
+**New in v17 — the mis-assignment refusal.** Because the default is now writable,
+mislabelling an engine-owned object into this bucket is no longer harmless: it
+advertises generic CRUD on a table that should take no user write, and no guard
+covers the bucket to catch it. `ObjectSchema.create()` therefore **refuses**
+`system-data` on an object whose resolved affordances grant no create, edit or
+delete — a contradiction with no honest reading, computable from the declaration
+alone. Partial narrowing stays legal; only the all-writes-false shape is refused.

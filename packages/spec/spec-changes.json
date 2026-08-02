@@ -241,6 +241,12 @@
         "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
         "conversionId": "flow-node-script-branch-keys-removed",
         "toMajor": 17
+      },
+      {
+        "surface": "object.managedBy",
+        "to": "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the name describing what the bucket actually holds: admin/user-writable platform data)",
+        "conversionId": "object-managed-by-system-to-system-data",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -766,6 +772,12 @@
           "surface": "flow.node.script.config.actionType / flow.node.script.config.template / flow.node.script.config.recipients / flow.node.script.config.variables / flow.node.script.config.script",
           "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
           "conversionId": "flow-node-script-branch-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "object.managedBy",
+          "to": "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the name describing what the bucket actually holds: admin/user-writable platform data)",
+          "conversionId": "object-managed-by-system-to-system-data",
           "toMajor": 17
         }
       ],

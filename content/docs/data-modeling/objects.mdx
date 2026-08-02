@@ -215,8 +215,8 @@ indexes: [
 | Property | Type | Description |
 | :--- | :--- | :--- |
 | `isSystem` | `boolean` | System object, protected from deletion (default: `false`) |
-| `managedBy` | `enum` | Lifecycle bucket that sets the default CRUD affordances and write policy — `'platform'` (default), `'config'`, `'system'`, `'engine-owned'`, `'append-only'`, `'better-auth'`. See [Lifecycle bucket](#lifecycle-bucket-managedby) below. |
-| `userActions` | `object` | Per-object override of the CRUD affordances the `managedBy` default implies — `{ create?, edit?, delete?, import?, exportCsv? }`. This is what makes a `system`/`append-only` object admin/user-writable. See [Lifecycle bucket](#lifecycle-bucket-managedby). |
+| `managedBy` | `enum` | Lifecycle bucket that sets the default CRUD affordances and write policy — `'platform'` (default), `'config'`, `'system-data'`, `'engine-owned'`, `'append-only'`, `'better-auth'`. See [Lifecycle bucket](#lifecycle-bucket-managedby) below. |
+| `userActions` | `object` | Per-object override of the CRUD affordances the `managedBy` default implies — `{ create?, edit?, delete?, import?, exportCsv? }`. This is what NARROWS a `system-data` object, or opens a verb on an `engine-owned`/`append-only` one. See [Lifecycle bucket](#lifecycle-bucket-managedby). |
 | `sharingModel` | `enum` | Org-Wide Default record visibility (ADR-0055/0056/0090). Canonical four only: `'private'`, `'public_read'`, `'public_read_write'`, `'controlled_by_parent'` (detail visibility derived from its master). The legacy aliases (`'read'`, `'read_write'`, `'full'`) were removed from the enum (ADR-0090 D4) — authoring rejects them. Unset on a custom object resolves to `'private'` (ADR-0090 D1) |
 | `ownership` | `enum` | Record-ownership model: `'user'` (default — injects the reassignable `owner_id` lookup, engaging owner-scoped RLS, "My" views and owner reports), `'org'`, or `'none'` (no per-record owner — Dataverse-style catalog / junction tables, skips `owner_id`). Distinct from the package `own`/`extend` contribution kind. |
 | `validations` | `ValidationRule[]` | Object-level validation rules (see [Validation](/docs/data-modeling/validation)) |
@@ -233,44 +233,58 @@ bare bucket string.
 | :--- | :--- |
 | `platform` | **Default.** User-owned business data — full New / Import / Edit / Delete. |
 | `config` | Admin-authored configuration — New / Edit / Delete, no CSV import. |
-| `system` | Platform-defined schema holding **admin/user-writable data** (RBAC link tables, preferences, messaging config). Locked by default; each object opens its writes via `userActions`. |
+| `system-data` | Platform-defined schema holding **admin/user-writable data** (RBAC link tables, preferences, messaging config). Full CRUD by default; narrow it with `userActions`. |
 | `engine-owned` | Runtime rows a platform service owns end to end — generic CRUD hidden, exposed `['get', 'list']` only, **no user writes ever**. |
 | `append-only` | Immutable audit trail — View + Export only. |
 | `better-auth` | Identity tables owned by the better-auth driver — generic user-context CRUD is suppressed; mutations flow through the auth API (sign-in, invite, reset). |
 
-**`engine-owned` vs. writable `system` objects (ADR-0103).** Two buckets share
-the same locked default matrix but say different things:
+**`engine-owned` vs. `system-data` (ADR-0103, #3355).** Both hold a
+platform-defined schema no tenant may model; they differ on who owns the *rows*:
 
 - **`engine-owned`** — jobs, notifications, approval runtime rows,
   `sys_record_share`, `sys_automation_run`, the metadata store, `sys_secret`,
   audit trails — written only by their owning service under a system context,
-  never through the generic `/data` API. A fail-closed guard
-  (`assertEngineOwnedWriteAllowed`) rejects user-context generic writes to them.
-- **`system`** — platform-defined schema holding admin/user-writable *data*: the
-  RBAC link tables, `sys_user_preference`, `sys_approval_delegation`, the
-  messaging config grids. These declare `userActions` to open the writes they
-  legitimately take:
+  never through the generic `/data` API. Locked by default, and a fail-closed
+  guard (`assertEngineOwnedWriteAllowed`) rejects user-context generic writes.
+- **`system-data`** — the schema is the platform's, the *data* is the admin's or
+  the user's: the RBAC link tables, `sys_user_preference`,
+  `sys_approval_delegation`, the messaging config grids. Full CRUD by default,
+  and no write guard covers the bucket — a writable default has nothing to fail
+  closed on:
 
 ```typescript
 export const SysUserPreference = ObjectSchema.create({
   name: 'sys_user_preference',
-  managedBy: 'system',
-  // Affordance only — RLS / delegated administration is the actual authz.
-  userActions: { create: true, edit: true, delete: true },
+  // Full CRUD by default — no `userActions` needed. RLS / delegated
+  // administration is the actual authz.
+  managedBy: 'system-data',
   // …
 });
 ```
 
-The same override works on `append-only`. `userActions` is an *affordance*
-declaration; the real authorization for these rows is still enforced by RLS,
-delegated administration, and permission sets.
+Pick between them on the *data*, not the table name: if no user ever writes a
+row through the generic API, it is `engine-owned`. Declaring `system-data` on an
+object whose resolved affordances grant no create, edit or delete is a
+contradiction, and `ObjectSchema.create()` refuses it.
+
+`userActions` NARROWS `system-data` (an editable-only grid: `{ create: false,
+delete: false }`) and OPENS a verb on `append-only`. Either way it is an
+*affordance* declaration; the real authorization for these rows is still
+enforced by RLS, delegated administration, and permission sets.
+
+<Callout type="info">
+**Upgrading from v16.** `managedBy: 'system'` was retired in protocol 17 —
+rename it to `'system-data'`, or run `os migrate meta --from 16`. Because the
+new bucket defaults to full CRUD, a `userActions` block that existed only to
+re-open create/edit/delete is now redundant and can be deleted.
+</Callout>
 
 <Callout type="warn">
 A managed object may not advertise `enable.apiMethods` verbs its resolved
 affordances forbid — the registry strips the contradiction at registration
-(`reconcileManagedApiMethods`, ADR-0049). To expose a generic write verb on a
-`system`/`append-only` object, declare the matching `userActions` rather than
-listing the verb in `apiMethods`.
+(`reconcileManagedApiMethods`, ADR-0049). To expose a generic write verb on an
+`engine-owned`/`append-only` object, declare the matching `userActions` rather
+than listing the verb in `apiMethods`.
 </Callout>
 
 ## Naming Conventions

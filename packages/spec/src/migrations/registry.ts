@@ -593,6 +593,31 @@ const step17: MigrationStep = {
     + 'source rewrite, and no tombstone: `DriverInterfaceSchema` describes a contract that '
     + 'code IMPLEMENTS and nothing ever `.parse()`d a driver, so tsc is the only channel that '
     + 'could carry the prescription, and it carries it where it matters — at a call site.\n\n'
+    + 'Separately, `object.managedBy: \'system\'` is retired in favour of `\'system-data\'` (#3355), '
+    + 'finishing the split ADR-0103 began in v16. That split was deliberately ADDITIVE: the 20 '
+    + 'engine-owned objects moved to the new explicit `engine-owned`, and the 8 admin/user-'
+    + 'writable ones — the RBAC link tables, `sys_user_preference`, the three messaging config '
+    + 'grids — stayed behind on `system`. What was left is a value whose name describes the half '
+    + 'that had already moved out: "system" sitting on precisely the objects a user writes. That '
+    + 'is not a cosmetic complaint. An author choosing between `system` and `engine-owned` had '
+    + 'nothing in the vocabulary to choose on, so the bucket was re-overloadable by anyone '
+    + 'reading the name in good faith — a model author most of all. `system-data` states both '
+    + 'boundaries: the SCHEMA is the platform\'s (versus `platform`, which is tenant-modelled), '
+    + 'the DATA is the admin\'s or the user\'s (versus `engine-owned`, where the engine owns both). '
+    + 'Reusing `config` was considered and rejected — `sys_user_preference` is user-owned rather '
+    + 'than admin-authored, and `config` suppresses CSV import — as was `platform-data`, which '
+    + 'sits one word away from the unrelated `platform` in the same closed enum and would '
+    + 'reintroduce the confusion at the point of choosing. Because v16 already drained the '
+    + 'engine side, the conversion is a ONE-TO-ONE mechanical value rename with no judgement '
+    + 'call. One deliberate consequence: `system` defaulted LOCKED and each object re-opened its '
+    + 'writes through `userActions`, while `system-data` defaults WRITABLE, so those blocks '
+    + 'become redundant and are deleted (keep `userActions` only to NARROW). No enforcement '
+    + 'moves — the engine write guard, the DelegatedAdminGate, RLS and permission sets all '
+    + 'adjudicate off resolved affordances and the principal, never off the bucket name; '
+    + '`system-data` simply joins `platform`/`config` as a bucket the guard does not cover, '
+    + 'because a writable default has nothing to fail closed on. Retired from the load path: '
+    + 'the enum rejection is what teaches the new spelling, and absorbing `\'system\'` silently at '
+    + 'load would leave every author writing the name this rename exists to retire.\n\n'
     + 'Finally, five keys retire because the advisory lint could never have warned about them '
     + '(#4509): mapping `extractQuery` / `errorPolicy` / `batchSize`, and app '
     + '`contextSelectors[].includeAll` / `.placement`. Four of the five carry schema DEFAULTS, '
@@ -643,6 +668,7 @@ const step17: MigrationStep = {
     'datasource-read-replicas-removed',
     'datasource-config-driver-key-aliases',
     'flow-node-script-branch-keys-removed',
+    'object-managed-by-system-to-system-data',
   ],
   semantic: [
     {

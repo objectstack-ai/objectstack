@@ -5420,6 +5420,8 @@
     "studio/ActionContribution:label",
     "studio/ActionContribution:location",
     "studio/ActionContribution:metadataTypes",
+    "studio/ActivationEvent:pattern",
+    "studio/ActivationEvent:type",
     "studio/CommandContribution:icon",
     "studio/CommandContribution:id",
     "studio/CommandContribution:label",

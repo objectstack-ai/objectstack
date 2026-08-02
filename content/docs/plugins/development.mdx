@@ -384,7 +384,7 @@ export const manifest = defineStudioPlugin({
   name: 'Flow Designer',
   version: '2.0.0',
   description: 'Visual flow builder for automation workflows',
-  activationEvents: ['onMetadataType:flow'],
+  activationEvents: [{ type: 'onMetadataType', pattern: 'flow' }],
 
   contributes: {
     metadataViewers: [{

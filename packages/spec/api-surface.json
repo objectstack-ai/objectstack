@@ -4051,6 +4051,7 @@
     "ActionContribution (type)",
     "ActionContributionSchema (const)",
     "ActionLocationSchema (const)",
+    "ActivationEvent (type)",
     "ActivationEventSchema (const)",
     "BUILT_IN_NODE_DESCRIPTORS (const)",
     "CommandContribution (type)",

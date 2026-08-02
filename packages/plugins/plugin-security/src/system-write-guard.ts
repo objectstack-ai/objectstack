@@ -1,11 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * ADR-0103 — engine-owned write guard for the `engine-owned` / `system` /
- * `append-only` buckets.
+ * ADR-0103 — engine-owned write guard for the `engine-owned` / `append-only`
+ * buckets.
  *
- * `managedBy: 'engine-owned'` (and the locked defaults of `system` /
- * `append-only`) mean *engine-owned*: rows a platform service owns end to end
+ * `managedBy: 'engine-owned'` (and the locked default of `append-only`) mean
+ * *engine-owned*: rows a platform service owns end to end
  * (the approval engine, the sharing engine, the job runner, the messaging
  * pipeline, …), written only via
  * `isSystem` / a service `SYSTEM_CTX` / a context-less engine call. Until this
@@ -14,14 +14,16 @@
  * generic data API (ADR-0049 violation), exactly the hole ADR-0092's identity
  * write guard closed for `better-auth`.
  *
- * This is the `system`/`append-only` counterpart, keyed off the SAME contract
- * the UI and the `apiMethods` reconciliation use — {@link resolveCrudAffordances}
- * — rather than the raw bucket string. An object is engine-owned precisely when
- * its resolved affordances grant no write; the admin/user-writable members of
- * these buckets (the RBAC link tables, `sys_user_preference`, the messaging
- * config grids, …) declare `userActions` opening the verbs they legitimately
- * take, so they pass this guard and their real authz — the `DelegatedAdminGate`,
- * RLS self-grants, permission sets — adjudicates the principal, unchanged.
+ * This is the `engine-owned`/`append-only` counterpart, keyed off the SAME
+ * contract the UI and the `apiMethods` reconciliation use —
+ * {@link resolveCrudAffordances} — rather than the raw bucket string. An object is
+ * engine-owned precisely when its resolved affordances grant no write; a member
+ * that opens a verb via `userActions` (e.g. an `append-only` table that permits
+ * an amendment) passes this guard and its real authz — the `DelegatedAdminGate`,
+ * RLS self-grants, permission sets — adjudicates the principal, unchanged. The
+ * admin/user-writable platform tables (the RBAC link tables,
+ * `sys_user_preference`, the messaging config grids) live in `system-data` since
+ * #3355, a writable-default bucket this guard does not cover at all.
  *
  * A write is USER-CONTEXT when its context carries a real `userId` and is not
  * `isSystem`. `isSystem` and context-less engine/service writes bypass by
@@ -40,12 +42,21 @@ import { resolveCrudAffordances } from '@objectstack/spec/data';
 import { PermissionDeniedError } from './errors.js';
 
 /**
- * Buckets whose DEFAULT affordance row is engine-owned (no user writes). The
- * explicit `engine-owned` bucket (ADR-0103) sits alongside `system` /
- * `append-only`, whose locked defaults are engine-owned too; all three are
- * guarded, and any member that opens a verb via `userActions` passes below.
+ * Buckets whose DEFAULT affordance row is engine-owned (no user writes): the
+ * explicit `engine-owned` bucket (ADR-0103) and `append-only`, whose locked
+ * audit-log default is engine-owned too. Both are guarded, and any member that
+ * opens a verb via `userActions` passes below.
+ *
+ * `system` used to sit here as well — its locked default made it engine-owned by
+ * accident of the v16 additive split, while the 8 objects actually in it all
+ * re-opened their writes via `userActions` and so passed this guard anyway. #3355
+ * renamed that residue to `system-data` with a WRITABLE default, which puts it
+ * with `platform` / `config`: buckets whose default grants the write have nothing
+ * for a fail-closed guard to close on, and their authz is adjudicated by the
+ * DelegatedAdminGate / RLS / permission sets. Net enforcement change: none — the
+ * 8 objects passed before and pass now, for the same resolved-affordance reason.
  */
-export const ENGINE_OWNED_BUCKETS: ReadonlySet<string> = new Set(['system', 'engine-owned', 'append-only']);
+export const ENGINE_OWNED_BUCKETS: ReadonlySet<string> = new Set(['engine-owned', 'append-only']);
 
 /**
  * Engine write operation → the {@link resolveCrudAffordances} flag it needs.
@@ -87,8 +98,9 @@ function isUserContextWrite(context: any): boolean {
 
 /**
  * Fail-closed on a user-context generic write to an engine-owned
- * `system`/`append-only` object. No-op for: reads, non-engine-owned buckets,
- * system/context-less writes, and objects whose `userActions` open the verb.
+ * `engine-owned`/`append-only` object. No-op for: reads, non-engine-owned
+ * buckets, system/context-less writes, and objects whose `userActions` open the
+ * verb.
  *
  * @param schema     the registered schema (or undefined — unknown objects pass)
  * @param operation  the engine operation (`insert`/`update`/`delete`/…)
