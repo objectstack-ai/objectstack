@@ -2120,9 +2120,11 @@ covers are folded into the list below rather than left to the changelog.)
   from `@objectstack/spec/kernel`, change the path to `@objectstack/spec/system`
   — same names, and that copy is the one the runtime has always emitted. It is
   the *looser* of the two, so a reader may need new narrowing: notably
-  `MetadataWatchEvent.type` also carries the raw watcher values
-  `add`/`change`/`unlink`, and `metadataType`/`name`/`timestamp` are optional
-  there. Nothing to migrate at runtime — the values were always these.
+  `metadataType`/`name`/`timestamp` are optional there. (`MetadataWatchEvent.type`
+  briefly also declared the raw watcher values `add`/`change`/`unlink`; they had
+  zero producers — both emit sites normalize — and were removed in #4536, so the
+  enum now carries exactly `added`/`changed`/`deleted`.) Nothing to migrate at
+  runtime — the values the runtime emits were always these.
 - **Multi-org:** the `group` posture requires the enterprise runtime — deployments
   relying on it self-activating must install `@objectstack/organizations` or move
   to `isolated`.
