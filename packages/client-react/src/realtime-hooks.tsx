@@ -7,9 +7,10 @@
  * Events are automatically cleaned up when components unmount.
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import type { MetadataEvent, DataEvent, BulkDataEvent } from '@objectstack/spec/api';
 import { useClient } from './context';
+import { useEventCallback } from './internal-deps';
 
 /**
  * Hook to subscribe to metadata events
@@ -134,20 +135,25 @@ export function useMetadataSubscriptionCallback(
   options?: { packageId?: string }
 ): void {
   const client = useClient();
+  // The callback is what RUNS on an event, not part of what is subscribed to
+  // (#4694). Depending on its identity tore down and reopened the subscription
+  // on every render whenever the caller passed an inline function — which the
+  // examples above do — losing any event that arrived in the gap.
+  const handleEvent = useEventCallback(callback);
 
   useEffect(() => {
     if (!client) return;
 
     const unsubscribe = client.events.subscribeMetadata(
       type,
-      callback,
+      handleEvent,
       options
     );
 
     return () => {
       unsubscribe();
     };
-  }, [client, type, callback, options?.packageId]);
+  }, [client, type, handleEvent, options?.packageId]);
 }
 
 /**
@@ -176,20 +182,23 @@ export function useDataSubscriptionCallback(
   options?: { recordId?: string }
 ): void {
   const client = useClient();
+  // Stable identity so an inline callback does not churn the subscription on
+  // every render (#4694) — see useMetadataSubscriptionCallback.
+  const handleEvent = useEventCallback(callback);
 
   useEffect(() => {
     if (!client) return;
 
     const unsubscribe = client.events.subscribeData(
       object,
-      callback,
+      handleEvent,
       options
     );
 
     return () => {
       unsubscribe();
     };
-  }, [client, object, callback, options?.recordId]);
+  }, [client, object, handleEvent, options?.recordId]);
 }
 
 /**
@@ -270,16 +279,19 @@ export function useBulkDataSubscriptionCallback(
   callback: (event: BulkDataEvent) => void
 ): void {
   const client = useClient();
+  // Stable identity so an inline callback does not churn the subscription on
+  // every render (#4694) — see useMetadataSubscriptionCallback.
+  const handleEvent = useEventCallback(callback);
 
   useEffect(() => {
     if (!client) return;
 
-    const unsubscribe = client.events.subscribeBulkData(object, callback);
+    const unsubscribe = client.events.subscribeBulkData(object, handleEvent);
 
     return () => {
       unsubscribe();
     };
-  }, [client, object, callback]);
+  }, [client, object, handleEvent]);
 }
 
 /**
@@ -355,19 +367,14 @@ export function useAutoRefresh(
   refetch: () => void,
   options?: { recordId?: string }
 ): void {
-  const handleEvent = useCallback((_event: DataEvent) => {
-    // Refetch on any data change
-    refetch();
-  }, [refetch]);
+  // No `useCallback` needed: both subscription hooks stabilize the handler
+  // themselves (#4694), so a caller passing an unmemoized `refetch` — which
+  // `useQuery` returned on every render before #4693 — no longer resubscribes.
+  useDataSubscriptionCallback(object, (_event: DataEvent) => refetch(), options);
 
   // A bulk event carries only a count, so when `options.recordId` narrows this
   // hook to one record there is no way to tell whether that record was in the
   // match set. Refetch anyway: a redundant query is cheap, and the alternative
   // is showing a record that a predicate write already changed.
-  const handleBulkEvent = useCallback((_event: BulkDataEvent) => {
-    refetch();
-  }, [refetch]);
-
-  useDataSubscriptionCallback(object, handleEvent, options);
-  useBulkDataSubscriptionCallback(object, handleBulkEvent);
+  useBulkDataSubscriptionCallback(object, (_event: BulkDataEvent) => refetch());
 }

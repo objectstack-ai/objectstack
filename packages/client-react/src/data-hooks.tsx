@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { QueryAST, FilterCondition } from '@objectstack/spec/data';
 import { PaginatedResult } from '@objectstack/client';
 import { useClient } from './context';
+import { stableKey, useEventCallback } from './internal-deps';
 
 /**
  * Query options for useQuery hook.
@@ -113,6 +114,26 @@ export function useQuery<T = any>(
   const resolvedLimit = limit;
   const resolvedOffset = offset;
 
+  // The query shape as a VALUE (#4693). `where` / `fields` / `orderBy` are
+  // objects and arrays, and the documented usage builds them inline, so keying
+  // the fetch on their identities re-ran it every render — and since it calls
+  // `setData`, every render caused another render. Measured before this fix:
+  // `useQuery('todo_task', { where: { status: 'open' } })` issued 4691 `find`
+  // calls in 250ms; the same call with a hoisted options object issued 1.
+  const queryKey = stableKey({
+    query,
+    where: resolvedWhere,
+    fields: resolvedFields,
+    orderBy: resolvedSort,
+    limit: resolvedLimit,
+    offset: resolvedOffset,
+  });
+
+  // Handlers say what to do with a result; they are not part of what is being
+  // fetched, so they must not drive refetching.
+  const handleSuccess = useEventCallback(onSuccess);
+  const handleError = useEventCallback(onError);
+
   const fetchData = useCallback(async (isRefetch = false) => {
     if (!enabled) return;
     
@@ -141,16 +162,16 @@ export function useQuery<T = any>(
       }
 
       setData(result);
-      onSuccess?.(result);
+      handleSuccess(result);
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Query failed');
       setError(error);
-      onError?.(error);
+      handleError(error);
     } finally {
       setIsLoading(false);
       setIsRefetching(false);
     }
-  }, [client, object, query, resolvedFields, resolvedWhere, resolvedSort, resolvedLimit, resolvedOffset, enabled, onSuccess, onError]);
+  }, [client, object, queryKey, enabled, handleSuccess, handleError]);
 
   // Initial fetch and dependency-based refetch
   useEffect(() => {
@@ -520,6 +541,18 @@ export function useInfiniteQuery<T = any>(
   const resolvedWhere = where;
   const resolvedSort = orderBy;
 
+  // Same value-keyed dependency as useQuery (#4693) — measured at 6611 `find`
+  // calls in 250ms before this fix, with inline options.
+  const queryKey = stableKey({
+    query,
+    where: resolvedWhere,
+    fields: resolvedFields,
+    orderBy: resolvedSort,
+    pageSize,
+  });
+  const handleSuccess = useEventCallback(onSuccess);
+  const handleError = useEventCallback(onError);
+
   const [pages, setPages] = useState<PaginatedResult<T>[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetchingNextPage, setIsFetchingNextPage] = useState(false);
@@ -564,16 +597,16 @@ export function useInfiniteQuery<T = any>(
       const hasMore = fetchedCount === pageSize;
       setHasNextPage(hasMore);
 
-      onSuccess?.(result);
+      handleSuccess(result);
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Query failed');
       setError(error);
-      onError?.(error);
+      handleError(error);
     } finally {
       setIsLoading(false);
       setIsFetchingNextPage(false);
     }
-  }, [client, object, query, resolvedFields, resolvedWhere, resolvedSort, pageSize, onSuccess, onError]);
+  }, [client, object, queryKey, handleSuccess, handleError]);
 
   // Initial fetch
   useEffect(() => {

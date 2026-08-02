@@ -6,8 +6,9 @@
  * React hooks for accessing ObjectStack metadata (schemas, views, fields)
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useClient, useObjectStackLocale } from './context';
+import { useEventCallback } from './internal-deps';
 
 /**
  * Metadata query options
@@ -89,6 +90,22 @@ export function useObject(
     onError
   } = options;
 
+  // `data` and `etag` are this hook's OWN state, and the fetch writes both.
+  // Depending on them made the fetch its own trigger: `setData` → new `data`
+  // identity → new `fetchMetadata` → the effect below re-ran → fetch again.
+  // Unlike the data hooks this needed no particular usage to fire — measured at
+  // 4306 metadata requests in 250ms for a bare `useObject('todo_task')`
+  // (#4693). They are read, never depended on, so they belong in refs.
+  const dataRef = useRef(data);
+  const etagRef = useRef(etag);
+  useEffect(() => {
+    dataRef.current = data;
+    etagRef.current = etag;
+  }, [data, etag]);
+
+  const handleSuccess = useEventCallback(onSuccess);
+  const handleError = useEventCallback(onError);
+
   const fetchMetadata = useCallback(async () => {
     if (!enabled) return;
 
@@ -100,7 +117,7 @@ export function useObject(
       if (useCache) {
         // Use cached metadata endpoint
         const result = await client.meta.getCached(objectName, {
-          ifNoneMatch: ifNoneMatch || etag,
+          ifNoneMatch: ifNoneMatch || etagRef.current,
           ifModifiedSince
         });
 
@@ -113,21 +130,21 @@ export function useObject(
           }
         }
 
-        onSuccess?.(result.data || data);
+        handleSuccess(result.data || dataRef.current);
       } else {
         // Direct fetch without cache
         const result = await client.meta.getItem('object', objectName);
         setData(result);
-        onSuccess?.(result);
+        handleSuccess(result);
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Failed to fetch object metadata');
       setError(error);
-      onError?.(error);
+      handleError(error);
     } finally {
       setIsLoading(false);
     }
-  }, [client, objectName, locale, enabled, useCache, ifNoneMatch, ifModifiedSince, etag, data, onSuccess, onError]);
+  }, [client, objectName, locale, enabled, useCache, ifNoneMatch, ifModifiedSince, handleSuccess, handleError]);
 
   useEffect(() => {
     fetchMetadata();
@@ -180,6 +197,9 @@ export function useView(
 
   const { enabled = true, onSuccess, onError } = options;
 
+  const handleSuccess = useEventCallback(onSuccess);
+  const handleError = useEventCallback(onError);
+
   const fetchView = useCallback(async () => {
     if (!enabled) return;
 
@@ -189,15 +209,15 @@ export function useView(
 
       const result = await client.meta.getView(objectName, viewType);
       setData(result);
-      onSuccess?.(result);
+      handleSuccess(result);
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Failed to fetch view configuration');
       setError(error);
-      onError?.(error);
+      handleError(error);
     } finally {
       setIsLoading(false);
     }
-  }, [client, objectName, viewType, locale, enabled, onSuccess, onError]);
+  }, [client, objectName, viewType, locale, enabled, handleSuccess, handleError]);
 
   useEffect(() => {
     fetchView();
@@ -286,6 +306,15 @@ export function useMetadata<T = any>(
 
   const { enabled = true, onSuccess, onError } = options;
 
+  // `fetcher` is a REQUIRED positional argument, so an inline arrow is the only
+  // natural way to call this hook — which made the loop unconditional in
+  // practice (7654 fetcher invocations in 250ms before this fix, #4693).
+  // Stabilizing it here means the fetch re-runs on `client` / `locale` /
+  // `enabled` changes, as intended, and not on the caller's render cadence.
+  const runFetcher = useEventCallback(fetcher);
+  const handleSuccess = useEventCallback(onSuccess);
+  const handleError = useEventCallback(onError);
+
   const fetchMetadata = useCallback(async () => {
     if (!enabled) return;
 
@@ -293,17 +322,17 @@ export function useMetadata<T = any>(
       setIsLoading(true);
       setError(null);
 
-      const result = await fetcher(client);
-      setData(result);
-      onSuccess?.(result);
+      const result = await runFetcher(client);
+      setData(result as T);
+      handleSuccess(result as T);
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Failed to fetch metadata');
       setError(error);
-      onError?.(error);
+      handleError(error);
     } finally {
       setIsLoading(false);
     }
-  }, [client, fetcher, locale, enabled, onSuccess, onError]);
+  }, [client, runFetcher, locale, enabled, handleSuccess, handleError]);
 
   useEffect(() => {
     fetchMetadata();
