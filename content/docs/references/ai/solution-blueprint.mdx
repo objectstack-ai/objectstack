@@ -96,6 +96,7 @@ const result = BlueprintApp.parse(data);
 | **reference** | `string` | optional | Target object name for lookup / master_detail relationship fields |
 | **options** | `{ label: string; value: string }[]` | optional | Choices for select / multiselect / radio fields |
 | **summaryOperations** | `{ object: string; function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>; field?: string; relationshipField?: string; … }` | optional | REQUIRED when `type` is "summary" (a roll-up of child records: 任务总数 / 报名人数 / 合计金额 / 已完成任务数). Names the child object, the aggregation, and — for a qualified count/sum — the condition. A "summary" field without it materializes runtime-dead. |
+| **expression** | `string` | optional | REQUIRED when `type` is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + ' · ' + record.customer" for a composed title. A "formula" field without it materializes runtime-dead: the engine builds its formula plan only from fields that HAVE an expression, so the field reads null everywhere, forever. Same failure shape as a "summary" with no `summaryOperations`. Note `nameField` on the object recommends a formula for numbered entities (invoice/ticket) — that formula needs THIS key, or the record title is blank on every card, lookup chip and breadcrumb. |
 
 
 ---
