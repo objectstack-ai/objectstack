@@ -297,29 +297,6 @@ describe.skipIf(!sharedMongod)('MongoDBDriver', () => {
   });
 
   // ===========================================================================
-  // Streaming
-  // ===========================================================================
-
-  describe('findStream', () => {
-    it('should stream records', async () => {
-      await driver.bulkCreate('task', [
-        { id: 's-1', title: 'One' },
-        { id: 's-2', title: 'Two' },
-        { id: 's-3', title: 'Three' },
-      ]);
-
-      const records: any[] = [];
-      for await (const record of driver.findStream('task', {})) {
-        records.push(record);
-      }
-      expect(records.length).toBe(3);
-      for (const r of records) {
-        expect(r).not.toHaveProperty('_id');
-      }
-    });
-  });
-
-  // ===========================================================================
   // Aggregation
   // ===========================================================================
 

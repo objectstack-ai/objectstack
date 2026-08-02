@@ -88,7 +88,6 @@ function makeMemoryDriver() {
       // audit's bounded-scan reporting untestable AND looser than production.
       return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
-    findStream() { throw new Error('not implemented'); },
     async findOne(object: string, ast: any) {
       for (const r of peek(object).values()) if (matches(r, ast?.where)) return r;
       return null;

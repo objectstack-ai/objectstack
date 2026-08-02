@@ -51,7 +51,6 @@ function makeDriver() {
     async find(object: string, ast: any) {
       return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
     },
-    findStream() { throw new Error('ni'); },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;
       return null;

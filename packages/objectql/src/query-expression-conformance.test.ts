@@ -164,7 +164,6 @@ function makeMemoryDriver() {
             const page = typeof ast?.limit === 'number' ? sorted.slice(from, from + ast.limit) : sorted.slice(from);
             return project(page, ast?.fields);
         },
-        findStream() { throw new Error('not implemented'); },
         async findOne(object: string, ast: any) {
             const rows = await this.find(object, ast);
             return rows[0] ?? null;

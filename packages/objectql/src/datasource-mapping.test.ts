@@ -21,7 +21,6 @@ const createMockDriver = (name: string) => ({
   bulkUpdate: async () => [],
   bulkDelete: async () => {},
   execute: async () => ({}),
-  findStream: async function* () {},
   upsert: async (obj: string, data: any) => ({ id: '1', ...data }),
   beginTransaction: async () => ({}),
   commit: async () => {},

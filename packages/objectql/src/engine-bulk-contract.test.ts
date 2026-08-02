@@ -20,7 +20,6 @@ function makeDriver(opts: { bulkCreate?: (object: string, rows: any[]) => Promis
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(object: string) { return Array.from(storeFor(object).values()); },
-    findStream() { throw new Error('ni'); },
     async findOne() { return null; },
     async create(object: string, data: Record<string, unknown>) {
       n += 1;

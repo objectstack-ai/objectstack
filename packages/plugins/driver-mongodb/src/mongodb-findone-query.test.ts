@@ -6,8 +6,8 @@
  *
  * It used to issue `collection.findOne(translateFilter(query.where), {
  * projection: { _id: 0 } })` and nothing else: `orderBy`, `fields` and `offset`
- * were accepted by the contract and dropped on the floor. `find` and
- * `_findStream` in the same file had always handled all three, so this was a
+ * were accepted by the contract and dropped on the floor. `find` in the same
+ * file had always handled all three, so this was a
  * per-method divergence exactly like the engine-level one #4419 is about —
  * `findOne({ orderBy: [{ field: 'created_at', order: 'desc' }] })` did not
  * return the newest record, it returned whichever document the scan reached

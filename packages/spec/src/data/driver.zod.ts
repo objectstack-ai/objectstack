@@ -475,19 +475,11 @@ export const DriverInterfaceSchema = lazySchema(() => z.object({
     .output(z.promise(z.array(z.record(z.string(), z.unknown()))))
     .describe('Find records'),
 
-  /**
-   * Stream records matching the structured query.
-   * Optimized for large datasets to avoid memory overflow.
-   * 
-   * @param object - The name of the object.
-   * @param query - The structured QueryAST.
-   * @param options - Driver options.
-   * @returns AsyncIterable/ReadableStream of records.
-   */
-  findStream: z.function()
-    .input(z.tuple([z.string(), QuerySchema, DriverOptionsSchema.optional()]))
-    .output(z.unknown())
-    .describe('Stream records (AsyncIterable)'),
+  // `findStream` was removed in 17.0.0 (#4484, ADR-0049 enforce-or-remove) — see the
+  // matching note on `IDataDriver` in `contracts/data-driver.ts`. Nothing ever called
+  // it, and two of the three drivers implementing it materialised the whole result set
+  // before yielding, inverting the memory guarantee it was declared for. Page through
+  // `find()` with `limit`/`offset` instead.
 
   /**
    * Find a single record by query.

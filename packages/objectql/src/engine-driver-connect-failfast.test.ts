@@ -25,7 +25,6 @@ function makeDriver(name: string, connect: () => Promise<void>) {
     async checkHealth() { return connected; },
     async execute() { return null; },
     async find() { return []; },
-    findStream() { throw new Error('ni'); },
     async findOne() { return null; },
     async create(_o: string, data: Record<string, unknown>) { return { id: 'r_1', ...data }; },
     async update(_o: string, id: string, data: Record<string, unknown>) { return { ...data, id }; },

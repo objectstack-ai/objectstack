@@ -104,12 +104,14 @@ export interface IDataDriver {
    */
   find(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown>[]>;
 
-  /**
-   * Stream records matching the structured query.
-   * Optimized for large datasets to avoid memory overflow.
-   * Returns an AsyncIterable or ReadableStream.
-   */
-  findStream(object: string, query: QueryAST, options?: DriverOptions): unknown;
+  // `findStream` was removed in 17.0.0 (#4484, ADR-0049 enforce-or-remove). It was a
+  // REQUIRED method promising reads "optimized for large datasets to avoid memory
+  // overflow" that nothing in either repository ever called — and two of its three
+  // implementations awaited `find()` in full before yielding, so the one guarantee it
+  // existed to make was the one it inverted. Large reads go through `find()` with
+  // `limit`/`offset`, whose paged-read determinism IS enforced (see above and
+  // `data/pagination-conformance.ts`). A real cursor-based read should be
+  // reintroduced with the caller that needs it, not ahead of one.
 
   /**
    * Find a single record by query.

@@ -74,7 +74,6 @@ function makeMemoryDriver() {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(o: string, ast: any) { return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)); },
-    findStream() { throw new Error('ns'); },
     async findOne(o: string, ast: any) { for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r; return null; },
     async create(o: string, data: Record<string, unknown>) {
       nextId += 1;

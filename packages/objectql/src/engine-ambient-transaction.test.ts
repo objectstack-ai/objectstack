@@ -40,7 +40,6 @@ function makeRecordingDriver() {
       seen.find.push({ object, transaction: options?.transaction });
       return Array.from(storeFor(object).values());
     },
-    findStream() { throw new Error('not implemented'); },
     async findOne(object: string) {
       for (const r of storeFor(object).values()) return r;
       return null;

@@ -97,7 +97,6 @@ function createMockDriver(): IDataDriver {
       return Promise.resolve(null);
     }),
 
-    findStream: vi.fn(),
 
     create: vi.fn().mockImplementation((tableName: string, data: Record<string, unknown>) => {
       const table = getTable(tableName);

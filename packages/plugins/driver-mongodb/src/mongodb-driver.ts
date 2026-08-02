@@ -226,9 +226,10 @@ export class MongoDBDriver implements IDataDriver {
    *
    * `singleRowLookup` marks the caller as `findOne`; see {@link buildSortSpec}.
    *
-   * Not used by `_findStream`, which deliberately projects the whole document
-   * regardless of `query.fields` — a separate divergence, and one that returns
-   * more data rather than the wrong data, so it is left as-is here.
+   * Every read path in this driver now goes through it. The one that did not —
+   * `_findStream`, which hardcoded `projection: { _id: 0 }` and so dropped
+   * `query.fields` on the floor — was retired with the contract method it served
+   * (#4484), which subsumes that divergence rather than fixing it.
    */
   private buildFindOptions(
     query: QueryAST,
@@ -295,32 +296,12 @@ export class MongoDBDriver implements IDataDriver {
     return result as Record<string, unknown> | null;
   }
 
-  findStream(object: string, query: QueryAST, options?: DriverOptions): AsyncGenerator<Record<string, unknown>> {
-    return this._findStream(object, query, options);
-  }
-
-  private async *_findStream(object: string, query: QueryAST, options?: DriverOptions): AsyncGenerator<Record<string, unknown>> {
-    const collection = this.getCollection(object);
-    const session = this.getSession(options);
-
-    const filter = translateFilter(query.where, this.temporalKindFor(object));
-    const findOptions: FindOptions = {
-      session,
-      projection: { _id: 0 },
-    };
-
-    const sort = this.buildSortSpec(query);
-    if (sort) findOptions.sort = sort;
-
-    if (query.offset !== undefined) findOptions.skip = query.offset;
-    if (query.limit !== undefined) findOptions.limit = query.limit;
-
-    const cursor = collection.find(filter, findOptions);
-
-    for await (const doc of cursor) {
-      yield doc as Record<string, unknown>;
-    }
-  }
+  // `findStream` / `_findStream` were removed with the contract method in 17.0.0
+  // (#4484). This was the only one of the three drivers that genuinely streamed —
+  // it walked the cursor — but it was also the only read here that never reached
+  // `buildFindOptions`, so `query.fields` was silently discarded on that path. With
+  // no caller anywhere in either repository there was nothing to fix it for. Page
+  // through `find()` with `limit`/`offset`.
 
   async create(object: string, data: Record<string, unknown>, options?: DriverOptions): Promise<Record<string, unknown>> {
     const collection = this.getCollection(object);
