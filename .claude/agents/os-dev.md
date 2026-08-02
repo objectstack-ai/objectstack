@@ -33,6 +33,23 @@ rules that most often get missed:
    consumer (`??` alias, tolerant parse), the bug is at the producer or in the
    spec — fix it there, or return `needs_decision`.
 
+**Resource discipline — parallel agents share ONE container; unbounded
+build/test runs OOM it.** Binding rules:
+
+1. **Serialize the heavy phase.** Wrap every build and test run in the shared
+   verification lock, so editing parallelizes but memory peaks never stack:
+   `flock -w 7200 /tmp/os-heavy-verify.lock -c '<build/test command>'`
+   (one lock file per container; waiting on it is normal, not a hang).
+2. **Cap the heap.** Prefix heavy commands with
+   `NODE_OPTIONS=--max-old-space-size=4096` (raise only with a reason).
+3. **Scope, don't sweep.** Build and test the affected packages
+   (`pnpm --filter <pkg> build/test`), not the whole repo, unless the task
+   explicitly requires a full pass. Cap test parallelism:
+   vitest `--maxWorkers=2`, turbo `--concurrency=2`.
+4. **Clean up when done**: after the PR is up, remove your worktree
+   (`git worktree remove <path> --force`) — leftover `node_modules` trees
+   exhaust the container's disk, which fails as confusingly as OOM.
+
 Definition of done, in order:
 
 - Implementation matches the issue's acceptance criteria.
@@ -89,3 +106,10 @@ Final message — exactly this JSON, no prose around it:
 
 Use `status: "rework"` for a partial result you know is incomplete (say why in
 `summary`); the PM will review and re-dispatch with feedback.
+
+Practical trap when filing issues/PRs through the GitHub API: the body
+sanitizer strips `<` followed by a letter as an HTML tag **at rest**, which
+destroys TypeScript generics (`Assert<Equal<1, 2>>` is stored as `Assert>`).
+Write generics with a space after each `<` — `Assert< Equal< 1, 2 > >` is
+still valid TypeScript — and read the stored body back to verify when a
+snippet is load-bearing.

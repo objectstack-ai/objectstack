@@ -32,6 +32,10 @@ export default defineConfig({
       '@objectstack/spec/security': path.resolve(__dirname, '../spec/src/security/index.ts'),
       '@objectstack/spec': path.resolve(__dirname, '../spec/src/index.ts'),
       '@objectstack/types': path.resolve(__dirname, '../types/src/index.ts'),
+      // Dev-only: app-plugin.jobs.test.ts drives the REAL CronJobAdapter, so
+      // the #4567 regression (croner rejecting the expression envelope) is
+      // reproduced by the actual scheduler rather than by a double.
+      '@objectstack/service-job': path.resolve(__dirname, '../services/service-job/src/index.ts'),
     },
   },
   test: {
