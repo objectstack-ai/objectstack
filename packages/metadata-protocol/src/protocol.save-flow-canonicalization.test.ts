@@ -16,7 +16,7 @@
  * — the existing flow-canonicalizer harness mocks `saveMetaItem` itself, which
  * a fix INSIDE `saveMetaItem` cannot use.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashSpec } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -142,6 +142,20 @@ const save = (protocol: any, item: unknown, extra: Record<string, unknown> = {})
 
 describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
     const legacyBody = () => flowBody({ objectName: 'lead', filters: { status: 'stale' } });
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => { warn.mockRestore(); });
+
+    /**
+     * Only the throw-fallback's own warnings. The protocol emits unrelated
+     * one-shot warnings (e.g. #3770's "engine has no schema registry"), and
+     * whether one has already fired depends on test order — matching on the
+     * message keeps these assertions immune to that.
+     */
+    const fallbackWarnings = (): string[] => (warn.mock.calls as unknown[][])
+        .map((c: unknown[]) => String(c[0]))
+        .filter((m: string) => m.includes('WITHOUT canonicalization'));
 
     it('a legacy dialect is healed by the save — the promise every other type already keeps', async () => {
         const { protocol, rows } = makeProtocol(
@@ -276,6 +290,81 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
         );
         await save(protocol, legacyBody());
         expect(spy.mock.calls[0][0]).toBe('purge_flow');
+    });
+
+    // ── #4580: the throw-fallback is correct, but it must not be silent ──
+
+    it('a throw-fallback SAYS SO — naming the flow and the canonicalizer\'s own reason', async () => {
+        // Before #4580 this posture was the only one with no signal at all: a
+        // save that skipped canonicalization looked exactly like one that
+        // healed the row, and a body that is BOTH legacy and unparseable
+        // re-persisted verbatim while the boot warning told the author that
+        // re-saving would fix it.
+        const throwing = () => { throw new Error('cycle detected: n1 → n1'); };
+        const { protocol } = makeProtocol(
+            new Map([['automation', { canonicalizeStoredFlow: throwing }]]),
+        );
+
+        await save(protocol, legacyBody());
+
+        expect(fallbackWarnings()).toHaveLength(1);
+        const msg = fallbackWarnings()[0];
+        expect(msg).toContain('flow/purge_flow');
+        expect(msg).toContain('cycle detected: n1 → n1');
+        expect(msg).toContain('os migrate meta --stored');
+    });
+
+    it('the fallback warning is deduped per flow — Studio autosave must not spam', async () => {
+        const throwing = () => { throw new Error('cycle detected: n1 → n1'); };
+        const { protocol } = makeProtocol(
+            new Map([['automation', { canonicalizeStoredFlow: throwing }]]),
+        );
+
+        await save(protocol, legacyBody());
+        await save(protocol, legacyBody());
+        await save(protocol, legacyBody());
+
+        expect(fallbackWarnings()).toHaveLength(1);
+    });
+
+    it('the clean path stays silent — a healed row needs no warning', async () => {
+        const { protocol } = makeProtocol(
+            new Map([['automation', { canonicalizeStoredFlow }]]),
+        );
+
+        await save(protocol, legacyBody());
+
+        expect(fallbackWarnings()).toHaveLength(0);
+    });
+
+    it('the conflict path stays silent — the 409 IS the signal', async () => {
+        const conflicting = () => ({
+            storable: {},
+            notices: [],
+            conflicts: [{
+                conversionId: 'flow-node-type-open-namespace',
+                token: 'http_request',
+                path: 'flows[0].nodes[0].type',
+                message: 'a custom executor owns this name here.',
+            }],
+        });
+        const { protocol } = makeProtocol(
+            new Map([['automation', { canonicalizeStoredFlow: conflicting }]]),
+        );
+
+        await expect(save(protocol, legacyBody())).rejects.toMatchObject({ status: 409 });
+
+        expect(fallbackWarnings()).toHaveLength(0);
+    });
+
+    it('a host with no automation service stays silent — nothing was skipped', async () => {
+        // There is no canonicalizer to fall back FROM; `os migrate meta
+        // --stored` is what reports these rows.
+        const { protocol } = makeProtocol(new Map());
+
+        await save(protocol, legacyBody());
+
+        expect(fallbackWarnings()).toHaveLength(0);
     });
 
     it('non-flow saves never consult the canonicalizer', async () => {
