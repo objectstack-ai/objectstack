@@ -113,8 +113,10 @@ the loop resumable and the board honest.
 ### 1. Fetch candidates
 
 List open issues matching the filter, excluding anything assigned or labeled
-`needs-user-decision`. Read each candidate's full body — triage, batch
-selection (steps 2–3) and the dispatch prompt all need it.
+`needs-user-decision`. **Open sub-issues of a matching parent are candidates
+too** — they inherit the parent's queue membership and need no label of their
+own. Read each candidate's full body — triage, batch selection (steps 2–3)
+and the dispatch prompt all need it.
 
 ### 2. Triage — routing is the PM's job, never the maintainer's
 
@@ -130,6 +132,17 @@ routing isn't already decided:
 - **Cross-repo?** Do the split yourself per "Multi-repo coordination" rule
   2: file the parent + per-repo sub-issues, contract-first order,
   `Blocked-by:` lines, routing labels on each sub-issue.
+- **Parent issue that already has sub-issues** (the maintainer built the
+  structure themself): the queue label on the **parent alone** is enough —
+  sub-issues of a queued parent are candidates automatically, with no label
+  of their own. The PM expands the parent at triage: triage/route each
+  sub-issue individually, keep any dependency ordering the maintainer
+  expressed (`Blocked-by:` lines or native blocked-by relations), and where
+  none is expressed **infer the contract-first order and write the
+  `Blocked-by:` lines yourself** (audit-trail comment as usual). The parent
+  itself is a coordination node — **never dispatched to a dev**; it stays
+  open as the progress view and the PM closes it with a summary comment when
+  the last sub-issue closes.
 - **Leave a one-comment audit trail** on the issue (Chinese), so the
   maintainer can veto cheaply: 「分诊:落地 objectui;理由:…」.
 - Routing is a **technical judgment — never escalate "which repo?" to the
