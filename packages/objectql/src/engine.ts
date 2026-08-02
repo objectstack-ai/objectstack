@@ -2272,7 +2272,7 @@ export class ObjectQL implements IObjectQLEngine {
       (a, b) => priorityRankOf(b?.name) - priorityRankOf(a?.name),
     );
 
-    // `${target} ${id}` → probe result, so N holders of one missing id
+    // `${target}\u0000${id}` → probe result, so N holders of one missing id
     // cost one probe. Scoped to this scan: a later sweep must re-ask.
     const probed = new Map<string, boolean | null>();
 
@@ -2327,7 +2327,7 @@ export class ObjectQL implements IObjectQLEngine {
             if (v === null || v === undefined || v === '') continue;
             if (typeof v === 'object') continue;   // already expanded — not an id write
             report.scannedReferences += 1;
-            const key = `${target} ${String(v)}`;
+            const key = `${target}\u0000${String(v)}`;
             let resolved = probed.get(key);
             if (resolved === undefined) {
               resolved = await this.referenceExists(target, v);
