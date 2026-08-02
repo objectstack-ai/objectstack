@@ -127,16 +127,10 @@
       "reason": "API response envelope, not authored metadata."
     },
     {
-      "key": "method:aggregate|batch|count|delete|execute|find|findOne|insert|update|vectorFind",
+      "key": "method:aggregate|count|delete|execute|find|findOne|insert|update|vectorFind",
       "label": "data-engine request",
       "exempt": "not-authorable",
-      "reason": "Engine RPC contract."
-    },
-    {
-      "key": "method:aggregate|count|delete|execute|find|findOne|insert|update|vectorFind",
-      "label": "data-engine batch request item",
-      "exempt": "not-authorable",
-      "reason": "Engine RPC contract; the batch member set excludes `batch` itself."
+      "reason": "Engine RPC contract. Two entries collapsed into this one when #4618 retired `IDataEngine.batch?`: the outer union carried a `batch` variant, and a second entry described the inner union inside `DataEngineBatchRequestSchema.requests` — this same member set minus `batch`. That inner union is gone with the schema, and the outer one narrowed to exactly this set."
     },
     {
       "key": "type:delete|insert|retain",

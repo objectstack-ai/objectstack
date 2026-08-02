@@ -8,7 +8,6 @@ import {
   EngineDeleteOptions,
   EngineAggregateOptions,
   EngineCountOptions,
-  DataEngineRequest,
   DroppedFieldsEvent,
 } from '../data/index.js';
 import type { IDataDriver } from './data-driver.js';
@@ -94,10 +93,15 @@ export interface IDataEngine {
    */
   vectorFind?(objectName: string, vector: number[], options?: { where?: any, limit?: number, fields?: string[], threshold?: number }): Promise<any[]>;
 
-  /**
-   * Batch Operations (Transactional)
-   */
-  batch?(requests: DataEngineRequest[], options?: { transaction?: boolean }): Promise<any[]>;
+  // `batch?` was declared here until ADR-0119 D3 (#4618) retired it. It was
+  // never implemented by any engine, never called by anyone, and its three-word
+  // doc comment specified nothing about partial failure, ordering, cross-object
+  // references or rollback scope — the questions a batch API exists to answer.
+  // A declared capability that cannot be exercised is ADR-0049's enforce-or-
+  // remove target. What it claimed is now covered by members that are real:
+  // `IObjectQLEngine.transaction(cb)` in-process, the metadata protocol's
+  // `batchData` with `options.atomic` for a batch over one object, and
+  // `POST {basePath}/batch` on the wire.
 
   /**
    * Execute raw command (Escape hatch)

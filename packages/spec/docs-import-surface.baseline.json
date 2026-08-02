@@ -32,7 +32,6 @@
     "data/ClockTimeValue — no type export",
     "data/ContextTokenPlaceholder — no type export",
     "data/DataEngineAggregateRequest — no type export",
-    "data/DataEngineBatchRequest — no type export",
     "data/DataEngineCountRequest — no type export",
     "data/DataEngineDeleteRequest — no type export",
     "data/DataEngineExecuteRequest — no type export",

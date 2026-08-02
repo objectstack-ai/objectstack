@@ -21,6 +21,9 @@ export { default as DoctorCommand } from './commands/doctor.js';
 export { default as MigrateCommand } from './commands/migrate/index.js';
 export { default as MigratePlanCommand } from './commands/migrate/plan.js';
 export { default as MigrateApplyCommand } from './commands/migrate/apply.js';
+// ADR-0119 D2 (#4617): act on a run the journal says was interrupted. Boot
+// discovers (MigrationRecoveryPlugin); this acts, under operator intent.
+export { default as MigrateResumeCommand } from './commands/migrate/resume.js';
 
 // ─── Environments topic subcommands ─────────────────────────────────
 export { default as EnvironmentsListCommand } from './commands/environments/list.js';

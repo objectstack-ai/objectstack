@@ -18,6 +18,7 @@ import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
+import { createHostRequire, createHostImporter } from '../utils/import-from-host.js';
 import {
   printHeader,
   printKV,
@@ -1528,6 +1529,28 @@ export default class Serve extends Command {
         }
       }
 
+      // Host-app package resolution — shared by every optional / enterprise
+      // package loaded from here down.
+      //
+      // Node ESM resolves a bare `import(pkg)` against the IMPORTER's own
+      // realpath. The CLI is reached through a workspace/`link:` dependency, so
+      // that realpath is inside the FRAMEWORK workspace: a bare import can only
+      // see what the framework itself installed. A package supplied by the app
+      // being served — a cloud-private one such as `@objectstack/organizations`,
+      // or anything a customer installs into their own project — is invisible
+      // to it no matter what the host app declares. Resolve from the host root
+      // instead; the CLI's own resolution stays as the fallback for the
+      // framework-owned packages the CLI depends on.
+      //
+      // Defined HERE, above the auth block, because the enterprise organizations
+      // load inside it needs it: this helper used to be declared *after* that
+      // block, so the organizations load fell back to a bare import, resolved in
+      // the framework workspace, never found the cloud-private package, and every
+      // walled-posture deployment hit the ADR-0093 D5 fail-fast and exited 1
+      // (cloud#1013).
+      const hostRequire = createHostRequire();
+      const importFromHost = createHostImporter(hostRequire);
+
       // 5d. Auto-register AuthPlugin (and paired Security/Audit) when the
       // 'auth' tier is enabled and no auth plugin is already configured.
       // The Console expects /api/v1/auth/* to be served by better-auth via
@@ -1725,7 +1748,16 @@ export default class Serve extends Command {
             if (multiTenant) {
               try {
                 const organizationsPkg = '@objectstack/organizations';
-                const mod: any = await import(/* webpackIgnore: true */ organizationsPkg);
+                // Resolve from the HOST APP (cloud#1013). This package is
+                // cloud-private: it is installed in the served app's
+                // node_modules, never in the framework workspace the CLI's own
+                // realpath points at, so a bare import here could never find it
+                // — `objectstack serve` failed the fail-fast below on EVERY
+                // self-hosted walled-posture deployment, and the only way past
+                // it was OS_ALLOW_DEGRADED_TENANCY=1, i.e. exactly the unwalled
+                // state D5 exists to prevent. The host app declares the package;
+                // this resolves it from there.
+                const mod: any = await importFromHost(organizationsPkg);
                 await kernel.use(new mod.OrganizationsPlugin());
                 trackPlugin('Organizations');
               } catch (orgErr) {
@@ -1750,7 +1782,9 @@ export default class Serve extends Command {
                         '    so the organization wall is INACTIVE. Refusing to boot — a deployment that requested\n' +
                         '    multi-organization isolation must not serve traffic without it (ADR-0093 D5).\n\n' +
                         '    Fix one of:\n' +
-                        '      • install @objectstack/organizations (the enterprise multi-org runtime), or\n' +
+                        '      • add @objectstack/organizations (the enterprise multi-org runtime) to THIS APP\n' +
+                        "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
+                        '          app, not from the framework it is linked out of — or\n' +
                         "      • set OS_TENANCY_POSTURE=single (or unset OS_MULTI_ORG_ENABLED) to run single-org, or\n" +
                         '      • set OS_ALLOW_DEGRADED_TENANCY=1 to boot in an explicitly degraded single-org state.\n\n' +
                         `    cause: ${cause}\n`,
@@ -1918,23 +1952,11 @@ export default class Serve extends Command {
         (p: any) => p.name === 'com.objectstack.service-ai'
             || p.constructor?.name === 'AIServicePlugin'
       );
-      // Resolve optional plugin packages from the HOST APP's context (the app
-      // being served declares them as deps — including private packages like
+      // `importFromHost` (declared above, before the auth block) resolves
+      // optional plugin packages from the HOST APP's context — the app being
+      // served declares them as deps, including private packages like
       // @objectstack/service-ai-studio that the framework CLI itself does not
-      // depend on). A bare import would resolve relative to the CLI's location
-      // and miss a package linked into the app's node_modules. Falls back to a
-      // bare import for framework-owned packages.
-      const { createRequire: _createRequire } = await import('node:module');
-      const { pathToFileURL: _pathToFileURL } = await import('node:url');
-      const _nodePath = await import('node:path');
-      const _hostRequire = _createRequire(_nodePath.join(process.cwd(), 'package.json'));
-      const importFromHost = async (pkg: string): Promise<any> => {
-        try {
-          return await import(_pathToFileURL(_hostRequire.resolve(pkg)).href);
-        } catch {
-          return import(/* webpackIgnore: true */ pkg);
-        }
-      };
+      // depend on.
       // [CE AI opt-in] Auto-register the headless AI service ONLY when the host
       // app DECLARES the AI service (or the cloud AI Studio that builds on it).
       // Declaration is the edition boundary: a Community-Edition app that omits
@@ -1947,7 +1969,7 @@ export default class Serve extends Command {
       const hostDeclaresDependency = (pkg: string): boolean => {
         try {
           const hostPkg = JSON.parse(
-            _fs.readFileSync(_hostRequire.resolve('./package.json'), 'utf8'),
+            _fs.readFileSync(hostRequire.resolve('./package.json'), 'utf8'),
           ) as Record<string, Record<string, string> | undefined>;
           return Boolean(
             hostPkg.dependencies?.[pkg] ?? hostPkg.devDependencies?.[pkg]

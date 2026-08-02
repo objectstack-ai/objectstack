@@ -159,30 +159,15 @@ describe('Data Engine Contract', () => {
       expect(results[0].score).toBe(0.95);
     });
 
-    it('should support optional batch operations', async () => {
-      const engine: IDataEngine = {
-        find: async () => [],
-        findOne: async () => null,
-        insert: async (_obj, data) => data,
-        update: async (_obj, data) => data,
-        delete: async () => ({}),
-        count: async () => 0,
-        aggregate: async () => [],
-        batch: async (requests, options?) => {
-          return requests.map(() => ({ success: true }));
-        },
-      };
-
-      expect(engine.batch).toBeDefined();
-      const results = await engine.batch!(
-        [
-          { object: 'users', operation: 'insert', data: { name: 'Alice' } } as any,
-          { object: 'users', operation: 'insert', data: { name: 'Bob' } } as any,
-        ],
-        { transaction: true }
-      );
-      expect(results).toHaveLength(2);
-    });
+    // The `batch?` case that stood here was deleted with the member itself
+    // (ADR-0119 D3, #4618). It is worth recording WHY it never protected
+    // anything: it built an ad-hoc object literal carrying a `batch` property
+    // and asserted the property was defined. That pins the TYPE — it cannot
+    // fail while the declaration exists, and it would have passed unchanged for
+    // the member's entire life with no engine implementing it. A test that
+    // asserts a contract member is declared is not evidence the contract is
+    // honoured; the neighbouring `getDefaultDriverName?` / `getDriverByName?`
+    // cases earn their optionality by naming a real implementer.
 
     it('should support optional execute (escape hatch)', async () => {
       const engine: IDataEngine = {

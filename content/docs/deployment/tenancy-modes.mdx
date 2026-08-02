@@ -112,7 +112,10 @@ The platform **refuses to boot** in this state:
 
 Resolve it one of three ways:
 
-- **install `@objectstack/organizations`** (the enterprise multi-org runtime); or
+- **add `@objectstack/organizations`** (the enterprise multi-org runtime) **to the
+  app you are serving** — declare it in that app's `package.json` and install it
+  there. The CLI resolves the package from the served app, not from the framework
+  it is linked out of, so installing it anywhere else does not lift the guard; or
 - **unset `OS_MULTI_ORG_ENABLED`** to run single-org; or
 - **set `OS_ALLOW_DEGRADED_TENANCY=1`** to boot anyway in an explicitly degraded
   single-org state.

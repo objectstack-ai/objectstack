@@ -186,6 +186,46 @@ export interface MigrationRunResult {
   readonly error?: unknown;
 }
 
+/**
+ * Where a resume finds the plan it has to re-run (#4617).
+ *
+ * A journal cannot hold a plan. `forward` and `compensate` are FUNCTIONS, and
+ * the rows a chunk covers are produced by `load()` against the live database —
+ * none of it survives a process boundary, which is why the journal records the
+ * plan HASH rather than the plan. So recovery needs the plan handed back to it
+ * by whoever owns the code, and that is what this registry is: the seam between
+ * "the journal knows a run stopped at chunk 7" and "something in this process
+ * knows what chunk 7 was supposed to do".
+ *
+ * Registered as the `migration-plans` kernel service. An interrupted run whose
+ * plan no loaded plugin registers is REPORTED, never silently skipped — the
+ * operator is told which plan id is missing, because "nothing to resume" and
+ * "the code that owns this run is not loaded" are different facts and only one
+ * of them is safe to ignore.
+ */
+export interface MigrationPlanProvider {
+  register(plan: MigrationPlan): void;
+  get(planId: string): MigrationPlan | undefined;
+  list(): MigrationPlan[];
+}
+
+/** The default {@link MigrationPlanProvider}. Last registration for an id wins. */
+export class MigrationPlanRegistry implements MigrationPlanProvider {
+  private readonly plans = new Map<string, MigrationPlan>();
+
+  register(plan: MigrationPlan): void {
+    this.plans.set(plan.id, plan);
+  }
+
+  get(planId: string): MigrationPlan | undefined {
+    return this.plans.get(planId);
+  }
+
+  list(): MigrationPlan[] {
+    return [...this.plans.values()];
+  }
+}
+
 /** A run found by {@link findInterruptedRuns} — started, never concluded. */
 export interface InterruptedRun {
   readonly runId: string;
