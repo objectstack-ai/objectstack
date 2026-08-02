@@ -21,6 +21,7 @@ describe('reference-integrity suite — membership', () => {
       'validatePageFieldBindings',
       'validateChartBindings',
       'validateNavAccess',
+      'validateNavTargetRefs',
       'validateTranslationReferences',
       'validateFlowTemplatePaths',
       'validateAiSurfaceAffinity',

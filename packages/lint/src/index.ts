@@ -205,6 +205,13 @@ export {
 } from './validate-object-references.js';
 export type { ObjectRefFinding, ObjectRefSeverity } from './validate-object-references.js';
 
+// [ADR-0072] The non-object nav targets (page/report/dashboard). Restores the
+// coverage `defineStack`'s cross-reference block switches off when the stack
+// declares none of that collection. `action` and `component` are deliberately
+// NOT members — see the module doc for the verification behind each.
+export { validateNavTargetRefs, NAV_TARGET_UNRESOLVED } from './validate-nav-target-refs.js';
+export type { NavTargetRefFinding, NavTargetRefSeverity } from './validate-nav-target-refs.js';
+
 export {
   validateSearchableFields,
   SEARCHABLE_FIELD_UNKNOWN,

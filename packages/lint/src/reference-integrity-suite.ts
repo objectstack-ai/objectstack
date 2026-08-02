@@ -60,6 +60,7 @@ import { validateActionNameRefs } from './validate-action-name-refs.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
 import { validateNavAccess } from './validate-nav-access.js';
+import { validateNavTargetRefs } from './validate-nav-target-refs.js';
 import { validateTranslationReferences } from './validate-translation-references.js';
 import { validateFlowTemplatePaths } from './validate-flow-template-paths.js';
 import { validateAiSurfaceAffinity } from './validate-ai-surface-affinity.js';
@@ -111,6 +112,13 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
   { name: 'validateChartBindings', run: validateChartBindings },
   { name: 'validateNavAccess', run: validateNavAccess },
+  // Nav targets that are NOT object names — page/report/dashboard. Restores the
+  // coverage `defineStack`'s own cross-reference block switches off whenever the
+  // stack declares none of that collection (`pageNames.size > 0 && …`), which is
+  // exactly the state a stack is in when the target was never written.
+  // `action` is deliberately absent (validateActionNameRefs owns it) and so is
+  // `component` (an unregistered ref renders a named diagnostic, not silence).
+  { name: 'validateNavTargetRefs', run: validateNavTargetRefs },
   { name: 'validateTranslationReferences', run: validateTranslationReferences },
   { name: 'validateFlowTemplatePaths', run: validateFlowTemplatePaths },
   { name: 'validateAiSurfaceAffinity', run: validateAiSurfaceAffinity },
