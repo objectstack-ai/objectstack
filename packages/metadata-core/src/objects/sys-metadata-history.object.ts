@@ -152,11 +152,23 @@ export const SysMetadataHistoryObject = ObjectSchema.create({
       description: 'Organization for multi-tenant isolation.',
     }),
 
-    /** User who made this change (= MetadataEvent.actor). */
+    /**
+     * User who made this change (= MetadataEvent.actor).
+     *
+     * NULL when the write had no human actor — a system-initiated write
+     * (boot metadata sync, a data migration, a scheduled job). #4556: this
+     * column used to receive the sentinel STRING `'system'`, which is not
+     * any `sys_user` id, so a lookup column declared as a foreign key held
+     * a value no join could ever resolve. NULL is the standard expression
+     * of "no link" and is what `deleteBehavior: 'set_null'` already means
+     * here, so the declared type and the stored value now agree.
+     */
     recorded_by: Field.lookup('sys_user', {
       label: 'Recorded By',
       required: false,
       readonly: true,
+      description:
+        'User who made this change. NULL = system-initiated (boot sync, migration, scheduled job) — never a sentinel string.',
     }),
 
     /** When was this version recorded */

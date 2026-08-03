@@ -34,6 +34,17 @@ export type { MetadataDiagnostics } from './metadata-diagnostics.js';
 
 export type { MetadataHostEngine } from './host-engine.js';
 
+// #4556 — the `sys_metadata_history.recorded_by` sentinel → NULL conversion,
+// as an ADR-0119 D2 migration plan. Run by `os migrate recorded-by`.
+export {
+  createRecordedBySentinelPlan,
+  findSentinelHistoryRows,
+  METADATA_HISTORY_OBJECT,
+  RECORDED_BY_SENTINEL,
+  RECORDED_BY_SENTINEL_PLAN_ID,
+} from './migrations/recorded-by-sentinel.js';
+export type { SentinelHistoryRow } from './migrations/recorded-by-sentinel.js';
+
 export { SeedLoaderService } from './seed-loader.js';
 export { runBuildProbes } from './build-probes.js';
 export type {
