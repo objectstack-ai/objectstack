@@ -2,7 +2,69 @@
 "@objectstack/console": minor
 ---
 
-Console (objectui) refreshed to `785b8a5d432c`. Frontend changes in this range:
+Console (objectui) refreshed to `785b8a5d432c` — the 2026-08-02 objectui batch reaches v17 (#4665).
+
+Until this pin moves, a merged objectui fix exists only on objectui's `main`: the
+release pipeline clones objectui at `.objectui-sha`, so anything newer is simply not
+in the artifact the platform ships, and its frontend changeset never reaches the
+platform's release history (#3340). Four of the seven PRs merged that day changed
+published packages, and one of them is **breaking for authoring** — so that
+migration is written out here, in the layer the release notes are compiled from,
+rather than left implicit in a SHA.
+
+## Breaking for authoring — an action param's picker target is `reference`, and only `reference` (objectui#3203)
+
+`ActionParam` in `@object-ui/types` no longer declares the nine resolved-side picker
+keys: `referenceTo`, `displayField`, `idField`, `descriptionField`, `titleFormat`,
+`lookupColumns`, `lookupFilters`, `lookupPageSize`, `dependsOn`.
+
+Migration:
+
+- **Inline picker target** — rewrite to `reference`:
+  FROM `{ name: 'account_id', type: 'lookup', referenceTo: 'account' }`
+  TO   `{ name: 'account_id', type: 'lookup', reference: 'account' }`
+- **The other eight** — make the param **field-backed** and it inherits the whole
+  picker group from the object field: `{ field: 'account_id' }`.
+
+**This removes a compile-time illusion, not a capability.** Those keys were never
+storable: `@objectstack/spec`'s `ActionParamSchema` is `.strict()`, its authorable key
+list carries `reference` and not `referenceTo`, and its alias table names
+`referenceto → reference` by hand — so an authored `referenceTo` has always been a
+hard parse rejection on the server. Only `tsc` waved it through, against objectui's
+public type, which meant the mistake surfaced at publish time instead of at the
+authoring keystroke. `ActionParam` is now derived from the spec schema
+(`Omit< z.input< typeof ActionParamSchema >, 'type' >`), so the authoring type and
+the parser can no longer disagree about a spelling, and `resolveActionParams()`
+additionally names any resolved-only key it meets in a dev-mode warning with the
+prescription above — covering params authored in plain JS or JSON, which `tsc` never
+sees.
+
+## Also author-visible in this batch
+
+- **An unrecognised dashboard date-filter value is skipped and named, not compared**
+  (objectui#3196, `@object-ui/core` minor — the other half of #4475). A `date` /
+  `dateRange` value that is neither a known preset nor a parseable date used to fall
+  through to "bare string means equality on that day", so a typo
+  (`defaultValue: 'last_7_dayz'`) reached the backend as `WHERE created_at = $1` and
+  answered `200 OK` with zero rows — indistinguishable from "this range has no data".
+  Such a filter is now dropped with a `console.warn` naming the filter, the offending
+  value and the accepted spellings; the widget's numbers go from 0 to unfiltered.
+- **`record:activity` fetches a feed instead of rendering a permanently empty one**
+  (objectui#3204, `@object-ui/plugin-detail`). The block's eleven declared inputs were
+  filters over a hard-coded `items={[]}`; the feed now resolves from `items` → a
+  mounted `DiscussionContext` → a self-fetch of `sys_activity` scoped to the bound
+  record, and the read-side inputs actually filter. `showSubscriptionToggle` is
+  labelled `NOT IMPLEMENTED` in its own input description rather than left looking
+  configurable.
+- **A fetching activity feed says "loading", not "No activity recorded"**
+  (objectui#3210, `@object-ui/plugin-detail` patch). The declared `loading` prop was
+  destructured into `_loading` and never read, so the panel asserted the record had no
+  activity for the whole duration of every fetch.
+- **`managedBy: 'system'` → `'system-data'` follow-through** (objectui#3214): the
+  Console now speaks the vocabulary this platform's retirement left standing.
+
+Full frontend range below. `fix(ci)` / CI-only commits are omitted — they release
+nothing and are not in the shipped bundle.
 
 - fix(fields)!: FieldWidgetComponentProps stops claiming to have every key (#3221) (#3230)
 - fix(app-shell): inspectors read and write the expression envelope (#3218) (#3228)
@@ -13,13 +75,11 @@ Console (objectui) refreshed to `785b8a5d432c`. Frontend changes in this range:
 - feat(plugin-detail): record:activity fetches a feed instead of rendering an empty one (#3165) (#3204)
 - fix(types,app-shell)!: `reference` 是 action param 唯一可作者化的 picker 目标 (#3174) (#3203)
 - fix(deps): #3184 可合并版 —— focus-scope 栈驱逐竞态补丁,解冲突 + 补丁存废说明 (#3200)
-- fix(ci): never render a budget FAIL for a run that measured nothing (#3198)
 - fix(core): 未知的 date filter 值改为跳过并警告,不再降级成永不命中的等值 (#3151) (#3196)
 - fix(types): retarget the objectstack#4171 inverted pins at their real trigger (#3177) (#3194)
 - fix(components,grid): a grid's search box searches the list, not the page you can see (#3118) (#3192)
 - feat(core): declare the 18 spec-owned action keys ActionDef absorbed silently (#3190)
 - fix(app-shell): actually compile `spec-symbol-parity.test.ts`'s type assertions (#3181) (#3187)
-- fix(ci): hand the cross-repo token to github-script instead of requiring @actions/github (#3186)
 - feat(app-shell): wire navigation action items to the console action runtime (framework#4509) (#3180)
 - feat(deps)!: upgrade to @objectstack/spec 17.0.0-rc.1 and retire the wait timeout fields (#3101) (#3178)
 - fix(studio,timeline,list): 表单设计器解析对象翻译；timeline 认它自己配置的日期字段 (#3134, #3129) (#3175)
