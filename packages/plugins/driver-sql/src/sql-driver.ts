@@ -23,6 +23,7 @@ import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
 import { resolveMultiOrgEnabled } from '@objectstack/types';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
+  applyIndexKeyParts,
   buildIndexName,
   diffManagedIndexes,
   diffManagedTable,
@@ -31,6 +32,7 @@ import {
   fieldHasColumn,
   isIndexDriftOp,
   legacyUniqueReplacements,
+  parseIndexDdl,
   uniqueIndexesFromFields,
   type ManagedDriftEntry,
   type DriftOp,
@@ -48,6 +50,45 @@ import { currentPerfTiming, perfNow, type PerfTiming } from '@objectstack/observ
  * Default ID length for auto-generated IDs.
  */
 const DEFAULT_ID_LENGTH = 16;
+
+// ── Raw index DDL the driver executes on the framework's behalf (#4884) ──────
+/** An SQL identifier in any dialect's quoting, or bare. */
+const SQL_IDENTIFIER = '(?:`[^`]+`|"[^"]+"|\\[[^\\]]+\\]|[A-Za-z_][A-Za-z0-9_$]*)';
+/** Cheap prefilter so ordinary `execute()` traffic never touches the parsers below. */
+const INDEX_DDL_PREFIX = /^\s*(?:create|drop)\s+(?:unique\s+)?index\b/i;
+const CREATE_INDEX_DDL = new RegExp(
+  `^\\s*create\\s+(?:unique\\s+)?index\\s+(?:concurrently\\s+)?(?:if\\s+not\\s+exists\\s+)?` +
+    `(${SQL_IDENTIFIER})\\s+on\\s+(${SQL_IDENTIFIER}(?:\\.${SQL_IDENTIFIER})?)`,
+  'i',
+);
+const DROP_INDEX_DDL = new RegExp(
+  `^\\s*drop\\s+index\\s+(?:concurrently\\s+)?(?:if\\s+exists\\s+)?` +
+    `(${SQL_IDENTIFIER}(?:\\.${SQL_IDENTIFIER})?)`,
+  'i',
+);
+
+/** Peel one layer of `"…"` / `` `…` `` / `[…]` quoting off an identifier. */
+function unquoteSqlIdentifier(raw: string): string {
+  const s = raw.trim();
+  if (s.length >= 2) {
+    const first = s[0];
+    const last = s[s.length - 1];
+    if ((first === '"' && last === '"') || (first === '`' && last === '`') || (first === '[' && last === ']')) {
+      return s.slice(1, -1);
+    }
+  }
+  return s;
+}
+
+/**
+ * The unquoted final segment of a possibly schema-qualified reference —
+ * `"public"."sys_metadata"` → `sys_metadata`. Tokenised rather than split on
+ * `.`, so a dot INSIDE a quoted identifier does not become a separator.
+ */
+function lastIdentifierSegment(raw: string): string {
+  const parts = raw.match(new RegExp(SQL_IDENTIFIER, 'g'));
+  return unquoteSqlIdentifier(parts && parts.length > 0 ? parts[parts.length - 1] : raw);
+}
 
 /**
  * Internal table that persists per-(object, tenant, field) auto-number
@@ -2163,7 +2204,48 @@ export class SqlDriver implements IDataDriver {
         ? this.knex.raw(command, params || []).transacting(options.transaction as Knex.Transaction)
         : this.knex.raw(command, params || []);
 
-    return await builder;
+    const result = await builder;
+    // Only after the statement actually succeeded — an index we failed to
+    // create is not one we own (#4884).
+    if (INDEX_DDL_PREFIX.test(command)) this.noteRuntimeIndexDdl(command);
+    return result;
+  }
+
+  /**
+   * Index names this process created through raw {@link execute} DDL, keyed by
+   * table (#4884).
+   *
+   * The framework runs a handful of index migrations the additive metadata sync
+   * cannot express — ADR-0048's partial UNIQUE overlay indexes on `sys_metadata`
+   * are the reference case, issued by `metadata-protocol`'s `ensureOverlayIndex`
+   * through this very seam. The drift detector has no other way to tell those
+   * apart from an index a stale metadata declaration abandoned, and it used to
+   * tell an operator to `--allow-destructive` the *draft-overlay uniqueness
+   * guarantee* on a database this build had created seconds earlier.
+   *
+   * This is a ledger of fact, not a heuristic: an entry means "this process ran
+   * that CREATE INDEX and it succeeded". Process-scoped by design — a restart
+   * starts empty, and the durable half of the guarantee is
+   * {@link isSyncReproducibleIndex}, which reads the index's own definition.
+   */
+  protected readonly runtimeCreatedIndexes = new Map<string, Set<string>>();
+
+  /** Record (or, on a DROP, forget) an index this driver just created via raw DDL. */
+  protected noteRuntimeIndexDdl(sql: string): void {
+    const created = CREATE_INDEX_DDL.exec(sql);
+    if (created) {
+      const table = lastIdentifierSegment(created[2]);
+      let names = this.runtimeCreatedIndexes.get(table);
+      if (!names) this.runtimeCreatedIndexes.set(table, (names = new Set<string>()));
+      names.add(unquoteSqlIdentifier(created[1]));
+      return;
+    }
+    const dropped = DROP_INDEX_DDL.exec(sql);
+    if (!dropped) return;
+    // SQLite / Postgres `DROP INDEX` names no table, so forget the name
+    // wherever it is recorded — the ledger must never outlive the index.
+    const name = lastIdentifierSegment(dropped[1]);
+    for (const names of this.runtimeCreatedIndexes.values()) names.delete(name);
   }
 
   // ===================================
@@ -3663,6 +3745,9 @@ export class SqlDriver implements IDataDriver {
       // therefore also what must never be mistaken for legacy debt (#3955).
       legacy: legacyUniqueReplacements({ table: tableName, fields, tenantField, physicalColumns, declaredIndexes }),
       physical: await this.introspectIndexes(tableName),
+      // Indexes the framework built through raw DDL on this boot are its own to
+      // manage — never this differ's to propose dropping (#4884).
+      runtimeCreated: this.runtimeCreatedIndexes.get(tableName),
     });
   }
 
@@ -4071,6 +4156,15 @@ export class SqlDriver implements IDataDriver {
    * UNIQUE CONSTRAINT (which is exactly what knex's old `col.unique()` produced)
    * are returned too — the drift detector cannot see the #3696 legacy shape
    * otherwise.
+   *
+   * ⚠️ The key is read from the index DEFINITION, not from the dialect's
+   * per-column catalogue view (#4884). Those views describe an expression key
+   * with a NULL column and nothing else, so `(type, name, organization_id,
+   * COALESCE(package_id,''))` used to arrive here as three columns — and a
+   * healthy ADR-0048 overlay index read as drift against its own four-column
+   * declaration. The partial predicate is captured for the same reason: it is
+   * what tells the differ this index is none of its business
+   * (`isSyncReproducibleIndex`).
    */
   protected async introspectIndexes(tableName: string): Promise<PhysicalIndex[]> {
     const byName = new Map<string, PhysicalIndex>();
@@ -4082,45 +4176,74 @@ export class SqlDriver implements IDataDriver {
     try {
       if (this.isSqlite) {
         const safe = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+        // `sqlite_master.sql` is the only place an expression key or a WHERE
+        // predicate survives; it is NULL for the indexes SQLite auto-creates
+        // for a UNIQUE/PK constraint, which are plain by construction.
+        const ddlByName = new Map<string, string>();
+        const master: any = await this.knex.raw(
+          `SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`,
+          [tableName],
+        );
+        for (const r of Array.isArray(master) ? master : (master?.rows ?? [])) {
+          if (typeof r?.sql === 'string' && r.sql) ddlByName.set(r.name, r.sql);
+        }
         const list: any = await this.knex.raw(`PRAGMA index_list(${safe})`);
         for (const r of list) {
           const entry = upsert(r.name, r.unique === 1 || r.unique === true, r.origin === 'pk');
-          const info: any = await this.knex.raw(`PRAGMA index_info(${JSON.stringify(r.name)})`);
-          // An expression index reports a null column name — skip those parts;
-          // a partial column list only ever makes the differ *less* eager.
-          for (const c of info) if (c.name != null) entry.columns.push(c.name);
+          const parsed = parseIndexDdl(ddlByName.get(r.name) ?? '');
+          if (parsed) {
+            applyIndexKeyParts(entry, parsed.keyParts);
+            if (parsed.partial) entry.partial = true;
+          } else {
+            const info: any = await this.knex.raw(`PRAGMA index_info(${JSON.stringify(r.name)})`);
+            for (const c of info) if (c.name != null) entry.columns.push(c.name);
+          }
+          // `PRAGMA index_list` reports partiality directly (SQLite ≥ 3.8.9);
+          // belt-and-braces with the parsed predicate above.
+          if (r.partial === 1 || r.partial === true) entry.partial = true;
         }
       } else if (this.isPostgres) {
         const res: any = await this.knex.raw(
           `SELECT i.relname AS index_name, ix.indisunique AS is_unique, ix.indisprimary AS is_primary,
-                  a.attname AS column_name
+                  (ix.indpred IS NOT NULL) AS is_partial,
+                  pg_get_indexdef(ix.indexrelid) AS indexdef
              FROM pg_class t
              JOIN pg_namespace n ON n.oid = t.relnamespace
              JOIN pg_index ix ON t.oid = ix.indrelid
              JOIN pg_class i ON i.oid = ix.indexrelid
-             JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
-             JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
             WHERE t.relname = ? AND n.nspname = 'public'
-            ORDER BY i.relname, k.ord`,
+            ORDER BY i.relname`,
           [tableName],
         );
         for (const r of res.rows) {
-          upsert(r.index_name, r.is_unique === true, r.is_primary === true).columns.push(r.column_name);
+          const entry = upsert(r.index_name, r.is_unique === true, r.is_primary === true);
+          if (r.is_partial === true) entry.partial = true;
+          const parsed = parseIndexDdl(r.indexdef);
+          if (parsed) applyIndexKeyParts(entry, parsed.keyParts);
         }
       } else if (this.isMysql) {
-        const res: any = await this.knex.raw(
-          `SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME
-             FROM information_schema.STATISTICS
-            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-            ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
-          [tableName],
-        );
+        // `EXPRESSION` only exists from MySQL 8.0.13 (functional indexes); on an
+        // older server or MariaDB the column is unknown and the query errors, so
+        // fall back rather than lose index introspection wholesale.
+        const columns = 'INDEX_NAME, NON_UNIQUE, COLUMN_NAME, EXPRESSION';
+        const statisticsQuery = (select: string) =>
+          this.knex.raw(
+            `SELECT ${select}
+               FROM information_schema.STATISTICS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+              ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
+            [tableName],
+          );
+        let res: any;
+        try {
+          res = await statisticsQuery(columns);
+        } catch {
+          res = await statisticsQuery('INDEX_NAME, NON_UNIQUE, COLUMN_NAME');
+        }
         for (const r of res[0]) {
-          upsert(
-            r.INDEX_NAME,
-            Number(r.NON_UNIQUE) === 0,
-            r.INDEX_NAME === 'PRIMARY',
-          ).columns.push(r.COLUMN_NAME);
+          const entry = upsert(r.INDEX_NAME, Number(r.NON_UNIQUE) === 0, r.INDEX_NAME === 'PRIMARY');
+          if (r.COLUMN_NAME != null) entry.columns.push(r.COLUMN_NAME);
+          else if (r.EXPRESSION != null) applyIndexKeyParts(entry, [String(r.EXPRESSION)]);
         }
       }
     } catch {
