@@ -89,6 +89,33 @@ export const PENDING_MARKER = 'os-regen-pending';
 /** The git config key pair that registers the driver in a clone. */
 export const DRIVER_NAME = 'os-regen';
 
+/**
+ * The script git runs as the merge driver, as a shell word (#4868).
+ *
+ * Resolved at MERGE time against the worktree being merged, never at install time
+ * against the worktree that happened to run `pnpm install`. Linked worktrees share
+ * one `.git/config`, so an absolute path here is a container-wide setting written
+ * by whoever installed last — and it dangles the moment that worktree is removed,
+ * which AGENTS.md requires on task cleanup. See `setup-git-hooks.mjs` for the two
+ * constraints this spelling satisfies and the two traps it avoids.
+ */
+export const DRIVER_SCRIPT_EXPR = '"$(git rev-parse --show-toplevel)/scripts/git-merge-regen.mjs"';
+
+/**
+ * Every git config setting that `pnpm install` registers, declared once.
+ *
+ * `setup-git-hooks.mjs` writes these; `git-merge-regen.mjs --self-test` asserts the
+ * live config still matches them and that the driver script actually resolves. One
+ * declaration, so the registrar and the gate cannot drift apart.
+ */
+export const GIT_SETTINGS = Object.freeze([
+  { key: `merge.${DRIVER_NAME}.name`, value: 'regenerate generator-owned artifacts instead of text-merging' },
+  // %O %A %B %P — ancestor, ours (the output file), theirs, pathname. Unquoted on
+  // purpose: git generates %O %A %B as temp names and shell-quotes %P itself.
+  { key: `merge.${DRIVER_NAME}.driver`, value: `node ${DRIVER_SCRIPT_EXPR} %O %A %B %P` },
+  { key: 'core.hooksPath', value: '.githooks' },
+]);
+
 /** Resolve the entry that owns a path, or undefined. Handles the one `**` entry. */
 export function entryForPath(p) {
   return REGEN_ARTIFACTS.find((e) =>
