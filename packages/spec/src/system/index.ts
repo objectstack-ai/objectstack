@@ -17,6 +17,7 @@ export * from './message-queue.zod';
 export * from './object-storage.zod';
 export * from './search-engine.zod';
 export * from './http-server.zod';
+export * from './stack-server.zod';
 
 // Observability & Operations
 // audit.zod (AuditConfig/AuditStorageConfig/AuditRetentionPolicy/AuditEventFilter/

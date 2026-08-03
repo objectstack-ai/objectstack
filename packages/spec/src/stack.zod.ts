@@ -7,6 +7,7 @@ import { validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { PLATFORM_CAPABILITY_TOKENS } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
+import { StackServerConfigSchema } from './system/stack-server.zod';
 import { hasPlatformObjectPrefix } from './system/constants/platform-object-names';
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
@@ -293,6 +294,21 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
     /** Per-environment membership 403 gate (dispatcher). Undefined → default. */
     enforceProjectMembership: z.boolean().optional(),
   }).optional().describe('Server-facing API config consumed by objectstack serve/dev'),
+
+  /**
+   * Server-level runtime configuration read by `objectstack serve` / `dev`.
+   *
+   * DELIBERATELY NARROW (#4910): it carries only keys an executor consumes —
+   * today `security.rateLimit` (the inbound token bucket that answers 429) and
+   * `trustProxy` (how that limiter identifies a caller). It is NOT the nine-key
+   * `HttpServerConfigSchema`: seven of those keys have no reader and no
+   * authoring surface, and mounting them here would make dead keys writable
+   * (their enforce-or-remove fate is #4938). Port/host stay a deployment
+   * concern owned by `objectstack serve -p`; see the schema file for the
+   * precedence rule and the rest of the rationale.
+   */
+  server: StackServerConfigSchema.optional()
+    .describe('Server-level runtime config consumed by objectstack serve/dev (inbound rate limit, proxy trust)'),
 
   /**
    * ObjectAI: Artificial Intelligence Layer

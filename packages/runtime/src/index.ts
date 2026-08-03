@@ -58,20 +58,38 @@ export type { DomainRoute, DomainHandler, DomainRequest, DomainHandlerDeps } fro
 export { MiddlewareManager } from './middleware.js';
 
 // ── Security primitives ───────────────────────────────────────────────
-// Adapter-agnostic helpers for response hardening (CSP/HSTS/XCTO/…)
-// and per-IP token-bucket rate limiting. The dispatcher plugin wires
-// security headers automatically; rate limiting is exposed as a
-// primitive so adapters can mount it at the appropriate layer (see
-// `docs/guide/hardening.md`).
+// Adapter-agnostic helpers for response hardening (CSP/HSTS/XCTO/…) and
+// token-bucket rate limiting.
+//
+// The dispatcher plugin wires BOTH automatically: security headers on
+// every response it mounts, and — when the stack declares
+// `server.security.rateLimit` — the inbound limiter as global middleware
+// on the `http.server` service (#4910). The pieces stay exported because
+// a host that composes its own transport still needs them; they are not
+// exported *instead* of being wired, which is what the previous version
+// of this comment claimed while pointing at a guide that did not exist
+// (#4937).
 export {
     buildSecurityHeaders,
     type SecurityHeadersOptions,
     RateLimiter,
     DEFAULT_RATE_LIMITS,
+    applyTokenBucket,
+    bucketIdleTtlSeconds,
+    type BucketState,
     type RateLimitBucketConfig,
     type RateLimitDecision,
     type RateLimitDefaults,
     type RateLimitStore,
+    createInboundRateLimitMiddleware,
+    deriveBucketConfig,
+    resolveRateLimitKey,
+    SharedTokenBucketLimiter,
+    type InboundRateLimitBudget,
+    type InboundRateLimitOptions,
+    type RateLimitKeyInput,
+    type RateLimitKeyKind,
+    type RateLimitLogger,
 } from './security/index.js';
 
 // ── Observability primitives ──────────────────────────────────────────

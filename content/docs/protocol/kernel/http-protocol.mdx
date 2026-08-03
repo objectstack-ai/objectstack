@@ -958,39 +958,89 @@ ETag: "abc123def456"
 
 ## Rate Limiting
 
-<Callout type="info">
-ObjectStack ships a token-bucket `RateLimiter` primitive
-(`@objectstack/runtime`), but emission of the `X-RateLimit-*` response headers
-and the `429` envelope below is deployment-specific and not wired into the
-default REST response path. Treat the headers and response shape here as the
-intended contract.
-</Callout>
+Inbound rate limiting is **off unless a stack declares it**, and it is declared in
+one place — the stack's `server` block:
 
-When enabled, responses include rate limit headers:
+```ts
+import { defineStack } from '@objectstack/spec';
 
-```http
-HTTP/1.1 200 OK
-X-RateLimit-Limit: 1000
-X-RateLimit-Remaining: 847
-X-RateLimit-Reset: 1705324800
+export default defineStack({
+  manifest: { /* … */ },
+  server: {
+    security: {
+      rateLimit: {
+        enabled: true,
+        windowMs: 60_000,   // budget window, in MILLISECONDS
+        maxRequests: 600,   // requests permitted per window, per caller
+      },
+    },
+    // Believe `X-Forwarded-For` / `X-Real-IP`? Only behind a proxy you control.
+    trustProxy: false,
+  },
+});
 ```
 
-**When limit exceeded:**
+`objectstack serve` / `dev` forward that block to the dispatcher plugin, which arms a
+token bucket in front of **every route the server mounts** — not just the dispatcher's
+own. `capacity` is `maxRequests` (so a full bucket absorbs one window's worth of
+traffic as a burst) and it refills at `maxRequests / (windowMs / 1000)` tokens per
+second (so the sustained rate is exactly the declared one).
+
+### What the bucket is keyed on
+
+1. **The resolved principal**, when the request carries a valid session. One user
+   cannot spend another's budget, and users behind a shared NAT do not throttle each
+   other.
+2. **The caller's IP**, for anonymous traffic — the case that most needs a limit
+   (credential stuffing, scraping) and has no identity yet.
+
+That IP comes from `X-Forwarded-For` / `X-Real-IP` **only when `server.trustProxy` is
+declared `true`**. Left at its default, the address is the transport's own peer
+address, which a client cannot forge. This is deliberate: an attacker who can choose
+their own `X-Forwarded-For` otherwise gets an unlimited supply of fresh buckets *and*
+can drain a chosen victim's. Declare `trustProxy` only when a reverse proxy you
+control overwrites those headers on every inbound request.
+
+CORS preflights (`OPTIONS`) are never metered.
+
+### When the limit is exceeded
+
 ```http
 HTTP/1.1 429 Too Many Requests
 Retry-After: 45
-X-RateLimit-Limit: 1000
-X-RateLimit-Remaining: 0
-X-RateLimit-Reset: 1705324800
+Content-Type: application/json
 
 {
-  "error": "Rate limit exceeded",
-  "code": "THROTTLED",
-  "retry_after": 45
+  "success": false,
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Rate limit exceeded. Retry after the interval in the Retry-After header.",
+    "httpStatus": 429,
+    "details": { "retryAfterSeconds": 45, "resetAt": "2026-08-03T12:00:45.000Z" }
+  }
 }
 ```
 
-See [Error Handling](/docs/protocol/kernel/error-handling) for more details.
+`Retry-After` is computed from the bucket itself, so the wait it advertises is the
+wait the bucket will actually take to refill. The body is the standard error envelope
+— see [Error Handling](/docs/protocol/kernel/error-handling).
+
+### Counting across nodes
+
+Counters live in the kernel `cache` service when one is registered, so a multi-node
+deployment enforces **one** budget rather than one per node (ADR-0069 D2). With no
+cache service the limiter falls back to a per-process store and says so once, at
+`warn`, naming the consequence: until a shared cache is registered the effective limit
+is the declared budget multiplied by the number of nodes.
+
+<Callout type="warn">
+**Not implemented, deliberately named rather than implied.** ObjectStack does **not**
+emit `X-RateLimit-Limit` / `-Remaining` / `-Reset` headers on successful responses —
+only `Retry-After` on a 429. And the per-endpoint `rateLimit` key on
+`ApiEndpointSchema` / `ApiEndpointRegistrationSchema` is **not wired to anything**;
+declaring it changes nothing today. Its fate travels with the declarative `apis:`
+surface as a whole, tracked by [#4936](https://github.com/objectstack-ai/objectstack/issues/4936).
+</Callout>
 
 ## Best Practices
 
@@ -1021,14 +1071,17 @@ const tasks = await fetch('/api/data/task?expand=assignee');
 ```
 
 ### Respect Rate Limits
-✅ **Good:** Check headers and implement backoff
+❌ **Bad:** Poll `X-RateLimit-Remaining` — that header is not emitted, so the check
+always reads `null` and the backoff never runs.
+
+✅ **Good:** Handle the 429 and honour `Retry-After`
 ```javascript
 const response = await fetch('/api/data/task');
-const remaining = response.headers.get('X-RateLimit-Remaining');
 
-if (remaining < 10) {
-  console.warn('Approaching rate limit');
-  await sleep(1000);
+if (response.status === 429) {
+  const retryAfter = Number(response.headers.get('Retry-After') ?? 1);
+  await sleep(retryAfter * 1000);
+  // …then retry once; the budget refills continuously, so a single wait is enough.
 }
 ```
 

@@ -229,6 +229,13 @@ describe('#3842 — no dispatcher module may reintroduce the drift', () => {
         './domain-handler-registry.ts',
         './domains/ai.ts',
         './domains/mcp.ts',
+        // [#4910] The inbound rate limiter writes a 429 body from a MIDDLEWARE
+        // rather than a route handler — a fifth way onto this wire surface, and
+        // therefore a fifth way to reintroduce a numeric `code`. Listed the day
+        // it was written, which is the whole point of the scan: the suite
+        // covering only the branches that existed when it was authored is how
+        // four sites drifted into three parking spots.
+        './security/inbound-rate-limit.ts',
     ];
 
     for (const file of MODULES) {

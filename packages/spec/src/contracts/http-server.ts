@@ -35,6 +35,22 @@ export interface IHttpRequest {
      * undefined when the underlying framework cannot expose the raw stream.
      */
     rawBody?: () => Promise<Buffer>;
+
+    /**
+     * The TRANSPORT's own peer address for this request — the socket's remote
+     * address, never a header.
+     *
+     * CONTRACT (#4910): this member is the unforgeable half of caller
+     * identification. `X-Forwarded-For` and friends live in {@link headers} and
+     * are believable only when the deployment declares `server.trustProxy`;
+     * this one a client cannot influence, which is why the inbound rate limiter
+     * keys anonymous traffic off it by default.
+     *
+     * Optional because not every runtime exposes it (an edge/Workers host may
+     * have no socket at all). Consumers MUST degrade deliberately when it is
+     * absent — never substitute a header for it silently, and never fall open.
+     */
+    remoteAddress?: string;
 }
 
 /**
@@ -95,7 +111,25 @@ export type RouteHandler = (
 ) => void | Promise<void>;
 
 /**
- * Middleware function
+ * Middleware function.
+ *
+ * ## Contract (#4910)
+ *
+ * A middleware either **continues** the chain by calling `next()`, or
+ * **short-circuits** it by writing a response (`res.status(…).json(…)` /
+ * `.send(…)`) and NOT calling `next()`. Doing neither is pass-through, so a
+ * forgotten branch cannot black-hole a request. Implementations MUST honour the
+ * short-circuit: the whole point of the seam is that a gate — rate limiting,
+ * maintenance mode — can answer instead of the route.
+ *
+ * Two limits every implementation shares, stated here so consumers do not
+ * discover them per adapter:
+ *
+ *  - `req.body` is NOT populated. Parsing it here would consume the stream
+ *    before the route handler that owns it.
+ *  - Middleware must be registered BEFORE the routes it should guard. Register
+ *    in a plugin's `init()` (kernel Phase 1); every route is mounted in some
+ *    plugin's `start()` (Phase 2), so this ordering is automatic.
  */
 export type Middleware = (
     req: IHttpRequest,

@@ -4,14 +4,18 @@ import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService } from '@objectstack/spec/contracts';
+import type { CounterStore } from '@objectstack/plugin-auth';
 import { HttpDispatcher, HttpDispatcherResult } from './http-dispatcher.js';
 import { isServiceServeable } from './service-serveable.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { buildApiError } from './error-envelope.js';
 import {
     buildSecurityHeaders,
+    createInboundRateLimitMiddleware,
+    type InboundRateLimitBudget,
     type SecurityHeadersOptions,
 } from './security/index.js';
+import { resolveSessionData, resolveSessionPrincipalId } from './security/resolve-session-principal.js';
 import {
     NoopMetricsRegistry,
     NoopErrorReporter,
@@ -95,6 +99,60 @@ export interface DispatcherPluginConfig {
         generateRequestId?: () => string;
         requestIdHeader?: string;
     };
+
+    /**
+     * Inbound rate limiting, forwarded from the stack's authored
+     * `server:` block by `objectstack serve` (#4910).
+     *
+     * This field is the one `security/rate-limit.ts` used to name in the
+     * present tense while it did not exist (#4937) — it exists now, and it is
+     * the only way the limiter is armed: omit it, or leave
+     * `budget.enabled` false, and no middleware is registered at all
+     * (zero per-request cost, not a disabled check).
+     *
+     * When armed, the plugin installs the limiter as GLOBAL middleware on the
+     * `http.server` service during `init()`. Global and `init()` are both
+     * load-bearing:
+     *
+     *  - global, because `server.security.rateLimit` is a SERVER-level budget —
+     *    a limiter covering only this plugin's own routes while `/data` ran
+     *    unmetered would be the same declared-≠-enforced half-truth the key was
+     *    introduced to end;
+     *  - `init()`, because the kernel runs every plugin's `init()` (Phase 1)
+     *    before any plugin's `start()` (Phase 2), and every route in the
+     *    composition is mounted in some `start()`. Registering here is therefore
+     *    what puts the gate in front of all of them, independent of plugin
+     *    registration order.
+     *
+     * Endpoint-level `ApiEndpointSchema.rateLimit` /
+     * `ApiEndpointRegistrationSchema.rateLimit` are NOT read here. They remain
+     * KNOWN-UNWIRED and are tracked by #4936, which owns the fate of the whole
+     * declarative `apis:` face — wiring one key of a surface whose existence is
+     * still undecided would have to be undone if that decision goes the other
+     * way.
+     */
+    rateLimit?: {
+        /** The authored `server.security.rateLimit` budget. */
+        budget?: InboundRateLimitBudget;
+        /** The authored `server.trustProxy`. */
+        trustProxy?: boolean;
+    };
+}
+
+/**
+ * `ctx.getService(name)` without the throw.
+ *
+ * The kernel's accessor raises for an unregistered name, and every consumer
+ * here treats absence as a legitimate composition ("no auth in this stack", "no
+ * cache service yet"). Spelled once so no branch quietly turns a missing
+ * OPTIONAL service into a boot failure.
+ */
+function safeGetService<T>(ctx: PluginContext, name: string): T | undefined {
+    try {
+        return ctx.getService<T>(name) ?? undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 /**
@@ -449,8 +507,57 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
         name: 'com.objectstack.runtime.dispatcher',
         version: '1.0.0',
 
-        init: async (_ctx: PluginContext) => {
-            // Consumer-only plugin — no services registered
+        init: async (ctx: PluginContext) => {
+            // Consumer-only plugin — no services registered.
+            //
+            // The one thing that MUST happen in Phase 1 is the inbound
+            // rate-limit gate (#4910): the kernel runs every `init()` before any
+            // `start()`, and every route in the composition is mounted in some
+            // `start()`, so registering the middleware here — and only here —
+            // puts it in front of all of them regardless of plugin order. Doing
+            // it in `start()` would gate whichever routes happened to be
+            // registered later, which is a limit that silently covers a
+            // different set of paths per deployment.
+            const middleware = createInboundRateLimitMiddleware({
+                ...(config.rateLimit?.budget ? { budget: config.rateLimit.budget } : {}),
+                trustProxy: config.rateLimit?.trustProxy === true,
+                resolvePrincipalId: (headers) =>
+                    resolveSessionPrincipalId(
+                        safeGetService<IAuthService>(ctx, 'auth'),
+                        headers as Record<string, unknown>,
+                    ),
+                resolveCache: async () => safeGetService<CounterStore>(ctx, 'cache'),
+                logger: ctx.logger,
+            });
+            // `null` = the stack declared no budget, or declared it disabled.
+            // Nothing is registered at all, so an unmetered deployment pays
+            // exactly zero per-request cost.
+            if (!middleware) return;
+
+            const server = safeGetService<IHttpServer>(ctx, 'http.server');
+            if (!server) {
+                // Functional degradation, loudly (route-ownership rule 3): a
+                // stack that ASKED for a rate limit and got none must not find
+                // out from a load test.
+                ctx.logger.warn(
+                    '[dispatcher] `server.security.rateLimit` is enabled but no `http.server` service is registered, '
+                    + 'so no request can be metered. Mount a transport plugin (e.g. @objectstack/plugin-hono-server) '
+                    + 'before the dispatcher, or remove the rate-limit declaration.',
+                );
+                return;
+            }
+
+            server.use(middleware);
+            const budget = config.rateLimit?.budget;
+            ctx.logger.info('Inbound rate limit armed', {
+                maxRequests: budget?.maxRequests ?? 100,
+                windowMs: budget?.windowMs ?? 60_000,
+                // NOT `key:` — the logger redacts that field name, and an
+                // operator reading `key: ***REDACTED***` learns nothing about
+                // what the limit is actually keyed on.
+                keyedBy: 'principal, falling back to caller IP',
+                trustProxy: config.rateLimit?.trustProxy === true,
+            });
         },
 
         start: async (ctx: PluginContext) => {
@@ -1149,15 +1256,12 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     // which claims the same thing while saying nothing.
                     const authService = ctx.getService('auth') as IAuthService | undefined;
                     if (!authService) return undefined;
-                    let api: any = authService.api;
-                    if (!api && typeof authService.getApi === 'function') {
-                        api = await authService.getApi();
-                    }
-                    if (!api?.getSession) return undefined;
-                    const headersInstance = headers instanceof Headers
-                        ? headers
-                        : new Headers(headers as Record<string, string>);
-                    const sessionData = await api.getSession({ headers: headersInstance });
+                    // [#4910] The session lookup itself lives in
+                    // `security/resolve-session-principal.ts` — the inbound rate
+                    // limiter asks the same question one kernel phase earlier,
+                    // and two copies of "who is calling" would eventually
+                    // disagree about what counts as authenticated.
+                    const sessionData = await resolveSessionData(authService, headers);
                     const userId: string | undefined = sessionData?.user?.id ?? sessionData?.session?.userId;
                     if (!userId) return undefined;
                     // AI-route req.user permissions (incl. the synthesized `ai_seat`) are
