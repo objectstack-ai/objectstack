@@ -55,6 +55,8 @@
  * load-bearing.
  */
 
+import type { ISharingService, SharingExecutionContext } from '@objectstack/spec/contracts';
+
 /** Minimal engine surface these installers need — duck-typed (like
  * service-storage's attachment seams) so tests can fake it and so plugin-audit
  * keeps its dependency-free posture. */
@@ -83,10 +85,13 @@ export interface CommentReadMiddlewareCtx {
   context?: { userId?: string; tenantId?: string; positions?: string[]; permissions?: string[]; isSystem?: boolean } & Record<string, unknown>;
 }
 
-/** Minimal surface of plugin-sharing's service this gate consults. */
-export interface CommentSharingLike {
-  canEdit(object: string, recordId: string, context: Record<string, unknown>): Promise<boolean>;
-}
+/**
+ * The single method of plugin-sharing's contract this gate consults. Taken as
+ * a `Pick` of the real `ISharingService` rather than re-declared locally: the
+ * narrow surface is the point, a second hand-written shape for it is not
+ * (AGENTS.md PD #12 — one contract, no dialects).
+ */
+export type CommentSharingLike = Pick<ISharingService, 'canEdit'>;
 
 export interface CommentAccessLogger {
   info(msg: string, meta?: unknown): void;
@@ -176,7 +181,7 @@ function asIdList(id: unknown): Array<string | number> | null {
 
 /** The caller's ExecutionContext rides on the operation options — the session
  * snapshot lacks `permissions`, which sharing bypasses need. */
-function callerContext(ctx: any): Record<string, unknown> {
+function callerContext(ctx: any): SharingExecutionContext {
   const exec = ctx?.input?.options?.context;
   if (exec && typeof exec === 'object') {
     return {

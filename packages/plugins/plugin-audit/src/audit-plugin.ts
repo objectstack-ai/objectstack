@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveLocalizationContext } from '@objectstack/core';
-import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataEngine, ISharingService } from '@objectstack/spec/contracts';
 import { SysAuditLog, SysActivity, SysComment } from './objects/index.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
 // It has landed, so the contribution moved to @objectstack/service-messaging —
@@ -143,7 +143,9 @@ export class AuditPlugin implements Plugin {
           engine as any,
           () => {
             try {
-              return ctx.getService<any>('sharing');
+              // Typed with the slot's contract (#4251): the gate consults
+              // `canEdit` only, but it consults the REAL interface.
+              return ctx.getService<ISharingService>('sharing');
             } catch {
               return null;
             }
