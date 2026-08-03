@@ -257,6 +257,43 @@ that costs one edited call. The value-shape half of the same ADR went the other
 way for the opposite reason: it rejects on the basis of data already at rest,
 so it stays gated per deployment (see *Files become platform records* below).
 
+### An action param's picker target is `reference`, and only `reference` (objectui#3203)
+
+`ActionParam` in `@object-ui/types` no longer declares the nine resolved-side
+picker keys — `referenceTo`, `displayField`, `idField`, `descriptionField`,
+`titleFormat`, `lookupColumns`, `lookupFilters`, `lookupPageSize`, `dependsOn`.
+Two rewrites cover everything authored against them:
+
+```diff
+- { name: 'account_id', type: 'lookup', referenceTo: 'account' }
++ { name: 'account_id', type: 'lookup', reference: 'account' }
+```
+
+- **The inline picker target** — spell it `reference`, as above. It is the only
+  authorable way to name an inline `lookup` / `master_detail` param's target
+  object, and `ActionParamSchema` refuses a targetless inline picker at parse
+  time rather than letting it degrade into a paste-a-UUID text box (#3405).
+- **The other eight** — make the param **field-backed** (`{ field: 'account_id' }`)
+  and the whole picker group is inherited rather than restated: `displayField`,
+  `descriptionField`, `lookupColumns`, `lookupFilters`, `lookupPageSize` and
+  `dependsOn` are `FieldSchema` keys, resolved at runtime from the referenced
+  field's own metadata. `idField` and `titleFormat` were never authorable on
+  either side — the picker resolves record identity itself, and a candidate's
+  label comes from the referenced object's `nameField` (ADR-0079).
+
+**This removes a compile-time illusion, not a capability.** None of the nine was
+ever storable: `ActionParamSchema` is `.strict()`, its authorable key list
+carries `reference` and not `referenceTo`, and its alias table names
+`referenceto → reference` by hand (`packages/spec/src/ui/action.zod.ts`) — so an
+authored `referenceTo` has always been a hard parse rejection on the server.
+Only `tsc` waved it through, against objectui's public type, which moved the
+failure from the authoring keystroke out to publish time. `ActionParam` is now
+derived from the spec schema (`Omit<z.input<typeof ActionParamSchema>, 'type'>`),
+so the authoring type and the parser can no longer disagree about a spelling,
+and `resolveActionParams()` names any resolved-only key it still meets in a
+dev-mode warning carrying the prescription above — which covers the params
+authored in plain JS or JSON, where `tsc` never looks.
+
 ### A flow run with no trigger user may not touch data (#3760)
 
 An effective `runAs: 'user'` run that resolved **no trigger user** used to
@@ -1914,7 +1951,7 @@ rc.1, and administrators should know what changed:
   the generated upgrade guide and the `spec_changes` MCP tool actually
   report the 16 → 17 chain (they still said 16.0.0).
 
-### New in Console — bundled objectui advanced `4a4829d0ef39 → 7d9734d5e321`
+### New in Console — bundled objectui advanced `4a4829d0ef39 → 785b8a5d432c`
 
 143 objectui commits across five pin moves, released as **objectui 17.1.0**.
 (The pin changesets enumerate 79 of them; one range under-enumerated its own
