@@ -2226,6 +2226,65 @@ const dashboardInertKeysRemoved: MetadataConversion = {
 };
 
 /**
+ * dashboard.widgets[].responsive (#4876) — the same-named `view.responsive`
+ * went in the #3896 close-out above; this one escaped that sweep through a
+ * liveness drill gap rather than on evidence (`dashboard.json` declares no
+ * `children` on `widgets`, so no widget-level key was ever classified — filed
+ * as #4956). Re-measured 2026-08-03: no objectui code reads
+ * `widget.responsive`, and zero authored instances exist repo-wide.
+ *
+ * Deliberately a SEPARATE entry rather than another key on
+ * `dashboard-inert-keys-removed`: that entry's identity is the #3896 sweep, and
+ * folding a differently-evidenced removal into it would misattribute this one
+ * in `spec-changes.json` and the upgrade guide — the two places an upgrading
+ * author actually reads. Both are `toMajor: 17`, so a stored dashboard carrying
+ * both keys is cleaned by both in one replay.
+ *
+ * Strips ONLY the widget embed. The shared `ResponsiveConfig` shape is
+ * untouched and still live on `page.components[].responsive`.
+ */
+const dashboardWidgetResponsiveRemoved: MetadataConversion = {
+  id: 'dashboard-widget-responsive-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'dashboard.widgets[].responsive',
+  summary: "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; page.components[].responsive is unaffected)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'dashboards', (d, path) => {
+      const widgets = d.widgets;
+      if (!Array.isArray(widgets)) return d;
+      let touched = false;
+      const rebuilt = widgets.map((w, i) => {
+        if (!w || typeof w !== 'object' || Array.isArray(w)) return w;
+        const cleaned = stripKeys(w as Record<string, unknown>, ['responsive'], emit, `${path}.widgets[${i}]`);
+        if (cleaned !== w) touched = true;
+        return cleaned;
+      });
+      if (!touched) return d;
+      return { ...d, widgets: rebuilt };
+    });
+  },
+  fixture: {
+    before: {
+      dashboards: [{
+        name: 'ops_overview',
+        widgets: [{
+          id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'],
+          responsive: { columns: { xs: 12, lg: 4 }, order: { xs: 2, lg: 1 }, hiddenOn: ['xs'] },
+        }],
+      }],
+    },
+    after: {
+      dashboards: [{
+        name: 'ops_overview',
+        widgets: [{ id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'] }],
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
  * agent.knowledge — a grounding claim nothing enforced (the RAG path reads
  * `sourceIds` from the LLM's tool-call arguments, never the agent record).
  * Absorbs the former `agent-knowledge-topics-to-sources` rename (#3855):
@@ -3667,6 +3726,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowInertKeysRemoved,
     viewInertKeysRemoved,
     dashboardInertKeysRemoved,
+    dashboardWidgetResponsiveRemoved,
     agentKnowledgeRemoved,
     skillTriggerPhrasesRemoved,
     stackApiRequireAuthRemoved,

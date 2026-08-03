@@ -50,6 +50,12 @@
  */
 
 import { hashSpec, ConflictError } from '@objectstack/metadata-core';
+// #4867 — the SAME discriminator `DatabaseLoader` uses (#4825), imported, not
+// re-implemented. A second hand-rolled "which driver errors are benign?" here
+// would be two vocabularies for one question, which is the dual-source debt
+// #4825 deliberately retired. See `@objectstack/metadata/errors` for why that
+// leaf subpath exists.
+import { isMissingTableError } from '@objectstack/metadata/errors';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type {
   MetadataRepository,
@@ -225,6 +231,18 @@ export class SysMetadataRepository implements MetadataRepository {
 
   /** Table name for the durable event log. */
   private readonly historyTable = 'sys_metadata_history';
+
+  /**
+   * #4867 — once-only reporting for the history-counter read seam.
+   *
+   * The history table is readable or it is not; repeating the same paragraph
+   * once per aborted write turns a real degradation into noise people learn to
+   * skim, which is what made the #4420 `warn` unreadable in the first place.
+   * Reset (with an `info`) on the next successful read, so an outage and its
+   * recovery each say themselves exactly once. Suppressing the *message* never
+   * suppresses the *failure*: every occurrence still throws.
+   */
+  private historyCounterFailureReported = false;
 
   constructor(opts: SysMetadataRepositoryOptions) {
     this.engine = opts.engine;
@@ -1047,6 +1065,28 @@ export class SysMetadataRepository implements MetadataRepository {
    * `sys_metadata_history` scoped by `organization_id`. MUST be called
    * inside a transaction (the only caller is the put/delete txn body) —
    * concurrent writers in the same org race otherwise.
+   *
+   * #4867 (same shape as #4825 on the legacy `DatabaseLoader` path; rule from
+   * #4632) — discriminate by error TYPE. This used to `catch { return 1 }`
+   * under a comment that named only the benign reason and then answered every
+   * reason with it. Exactly one reason licenses `1`: the history table has not
+   * been provisioned, so there is no row to collide with. Every other reason —
+   * dropped connection, timeout, insufficient privileges — means the rows are
+   * still there and merely were not seen, and numbering from 1 against a table
+   * with N rows **collides with existing rows** while the insert SUCCEEDS and
+   * the log stays empty.
+   *
+   * Being inside a transaction does not save this. A transaction serialises
+   * *concurrent* writers; it has no opinion about a number derived from a read
+   * that failed, and a successfully committed transaction commits a wrong
+   * `event_seq` just as durably as a non-transactional insert does. What the
+   * transaction *does* give us is the clean remedy: throw, and the whole write
+   * rolls back rather than committing an invented number.
+   *
+   * @throws The underlying driver error, unchanged, for every non-benign read
+   *         failure — aborting the enclosing put/delete. Deliberate: a sequence
+   *         number this method cannot derive from data it actually read is not
+   *         a number it may invent.
    */
   private async nextEventSeq(ctx: any): Promise<number> {
     try {
@@ -1059,10 +1099,14 @@ export class SysMetadataRepository implements MetadataRepository {
         const v = typeof row.event_seq === 'number' ? row.event_seq : 0;
         if (v > max) max = v;
       }
+      this.noteHistoryReadable();
       return max + 1;
-    } catch {
-      // Table not provisioned yet (fresh DB) — start at 1.
-      return 1;
+    } catch (error) {
+      return this.historyCounterVerdict(
+        error,
+        'event_seq',
+        'the per-org history cursor that history ordering and rollback targeting both stand on',
+      );
     }
   }
 
@@ -1070,6 +1114,16 @@ export class SysMetadataRepository implements MetadataRepository {
    * Per-(org,type,name) lineage counter. Reads from history (not from
    * `sys_metadata.version`) so delete + recreate continues incrementing
    * instead of restarting at 1.
+   *
+   * #4867 — which is exactly why the old `catch { return 1 }` was the worse of
+   * the two: a read failure restored, precisely, the behaviour this method
+   * exists to prevent. The lineage restarts at 1, collides with the existing
+   * lineage rows, and `MetadataManager.rollback(type, name, version)` /
+   * `POST /api/v1/meta/:type/:name/rollback` locate their snapshot BY this
+   * number — so a rollback can land on a different record's same-numbered
+   * version. Same discrimination, same rethrow; see {@link nextEventSeq}.
+   *
+   * @throws The underlying driver error for every non-benign read failure.
    */
   private async nextItemVersion(
     ref: Pick<MetaRef, 'type' | 'name'>,
@@ -1089,10 +1143,68 @@ export class SysMetadataRepository implements MetadataRepository {
         const v = typeof row.version === 'number' ? row.version : 0;
         if (v > max) max = v;
       }
+      this.noteHistoryReadable();
       return max + 1;
-    } catch {
-      return 1;
+    } catch (error) {
+      return this.historyCounterVerdict(
+        error,
+        'version',
+        `the ${ref.type}/${ref.name} lineage counter that rollback resolves a snapshot by`,
+      );
     }
+  }
+
+  /**
+   * The shared `catch` verdict for both history-derived counters (#4867).
+   *
+   * @returns `1` — and ONLY — when the table genuinely does not exist yet:
+   *          no rows, therefore nothing to collide with, therefore 1 really is
+   *          the next number.
+   * @throws The original error for every other read failure, after reporting
+   *         the consequence once at `error` level (AGENTS.md "Degradation log
+   *         levels": this is a durability/consistency degradation, not a
+   *         functional one — the system keeps looking healthy while the bytes
+   *         it persists are wrong).
+   */
+  private historyCounterVerdict(
+    error: unknown,
+    counter: 'event_seq' | 'version',
+    subject: string,
+  ): 1 {
+    // Benign — and only benign: a fresh DB has no row to be inconsistent with.
+    if (isMissingTableError(error)) return 1;
+
+    if (!this.historyCounterFailureReported) {
+      this.historyCounterFailureReported = true;
+      console.error(
+        `[SysMetadataRepository] Could not read \`${this.historyTable}\` to determine the next ` +
+          `\`${counter}\` (${subject}) — the metadata write is being ABORTED and the enclosing ` +
+          `transaction rolled back, so nothing is committed and the caller sees the failure. ` +
+          `Before #4867 this path answered \`${counter} = 1\` instead: against a table that ` +
+          `already has rows that number COLLIDES with an existing row, while the insert SUCCEEDS ` +
+          `and not one line is logged — leaving version ordering untrustworthy and rollback ` +
+          `targets ambiguous (a rollback can then resolve to a different record's same-numbered ` +
+          `version). No retry and no restart repairs that; a failed write is the loud, ` +
+          `recoverable alternative. Fix the datasource/driver error below (connection, timeout, ` +
+          `privileges) and retry the write.`,
+        error,
+      );
+    }
+    throw error;
+  }
+
+  /**
+   * Recovery half of the #4867 report: the counters are readable again, so the
+   * next outage gets to speak. Says so once, and only if something was said.
+   */
+  private noteHistoryReadable(): void {
+    if (!this.historyCounterFailureReported) return;
+    this.historyCounterFailureReported = false;
+    console.info(
+      `[SysMetadataRepository] \`${this.historyTable}\` is readable again — \`event_seq\` / ` +
+        `\`version\` numbering recovered and metadata writes are being recorded again. Writes ` +
+        `rejected during the outage were not applied and must be re-submitted.`,
+    );
   }
 
   /** Lightweight UUID-ish id for history rows; sufficient for an audit log. */

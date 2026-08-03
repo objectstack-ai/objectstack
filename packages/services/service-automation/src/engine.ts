@@ -4291,19 +4291,47 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * Execute a promise with timeout using Promise.race.
+     * Race a node's execution against its `timeoutMs` guard, and reclaim the
+     * guard the moment the race settles (#4952).
+     *
+     * The guard used to be armed and then abandoned: when the node won the
+     * race, its `setTimeout` stayed ref'd in the event loop for the full
+     * `timeoutMs`. Same leak as the kernel's startup guards (#4813, PR #4874)
+     * and the health checks (#4875, PR #4950), with the widest blast radius of
+     * the three — this is the per-node hot path, so the orphan count grows with
+     * flow size × trigger frequency, and a one-shot process (`os` CLI running a
+     * flow) idles for the longest `timeoutMs` it happened to arm after its work
+     * is done.
+     *
+     * Clearing on settle rather than `unref()`-ing at arm time is deliberate.
+     * An unref'd guard also stops pinning the loop, but it stops being a guard
+     * as well: if the node never settles and nothing else keeps the loop alive,
+     * Node exits before the timer can fire and the timeout is never reported.
+     * The guard has to stay ref'd exactly as long as the race is undecided,
+     * which is what `clearTimeout` in a `finally` expresses.
+     *
+     * No `T | PromiseLike<T>` widening here (unlike the kernel and
+     * health-monitor helpers, whose hooks may be synchronous):
+     * `NodeExecutor.execute` is declared `Promise`-returning.
      */
-    private executeWithTimeout(
+    private async executeWithTimeout(
         promise: Promise<NodeExecutionResult>,
         timeoutMs: number,
         nodeId: string,
     ): Promise<NodeExecutionResult> {
-        return Promise.race([
-            promise,
-            new Promise<NodeExecutionResult>((_, reject) =>
-                setTimeout(() => reject(new Error(`Node '${nodeId}' timed out after ${timeoutMs}ms`)), timeoutMs),
-            ),
-        ]);
+        let guard: ReturnType<typeof setTimeout> | undefined;
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            guard = setTimeout(() => {
+                reject(new Error(`Node '${nodeId}' timed out after ${timeoutMs}ms`));
+            }, timeoutMs);
+        });
+
+        try {
+            return await Promise.race([promise, timeoutPromise]);
+        } finally {
+            clearTimeout(guard);
+        }
     }
 
     /**

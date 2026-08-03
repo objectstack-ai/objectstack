@@ -43,13 +43,61 @@
  * {@link TRY_CATCH_NODE_TYPE} (`try_catch`). These are distinct from the BPMN
  * interop node types (`parallel_gateway` / `join_gateway` / `boundary_event`),
  * which remain author-invisible interchange representations.
+ *
+ * ## Unknown keys are rejected (#4001 / ADR-0078)
+ *
+ * Every shape below is `strictObject`. Before that they were plain `z.object`,
+ * so zod's default `.strip` applied and a key this file does not declare was
+ * **discarded in silence** — the container still parsed, still registered, and
+ * still ran, with the author's configuration simply absent. On these five
+ * shapes that silence is unusually expensive, because each one carries
+ * *control* rather than data: a swallowed `maxIterations` is an uncapped loop,
+ * a swallowed branch key is a branch that runs without what it was given.
+ *
+ * ### How this relates to {@link validateControlFlow}
+ *
+ * `validateControlFlow` is a **sibling guard, not a key gate** — it answers
+ * "is this region single-entry / single-exit / acyclic", which no amount of
+ * key strictness can answer. The two do not overlap and cannot fight: the
+ * schema rejects undeclared KEYS, the analysis rejects malformed STRUCTURE.
+ * They do now meet at one seam, deliberately — `validateControlFlow`
+ * `safeParse`s each region slot before analyzing it, so from #4001 that parse
+ * is also where a region's undeclared key surfaces, reported as
+ * `<where>: invalid region — <the strictObject message>`. Nothing was
+ * duplicated and nothing was removed; the structural prose this guard exists
+ * for is untouched, and it simply stopped silently repairing its own input.
  */
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 import { FlowNodeSchema, FlowEdgeSchema } from './flow.zod';
 import type { FlowNodeParsed, FlowEdgeParsed } from './flow.zod';
 import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
+
+/**
+ * Shared history sentence for the five shapes in this file — one silence, one
+ * description of it, so the five rejections cannot drift apart.
+ */
+const CONTROL_FLOW_STRIP_HISTORY =
+  'Until #4001 an undeclared key here was dropped silently — the container still parsed, registered and ran, with the author\'s configuration simply absent.';
+
+/**
+ * ADR-0031 §Decision 2, stated once per spelling a BPMN-trained author reaches
+ * for on a `parallel` block.
+ *
+ * Two entries rather than one shared string, because `guidance` prescriptions
+ * are emitted **verbatim, one bullet per rejected key** — writing a flow with
+ * both spellings would otherwise print the identical paragraph twice, which
+ * reads as a bug in the error rather than as an answer. Each spelling gets the
+ * half of the decision that actually addresses it.
+ */
+const IMPLICIT_JOIN_PRESCRIPTIONS = {
+  join:
+    'A `parallel` block joins IMPLICITLY: it continues once, when every branch has completed (ADR-0031 §Decision 2). There is no join to configure and no arrival count to get wrong — that is the point of the construct, so the key has no replacement.',
+  joinGateway:
+    '`join_gateway` is a BPMN **interop** node type, not a `parallel` config key. ADR-0031 §Decision 5 keeps the BPMN gateways for import/export and §Decision 2 folds an imported `parallel_gateway`/`join_gateway` pair INTO this block — so by the time you are writing `parallel`, the join has already been absorbed.',
+} as const;
 
 // ─── Canonical construct type ids ────────────────────────────────────
 
@@ -77,12 +125,25 @@ export const LOOP_MAX_ITERATIONS_CEILING = 100_000;
  * body mutations are visible to the surrounding flow), so a region is *not* a
  * separate `subflow` invocation.
  */
-export const FlowRegionSchema = lazySchema(() => z.object({
-  /** Body nodes (must not include `start`/`end` trigger sentinels). */
-  nodes: z.array(FlowNodeSchema).min(1).describe('Region body nodes (single-entry/single-exit sub-graph)'),
-  /** Body edges connecting the region nodes. */
-  edges: z.array(FlowEdgeSchema).default([]).describe('Region body edges'),
-}));
+export const FlowRegionSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this control-flow region',
+    history: CONTROL_FLOW_STRIP_HISTORY,
+    guidance: {
+      // Both entries are wrong-LAYER pointers, not renames: a region has no
+      // name of any spelling, so suggesting one would send the author to a key
+      // this schema cannot accept.
+      name: 'A region is not named. Only a `parallel` branch carries a `name` (`config.branches[].name`) — a `loop` body, a `try` region and a `catch` region are identified by the container that holds them.',
+      label: 'A region is not labelled. `label` is required on every NODE inside `nodes[]`, which is where you are seeing it; the region itself is identified by its container slot.',
+    },
+  },
+  {
+    /** Body nodes (must not include `start`/`end` trigger sentinels). */
+    nodes: z.array(FlowNodeSchema).min(1).describe('Region body nodes (single-entry/single-exit sub-graph)'),
+    /** Body edges connecting the region nodes. */
+    edges: z.array(FlowEdgeSchema).default([]).describe('Region body edges'),
+  },
+));
 
 export type FlowRegion = z.input<typeof FlowRegionSchema>;
 export type FlowRegionParsed = z.infer<typeof FlowRegionSchema>;
@@ -99,38 +160,62 @@ export type FlowRegionParsed = z.infer<typeof FlowRegionSchema>;
  * `body` is **optional** for back-compat: a `loop` node with no `body` keeps the
  * legacy flat-graph behavior (the constructs are additive).
  */
-export const LoopConfigSchema = lazySchema(() => z.object({
-  /**
-   * The collection to iterate. A `{token}` template or bare variable name that
-   * resolves (at run time) to an array in the flow's variable scope, or an
-   * inline array — the same union `map.collection` declares, because the two
-   * executors share the resolve logic (#4277 aligned this contract with what
-   * the executor has always read; the string-only declaration under-declared).
-   */
-  // `xExpression: 'template'` marks the string form as an `interpolate()`
-  // `{var}` template (not bare CEL), so the flow designer renders a `{var}`
-  // picker + mono editor and skips the CEL brace-trap (objectui #2670 Phase 3).
-  // Flows through `z.toJSONSchema` verbatim, same channel as `xRef` /
-  // `xEnumDeprecated`. The shipped `loop` descriptor carries the same marker on
-  // its hand-written configSchema literal (service-automation/builtin/loop-node.ts).
-  collection: z.union([z.string().min(1), z.array(z.unknown())]).meta({
-    description: 'Template/variable resolving to the array to iterate (an inline array is accepted)',
-    xExpression: 'template',
-  }),
-  /** Variable name the current item is bound to inside the body. */
-  iteratorVariable: z.string().min(1).default('item').describe('Loop variable holding the current item'),
-  /** Optional variable name the zero-based index is bound to inside the body. */
-  indexVariable: z.string().optional().describe('Optional loop variable holding the current index'),
-  /**
-   * Maximum iterations to run — a guard against runaway collections. Clamped to
-   * {@link LOOP_MAX_ITERATIONS_CEILING}; a collection longer than this fails the
-   * node rather than truncating silently.
-   */
-  maxIterations: z.number().int().min(1).max(LOOP_MAX_ITERATIONS_CEILING).optional()
-    .describe('Hard cap on iterations (clamped to the engine ceiling)'),
-  /** The body region executed once per item (single-entry/single-exit). */
-  body: FlowRegionSchema.optional().describe('Loop body region (omit for legacy flat-graph loops)'),
-}));
+export const LoopConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this loop container config',
+    history: CONTROL_FLOW_STRIP_HISTORY,
+    // `itemVariable` is here to OVERRULE the edit-distance fallback, which was
+    // measured getting it wrong: `itemVariable` is 4 edits from
+    // `indexVariable` and further from `iteratorVariable`, so the bare
+    // suggester answers "did you mean `indexVariable`?" — pointing an author
+    // who wants the ITEM at the key that binds the INDEX. Following it yields
+    // a loop whose variable holds a number, silently, which is the failure
+    // this campaign exists to remove, produced by the campaign's own helper
+    // (the `pii` → `min` shape from batch 6b, and finding 7's "never signpost
+    // the way into the failure mode"). An alias entry wins over edit distance,
+    // so naming it is the whole fix.
+    aliases: { itemVariable: 'iteratorVariable' },
+    guidance: {
+      // `map` is `loop`'s nearest neighbour — the two share `collection`,
+      // `iteratorVariable` and `indexVariable`, and `flowName` is the key that
+      // DEFINES map (required there). An author moving between them borrows it.
+      // A pointer, not a rename: `loop` has no subflow key to rename it to.
+      flowName: '`flowName` belongs to the `map` node, which runs a separate subflow per item (ADR-0037). A `loop` runs an INLINE `body` region in the enclosing variable scope — put the per-item steps in `config.body`, or change the node `type` to `map` if you meant the subflow form.',
+    },
+  },
+  {
+    /**
+     * The collection to iterate. A `{token}` template or bare variable name that
+     * resolves (at run time) to an array in the flow's variable scope, or an
+     * inline array — the same union `map.collection` declares, because the two
+     * executors share the resolve logic (#4277 aligned this contract with what
+     * the executor has always read; the string-only declaration under-declared).
+     */
+    // `xExpression: 'template'` marks the string form as an `interpolate()`
+    // `{var}` template (not bare CEL), so the flow designer renders a `{var}`
+    // picker + mono editor and skips the CEL brace-trap (objectui #2670 Phase 3).
+    // Flows through `z.toJSONSchema` verbatim, same channel as `xRef` /
+    // `xEnumDeprecated`. The shipped `loop` descriptor carries the same marker on
+    // its hand-written configSchema literal (service-automation/builtin/loop-node.ts).
+    collection: z.union([z.string().min(1), z.array(z.unknown())]).meta({
+      description: 'Template/variable resolving to the array to iterate (an inline array is accepted)',
+      xExpression: 'template',
+    }),
+    /** Variable name the current item is bound to inside the body. */
+    iteratorVariable: z.string().min(1).default('item').describe('Loop variable holding the current item'),
+    /** Optional variable name the zero-based index is bound to inside the body. */
+    indexVariable: z.string().optional().describe('Optional loop variable holding the current index'),
+    /**
+     * Maximum iterations to run — a guard against runaway collections. Clamped to
+     * {@link LOOP_MAX_ITERATIONS_CEILING}; a collection longer than this fails the
+     * node rather than truncating silently.
+     */
+    maxIterations: z.number().int().min(1).max(LOOP_MAX_ITERATIONS_CEILING).optional()
+      .describe('Hard cap on iterations (clamped to the engine ceiling)'),
+    /** The body region executed once per item (single-entry/single-exit). */
+    body: FlowRegionSchema.optional().describe('Loop body region (omit for legacy flat-graph loops)'),
+  },
+));
 
 export type LoopConfig = z.input<typeof LoopConfigSchema>;
 export type LoopConfigParsed = z.infer<typeof LoopConfigSchema>;
@@ -138,12 +223,26 @@ export type LoopConfigParsed = z.infer<typeof LoopConfigSchema>;
 // ─── Parallel block ──────────────────────────────────────────────────
 
 /** One named branch of a {@link ParallelConfigSchema} parallel block. */
-export const ParallelBranchSchema = lazySchema(() => z.object({
-  /** Optional human label for the branch (designer + logs). */
-  name: z.string().optional().describe('Branch label'),
-  nodes: z.array(FlowNodeSchema).min(1).describe('Branch body nodes'),
-  edges: z.array(FlowEdgeSchema).default([]).describe('Branch body edges'),
-}));
+export const ParallelBranchSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this parallel branch',
+    history: CONTROL_FLOW_STRIP_HISTORY,
+    // `label` is not a typo of `name` — no edit distance connects them. It is
+    // the word this protocol uses for a human-readable name EVERYWHERE ELSE in
+    // the same object literal: `FlowNodeSchema.label` is REQUIRED on every
+    // element of the `nodes[]` array sitting right beside this key. A branch is
+    // the one shape here that spells it `name`, so borrowing `label` is a
+    // reasonable author's guess, and the `visibleWhen → visible` category
+    // `aliases` exists for.
+    aliases: { label: 'name' },
+  },
+  {
+    /** Optional human label for the branch (designer + logs). */
+    name: z.string().optional().describe('Branch label'),
+    nodes: z.array(FlowNodeSchema).min(1).describe('Branch body nodes'),
+    edges: z.array(FlowEdgeSchema).default([]).describe('Branch body edges'),
+  },
+));
 
 export type ParallelBranch = z.input<typeof ParallelBranchSchema>;
 
@@ -153,10 +252,17 @@ export type ParallelBranch = z.input<typeof ParallelBranchSchema>;
  * complete). There is no author-visible split/join gateway to mis-wire. The
  * branches run in the enclosing variable scope.
  */
-export const ParallelConfigSchema = lazySchema(() => z.object({
-  branches: z.array(ParallelBranchSchema).min(2)
-    .describe('Branch regions executed concurrently; implicit join at block end'),
-}));
+export const ParallelConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this parallel block config',
+    history: CONTROL_FLOW_STRIP_HISTORY,
+    guidance: IMPLICIT_JOIN_PRESCRIPTIONS,
+  },
+  {
+    branches: z.array(ParallelBranchSchema).min(2)
+      .describe('Branch regions executed concurrently; implicit join at block end'),
+  },
+));
 
 export type ParallelConfig = z.input<typeof ParallelConfigSchema>;
 export type ParallelConfigParsed = z.infer<typeof ParallelConfigSchema>;
@@ -190,13 +296,26 @@ import { RetryPolicySchema } from '../shared/retry-policy.zod';
  * native error model — the same `fault` + retry semantics already in the engine,
  * surfaced as a construct rather than BPMN boundary events (ADR-0031 §Decision 3).
  */
-export const TryCatchConfigSchema = lazySchema(() => z.object({
-  try: FlowRegionSchema.describe('Protected region'),
-  catch: FlowRegionSchema.optional().describe('Handler region run when the try region fails'),
-  /** Variable the caught error is bound to inside the catch region. */
-  errorVariable: z.string().default('$error').describe('Variable holding the caught error in the catch region'),
-  retry: RetryPolicySchema.optional().describe('Optional retry policy for the try region'),
-}));
+export const TryCatchConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this try/catch config',
+    history: CONTROL_FLOW_STRIP_HISTORY,
+    guidance: {
+      // The strongest prior any author brings to a construct named
+      // `try_catch`: every mainstream language pairs it with `finally`. This
+      // one deliberately does not, and the answer is a real place to put the
+      // steps — not "that key does not exist".
+      finally: 'There is no `finally` region. The `try_catch` node\'s ORDINARY out-edges are the continuation and run whichever way the protected region went (ADR-0031 §Decision 3 surfaces the engine\'s existing `fault` edge, not BPMN boundary events) — put the always-run steps in the nodes AFTER this container.',
+    },
+  },
+  {
+    try: FlowRegionSchema.describe('Protected region'),
+    catch: FlowRegionSchema.optional().describe('Handler region run when the try region fails'),
+    /** Variable the caught error is bound to inside the catch region. */
+    errorVariable: z.string().default('$error').describe('Variable holding the caught error in the catch region'),
+    retry: RetryPolicySchema.optional().describe('Optional retry policy for the try region'),
+  },
+));
 
 export type TryCatchConfig = z.input<typeof TryCatchConfigSchema>;
 export type TryCatchConfigParsed = z.infer<typeof TryCatchConfigSchema>;
@@ -357,8 +476,11 @@ function regionSlotsOf(node: FlowNodeParsed): RegionSlot[] {
         key,
         index,
         label: `${node.type} '${node.id}' ${singularize(key)} ${index}`,
-        // A branch also carries an optional `name`, which the plain region
-        // schema (a non-strict `z.object`) would strip.
+        // A branch also carries an optional `name`. Picking the branch schema
+        // here used to be a fidelity choice — the region schema would have
+        // STRIPPED `name`, losing it. Since #4001 both schemas are strict, so
+        // it is a correctness choice: the region schema would REJECT a legal
+        // branch outright. Same line, higher stakes.
         schema: ParallelBranchSchema,
       }));
       continue;

@@ -366,6 +366,36 @@ protocol 17 (#3855): authoring it is rejected with an error naming the
 replacement, not silently stripped, and `os migrate meta --from 16` rewrites
 existing sources automatically.
 
+#### Locking a detail from its master: `parent`
+
+On a **detail** object — one that declares a `master_detail` relationship — a
+`readonlyWhen` predicate may read the header record as `parent`. The canonical
+case is "once the invoice is Paid, its lines are frozen":
+
+```typescript
+quantity: Field.number({
+  label: 'Qty',
+  required: true,
+  // `parent` = the record on the other end of this object's master_detail field.
+  readonlyWhen: P`parent.status == 'paid'`,
+}),
+```
+
+The server binds `parent` on the update path by reading the master the row
+points at (a repointing write is judged against the master it lands on), so the
+lock holds against a direct API call, not only in the grid.
+
+Two rules make this predictable:
+
+- **Exactly one master.** `parent` resolves only when the object declares
+  exactly one `master_detail` relationship. With none — or with two, where the
+  metadata does not say which one is "the parent" — `objectstack compile`
+  rejects the predicate with an error naming the object.
+- **An unresolvable `parent` means locked, not open.** If the header cannot be
+  read at write time, the field is treated as read-only rather than written. A
+  lock the platform could not evaluate is never waived: that is what makes the
+  declaration a guarantee instead of a hint.
+
 ## Naming Conventions
 
 - Field names use `snake_case`: `first_name`, `annual_revenue`, `is_active`
