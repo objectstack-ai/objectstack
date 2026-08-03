@@ -2746,7 +2746,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Organización para el aislamiento multi-tenant."
       },
       recorded_by: {
-        label: "Registrado por"
+        label: "Registrado por",
+        help: "User who made this change. NULL = system-initiated (boot sync, migration, scheduled job) — never a sentinel string."
       },
       recorded_at: {
         label: "Registrado el"

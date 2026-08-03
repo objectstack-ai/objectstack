@@ -24,6 +24,9 @@ export { default as MigrateApplyCommand } from './commands/migrate/apply.js';
 // ADR-0119 D2 (#4617): act on a run the journal says was interrupted. Boot
 // discovers (MigrationRecoveryPlugin); this acts, under operator intent.
 export { default as MigrateResumeCommand } from './commands/migrate/resume.js';
+// #4556: rewrite the legacy `'system'` sentinel in
+// `sys_metadata_history.recorded_by` to NULL, through the same journal.
+export { default as MigrateRecordedByCommand } from './commands/migrate/recorded-by.js';
 
 // ─── Environments topic subcommands ─────────────────────────────────
 export { default as EnvironmentsListCommand } from './commands/environments/list.js';

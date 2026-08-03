@@ -2746,7 +2746,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "Organization for multi-tenant isolation."
       },
       recorded_by: {
-        label: "Recorded By"
+        label: "Recorded By",
+        help: "User who made this change. NULL = system-initiated (boot sync, migration, scheduled job) — never a sentinel string."
       },
       recorded_at: {
         label: "Recorded At"
