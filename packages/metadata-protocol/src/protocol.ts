@@ -6839,7 +6839,10 @@ export class ObjectStackProtocolImplementation implements
             try {
                 const result = await repo.put(ref, request.item, {
                     parentVersion,
-                    actor: request.actor ?? 'system',
+                    // #4556 — `actor` lands in `sys_metadata_history.recorded_by`,
+                    // a lookup('sys_user'). No caller actor → NULL, never the
+                    // sentinel string 'system' (which resolves to no user row).
+                    actor: request.actor ?? null,
                     source: writeSource,
                     intent,
                     state: mode === 'draft' ? 'draft' : 'active',
@@ -7476,7 +7479,8 @@ export class ObjectStackProtocolImplementation implements
         } as Parameters<typeof repo.promoteDraft>[0];
         try {
             const result = await repo.promoteDraft(ref, {
-                actor: request.actor ?? 'system',
+                // #4556 — NULL, not 'system', for an actor-less publish.
+                actor: request.actor ?? null,
                 source: 'protocol.publishMetaItem',
                 ...(request.message ? { message: request.message } : {}),
                 intent,
@@ -8621,7 +8625,9 @@ export class ObjectStackProtocolImplementation implements
         }
         const items = this.parseCommitItems(row.items);
         const repo = this.getOverlayRepo(orgId);
-        const actor = request.actor ?? 'system';
+        // #4556 — threaded into repo.put/delete → `recorded_by`; NULL when the
+        // revert carries no human actor.
+        const actor = request.actor ?? null;
         const reverted: Array<{ type: string; name: string; action: 'removed' | 'restored' }> = [];
         const failed: Array<{ type: string; name: string; error: string; code?: string }> = [];
 
@@ -8801,7 +8807,8 @@ export class ObjectStackProtocolImplementation implements
         } as Parameters<typeof repo.restoreVersion>[0];
         try {
             const result = await repo.restoreVersion(ref, request.toVersion, {
-                actor: request.actor ?? 'system',
+                // #4556 — NULL, not 'system', for an actor-less rollback.
+                actor: request.actor ?? null,
                 source: 'protocol.rollbackMetaItem',
                 ...(request.message ? { message: request.message } : {}),
                 intent,
@@ -9063,7 +9070,8 @@ export class ObjectStackProtocolImplementation implements
 
                 const result = await repo.delete(ref, {
                     parentVersion,
-                    actor: request.actor ?? 'system',
+                    // #4556 — NULL, not 'system', for an actor-less delete.
+                    actor: request.actor ?? null,
                     source: 'protocol.deleteMetaItem',
                     intent: this.isArtifactBacked(singularTypeForRepo, request.name)
                         ? 'override-artifact'
