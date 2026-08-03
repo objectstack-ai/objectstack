@@ -131,8 +131,13 @@ describe('data.batchTransaction (live Hono, #1604)', () => {
         expect(child.project).toBe(parent.id);
 
         // Both rows are readable afterwards through the ordinary data API.
+        // One shape only (#4793): `data.get` answers the declared
+        // `GetDataResponseSchema` envelope — the record rides `record`. The
+        // old `?? (x as any).record?.project` double-shape hedge is exactly
+        // the "test can't say which side is true" tax the contract exists to
+        // remove.
         const storedChild = await client.data.get<any>('task', child.id);
-        expect((storedChild as any).project ?? (storedChild as any).record?.project).toBeDefined();
+        expect(storedChild.record?.project).toBe(parent.id);
     });
 
     it('is mirrored on the environment-scoped client (/environments/:id/batch)', async () => {

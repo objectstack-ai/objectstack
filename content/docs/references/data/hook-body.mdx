@@ -5,34 +5,6 @@ description: Hook Body protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Capability tokens a script body may request.
-
-The runtime sandbox enforces these — if a body uses a `ctx` API that requires
-
-a capability it did not declare, the call throws at invocation time.
-
-- `api.read`   — `ctx.api.object(...).find / findOne / count / aggregate`
-
-- `api.write`  — `ctx.api.object(...).insert / update / delete`
-
-- `api.transaction` — `ctx.api.transaction(async () => \{ … \})` — runs the
-
-callback's `ctx.api` writes/reads inside one driver transaction, committed
-
-on return and rolled back if the callback throws. Requires `api.write`
-
-alongside it to be useful (the transaction body still needs write access).
-
-- `crypto.uuid` — `ctx.crypto.randomUUID()`
-
-- `crypto.hash` — `ctx.crypto.hash(algo, data)`
-
-- `log`        — `ctx.log.info / warn / error`
-
-`http.fetch` is intentionally absent — outbound calls go through Connector
-
-recipes (separate spec) so they remain auditable and replayable.
-
 <Callout type="info">
 **Source:** `packages/spec/src/data/hook-body.zod.ts`
 </Callout>
@@ -94,7 +66,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | :--- | :--- | :--- | :--- |
 | **language** | `'js'` | ✅ |  |
 | **source** | `string` | ✅ | Function body source |
-| **capabilities** | `Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'crypto.hash' \| 'log'>[]` | ✅ | Granted capability tokens |
+| **capabilities** | `Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]` | ✅ | Granted capability tokens |
 | **timeoutMs** | `integer` | optional | Per-invocation timeout (ms) |
 | **memoryMb** | `integer` | optional | Per-invocation memory cap (MB) |
 
@@ -111,7 +83,6 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 * `api.write`
 * `api.transaction`
 * `crypto.uuid`
-* `crypto.hash`
 * `log`
 
 
@@ -127,7 +98,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | :--- | :--- | :--- | :--- |
 | **language** | `'js'` | ✅ |  |
 | **source** | `string` | ✅ | Function body source |
-| **capabilities** | `Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'crypto.hash' \| 'log'>[]` | ✅ | Granted capability tokens |
+| **capabilities** | `Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]` | ✅ | Granted capability tokens |
 | **timeoutMs** | `integer` | optional | Per-invocation timeout (ms) |
 | **memoryMb** | `integer` | optional | Per-invocation memory cap (MB) |
 

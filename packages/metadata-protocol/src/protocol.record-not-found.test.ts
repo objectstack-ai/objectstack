@@ -170,7 +170,8 @@ describe('[#4435] deleteManyData reports per id, not per request', () => {
     // Pre-#4435: { succeeded: 1, failed: 0, results: [{ success: true }] }.
     expect(res).toMatchObject({ success: false, total: 1, succeeded: 0, failed: 1 });
     expect(res.results[0]).toMatchObject({ id: 'nonexistent_1', success: false });
-    expect(res.results[0].error).toContain('nonexistent_1');
+    expect(res.results[0].errors[0].message).toContain('nonexistent_1');
+    expect(res.results[0].errors[0].code).toBe('RECORD_NOT_FOUND');
   });
 
   it('mixed ids are reported individually', async () => {

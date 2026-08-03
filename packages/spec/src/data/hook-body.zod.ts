@@ -3,6 +3,23 @@
 import { z } from 'zod';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
 
+// Retired token prescription. Declared with `//` (never `/** */`) and ABOVE the
+// capability enum's JSDoc on purpose — see the placement note below: build-docs
+// takes the file's FIRST JSDoc as the reference page's module blurb, so a doc
+// comment here would replace the whole capability-token table.
+const CRYPTO_HASH_RETIRED =
+  "`crypto.hash` was removed from `HookBodyCapability` in @objectstack/spec 17 (#4391, "
+  + 'ADR-0049 enforce-or-remove) — the sandbox never implemented it. `installCtx` wired only '
+  + '`ctx.crypto.randomUUID`, so `ctx.crypto.hash(...)` threw inside the VM on every call the '
+  + 'token ever "granted", while the build-time extractor inferred the token from that very '
+  + 'call and let `os build` pass. Delete the capability from `capabilities` AND delete the '
+  + '`ctx.crypto.hash(...)` call it was declared for — the call has never returned a value, so '
+  + 'nothing that works today depends on it. There is no replacement inside the sandbox: hash '
+  + 'in the host (a Connector recipe, or an engine-side hook) instead. If you need hashing in '
+  + 'a body, reopen it through the capability admission process — implementation first, the '
+  + 'declaration lands with the implementation. '
+  + 'Run `os migrate meta --from 16` to rewrite it automatically.';
+
 /**
  * Capability tokens a script body may request.
  *
@@ -16,20 +33,31 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
  *   on return and rolled back if the callback throws. Requires `api.write`
  *   alongside it to be useful (the transaction body still needs write access).
  * - `crypto.uuid` — `ctx.crypto.randomUUID()`
- * - `crypto.hash` — `ctx.crypto.hash(algo, data)`
  * - `log`        — `ctx.log.info / warn / error`
  *
  * `http.fetch` is intentionally absent — outbound calls go through Connector
  * recipes (separate spec) so they remain auditable and replayable.
+ *
+ * `crypto.hash` was REMOVED in 17 (#4391): declared here, inferred by the CLI
+ * extractor and typed on `ScriptContext`, but never installed on the VM's
+ * `ctx.crypto` — so the one thing it authorised always threw. Every layer that
+ * advertised it is gone in the same change; a body that still declares it is
+ * rejected at parse with {@link CRYPTO_HASH_RETIRED}. It comes back only WITH
+ * an implementation (ADR-0049's enforce leg), not ahead of one.
  */
 export const HookBodyCapability = z.enum([
   'api.read',
   'api.write',
   'api.transaction',
   'crypto.uuid',
-  'crypto.hash',
   'log',
-]);
+], {
+  // Only the value that USED to be legal gets the retirement prescription —
+  // telling the author of `crypto.hsah` that their value "was removed" would
+  // misinform. Everything else keeps zod's own enum message, which already
+  // lists the legal tokens. (The `managedBy: 'system'` precedent, object.zod.ts.)
+  error: (issue) => (issue.input === 'crypto.hash' ? CRYPTO_HASH_RETIRED : undefined),
+});
 export type HookBodyCapability = z.infer<typeof HookBodyCapability>;
 
 /*

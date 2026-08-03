@@ -156,8 +156,8 @@ describe('atomic batchData over the real engine (ADR-0119 D4 / ADR-0034)', () =>
         expect(res.success).toBe(false);
         expect(res.succeeded).toBe(0);
         expect(res.results.every((r: any) => r.success === false)).toBe(true);
-        expect(res.results[0].error).toMatch(/^ROLLED_BACK:/);
-        expect(res.results[2].error).toContain('constraint violated');
+        expect(res.results[0].errors?.[0]?.code).toBe('ROLLED_BACK');
+        expect(res.results[2].errors?.[0]?.message).toContain('constraint violated');
     });
 
     it('leaves rows written BEFORE the batch untouched when it rolls back', async () => {

@@ -25,12 +25,14 @@ export type CompareTo = DatasetCompareTo;
  * runtime filter, compareTo) into one or more `AnalyticsQuery`s against the Cube
  * runtime, then post-processes the results:
  *   - resolves the base measures a selection needs (including derived deps),
- *   - applies measure-scoped filters via supplementary grouped queries,
+ *   - applies measure-scoped filters via supplementary grouped queries — in
+ *     EVERY window it runs, the `compareTo` one included (#4820),
  *   - fills the empty-group value into columns no query reported, by aggregate
  *     kind (#4708) — a count/sum over an excluded group is 0, avg/min/max null,
  *   - evaluates derived measures (ratio/sum/difference/product) row-by-row (Q1),
- *   - shifts the query for `compareTo` (previousPeriod / previousYear) and
- *     attaches `<measure>__compare` columns,
+ *   - shifts the queries for `compareTo` (previousPeriod / previousYear) and
+ *     attaches `<measure>__compare` columns, re-running the same measure pass
+ *     so a filtered measure means the same thing in both columns,
  *   - computes server-side totals (`selection.totals.groupings`, #1753) by
  *     re-running the selection per dimension subset, so matrix subtotals and
  *     the grand total use each measure's true aggregate,
@@ -131,6 +133,36 @@ export function combineFilters(
 ): FilterCondition | undefined {
   if (a && b) return { $and: [a, b] } as FilterCondition;
   return a ?? b;
+}
+
+/**
+ * Partition base measures into those the dataset scopes with their own
+ * measure-level `filter` and those it does not — the single place that answers
+ * "does this measure carry its own filter?".
+ *
+ * Paired with {@link DatasetExecutor.runMeasurePass}, this is what keeps ONE
+ * definition of "how a measure filter is applied" for every grouped pass the
+ * executor runs: the current period, each `totals` subset, and the `compareTo`
+ * window. `compareTo` used to issue a single shifted query over all base
+ * measures with only the base filter, consulting `measureFilters` nowhere on
+ * that path — so a measure declared `filter: { stage: 'closed_won' }` was
+ * scoped in its own column and unscoped in `<measure>__compare`: two different
+ * measures rendered side by side under one label, and biased the worst way
+ * (the comparison window is inflated by exactly the rows the measure exists to
+ * exclude, so "won deals vs. last month" reads as a collapse). #4820.
+ *
+ * The remedy is deliberately NOT a second copy of the filter logic on the
+ * compare path — two implementations of one rule diverge again at the next
+ * change. Both paths call the same split and the same pass.
+ */
+export function splitMeasuresByFilter(
+  measures: Iterable<string>,
+  measureFilters: Record<string, FilterCondition | undefined>,
+): { unfiltered: string[]; filtered: string[] } {
+  const unfiltered: string[] = [];
+  const filtered: string[] = [];
+  for (const m of measures) (measureFilters[m] ? filtered : unfiltered).push(m);
+  return { unfiltered, filtered };
 }
 
 /**
@@ -544,11 +576,7 @@ export class DatasetExecutor {
     }
 
     // Split measures into those with a scoped filter and those without.
-    const unfiltered: string[] = [];
-    const filtered: string[] = [];
-    for (const m of baseMeasures) {
-      (compiled.measureFilters[m] ? filtered : unfiltered).push(m);
-    }
+    const { unfiltered, filtered } = splitMeasuresByFilter(baseMeasures, compiled.measureFilters);
 
     const baseFilter = combineFilters(compiled.filter, selection.runtimeFilter);
     const dimensions = selection.dimensions ?? [];
@@ -584,34 +612,17 @@ export class DatasetExecutor {
       ? { order, limit: selection.limit, offset: selection.offset }
       : undefined;
 
-    // Primary query: all unfiltered base measures in one pass. When every base
-    // measure is filter-scoped, the supplementary queries below build the grid.
-    let result: AnalyticsResult;
-    if (unfiltered.length > 0 || filtered.length === 0) {
-      result = await this.service.query(this.buildQuery(compiled, {
-        measures: unfiltered,
-        dimensions,
-        where: baseFilter,
-        selection,
-        contextTimezone: context?.timezone,
-        window: windowQuery,
-      }), context);
-    } else {
-      result = { rows: [], fields: [] };
-    }
+    // The current-period pass: unfiltered base measures in one query plus one
+    // supplementary query per measure-scoped filter, merged by dimension key.
+    const result = await this.runMeasurePass(compiled, selection, {
+      measures: [...baseMeasures],
+      dimensions,
+      baseFilter,
+      window: windowQuery,
+      context,
+    });
 
-    // Supplementary queries: one per measure-scoped filter, merged by dimension key.
-    for (const m of filtered) {
-      const mFilter = combineFilters(baseFilter, compiled.measureFilters[m]);
-      const sub = await this.service.query(this.buildQuery(compiled, {
-        measures: [m], dimensions, where: mFilter, selection,
-        contextTimezone: context?.timezone,
-      }), context);
-      result.rows = mergeByDimensions(result.rows, sub.rows, dimensions, [m]);
-      result.fields.push({ name: m, type: 'number' });
-    }
-
-    // compareTo — run a shifted query over the same base measures and attach.
+    // compareTo — run the SAME pass over the shifted window and attach.
     if (selection.compareTo) {
       const compareRows = await this.runCompare(compiled, selection, [...baseMeasures], dimensions, baseFilter, context);
       result.rows = mergeByDimensions(
@@ -678,6 +689,80 @@ export class DatasetExecutor {
     }
     result.rows = applyOrdering(result.rows, order, sortKeys);
     result.rows = applyWindow(result.rows, selection.limit, selection.offset);
+
+    return result;
+  }
+
+  /**
+   * Run ONE grouped pass over a set of base measures, honouring each measure's
+   * own scoped `filter`: the unfiltered measures in a single query, plus one
+   * supplementary query per filter-scoped measure, merged back by dimension key.
+   *
+   * **This is the executor's only implementation of "how a measure filter is
+   * applied", and every window goes through it** — the current period, each
+   * `totals` subset (which re-enters via `executeSelection`), and the
+   * `compareTo` window. Before #4820 the comparison window had its own,
+   * simpler answer: one shifted query over all base measures with only the
+   * base filter, so `compiled.measureFilters` was never read on that path.
+   * `won_count` counted won deals and `won_count__compare` counted every deal,
+   * under one label, in adjacent columns. Only measures carrying a filter were
+   * wrong — which is what made it survive: the unfiltered ones next to them
+   * compared correctly.
+   *
+   * The caller supplies the `selection` this pass queries under, which is how
+   * the comparison window differs at all: same measures, same dimensions, same
+   * filters — a `timeDimensions` shifted by {@link shiftRange}. Nothing else
+   * about the two passes may drift, because anything that does becomes a
+   * discrepancy between two columns the reader is invited to subtract.
+   *
+   * Cost: one extra query per filter-scoped measure when `compareTo` is set.
+   * The alternative — declaring the discrepancy in the response — is not one,
+   * since the two columns exist to be directly comparable.
+   *
+   * @param window - Ordering/window to push into the SQL. Only ever set for a
+   *   selection the caller proved is a single self-sufficient query; a pass
+   *   that fans out must return its whole grid for the merge.
+   */
+  private async runMeasurePass(
+    compiled: CompiledDataset,
+    selection: DatasetSelection,
+    opts: {
+      measures: string[];
+      dimensions: string[];
+      baseFilter?: FilterCondition;
+      window?: { order?: Record<string, 'asc' | 'desc'>; limit?: number; offset?: number };
+      context?: ExecutionContext;
+    },
+  ): Promise<AnalyticsResult> {
+    const { measures, dimensions, baseFilter, window, context } = opts;
+    const { unfiltered, filtered } = splitMeasuresByFilter(measures, compiled.measureFilters);
+
+    // Primary query: all unfiltered base measures in one pass. When every base
+    // measure is filter-scoped, the supplementary queries below build the grid.
+    let result: AnalyticsResult;
+    if (unfiltered.length > 0 || filtered.length === 0) {
+      result = await this.service.query(this.buildQuery(compiled, {
+        measures: unfiltered,
+        dimensions,
+        where: baseFilter,
+        selection,
+        contextTimezone: context?.timezone,
+        window,
+      }), context);
+    } else {
+      result = { rows: [], fields: [] };
+    }
+
+    // Supplementary queries: one per measure-scoped filter, merged by dimension key.
+    for (const m of filtered) {
+      const mFilter = combineFilters(baseFilter, compiled.measureFilters[m]);
+      const sub = await this.service.query(this.buildQuery(compiled, {
+        measures: [m], dimensions, where: mFilter, selection,
+        contextTimezone: context?.timezone,
+      }), context);
+      result.rows = mergeByDimensions(result.rows, sub.rows, dimensions, [m]);
+      result.fields.push({ name: m, type: 'number' });
+    }
 
     return result;
   }
@@ -796,21 +881,25 @@ export class DatasetExecutor {
     const shiftedTd = (selection.timeDimensions ?? []).map((t) =>
       t.dimension === cmp.dimension ? { ...t, dateRange: shifted } : t,
     );
-    // Built through `buildQuery` so the comparison pass buckets its date
-    // dimensions EXACTLY like the primary pass. Hand-rolling the query here
-    // skipped granularity resolution, so a bucketed primary grid ("2026-04")
-    // was merged against raw-timestamp comparison rows and no dimension key
-    // ever matched — every `__compare` column came back empty. The shifted
-    // `timeDimensions` still win for their own dimension (rule 1 of the
-    // precedence chain); `window` is deliberately omitted — the comparison grid
-    // must stay whole for the merge.
-    const sub = await this.service.query(this.buildQuery(compiled, {
-      measures,
-      dimensions,
-      where: baseFilter,
-      selection: { ...selection, timeDimensions: shiftedTd },
-      contextTimezone: context?.timezone,
-    }), context);
+    // Run the SAME pass the current period ran, over the shifted window: same
+    // measures, same dimensions, same base filter, and — since #4820 — the same
+    // measure-scoped filters, applied by the same supplementary sub-queries.
+    // Issuing one flat query here instead is what made `<measure>__compare`
+    // report a different measure than the column beside it.
+    //
+    // Going through `runMeasurePass` (and so `buildQuery`) also keeps the
+    // comparison pass bucketing its date dimensions EXACTLY like the primary
+    // pass. Hand-rolling the query here skipped granularity resolution, so a
+    // bucketed primary grid ("2026-04") was merged against raw-timestamp
+    // comparison rows and no dimension key ever matched — every `__compare`
+    // column came back empty. The shifted `timeDimensions` still win for their
+    // own dimension (rule 1 of the precedence chain); `window` is deliberately
+    // omitted — the comparison grid must stay whole for the merge.
+    const sub = await this.runMeasurePass(
+      compiled,
+      { ...selection, timeDimensions: shiftedTd },
+      { measures, dimensions, baseFilter, context },
+    );
     // Rename measure columns to `<measure>__compare` so they merge alongside primary.
     return sub.rows.map((row) => {
       const out: Record<string, unknown> = {};

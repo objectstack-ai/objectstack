@@ -156,3 +156,30 @@ Integration against a real `ObjectQL` with a transaction-capable driver (`packag
 8. A poisoned row rolls back the whole batch — zero rows persisted.
 9. An atomic upsert's internal `findOne` runs on the transaction's connection (the no-deadlock pin ADR-0034's absence of coverage originally cost us).
 10. The engine typed as `IObjectQLEngine` can call `.transaction` with no cast — a compile-time pin on D1.
+
+---
+
+## Addendum (2026-08-03) — the D4 row marking became structured, and the deferred shape divergence is closed
+
+Two of the items this record deferred are now landed, and one detail of D4's
+wording is superseded by them:
+
+- [#4620](https://github.com/objectstack-ai/objectstack/issues/4620) (PR #4798)
+  extended D4's real-or-refused `atomic` to `deleteManyData` / `updateManyData`
+  through one shared runner.
+- [#4793](https://github.com/objectstack-ai/objectstack/issues/4793) closed the
+  per-row result shape's divergence from `BatchOperationResultSchema` — the
+  reconciliation D4 deliberately kept off its bug fix. The rows of all three
+  bulk-write endpoints now deliver the declared shape (`errors: ApiError[]`,
+  `data`, `index`), pinned by a conformance test
+  (`packages/metadata-protocol/src/protocol.batch-row-conformance.test.ts`)
+  that parses every emitted row against the schema.
+
+With that migration, the `ROLLED_BACK:` / `NOT_ATTEMPTED:` **message-string
+prefixes** this record's D4 text and test plan describe are superseded by
+**structured codes**: the same two words are now `errors[0].code` values
+registered in the ADR-0112 `ERROR_CODE_LEDGER`, with the message carrying only
+the human-readable cause and causal row index. The D4 invariant is unchanged —
+a rolled-back batch reports zero successes and every row says what happened to
+it; only the encoding moved from a prefix convention a client had to regex to a
+code a client branches on.

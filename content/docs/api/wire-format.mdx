@@ -475,7 +475,7 @@ Process many records of a **single** operation type in one request. The body car
 
 By default (`options.atomic` omitted or `false`) processing stops at the first failing record, and records written earlier in the same batch are **not** rolled back — there is no wrapping transaction. Add `options.continueOnError: true` to keep going instead and collect a full partial-success report.
 
-Send `options.atomic: true` to run the whole batch inside one database transaction: the first failure rolls back every prior write, and the response reports zero successes with each row marked `ROLLED_BACK:`, the causal error, or `NOT_ATTEMPTED:`. A deployment whose driver cannot roll back **rejects** an atomic request with `501 NOT_IMPLEMENTED` rather than quietly running it best-effort — probe `capabilities.transactionalBatch` on `/discovery` to know in advance. `atomic` takes precedence over `continueOnError`.
+Send `options.atomic: true` to run the whole batch inside one database transaction: the first failure rolls back every prior write, and the response reports zero successes — each row's `errors[0].code` says what happened: `ROLLED_BACK` (written, then undone), the causal row's own error code, or `NOT_ATTEMPTED` (never reached). A deployment whose driver cannot roll back **rejects** an atomic request with `501 NOT_IMPLEMENTED` rather than quietly running it best-effort — probe `capabilities.transactionalBatch` on `/discovery` to know in advance. `atomic` takes precedence over `continueOnError`.
 
 ### Request
 
@@ -495,7 +495,7 @@ Send `options.atomic: true` to run the whole batch inside one database transacti
 
 ### Response — `200 OK`
 
-The response is the `BatchUpdateResponse` envelope: a top-level `success` flag plus `total` / `succeeded` / `failed` counts and a per-record `results` array. Each successful entry echoes the written `record`; pass `options.returnRecords: false` to get back just `{ id, success }` per result.
+The response is the `BatchUpdateResponse` envelope: a top-level `success` flag plus `total` / `succeeded` / `failed` counts and a per-record `results` array — each entry is a `BatchOperationResult` (`id`, `success`, `index`, optional `errors`, optional `data`). `index` is the row's position in the request `records` array. Each successful entry echoes the written record on `data`; pass `options.returnRecords: false` to get back just `{ id, success, index }` per result.
 
 ```json
 {
@@ -505,15 +505,15 @@ The response is the `BatchUpdateResponse` envelope: a top-level `success` flag p
   "succeeded": 2,
   "failed": 0,
   "results": [
-    { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "success": true, "record": { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "status": "done" } },
-    { "id": "tsk_01HQ4B8C0E4G6H9K3L5M", "success": true, "record": { "id": "tsk_01HQ4B8C0E4G6H9K3L5M", "status": "done" } }
+    { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "success": true, "index": 0, "data": { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "status": "done" } },
+    { "id": "tsk_01HQ4B8C0E4G6H9K3L5M", "success": true, "index": 1, "data": { "id": "tsk_01HQ4B8C0E4G6H9K3L5M", "status": "done" } }
   ]
 }
 ```
 
 ### Partial Failure Response
 
-When the batch is not atomic and some records fail, the failing entries carry a single `error` message string (not an array). An atomic batch never returns this shape — it either commits everything or reports every row as failed:
+When the batch is not atomic and some records fail, each failing entry carries an `errors` array of `ApiError` objects — read the human-readable cause from `errors[0].message` and branch on the machine-readable `errors[0].code`. An atomic batch never returns this shape — it either commits everything or reports every row as failed (with `errors[0].code` `ROLLED_BACK` / the causal code / `NOT_ATTEMPTED`):
 
 ```json
 {
@@ -523,8 +523,8 @@ When the batch is not atomic and some records fail, the failing entries carry a 
   "succeeded": 1,
   "failed": 1,
   "results": [
-    { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "success": true, "record": { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "status": "done" } },
-    { "id": "tsk_invalid_id", "success": false, "error": "Record tsk_invalid_id not found in task" }
+    { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "success": true, "index": 0, "data": { "id": "tsk_01HQ4A7B9D3F5G8J2K4L", "status": "done" } },
+    { "id": "tsk_invalid_id", "success": false, "index": 1, "errors": [{ "code": "RECORD_NOT_FOUND", "message": "Record tsk_invalid_id not found in task", "httpStatus": 404 }] }
   ]
 }
 ```

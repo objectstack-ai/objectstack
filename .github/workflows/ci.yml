@@ -75,11 +75,13 @@ jobs:
               - '.github/workflows/ci.yml'
 
   test:
-    # Sharded 2-way BY PACKAGE: a core-touching PR ran the affected suite
-    # ~11½ min on one 4-vCPU runner — the longest pole in the whole workflow.
-    # scripts/partition-test-shards.mjs splits the package list into two
-    # deterministic, test-file-count-balanced halves (573/572 at the time of
-    # writing) and each shard runs its half through turbo. NOT the dogfood
+    # Sharded 3-way BY PACKAGE: a core-touching PR ran the affected suite
+    # ~11½ min on one 4-vCPU runner — the longest pole in the whole workflow —
+    # and at 2 shards the slower shard still ran ~10 min, keeping merge-queue
+    # builds at ~11 min end-to-end (#4859).
+    # scripts/partition-test-shards.mjs splits the package list into three
+    # deterministic, test-file-count-balanced thirds and each shard runs its
+    # slice through turbo. NOT the dogfood
     # job's vitest --shard passthrough, deliberately: that works for dogfood
     # because it is ONE package with ~60 files, but applied workspace-wide,
     # vitest 4 hard-fails every package with fewer test files than the shard
@@ -90,13 +92,13 @@ jobs:
     # Branch protection requires the bare "Test Core" context, which a matrix
     # can never publish again — the test-gate job below carries that name
     # (the #3622 lesson; see dogfood-gate).
-    name: Test Core (${{ matrix.shard }}/2)
+    name: Test Core (${{ matrix.shard }}/3)
     needs: filter
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test steps is the primary
     # detector for a #4250-style hang and fires well before this. 30 min is
-    # ~4× a normal sharded run (~6-7 min), with margin for a cold Turbo cache;
+    # ~5× a normal sharded run (~4-6 min), with margin for a cold Turbo cache;
     # the old 45 left a hung job "running" for half an hour past any plausible
     # healthy finish.
     timeout-minutes: 30
@@ -105,7 +107,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
 
     steps:
       - name: Checkout repository
@@ -190,7 +192,7 @@ jobs:
             pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
           fi
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
-            --shard ${{ matrix.shard }}/2 --exclude @objectstack/dogfood \
+            --shard ${{ matrix.shard }}/3 --exclude @objectstack/dogfood \
             > "$RUNNER_TEMP/shard-packages.txt"
           echo "Packages on this shard:"
           cat "$RUNNER_TEMP/shard-packages.txt"
@@ -499,18 +501,19 @@ jobs:
               test
 
   dogfood:
-    # Sharded 2-way: the suite is ~60 independent test files, each booting its
-    # own in-process app, and a single 4-vCPU runner needed ~7½ minutes for the
-    # lot — the longest pole in the whole workflow. vitest partitions the file
-    # list deterministically across shards; both shards must pass. If branch
-    # protection lists "Dogfood Regression Gate" as a required check, it must be
-    # updated to the two sharded check names.
-    name: Dogfood Regression Gate (${{ matrix.shard }}/2)
+    # Sharded 3-way: the suite is ~60 independent test files, each booting its
+    # own in-process app; a single 4-vCPU runner needed ~7½ minutes for the
+    # lot, and at 2 shards each half still ran ~7 min — the longest pole left
+    # once Test Core went 3-way (#4859). vitest partitions the file list
+    # deterministically across shards; all shards must pass. Branch protection
+    # requires only the bare "Dogfood Regression Gate" context, carried by the
+    # dogfood-gate job below — the shard count can change without touching it.
+    name: Dogfood Regression Gate (${{ matrix.shard }}/3)
     needs: filter
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test step is the primary detector
-    # for a #4250-style hang (see Test Core). 30 min is ~4× a shard (~7 min;
+    # for a #4250-style hang (see Test Core). 30 min is ~6× a shard (~5 min;
     # the verify-CLI pass that used to ride shard 1 is its own parallel job
     # now — dogfood-verify below).
     timeout-minutes: 30
@@ -519,7 +522,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
 
     steps:
       - name: Checkout repository
@@ -552,7 +555,10 @@ jobs:
       # Shard-scoped key: the turbo test hash differs per shard (pass-through
       # args are part of the task hash). Restore-only on PRs — see the Restore
       # Turbo cache comment in the test job; the save step at the end of this
-      # job seeds from main only.
+      # job seeds from main only. The job-level catch-all (same as Test Core's)
+      # is what keeps a NEW shard number warm before main has ever saved it:
+      # turbo's cache is content-addressed per task, so another shard's entries
+      # replay the shared build closure even when the test slice differs.
       - name: Restore Turbo cache
         uses: actions/cache/restore@v6
         with:
@@ -561,6 +567,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -585,7 +592,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test --filter=@objectstack/dogfood -- --shard=${{ matrix.shard }}/2
+            pnpm turbo run test --filter=@objectstack/dogfood -- --shard=${{ matrix.shard }}/3
 
       # Dogfood boots real apps in-process, so a native/OOM abort is likelier
       # here than in the unit suites — and a shard that dies silently looks like

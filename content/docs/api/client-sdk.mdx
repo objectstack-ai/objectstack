@@ -508,9 +508,13 @@ The `find` method accepts an options object with **canonical** (recommended) fie
 | `returnRecords` | `boolean` | `false` | Include full records in response |
 | `continueOnError` | `boolean` | `false` | Continue after errors (when atomic is false) |
 
-A rolled-back atomic batch reports `succeeded: 0`, with each row carrying
-`ROLLED_BACK:`, the causal error, or `NOT_ATTEMPTED:` — no row is reported as a
-success, because none of them survived.
+A rolled-back atomic batch reports `succeeded: 0`, with each row's
+`errors[0].code` set to `ROLLED_BACK` (written, then undone), the causal row's
+own error code, or `NOT_ATTEMPTED` (never reached) — no row is reported as a
+success, because none of them survived. Per-row results are the declared
+`BatchOperationResult` shape: failures ride `row.errors` (an `ApiError[]` —
+message in `errors[0].message`), records ride `row.data` when
+`returnRecords: true`, and `row.index` correlates the row to the request array.
 
 ---
 

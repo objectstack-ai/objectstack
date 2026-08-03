@@ -88,9 +88,10 @@ Sandbox essentials (full contract in
 - **`ctx.api.object(n)`** repo: `find` / `findOne` / `count` / `insert` /
   `update({ id, ...fields })` / `upsert` / `delete`. Query key is **`where`**
   (object + `$`-operators) — **not** `filter: [[…]]`.
-- **`capabilities`** (declare what the body uses, else it throws) — the six legal
-  tokens: `api.read`, `api.write`, `api.transaction`, `crypto.uuid`,
-  `crypto.hash`, `log`.
+- **`capabilities`** (declare what the body uses, else it throws) — the five legal
+  tokens: `api.read`, `api.write`, `api.transaction`, `crypto.uuid`, `log`.
+  There is **no hashing capability**: `crypto.hash` was removed in spec 17
+  (#4391) because the sandbox never implemented it.
 - Cross-object writes obey the **target's** sharing model — a `public_read`
   target rejects the write with `FORBIDDEN`, and **admin is not exempt**.
 - No `console` (use `ctx.log`), no `fetch` (use Connectors), no `import` /

@@ -36,7 +36,7 @@ describe('deleteManyData — the id set is the contract (#3897)', () => {
       success: true, operation: 'delete', total: 3, succeeded: 3, failed: 0,
     });
     expect(res.results).toEqual([
-      { id: 'a', success: true }, { id: 'b', success: true }, { id: 'c', success: true },
+      { id: 'a', success: true, index: 0 }, { id: 'b', success: true, index: 1 }, { id: 'c', success: true, index: 2 },
     ]);
   });
 
@@ -130,7 +130,12 @@ describe('deleteManyData — partial-failure semantics (#3897)', () => {
 
     expect(del).toHaveBeenCalledTimes(2);
     expect(res).toMatchObject({ success: false, total: 3, succeeded: 1, failed: 1 });
-    expect(res.results[1]).toEqual({ id: 'b', success: false, error: 'RLS: not visible' });
+    expect(res.results[1]).toEqual({
+      id: 'b', success: false, index: 1,
+      // A thrown error with no code of its own maps to the unclassified-500
+      // row form; the message survives verbatim (#4793).
+      errors: [{ code: 'INTERNAL_ERROR', message: 'RLS: not visible' }],
+    });
   });
 
   it('continueOnError keeps going and still marks the batch unsuccessful', async () => {

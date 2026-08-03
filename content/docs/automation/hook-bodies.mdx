@@ -100,9 +100,27 @@ The script sees only what the surrounding `ctx` object exposes:
 | `ctx.api.object(name).find\|count\|aggregate` | Cross-object reads, scoped to current tenant. | `api.read` |
 | `ctx.api.object(name).insert\|update\|delete` | Cross-object writes. | `api.write` |
 | `ctx.crypto.randomUUID()` | UUID generation. | `crypto.uuid` |
-| `ctx.crypto.hash(algo, data)` _(not yet wired)_ | Sha-256/512 etc. The `crypto.hash` capability exists in the schema and is inferred by the build-time extractor, but the QuickJS sandbox currently only installs `ctx.crypto.randomUUID` — calling `ctx.crypto.hash(...)` throws inside the VM today. | `crypto.hash` |
 | `ctx.log.{info,warn,error}` | Structured logging. | `log` |
 | `ctx.connector(name).<method>(...)` _(planned)_ | Outbound HTTP / SaaS calls. **Not yet wired into the sandbox** — ships with the separate Connector spec. | (separate Connector spec) |
+
+<Callout type="warn">
+**There is no hashing capability — `crypto.hash` was removed in spec 17.** Until
+17 the `crypto.hash` token was declared in `HookBodyCapability`, listed in this
+table, typed on `ScriptContext` and *auto-inferred by the build-time extractor* —
+but the sandbox never installed the function. Every call the token authorised
+threw inside the VM, while `os build` reported success precisely because writing
+`ctx.crypto.hash(...)` is what made the CLI grant the capability. All four
+declarations were removed together in #4391: declaring `crypto.hash` is now a
+parse error that explains this, and writing the call no longer earns a capability.
+
+**If you declared it:** delete the token from `capabilities` **and** delete the
+`ctx.crypto.hash(...)` call — the call has never returned a value, so nothing
+that works today depends on it. `os migrate meta --from 16` strips the token for
+you; the dead call is yours to remove. Hash in the host instead (a Connector
+recipe, or an engine-side hook). Hashing inside the sandbox comes back only
+*with* an implementation, via the capability admission process — the declaration
+follows the implementation, it never leads it.
+</Callout>
 
 ### What the sandbox forbids
 
@@ -296,7 +314,6 @@ The extractor scans each body for known patterns and adds the matching capabilit
 | `*.object(…).find / findOne / count / aggregate / get / list` | `api.read` |
 | `*.object(…).insert / update / upsert / delete / patch / remove / create` | `api.write` |
 | `ctx.crypto.randomUUID` | `crypto.uuid` |
-| `ctx.crypto.hash` | `crypto.hash` |
 | `ctx.log.info / warn / error / debug` | `log` |
 
 To override the inference, add a directive comment as the first line of your handler body:

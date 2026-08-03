@@ -112,9 +112,20 @@ export interface ScriptContext {
     warn: (msg: string, data?: unknown) => void;
     error: (msg: string, data?: unknown) => void;
   };
+  /**
+   * Host-provided crypto seam. `randomUUID` is the only member — it is the only
+   * one `installCtx` (quickjs-runner.ts) ever wired onto the VM's `ctx.crypto`.
+   *
+   * `hash?: (algo, data) => Promise< string >` was declared here until spec 17
+   * (#4391) with no implementation behind it anywhere: this signature, the
+   * `crypto.hash` capability token and the CLI's build-time inference all
+   * described a function the sandbox never installed, so the one call it typed
+   * threw inside the VM. Removed rather than implemented (ADR-0049) — hashing
+   * in the sandbox widens its capability and security-review surface and
+   * nothing pulled for it. It returns WITH an implementation, not ahead of one.
+   */
   crypto?: {
     randomUUID?: () => string;
-    hash?: (algo: string, data: string | Uint8Array) => Promise<string>;
   };
 }
 

@@ -488,6 +488,19 @@ const step17: MigrationStep = {
     + 'lying about a data-safety guarantee. No dry-run exists today; the schema tombstones the '
     + 'key with the prescription. It is HTTP-only (never stored in stack metadata), so the '
     + 'change is one semantic TODO for API callers rather than a stack conversion.\n\n'
+    + 'The batch response rows converge on their declared schema in the same window (#4793): '
+    + 'the per-row results of `/batch`, `/updateMany` and `/deleteMany` used to carry a legacy '
+    + 'implementation shape — `error: string`, `record`, no `index` — while '
+    + '`BatchOperationResultSchema`, the published client SDK type and the reference docs all '
+    + 'declared `errors: ApiError[]` / `data` / `index`. A consumer written against the '
+    + 'declaration read `row.errors` and got `undefined` at runtime — the exact "photographed '
+    + 'from the schema, dead on the wire" failure the enhanced-api-error rename above records. '
+    + 'The wire now delivers the declared shape, and the ADR-0119 D4 rollback marking is '
+    + 'structured with it: `ROLLED_BACK:` / `NOT_ATTEMPTED:` message prefixes become '
+    + 'first-class `ApiError.code` values, so clients branch on `errors[0].code` instead of '
+    + 'regexing message strings. A RESPONSE surface, never stored in stack metadata, so there '
+    + 'is no source for the chain to rewrite — one semantic TODO for readers of the old row '
+    + 'keys.\n\n'
     + 'It also narrows `QueryAST.fields` to field names (#4196): the `FieldNode` union carried a '
     + 'second `{ field, fields, alias }` nested-select member that nothing produced and nothing '
     + 'consumed — every reader on the path treats the list as `string[]`, so the object form was '
@@ -753,7 +766,24 @@ const step17: MigrationStep = {
     + 'recipient, and importing `DynamicLoadRequestSchema` at all is TS2305 in v17. The '
     + 'studio half of the `activationEvents` retirement is untouched and still rejects the '
     + 'key with its own prescription — `defineStudioPlugin` remains a live authoring surface. '
-    + 'Behaviour is again byte-identical: nothing ever executed a dynamic plugin operation.',
+    + 'Behaviour is again byte-identical: nothing ever executed a dynamic plugin operation.\n\n'
+    + "Finally it removes the script-body capability token 'crypto.hash' (#4391). Four layers "
+    + 'declared it — the `HookBodyCapability` enum, the doc table beside it, the CLI extractor '
+    + 'and `ScriptContext.crypto.hash` — and none implemented it: `installCtx` wired only '
+    + '`randomUUID`, so the one call the token authorised threw inside the VM every time. The '
+    + 'build-time inference made it worse than an ordinary declared-but-unenforced key: writing '
+    + '`ctx.crypto.hash(...)` made the CLI ADD the capability for you, so `os build` went green '
+    + 'on the body that was guaranteed to fail at the first record write. Removed rather than '
+    + 'implemented (ADR-0049) — hashing inside the sandbox widens its capability and '
+    + 'security-review surface, and a capability that throws on every use yet drew zero '
+    + 'complaints in its whole life is its own liveness verdict. This is an enum VALUE, not a '
+    + 'key, so there is no `retiredKey()` tombstone: the enum error map carries the '
+    + 'prescription, keyed on the received value so that only the spelling which used to be '
+    + 'legal is told it "was removed". The conversion strips the dead token from '
+    + '`body.capabilities` on hooks and actions; it deliberately does NOT touch the '
+    + '`ctx.crypto.hash(...)` call the body made under it, which never returned a value and '
+    + 'which the author must delete. Hashing returns only WITH an implementation, through the '
+    + 'capability admission process.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -791,6 +821,7 @@ const step17: MigrationStep = {
     'object-managed-by-system-to-system-data',
     'retry-policy-converged',
     'object-enable-trash-mru-removed',
+    'hook-body-crypto-hash-removed',
   ],
   semantic: [
     {
@@ -906,6 +937,39 @@ const step17: MigrationStep = {
       acceptanceCriteria:
         'No /batch, /updateMany or /deleteMany call sends `options.validateOnly`; a request that '
         + 'includes it answers 400 VALIDATION_FAILED with the retirement prescription.',
+    },
+    {
+      id: 'batch-row-result-schema-shape',
+      surface:
+        'api.batchOperationResult — the per-row `results` entries of BatchUpdateResponse '
+        + '(`POST /data/:object/batch`, `/updateMany`, `/deleteMany`)',
+      replacement:
+        '`errors: ApiError[]` (was `error: string` — read `row.errors?.[0]?.message`, branch on '
+        + '`row.errors?.[0]?.code`), `data` (was `record`), and `index` (new — the row\'s position '
+        + 'in the request array)',
+      reason:
+        'The rows the three bulk-write endpoints emitted had drifted from the schema that '
+        + 'declared them: `BatchOperationResultSchema`, the client SDK\'s exported '
+        + '`BatchOperationResult` type and the reference docs all said `errors: ApiError[]` / '
+        + '`data` / `index`, while the wire carried `error: string` / `record` and never sent '
+        + '`index` at all. A TypeScript consumer written against the published type compiled, '
+        + 'validated and read `undefined` at runtime — the declared-but-not-delivered shape this '
+        + 'registry exists to close, on the response envelope (ADR-0119 D4 deferred the '
+        + 'reconciliation off a bug fix; this is that tracked change, shipped in the 17 major '
+        + 'window). The ADR-0119/#4620 rollback marking is structured in the same move: the '
+        + '`ROLLED_BACK:` / `NOT_ATTEMPTED:` message-string prefixes become registered '
+        + '`ApiError.code` values (message keeps the human-readable cause and causal row index), '
+        + 'so "attempted and undone" vs "never ran" is machine-readable instead of a regex '
+        + 'convention. A RESPONSE surface — nothing stored in stack metadata carries a batch '
+        + 'row, so there is no source for the chain to rewrite; consumers of the legacy keys '
+        + 'move their reads themselves. Off-contract readers only: the legacy keys were never '
+        + 'in the schema or the SDK types, so a typed consumer needs no change. #4793.',
+      acceptanceCriteria:
+        'No consumer reads `row.error` or `row.record` on a batch result row; failures are read '
+        + 'from `row.errors` (message via `errors[0].message`, rollback state via '
+        + '`errors[0].code` — ROLLED_BACK / NOT_ATTEMPTED), records from `row.data`, and rows '
+        + 'correlate to the request via `row.index`. Every row the three endpoints emit parses '
+        + 'under `BatchOperationResultSchema` with those keys present.',
     },
     {
       id: 'query-joins-retired',
