@@ -18,6 +18,7 @@ import type { Expression } from '@objectstack/spec';
 import type { HookHandler } from './engine.js';
 import { ExpressionEngine } from '@objectstack/formula';
 import { noopHookMetricsRecorder, type HookMetricsRecorder, type HookMetricOutcome } from './hook-metrics.js';
+import { materializeDeclaredFields } from './declared-fields.js';
 
 export interface WrapDeclarativeOptions {
   /** Logger for declarative-layer diagnostics (timeouts, retries, swallowed errors). */
@@ -48,11 +49,12 @@ const noopLogger = {
  *   4. timeout    → abort if handler runs too long
  *   5. onError    → swallow when set to 'log'
  *
- * The condition formula is evaluated against the most useful record-shaped
- * payload available on the context (write payloads first, then `previous`,
- * then a flat merge of input). Read events typically have no record yet,
- * so a condition on a `beforeFind` will simply skip when no data is
- * present.
+ * The condition formula is evaluated against the record-shaped view of the
+ * context built by {@link pickRecordPayload}: for a write, the stored record
+ * overlaid with this write's payload, made total over the object's declared
+ * fields (#4770 — the same shape a validation predicate reads). Read events
+ * typically have no record yet, so a condition on a `beforeFind` will simply
+ * skip when no data is present.
  */
 export function wrapDeclarativeHook(
   meta: Hook,
@@ -317,20 +319,88 @@ function installFlatInput(ctx: HookContext): () => void {
   };
 }
 
+/** Hook events whose write has no prior state at all — absence of a key on the
+ *  payload genuinely means "no value", never "unchanged". */
+function isInsertEvent(event: unknown): boolean {
+  return event === 'beforeInsert' || event === 'afterInsert';
+}
+
 /**
- * Choose the record-shaped object the condition formula should evaluate
- * against. Order:
- *   1. ctx.input.data — write operations carry the new record here
- *   2. ctx.previous   — update/delete carry pre-image here
- *   3. ctx.input      — fall back to flat input bag (read ops, custom shapes)
+ * The object's DECLARED fields, if this context can reach them.
+ *
+ * `ctx.ql` is the engine and `getObject` is an in-memory registry read — no
+ * I/O, no extra row fetched, nothing loaded that the write path did not
+ * already have. When the context carries no engine (unit harnesses, embedders
+ * that hand-build a context) the record is simply merged without
+ * materialisation: the merge alone already fixes the common case, and a
+ * missing key then behaves exactly as it did before.
+ */
+function declaredFieldsFor(ctx: HookContext): Record<string, unknown> | undefined {
+  const ql: any = (ctx as any).ql;
+  if (!ql || typeof ql.getObject !== 'function' || typeof ctx.object !== 'string') return undefined;
+  try {
+    const fields = ql.getObject(ctx.object)?.fields;
+    return fields && typeof fields === 'object' && !Array.isArray(fields)
+      ? (fields as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Choose the record-shaped object the condition formula evaluates against.
+ *
+ * ## The record is the RECORD, not the patch (#4770)
+ *
+ * This used to return `ctx.input.data` — the fields the current write happens
+ * to carry — and `ctx.previous` was unreachable behind it, the two never
+ * merged. A condition could therefore only reference a field the update
+ * *happened* to touch; anything else aborted the CEL expression with
+ * `No such key` and was swallowed into `false` (see the condition gate above).
+ * For an audit-style hook (`record.done == true`) that meant the audit silently
+ * did not happen on exactly the ordinary updates — change the status, change
+ * the assignee — that leave `done` out of the payload.
+ *
+ * So the record is now **stored ⊕ payload**, made total over the object's
+ * declared fields — the same shape a validation predicate reads
+ * ({@link materializeDeclaredFields}, #1871/#4649). The two surfaces share one
+ * helper on purpose: `record.done == true` must not mean two different things
+ * depending on which of them evaluates it.
+ *
+ * Order, unchanged for shapes that are not write-like:
+ *   1. `ctx.input.data` (⊕ `ctx.previous`) — write operations carry the patch
+ *      here and the pre-image there
+ *   2. `ctx.previous`   — delete-shaped contexts carry only the pre-image
+ *   3. `ctx.input`      — flat input bag (read ops, custom shapes)
+ *
+ * Materialisation is applied only when the record's persisted state is in hand
+ * — an insert (nothing to know) or an update whose prior row was fetched.
+ * A predicate bulk update carries no prior row, so its payload is left exactly
+ * as it is rather than gaining `null`s that contradict N stored rows.
+ *
+ * Copies, never mutates: `ctx.previous` and `ctx.input.data` are the engine's
+ * own objects, observed by the handlers that run after this gate.
  */
 function pickRecordPayload(ctx: HookContext): any {
   const input: any = ctx.input ?? {};
-  if (input && typeof input === 'object' && input.data && typeof input.data === 'object') {
-    return input.data;
+  const payload: Record<string, unknown> | undefined =
+    input && typeof input === 'object' && input.data && typeof input.data === 'object'
+      ? (input.data as Record<string, unknown>)
+      : undefined;
+  const prior: Record<string, unknown> | undefined =
+    ctx.previous && typeof ctx.previous === 'object'
+      ? (ctx.previous as Record<string, unknown>)
+      : undefined;
+
+  if (payload) {
+    // No prior row and not an insert → the persisted state is unknown, so
+    // neither merging nor materialising is possible without inventing it.
+    if (!prior && !isInsertEvent(ctx.event)) return payload;
+    return materializeDeclaredFields({ ...prior, ...payload }, declaredFieldsFor(ctx));
   }
-  if (ctx.previous && typeof ctx.previous === 'object') {
-    return ctx.previous;
+  if (prior) {
+    return materializeDeclaredFields({ ...prior }, declaredFieldsFor(ctx));
   }
   return input;
 }

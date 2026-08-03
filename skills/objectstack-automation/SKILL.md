@@ -490,7 +490,8 @@ entered. Its CEL source sees exactly **three roots** — nothing else:
 
 **`record` and bare field names are NOT available and fail the node loudly.**
 Everywhere else on this platform `record` means "the record at event time"
-(flow conditions: the trigger snapshot; hooks: the write payload) — at an
+(flow conditions: the trigger snapshot; hook conditions: the stored record
+overlaid with the write's payload, #4770) — at an
 approval node that phrase is ambiguous between two different times, so you must
 say which one: `current.x` or `trigger.x`. Do not carry the `record.x` habit
 over from conditions.
