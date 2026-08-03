@@ -10,7 +10,11 @@ import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } from '../utils/storage-driver.js';
-import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
+// [ADR-0105 D1] `resolveMultiOrgEnabled` is deliberately NOT imported here: the
+// posture is the authoritative knob and `resolveTenancyPosture()` already folds
+// the legacy boolean in as its unset-fallback. serve's last direct reader of the
+// boolean was the banner, and that was exactly the drift #4801 fixed.
+import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
 import { resolveObjectStackHome } from '@objectstack/runtime';
@@ -2688,7 +2692,15 @@ export default class Serve extends Command {
         consolePath: loadedPlugins.includes('ConsoleUI') ? CONSOLE_PATH : undefined,
         driverLabel: resolvedDriverLabel,
         databaseUrl: resolvedDatabaseUrl ? redactConnectionUrl(resolvedDatabaseUrl) : undefined,
-        multiTenant: resolveMultiOrgEnabled(),
+        // [ADR-0105 D1] #4801 — the banner reads the SAME resolver the runtime
+        // wiring above keys off (`resolveTenancyPosture()`), not the legacy
+        // boolean `resolveMultiOrgEnabled()`. With `OS_TENANCY_POSTURE=isolated`
+        // and `OS_MULTI_ORG_ENABLED` unset, the boolean says `false` while the
+        // wall is up — the banner printed `single-tenant` on the same screen
+        // that listed `Organizations` in the plugin table (cloud#1020). A
+        // diagnostic surface that disagrees with the runtime costs every later
+        // investigation an extra lap.
+        tenancyPosture: resolveTenancyPosture(),
         seededAdmin,
         automation: automationSummary,
         seeds: seedSummary,

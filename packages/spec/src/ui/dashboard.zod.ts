@@ -10,7 +10,10 @@ import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
 import { ActionType } from './action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
-import { ResponsiveConfigSchema } from './responsive.zod';
+// `ResponsiveConfigSchema` is no longer imported here: `widgets[].responsive`
+// was retired (#4876). The shape itself is NOT removed — it stays live on
+// `page.components[].responsive` (`page.zod.ts`), whose renderer really does
+// read it (objectui `useResponsiveConfig`). See the tombstone below.
 
 /**
  * Color variant for dashboard widgets (e.g., KPI cards).
@@ -347,8 +350,26 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
    */
   suppressWarnings: z.array(z.string()).optional().describe('Build diagnostic rule ids suppressed on this widget'),
 
-  /** Responsive layout overrides per breakpoint */
-  responsive: ResponsiveConfigSchema.optional().describe('Responsive layout configuration'),
+  // `responsive` REMOVED (#4876): authorable and inert, exactly like the
+  // same-named `view.responsive` retired four days earlier (#3896 close-out).
+  // No objectui code read `widget.responsive` — DashboardRenderer /
+  // DashboardEditor / plugin-designer mention it only in comments, and the one
+  // real per-breakpoint consumer (`useResponsiveConfig`) is fed by
+  // `page.components[].responsive`, not by a widget. It escaped the #3896 sweep
+  // through a liveness-ledger drill gap, not on evidence: `dashboard.json`
+  // declares no `children` on `widgets`, so no widget-level key has ever been
+  // classified (#4956). The shared `ResponsiveConfigSchema` survives untouched
+  // via `page.zod.ts` — only this embed goes.
+  responsive: retiredKey(
+    '`dashboard.widgets[].responsive` was removed in @objectstack/spec 17.0.0 (#4876, ADR-0049 D2) — ' +
+    'no renderer ever read it, so per-widget breakpoint overrides were never applied: the value ' +
+    'parsed, validated, and then did nothing. The dashboard grid reflows by its own layout rules ' +
+    '(`columns` + `gap` on the dashboard, the `layout` box on each widget). Delete the key. ' +
+    'The shared `ResponsiveConfig` shape is NOT gone — it stays live on `page.components[].responsive`, ' +
+    'which objectui `useResponsiveConfig` really does read; move the layout there if you need ' +
+    'breakpoint behaviour today. ' +
+    'Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),

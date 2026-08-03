@@ -274,6 +274,28 @@ describe('WebhookConfigSchema', () => {
     expect(parsed.signatureAlgorithm).toBe('hmac_sha256');
     expect(parsed.timeoutMs).toBe(30000);
   });
+
+  // #4001 batch 11 closed the BASE (`automation/webhook.zod.ts`), and zod
+  // carries both the strictness and the base's error map through `.extend()`.
+  // That is the trap the ledger records as finding 16 — a base tightened for
+  // one surface silently retightening another — so it is asserted here, on the
+  // extension's own file, rather than left for someone to discover.
+  it('inherits the base webhook\'s strictness through `.extend()` (#4001)', () => {
+    const result = WebhookConfigSchema.safeParse({
+      name: 'test_webhook', url: 'https://api.example.com/webhooks', notAKey: 1,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+  });
+
+  it('still accepts the two keys the extension adds', () => {
+    // The base names `signatureAlgorithm` in `extraKeys` so a typo of it is
+    // still suggestible on this surface, where the base has never heard of it.
+    expect(WebhookConfigSchema.safeParse({
+      name: 'test_webhook', url: 'https://api.example.com/webhooks',
+      events: ['record.created'], signatureAlgorithm: 'hmac_sha512',
+    }).success).toBe(true);
+  });
 });
 
 // ============================================================================

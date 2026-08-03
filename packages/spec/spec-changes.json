@@ -189,6 +189,12 @@
         "toMajor": 17
       },
       {
+        "surface": "dashboard.widgets[].responsive",
+        "to": "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; page.components[].responsive is unaffected)",
+        "conversionId": "dashboard-widget-responsive-removed",
+        "toMajor": 17
+      },
+      {
         "surface": "agent.knowledge",
         "to": "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
         "conversionId": "agent-knowledge-removed",
@@ -822,6 +828,12 @@
           "surface": "dashboard.aria / dashboard.performance / dashboard.widgets[].performance",
           "to": "dashboard keys 'aria'/'performance' and widget 'performance' removed (#3896 close-out — no renderer applied any of them)",
           "conversionId": "dashboard-inert-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "dashboard.widgets[].responsive",
+          "to": "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; page.components[].responsive is unaffected)",
+          "conversionId": "dashboard-widget-responsive-removed",
           "toMajor": 17
         },
         {

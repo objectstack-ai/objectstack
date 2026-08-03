@@ -51,6 +51,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * What a `script`-node function does to data (#4396).
@@ -101,8 +102,58 @@ export const DEFAULT_FLOW_FUNCTION_EFFECT: FlowFunctionEffect = 'pure';
  * a function anything — it changes what the platform *reports* about the runs
  * that call it, which is the whole point: an undeclared writer is counted as
  * having written nothing.
+ *
+ * ## Where strictness on this shape actually binds (#4001 batch 11)
+ *
+ * At AUTHORING time, and only there — worth stating precisely, because the
+ * campaign's rule is that a tightening claims no reach it does not have.
+ * `defineStack({ functions })` parses this through
+ * {@link FlowFunctionEntrySchema}, so `{ handler, efect: 'writes' }` is refused
+ * where it was written. The BOOT path does not re-parse: `AppPlugin` and
+ * `hook-binder` read entries with the hand-written
+ * {@link normalizeFlowFunctionEntry} (re-validating a live callable every boot
+ * buys nothing), so a stack that never went through `defineStack` is not gated
+ * by this.
+ *
+ * That is exactly why the strictness matters rather than being redundant.
+ * `normalizeFlowFunctionEntry` reads TWO keys and ignores the rest by
+ * construction, so before this change a misspelled `effect` was dropped at the
+ * schema and then *not looked for* by the reader — and the failure is the quiet
+ * direction: the function is registered, it runs, and its writes are counted as
+ * none, so #4354's broken-sweep query stays silent on the one flow that needed
+ * it. (A misspelled `effect` VALUE — `'write'` — already fails loudly-ish:
+ * `normalizeFlowFunctionEntry` degrades it to `'writes'` and surfaces the raw
+ * string. A misspelled KEY had no such backstop.)
  */
-export const FlowFunctionDeclarationSchema = lazySchema(() => z.object({
+export const FlowFunctionDeclarationSchema = lazySchema(() => strictObject({
+  surface: 'this `functions` entry',
+  aliases: {
+    // A different word for "the callable", from the shapes an author has just
+    // been writing: hooks/jobs/endpoints in this repo all name theirs `handler`
+    // too, but `fn`/`callback`/`execute`/`run` are what the short forms in
+    // other products call it, and none is within edit distance of `handler`.
+    fn: 'handler',
+    func: 'handler',
+    callback: 'handler',
+    execute: 'handler',
+    run: 'handler',
+    // `effects` (plural) is one edit away and the distance fallback gets it;
+    // `writes`/`sideEffects` are the concept named instead of the key.
+    sideEffects: 'effect',
+    writes: 'effect',
+  },
+  guidance: {
+    name:
+      'A function is named by its KEY in the `functions` map (`functions: { scoreLead: {…} }`), ' +
+      'not by a `name` inside the entry. The array form `functions: [{ name, handler }]` does ' +
+      'take one — but that is the array entry\'s own shape, not this record.',
+  },
+  history:
+    'Until #4001 these were dropped silently — and `normalizeFlowFunctionEntry` reads only ' +
+    '`handler`/`effect` by construction, so a misspelled `effect` was discarded twice over: ' +
+    'the function still registered, still ran, and its writes were still counted as none, ' +
+    'which is what keeps #4354\'s broken-sweep alert quiet on the run that needed it.',
+}, {
   handler: z.function().describe('The function invoked by name (a `script` node, a string-named Hook/Action handler)'),
   effect: FlowFunctionEffectSchema.default(DEFAULT_FLOW_FUNCTION_EFFECT)
     .describe("What the function does to data — omit for the pure default"),

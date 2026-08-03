@@ -21,6 +21,11 @@
       "types": "./dist/migrations/index.d.ts",
       "import": "./dist/migrations/index.js",
       "require": "./dist/migrations/index.cjs"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "require": "./dist/errors.cjs"
     }
   },
   "files": [

@@ -982,6 +982,9 @@ importers:
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../lint
+      '@objectstack/metadata':
+        specifier: workspace:*
+        version: link:../metadata
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../metadata-core

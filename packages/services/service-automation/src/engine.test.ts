@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { AutomationEngine, DEFAULT_MAX_EXECUTION_LOG_SIZE } from './engine.js';
 import { AutomationServicePlugin, parseObjectFieldSchema } from './plugin.js';
@@ -1854,6 +1854,148 @@ describe('AutomationEngine - Node Timeout', () => {
 
         const result = await engine.execute('fast_flow');
         expect(result.success).toBe(true);
+    });
+
+    // #4952 — the node-execution timeout guard must not outlive the race it
+    // guards. Same shape as the kernel's startup guards (#4813, PR #4874) and
+    // the periodic health checks (#4875, PR #4950), on the widest surface of
+    // the three: one guard per node that declares `timeoutMs`, per run, so the
+    // orphan count scales with flow size × trigger frequency and a one-shot
+    // process (`os` CLI running a flow) idles for the longest armed budget
+    // after its work is done.
+    //
+    // Everything below asserts the observable consequence, never the source:
+    // "engine.ts calls clearTimeout" is a tautology any refactor could satisfy
+    // while still leaving the loop pinned.
+    describe('Node timeout guard does not outlive the race (#4952)', () => {
+        /** A guard long enough that a single orphan is unmistakable. */
+        const GUARD_MS = 120_000;
+
+        /** A script executor that answers immediately (wins every race). */
+        const registerInstantScript = (target: AutomationEngine, calls: { count: number }) => {
+            target.registerNodeExecutor({
+                type: 'script',
+                async execute() {
+                    calls.count++;
+                    return { success: true };
+                },
+            });
+        };
+
+        /** `count` guarded script nodes in series — one guard armed per node. */
+        const registerGuardedFlow = (target: AutomationEngine, flowName: string, count: number) => {
+            const nodes = [
+                { id: 'start', type: 'start', label: 'Start' },
+                ...Array.from({ length: count }, (_, i) => ({
+                    id: `n${i}`,
+                    type: 'script',
+                    label: `Guarded ${i}`,
+                    timeoutMs: GUARD_MS,
+                })),
+                { id: 'end', type: 'end', label: 'End' },
+            ];
+            const ids = nodes.map(n => n.id);
+            target.registerFlow(flowName, {
+                name: flowName,
+                label: 'Guarded Flow',
+                type: 'autolaunched',
+                nodes,
+                edges: ids.slice(0, -1).map((source, i) => ({
+                    id: `e${i}`,
+                    source,
+                    target: ids[i + 1]!,
+                })),
+            });
+        };
+
+        /**
+         * Ref'd `Timeout` handles — `getActiveResourcesInfo()` reports only
+         * resources currently keeping the event loop alive, which is exactly
+         * the property that made `os migrate` idle ~120s in #4813.
+         */
+        const refdTimers = () =>
+            process.getActiveResourcesInfo().filter(r => r === 'Timeout').length;
+
+        it("leaves no ref'd timer behind when the nodes win the race", async () => {
+            const calls = { count: 0 };
+            registerInstantScript(engine, calls);
+            registerGuardedFlow(engine, 'guarded_flow', 3);
+
+            const before = refdTimers();
+            const result = await engine.execute('guarded_flow');
+
+            expect(result.success).toBe(true);
+            expect(calls.count).toBe(3);
+            expect(refdTimers()).toBe(before);
+        });
+
+        it('still reports the timeout when a node never answers', async () => {
+            // The companion assertion: reclaiming the guard must not disarm it.
+            // `unref()` would satisfy "no ref'd timer" by detaching the guard
+            // from the loop — a process with nothing else to run then exits
+            // *silently* instead of reporting the timeout. Clearing on settle
+            // keeps the guard armed exactly while the race is undecided.
+            let release: () => void = () => {};
+            engine.registerNodeExecutor({
+                type: 'script',
+                execute: () =>
+                    new Promise(resolve => {
+                        release = () => resolve({ success: true });
+                    }),
+            });
+
+            engine.registerFlow('hanging_flow', {
+                name: 'hanging_flow',
+                label: 'Hanging Flow',
+                type: 'autolaunched',
+                nodes: [
+                    { id: 'start', type: 'start', label: 'Start' },
+                    { id: 'hangs', type: 'script', label: 'Hangs', timeoutMs: 50 },
+                    { id: 'end', type: 'end', label: 'End' },
+                ],
+                edges: [
+                    { id: 'e1', source: 'start', target: 'hangs' },
+                    { id: 'e2', source: 'hangs', target: 'end' },
+                ],
+            });
+
+            const result = await engine.execute('hanging_flow');
+            expect(result.success).toBe(false);
+            expect(result.error).toBe("Node 'hangs' timed out after 50ms");
+
+            release();
+        });
+
+        describe('under fake timers', () => {
+            beforeEach(() => {
+                vi.useFakeTimers();
+            });
+
+            afterEach(() => {
+                vi.useRealTimers();
+            });
+
+            it('accumulates no guard across nodes and runs', async () => {
+                const calls = { count: 0 };
+                registerInstantScript(engine, calls);
+                registerGuardedFlow(engine, 'guarded_flow', 3);
+
+                // Unlike `getActiveResourcesInfo()`, the fake-timer count still
+                // sees an `unref()`'d timer — so this distinguishes "the guard
+                // was reclaimed" from "the guard was merely detached from the
+                // loop", the fake fix that keeps the leak and loses the report.
+                const before = vi.getTimerCount();
+
+                for (let run = 0; run < 4; run++) {
+                    const result = await engine.execute('guarded_flow');
+                    expect(result.success).toBe(true);
+                    // Nothing armed survives the run that armed it — no drift.
+                    expect(vi.getTimerCount()).toBe(before);
+                }
+
+                expect(calls.count).toBe(12);
+            });
+        });
     });
 });
 
