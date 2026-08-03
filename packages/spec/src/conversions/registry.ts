@@ -1620,7 +1620,7 @@ const appDeadAuthoringKeysRemoved: MetadataConversion = {
     'app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / '
     + 'app.mobileNavigation / app.contextSelectors.includeAll / app.contextSelectors.placement / '
     + 'app.homePageId / app.areas.order',
-  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits #4001, #4509, #4667 — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, the landing page IS the first nav item, and no renderer ever sorted areas)",
+  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation'/'homePageId' plus contextSelectors 'includeAll'/'placement' and areas 'order' removed (liveness audits #4001, #4509, #4667 — unread or wrongly encoded; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented, includeAll was deliberately disobeyed because an 'All' row would clear a mandatory scope, homePageId WAS read by objectui's console before v17 but encoded the landing page as an ID cross-reference that silently fell back when it dangled — the landing page is the first nav item (premise corrected in #4709; the retirement stands), and no renderer ever sorted areas)",
   apply(stack, emit) {
     const RETIRED = [
       'version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation',

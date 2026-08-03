@@ -3,7 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { bindHooksToEngine } from './hook-binder.js';
-import { wrapDeclarativeHook } from './hook-wrappers.js';
+import { wrapDeclarativeHook, HookConditionError } from './hook-wrappers.js';
 import type { Hook, HookContext } from '@objectstack/spec/data';
 
 function makeEngine() {
@@ -377,8 +377,15 @@ describe('wrapDeclarativeHook', () => {
     expect(calls).toEqual(['done']); // awaited despite async=true
   });
 
-  it('logs and treats invalid condition formulas as skipping', async () => {
-    const warn = vi.fn();
+  it('rejects the operation when the condition formula does not compile', async () => {
+    // [#4775] This test used to accept EITHER outcome ("ignored at compile time
+    // (handler runs) or evaluated false (skipped) … just assert we didn't
+    // crash"). That latitude was the defect: "condition ignored" DELETED the
+    // gate, so a hook declared to run conditionally ran on every write, and the
+    // only trace was a `warn`. A condition that cannot compile can never be
+    // evaluated, so the hook can neither run nor be skipped honestly — the
+    // operation is rejected instead, naming the hook.
+    const error = vi.fn();
     const calls: string[] = [];
     const meta: Hook = {
       name: 'badcond', object: 'a', events: ['beforeInsert'], priority: 100,
@@ -386,12 +393,17 @@ describe('wrapDeclarativeHook', () => {
       handler: () => { calls.push('ran'); },
     };
     const wrapped = wrapDeclarativeHook(meta, meta.handler as any, {
-      logger: { debug: () => {}, info: () => {}, warn, error: () => {} },
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error },
     });
-    await wrapped(makeCtx());
-    expect(warn).toHaveBeenCalled();
-    // Either ignored at compile time (handler runs) or evaluated false
-    // (skipped). Both are valid; just assert we didn't crash.
-    expect(calls.length === 0 || calls[0] === 'ran').toBe(true);
+
+    const err = await wrapped(makeCtx()).then(() => null, (e) => e);
+
+    expect(err).toBeInstanceOf(HookConditionError);
+    expect(err.reason).toBe('uncompilable');
+    expect(err.message).toContain("Hook 'badcond'");
+    expect(calls).toEqual([]);
+    // Reported at bind time too, at error level — an operator sees the broken
+    // hook before the first write trips over it.
+    expect(error).toHaveBeenCalled();
   });
 });

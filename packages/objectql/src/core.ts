@@ -56,7 +56,7 @@ export { applyInMemoryAggregation, bucketDateValue } from './in-memory-aggregati
 // Hook binder & wrappers (declarative-metadata → engine glue)
 export { bindHooksToEngine } from './hook-binder.js';
 export type { BindHooksOptions, BindHooksResult } from './hook-binder.js';
-export { wrapDeclarativeHook } from './hook-wrappers.js';
+export { wrapDeclarativeHook, HookConditionError } from './hook-wrappers.js';
 export type { WrapDeclarativeOptions } from './hook-wrappers.js';
 
 // Validation

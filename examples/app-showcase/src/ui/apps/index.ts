@@ -25,8 +25,8 @@ export const ShowcaseApp = App.create({
   branding: { primaryColor: '#7C3AED' },
 
   navigation: [
-    // First item = the app's landing surface (the delivered convention; the
-    // spec's homePageId has no console consumer yet).
+    // First item = the app's landing surface — the only way to say it since
+    // `homePageId` was removed in spec 17.0.0 (#4667, #4709).
     { id: 'nav_capability_map', type: 'page', pageName: 'showcase_capability_map', label: 'Capability Map', icon: 'map' },
     { id: 'nav_start_here', type: 'page', pageName: 'showcase_start_here', label: 'Page Authoring', icon: 'compass' },
     {
