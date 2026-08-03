@@ -22,7 +22,6 @@ import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
 
 export default defineStack({
-  name: 'plugin-audit-i18n-extract',
   objects: [SysAuditLog, SysActivity, SysComment] as any,
   translations: [
     { en: { objects: enObjects } },

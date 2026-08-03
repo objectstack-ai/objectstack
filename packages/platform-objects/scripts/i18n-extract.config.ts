@@ -178,8 +178,6 @@ import { jaJP } from '../src/apps/translations/ja-JP.js';
 import { esES } from '../src/apps/translations/es-ES.js';
 
 export default defineStack({
-  name: 'platform-objects-i18n-extract',
-
   objects: [
     // Identity
     SysUser,
