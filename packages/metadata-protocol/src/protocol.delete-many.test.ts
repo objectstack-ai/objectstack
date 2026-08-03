@@ -145,15 +145,19 @@ describe('deleteManyData — partial-failure semantics (#3897)', () => {
     expect(res).toMatchObject({ success: false, total: 3, succeeded: 2, failed: 1 });
   });
 
-  it('atomic aborts the remaining ids on the first failure', async () => {
+  // [#4620] This used to pin the fake-atomic: `atomic: true` merely broke the
+  // loop, so `a` stayed DELETED and the response reported `succeeded: 1` under
+  // a flag whose one job is to guarantee it was undone. On this engine — no
+  // `transaction()` at all — the honest answer is a refusal, not a half-batch.
+  // Real rollback is pinned in protocol.many-data-atomic.test.ts.
+  it('atomic REFUSES on an engine that cannot roll back, deleting nothing (#4620)', async () => {
     const { p, del } = failOn('b');
-    const res: any = await p.deleteManyData({
+    await expect(p.deleteManyData({
       object: 'invoice',
       ids: ['a', 'b', 'c'],
       options: { atomic: true, continueOnError: true },
-    } as any);
+    } as any)).rejects.toMatchObject({ status: 501, code: 'NOT_IMPLEMENTED' });
 
-    expect(del).toHaveBeenCalledTimes(2);
-    expect(res.succeeded).toBe(1);
+    expect(del).not.toHaveBeenCalled();
   });
 });

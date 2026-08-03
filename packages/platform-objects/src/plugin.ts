@@ -43,7 +43,12 @@ import type { II18nService, IObjectQLEngine } from '@objectstack/spec/contracts'
  *    platform-objects. Registered here, that error message is true.
  *  - **Fresh-datastore attestation** (#3438, ADR-0104 2026-07-30) —
  *    travels with the ledger registration: a store this boot created from
- *    empty is attested at `kernel:ready`, whichever services are composed.
+ *    empty is attested once that boot's own data has settled
+ *    (`app:seeded`, falling back to `kernel:ready` for kernels that never
+ *    seed), whichever services are composed. Not before: emptiness settles
+ *    a claim about CONTENT, and a boot that certifies itself and then seeds
+ *    rows contradicting the certificate leaves every later boot enforcing
+ *    it against data this one wrote (#4769).
  *  - **Translation bundles** — `SetupAppTranslations` (the static Setup
  *    App + sys_* dashboards) and `MetadataFormsTranslations`
  *    (`metadataForms.*` for object/field/agent/flow/view configuration
@@ -95,17 +100,23 @@ export class PlatformObjectsPlugin {
     // ── Fresh-datastore attestation (#3438, ADR-0104 2026-07-30) ────────
     // A store this process just created from empty can hold no legacy
     // value, so the data migrations that exist to find and convert them
-    // are settled here before they are ever run — recorded now, while that
+    // are settled here before they are ever run — recorded while that
     // emptiness is still an observed fact rather than something a later
     // scan would have to infer. Without it every new deployment would
     // start lax and stay lax until someone ran a command that, for them,
     // does nothing: the warn regime would never die out.
     //
+    // Timing is load-bearing (#4769): the inference is "empty, therefore
+    // nothing here violates", and it stops holding the moment this boot
+    // writes. So the attestation waits for the boot's own data, and
+    // `attestFreshDatastore` refuses any id this boot has already
+    // contradicted.
+    //
     // This plugin owns the call because it registers `sys_migration`
     // (above; #4243 — moved here with the registration from
     // service-storage). A store that was found rather than created attests
     // nothing and keeps producing evidence by scan.
-    ctx?.hook?.('kernel:ready', async () => {
+    const attest = async () => {
       let engine: IObjectQLEngine | undefined;
       try {
         engine = ctx.getService?.('objectql');
@@ -128,7 +139,20 @@ export class PlatformObjectsPlugin {
           `[platform-objects] fresh-datastore attestation skipped (${err?.message ?? err})`,
         );
       }
-    });
+    };
+
+    // #4769 — run it as soon as the boot's own data has settled, and not
+    // before. `app:seeded` is that moment for a deployment that seeds: it
+    // fires when the inline seed finishes, including the background
+    // continuation of one that overran `OS_INLINE_SEED_BUDGET_MS`. Attesting
+    // ahead of it certified a store as clean and then filled it with the rows
+    // that disprove the certificate, which the NEXT boot enforced against.
+    // `kernel:ready` stays as the backstop for every kernel that never seeds
+    // (it is the same moment as before for those). Both land in the same
+    // idempotent call: the first one to find an id unattested and
+    // uncontradicted writes it, the other finds the row and skips.
+    ctx?.hook?.('app:seeded', attest);
+    ctx?.hook?.('kernel:ready', attest);
 
     ctx?.hook?.('kernel:ready', async () => {
       let i18n: II18nService | undefined;

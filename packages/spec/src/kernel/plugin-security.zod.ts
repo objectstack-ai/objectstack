@@ -305,31 +305,44 @@ export type SecurityPolicy = z.infer<typeof SecurityPolicySchema>;
 // ============================================================================
 
 /**
- * Package Dependency
+ * Resolved Package Dependency — one edge of the resolver's dependency graph.
+ *
+ * This is the RESOLVER-side shape: what the dependency resolver works with
+ * while it walks a graph (`DependencyGraphNodeSchema.dependencies`) and what
+ * `PluginSecurityProtocol` publishes for SBOM/conflict reporting. It carries
+ * the resolution outcome (`resolvedVersion`) alongside the constraint.
+ *
+ * Do NOT confuse it with `PackageDependency` from `@objectstack/spec/cloud`
+ * (`cloud/package-version.zod.ts`), which is the DECLARATION-side shape an
+ * author writes into a package manifest (`packageId` / `versionRange` /
+ * `optional`). Until #4741 both were named `PackageDependency` and the two
+ * key sets are entirely disjoint, so which type a consumer got depended on
+ * nothing but the import path — the #4411 trap. ADR-0112 D9(a) renamed this,
+ * the resolver side; the manifest side keeps the bare name.
  */
-export const PackageDependencySchema = lazySchema(() => z.object({
+export const ResolvedPackageDependencySchema = lazySchema(() => z.object({
   /**
    * Package name/ID
    */
   name: z.string().describe('Package name or identifier'),
-  
+
   /**
    * Version constraint (semver range)
    */
   versionConstraint: z.string().describe('Semver range (e.g., `^1.0.0`, `>=2.0.0 <3.0.0`)'),
-  
+
   /**
    * Dependency type
    */
   type: z.enum(['required', 'optional', 'peer', 'dev']).default('required').describe('Category of the dependency relationship'),
-  
+
   /**
    * Resolved version (filled during resolution)
    */
   resolvedVersion: z.string().optional().describe('Concrete version resolved during dependency resolution'),
-}).describe('A package dependency with its version constraint'));
+}).describe('A resolver-side package dependency: version constraint plus its resolution outcome'));
 
-export type PackageDependency = z.infer<typeof PackageDependencySchema>;
+export type ResolvedPackageDependency = z.infer<typeof ResolvedPackageDependencySchema>;
 
 /**
  * Dependency Graph Node
@@ -348,7 +361,7 @@ export const DependencyGraphNodeSchema = lazySchema(() => z.object({
   /**
    * Dependencies of this package
    */
-  dependencies: z.array(PackageDependencySchema).default([]).describe('Dependencies required by this package'),
+  dependencies: z.array(ResolvedPackageDependencySchema).default([]).describe('Dependencies required by this package'),
   
   /**
    * Depth in dependency tree
@@ -758,7 +771,7 @@ export const PluginSecurityProtocol = {
   SecurityVulnerability: SecurityVulnerabilitySchema,
   SecurityScanResult: SecurityScanResultSchema,
   SecurityPolicy: SecurityPolicySchema,
-  PackageDependency: PackageDependencySchema,
+  ResolvedPackageDependency: ResolvedPackageDependencySchema,
   DependencyGraphNode: DependencyGraphNodeSchema,
   DependencyGraph: DependencyGraphSchema,
   DependencyConflict: PackageDependencyConflictSchema,

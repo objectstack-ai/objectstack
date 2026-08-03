@@ -3,6 +3,7 @@
 import {
   CREATION_ATTESTED_MIGRATION_IDS,
   DATA_MIGRATION_FLAG_OBJECT,
+  FILE_REFERENCES_MIGRATION_ID,
   isDataMigrationFlagVerified,
   type DataMigrationFlag,
 } from '@objectstack/spec/system';
@@ -24,12 +25,31 @@ import {
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
+/**
+ * What this boot has admitted against one migration's contract (#4769). The
+ * engine's shape, restated structurally rather than imported: this package
+ * defines schemas and must not take a runtime dependency on the engine to read
+ * one number. Mirrors `AdmittedValueShapeViolationTally` in
+ * `@objectstack/objectql`.
+ */
+export interface AdmittedMigrationViolations {
+  count: number;
+  first?: { object?: string; field?: string; type?: string; detail?: string };
+}
+
 /** Engine surface the flag helpers need — duck-typed like the storage seams. */
 export interface MigrationFlagEngine {
   getObject(name: string): unknown | undefined;
   find(object: string, options: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
   insert(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
   update(object: string, data: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
+  /**
+   * Value-shape violations this boot has ADMITTED, keyed by migration id
+   * (#4769) — the counterexamples that forbid attesting. Optional so a fake or
+   * an older engine simply reports nothing; see {@link attestFreshDatastore}
+   * for why "cannot say" is handled the way it is.
+   */
+  valueShapeViolationsAdmitted?(): Record<string, AdmittedMigrationViolations>;
 }
 
 /**
@@ -161,10 +181,33 @@ export interface AttestationLogger {
  * already ships these migrations would start lax and stay lax until someone
  * ran a command that, for them, does nothing.
  *
+ * **The emptiness has to still be settling the question.** "Created empty"
+ * licenses a claim about CONTENT — no legacy value here — and that inference
+ * expires the moment the boot writes something. Before #4769 this function
+ * ignored that: it ran at `kernel:ready` while the same boot's seed was still
+ * landing rows, so a deployment certified itself and then immediately stored
+ * values contradicting the certificate. The first boot ran warn-first over
+ * data it kept; every later boot read the certificate, enforced, and rejected
+ * the very rows its predecessor had written — the same data, the same code, a
+ * restart the only difference.
+ *
+ * So the boot's own admissions are consulted first. The engine tallies every
+ * off-shape value it lets through, with the exact predicate strict mode uses,
+ * and one such value is a complete disproof: certifying needs a scan of
+ * everything, refuting needs a single counterexample. An id this boot has
+ * contradicted is NOT attested — the deployment stays warn-first, which is
+ * both true and recoverable, and the operator is told which value cost them
+ * the gate. An engine that cannot say (a fake, an older build) reports
+ * nothing, which reads as no counterexample: this is a best-effort
+ * bookkeeping path, and it was already the case that a store nobody could
+ * inspect got attested on the creator's word alone.
+ *
  * **Never overwrites.** A migration id that already has a row is skipped
  * untouched: a store with flag rows is by definition not one being created,
  * so a write here would be evidence about the wrong database — and it could
- * only ever *raise* a gate the real evidence had closed.
+ * only ever *raise* a gate the real evidence had closed. (The engine owns the
+ * other direction: a certificate contradicted AFTER it was issued is revoked
+ * from the write path that contradicted it.)
  *
  * **Best-effort, deliberately diverging from this module's "writes fail
  * loudly" rule.** That rule fits the migration commands, whose entire output
@@ -184,11 +227,34 @@ export async function attestFreshDatastore(
   const logger = options.logger;
   if (!engine.getObject(DATA_MIGRATION_FLAG_OBJECT)) return [];
 
+  let admitted: Record<string, AdmittedMigrationViolations> = {};
+  try {
+    admitted = engine.valueShapeViolationsAdmitted?.() ?? {};
+  } catch {
+    admitted = {};
+  }
+
   const now = new Date().toISOString();
   const attested: string[] = [];
   for (const id of ids) {
     try {
       if (await readDataMigrationFlag(engine, id)) continue; // not ours to write
+      // #4769 — a boot may not prove a contract it has already broken.
+      const contradiction = admitted[id];
+      if (contradiction && contradiction.count > 0) {
+        const at = contradiction.first;
+        const where = at?.object && at?.field ? `${at.object}.${at.field}` : 'a record';
+        logger?.warn(
+          `[migration] NOT attesting '${id}' on this new datastore: this boot already wrote ` +
+            `${contradiction.count} value(s) that the migration's own contract rejects ` +
+            `(${where}${at?.detail ? `: ${at.detail}` : ''}). The store was created empty, but it ` +
+            'is no longer empty and what it now holds contradicts the claim — the gate stays ' +
+            'open (warn-first). Fix the data, then run `os migrate ' +
+            (id === FILE_REFERENCES_MIGRATION_ID ? 'files-to-references' : 'value-shapes') +
+            ' --apply` to close it on real evidence (ADR-0104).',
+        );
+        continue;
+      }
       await engine.insert(
         DATA_MIGRATION_FLAG_OBJECT,
         {

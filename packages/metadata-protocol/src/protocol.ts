@@ -5349,6 +5349,41 @@ export class ObjectStackProtocolImplementation implements
         context: any;
     }): Promise<BatchUpdateResponse> {
         const { object, operation, records, options, batchSchema, context } = args;
+        return await this.runAtomicBatch({
+            object,
+            context,
+            runLoop: (trxCtx) => this.runBatchDataLoop({ object, operation, records, options, batchSchema, context: trxCtx, atomic: true }),
+            onCommit: (outcome) => this.buildBatchDataResponse(operation, records, options, outcome),
+            onRollback: (outcome) => this.buildRolledBackBatchResponse(operation, records, outcome),
+        });
+    }
+
+    /**
+     * The atomic arm, shared by every bulk-write surface on this protocol
+     * (#4620): `batchData` (ADR-0119 D4), `updateManyData` and
+     * `deleteManyData`.
+     *
+     * D4 fixed `batchData` alone, and its two siblings in this file carried the
+     * same class of defect — `deleteManyData` `break`-ed the loop and left every
+     * prior delete committed under a response that called itself atomic (worse
+     * than the `batchData` case: a partial delete has no natural undo), while
+     * `updateManyData` never read `atomic` at all. Fixed by giving all three ONE
+     * runner rather than a third and fourth copy of transaction handling —
+     * copies are exactly how the next sibling drifts back into a lie.
+     *
+     * Each caller supplies only what differs: the per-record loop, and the two
+     * response builders. Everything that makes `atomic` a guarantee — the
+     * fail-closed capability gate, the single `engine.transaction()`, the abort
+     * sentinel, the zero-successes rollback response — lives here, once.
+     */
+    private async runAtomicBatch(args: {
+        object: string;
+        context: any;
+        runLoop: (trxCtx: any) => Promise<BatchDataLoopOutcome>;
+        onCommit: (outcome: BatchDataLoopOutcome) => BatchUpdateResponse;
+        onRollback: (outcome: BatchDataLoopOutcome) => BatchUpdateResponse;
+    }): Promise<BatchUpdateResponse> {
+        const { object, context, runLoop, onCommit, onRollback } = args;
 
         // Two-level probe, shared with the ADR-0119 D2 migration-journal runner
         // as `engineCanRollBack` (#4617). `engine.transaction()` runs the
@@ -5389,16 +5424,16 @@ export class ObjectStackProtocolImplementation implements
         let aborted: BatchDataLoopOutcome | undefined;
         try {
             return await engineTx(async (trxCtx: any) => {
-                const outcome = await this.runBatchDataLoop({ object, operation, records, options, batchSchema, context: trxCtx, atomic: true });
+                const outcome = await runLoop(trxCtx);
                 if (outcome.failed > 0) {
                     aborted = outcome;
                     throw ABORT;
                 }
-                return this.buildBatchDataResponse(operation, records, options, outcome);
+                return onCommit(outcome);
             }, context);
         } catch (err) {
             if (err === ABORT && aborted) {
-                return this.buildRolledBackBatchResponse(operation, records, aborted);
+                return onRollback(aborted);
             }
             throw err;
         }
@@ -5550,7 +5585,11 @@ export class ObjectStackProtocolImplementation implements
      */
     private buildRolledBackBatchResponse(
         operation: BatchUpdateRequest['operation'],
-        records: BatchUpdateRequest['records'],
+        // Only `length` and `id` are read, so `updateManyData`'s rows and the
+        // id list `deleteManyData` rolls back reuse this verbatim (#4620) —
+        // the marking a client reconciles against must be one implementation,
+        // not three that agree today.
+        records: ReadonlyArray<{ id?: string }>,
         outcome: BatchDataLoopOutcome,
     ): BatchUpdateResponse {
         const attempted = outcome.results;
@@ -5661,7 +5700,46 @@ export class ObjectStackProtocolImplementation implements
     async updateManyData(request: UpdateManyDataRequest & { context?: any }): Promise<BatchUpdateResponse> {
         const { object, records, options, context } = request;
         this.assertObjectRegistered(object); // [#3770]
-        const results: Array<{ id?: string; success: boolean; error?: string; record?: any; droppedFields?: DroppedFieldsEvent[] }> = [];
+
+        // [#4620] `atomic` used not to appear ANYWHERE in this method: the
+        // option was accepted, declared in `BatchOptionsSchema` with a contract
+        // that promises all-or-nothing, and never read — a caller asking for
+        // atomicity silently got best-effort with no signal at all. Same
+        // enforcement shape as `batchData` (ADR-0119 D4), same runner, so the
+        // three bulk-write surfaces cannot drift apart again. `=== true` is the
+        // deliberate opt-in from D4: absent/false keeps today's semantics
+        // exactly.
+        if (options?.atomic === true) {
+            return await this.runAtomicBatch({
+                object,
+                context,
+                runLoop: (trxCtx) => this.runUpdateManyLoop({ object, records, options, context: trxCtx, atomic: true }),
+                onCommit: (outcome) => this.buildUpdateManyResponse(records, outcome),
+                onRollback: (outcome) => this.buildRolledBackBatchResponse('update', records, outcome),
+            });
+        }
+
+        const outcome = await this.runUpdateManyLoop({ object, records, options, context, atomic: false });
+        return this.buildUpdateManyResponse(records, outcome);
+    }
+
+    /**
+     * The per-record loop of {@link updateManyData}, shared by both arms
+     * (#4620) so atomic and non-atomic cannot drift apart. `atomic` changes
+     * exactly one thing: it aborts on the first failure regardless of
+     * `continueOnError` — whose own contract text already scopes it to
+     * `atomic=false`, and which has nothing to continue toward when every write
+     * so far is about to be undone.
+     */
+    private async runUpdateManyLoop(args: {
+        object: string;
+        records: UpdateManyDataRequest['records'];
+        options: UpdateManyDataRequest['options'];
+        context: any;
+        atomic: boolean;
+    }): Promise<BatchDataLoopOutcome> {
+        const { object, records, options, context, atomic } = args;
+        const results: BatchDataRowResult[] = [];
         let succeeded = 0;
         let failed = 0;
 
@@ -5683,12 +5761,30 @@ export class ObjectStackProtocolImplementation implements
             } catch (err: any) {
                 results.push({ id: record.id, success: false, error: err.message });
                 failed++;
+                if (atomic) {
+                    // Abort on the first failure; the caller rolls back.
+                    break;
+                }
                 if (!options?.continueOnError) {
                     break;
                 }
             }
         }
 
+        return { results, succeeded, failed };
+    }
+
+    /**
+     * The ordinary (committed) `updateMany` response. Deliberately NOT
+     * {@link buildBatchDataResponse}: this surface has never honoured
+     * `returnRecords`, and quietly starting to would change the default
+     * (non-atomic) path's payload while fixing an unrelated bug (#4620).
+     */
+    private buildUpdateManyResponse(
+        records: UpdateManyDataRequest['records'],
+        outcome: BatchDataLoopOutcome,
+    ): BatchUpdateResponse {
+        const { results, succeeded, failed } = outcome;
         return {
             success: failed === 0,
             operation: 'update',
@@ -5750,6 +5846,12 @@ export class ObjectStackProtocolImplementation implements
      *   - the declared {@link BatchUpdateResponse} contract (per-record results,
      *     `atomic` / `continueOnError`) was unimplementable from a bulk row
      *     count. It is now actually delivered.
+     *
+     * [#4620] That last bullet over-claimed for one member: `atomic` was
+     * per-record, but it only stopped the loop — no transaction, no rollback,
+     * every earlier delete left committed under a response titled atomic. It is
+     * delivered for real now, through the shared {@link runAtomicBatch}, and
+     * refused (501 `NOT_IMPLEMENTED`) on a runtime that cannot roll back.
      */
     async deleteManyData(request: DeleteManyDataRequest & { context?: any }): Promise<BatchUpdateResponse> {
         const { object, options, context } = request;
@@ -5771,7 +5873,40 @@ export class ObjectStackProtocolImplementation implements
             throw err;
         }
 
-        const results: Array<{ id?: string; success: boolean; error?: string }> = [];
+        // [#4620] `atomic` here was the same fake-atomic `batchData` carried
+        // before ADR-0119 D4 — it only `break`-ed the loop, so every row deleted
+        // before the failure stayed DELETED while the response called itself
+        // atomic. Worse than the `batchData` case, because a partial delete has
+        // no natural undo: the caller cannot reconstruct the rows from the
+        // request. Same runner, same fail-closed gate, same row marking.
+        if (options?.atomic === true) {
+            const rows = ids.map((id) => ({ id: String(id) }));
+            return await this.runAtomicBatch({
+                object,
+                context,
+                runLoop: (trxCtx) => this.runDeleteManyLoop({ object, ids, options, context: trxCtx, atomic: true }),
+                onCommit: (outcome) => this.buildDeleteManyResponse(ids, outcome),
+                onRollback: (outcome) => this.buildRolledBackBatchResponse('delete', rows, outcome),
+            });
+        }
+
+        const outcome = await this.runDeleteManyLoop({ object, ids, options, context, atomic: false });
+        return this.buildDeleteManyResponse(ids, outcome);
+    }
+
+    /**
+     * The per-id loop of {@link deleteManyData}, shared by both arms (#4620) —
+     * see {@link runUpdateManyLoop} for why `atomic` outranks `continueOnError`.
+     */
+    private async runDeleteManyLoop(args: {
+        object: string;
+        ids: unknown[];
+        options: DeleteManyDataRequest['options'];
+        context: any;
+        atomic: boolean;
+    }): Promise<BatchDataLoopOutcome> {
+        const { object, ids, options, context, atomic } = args;
+        const results: BatchDataRowResult[] = [];
         let succeeded = 0;
         let failed = 0;
         const ctxOpt = context !== undefined ? { context } : {};
@@ -5787,20 +5922,29 @@ export class ObjectStackProtocolImplementation implements
                 // single-record path: the contract's positive not-found value,
                 // never an inference from a falsy return.
                 const deleted = await this.engine.delete(object, { where: { id }, ...ctxOpt } as any);
-                if (deleted === false) throw recordNotFoundError(object, id);
+                // `id` is `unknown` to this helper only because the caller's
+                // fail-closed `isScalarId` guard is what proves it scalar.
+                if (deleted === false) throw recordNotFoundError(object, id as string | number);
                 results.push({ id: String(id), success: true });
                 succeeded++;
             } catch (err: any) {
                 results.push({ id: String(id), success: false, error: err?.message });
                 failed++;
                 // Same stop semantics as `batchData`: `atomic` aborts the rest on
-                // the first failure, and without `continueOnError` a failure ends
-                // the run rather than silently ploughing on.
-                if (options?.atomic) break;
+                // the first failure (the caller rolls back), and without
+                // `continueOnError` a failure ends the run rather than silently
+                // ploughing on.
+                if (atomic) break;
                 if (!options?.continueOnError) break;
             }
         }
 
+        return { results, succeeded, failed };
+    }
+
+    /** The ordinary (committed) `deleteMany` response — every id reports what it did. */
+    private buildDeleteManyResponse(ids: unknown[], outcome: BatchDataLoopOutcome): BatchUpdateResponse {
+        const { results, succeeded, failed } = outcome;
         return {
             success: failed === 0,
             operation: 'delete',

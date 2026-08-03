@@ -30,8 +30,8 @@ See `docs/adr/0003-package-as-first-class-citizen.md` for the full rationale.
 ## TypeScript Usage
 
 ```typescript
-import { CreatePackageVersionRequestSchema, PackageManifestSchema, PackageVersionSchema, PackageVersionStatusSchema, PublishPackageVersionRequestSchema, UpdatePackageVersionRequestSchema } from '@objectstack/spec/cloud';
-import type { CreatePackageVersionRequest, PackageManifest, PackageVersion, PackageVersionStatus, PublishPackageVersionRequest, UpdatePackageVersionRequest } from '@objectstack/spec/cloud';
+import { CreatePackageVersionRequestSchema, PackageDependencySchema, PackageManifestSchema, PackageVersionSchema, PackageVersionStatusSchema, PublishPackageVersionRequestSchema, UpdatePackageVersionRequestSchema } from '@objectstack/spec/cloud';
+import type { CreatePackageVersionRequest, PackageDependency, PackageManifest, PackageVersion, PackageVersionStatus, PublishPackageVersionRequest, UpdatePackageVersionRequest } from '@objectstack/spec/cloud';
 
 // Validate data
 const result = CreatePackageVersionRequestSchema.parse(data);
@@ -53,6 +53,21 @@ Create a new draft package version
 | **releaseNotes** | `string` | optional |  |
 | **isPreRelease** | `boolean` | optional |  |
 | **createdBy** | `string` | ✅ | User ID creating this version |
+
+
+---
+
+## PackageDependency
+
+Package dependency declaration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **packageId** | `string` | ✅ | Manifest ID of the dependency |
+| **versionRange** | `string` | ✅ | Semver version range (e.g. ^1.0.0) |
+| **optional** | `boolean` | ✅ | Whether this dependency is optional |
 
 
 ---

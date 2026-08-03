@@ -27,7 +27,6 @@ import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
 
 export default defineStack({
-  name: 'plugin-approvals-i18n-extract',
   objects: [SysApprovalRequest, SysApprovalAction, SysApprovalDelegation] as any,
   translations: [
     { en: { objects: enObjects } },

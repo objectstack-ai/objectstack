@@ -38,13 +38,20 @@ export const NormalizeTaskTitleHook = {
   description: 'Trims leading/trailing whitespace from the task title before every write.',
 };
 
-/** afterUpdate (gated) — log a line whenever a task flips to done. */
+/**
+ * afterUpdate (gated) — log a line on the update that flips a task to done.
+ *
+ * The condition compares against `previous` on purpose (#4784). Since #4770
+ * `record` means the record's STATE, so `record.done == true` alone would audit
+ * every later edit of an already-done task — while this hook's own description
+ * says "transitions to done". The transition is the two-root form.
+ */
 export const AuditTaskCompletionHook = {
   name: 'showcase_audit_task_completion',
   label: 'Audit Task Completion',
   object: 'showcase_task',
   events: ['afterUpdate'] as LifecycleEvent[],
-  condition: "record.done == true",
+  condition: "previous.done != true && record.done == true",
   body: {
     language: 'js' as const,
     source: "var r = ctx.result || ctx.input || {}; ctx.log.info('task completed: ' + (r.title || r.id || 'unknown'));",

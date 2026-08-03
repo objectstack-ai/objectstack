@@ -41,6 +41,7 @@ import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js
 import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
+import type { CounterStore } from './rate-limit-storage.js';
 import {
   authIdentityObjects,
   authPluginManifestHeader,
@@ -356,24 +357,51 @@ export class AuthPlugin implements Plugin {
     // Whether the session of record should live in the cache at all is #4785.
     // A host that supplies `secondaryStorage` itself still wins and keeps
     // better-auth's own `storage: 'secondary-storage'` counters.
-    if (!authConfig.secondaryStorage) {
-      const { createLazyCacheRateLimitStorage } = await import('./rate-limit-storage.js');
-      authConfig.rateLimitStorage = createLazyCacheRateLimitStorage({
-        // The `cache` service is registered ASYNC — `getService` throws for it,
-        // so resolve via `getServiceAsync` and treat any failure (not
-        // registered, or not yet ready) as "no shared cache, ask again later".
-        resolveCache: async () => {
-          let cache: any;
-          try {
-            cache = await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> })
-              .getServiceAsync?.('cache');
-          } catch {
-            return undefined;
-          }
-          if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') return cache;
-          return undefined;
-        },
+    //
+    // The SAME resolution carries ObjectStack's own per-number OTP send budget
+    // (#2780) below — that counter had the identical hole (#4790): it counted
+    // in `secondaryStorage` when a host supplied one and per-process otherwise,
+    // which under the standard `serve` composition (nobody supplies one) meant
+    // every node granted the same phone number its own cooldown + hourly cap.
+    // The currency there is paid SMS, so an N-node deployment was billed for up
+    // to N× the declared budget.
+    //
+    // The `cache` service is registered ASYNC — `getService` throws for it, so
+    // resolve via `getServiceAsync` and treat any failure (not registered, or
+    // not yet ready) as "no shared cache, ask again later".
+    const resolveCache = async (): Promise<CounterStore | undefined> => {
+      let cache: any;
+      try {
+        cache = await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> })
+          .getServiceAsync?.('cache');
+      } catch {
+        return undefined;
+      }
+      if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') return cache;
+      return undefined;
+    };
+
+    {
+      const { createLazyCacheRateLimitStorage, createLazyCounterStore } = await import(
+        './rate-limit-storage.js'
+      );
+      if (!authConfig.secondaryStorage) {
+        authConfig.rateLimitStorage = createLazyCacheRateLimitStorage({
+          resolveCache,
+          logger: ctx.logger,
+        });
+      }
+      // #4790 — ObjectStack's own counters. Wired even when the host supplied a
+      // `secondaryStorage` (AuthManager prefers that store for the budget and
+      // then never calls this resolver), so the two decisions stay independent.
+      authConfig.sharedCounterStore = createLazyCounterStore({
+        resolveCache,
         logger: ctx.logger,
+        subject: 'per-number OTP send budget (#2780)',
+        degradedImpact:
+          'The budget is still enforced, but PER NODE: every node grants the same phone number its own ' +
+          'cooldown and hourly cap, so an N-node deployment can send up to N× the configured number of ' +
+          'PAID SMS to one number (#4790)',
       });
     }
 
