@@ -2251,6 +2251,36 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.object).toBe('crm_lead');
   });
 
+  // #4630: the sys_comment record-level gates from plugin-audit's engine
+  // hooks. They reuse the STANDARD catalog code rather than a bespoke
+  // COMMENT_* one, so this asserts the same object-preference the sibling
+  // gates get — the generic 4xx passthrough would report `sys_comment`.
+  it('maps RECORD_NOT_ACCESSIBLE → 403 with the record\'s object, not the comment table', () => {
+    const r = mapDataError(
+      Object.assign(
+        new Error('Cannot comment on crm_opportunity/1A7n: the record does not exist or you cannot read it'),
+        { code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: 'crm_opportunity' },
+      ),
+      'sys_comment',
+    );
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('RECORD_NOT_ACCESSIBLE');
+    expect(r.body.object).toBe('crm_opportunity');
+  });
+
+  it('maps RECORD_NOT_ACCESSIBLE without a parent object (malformed thread_id) → 403', () => {
+    const r = mapDataError(
+      Object.assign(new Error('Cannot comment: thread_id "crm_opportunity:" does not name a record'), {
+        code: 'RECORD_NOT_ACCESSIBLE',
+        status: 403,
+      }),
+      'sys_comment',
+    );
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('RECORD_NOT_ACCESSIBLE');
+    expect(r.body.object).toBe('sys_comment');
+  });
+
   it('maps ATTACHMENT_DELETE_DENIED → 403', () => {
     const r = mapDataError(
       Object.assign(new Error('Cannot delete attachment a1: only the uploader or a user who can edit the parent record (crm_lead/rec1) may delete it'), {

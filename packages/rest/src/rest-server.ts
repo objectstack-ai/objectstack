@@ -289,6 +289,24 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             },
         };
     }
+    // Comment access gates (#4630): plugin-audit's engine hooks reject
+    // sys_comment writes fail-closed when the caller cannot read the record
+    // behind `thread_id` (create) or is neither the author nor a parent editor
+    // (update/delete). Uses the STANDARD catalog code rather than a bespoke
+    // one (ADR-0112: generic permission conditions take the catalog), and is
+    // matched here — ahead of the generic 4xx passthrough — for the same
+    // reason as the attachment gates: `error.object` names the record's object
+    // (not the join/comment table) and the passthrough would drop it.
+    if (error?.code === 'RECORD_NOT_ACCESSIBLE') {
+        return {
+            status: 403,
+            body: {
+                error: error?.message ?? 'Record access denied',
+                code: 'RECORD_NOT_ACCESSIBLE',
+                ...(error?.object || object ? { object: error?.object ?? object } : {}),
+            },
+        };
+    }
     // Short-circuit: explicit security denial → 403. Match by `code` /
     // `name` to avoid pulling a runtime dependency on plugin-security.
     if (

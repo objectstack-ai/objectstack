@@ -88,3 +88,75 @@ describe('AuditPlugin — system table provisioning', () => {
     await expect(fireReady()).resolves.toBeUndefined();
   });
 });
+
+/**
+ * #4630 — the sys_comment record-level gates are only worth as much as their
+ * MOUNTING: `comment-access-hooks.test.ts` proves what the hooks decide, this
+ * proves the plugin actually installs them on a real kernel:ready, on the right
+ * object, alongside (not instead of) the audit writers. "Who mounts this" is a
+ * question about the composed runtime, and a gate that silently stops being
+ * registered fails exactly like a gate that was never written.
+ */
+describe('AuditPlugin — sys_comment access gates are mounted', () => {
+  function makeGateEngine() {
+    const hooks: Array<{ event: string; object?: string; packageId?: string; handler: (ctx: any) => Promise<void> }> = [];
+    const middlewares: Array<{ object?: string }> = [];
+    const engine = {
+      registerHook(event: string, handler: any, options?: { object?: string; packageId?: string }) {
+        hooks.push({ event, handler, ...options });
+      },
+      registerMiddleware(_fn: any, options?: { object?: string }) {
+        middlewares.push({ ...options });
+      },
+      async find() { return [] as unknown[]; },
+      async findOne() { return null; },
+      async syncObjectSchema() {},
+    };
+    return { engine, hooks, middlewares };
+  }
+
+  it('registers the write hooks + the read middleware on sys_comment at kernel:ready', async () => {
+    const { engine, hooks, middlewares } = makeGateEngine();
+    const { ctx, fireReady } = makeCtx(engine);
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await fireReady();
+
+    const commentHooks = hooks.filter((h) => h.object === 'sys_comment');
+    for (const event of ['beforeInsert', 'beforeUpdate', 'beforeDelete']) {
+      expect(commentHooks.some((h) => h.event === event)).toBe(true);
+    }
+    expect(middlewares).toContainEqual({ object: 'sys_comment' });
+    // The audit writers are still installed — the gates are additive.
+    expect(hooks.some((h) => h.event === 'afterInsert' && !h.object)).toBe(true);
+  });
+
+  it('the mounted beforeInsert actually refuses a comment on an unreadable record', async () => {
+    const { engine, hooks } = makeGateEngine();
+    const { ctx, fireReady } = makeCtx(engine);
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await fireReady();
+
+    // Caller-scoped api that can read nothing — the #4630 rep2 situation.
+    const hookCtx = {
+      object: 'sys_comment',
+      event: 'beforeInsert',
+      input: {
+        data: { thread_id: 'crm_opportunity:1A7nlQpfEhWxIaeX', body: 'rep2 should not be here' },
+        options: { context: { userId: 'rep2' } },
+      },
+      session: { userId: 'rep2' },
+      api: { object: () => ({ findOne: async () => null }) },
+    };
+    const insertHooks = hooks.filter((h) => h.object === 'sys_comment' && h.event === 'beforeInsert');
+    const results = await Promise.allSettled(insertHooks.map((h) => h.handler(hookCtx)));
+    const denials = results.filter(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    );
+    expect(denials).toHaveLength(1);
+    expect(denials[0].reason).toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+  });
+});

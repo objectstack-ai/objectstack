@@ -14,6 +14,7 @@ import { SysAuditLog, SysActivity, SysComment } from './objects/index.js';
 // @objectstack/service-storage for the same ownership reason (ADR-0052 §3: a
 // file↔record link belongs with storage, not the compliance ledger).
 import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
+import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
 
 /**
  * AuditPlugin
@@ -127,6 +128,38 @@ export class AuditPlugin implements Plugin {
       };
       installAuditWriters(engine as any, this.name, { getMessaging, getI18n, getLocale });
       ctx.logger.info('AuditPlugin: audit + activity writers installed');
+
+      // #4630 — record-level authorization for sys_comment: a comment's access
+      // derives from the record its `thread_id` names, exactly as an
+      // attachment's derives from its parent (service-storage's
+      // installAttachmentAccessHooks / installAttachmentReadVisibility). Both
+      // halves are needed: the hooks gate writes, the middleware is the only
+      // seam that filters `count()` (→ list `total`) like `find()`. Orthogonal
+      // to `enforceFeedsCapability` above, which gates `enable.feeds`, not
+      // access. The sharing service resolves lazily so plugin order doesn't
+      // matter; without it the edit checks degrade to parent read visibility.
+      if (typeof (engine as any).registerHook === 'function') {
+        installCommentAccessHooks(
+          engine as any,
+          () => {
+            try {
+              return ctx.getService<any>('sharing');
+            } catch {
+              return null;
+            }
+          },
+          ctx.logger,
+        );
+        if (typeof (engine as any).registerMiddleware === 'function') {
+          installCommentReadVisibility(engine as any, ctx.logger);
+        } else {
+          ctx.logger.warn(
+            'AuditPlugin: engine has no middleware seam — sys_comment READ visibility NOT installed ' +
+              '(comments on records the caller cannot read would be listable)',
+          );
+        }
+        ctx.logger.info('AuditPlugin: sys_comment record-level access gates installed');
+      }
     });
   }
 
