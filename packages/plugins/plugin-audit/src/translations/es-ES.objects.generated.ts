@@ -186,9 +186,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Comentario principal",
         help: "Comentario principal opcional para respuestas anidadas."
       },
-      reply_count: {
-        label: "Número de respuestas"
-      },
       author_id: {
         label: "Autor"
       },
@@ -215,14 +212,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       edited_at: {
         label: "Editado el"
-      },
-      visibility: {
-        label: "Visibilidad",
-        options: {
-          public: "Público",
-          internal: "Interno",
-          private: "Privado"
-        }
       },
       created_at: {
         label: "Creado el"

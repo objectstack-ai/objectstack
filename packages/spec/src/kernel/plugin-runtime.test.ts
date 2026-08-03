@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   DynamicPluginOperationSchema,
   PluginSourceSchema,
-  ActivationEventSchema,
   DynamicLoadRequestSchema,
   DynamicUnloadRequestSchema,
   DynamicPluginResultSchema,
@@ -64,57 +63,10 @@ describe('Plugin Runtime Management Protocol', () => {
     });
   });
 
-  describe('ActivationEventSchema', () => {
-    it('should accept command activation', () => {
-      const event = {
-        type: 'onCommand',
-        pattern: 'analytics.generateReport',
-      };
-      const result = ActivationEventSchema.parse(event);
-      expect(result.type).toBe('onCommand');
-      expect(result.pattern).toBe('analytics.generateReport');
-    });
-
-    it('should accept route activation', () => {
-      const event = {
-        type: 'onRoute',
-        pattern: '/api/v1/analytics/*',
-      };
-      const result = ActivationEventSchema.parse(event);
-      expect(result.type).toBe('onRoute');
-    });
-
-    it('should accept all activation types', () => {
-      const types = [
-        'onCommand', 'onRoute', 'onObject',
-        'onEvent', 'onService', 'onSchedule', 'onStartup',
-        // [#4653] Widened to the union of the two pre-v17 vocabularies when
-        // `./studio` converged onto this declaration.
-        'onMetadataType', 'onView',
-      ];
-      types.forEach((type) => {
-        const result = ActivationEventSchema.parse({ type, pattern: '*' });
-        expect(result.type).toBe(type);
-      });
-    });
-
-    // [#4653] The whole point of converging on the structured form: a mistyped
-    // trigger is rejected at authoring time. The pre-v17 studio `z.string()`
-    // accepted every one of these silently.
-    it('rejects a mistyped trigger instead of silently accepting it', () => {
-      for (const type of ['onMetadatType', 'onview', 'banana', '']) {
-        expect(() => ActivationEventSchema.parse({ type, pattern: 'flow' })).toThrow();
-      }
-    });
-
-    // [#4653] The studio string form is not silently coerced — it fails loudly.
-    // That is the migration's whole failure mode, so it is pinned here.
-    it('rejects the pre-v17 studio string form', () => {
-      for (const legacy of ['*', 'onMetadataType:flow', 'onCommand:my.cmd']) {
-        expect(() => ActivationEventSchema.parse(legacy)).toThrow();
-      }
-    });
-  });
+  // `ActivationEventSchema` was REMOVED (#4657, ADR-0049) — no runtime ever
+  // read an activation event, so the vocabulary retired with the keys that
+  // embedded it. Export-surface pins live in
+  // activation-events-retirement.test.ts; the tombstone pins are below.
 
   describe('DynamicLoadRequestSchema', () => {
     it('should accept minimal load request', () => {
@@ -133,7 +85,7 @@ describe('Plugin Runtime Management Protocol', () => {
       expect(result.timeout).toBe(60000); // default
     });
 
-    it('should accept full load request with activation events', () => {
+    it('should accept full load request', () => {
       const request = {
         pluginId: 'com.acme.analytics',
         source: {
@@ -141,19 +93,38 @@ describe('Plugin Runtime Management Protocol', () => {
           location: 'acme-analytics',
           version: '~2.1.0',
         },
-        activationEvents: [
-          { type: 'onRoute' as const, pattern: '/api/v1/analytics/*' },
-          { type: 'onCommand' as const, pattern: 'analytics.*' },
-        ],
         config: { apiKey: 'abc123', region: 'us-east' },
         priority: 50,
         sandbox: true,
         timeout: 120000,
       };
       const result = DynamicLoadRequestSchema.parse(request);
-      expect(result.activationEvents).toHaveLength(2);
       expect(result.sandbox).toBe(true);
       expect(result.priority).toBe(50);
+    });
+
+    // ─── [#4657] `activationEvents` tombstone pins (ADR-0049) ────────────
+    // The key promised lazy activation no runtime ever implemented — every
+    // plugin activates immediately on load. The schema is not `.strict()`,
+    // so the removal is a `retiredKey()` tombstone: a plain delete would have
+    // Zod silently STRIP an authored value (#2169 shape) instead of teaching.
+    it('rejects an authored activationEvents with the retirement prescription', () => {
+      expect(() =>
+        DynamicLoadRequestSchema.parse({
+          pluginId: 'com.acme.analytics',
+          source: { type: 'npm' as const, location: '@acme/analytics-plugin' },
+          activationEvents: [{ type: 'onRoute', pattern: '/api/v1/analytics/*' }],
+        }),
+      ).toThrow(/activationEvents.*removed.*17\.0\.0.*#4657.*Delete the key/s);
+    });
+
+    it('parses clean without the key — and the result does not carry it', () => {
+      const result = DynamicLoadRequestSchema.parse({
+        pluginId: 'com.acme.analytics',
+        source: { type: 'npm' as const, location: '@acme/analytics-plugin' },
+      });
+      // Absence stays absence: the tombstone must not materialize a value.
+      expect(result).not.toHaveProperty('activationEvents');
     });
   });
 

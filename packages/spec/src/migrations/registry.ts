@@ -718,7 +718,26 @@ const step17: MigrationStep = {
     + 'rewrite — one semantic TODO for config authors rather than a stack conversion, the '
     + '`validateOnly` shape. The key itself is tombstoned (the schema is not `.strict()`; a '
     + 'plain delete would strip it silently), and a config-driven webhooks/callbacks synthesis, '
-    + 'if ever wanted, returns via the enforce route of ADR-0049 through a new ADR.',
+    + 'if ever wanted, returns via the enforce route of ADR-0049 through a new ADR.\n\n'
+    + 'The same pass closes `activationEvents` (#4657): both keys that carried it — '
+    + '`DynamicLoadRequest.activationEvents` on the kernel side and '
+    + '`StudioPluginManifest.activationEvents` on the studio side — declared lazy plugin '
+    + 'activation ("plugins remain dormant until an activation event fires") that no runtime '
+    + 'in any repo ever implemented: every plugin has always activated immediately on '
+    + "load/registration, and cloud-v1's own ROADMAP recorded the capability as "
+    + 'unimplemented, planned for v0.4.0. #4653 had just converged the two '
+    + '`ActivationEventSchema` declarations onto one structured `{ type, pattern }` '
+    + "vocabulary in this same unreleased major; with the maintainer's enforce-or-remove "
+    + 'ruling landing on REMOVE, that converged vocabulary retires before ever shipping — '
+    + 'composed across the two changes, a v16 author simply deletes the key in whichever '
+    + 'form they carried. Neither parent is stored metadata (`StudioPluginManifest` is TS '
+    + 'configuration parsed by `defineStudioPlugin`; `DynamicLoadRequest` is a runtime '
+    + 'request shape with no caller in any repo), so there is no source for the chain to '
+    + 'rewrite — one semantic TODO, the `validateOnly` shape. The kernel key is tombstoned '
+    + '(its schema is not `.strict()`; a plain delete would strip it silently), the studio '
+    + 'key is rejected by the strict manifest parse with its own guidance prescription, and '
+    + 'the orphaned `ActivationEventSchema` def is removed with them. Behaviour is '
+    + 'byte-identical: eager activation was always the only behaviour.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1200,6 +1219,44 @@ const step17: MigrationStep = {
         + 'behaviour is byte-identical: every removed bit had zero readers, and the three '
         + 'live bits keep their readers (engine.ts autonumber defer / aggregate dispatch, '
         + 'plugin.ts + engine.ts batched schema sync, verify date-bucket parity).',
+    },
+    {
+      id: 'plugin-activation-events-retired',
+      surface:
+        'kernel.dynamicLoadRequest.activationEvents / studio.studioPluginManifest.activationEvents',
+      replacement:
+        '(removed — delete the key. Every plugin activates immediately on load/registration, '
+        + 'which is the only behaviour that has ever existed; `activate()` still runs at '
+        + 'registration time. Lazy activation, if built, returns via the enforce route of '
+        + 'ADR-0049 through a new ADR, with a vocabulary its executor actually honours)',
+      reason:
+        'Both `activationEvents` keys — and the `ActivationEventSchema` trigger vocabulary '
+        + 'they embedded (`onCommand` / `onRoute` / … / `onView` after the #4653 convergence) — '
+        + 'promised lazy plugin activation ("plugins remain dormant until an activation event '
+        + 'fires") that no runtime in objectstack, cloud, cloud-v1 or objectui ever '
+        + "implemented: nothing anywhere read the key, every plugin activates immediately, and "
+        + "cloud-v1's own ROADMAP recorded lazy activation as unimplemented (planned v0.4.0). "
+        + 'That is the ADR-0049 false-compliance shape in the semantically-lying direction: an '
+        + 'author writing `activationEvents: [{ type: \'onMetadataType\', pattern: \'flow\' }]` '
+        + 'expected deferral and got eager activation with a clean parse. Neither parent shape '
+        + 'is stored metadata — `StudioPluginManifest` is TS configuration parsed by '
+        + '`defineStudioPlugin` (a root schema, never part of a stack tree) and '
+        + '`DynamicLoadRequest` is a runtime request shape with no caller — so no '
+        + '`sys_metadata` row can carry the key and there is no source for the D2 chain to '
+        + 'rewrite; this entry is the D3 record. The kernel key is tombstoned via '
+        + '`retiredKey()` (its schema is not `.strict()`; a plain delete would strip an '
+        + "authored value silently), the studio key is rejected by the strict manifest parse "
+        + 'with a guidance prescription (as are its former VS Code-flavoured aliases '
+        + '`activation` / `events` / `onActivate`), and the orphaned `ActivationEventSchema` / '
+        + '`ActivationEvent` exports are removed from `./kernel` and `./studio` with the keys '
+        + '(#3950: an exported schema with no consumer is read as a capability). #4657.',
+      acceptanceCriteria:
+        'No `DynamicLoadRequest` or `defineStudioPlugin` input authors `activationEvents` — '
+        + 'authoring it is a tsc error (`never` on the kernel side; an unknown key on the '
+        + 'strict studio manifest) and a parse error carrying the prescription on both. No '
+        + 'code imports `ActivationEventSchema` / `ActivationEvent` from '
+        + '`@objectstack/spec/kernel` or `@objectstack/spec/studio` (TS2305 after upgrade). '
+        + 'Runtime behaviour is byte-identical: plugins loaded eagerly before and after.',
     },
   ],
 };

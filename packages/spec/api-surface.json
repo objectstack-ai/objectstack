@@ -1432,8 +1432,6 @@
     "validationMessageTranslationKey (function)"
   ],
   "./kernel": [
-    "ActivationEvent (type)",
-    "ActivationEventSchema (const)",
     "AdvancedPluginLifecycleConfig (type)",
     "AdvancedPluginLifecycleConfigSchema (const)",
     "ArtifactChecksum (type)",
@@ -3995,8 +3993,6 @@
     "ActionContributionLocation (type)",
     "ActionContributionLocationSchema (const)",
     "ActionContributionSchema (const)",
-    "ActivationEvent (type)",
-    "ActivationEventSchema (const)",
     "BUILT_IN_NODE_DESCRIPTORS (const)",
     "CommandContribution (type)",
     "CommandContributionSchema (const)",
