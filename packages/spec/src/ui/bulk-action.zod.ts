@@ -125,7 +125,7 @@ export const BulkActionParamSchema = lazySchema(() => z.object({
   options: z.array(z.object({
     label: z.string().describe('Option label (plain string — not i18n-resolved on this path).'),
     value: z.union([z.string(), z.number(), z.boolean()]).describe('Stored value.'),
-  }).passthrough()).optional().describe('Static options for select-style widgets.'),
+  }).passthrough()).optional().describe('Static options for select-style widgets. Each entry is `{ label, value }` plus any extra widget config — the entry is open (`.passthrough()`) because the renderer forwards unknown option keys to the field widget, which reads `color` / `icon` / `disabled` / `visibleWhen` beyond the declared pair.'),
   object: SnakeCaseIdentifierSchema.optional().describe("Target object for a `lookup` widget. (An ActionParam spells this `reference`.)"),
   labelField: z.string().optional().describe('Related-object field used as the option label for a `lookup` widget (defaults to name/full_name/email/id).'),
   multiple: z.boolean().optional().describe('Allow picking multiple values — the param value becomes an array and is written to the patch as-is.'),
