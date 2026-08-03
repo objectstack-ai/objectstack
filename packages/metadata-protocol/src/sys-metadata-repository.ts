@@ -318,7 +318,10 @@ export class SysMetadataRepository implements MetadataRepository {
       body: body as Record<string, unknown>,
       hash,
       parentHash: (row as any).previous_checksum ?? null,
-      authoredBy: (row as any).recorded_by ?? 'unknown',
+      // #4556 — a null `recorded_by` means the write had no actor. Rendering
+      // that as the string 'unknown' invents an identity the column never
+      // held, which is the same declared-≠-actual defect on the read side.
+      authoredBy: ((row as any).recorded_by as string | null | undefined) ?? null,
       authoredAt: (row as any).recorded_at ?? new Date(0).toISOString(),
       message: (row as any).change_note ?? undefined,
       seq: ((row as any).event_seq as number) ?? 0,
@@ -424,7 +427,10 @@ export class SysMetadataRepository implements MetadataRepository {
           change_note: opts.message,
           source: opts.source ?? 'sys-metadata-repo',
           organization_id: this.organizationId,
-          recorded_by: opts.actor,
+          // #4556 — `recorded_by` is a lookup('sys_user'). A write with no
+          // actor stores NULL, never a sentinel string: an id that resolves
+          // to no row is a foreign key that lies.
+          recorded_by: opts.actor ?? null,
           recorded_at: now,
         },
         { context: ctx },
@@ -546,7 +552,8 @@ export class SysMetadataRepository implements MetadataRepository {
             change_note: opts.message,
             source: opts.source ?? 'sys-metadata-repo',
             organization_id: this.organizationId,
-            recorded_by: opts.actor,
+            // #4556 — NULL, not a sentinel, when the delete had no actor.
+            recorded_by: opts.actor ?? null,
             recorded_at: now,
           },
           { context: ctx },
@@ -596,7 +603,7 @@ export class SysMetadataRepository implements MetadataRepository {
    */
   async promoteDraft(
     ref: MetaRef,
-    opts: { actor: string; source?: string; message?: string; intent?: MetadataWriteIntent },
+    opts: { actor: string | null; source?: string; message?: string; intent?: MetadataWriteIntent },
   ): Promise<{ version: string; seq: number; item: MetadataItem; packageId: string | null }> {
     this.assertOpen();
     // Read the RAW draft row (not just the body) so the promotion can carry
@@ -667,7 +674,7 @@ export class SysMetadataRepository implements MetadataRepository {
   async restoreVersion(
     ref: MetaRef,
     targetVersion: number,
-    opts: { actor: string; source?: string; message?: string; intent?: MetadataWriteIntent },
+    opts: { actor: string | null; source?: string; message?: string; intent?: MetadataWriteIntent },
   ): Promise<{ version: string; seq: number; item: MetadataItem }> {
     this.assertOpen();
     const full = this.fullRef(ref);
@@ -825,7 +832,10 @@ export class SysMetadataRepository implements MetadataRepository {
         hash: (row.checksum as string | null) ?? null,
         parentHash: (row.previous_checksum as string | null) ?? null,
         version: typeof row.version === 'number' ? row.version : undefined,
-        actor: (row.recorded_by as string | undefined) ?? 'unknown',
+        // #4556 — surface the absence, do not paper it over with a label.
+        // An audit timeline that must show "who changed this" needs to know
+        // the answer is "the platform", not a user literally named 'unknown'.
+        actor: (row.recorded_by as string | null | undefined) ?? null,
         message: (row.change_note as string | undefined) ?? undefined,
         ts: (row.recorded_at as string) ?? new Date(0).toISOString(),
         source: (row.source as string | undefined) ?? 'sys-metadata-repo',
@@ -898,7 +908,8 @@ export class SysMetadataRepository implements MetadataRepository {
           ref: { org: '', type: 'view', name: '_close' } as MetaRef,
           hash: null,
           parentHash: null,
-          actor: 'system',
+          // #4556 — a synthetic drain event has no actor at all.
+          actor: null,
           ts: new Date().toISOString(),
           source: 'sys-metadata-repo-close',
         });
@@ -1009,7 +1020,9 @@ export class SysMetadataRepository implements MetadataRepository {
       body,
       hash,
       parentHash: null,
-      authoredBy: row.updated_by ?? row.created_by ?? 'unknown',
+      // #4556 — `updated_by` / `created_by` are lookup('sys_user') too;
+      // absent means absent, not a user called 'unknown'.
+      authoredBy: (row.updated_by as string | null | undefined) ?? (row.created_by as string | null | undefined) ?? null,
       authoredAt: row.updated_at ?? row.created_at ?? new Date().toISOString(),
       message: undefined,
       seq: this.seqCounter,

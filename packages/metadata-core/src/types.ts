@@ -99,7 +99,7 @@ export const MetadataItemSchema = z.object({
   body: z.record(z.string(), z.unknown()).describe('Canonical Zod-normalised spec'),
   hash: z.string().regex(/^sha256:[0-9a-f]{64}$/).describe('sha256(canonicalize(body))'),
   parentHash: z.string().nullable().describe('Hash this version was derived from; null for first version'),
-  authoredBy: z.string().describe('Identity of the writer (user id, "cli", "ai:claude", …)'),
+  authoredBy: z.string().nullable().describe('Identity of the writer (user id, "cli", "ai:claude", …); null = system-initiated, no actor'),
   authoredAt: z.string().describe('ISO-8601 timestamp'),
   message: z.string().optional().describe('Optional commit message'),
   seq: z.number().int().nonnegative().describe('Sequence number this write produced in the org log'),
@@ -136,7 +136,13 @@ export const MetadataEventSchema = z.object({
    */
   version: z.number().int().positive().optional(),
   previousName: z.string().optional().describe('Set on op="rename"'),
-  actor: z.string(),
+  /**
+   * Who wrote this. `null` = system-initiated (boot sync, migration,
+   * scheduled job) — see `PutOptions.actor` (#4556). Never a sentinel
+   * string: consumers that resolve this against `sys_user` must be able to
+   * tell "nobody" from "a user id", and only `null` says the former.
+   */
+  actor: z.string().nullable(),
   message: z.string().optional(),
   ts: z.string(),
   source: z.string().describe('Origin label: "fs", "studio", "rest", "ai", "git-import", …'),
@@ -170,8 +176,18 @@ export interface PutOptions {
    * absence". A mismatch throws ConflictError.
    */
   parentVersion: string | null;
-  /** Identity of the writer; mirrored to MetadataEvent.actor. */
-  actor: string;
+  /**
+   * Identity of the writer; mirrored to MetadataEvent.actor and stored in
+   * `sys_metadata_history.recorded_by` (a `lookup('sys_user')`).
+   *
+   * **Required but nullable, deliberately** (#4556). Pass `null` — never a
+   * label like `'system'` — when the write has no human actor: a boot
+   * metadata sync, a data migration, a scheduled job. Keeping the property
+   * required rather than optional forces every call site to state which of
+   * the two it is, so a forgotten actor cannot silently become a fake
+   * foreign key in a lookup column.
+   */
+  actor: string | null;
   /** Optional human-readable commit message. */
   message?: string;
   /** Optional label for the change log "source" column. */
@@ -198,7 +214,8 @@ export interface PutResult {
 
 export interface DeleteOptions {
   parentVersion: string;
-  actor: string;
+  /** Identity of the writer; `null` = system-initiated. See {@link PutOptions.actor}. */
+  actor: string | null;
   message?: string;
   source?: string;
   /** Two-tier authorization intent; defaults to `override-artifact`. */
