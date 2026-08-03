@@ -1,5 +1,5 @@
 ---
-'@objectstack/objectql': patch
+'@objectstack/objectql': minor
 '@objectstack/cli': patch
 ---
 
