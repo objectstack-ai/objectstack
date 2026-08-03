@@ -12,6 +12,7 @@ import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import type { ISecurityService } from '@objectstack/spec/contracts';
@@ -5992,6 +5993,22 @@ export class RestServer {
                     if (!dataset) {
                         return res.status(400).json({ code: 'VALIDATION_FAILED', message: 'Provide body.dataset (inline) or body.datasetName.' });
                     }
+
+                    // A SERVED document is not a valid input to the schema that
+                    // produced it: the read path stamps `_diagnostics` on every
+                    // item `getMetaItems` returns, and since #4001
+                    // `DatasetSchema` is CLOSED — so the parse below rejected
+                    // our OWN annotation with `unrecognized_keys`, answering
+                    // 400 "Invalid dataset definition." for every saved dataset,
+                    // i.e. every widget on every dataset-bound dashboard. Same
+                    // shape as the cold-boot flow bind (cloud#971).
+                    //
+                    // Stripped on BOTH branches, not just the `datasetName`
+                    // read: the Studio dataset preview posts its draft INLINE,
+                    // and that draft is the document the designer GET-loaded —
+                    // decorations and all. A genuinely hand-authored draft
+                    // never carries these keys, so the strip is a no-op there.
+                    dataset = stripReadDecorations(dataset);
 
                     // Validate against the spec schema so a malformed draft
                     // yields a clean 400 instead of a runtime throw.

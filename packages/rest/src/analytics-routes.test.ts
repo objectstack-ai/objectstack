@@ -30,10 +30,10 @@ const inlineDataset = {
 const selection = { dimensions: ['region'], measures: ['revenue'] };
 
 /** Build a RestServer with an optional analytics provider (positional arg #15). */
-function buildServer(analyticsProvider?: any) {
+function buildServer(analyticsProvider?: any, protocol: any = mockProtocol()) {
   const server = mockServer();
   const rest = new RestServer(
-    server as any, mockProtocol() as any, { api: { requireAuth: false } } as any,
+    server as any, protocol as any, { api: { requireAuth: false } } as any,
     undefined, undefined, undefined, undefined, undefined, undefined, undefined,
     undefined, undefined, undefined, undefined,
     analyticsProvider,
@@ -86,6 +86,64 @@ describe('POST /analytics/dataset/query', () => {
     const res = mockRes();
     const bad = { ...inlineDataset, measures: [{ name: 'x', aggregate: 'not_a_real_agg' }] };
     await route!.handler({ method: 'POST', params: {}, headers: {}, body: { dataset: bad, selection } } as any, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_FAILED');
+  });
+
+  // ── saved datasets (`datasetName`) ─────────────────────────────────────────
+  // Every case above passes the dataset INLINE, which is why the read path
+  // below shipped broken: `getMetaItems` stamps the read-time `_diagnostics`
+  // verdict onto every served item, and `DatasetSchema` is closed (#4001), so
+  // the strict re-parse rejected our own decoration and answered 400 "Invalid
+  // dataset definition." for every saved dataset — i.e. every dashboard widget.
+  it('resolves a saved dataset by name and strips read decorations before parsing', async () => {
+    const served = {
+      ...inlineDataset,
+      _packageId: 'com.example.showcase',
+      _diagnostics: { valid: true },
+    };
+    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [served] }) };
+    const queryDataset = vi.fn().mockResolvedValue({ rows: [{ region: 'NA', revenue: 100 }], fields: [] });
+    const { route } = buildServer(async () => ({ queryDataset }), protocol);
+    const res = mockRes();
+    await route!.handler({ method: 'POST', params: {}, headers: {}, body: { datasetName: 'sales', selection } } as any, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.rows).toEqual([{ region: 'NA', revenue: 100 }]);
+    const passed = queryDataset.mock.calls[0][0];
+    expect(passed).not.toHaveProperty('_diagnostics');
+    // The ADR-0010 provenance envelope is NOT a read decoration — it survives.
+    expect(passed._packageId).toBe('com.example.showcase');
+  });
+
+  // The Studio dataset preview posts the draft INLINE — and that draft is the
+  // document the designer GET-loaded, decorations included.
+  it('strips read decorations from an INLINE dataset too', async () => {
+    const queryDataset = vi.fn().mockResolvedValue({ rows: [], fields: [] });
+    const { route } = buildServer(async () => ({ queryDataset }));
+    const res = mockRes();
+    const served = { ...inlineDataset, _diagnostics: { valid: true }, _provenance: 'package' };
+    await route!.handler({ method: 'POST', params: {}, headers: {}, body: { dataset: served, selection } } as any, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(queryDataset.mock.calls[0][0]).not.toHaveProperty('_diagnostics');
+  });
+
+  it('returns 404 for an unknown datasetName', async () => {
+    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [] }) };
+    const { route } = buildServer(async () => ({ queryDataset: vi.fn() }), protocol);
+    const res = mockRes();
+    await route!.handler({ method: 'POST', params: {}, headers: {}, body: { datasetName: 'nope', selection } } as any, res);
+    expect(res.statusCode).toBe(404);
+    expect(res.body.code).toBe('NOT_FOUND');
+  });
+
+  it('still rejects a saved dataset that is genuinely malformed', async () => {
+    const served = { ...inlineDataset, measures: [{ name: 'x', aggregate: 'not_a_real_agg' }], _diagnostics: { valid: false } };
+    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [served] }) };
+    const { route } = buildServer(async () => ({ queryDataset: vi.fn() }), protocol);
+    const res = mockRes();
+    await route!.handler({ method: 'POST', params: {}, headers: {}, body: { datasetName: 'sales', selection } } as any, res);
     expect(res.statusCode).toBe(400);
     expect(res.body.code).toBe('VALIDATION_FAILED');
   });
