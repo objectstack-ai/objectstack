@@ -2,8 +2,9 @@
 
 /**
  * cloud#1013 / #4700 — resolving a host-app package from a framework package.
+ * #4719 — and only when the host app DECLARES it.
  *
- * The defect: `serve` loaded `@objectstack/organizations` with a BARE
+ * The first defect: `serve` loaded `@objectstack/organizations` with a BARE
  * `import()`. Node ESM resolves that against the importer's own realpath — the
  * framework package's, inside the framework workspace — while the package is
  * cloud-private and only ever exists in the host app's `node_modules`. It could
@@ -13,22 +14,43 @@
  * why the resolver moved here from `packages/cli/src/utils/import-from-host.ts`:
  * one behaviour, one source.
  *
- * These cases run against a REAL fixture app on disk (a real `node_modules`,
- * real resolution, nothing mocked): the first two are the issue's own repro,
- * one half per case — the framework package's resolution cannot see the package,
- * the host app's can.
+ * The second defect (#4719) is the fix's own: "resolve from the host app" was a
+ * CJS `createRequire`, and CJS resolution honours `NODE_PATH` — which every pnpm
+ * bin shim exports, pointing at the hoisted workspace store. So ANY package
+ * transitively reachable from anywhere in the workspace resolved "from the host
+ * app", whatever that app declared, and D5's "declare it in the app's
+ * package.json" was advice about a thing nothing checked. The gate is now the
+ * DECLARATION; reachability is refused.
+ *
+ * These cases run against REAL fixture apps on disk (a real `node_modules`, real
+ * resolution, a real `NODE_PATH`, nothing mocked).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import * as NodeModule from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHostImporter, createHostRequire } from './node.js';
+import {
+  createHostImporter,
+  createHostRequire,
+  hostImportFailureKind,
+  isDeclaredByHost,
+  packageNameFromSpecifier,
+  readHostDeclaration,
+} from './node.js';
 
 /** The cloud-private package at the heart of cloud#1013. */
 const ORGANIZATIONS = '@objectstack/organizations';
 /** A package that fails while it EVALUATES — not while it resolves. */
 const BROKEN = '@fixture/throws-on-load';
+/**
+ * Installed ONLY in the `NODE_PATH` store — i.e. exactly the shape a pnpm bin
+ * shim puts every transitively-reachable workspace package into (#4719).
+ */
+const HOISTED_ONLY = '@fixture/hoisted-only';
+/** Declared by the host app and installed nowhere at all. */
+const DECLARED_MISSING = '@fixture/declared-but-missing';
 
 /**
  * A directory inside the framework workspace — what a bare `import()` from a
@@ -39,7 +61,21 @@ const BROKEN = '@fixture/throws-on-load';
  */
 const PACKAGE_ROOT = process.cwd();
 
+/** Host app that declares (and installs) what it uses — the supported shape. */
 let hostRoot: string;
+/** Host app that declares NOTHING, used against the NODE_PATH store below. */
+let undeclaringRoot: string;
+/** A directory with no `package.json` at all. */
+let manifestlessRoot: string;
+/** Stands in for `<workspace>/node_modules/.pnpm/node_modules`. */
+let nodePathStore: string;
+
+const originalNodePath = process.env.NODE_PATH;
+
+/** `Module.globalPaths` is derived from NODE_PATH once, at startup. */
+function reloadNodePath(): void {
+  (NodeModule as unknown as { _initPaths: () => void })._initPaths();
+}
 
 function writeFixturePackage(root: string, name: string, indexJs: string): void {
   const dir = join(root, 'node_modules', ...name.split('/'));
@@ -53,9 +89,9 @@ function writeFixturePackage(root: string, name: string, indexJs: string): void 
 }
 
 beforeAll(() => {
-  // A host app exactly as the fix expects one: it DECLARES the enterprise
-  // package and has it installed in its own node_modules. The framework
-  // workspace this package lives in has neither.
+  // A host app exactly as the fix expects one: it DECLARES the packages it uses
+  // and has them installed in its own node_modules. The framework workspace this
+  // package lives in has neither.
   hostRoot = mkdtempSync(join(tmpdir(), 'os-import-from-host-'));
   writeFileSync(
     join(hostRoot, 'package.json'),
@@ -63,6 +99,14 @@ beforeAll(() => {
       name: 'host-app-fixture',
       type: 'module',
       dependencies: { [ORGANIZATIONS]: '*' },
+      // #4719 fixture amendment: the evaluation-crash case below imports this
+      // package, and an undeclared name is no longer looked up in the host's
+      // node_modules at all — so the crash it exists to prove would be masked by
+      // an "undeclared" verdict. Declaring it is the correct fix (the fixture app
+      // really does depend on it); loosening the gate would not be.
+      devDependencies: { [BROKEN]: '*' },
+      // Declared, deliberately never installed anywhere.
+      optionalDependencies: { [DECLARED_MISSING]: '*' },
     }),
     'utf8',
   );
@@ -72,10 +116,44 @@ beforeAll(() => {
     'export class OrganizationsPlugin { name = "com.objectstack.organizations"; }\n',
   );
   writeFixturePackage(hostRoot, BROKEN, 'throw new Error("fixture package exploded on import");\n');
+
+  undeclaringRoot = mkdtempSync(join(tmpdir(), 'os-import-undeclared-'));
+  writeFileSync(
+    join(undeclaringRoot, 'package.json'),
+    JSON.stringify({ name: 'undeclaring-app-fixture', type: 'module', dependencies: {} }),
+    'utf8',
+  );
+
+  manifestlessRoot = mkdtempSync(join(tmpdir(), 'os-import-no-manifest-'));
+
+  // The hoisted store, and NODE_PATH pointed at it — the pnpm bin shim's first
+  // act, reproduced. `Module.globalPaths` is rebuilt so an ALREADY-CREATED
+  // `require` sees it, which is what makes this the issue's exact repro.
+  nodePathStore = mkdtempSync(join(tmpdir(), 'os-node-path-store-'));
+  const pkgDir = join(nodePathStore, ...HOISTED_ONLY.split('/'));
+  mkdirSync(pkgDir, { recursive: true });
+  writeFileSync(
+    join(pkgDir, 'package.json'),
+    JSON.stringify({
+      name: HOISTED_ONLY,
+      version: '0.0.0-fixture',
+      type: 'module',
+      main: 'index.js',
+    }),
+    'utf8',
+  );
+  writeFileSync(join(pkgDir, 'index.js'), 'export const hoisted = true;\n', 'utf8');
+  process.env.NODE_PATH = originalNodePath ? `${nodePathStore}:${originalNodePath}` : nodePathStore;
+  reloadNodePath();
 });
 
 afterAll(() => {
-  if (hostRoot) rmSync(hostRoot, { recursive: true, force: true });
+  if (originalNodePath === undefined) delete process.env.NODE_PATH;
+  else process.env.NODE_PATH = originalNodePath;
+  reloadNodePath();
+  for (const dir of [hostRoot, undeclaringRoot, manifestlessRoot, nodePathStore]) {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe('host-app package resolution (cloud#1013, #4700)', () => {
@@ -90,32 +168,24 @@ describe('host-app package resolution (cloud#1013, #4700)', () => {
   });
 
   it('resolves a package that exists ONLY in the host app', async () => {
-    const importFromHost = createHostImporter(createHostRequire(hostRoot));
+    const importFromHost = createHostImporter(hostRoot);
     const mod = await importFromHost(ORGANIZATIONS);
     // The export `serve` and `bootStack` construct: `new mod.OrganizationsPlugin()`.
     expect(typeof mod.OrganizationsPlugin).toBe('function');
     expect(new mod.OrganizationsPlugin().name).toBe('com.objectstack.organizations');
   });
 
-  it("falls back to the importing package's own resolution when the host cannot resolve", async () => {
-    // Whatever the host app cannot see must still load from the framework
+  it("falls back to the importing package's own resolution when the host does not declare", async () => {
+    // Whatever the host app does not declare must still load from the framework
     // package's own dependencies — that fallback is what keeps every
     // framework-owned load in `serve` (plugin-auth, plugin-security,
-    // service-i18n, …) and in `bootStack` working exactly as before. Modelled
-    // with a host `require` that resolves nothing, because a real one cannot:
-    // vitest exports NODE_PATH into the test process, so every package in the
-    // workspace store resolves from any directory.
-    const blindHostRequire = {
-      resolve(pkg: string): string {
-        throw Object.assign(new Error(`Cannot find module '${pkg}'`), { code: 'MODULE_NOT_FOUND' });
-      },
-    } as unknown as NodeRequire;
-    const mod = await createHostImporter(blindHostRequire)('@objectstack/spec');
+    // service-i18n, …) and in `bootStack` working exactly as before.
+    const mod = await createHostImporter(undeclaringRoot)('@objectstack/spec');
     expect(mod).toBeTypeOf('object');
   });
 
   it('reports a package that neither can resolve as module-not-found', async () => {
-    const importFromHost = createHostImporter(createHostRequire(hostRoot));
+    const importFromHost = createHostImporter(hostRoot);
     // Callers classify "missing vs crashed" off this error (Serve.
     // isModuleNotFoundError), so the absent case must stay recognisable.
     await expect(importFromHost('@fixture/nowhere-at-all')).rejects.toThrow(
@@ -129,7 +199,188 @@ describe('host-app package resolution (cloud#1013, #4700)', () => {
     // would swap the real cause for a MODULE_NOT_FOUND, which every caller
     // reads as "not installed" — a crash silently downgraded to a skip, or a
     // fatal telling the operator to install what is already installed.
-    const importFromHost = createHostImporter(createHostRequire(hostRoot));
+    const importFromHost = createHostImporter(hostRoot);
     await expect(importFromHost(BROKEN)).rejects.toThrow(/fixture package exploded on import/);
+    const err = await importFromHost(BROKEN).catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBeUndefined();
+  });
+});
+
+describe('declaration gates the host lookup (#4719)', () => {
+  it('PRECONDITION: NODE_PATH really does make an undeclared package resolvable', () => {
+    // The whole defect in one assertion. This is the resolution the previous
+    // implementation performed and trusted: a CJS `require` anchored at an app
+    // that declares NOTHING, finding a package because the launcher exported
+    // NODE_PATH. It succeeds — which is why the guard below has to exist.
+    const resolved = createHostRequire(undeclaringRoot).resolve(HOISTED_ONLY);
+    expect(resolved).toContain(nodePathStore);
+    expect(isDeclaredByHost(HOISTED_ONLY, undeclaringRoot)).toBe(false);
+  });
+
+  it('REFUSES an undeclared package even though NODE_PATH resolves it', async () => {
+    // THE case. Before #4719 this imported the hoisted copy and reported
+    // success, so `objectstack serve` booted a walled posture for an app that
+    // had never declared the enterprise runtime — but only when launched
+    // through a pnpm shim. Now the manifest is the answer, in every launcher.
+    const importFromHost = createHostImporter(undeclaringRoot);
+    const err = await importFromHost(HOISTED_ONLY).catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('undeclared');
+    expect((err as Error).message).toMatch(/does not declare it/);
+    expect((err as Error).message).toMatch(/Declare it in that app's package\.json/);
+  });
+
+  it('ACCEPTS the same package once the app declares it', async () => {
+    // Same package, same NODE_PATH store, same process — only the manifest
+    // differs. That is the contract: the declaration decides, not the layout.
+    const declaringRoot = mkdtempSync(join(tmpdir(), 'os-import-declared-'));
+    try {
+      writeFileSync(
+        join(declaringRoot, 'package.json'),
+        JSON.stringify({ name: 'declaring-app', dependencies: { [HOISTED_ONLY]: '*' } }),
+        'utf8',
+      );
+      const mod = await createHostImporter(declaringRoot)(HOISTED_ONLY);
+      expect(mod.hoisted).toBe(true);
+    } finally {
+      rmSync(declaringRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('DECLARED but unresolvable is a broken install, worded as one', async () => {
+    // The other half of the fail-fast contract: the two failures used to
+    // collapse into one MODULE_NOT_FOUND with opposite remedies. An operator
+    // who has already declared the package must not be sent back to the
+    // package.json they just edited.
+    const err = await createHostImporter(hostRoot)(DECLARED_MISSING).catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect((err as Error).message).toMatch(/DECLARES it \(optionalDependencies: "\*"\)/);
+    expect((err as Error).message).toMatch(/INSTALL problem, not a declaration problem/);
+    expect((err as Error).message).not.toMatch(/does not declare it/);
+  });
+
+  it('both failures stay classifiable as module-not-found for existing callers', async () => {
+    // `serve`'s optional-plugin guards and the `requires` resolver branch on
+    // `isModuleNotFoundError`; neither new error may fall out of that class.
+    for (const [root, pkg] of [
+      [undeclaringRoot, HOISTED_ONLY],
+      [hostRoot, DECLARED_MISSING],
+    ] as const) {
+      const err = await createHostImporter(root)(pkg).catch((e: { code?: string }) => e);
+      expect(err.code).toBe('MODULE_NOT_FOUND');
+    }
+  });
+
+  it('a directory with no package.json declares nothing, and says so', async () => {
+    const decl = readHostDeclaration(HOISTED_ONLY, manifestlessRoot);
+    expect(decl).toMatchObject({ declared: false, manifestMissing: true });
+    await expect(createHostImporter(manifestlessRoot)(HOISTED_ONLY)).rejects.toThrow(
+      /no readable package\.json was found there/,
+    );
+  });
+});
+
+describe('what counts as a declaration (#4719)', () => {
+  it('reads all four declaration fields, and names the one it found', () => {
+    const root = mkdtempSync(join(tmpdir(), 'os-decl-fields-'));
+    try {
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify({
+          name: 'fields-fixture',
+          dependencies: { a: '^1.0.0' },
+          devDependencies: { b: '^2.0.0' },
+          optionalDependencies: { c: '^3.0.0' },
+          peerDependencies: { d: '^4.0.0' },
+        }),
+        'utf8',
+      );
+      expect(readHostDeclaration('a', root)).toMatchObject({
+        declared: true,
+        field: 'dependencies',
+      });
+      expect(readHostDeclaration('b', root)).toMatchObject({
+        declared: true,
+        field: 'devDependencies',
+      });
+      expect(readHostDeclaration('c', root)).toMatchObject({
+        declared: true,
+        field: 'optionalDependencies',
+      });
+      expect(readHostDeclaration('d', root)).toMatchObject({
+        declared: true,
+        field: 'peerDependencies',
+      });
+      expect(readHostDeclaration('e', root).declared).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts workspace / link / alias specifiers — the KEY is the declaration', () => {
+    const root = mkdtempSync(join(tmpdir(), 'os-decl-specifiers-'));
+    try {
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify({
+          name: 'specifier-fixture',
+          dependencies: {
+            '@objectstack/organizations': 'workspace:*',
+            local: 'link:../local',
+            aliased: 'npm:@acme/real@1.2.3',
+          },
+        }),
+        'utf8',
+      );
+      // A `workspace:` / `link:` value is the package manager's business; the
+      // authoring act this gate reads is the KEY.
+      expect(readHostDeclaration('@objectstack/organizations', root)).toMatchObject({
+        declared: true,
+        specifier: 'workspace:*',
+      });
+      expect(isDeclaredByHost('local', root)).toBe(true);
+      // Alias deps need no special case: `import('aliased')` is what the app can
+      // write, and `aliased` is the key. The aliased TARGET is not importable by
+      // that name, and correctly reads as undeclared.
+      expect(isDeclaredByHost('aliased', root)).toBe(true);
+      expect(isDeclaredByHost('@acme/real', root)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('strips subpaths and keeps scopes when finding the declared name', () => {
+    expect(packageNameFromSpecifier('@objectstack/platform-objects/plugin')).toBe(
+      '@objectstack/platform-objects',
+    );
+    expect(packageNameFromSpecifier('@objectstack/organizations')).toBe(
+      '@objectstack/organizations',
+    );
+    expect(packageNameFromSpecifier('chalk/dist/x.js')).toBe('chalk');
+    // Not bare package names — nothing a package.json can declare, so they
+    // bypass the gate entirely rather than being refused.
+    expect(packageNameFromSpecifier('./local.js')).toBeUndefined();
+    expect(packageNameFromSpecifier('/abs/path.js')).toBeUndefined();
+    expect(packageNameFromSpecifier('node:fs')).toBeUndefined();
+    expect(packageNameFromSpecifier('file:///tmp/x.mjs')).toBeUndefined();
+  });
+
+  it('a declared subpath import is gated by its package NAME, not the subpath', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'os-decl-subpath-'));
+    try {
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify({ name: 'subpath-fixture', dependencies: { [HOISTED_ONLY]: '*' } }),
+        'utf8',
+      );
+      // Declared by package name ⇒ the subpath IS looked up in the host. The
+      // fixture has no such file, so this fails on the subpath — as a broken
+      // install, never as an undeclared package.
+      const err = await createHostImporter(root)(`${HOISTED_ONLY}/missing-subpath`).catch(
+        (e: unknown) => e,
+      );
+      expect(hostImportFailureKind(err)).not.toBe('undeclared');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

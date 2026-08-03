@@ -22,8 +22,20 @@ import { probeOrganizations, MULTI_ORG_ENV, ORGANIZATIONS_PKG } from './enterpri
 
 let hostWithPkg: string;
 let hostWithoutPkg: string;
+/**
+ * #4719 — the package is physically INSTALLED in the app's own `node_modules`
+ * and the app's `package.json` never mentions it. That is what a hoisted
+ * workspace store (or a `NODE_PATH` a pnpm bin shim exported) looks like to the
+ * resolver, and it used to read as AVAILABLE.
+ */
+let hostInstalledButUndeclared: string;
 
-function writeHost(prefix: string, withPkg: boolean): string {
+function writeHost(
+  prefix: string,
+  withPkg: boolean,
+  opts: { declare?: boolean } = {},
+): string {
+  const declare = opts.declare ?? withPkg;
   const dir = mkdtempSync(join(tmpdir(), prefix));
   writeFileSync(
     join(dir, 'package.json'),
@@ -31,7 +43,7 @@ function writeHost(prefix: string, withPkg: boolean): string {
       name: 'dogfood-host-fixture',
       private: true,
       type: 'module',
-      ...(withPkg ? { dependencies: { [ORGANIZATIONS_PKG]: '*' } } : {}),
+      ...(declare ? { dependencies: { [ORGANIZATIONS_PKG]: '*' } } : {}),
     }),
     'utf8',
   );
@@ -60,10 +72,11 @@ function writeHost(prefix: string, withPkg: boolean): string {
 beforeAll(() => {
   hostWithPkg = writeHost('os-dogfood-org-ok-', true);
   hostWithoutPkg = writeHost('os-dogfood-org-missing-', false);
+  hostInstalledButUndeclared = writeHost('os-dogfood-org-undeclared-', true, { declare: false });
 });
 
 afterAll(() => {
-  for (const dir of [hostWithPkg, hostWithoutPkg]) {
+  for (const dir of [hostWithPkg, hostWithoutPkg, hostInstalledButUndeclared]) {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -98,5 +111,25 @@ describe('enterprise multi-org probe (#4700)', () => {
 
   it('does not throw when the run declares the package AND it is there', async () => {
     await expect(probeOrganizations(hostWithPkg, true)).resolves.toEqual({ available: true });
+  });
+
+  it('reports UNAVAILABLE when the package is merely PRESENT but not declared (#4719)', async () => {
+    // The gate is the app's declaration, not what happens to be reachable. Under
+    // the old resolver this host answered AVAILABLE — same bytes on disk, same
+    // package.json, and the multi-org gates would run for an app that never
+    // asked for the enterprise runtime. Worse, in a real pnpm workspace the
+    // "present" half arrives via the bin shim's NODE_PATH, so the verdict moved
+    // with the launcher.
+    const probe = await probeOrganizations(hostInstalledButUndeclared, false);
+    expect(probe.available).toBe(false);
+    expect(probe.reason).toContain("package.json");
+  });
+
+  it('THROWS with a DECLARE-it remedy when the run declares it but the app does not (#4719)', async () => {
+    // The remedy has to be the one that works. "Install it" is unfollowable
+    // advice here — it is already installed; the missing act is declaring it.
+    await expect(probeOrganizations(hostInstalledButUndeclared, true)).rejects.toThrow(
+      new RegExp(`declare ${ORGANIZATIONS_PKG.replace('/', '\\/')} in .* package\\.json`),
+    );
   });
 });

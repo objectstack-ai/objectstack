@@ -118,6 +118,10 @@ describe('@objectstack/types — node-only code stays behind the ./node subpath 
     // subpath would look justified when it no longer was.
     const specs = specifiersOf(join(SRC, 'node.ts'));
     expect(specs.filter((s) => s.startsWith('node:')).sort()).toEqual([
+      // #4719 added `node:fs`: the host lookup is gated on what the host app's
+      // package.json DECLARES, which means reading that file. One more reason
+      // this slice can never move back behind the root export.
+      'node:fs',
       'node:module',
       'node:path',
       'node:url',

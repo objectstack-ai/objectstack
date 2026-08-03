@@ -76,6 +76,35 @@ export class OrganizationsPlugin {
 let appWithPackage: string;
 /** The same app WITHOUT it — the fail-fast must still fire. */
 let appWithoutPackage: string;
+/**
+ * #4719 — an app that declares NOTHING, run with `NODE_PATH` pointing at a
+ * store that carries the enterprise package. This is not a contrivance: it is
+ * verbatim what a pnpm bin shim does before it execs the CLI —
+ *
+ *     export NODE_PATH="<workspace>/node_modules/.pnpm/node_modules"
+ *
+ * — and CJS resolution honours it, so `serve` used to boot a walled posture for
+ * an app that had never asked for the multi-org runtime. Measured on cloud's
+ * `apps/objectos-ee`: `pnpm start` (through the shim) booted silently, while
+ * `node …/@objectstack/cli/bin/run.js serve` on the same app hit D5 and exited 1.
+ */
+let hoistedStore: string;
+
+function writeOrganizationsPackage(root: string): void {
+  const pkgDir = join(root, '@objectstack', 'organizations');
+  mkdirSync(pkgDir, { recursive: true });
+  writeFileSync(
+    join(pkgDir, 'package.json'),
+    JSON.stringify({
+      name: '@objectstack/organizations',
+      version: '0.0.0-fixture',
+      type: 'module',
+      main: 'index.js',
+    }),
+    'utf8',
+  );
+  writeFileSync(join(pkgDir, 'index.js'), FAKE_ORGANIZATIONS, 'utf8');
+}
 
 function writeApp(prefix: string, opts: { withOrganizations: boolean }): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -96,31 +125,19 @@ function writeApp(prefix: string, opts: { withOrganizations: boolean }): string 
     ),
     'utf8',
   );
-  if (opts.withOrganizations) {
-    const pkgDir = join(dir, 'node_modules', '@objectstack', 'organizations');
-    mkdirSync(pkgDir, { recursive: true });
-    writeFileSync(
-      join(pkgDir, 'package.json'),
-      JSON.stringify({
-        name: '@objectstack/organizations',
-        version: '0.0.0-fixture',
-        type: 'module',
-        main: 'index.js',
-      }),
-      'utf8',
-    );
-    writeFileSync(join(pkgDir, 'index.js'), FAKE_ORGANIZATIONS, 'utf8');
-  }
+  if (opts.withOrganizations) writeOrganizationsPackage(join(dir, 'node_modules'));
   return dir;
 }
 
 beforeAll(() => {
   appWithPackage = writeApp('os-org-host-ok-', { withOrganizations: true });
   appWithoutPackage = writeApp('os-org-host-missing-', { withOrganizations: false });
+  hoistedStore = mkdtempSync(join(tmpdir(), 'os-org-hoisted-store-'));
+  writeOrganizationsPackage(hoistedStore);
 });
 
 afterAll(() => {
-  for (const dir of [appWithPackage, appWithoutPackage]) {
+  for (const dir of [appWithPackage, appWithoutPackage, hoistedStore]) {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -180,6 +197,40 @@ describe('os serve — enterprise organizations resolution (cloud#1013)', () => 
       expect(stderr).toMatch(/to THIS APP/);
       expect(stdout, `serve served traffic without the wall${seen}`).not.toContain(
         'Press Ctrl+C to stop',
+      );
+    },
+    300_000,
+  );
+
+  it(
+    'refuses when the package is reachable only through NODE_PATH — the pnpm shim shape (#4719)',
+    async () => {
+      // The #4719 defect, over a real process, with the launcher reproduced
+      // exactly. Same app as the case above (declares nothing), same posture —
+      // the only difference is the NODE_PATH every pnpm bin shim exports. Before
+      // this change that single environment variable was enough to boot the
+      // organization wall off a package the app had never declared, so whether
+      // ADR-0093 D5 fired came down to HOW the process was started.
+      const port = randomPort();
+      const { stdout, stderr } = await runServe(appWithoutPackage, ['--port', port], {
+        waitFor: /Press Ctrl\+C to stop/,
+        env: { ...SERVE_ENV, NODE_PATH: hoistedStore },
+        timeoutMs: 240_000,
+      });
+
+      const seen = `\n--- stdout ---\n${stdout.slice(-4000)}\n--- stderr ---\n${stderr.slice(-4000)}`;
+      expect(
+        stderr,
+        `NODE_PATH got an undeclared app past the D5 wall — the #4719 defect${seen}`,
+      ).toMatch(/FATAL: tenancy posture 'isolated' was requested/);
+      // …and the remedy is the declaration one, naming why reachability lost.
+      expect(stderr).toMatch(/to THIS APP/);
+      expect(stderr).toMatch(/NODE_PATH/);
+      expect(stdout, `serve served traffic without the wall${seen}`).not.toContain(
+        'Press Ctrl+C to stop',
+      );
+      expect(stdout, `the hoisted package was mounted anyway${seen}`).not.toContain(
+        'Organizations',
       );
     },
     300_000,
