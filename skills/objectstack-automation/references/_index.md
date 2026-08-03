@@ -13,7 +13,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/automation/execution.zod.ts` — Automation Execution Protocol
 - `node_modules/@objectstack/spec/src/automation/flow.zod.ts` — Flow Node Types — **built-in seed set** (ADR-0018).
 - `node_modules/@objectstack/spec/src/automation/node-executor.zod.ts` — Node Executor Plugin Protocol — Wait Node Pause/Resume
-- `node_modules/@objectstack/spec/src/automation/state-machine.zod.ts` — XState-inspired State Machine Protocol
+- `node_modules/@objectstack/spec/src/automation/state-machine.zod.ts` — XState-inspired State Machine Protocol — hierarchical states, guarded
 - `node_modules/@objectstack/spec/src/automation/time-relative-trigger.zod.ts` — Time-Relative Trigger Protocol
 - `node_modules/@objectstack/spec/src/automation/webhook.zod.ts` — Webhook Trigger Event
 - `node_modules/@objectstack/spec/src/data/validation.zod.ts` — ObjectStack Validation Protocol

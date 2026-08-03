@@ -84,7 +84,8 @@ import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spe
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
+import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
+import { resolveMasterDetailRelation } from './master-detail.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -636,6 +637,24 @@ function isEmptyReferenceValue(v: unknown): boolean {
   if (v === null || v === undefined || v === '') return true;
   if (Array.isArray(v)) return v.length === 0 || v.every((e) => e === null || e === undefined || e === '');
   return false;
+}
+
+/**
+ * [#4889] The master id a detail row's `parent` binding resolves against:
+ * the write's own value for the FK when it carries one (a REPOINT must be
+ * judged against the master it lands on), else the prior row's. Only a scalar
+ * id counts — an expanded relation object or an array is not an id this read
+ * can bind, and guessing one would be worse than leaving `parent` unbound.
+ */
+function masterIdOf(
+  fk: string,
+  data: Record<string, unknown> | null | undefined,
+  row: Record<string, unknown> | null | undefined,
+): string | number | undefined {
+  const raw = data && fk in data ? data[fk] : row?.[fk];
+  if (typeof raw === 'string') return raw === '' ? undefined : raw;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  return undefined;
 }
 
 /**
@@ -2398,6 +2417,90 @@ export class ObjectQL implements IObjectQLEngine {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * [#4889] The master-detail header a detail row's `parent`-scoped
+   * `readonlyWhen` reads, or `null` when this write cannot resolve one.
+   *
+   * `readonlyWhen: parent.status == 'paid'` is a documented **server**
+   * guarantee (ADR-0057 D10 puts enforcement here; the client grid is
+   * courtesy), but the strip is a pure function over the payload and the prior
+   * row — it has no driver and cannot fetch a header. So the engine resolves it
+   * and passes it in.
+   *
+   * The header id comes from the payload first, then the prior row: a write that
+   * REPOINTS the detail at another master must be judged against the master it
+   * is landing on, not the one it is leaving. Read as **system**: the lock is a
+   * data-integrity property of the header's state, not of the caller's
+   * visibility of it, and the caller's right to touch this detail at all was
+   * already settled upstream (RLS / `controlled_by_parent`, ADR-0055) before the
+   * write reached the strip.
+   *
+   * `null` on any failure — no relation, no id, header gone, read threw. It is
+   * NOT read as "unlocked": an unresolved binding leaves `parent` unbound, and
+   * `isReadonlyWhenLocked` treats a predicate that needs it as LOCKED.
+   */
+  private async resolveMasterDetailParent(
+    schema: any,
+    data: Record<string, unknown> | null | undefined,
+    priorRow: Record<string, unknown> | null | undefined,
+  ): Promise<Record<string, unknown> | null> {
+    const rel = resolveMasterDetailRelation(schema);
+    if (!rel) return null;
+    const parentId = masterIdOf(rel.fk, data, priorRow);
+    if (parentId == null) return null;
+    try {
+      const row = await this.findOne(rel.master, { where: { id: parentId }, context: { isSystem: true } } as any);
+      return (row as Record<string, unknown>) ?? null;
+    } catch (err) {
+      this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
+        object: rel.master, id: parentId, error: err,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Bulk counterpart of {@link resolveMasterDetailParent}: one read for the
+   * whole matched set, then a per-row lookup for
+   * `stripReadonlyWhenFieldsMulti`. A bulk update of N details under M masters
+   * costs ONE extra query, not N — the same "read the match set once" discipline
+   * the #3106 prior-row fetch follows.
+   */
+  private async resolveMasterDetailParents(
+    schema: any,
+    data: Record<string, unknown> | null | undefined,
+    priorRows: ReadonlyArray<Record<string, unknown>> | null | undefined,
+  ): Promise<(row: Record<string, unknown> | undefined) => Record<string, unknown> | null> {
+    const unbound = () => null;
+    const rel = resolveMasterDetailRelation(schema);
+    if (!rel) return unbound;
+    const ids = new Set<string>();
+    for (const row of priorRows ?? []) {
+      const id = masterIdOf(rel.fk, data, row);
+      if (id != null) ids.add(String(id));
+    }
+    if (ids.size === 0) return unbound;
+    const byId = new Map<string, Record<string, unknown>>();
+    try {
+      const rows = await this.find(rel.master, {
+        where: { id: { $in: [...ids] } },
+        context: { isSystem: true },
+      } as any) as Array<Record<string, unknown>>;
+      for (const row of Array.isArray(rows) ? rows : []) {
+        if (row?.id != null) byId.set(String(row.id), row);
+      }
+    } catch (err) {
+      this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
+        object: rel.master, error: err,
+      });
+      return unbound;
+    }
+    return (row) => {
+      const id = masterIdOf(rel.fk, data, row);
+      return id == null ? null : (byId.get(String(id)) ?? null);
+    };
   }
 
   /**
@@ -4773,7 +4876,16 @@ export class ObjectQL implements IObjectQLEngine {
                // field is read-only for this record's state, so the incoming
                // change is ignored (the persisted value is kept).
                const preRoWhen = hookContext.input.data as Record<string, unknown>;
-               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger) as any;
+               // [#4889] A `parent`-scoped predicate ("once the header invoice
+               // is Paid, its lines are frozen") needs the master-detail header
+               // bound as `parent`. Only the engine can fetch it, so the strip
+               // is a pure function of what we hand it — resolve here, gated on
+               // the payload actually touching such a predicate so a detail
+               // object with only `record`-scoped locks pays no extra read.
+               const roWhenParent = hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhen)
+                   ? await this.resolveMasterDetailParent(updateSchema, preRoWhen, priorRecord)
+                   : undefined;
+               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, roWhenParent) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
@@ -4833,7 +4945,15 @@ export class ObjectQL implements IObjectQLEngine {
                // single-id `stripReadonlyWhenFields`; INSERT stays exempt.
                if (payloadHasReadonlyWhen) {
                    const preRoWhenMulti = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger) as any;
+                   // [#4889] N matched rows can hang off N different masters, so
+                   // the `parent` binding is per row here. Batch-read the
+                   // distinct headers ONCE (the same shape as the single-id
+                   // resolution, one query instead of one per row) and hand the
+                   // strip a lookup.
+                   const parentForRow = hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti)
+                       ? await this.resolveMasterDetailParents(updateSchema, preRoWhenMulti, priorRows)
+                       : undefined;
+                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, parentForRow) as any;
                    reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
                // [#2948] Same static-`readonly` write guard on the bulk path —

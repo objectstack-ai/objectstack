@@ -475,12 +475,72 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         objects: [{
           name: 'inv_line',
           fields: {
+            // #4889 — `parent` is bound from THIS relationship at write time, so
+            // the fixture declares it: a detail object without one has no header
+            // for the server to read (see the gate's own cases below).
+            inv: { type: 'master_detail', reference: 'inv' },
             qty: { type: 'number', required: true, defaultValue: 1, readonlyWhen: "parent.status == 'paid'" },
             note: { type: 'text', requiredWhen: 'record.qty >= 100' },
           },
         }],
       });
       expect(issues).toHaveLength(0);
+    });
+
+    // #4889 — `parent`-scoped `readonlyWhen` is enforced by the SERVER binding
+    // the object's master-detail header. No single master ⇒ no binding ⇒ the
+    // write path holds the field locked forever. The metadata says so at build
+    // time, so the build says so.
+    describe('parent-scoped `readonlyWhen` needs a resolvable master (#4889)', () => {
+      const parentScopeIssues = (obj: Record<string, unknown>) =>
+        validateStackExpressions({ objects: [obj] }).filter((i) => /reads `parent`/.test(i.message));
+
+      it('rejects it on an object that declares NO master_detail relationship', () => {
+        const issues = parentScopeIssues({
+          name: 'orphan_line',
+          fields: {
+            inv: { type: 'lookup', reference: 'inv' }, // a lookup is not a master
+            qty: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
+          },
+        });
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.severity).toBe('error');
+        expect(issues[0]!.message).toMatch(/declares no `master_detail` relationships/);
+      });
+
+      it('rejects it when TWO masters leave "the parent" unstated', () => {
+        const issues = parentScopeIssues({
+          name: 'junction',
+          fields: {
+            left: { type: 'master_detail', reference: 'a' },
+            right: { type: 'master_detail', reference: 'b' },
+            qty: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
+          },
+        });
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.message).toMatch(/declares 2 `master_detail` relationships/);
+      });
+
+      it('does not fire on a field literally named `parent_id`, or a `parent` string literal', () => {
+        expect(parentScopeIssues({
+          name: 'node',
+          fields: {
+            parent_id: { type: 'text' },
+            kind: { type: 'text' },
+            a: { type: 'text', readonlyWhen: "record.parent_id != ''" },
+            b: { type: 'text', readonlyWhen: "record.kind == 'parent'" },
+          },
+        })).toHaveLength(0);
+      });
+
+      it('is scoped to `readonlyWhen` — `requiredWhen`/`visibleWhen` verdicts are unchanged', () => {
+        expect(parentScopeIssues({
+          name: 'orphan_line',
+          fields: {
+            qty: { type: 'number', requiredWhen: "parent.status == 'paid'", visibleWhen: "parent.status == 'paid'" },
+          },
+        })).toHaveLength(0);
+      });
     });
 
     it('flags a bare-field sharing-rule condition', () => {

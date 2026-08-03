@@ -75,7 +75,9 @@ describe('#4347 — normalizeControlFlowRegions', () => {
 
     const branches = (flow.nodes[1]!.config as any).branches;
     for (const branch of branches) expect(branch.edges[0].condition).toEqual(ENVELOPE);
-    // `FlowRegionSchema` would have stripped `name`; branches parse as branches.
+    // `FlowRegionSchema` would REJECT `name` (strict since #4001 批 10, where
+    // it used to merely strip it) — so `regionSlotsOf` picking the branch
+    // schema for `branches[]` went from a fidelity choice to a correctness one.
     expect(branches.map((b: { name: string }) => b.name)).toEqual(['left', 'right']);
   });
 

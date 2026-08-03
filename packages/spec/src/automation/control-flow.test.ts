@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   LoopConfigSchema,
   ParallelConfigSchema,
+  ParallelBranchSchema,
   TryCatchConfigSchema,
   FlowRegionSchema,
   analyzeRegion,
@@ -15,6 +16,7 @@ import {
   PARALLEL_NODE_TYPE,
   TRY_CATCH_NODE_TYPE,
 } from './control-flow.zod';
+import { findClosestMatches } from '../shared/suggestions.zod';
 
 const node = (id: string, type = 'assignment') => ({ id, type, label: id });
 const edge = (id: string, source: string, target: string) => ({ id, source, target });
@@ -264,5 +266,192 @@ describe('validateControlFlow', () => {
         ] as never,
       }),
     ).toThrow(/try_catch 'tc' try/);
+  });
+});
+
+// ─── [#4001 批 10] unknown keys are rejected, not stripped ──────────────────
+
+describe('[#4001] control-flow strictness — per shape', () => {
+  it('FlowRegion: `name` and `label` get wrong-layer prescriptions, not renames', () => {
+    for (const [key, expected] of [
+      ['name', 'A region is not named'],
+      ['label', 'A region is not labelled'],
+    ] as const) {
+      const result = FlowRegionSchema.safeParse({ nodes: [node('a')], [key]: 'body' });
+      expect(result.success, `region.${key} must be refused`).toBe(false);
+      expect(result.error!.issues[0]!.message).toContain(expected);
+      // Neither has a canonical spelling on a region, so neither may be
+      // renamed — suggesting one would point at a key this schema rejects.
+      expect(result.error!.issues[0]!.message).not.toContain('Did you mean');
+    }
+  });
+
+  // This is the entry that had to be MEASURED rather than curated by taste:
+  // the bare edit-distance fallback answers `itemVariable` with
+  // `indexVariable`, which binds the loop INDEX where the author wanted the
+  // ITEM — a silently-wrong loop, prescribed by this campaign's own helper.
+  // The control below re-runs the raw suggester so the alias cannot be
+  // "cleaned up" as redundant: delete it and the wrong answer comes straight
+  // back.
+  it('Loop: `itemVariable` is aliased to `iteratorVariable`, overruling a WRONG edit-distance hit', () => {
+    const LOOP_KEYS = ['collection', 'iteratorVariable', 'indexVariable', 'maxIterations', 'body'];
+    const bare = findClosestMatches('itemVariable', LOOP_KEYS, Math.max(2, Math.floor('itemVariable'.length / 3)), 1);
+    expect(bare, 'the raw suggester still gets this wrong — that is why the alias exists').toEqual(['indexVariable']);
+
+    const result = LoopConfigSchema.safeParse({ collection: '{tasks}', itemVariable: 'task' });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain('`itemVariable` → `iteratorVariable`');
+    expect(result.error!.issues[0]!.message).not.toContain('indexVariable');
+  });
+
+  it('Loop: `flowName` is pointed at the `map` node, which is where it is real', () => {
+    const result = LoopConfigSchema.safeParse({ collection: '{tasks}', flowName: 'per_item' });
+    expect(result.success).toBe(false);
+    const message = result.error!.issues[0]!.message;
+    expect(message).toContain('`map` node');
+    expect(message).toContain('config.body');
+  });
+
+  it('Loop: a plain typo still rides the edit-distance fallback', () => {
+    const result = LoopConfigSchema.safeParse({ collection: '{x}', maxIteration: 5 });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain('`maxIteration` → `maxIterations`');
+  });
+
+  it('ParallelBranch: `label` → `name`, the word every NODE beside it uses', () => {
+    // `FlowNodeSchema.label` is REQUIRED on every element of the `nodes[]`
+    // array in the same literal, so borrowing it is an author's reasonable
+    // guess — and 5 edits away, so only a named alias reaches it.
+    const result = ParallelBranchSchema.safeParse({ label: 'Left', nodes: [node('a')] });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain('`label` → `name`');
+    // The declared spelling is untouched.
+    expect(() => ParallelBranchSchema.parse({ name: 'Left', nodes: [node('a')] })).not.toThrow();
+  });
+
+  it('Parallel: the two join spellings get DISTINCT prescriptions, not one repeated twice', () => {
+    const result = ParallelConfigSchema.safeParse({
+      branches: [{ nodes: [node('a')] }, { nodes: [node('b')] }],
+      join: 'all',
+      joinGateway: 'j1',
+    });
+    expect(result.success).toBe(false);
+    const bullets = result.error!.issues[0]!.message.split('\n').filter((l) => l.trim().startsWith('•'));
+    expect(bullets).toHaveLength(2);
+    // `guidance` emits one bullet per key verbatim, so a shared string would
+    // print the same paragraph twice and read as a bug in the error itself.
+    expect(bullets[0]).not.toBe(bullets[1]);
+    expect(bullets[0]).toContain('joins IMPLICITLY');
+    expect(bullets[1]).toContain('BPMN');
+  });
+
+  it('TryCatch: `finally` is answered with WHERE the always-run steps go', () => {
+    const result = TryCatchConfigSchema.safeParse({
+      try: { nodes: [node('t')] },
+      finally: { nodes: [node('f')] },
+    });
+    expect(result.success).toBe(false);
+    const message = result.error!.issues[0]!.message;
+    expect(message).toContain('There is no `finally` region');
+    // A prescription that only said "no such key" would leave the author
+    // stuck; the construct really does have a place for those steps.
+    expect(message).toContain('AFTER this container');
+  });
+
+  it('every legal shape this file already documented still parses', () => {
+    // Anti-vacuity for the whole block: strictness that also refused the
+    // declared spellings would make every assertion above pass for the wrong
+    // reason. These are the showcase/app-todo shapes, verbatim in structure.
+    expect(() => LoopConfigSchema.parse({
+      collection: '{tasksToRemind}', iteratorVariable: 'task', indexVariable: 'i',
+      maxIterations: 500, body: { nodes: [node('w', 'noop')], edges: [] },
+    })).not.toThrow();
+    expect(() => ParallelConfigSchema.parse({
+      branches: [{ name: 'A', nodes: [node('a')] }, { name: 'B', nodes: [node('b')] }],
+    })).not.toThrow();
+    expect(() => TryCatchConfigSchema.parse({
+      try: { nodes: [node('t')] }, catch: { nodes: [node('c')] },
+      errorVariable: '$error', retry: { maxRetries: 3, backoffMs: 500 },
+    })).not.toThrow();
+  });
+});
+
+// The sibling-guard question the batch was dispatched to answer: does closing
+// the key gate collide with `validateControlFlow`, which has validated these
+// same regions structurally since ADR-0031?
+//
+// It does not, and the reason is that they answer different questions. The
+// schema rejects undeclared KEYS; the analysis rejects malformed STRUCTURE
+// (single-entry / single-exit / acyclic), which no key check can decide. They
+// meet at exactly one seam — `validateControlFlow` `safeParse`s each region
+// slot before analyzing it, so from #4001 that parse is also where an
+// undeclared region key surfaces. Nothing was duplicated and nothing was
+// removed: the guard's structural prose is untouched, and it simply stopped
+// silently repairing its own input before judging it.
+describe('[#4001] validateControlFlow and the key gate do not fight', () => {
+  const flowWith = (cfg: Record<string, unknown>, type = LOOP_NODE_TYPE) =>
+    ({ nodes: [{ ...node('c1', type), config: cfg }] } as never);
+
+  it('STRUCTURE errors are still reported by the guard, in the guard\'s own words', () => {
+    // Two entries / two exits — a key gate cannot see this, and the message
+    // must stay the analysis\'s, not the schema\'s.
+    expect(() => validateControlFlow(flowWith({
+      collection: '{items}', body: { nodes: [node('a'), node('b')], edges: [] },
+    }))).toThrow(/single-entry/);
+  });
+
+  it('KEY errors now surface through that same guard, carrying the schema\'s prose', () => {
+    let message = '';
+    try {
+      validateControlFlow(flowWith({
+        collection: '{items}', body: { nodes: [node('a')], edges: [], name: 'inner' },
+      }));
+    } catch (e) { message = (e as Error).message; }
+
+    // The guard's own framing (which region, which container) …
+    expect(message).toContain("loop 'c1' body");
+    expect(message).toContain('invalid region');
+    // … wrapping the schema's prescription, rather than replacing it.
+    expect(message).toContain('A region is not named');
+  });
+
+  it('a PARALLEL BRANCH keeps its `name` — the slot picks the branch schema, and now it must', () => {
+    // `regionSlotsOf` parses `branches[]` as `ParallelBranchSchema` and every
+    // other slot as `FlowRegionSchema`. That used to be a fidelity choice (the
+    // region schema would have STRIPPED `name`); with both strict it is a
+    // correctness one — the region schema would REJECT a legal branch. Pinned
+    // because the two schemas now differ by a rejection, not by a silent drop.
+    expect(() => validateControlFlow(flowWith({
+      branches: [
+        { name: 'left', nodes: [node('a')], edges: [] },
+        { name: 'right', nodes: [node('b')], edges: [] },
+      ],
+    }, PARALLEL_NODE_TYPE))).not.toThrow();
+
+    // …and the region schema really would have refused it — the anti-vacuity
+    // half, so this test cannot pass because `name` became universally legal.
+    expect(FlowRegionSchema.safeParse({ name: 'left', nodes: [node('a')], edges: [] }).success).toBe(false);
+  });
+
+  it('the guard still ignores legacy flat-graph loops (no region to key-check)', () => {
+    expect(() => validateControlFlow(flowWith({ collection: '{items}', iteratorVariable: 'x' }))).not.toThrow();
+  });
+
+  it('nested regions are key-checked at depth, like the structural check (#4389)', () => {
+    let message = '';
+    try {
+      validateControlFlow(flowWith({
+        collection: '{outer}',
+        body: {
+          nodes: [{
+            ...node('inner', TRY_CATCH_NODE_TYPE),
+            config: { try: { nodes: [node('x')], edges: [], label: 'oops' } },
+          }],
+          edges: [],
+        },
+      }));
+    } catch (e) { message = (e as Error).message; }
+    expect(message).toContain("loop 'c1' body → try_catch 'inner' try");
+    expect(message).toContain('A region is not labelled');
   });
 });
