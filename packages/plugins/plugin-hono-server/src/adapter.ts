@@ -363,12 +363,18 @@ export class HonoHttpServer implements IHttpServer {
      *    the request stream before the route handler that owns it, so a
      *    middleware sees headers/method/path/query only. Body-dependent policy
      *    belongs in a route handler or a dispatcher gate stage.
-     *  - **Register before routes.** Hono composes the handlers that matched, in
-     *    registration order; middleware added after a route runs after that
-     *    route's handler, which is useless for short-circuiting. The kernel's
-     *    two-phase boot makes this easy to satisfy: register middleware in a
-     *    plugin's `init()` (Phase 1) and every route — all of which are mounted
-     *    in some plugin's `start()` (Phase 2) — is behind it.
+     *  - **The seam must be mounted before routes, but `use()` need not be
+     *    called before them.** Hono composes the handlers that matched, in
+     *    registration order, so a middleware Hono learns about after a route
+     *    runs after that route's handler — useless for short-circuiting. This
+     *    class therefore mounts ONE Hono middleware (the chain runner) and lets
+     *    `use()` append to the chain it reads per request. {@link
+     *    installMiddlewareSeam} places that runner; `HonoServerPlugin` calls it
+     *    at the end of `init()`, after the transport's own built-ins and before
+     *    any route exists, so every later `use()` — from any plugin, in either
+     *    boot phase — gates everything. A standalone `HonoHttpServer` that never
+     *    calls it gets the runner mounted on its first `use()` instead, and only
+     *    that path carries the register-before-routes requirement.
      */
     use(pathOrHandler: string | Middleware, handler?: Middleware) {
         if (typeof pathOrHandler === 'string' && handler) {
@@ -383,13 +389,24 @@ export class HonoHttpServer implements IHttpServer {
 
     /**
      * Mount the single Hono middleware that runs the registered
-     * {@link Middleware} chain. Installed on the FIRST `use()` call rather than
-     * in the constructor so it sits behind the transport's own built-ins (CORS,
-     * Server-Timing) that `HonoServerPlugin.init()` registers directly on the
-     * raw app — a 429 short-circuit that ran ahead of CORS would reach a browser
-     * as an opaque network error instead of a readable status.
+     * {@link Middleware} chain. Idempotent.
+     *
+     * WHERE this is called decides what the seam can gate, and the two callers
+     * are deliberate:
+     *
+     *  - **`HonoServerPlugin.init()`, at the end** — after the transport's own
+     *    built-ins (Server-Timing, CORS) so a 429 short-circuit still carries
+     *    CORS headers (otherwise a browser reports an opaque network error
+     *    instead of the status), and before any route exists, since every route
+     *    in the platform is mounted in some plugin's `start()`. From there a
+     *    `use()` at ANY later moment gates the whole server, which is what lets
+     *    the dispatcher install the rate limiter in `start()` — where "no
+     *    http.server" is a settled fact rather than a mid-Phase-1 guess that a
+     *    later plugin could contradict.
+     *  - **the first `use()`** — for a bare `HonoHttpServer` composed without
+     *    the plugin, so the seam is never silently absent.
      */
-    private installMiddlewareSeam(): void {
+    installMiddlewareSeam(): void {
         if (this.middlewareSeamInstalled) return;
         this.middlewareSeamInstalled = true;
 

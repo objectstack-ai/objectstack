@@ -15,16 +15,20 @@
  * the stub lacked. Each has an assertion below, so the seam cannot quietly
  * regress to a no-op again.
  *
- * ## Every fixture registers middleware BEFORE routes, on purpose
+ * ## Two mounting positions, and why the fixtures differ
  *
- * That is the declared contract (`Middleware` in `@objectstack/spec/contracts`)
- * and it is not a wart of this implementation — Hono composes the handlers that
- * matched, in registration order, so middleware added after a route runs after
- * that route's handler and can no longer answer instead of it. The last suite
- * pins the failure mode explicitly rather than leaving it to be rediscovered.
- * Consumers satisfy the ordering for free: the kernel runs every `init()`
- * (Phase 1) before any `start()` (Phase 2), and every route in the platform is
- * mounted in some `start()`.
+ * Hono composes the handlers that matched in registration order, so what a
+ * middleware can gate depends on when Hono learned about it. This class mounts
+ * ONE Hono middleware — the chain runner — and `use()` appends to the chain it
+ * reads per request, so the question becomes "when was the RUNNER mounted":
+ *
+ *  - `installMiddlewareSeam()` up front (what `HonoServerPlugin.init()` does) —
+ *    every later `use()` gates the whole server, whenever it happens.
+ *  - never called — the runner is mounted on the first `use()`, so that call
+ *    still has to precede the routes it means to guard.
+ *
+ * Both are pinned below, including the negative case, so the decoupling is not
+ * mistaken for something `use()` provides on its own.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -152,7 +156,7 @@ describe('path-scoped middleware', () => {
     });
 });
 
-describe('the documented ordering requirement, pinned', () => {
+describe('installMiddlewareSeam decouples use() from route registration order', () => {
     it('gates routes registered AFTER it', async () => {
         const server = new HonoHttpServer(0);
         server.use((_req: IHttpRequest, res: IHttpResponse) => { res.status(429); res.send('nope'); });
@@ -161,11 +165,40 @@ describe('the documented ordering requirement, pinned', () => {
         expect((await call(server, '/late')).status).toBe(429);
     });
 
-    it('does NOT gate routes registered BEFORE it — register in init(), not start()', async () => {
-        // Not a defect to fix here: it is Hono's composition order, and pinning
-        // it is what stops a future consumer from registering the limiter in
-        // `start()` and shipping a gate that covers a different set of paths per
-        // deployment depending on plugin registration order.
+    it('gates routes registered BEFORE the use() call, once the seam was placed up front', async () => {
+        // This is the composition `HonoServerPlugin` produces: it places the
+        // seam at the end of its own `init()`, and consumers `use()` later —
+        // from `start()`, after other plugins have already mounted routes. The
+        // gate must still cover those routes, or "server-level rate limit"
+        // would silently mean "whichever routes happened to be registered after
+        // the limiter", i.e. a different set per deployment.
+        const server = new HonoHttpServer(0);
+        server.installMiddlewareSeam();
+        server.get('/early', (_req, res) => { res.status(200); res.send('early'); });
+        server.use((_req: IHttpRequest, res: IHttpResponse) => { res.status(429); res.send('nope'); });
+
+        expect((await call(server, '/early')).status).toBe(429);
+    });
+
+    it('is idempotent — calling it twice does not double-run the chain', async () => {
+        let runs = 0;
+        const server = new HonoHttpServer(0);
+        server.installMiddlewareSeam();
+        server.installMiddlewareSeam();
+        server.use(async (_req: IHttpRequest, _res: IHttpResponse, next: () => void | Promise<void>) => {
+            runs++;
+            await next();
+        });
+        server.get('/thing', (_req, res) => { res.status(200); res.send('ok'); });
+
+        await call(server, '/thing');
+        expect(runs).toBe(1);
+    });
+
+    it('without the seam placed up front, a use() after routes cannot gate them', async () => {
+        // Pinned so the requirement above is not mistaken for an accident: the
+        // decoupling comes from WHERE the seam is mounted, not from `use()`
+        // itself. Hono composes matched handlers in registration order.
         const server = new HonoHttpServer(0);
         server.get('/early', (_req, res) => { res.status(200); res.send('early'); });
         server.use((_req: IHttpRequest, res: IHttpResponse) => { res.status(429); res.send('nope'); });

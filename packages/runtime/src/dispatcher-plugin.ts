@@ -111,18 +111,17 @@ export interface DispatcherPluginConfig {
      * (zero per-request cost, not a disabled check).
      *
      * When armed, the plugin installs the limiter as GLOBAL middleware on the
-     * `http.server` service during `init()`. Global and `init()` are both
-     * load-bearing:
+     * `http.server` service. Global is load-bearing:
+     * `server.security.rateLimit` is a SERVER-level budget, and a limiter
+     * covering only this plugin's own routes while `/data` ran unmetered would
+     * be the same declared-≠-enforced half-truth the key was introduced to end.
      *
-     *  - global, because `server.security.rateLimit` is a SERVER-level budget —
-     *    a limiter covering only this plugin's own routes while `/data` ran
-     *    unmetered would be the same declared-≠-enforced half-truth the key was
-     *    introduced to end;
-     *  - `init()`, because the kernel runs every plugin's `init()` (Phase 1)
-     *    before any plugin's `start()` (Phase 2), and every route in the
-     *    composition is mounted in some `start()`. Registering here is therefore
-     *    what puts the gate in front of all of them, independent of plugin
-     *    registration order.
+     * It goes in `start()` rather than `init()` so that "this kernel has no
+     * `http.server`" is a settled fact when it is reported, not a Phase-1 guess
+     * a later-initializing transport could contradict (#4771). That is only safe
+     * because the transport mounts the middleware SEAM at the end of its own
+     * `init()` — a `use()` at any later point still gates every route, so the
+     * gate does not have to win a race with route registration to be complete.
      *
      * Endpoint-level `ApiEndpointSchema.rateLimit` /
      * `ApiEndpointRegistrationSchema.rateLimit` are NOT read here. They remain
@@ -507,18 +506,29 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
         name: 'com.objectstack.runtime.dispatcher',
         version: '1.0.0',
 
-        init: async (ctx: PluginContext) => {
+        init: async (_ctx: PluginContext) => {
             // Consumer-only plugin — no services registered.
-            //
-            // The one thing that MUST happen in Phase 1 is the inbound
-            // rate-limit gate (#4910): the kernel runs every `init()` before any
-            // `start()`, and every route in the composition is mounted in some
-            // `start()`, so registering the middleware here — and only here —
-            // puts it in front of all of them regardless of plugin order. Doing
-            // it in `start()` would gate whichever routes happened to be
-            // registered later, which is a limit that silently covers a
-            // different set of paths per deployment.
-            const middleware = createInboundRateLimitMiddleware({
+        },
+
+        start: async (ctx: PluginContext) => {
+            let server: IHttpServer | undefined;
+            try {
+                server = ctx.getService<IHttpServer>('http.server');
+            } catch {
+                // No HTTP server available — skip silently
+                server = undefined;
+            }
+
+            // ── Inbound rate limit (#4910) ──────────────────────────────
+            // Installed in `start()`, deliberately. Phase 1 is over, so "no
+            // `http.server`" is a FACT rather than a mid-boot guess a later
+            // plugin could contradict — the #4771 class of defect, which is
+            // exactly what makes the warning below safe to emit. The gate still
+            // precedes every route because the transport mounts the middleware
+            // SEAM at the end of its own `init()`; `use()` appends to a chain
+            // that seam reads per request, so registration order stops mattering
+            // (see `HonoHttpServer.installMiddlewareSeam`).
+            const rateLimitMiddleware = createInboundRateLimitMiddleware({
                 ...(config.rateLimit?.budget ? { budget: config.rateLimit.budget } : {}),
                 trustProxy: config.rateLimit?.trustProxy === true,
                 resolvePrincipalId: (headers) =>
@@ -529,45 +539,34 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 resolveCache: async () => safeGetService<CounterStore>(ctx, 'cache'),
                 logger: ctx.logger,
             });
-            // `null` = the stack declared no budget, or declared it disabled.
-            // Nothing is registered at all, so an unmetered deployment pays
-            // exactly zero per-request cost.
-            if (!middleware) return;
-
-            const server = safeGetService<IHttpServer>(ctx, 'http.server');
-            if (!server) {
-                // Functional degradation, loudly (route-ownership rule 3): a
-                // stack that ASKED for a rate limit and got none must not find
-                // out from a load test.
-                ctx.logger.warn(
-                    '[dispatcher] `server.security.rateLimit` is enabled but no `http.server` service is registered, '
-                    + 'so no request can be metered. Mount a transport plugin (e.g. @objectstack/plugin-hono-server) '
-                    + 'before the dispatcher, or remove the rate-limit declaration.',
-                );
-                return;
+            // `null` = no budget declared, or declared disabled. Nothing is
+            // registered at all, so an unmetered deployment pays zero
+            // per-request cost — not a disabled check, no check.
+            if (rateLimitMiddleware) {
+                if (server) {
+                    server.use(rateLimitMiddleware);
+                    const budget = config.rateLimit?.budget;
+                    ctx.logger.info('Inbound rate limit armed', {
+                        maxRequests: budget?.maxRequests ?? 100,
+                        windowMs: budget?.windowMs ?? 60_000,
+                        // NOT `key:` — the logger redacts that field name, and
+                        // `key: ***REDACTED***` tells an operator nothing about
+                        // what the limit is actually keyed on.
+                        keyedBy: 'principal, falling back to caller IP',
+                        trustProxy: config.rateLimit?.trustProxy === true,
+                    });
+                } else {
+                    // Absence must be loud (route-ownership rule 3): a stack
+                    // that ASKED to be rate limited and is not must never find
+                    // out from a load test.
+                    ctx.logger.warn(
+                        '[dispatcher] `server.security.rateLimit` is enabled but this kernel has no `http.server` '
+                        + 'service, so no request can be metered. Mount a transport plugin (e.g. '
+                        + '@objectstack/plugin-hono-server), or remove the rate-limit declaration.',
+                    );
+                }
             }
 
-            server.use(middleware);
-            const budget = config.rateLimit?.budget;
-            ctx.logger.info('Inbound rate limit armed', {
-                maxRequests: budget?.maxRequests ?? 100,
-                windowMs: budget?.windowMs ?? 60_000,
-                // NOT `key:` — the logger redacts that field name, and an
-                // operator reading `key: ***REDACTED***` learns nothing about
-                // what the limit is actually keyed on.
-                keyedBy: 'principal, falling back to caller IP',
-                trustProxy: config.rateLimit?.trustProxy === true,
-            });
-        },
-
-        start: async (ctx: PluginContext) => {
-            let server: IHttpServer | undefined;
-            try {
-                server = ctx.getService<IHttpServer>('http.server');
-            } catch {
-                // No HTTP server available — skip silently
-                return;
-            }
             if (!server) return;
 
             const kernel = ctx.getKernel();

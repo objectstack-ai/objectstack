@@ -73,6 +73,25 @@ function fakeCachePlugin(): Plugin {
     };
 }
 
+/**
+ * A plugin that mounts a route in `start()` and is REGISTERED BEFORE the
+ * dispatcher — so its route exists before the dispatcher installs the limiter.
+ * Stands in for `@objectstack/rest`, whose `/data` surface is mounted exactly
+ * this way. If the gate only covered routes registered after it,
+ * `server.security.rateLimit` would silently mean "some routes".
+ */
+function earlyRoutePlugin(): Plugin {
+    return {
+        name: 'com.objectstack.test.early-route',
+        version: '1.0.0',
+        init: async () => { /* nothing */ },
+        start: async (ctx: PluginContext) => {
+            const server = ctx.getService<IHttpServer>('http.server');
+            server.get('/early/route', (_req, res) => { res.status(200); res.json({ early: true }); });
+        },
+    };
+}
+
 async function boot(dispatcherConfig: Record<string, unknown>) {
     // LiteKernel, like `dispatcher-plugin.ready.integration.test.ts`: the same
     // two-phase init/start contract the gate placement depends on, without a
@@ -81,6 +100,8 @@ async function boot(dispatcherConfig: Record<string, unknown>) {
     kernel.use(fakeAuthPlugin());
     kernel.use(fakeCachePlugin());
     kernel.use(new HonoServerPlugin({ port: 0 }));
+    // Registered — and therefore started — BEFORE the dispatcher, on purpose.
+    kernel.use(earlyRoutePlugin());
     kernel.use(createDispatcherPlugin({
         prefix: '/api/v1',
         securityHeaders: false,
@@ -166,6 +187,20 @@ describe('inbound rate limit, wired (#4910)', () => {
         let last = first;
         for (let i = 0; i < BUDGET.maxRequests + 2; i++) {
             last = await fetch(`${baseUrl}/nope`, { headers: { 'x-test-user': 'usr_unowned' } });
+        }
+        expect(last.status).toBe(429);
+    });
+
+    it('gates a route another plugin mounted BEFORE the limiter was installed', async () => {
+        // The `@objectstack/rest` shape: a plugin registered earlier mounts its
+        // routes in `start()`, which runs before the dispatcher's. Registration
+        // order must not decide which paths are metered.
+        const first = await fetch(`${baseUrl}/early/route`, { headers: { 'x-test-user': 'usr_early' } });
+        expect(first.status).toBe(200);
+
+        let last = first;
+        for (let i = 0; i < BUDGET.maxRequests + 2; i++) {
+            last = await fetch(`${baseUrl}/early/route`, { headers: { 'x-test-user': 'usr_early' } });
         }
         expect(last.status).toBe(429);
     });
