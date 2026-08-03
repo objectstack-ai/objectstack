@@ -19,9 +19,84 @@ The **HTTP API** defines how ObjectStack maps data operations to RESTful HTTP en
 
 ## API Discovery
 
-### Discovery Endpoint
+Before making any API calls, clients should request a discovery endpoint to learn about
+available services. **Two endpoints answer that question, and in a stack that mounts
+`@objectstack/rest` they do not return the same shape** — they are built by different
+packages. Read the one that matches your composition; do not mix their fields.
 
-Before making any API calls, clients should request the discovery endpoint to learn about available services:
+### `GET /api/v1` (and `GET /api/v1/discovery`)
+
+Returns the full discovery manifest. `@objectstack/rest` registers **one handler at both
+paths** — the API base path and `<basePath>/discovery` — so the two are the same document,
+not a redirect and not two shapes. In a REST-less composition the runtime dispatcher
+registers `<basePath>/discovery` as the fallback owner instead, and then serves its own
+`/.well-known/objectstack` payload there (see below); when `@objectstack/rest` is mounted
+the dispatcher cedes the route to it, so a single owner answers it (ADR-0076 D11).
+
+**Request:**
+```http
+GET /api/v1/discovery HTTP/1.1
+Host: api.acme.com
+```
+
+**Response:**
+```json
+{
+  "version": "v1",
+  "apiName": "ObjectStack API",
+  "routes": {
+    "data": "/api/v1/data",
+    "metadata": "/api/v1/meta"
+  },
+  "services": {
+    "metadata": { "enabled": true, "status": "available", "handlerReady": true, "route": "/api/v1/meta", "provider": "objectql" },
+    "data": { "enabled": true, "status": "available", "handlerReady": true, "route": "/api/v1/data", "provider": "objectql" },
+    "search": { "enabled": false, "status": "unavailable", "message": "No implementation ships for the 'search' slot — register a service under it to enable" },
+    "ai": { "enabled": false, "status": "unavailable", "message": "Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation ships in the open framework" }
+  },
+  "capabilities": {
+    "cron": { "enabled": false },
+    "automation": { "enabled": false },
+    "search": { "enabled": false },
+    "transactionalBatch": { "enabled": true, "description": "Atomic cross-object batch endpoint (POST {basePath}/batch)…" }
+  },
+  "scoping": {
+    "enabled": false,
+    "resolution": "auto",
+    "scoped": false
+  }
+}
+```
+
+Three things about this body are worth stating explicitly, because they are what the
+`/.well-known/objectstack` document below does *not* share:
+
+- **`version` is the configured API version, not a product version.** The handler
+  overwrites the protocol's value with `api.version` — the same string that forms the
+  path segment (`"v1"`). It is never a semantic version like `2.1.0`.
+- **There is no `name`, `environment` or `locale` here.** Those are dispatcher fields
+  (see below). A client that initialises i18n from `locale` must read
+  `/.well-known/objectstack`, not this response.
+- **`scoping` is added by the REST server**, so clients can detect dual-mode routing;
+  `environmentId` is present only on the environment-scoped mount
+  (`/api/v1/environments/:environmentId/...`).
+
+Disabled/uninstalled route keys are omitted from `routes` entirely rather than set to
+`null`; check `services` to tell "not installed" apart from "installed but not yet mounted
+here." `capabilities` is a flat map of platform feature flags (`comments`, `automation`,
+`cron`, `search`, `export`, `chunkedUpload`, `transactionalBatch`), each derived from what
+is actually registered — never hardcoded. See
+[API → Discovery](/docs/api#discovery) for the field-by-field reference.
+
+### `GET /.well-known/objectstack`
+
+Served by the runtime dispatcher (`@objectstack/runtime`), not `@objectstack/rest` — its
+body is wrapped as `{ "data": { ... } }` and includes fields (`name`, `environment`,
+`features`, `locale`) that the `@objectstack/rest`-served `/api/v1` response above does
+not. This path is unconditionally dispatcher-owned: no other plugin registers it, so it
+answers with this shape whether or not REST is mounted. The client SDK's `connect()` tries
+`/api/v1/discovery` first and falls back to this endpoint, unwrapping either `body.data` or
+the bare `body`.
 
 **Request:**
 ```http
@@ -29,40 +104,62 @@ GET /.well-known/objectstack HTTP/1.1
 Host: api.acme.com
 ```
 
-`/.well-known/objectstack` and the versioned `/api/v1/discovery` route both return the
-discovery document directly — there is no HTTP redirect between them:
-```http
-GET /api/v1/discovery HTTP/1.1
-```
-
 **Response:**
 ```json
 {
-  "name": "Acme CRM Production",
-  "version": "2.1.0",
-  "environment": "production",
-  "routes": {
-    "data": "/api/v1/data",
-    "metadata": "/api/v1/meta",
-    "packages": "/api/v1/packages",
-    "auth": "/api/v1/auth",
-    "ui": "/api/v1/ui",
-    "storage": "/api/v1/storage"
-  },
-  "services": {
-    "data": { "enabled": true, "status": "available", "route": "/api/v1/data", "provider": "objectql" },
-    "metadata": { "enabled": true, "status": "available", "route": "/api/v1/meta", "provider": "objectql" },
-    "auth": { "enabled": true, "status": "available", "route": "/api/v1/auth", "provider": "@objectstack/plugin-auth" },
-    "search": { "enabled": false, "status": "unavailable", "message": "No implementation ships for the 'search' slot — register a service under it to enable" },
-    "ai": { "enabled": false, "status": "unavailable", "message": "Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation ships in the open framework" }
-  },
-  "locale": {
-    "default": "en-US",
-    "supported": ["en-US", "zh-CN", "es-ES", "fr-FR"],
-    "timezone": "America/Los_Angeles"
+  "data": {
+    "name": "ObjectOS",
+    "version": "1.0.0",
+    "environment": "production",
+    "routes": {
+      "data": "/api/v1/data",
+      "metadata": "/api/v1/meta",
+      "packages": "/api/v1/packages",
+      "auth": "/api/v1/auth",
+      "ui": "/api/v1/ui",
+      "i18n": "/api/v1/i18n"
+    },
+    "features": {
+      "search": false,
+      "websockets": false,
+      "files": false,
+      "analytics": false,
+      "ai": false,
+      "notifications": false,
+      "i18n": true
+    },
+    "services": {
+      "metadata": { "enabled": true, "status": "available", "handlerReady": true, "route": "/api/v1/meta", "provider": "kernel" },
+      "data": { "enabled": true, "status": "available", "handlerReady": true, "route": "/api/v1/data", "provider": "kernel" },
+      "auth": { "enabled": true, "status": "available", "handlerReady": true, "route": "/api/v1/auth" },
+      "search": { "enabled": false, "status": "unavailable", "handlerReady": false, "message": "No implementation ships for the 'search' slot — register a service under it to enable" }
+    },
+    "locale": {
+      "default": "en-US",
+      "supported": ["en-US", "zh-CN"],
+      "timezone": "UTC"
+    }
   }
 }
 ```
+
+`name` and `version` are the dispatcher's own build identity, not your app's name — they
+are fixed strings, so do not display them as the deployment's title. `environment` is the
+process `NODE_ENV`. `locale` is derived from the registered i18n service (`getDefaultLocale()`
+/ `getLocales()`); with no i18n service it degrades to `{ "default": "en", "supported":
+["en"], "timezone": "UTC" }`. The body also repeats `routes` under an `endpoints` key as a
+backward-compatibility alias, and carries **no** `capabilities` map — that one exists only
+on the REST-served response above.
+
+<Callout type="warn">
+**"Both paths return the same document" holds only in a REST-less composition.** There, the
+dispatcher owns `/api/v1/discovery` as the fallback registrant, so that path and
+`/.well-known/objectstack` both answer with the dispatcher payload above (the bare
+`/api/v1` is registered by `@objectstack/rest` alone and is not served at all). As soon as
+`@objectstack/rest` is mounted it takes `/api/v1/discovery` under the single-owner rule
+(ADR-0076 D11) and the two paths answer different shapes. Never write a client that reads
+`locale` or `environment` off `/api/v1/discovery`.
+</Callout>
 
 **Why discovery matters:**
 - **Environment agnostic:** Works across dev, staging, production without hardcoding URLs
