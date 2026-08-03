@@ -260,8 +260,21 @@ in neither). So:
   `has(record.spent) && record.spent > record.budget` still faults on
   `null > null`. `has()` answers "is this key declared at all", which is a
   question about your spelling, not about your data.
-- An **undeclared** key (a typo) stays unevaluable: the condition is logged at
-  WARN and treated as false.
+
+⚠️ **An unevaluable condition ABORTS the operation (#4775).** A typo'd key
+(`record.stauts`), a `previous` reference on an insert, or a comparison CEL has
+no overload for does **not** degrade to "the hook did not fire" — it **fails the
+write**. Until protocol 17 the gate emitted a `logger.warn` and returned `false`,
+which is why the two bullets above are load-bearing rather than stylistic: a
+`before*` guard swallowed into `false` silently let writes through, and an audit
+hook swallowed into `false` silently dropped records. Those are opposite
+failures, so "the condition said no" and "the platform could not work out what
+the condition says" are now different outcomes and the second one is loud.
+
+Practical consequence when authoring: spell keys against the object's **declared**
+fields, and never reach for `previous` in a hook that can fire on insert or on a
+`multi: true` write — that mistake used to cost you a hook that quietly never
+ran, and now costs you every write the hook is attached to.
 
 #### `onError` — Error Handling
 
