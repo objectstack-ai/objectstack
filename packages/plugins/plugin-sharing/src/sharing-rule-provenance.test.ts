@@ -17,6 +17,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { bindRuleProvenanceStamp, SHARING_RULE_PROVENANCE_PACKAGE } from './sharing-rule-provenance.js';
@@ -53,6 +54,9 @@ function makeEngine() {
       return t[i];
     },
     async delete(o: string, opts?: any) {
+      // [#4550] Pinned to ObjectQL.delete's own dispatch predicate — see the
+      // note in sharing-rule.test.ts for what a looser fake cost (#4434).
+      assertEngineDeleteDispatch(opts);
       const t = ensure(o); const where = opts?.where ?? {};
       for (let i = t.length - 1; i >= 0; i--) if (matches(t[i], where)) t.splice(i, 1);
       return { ok: true };

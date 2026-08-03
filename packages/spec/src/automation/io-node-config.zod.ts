@@ -26,9 +26,26 @@
  * post-interpolation guards still own "resolved to nothing". `http` parses
  * the INTERPOLATED config, because that is the shape its executor reads —
  * a `{token}` in a typed slot (`timeoutMs`, `durable`) resolves to its real
- * type first. Unknown keys are the registration layer's job: `registerFlow()`
- * rejects keys the descriptor `configSchema` does not declare (the tightened
- * #4059 check), while the parse here strips them.
+ * type first.
+ *
+ * ## Unknown keys — closed here too, as of #4001 批 9
+ *
+ * These contracts used to say "unknown keys are the registration layer's job":
+ * `registerFlow()` rejects keys the descriptor `configSchema` does not declare
+ * (the tightened #4059 check), and this parse merely stripped them. That is one
+ * door, and the #4001 campaign's second recurring finding is that a schema
+ * which strips by default leaves every OTHER door open — whoever writes the
+ * guard is fixing the bug in front of them, not auditing the surface.
+ *
+ * The registration check remains the first door a stored flow meets and the
+ * more informative one (it walks NESTED config against the descriptor's JSON
+ * Schema and prints the declared set per path, which a flat key list cannot).
+ * What changes is that a config reaching `parse()` by any OTHER route — a
+ * direct `NotifyConfigSchema.parse()` in tooling, a host that composes the
+ * engine without `registerFlow`, a future executor seam — no longer has its
+ * undeclared keys silently deleted. The two doors are kept in agreement by
+ * `io-node-form-zod-ledger.test.ts`, which reconciles this key set against the
+ * descriptor's in both directions.
  *
  * `connector_action` has no schema here on purpose: its config contract is
  * empty. The executor reads only the declared `FlowNodeSchema.connectorConfig`
@@ -38,6 +55,54 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
+
+/**
+ * What a rejected key on these contracts silently did before #4001 批 9.
+ *
+ * Shared by both schemas because the failure was identical: the step ran, the
+ * notification went out or the request was made, and the run reported success
+ * minus whatever the key was meant to configure.
+ */
+const IO_NODE_CONFIG_HISTORY =
+  'Until #4001 an undeclared key here was dropped at the execute-time parse — the step still ran and '
+  + 'the run still reported success, minus whatever the key was meant to configure.';
+
+/**
+ * `notify` prescriptions for the four ADR-0087 D2 aliases and the nested
+ * `source` shape (#3796 / #4045).
+ *
+ * Each is a RETIRED SPELLING, not a typo, so a bare "did you mean" would
+ * under-serve it: `flow-node-notify-config-aliases` rewrites all five at load
+ * (including the `registerFlow` rehydration seam), which means a config that
+ * still carries one when it reaches this parse carries the canonical key too —
+ * `renameConfigKey` leaves a SHADOWED alias in place rather than clobbering the
+ * winner. So each prescription answers both readings: the rename, for whoever
+ * parses this contract directly, and "delete the dead twin", for whoever came
+ * through the load path.
+ */
+const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
+  to:
+    'The recipient slot is `recipients`. `to` is the pre-17 spelling, rewritten at load by the ADR-0087 D2 '
+    + 'conversion `flow-node-notify-config-aliases` — so if `recipients` is already present, the conversion left '
+    + '`to` behind as a dead twin (a shadowed alias is not clobbered) and it should be deleted.',
+  subject:
+    'The heading slot is `title`. `subject` is the pre-17 spelling rewritten at load by '
+    + '`flow-node-notify-config-aliases`; delete it once `title` carries the text.',
+  body:
+    'The body slot is `message`. `body` is the pre-17 spelling rewritten at load by '
+    + '`flow-node-notify-config-aliases`; delete it once `message` carries the text. (`body` IS canonical on an '
+    + '`http` node — the key is wrong only here.)',
+  url:
+    'The click-through slot is `actionUrl`. It was renamed at 17 because `url` elsewhere on the platform means '
+    + '"HTTP endpoint to call" (`http` node, webhooks), a different concept from an in-app click target. '
+    + '`flow-node-notify-config-aliases` rewrites it at load; delete it once `actionUrl` carries the link.',
+  source:
+    'The click-through target is the flat PAIR `sourceObject` + `sourceId`, never a nested `source: { object, id }`. '
+    + '`flow-node-notify-config-aliases` lifts the nested shape at load and drops it once every part is accounted '
+    + 'for, so a surviving `source` means both flat keys were already set — delete it. Note the pair only takes '
+    + 'effect together: a half-specified target is dropped so the inbox never renders a dead link.',
+};
 
 // ─── notify ──────────────────────────────────────────────────────────
 
@@ -63,7 +128,11 @@ import { lazySchema } from '../shared/lazy-schema';
  *    conversion `flow-node-notify-config-aliases` rewrites them at load, so the
  *    executor only ever sees the canonical keys below (#3796, #4045).
  */
-export const NotifyConfigSchema = lazySchema(() => z.object({
+export const NotifyConfigSchema = lazySchema(() => strictObject({
+  surface: 'this notify node config',
+  history: IO_NODE_CONFIG_HISTORY,
+  guidance: NOTIFY_KEY_GUIDANCE,
+}, {
   /** Who gets the notification — user id(s) / audience selector(s). */
   recipients: z.union([z.string(), z.array(z.string())])
     .describe('Recipient user id(s) / audience selector(s); `{token}` templates resolve per run'),
@@ -114,7 +183,15 @@ export type NotifyConfigParsed = z.infer<typeof NotifyConfigSchema>;
  *    (retry / dead-letter) and returns `{ deliveryId }` instead of the
  *    response; without an outbox it degrades to the inline call.
  */
-export const HttpConfigSchema = lazySchema(() => z.object({
+export const HttpConfigSchema = lazySchema(() => strictObject({
+  surface: 'this http node config',
+  history: IO_NODE_CONFIG_HISTORY,
+  // No curated table: `http` has no retired spelling and no cross-surface
+  // near-miss this campaign's payload scan could attest. The two plausible
+  // typos are already reachable by edit distance (`timeout` → `timeoutMs`,
+  // `header` → `headers`), and inventing entries nothing refutes is how this
+  // campaign shipped four confidently-wrong prescriptions in one batch.
+}, {
   /** Target URL (execute-time required). */
   url: z.string().describe('Target URL'),
   /** HTTP method — default GET inline, POST when durable. */

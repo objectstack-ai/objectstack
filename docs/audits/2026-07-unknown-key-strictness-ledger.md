@@ -488,7 +488,7 @@ not verdicts).
 |---|---|---|---|
 | `action.zod.ts` | 8 | authorable | param schema strict (#3746); remaining blocks ride later steps. **9 → 8 at the #4001 re-measurement** — no schema changed: the ninth "site" was a `z.object(…)` inside a JSDoc paragraph, which the old textual counter could not tell from code |
 | `view.zod.ts` | 50 | authorable | partially strict (ADR-0089); long tail of sub-blocks. `bulkActionDefs` left this file in #4457 — see the row below |
-| `bulk-action.zod.ts` | 3 | authorable | **strict as of #4457** — `BulkActionDefSchema` (the def itself). It was `z.array(z.record(z.string(), z.any()))` inline in `view.zod.ts`: a selection-bar button with **no shape at all**, so `opeartion` / `excution: 'aggregate'` parsed and shipped as a button that ran the default behaviour. Its two other sites are `BulkActionParamSchema` and that param's `options` entry, both deliberately **open**: objectui's `BulkActionParam` declares a `[key: string]: unknown` catch-all for widget config (min/max/step/format), so `.passthrough()` is the honest mirror and strictness there would reject valid config — same call as `dashboard.zod.ts`'s widget `config`. The def also refuses the combinations the executor never reads (`patch` outside an update, `execution` outside a custom, `batchSize` on an aggregate) and a hand-written `actionDef`, which is renderer-attached |
+| `bulk-action.zod.ts` | 3 | authorable | **strict as of #4457** — `BulkActionDefSchema` (the def itself). It was `z.array(z.record(z.string(), z.any()))` inline in `view.zod.ts`: a selection-bar button with **no shape at all**, so `opeartion` / `excution: 'aggregate'` parsed and shipped as a button that ran the default behaviour. Its two other sites are `BulkActionParamSchema` and that param's `options` entry, both deliberately **open** and both now `.passthrough()` — the param because objectui's `BulkActionParam` declares a `[key: string]: unknown` catch-all for widget config (min/max/step/format), so passthrough is the honest mirror and strictness would reject valid config (same call as `dashboard.zod.ts`'s widget `config`); the OPTION ENTRY on separate measured evidence, since its objectui type is closed and only the runtime path is open — `bulkParamToField` spreads each entry (`plugin-grid/src/components/bulkParamToField.ts:131`) into `SelectOptionMetadata` (`types/src/field-types.ts:288`), which declares and reads `color` / `icon` / `disabled` / `visibleWhen`. **This row said "both deliberately open" while only the parent was `passthrough`** — one intent, two postures, caught by the 2026-08-03 re-measure and closed by the ruling's verdict A (make the code match the prose). The lesson is the campaign's own: prose in this ledger is not a posture reading, which is why the remaining-strip map is gated and this column is not. The def also refuses the combinations the executor never reads (`patch` outside an update, `execution` outside a custom, `batchSize` on an aggregate) and a hand-written `actionDef`, which is renderer-attached |
 | `component.zod.ts` | 29 | authorable | **next candidate** — SDUI component defs; check React-prop open slots first (p) |
 | `theme.zod.ts` | 14 | authorable (p) | authored themes |
 | `app.zod.ts` | 18 | authorable | **strict as of #4001 PR B** — `AppSchema` + branding / area / context-selector / contribution, and the nav-item union converted to `z.discriminatedUnion('type', …)` (the union-error question, settled empirically: matched-branch-only errors, exact recursive paths, `toJSONSchema` clean). Per-target `params` stay open. PR A (#4142) tombstoned the seven audit-dead keys first |
@@ -535,9 +535,9 @@ not verdicts).
 | `bpmn-interop.zod.ts` | 5 | wire (p) | interop import shapes |
 | `approval.zod.ts` | 4 | authorable | **strict as of #4001 step 3** — all four authoring schemas (node config / approver / escalation / decision-output). The published JSON schema carries `additionalProperties: false` into the Studio form AND `registerFlow()` config validation (#4027/#4040), so an unknown key in an approval node's `config` is rejected at registration too — verified: `z.toJSONSchema` on the strict lazySchema does not throw (#3746 hazard checked) |
 | `node-executor.zod.ts` | 4 | wire | executor contract |
-| `io-node-config.zod.ts` | 2 | authorable | `NotifyConfigSchema` / `HttpConfigSchema` (#4045) — the sibling contracts that validate the **open** `config` slot on flow `notify` / `http` nodes. Authored per-node, so the open-slot exemption above does not extend to them; candidate once the executors' own drift is verified |
-| `builtin-node-config.zod.ts` | 8 | authorable | Same family (#4045): the CRUD quartet, `screen`, `map`. Written from what the executors read rather than from the descriptors' `configSchema` literals, and reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` — so unlike most rows here, this one already has a drift check of its own. Same candidacy note as `io-node-config` |
-| `schemaless-node-config.zod.ts` | 4 | authorable | Same family, third panel (#4278): `script` / `subflow` / `decision` (+ the decision branch item) — the descriptor-schemaless nodes whose form lives in objectui's hand-written table. Written from the executors; the drift check is objectui's `flow-node-config.spec-reconciliation` test (cross-repo, via the published exports). Since #4343 `script` and `subflow` ARE parsed at execute time (`parse-config.ts`) — `script` once retiring its `actionType` branches left it flat — so strictness candidacy now follows `io-node-config` on the same terms rather than being moot; `decision` stays export-only |
+| `io-node-config.zod.ts` | 2 | authorable | `NotifyConfigSchema` / `HttpConfigSchema` (#4045) — the sibling contracts that validate the **open** `config` slot on flow `notify` / `http` nodes. Authored per-node, so the open-slot exemption above does not extend to them. **Strict as of #4001 批 9**; the node `config` SLOT itself stays open (ADR-0018 keeps `node.type` open, so the slot cannot be closed without closing the plugin extension point). Five `guidance` entries carry the ADR-0087 notify aliases (`to`/`subject`/`body`/`url`/`source`) |
+| `builtin-node-config.zod.ts` | 8 | authorable | Same family (#4045): the CRUD quartet, `screen`, `map`. Written from what the executors read rather than from the descriptors' `configSchema` literals, and reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` — so unlike most rows here, this one already has a drift check of its own. **Strict as of #4001 批 9.** The curated tables are the `FLOW_NODE_UNKNOWN_KEY_GUIDANCE` prose from `service-automation`'s registration door, plus two entries that door never had: `recordId` (measured on CRUD nodes across the repo's own flow fixtures, read by no executor — on `delete_record` that is #3810 wearing a key that looks like a constraint) and `outputVariable` on `update_record` / `delete_record` (a documented ABSENCE, and the likeliest wrong key precisely because five sibling contracts declare it) |
+| `schemaless-node-config.zod.ts` | 4 | authorable | Same family, third panel (#4278): `script` / `subflow` / `decision` (+ the decision branch item) — the descriptor-schemaless nodes whose form lives in objectui's hand-written table. Written from the executors; the drift check is objectui's `flow-node-config.spec-reconciliation` test (cross-repo, via the published exports — it compares `.shape` key sets, so strictness does not move it). Since #4343 `script` and `subflow` ARE parsed at execute time (`parse-config.ts`). **Strict as of #4001 批 9 — and this is the one row in the table where strictness is the FIRST unknown-key gate, not a second one**: `registerFlow()`'s #4277 rejection derives its declared set from a descriptor `configSchema`, so it structurally skips the schemaless class. `decision` stays export-only, closed anyway; its `condition` guidance suppresses a one-edit rename to `conditions` that #4414 proves is the worse outcome |
 | `webhook.zod.ts` | 1 | authorable (p) | spec-only (#3461) |
 | `time-relative-trigger.zod.ts` | 1 | authorable | **Undeclared until the #4001 re-measurement, and invisible for the worst possible reason**: `TimeRelativeTriggerSchema` is written `z\n  .object({`, the old textual counter matched zero sites, and a zero-site file is SKIPPED by the coverage walk as "nothing to classify". So the gate whose whole promise is "no undeclared surface" reported green over an authorable schema — the same shape as `data/driver/`, one layer subtler, because this time the file was not hidden by the walk but by the counter feeding it. Classification is not a guess: the file's own `@example` blocks author it by hand into a flow start node (`config: { timeRelative: { object, dateField, offsetDays, filter } }`), which is the authoring door. A stripped key here means the sweep silently never matches — `offsetDay` for `offsetDays` returns a trigger that never fires, reported as configured |
 | `flow-function.zod.ts` | 1 | authorable | `FlowFunctionDeclarationSchema` (#4396) — the `{ handler, effect }` form of a `defineStack({ functions })` entry. Authored, but note what an undeclared key here would be: a sibling of a **live function**, not data. `defineStack`'s union already rejects a record whose `handler` is not callable, and the boot-path reader is the hand-written `normalizeFlowFunctionEntry` rather than a `.parse()` (re-validating a live handler every boot buys nothing), so strictness would bind at authoring only. Candidate on the same verify-first rule as its `*-node-config` neighbours |
@@ -605,25 +605,42 @@ classes; where it does, the split is stated. **Only the authorable half is in th
 2026-08-03 ruling's forced scope** — wire/open rows are listed so the arithmetic
 is complete and so nobody re-triages them from scratch next batch.
 
-#### `automation/` — 56 strip of 75
+#### `automation/` — 42 strip of 75
 
 | File | Strip | Sites | Class | Batch |
 |---|---|---|---|---|
 | `execution.zod.ts` | 13 | 13 | wire | **out of scope** — engine-emitted run state; the ledger row already says "never strict" |
 | `etl.zod.ts` | 10 | 10 | mixed | 7 authorable (`ETLSource` + `.incremental`, `ETLDestination`, `ETLTransformation`, `ETLPipeline` + `.retry` + `.notifications`), 3 wire (`ETLPipelineRun` + `.stats` + `.error` — run state) |
-| `builtin-node-config.zod.ts` | 8 | 8 | authorable | CRUD quartet + `Screen` (+ `.options`) + `Map`; already has a bidirectional drift check (`builtin-node-form-zod-ledger.test.ts`) |
 | `flow.zod.ts` | 7 | 11 | mixed | 6 authorable (`FlowNode.connectorConfig` / `.position` / `.inputSchema` / `.waitEventConfig` / `.boundaryConfig`, `Flow.errorHandling`), 1 wire (`FlowVersionHistorySchema` — the ledger row already exempts it) |
 | `bpmn-interop.zod.ts` | 5 | 5 | wire (p) | **out of scope** — third-party BPMN import/export shapes; strictness turns an upstream addition into our parse crash |
 | `node-executor.zod.ts` | 4 | 4 | wire | **out of scope** — executor registration contract, code-to-code |
-| `schemaless-node-config.zod.ts` | 4 | 4 | authorable | `Script` / `Subflow` / `DecisionCondition` / `Decision`; `script` + `subflow` ARE parsed at execute time since #4343 |
-| `io-node-config.zod.ts` | 2 | 2 | authorable | `NotifyConfig` / `HttpConfig` — the sibling contracts for the deliberately-open flow node `config` slot |
 | `flow-function.zod.ts` | 1 | 1 | authorable | `FlowFunctionDeclarationSchema`; binds at authoring only (the boot reader is `normalizeFlowFunctionEntry`, not a `.parse()`) |
 | `time-relative-trigger.zod.ts` | 1 | 1 | authorable | `TimeRelativeTriggerSchema` — **newly visible** (see its triage row); a stripped `offsetDay`/`withinDay` yields a trigger that never fires, reported as configured |
 | `webhook.zod.ts` | 1 | 1 | authorable (p) | `WebhookSchema`, spec-only (#3461) |
 
-**Authorable strip in `automation/`: 30 of 56.** This is the ruling's "known main body".
+Three rows left this table at **批 9** (#4001), the ruling's first `automation/`
+wave — `builtin-node-config.zod.ts` (8), `schemaless-node-config.zod.ts` (4) and
+`io-node-config.zod.ts` (2), all reaching zero strip. The reverse pin fired on
+all three before the rows were removed, which is the only evidence that a
+deletion here is bookkeeping rather than a guess.
 
-#### `ui/` — 124 strip of 198
+Two more left it at **批 10** — `control-flow.zod.ts` (5) and
+`state-machine.zod.ts` (6), same reverse-pin evidence. Worth recording how the
+two waves met, because it is the failure mode this table is most exposed to:
+both PRs deleted their own rows and decremented this header by their own count,
+so git merged the ROWS cleanly (they do not overlap) and left the header
+conflicted — and the subtotal line below it, which conflicts with nothing,
+merged clean while being **wrong on both branches**. Neither number was a
+mistake in isolation; each was computed against one wave's deletions. The
+header is therefore recomputed from the surviving rows rather than resolved in
+favour of either side, and `check:strictness-ledger`'s header arithmetic is
+what settles it. A clean-looking merge here is not evidence of anything.
+
+**Authorable strip in `automation/`: 16 of 42** (was 41 of 67 before the two
+waves). What remains of the ruling's "known main body" is `etl` 7, `flow` 6,
+and one each from `flow-function` / `time-relative-trigger` / `webhook`.
+
+#### `ui/` — 123 strip of 198
 
 | File | Strip | Sites | Class | Batch |
 |---|---|---|---|---|
@@ -645,12 +662,22 @@ is complete and so nobody re-triages them from scratch next batch.
 | `sharing.zod.ts` | 2 | 2 | authorable (p) | `SharingConfig` / `EmbedConfig` |
 | `action.zod.ts` | 1 | 8 | authorable | `ActionParamSchema.options` — a plain `{ label, value }` pair; the cheapest win in the directory |
 | `app.zod.ts` | 1 | 18 | verify | `BaseNavItemSchema` — the base the strict discriminated-union members extend. Closing a base that is `.extend()`ed is the #4001 trap that bit `view` (finding 16); confirm the members' strictness is not already covering it before touching |
-| `bulk-action.zod.ts` | 1 | 3 | open | `BulkActionParamSchema.options`. ⚠️ **The triage row calls both this and its parent "deliberately open", but only the PARENT is `passthrough` — this one is plain strip.** Same intent, two postures; decide which the intent actually was |
 | `notification.zod.ts` | 1 | 1 | authorable (p) | `NotificationActionSchema` |
 
-**Authorable strip in `ui/`: 123 of 124** — everything except `bulk-action.zod.ts`'s
-`options`, which is `open`. Of those 123, `app.zod.ts`'s single site is held pending
+**Authorable strip in `ui/`: 123 of 123** — every remaining strip site in this
+directory is authorable. Of those 123, `app.zod.ts`'s single site is held pending
 the finding-16 `.extend()` check rather than counted as ready.
+
+The one `open` site this directory carried is **gone, and not by being closed**:
+`bulk-action.zod.ts`'s `BulkActionParamSchema.options` was the row that read
+*"the triage row calls this and its parent deliberately open, but only the PARENT
+is `passthrough`"*. The 2026-08-03 ruling settled the intent as **open** and the
+fix was to make the code say so — `.passthrough()` on the option item, so the
+posture and the prose agree. It leaves this map the way a resolved row is
+supposed to: the file now has **0** strip sites, so its row is deleted (the
+reverse pin above). Worth noting for the next batch that "resolve a row" has two
+exits, and the reverse pin cannot tell them apart — only the changeset and the
+triage row record which one was taken.
 
 #### `data/` — 121 strip of 162
 

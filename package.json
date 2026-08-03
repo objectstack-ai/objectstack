@@ -34,10 +34,11 @@
     "check:i18n-coverage": "node scripts/check-i18n-coverage.mjs",
     "check:nul-bytes": "node scripts/check-nul-bytes.mjs --self-test && node scripts/check-nul-bytes.mjs",
     "check:doc-authoring": "node scripts/check-doc-authoring.mjs --self-test && node scripts/check-doc-authoring.mjs",
+    "check:docs-audit-scope": "node scripts/docs-audit/affected-docs.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs",
     "check:role-word": "node scripts/check-role-word.mjs",
     "check:adr-anchors": "node scripts/check-adr-anchors.mjs",
     "check:org-identifier": "node scripts/check-org-identifier.mjs",
-    "check:authz-resolver": "node scripts/check-single-authz-resolver.mjs",
+    "check:authz-resolver": "node scripts/check-single-authz-resolver.mjs --self-test && node scripts/check-single-authz-resolver.mjs",
     "check:slot-lookup": "node scripts/check-slot-lookup-ratchet.mjs",
     "check:service-providers": "node scripts/check-service-providers.mjs",
     "check:route-envelope": "node scripts/check-route-envelope.mjs --self-test && node scripts/check-route-envelope.mjs",
@@ -48,11 +49,13 @@
     "check:startup-registry-verdict": "node scripts/check-startup-registry-verdict.mjs --self-test && node scripts/check-startup-registry-verdict.mjs",
     "check:console-sha": "node scripts/check-console-sha.mjs",
     "check:objectui-changeset": "node scripts/objectui-changeset-digest.mjs --self-test && node scripts/objectui-range.mjs --self-test",
+    "check:objectui-pin-fresh": "node scripts/check-objectui-pin-fresh.mjs --self-test && node scripts/check-objectui-pin-fresh.mjs",
     "check:release-notes": "node scripts/check-release-notes.mjs",
     "check:node-version": "node scripts/check-node-version.mjs",
     "check:published-files": "node scripts/check-published-files.mjs --self-test && node scripts/check-published-files.mjs",
     "check:type-check-coverage": "node scripts/check-type-check-coverage.mjs --self-test && node scripts/check-type-check-coverage.mjs",
-    "check:driver-conformance": "node scripts/check-driver-conformance.mjs --self-test && node scripts/check-driver-conformance.mjs"
+    "check:driver-conformance": "node scripts/check-driver-conformance.mjs --self-test && node scripts/check-driver-conformance.mjs",
+    "check:engine-double-contract": "node scripts/check-engine-double-contract.mjs --self-test && node scripts/check-engine-double-contract.mjs"
   },
   "keywords": [
     "objectstack",
