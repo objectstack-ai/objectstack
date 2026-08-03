@@ -532,7 +532,6 @@
     "automation/ETLSyncMode",
     "automation/ETLTransformation",
     "automation/ETLTransformationType",
-    "automation/Event",
     "automation/ExecutionError",
     "automation/ExecutionErrorSeverity",
     "automation/ExecutionLog",

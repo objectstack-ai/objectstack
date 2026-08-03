@@ -49,14 +49,13 @@ export const TransitionSchema = lazySchema(() => z.object({
   description: z.string().optional().describe('Human readable description of this rule'),
 }));
 
-/**
- * Event Definition (Signals)
- */
-export const EventSchema = lazySchema(() => z.object({
-  type: z.string().describe('Event Type (e.g. "APPROVE", "REJECT", "Submit")'),
-  // Payload validation schema could go here if we want deep validation
-  schema: z.record(z.string(), z.unknown()).optional().describe('Expected event payload structure'),
-}));
+// `EventSchema` (XState-style signal declaration `{ type, schema }`) was removed
+// here in #4658 (dual-source ledger #4535 C6): nothing in this file — or any
+// repo — ever referenced it. Event types on a state machine are the RECORD KEYS
+// of `on:` (plain strings), not declared signal objects. The platform's one
+// `EventSchema` is the event-bus envelope in `kernel/events/core.zod.ts`; the
+// kernel-side analogue of a signal *declaration* is `EventTypeDefinitionSchema`
+// in the same file.
 
 export type ActionRef = z.infer<typeof ActionRefSchema>;
 export type Transition = z.infer<typeof TransitionSchema>;

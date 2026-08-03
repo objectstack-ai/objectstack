@@ -19,7 +19,6 @@
     "api/MetadataValidateRequest — no type export",
     "api/SubscriptionEvent — no type export",
     "automation/ApproverType — no type export",
-    "automation/Event — no type export",
     "automation/FlowNodeAction — no type export",
     "automation/FlowVariable — no type export",
     "automation/GuardRef — no type export",

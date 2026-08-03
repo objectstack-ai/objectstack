@@ -2271,8 +2271,6 @@
     "automation/ETLTransformation:continueOnError",
     "automation/ETLTransformation:name",
     "automation/ETLTransformation:type",
-    "automation/Event:schema",
-    "automation/Event:type",
     "automation/ExecutionError:code",
     "automation/ExecutionError:context",
     "automation/ExecutionError:executionId",

@@ -2166,7 +2166,6 @@
     "ETLTransformationSchema (const)",
     "ETLTransformationType (type)",
     "ETLTransformationTypeSchema (const)",
-    "EventSchema (const)",
     "ExecutionError (type)",
     "ExecutionErrorParsed (type)",
     "ExecutionErrorSchema (const)",
