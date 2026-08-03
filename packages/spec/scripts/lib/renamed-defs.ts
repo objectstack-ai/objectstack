@@ -79,6 +79,17 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // distinct concept (client/server offline sync) and the only side with
   // cross-repo consumers (objectui useOffline + re-export + parity ratchet).
   'integration/ConflictResolution': 'integration/ConnectorConflictResolution',
+
+  // #4741 / ADR-0112 D9a — `PackageDependency` was published by TWO defs whose
+  // key sets are ENTIRELY disjoint (zero shared properties): `cloud` is the
+  // DECLARATION form an author writes into a package manifest
+  // (`packageId` / `versionRange` / `optional`), `kernel` is the RESOLVER form
+  // the dependency graph walks (`name` / `versionConstraint` / `type` /
+  // `resolvedVersion`). Two concepts, not two spellings. The resolver side
+  // takes the descriptive name; `cloud/PackageDependency` keeps the bare one
+  // and is deliberately absent from this table — it is neither source nor
+  // target, and it is emitted byte-for-byte unchanged by this build.
+  'kernel/PackageDependency': 'kernel/ResolvedPackageDependency', // 4 keys carried
 };
 
 /**

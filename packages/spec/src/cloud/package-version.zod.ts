@@ -44,6 +44,13 @@ export type PackageVersionStatus = z.infer<typeof PackageVersionStatusSchema>;
 /**
  * A single dependency declared in a package manifest.
  * Follows npm-style `"package_id": "version_range"` semantics.
+ *
+ * This is the DECLARATION-side shape — what an author writes into
+ * `manifestJson.dependencies[]`. The resolver-side shape (a constraint plus
+ * the `resolvedVersion` it resolved to) is a different concept and lives in
+ * `@objectstack/spec/kernel` as `ResolvedPackageDependency`; before #4741 it
+ * also went by `PackageDependency`, so which type a consumer got depended on
+ * nothing but the import path (#4411). The bare name is now this one alone.
  */
 export const PackageDependencySchema = lazySchema(() => z.object({
   /** Manifest ID of the required package (e.g. `com.objectstack.core`). */
