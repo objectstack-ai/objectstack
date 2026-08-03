@@ -50,11 +50,55 @@
  * `MODULE_NOT_FOUND`, which every caller here classifies as "not installed" —
  * turning a broken package into a silent skip (or, on the organizations path,
  * into a fatal message telling the operator to install what is already there).
+ *
+ * ── #4719: the host's DECLARATION gates the lookup, not its resolvability ────
+ *
+ * "Resolve from the host app" was implemented as a CJS `createRequire` anchored
+ * at the host's `package.json`, and **CJS resolution honours `NODE_PATH`**
+ * (`Module.globalPaths`). The first thing a pnpm-generated bin shim does is
+ *
+ *     export NODE_PATH="<workspace>/node_modules/.pnpm/node_modules"
+ *
+ * and every `serve` / `dev` child process inherits it. Everything any package in
+ * the workspace transitively depends on lives in that hoisted store, so
+ * `hostRequire.resolve(pkg)` succeeded for packages the host app had never
+ * declared — the answer depended on HOW THE PROCESS WAS LAUNCHED, not on the
+ * app. Measured on cloud's `apps/objectos-ee`, which did not declare
+ * `@objectstack/organizations`: `pnpm start` (through the shim) booted with the
+ * organizations plugin mounted and ADR-0093 D5 silent, while
+ * `node node_modules/@objectstack/cli/bin/run.js serve` (no shim, no NODE_PATH)
+ * hit the D5 fail-fast and exited 1. Same app, same `package.json`, same
+ * posture. D5's own message told operators to "declare it in the app's
+ * package.json" — the one thing the CLI never checked.
+ *
+ * So the host lookup is now gated on the host's **declaration**: a package name
+ * is looked up in the host's `node_modules` only when it appears in the host
+ * `package.json` (see {@link HOST_DECLARATION_FIELDS}). Reachability through a
+ * hoisted store or `NODE_PATH` is deliberately not accepted — it is precisely
+ * the accident that made the contract unenforced. This is the "declared =
+ * enforced" shape the rest of the repo uses (Prime Directive #10): the
+ * declaration is a deliberate authoring act, machine-checkable at the moment of
+ * boot, and independent of launcher, package manager and hoist layout.
+ *
+ * The two failures it separates were, until now, one indistinguishable
+ * `MODULE_NOT_FOUND`, with opposite remedies:
+ *
+ *   - **undeclared** — the app never asked for this package. Remedy: declare it
+ *     in the app's `package.json` and install.
+ *   - **declared but unresolvable** — the app asked for it and the install is
+ *     broken/pruned/unbuilt. Remedy: fix the install. Re-reading the
+ *     `package.json` is wasted effort; the declaration is right there.
+ *
+ * {@link hostImportFailureKind} exposes that classification to callers so their
+ * fail-fast text can say which one it is (`packages/cli` ADR-0093 D5,
+ * `packages/verify` `bootStack`, `packages/qa/dogfood`'s enterprise probe).
  */
 
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { isModuleNotFoundError } from './module-not-found.js';
 
 /**
  * Imports a package as the host app would see it.
@@ -80,26 +124,269 @@ export function createHostRequire(hostRoot: string = process.cwd()): NodeRequire
 }
 
 /**
- * Build an importer that resolves from the host app first, then falls back to
- * the importing package's own resolution.
+ * The `package.json` fields whose KEYS count as a host-app declaration (#4719).
  *
- * @param hostRequire Reuse an existing host `require` (callers usually also need
- * it to read the host `package.json`); defaults to one anchored at the CWD.
+ * All four are deliberate authoring acts in the app's own manifest that name the
+ * package, which is the signal this gate is built on — not "is it reachable".
+ * Why each is in:
+ *
+ * - `dependencies` — the obvious one: the app runs with it.
+ * - `devDependencies` — the app being served / verified / dogfooded IS the
+ *   project, not a library someone else consumes, so its dev deps are installed
+ *   in exactly the environment this resolver runs in.
+ * - `optionalDependencies` — npm/pnpm install them and tolerate an install
+ *   failure. "Installed ⇒ declared" holds; and if it did NOT install, the
+ *   declared-but-unresolvable branch says so precisely instead of pretending the
+ *   app never asked.
+ * - `peerDependencies` — an app is nobody's peer, so this is an unusual place to
+ *   put an enterprise add-on; but it still NAMES the package on purpose, and
+ *   `packages/cli`'s own edition gate (`serve`'s AI-service opt-in, #1597) has
+ *   read all four since it was written. Accepting three here and four there
+ *   would fork "declared" into two dialects for one question — the shape Prime
+ *   Directive #12 exists to prevent. That gate now delegates to this list, so
+ *   there is one owner and one answer.
+ *
+ * `bundleDependencies` is absent on purpose: it is an array of names that must
+ * ALSO appear in `dependencies`, so it can never be the only declaration.
  */
-export function createHostImporter(
-  hostRequire: NodeRequire = createHostRequire(),
-): HostImporter {
+export const HOST_DECLARATION_FIELDS = [
+  'dependencies',
+  'devDependencies',
+  'optionalDependencies',
+  'peerDependencies',
+] as const;
+
+export type HostDeclarationField = (typeof HOST_DECLARATION_FIELDS)[number];
+
+/** What the host app's `package.json` says about one package name. */
+export interface HostDeclaration {
+  /** Bare package name the specifier belongs to (subpath stripped). */
+  packageName: string;
+  /** Directory whose `package.json` was consulted. */
+  hostRoot: string;
+  /** True when {@link packageName} is a key of one of {@link HOST_DECLARATION_FIELDS}. */
+  declared: boolean;
+  /** Which field carried it (first match, in {@link HOST_DECLARATION_FIELDS} order). */
+  field?: HostDeclarationField;
+  /** The version range AS WRITTEN — `^1.2.3`, `workspace:*`, `npm:@acme/x@1`, `link:../x`. */
+  specifier?: string;
+  /** True when `hostRoot` has no readable / parseable `package.json` at all. */
+  manifestMissing?: boolean;
+}
+
+/**
+ * The package a bare specifier belongs to, or `undefined` when the specifier is
+ * not a bare package name at all (a relative/absolute path, a `file:`/`data:`
+ * URL, or a `node:`-prefixed builtin). Those bypass the declaration gate: they
+ * are not things a `package.json` can declare.
+ *
+ * Subpaths are stripped, so `@objectstack/platform-objects/plugin` is declared
+ * by `"@objectstack/platform-objects"`, which is the only key that can exist.
+ * Scoped names keep both segments.
+ *
+ * Alias dependencies need no special case, and that is the point: with
+ * `"foo": "npm:bar@1"` the importable specifier is `foo` and the manifest key is
+ * `foo`, so keying on the KEY (never the value) is exactly right — `import('bar')`
+ * correctly reads as undeclared unless `bar` is itself a key. Same for
+ * `workspace:` / `link:` / `file:` specifiers: the key is the name, the value is
+ * the package manager's business.
+ */
+export function packageNameFromSpecifier(specifier: string): string | undefined {
+  if (!specifier || specifier.startsWith('.') || specifier.startsWith('/')) return undefined;
+  // A URL-ish or protocol-prefixed specifier (`node:fs`, `file:///…`, `data:…`).
+  if (/^[a-z][a-z0-9+.-]*:/i.test(specifier)) return undefined;
+  const segments = specifier.split('/');
+  if (specifier.startsWith('@')) {
+    if (segments.length < 2 || !segments[0] || !segments[1]) return undefined;
+    return `${segments[0]}/${segments[1]}`;
+  }
+  return segments[0] || undefined;
+}
+
+/**
+ * Read what the host app's `package.json` declares about `specifier`.
+ *
+ * Deliberately a plain manifest READ, never a resolution attempt: resolvability
+ * is the property #4719 proved unreliable (it moved with `NODE_PATH` and the
+ * hoist layout), while the manifest is the same fact in every launcher.
+ */
+export function readHostDeclaration(
+  specifier: string,
+  hostRoot: string = process.cwd(),
+): HostDeclaration {
+  const packageName = packageNameFromSpecifier(specifier) ?? specifier;
+  const base: HostDeclaration = { packageName, hostRoot, declared: false };
+
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = JSON.parse(readFileSync(join(hostRoot, 'package.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    // No manifest ⇒ nothing is declared. Recorded rather than swallowed so the
+    // failure text can say "there is no package.json here" instead of the
+    // misleading "you did not declare it".
+    return { ...base, manifestMissing: true };
+  }
+
+  for (const field of HOST_DECLARATION_FIELDS) {
+    const entries = manifest[field];
+    if (!entries || typeof entries !== 'object') continue;
+    const specifierValue = (entries as Record<string, unknown>)[packageName];
+    if (specifierValue === undefined) continue;
+    return { ...base, declared: true, field, specifier: String(specifierValue) };
+  }
+  return base;
+}
+
+/** Convenience predicate over {@link readHostDeclaration}. */
+export function isDeclaredByHost(specifier: string, hostRoot?: string): boolean {
+  return readHostDeclaration(specifier, hostRoot).declared;
+}
+
+/**
+ * Why a {@link HostImporter} could not produce a module.
+ *
+ * - `undeclared` — the host app's `package.json` never names the package, and
+ *   the importing framework package cannot supply it either. Remedy: DECLARE it
+ *   in the app and install.
+ * - `declared-unresolvable` — the app declares it and it still would not
+ *   resolve. Remedy: fix the INSTALL. Re-reading the manifest is wasted effort.
+ *
+ * An evaluation crash is neither: it propagates untouched and carries no kind.
+ */
+export type HostImportFailureKind = 'undeclared' | 'declared-unresolvable';
+
+/**
+ * Property carrying {@link HostImportFailureKind} on a thrown error.
+ *
+ * A string property, read by {@link hostImportFailureKind} — never `instanceof`.
+ * `serve` loads plugins through this importer, so CLI and package can hold
+ * different module instances of anything class-shaped; the #4818 comment in
+ * `serve.ts` names that trap explicitly.
+ */
+export const HOST_IMPORT_FAILURE_KIND = 'objectstackHostImportFailureKind';
+
+/** The classification on an error thrown by a {@link HostImporter}, if any. */
+export function hostImportFailureKind(err: unknown): HostImportFailureKind | undefined {
+  const kind = (err as Record<string, unknown> | null | undefined)?.[HOST_IMPORT_FAILURE_KIND];
+  return kind === 'undeclared' || kind === 'declared-unresolvable' ? kind : undefined;
+}
+
+function hostImportError(
+  kind: HostImportFailureKind,
+  message: string,
+  cause: unknown,
+): Error {
+  // `cause` is assigned rather than passed to the constructor: this package
+  // compiles against a lib without the ES2022 `ErrorOptions` overload.
+  const err = new Error(message);
+  // Every caller classifies "missing vs crashed" through
+  // `isModuleNotFoundError`; both of these ARE the missing case, just with
+  // different remedies, so they must keep answering true to it.
+  return Object.assign(err, {
+    cause,
+    code: 'MODULE_NOT_FOUND',
+    [HOST_IMPORT_FAILURE_KIND]: kind,
+  });
+}
+
+function undeclaredMessage(declaration: HostDeclaration, cause: unknown): string {
+  const { packageName, hostRoot, manifestMissing } = declaration;
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  return (
+    `Cannot find package '${packageName}': the host app does not declare it.\n` +
+    `  host app: ${hostRoot}\n` +
+    (manifestMissing
+      ? '  no readable package.json was found there — nothing can be declared\n'
+      : `  checked: ${HOST_DECLARATION_FIELDS.join(', ')}\n`) +
+    `\n  Declare it in that app's package.json and install it, e.g.\n` +
+    `      cd ${hostRoot} && pnpm add ${packageName}\n` +
+    '\n  Being merely REACHABLE is not enough and is rejected on purpose (#4719):\n' +
+    '  a package hoisted into a workspace store — which is what NODE_PATH points\n' +
+    "  at in every pnpm bin shim — used to resolve here regardless of the app's\n" +
+    '  package.json, so the same app booted or refused depending on how the\n' +
+    '  process was launched. The declaration is the contract.\n' +
+    `  (fallback resolution also failed: ${detail})`
+  );
+}
+
+function unresolvableMessage(declaration: HostDeclaration, cause: unknown): string {
+  const { packageName, hostRoot, field, specifier } = declaration;
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  return (
+    `Cannot find module '${packageName}': the host app DECLARES it ` +
+    `(${field}: ${JSON.stringify(specifier)}) but it could not be resolved.\n` +
+    `  host app: ${hostRoot}\n` +
+    '\n  This is an INSTALL problem, not a declaration problem — the declaration is\n' +
+    '  already there, so re-reading the package.json will not help. Check:\n' +
+    `    • dependencies never installed, or installed before the declaration was added → run \`pnpm install\` in ${hostRoot}\n` +
+    '    • a production prune / filtered deploy dropped it (devDependencies and\n' +
+    '      optionalDependencies go first)\n' +
+    '    • it IS installed but its "main"/"exports" points at a dist that was never built\n' +
+    `  (resolver: ${detail})`
+  );
+}
+
+/**
+ * Build an importer that loads a package **as the host app declares it**, and
+ * otherwise falls back to the importing package's own resolution.
+ *
+ * Order of operations, and why (#4719):
+ *
+ * 1. The host `package.json` is READ. Only a declared name is looked up in the
+ *    host's `node_modules`. An undeclared name never reaches the host resolver,
+ *    so no amount of `NODE_PATH` / hoisting can make it appear to be the app's.
+ * 2. Declared but unresolvable is reported AS SUCH — the app asked for it and
+ *    the install is broken. It is not retried bare: falling back there would
+ *    reintroduce exactly the "some other package happens to supply it" accident
+ *    this gate closes, and would report an install problem as an absence.
+ * 3. Undeclared falls back to the importing package's own resolution, which is
+ *    what keeps every framework-owned load working (`serve`'s plugin-auth /
+ *    service-i18n path, `bootStack`'s service plugins). Bare `import()` is ESM,
+ *    and ESM does not honour `NODE_PATH`, so the fallback cannot re-open the
+ *    hole either. Only when that fails as module-not-found does the undeclared
+ *    error surface; a package that RESOLVES and then throws while evaluating is
+ *    a genuine crash and propagates untouched, as before.
+ *
+ * @param hostRoot Directory holding the host app's `package.json` (default: the
+ * process CWD, which is where the CLI reads `objectstack.config.ts` from too).
+ * Note this used to take a pre-built `NodeRequire`; it needs the ROOT now,
+ * because a `NodeRequire` cannot be asked where it was anchored and the manifest
+ * has to be read from there.
+ */
+export function createHostImporter(hostRoot: string = process.cwd()): HostImporter {
+  const hostRequire = createHostRequire(hostRoot);
   return async (pkg: string): Promise<any> => {
-    let resolved: string;
-    try {
-      resolved = hostRequire.resolve(pkg);
-    } catch {
-      // Invisible to the host app — try the importing package's own
-      // dependencies. A package neither can see throws MODULE_NOT_FOUND from
-      // here, which is what the callers' "missing vs crashed" classification
-      // expects.
+    // Not a bare package name (a path, a URL, a `node:` builtin) — nothing a
+    // manifest could declare. Hand it to the normal resolver untouched.
+    if (packageNameFromSpecifier(pkg) === undefined) {
       return import(/* webpackIgnore: true */ pkg);
     }
-    return import(pathToFileURL(resolved).href);
+
+    const declaration = readHostDeclaration(pkg, hostRoot);
+
+    if (declaration.declared) {
+      let resolved: string;
+      try {
+        resolved = hostRequire.resolve(pkg);
+      } catch (cause) {
+        throw hostImportError(
+          'declared-unresolvable',
+          unresolvableMessage(declaration, cause),
+          cause,
+        );
+      }
+      return import(pathToFileURL(resolved).href);
+    }
+
+    try {
+      return await import(/* webpackIgnore: true */ pkg);
+    } catch (cause) {
+      // A package that resolved and then exploded is a crash, not an absence.
+      if (!isModuleNotFoundError(cause)) throw cause;
+      throw hostImportError('undeclared', undeclaredMessage(declaration, cause), cause);
+    }
   };
 }

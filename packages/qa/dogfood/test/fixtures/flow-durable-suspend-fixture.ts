@@ -22,6 +22,7 @@
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import type { Flow } from '@objectstack/spec/automation';
 
 /** The record the resumed half of the run stamps, so "it continued" is observable. */
 export const SuspendNote = ObjectSchema.create({
@@ -51,7 +52,7 @@ export const SuspendNote = ObjectSchema.create({
  * snapshot across the restart) cannot accidentally pass: the variables have to
  * survive the round-trip through `sys_automation_run` for the right row to move.
  */
-export const flowDurableSuspend = {
+export const flowDurableSuspend: Flow = {
   name: 'flow_durable_suspend',
   label: 'Flow Durable Suspend',
   type: 'screen',

@@ -33,7 +33,7 @@ import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 // Node-only subpath (#4700). Optional packages supplied by the app under
 // verification — `@objectstack/organizations` above all — must be resolved from
 // THAT app, not from `packages/verify`'s own realpath inside this workspace.
-import { createHostImporter, createHostRequire } from '@objectstack/types/node';
+import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 
 /** A Hono app exposes `.request(path, init)` returning a standard `Response`. */
 interface InjectableApp {
@@ -295,15 +295,32 @@ export async function bootStack(
     // telling them to install it again. Resolve from the host app (the project
     // `objectstack verify` runs in) and fall back to this package's own
     // resolution — the same helper `objectstack serve` uses (cloud#1013).
+    //
+    // #4719: that host resolution is now gated on the host app DECLARING the
+    // package. It previously honoured NODE_PATH (a CJS require), so under a pnpm
+    // bin shim a fixture app that never declared the enterprise runtime still
+    // booted multi-tenant off a hoisted copy — and the RLS posture a fixture
+    // then asserted against depended on the launcher.
     const organizationsPkg = '@objectstack/organizations';
+    const hostRoot = opts.hostRoot ?? process.cwd();
     let mod: any;
     try {
-      mod = await createHostImporter(createHostRequire(opts.hostRoot))(organizationsPkg);
+      mod = await createHostImporter(hostRoot)(organizationsPkg);
     } catch (e) {
       restoreTenancyPosture();
+      // Two absences, two remedies (#4719). "Install/link it in THIS APP" is
+      // exactly wrong for an app that already declared it and has a pruned or
+      // unbuilt install — it sends the operator back to a correct package.json.
+      const remedy =
+        hostImportFailureKind(e) === 'declared-unresolvable'
+          ? `It IS declared in ${hostRoot}'s package.json, so the declaration is not the problem — ` +
+            `repair the install there (\`pnpm install\`, un-prune, rebuild its dist).`
+          : `Install/link it in THIS APP (${hostRoot}) — and DECLARE it in that app's ` +
+            'package.json, which is what is actually checked: a package merely reachable through ' +
+            'NODE_PATH or a hoisted workspace store is not accepted (#4719) — to run multi-org fixtures.';
       throw new Error(
         'verify: multiTenant=true requires the enterprise @objectstack/organizations package (migrated from plugin-org-scoping, ADR-0081 D2). ' +
-          `Install/link it in THIS APP (${opts.hostRoot ?? process.cwd()}) to run multi-org fixtures. (${(e as Error).message})`,
+          `${remedy} (${(e as Error).message})`,
       );
     }
     await kernel.use(new mod.OrganizationsPlugin());

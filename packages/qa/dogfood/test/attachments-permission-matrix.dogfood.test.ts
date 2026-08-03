@@ -61,7 +61,11 @@ function bootFixture(extra: { multiTenant?: boolean } = {}) {
 
 /** Drive the REAL presigned three-step upload; returns the fileId. */
 async function uploadFile(stack: VerifyStack, token: string | null, name = 'hello.txt'): Promise<string> {
-  const auth = token ? { Authorization: `Bearer ${token}` } : {};
+  // Typed as a header record rather than inferred: the ternary would otherwise
+  // widen to `{ Authorization?: undefined }` on the anonymous branch, which the
+  // spread carries into `headers` and `HeadersInit` (Record< string, string >)
+  // rightly refuses.
+  const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const presignRes = await stack.api('/storage/upload/presigned', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...auth },

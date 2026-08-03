@@ -45,9 +45,28 @@
  * resolver, and a cloud/enterprise run that ships the package will actually
  * execute the blocks (and will fail loudly if it thinks it ships the package but
  * does not).
+ *
+ * ── #4719 ────────────────────────────────────────────────────────────────────
+ *
+ * The shared resolver now looks a package up in the host app only when that app
+ * DECLARES it (`dependencies` / `devDependencies` / `optionalDependencies` /
+ * `peerDependencies`). It used to honour `NODE_PATH`, which every pnpm bin shim
+ * exports at the hoisted workspace store — so in a workspace that happened to
+ * carry the enterprise package anywhere, this probe could report AVAILABLE for
+ * an app that never declared it, and the multi-org gates would run (or not)
+ * according to how the runner was launched. A capability probe whose answer
+ * moves with the launcher is the same class of lie as the constant-false one
+ * this file replaced, so the probe now reads the declaration too.
+ *
+ * Consequence for an enterprise/cloud run: `OS_TEST_MULTI_ORG_ENABLED=1`
+ * requires the app under test — the `hostRoot` passed here, defaulting to the
+ * CWD — to DECLARE `@objectstack/organizations` in its own `package.json`.
+ * Shipping it only as a hoisted transitive dependency of something else is no
+ * longer enough. The failure text below says so explicitly rather than leaving
+ * it to be rediscovered.
  */
 
-import { createHostImporter, createHostRequire } from '@objectstack/types/node';
+import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 
 /** The cloud-private enterprise package (ADR-0081 D2). */
 export const ORGANIZATIONS_PKG = '@objectstack/organizations';
@@ -77,28 +96,38 @@ export async function probeOrganizations(
   hostRoot?: string,
   declared: boolean = process.env[MULTI_ORG_ENV] === '1',
 ): Promise<OrganizationsProbe> {
-  const importFromHost = createHostImporter(createHostRequire(hostRoot));
+  const root = hostRoot ?? process.cwd();
+  const importFromHost = createHostImporter(root);
   try {
     await importFromHost(ORGANIZATIONS_PKG);
     return { available: true };
   } catch (e) {
     const detail = (e as Error).message;
+    // #4719 — name the remedy that actually applies. "Install it" is useless
+    // advice for an app that installed it and never declared it, which is the
+    // shape a workspace makes easy and a hoisted store used to hide.
+    const remedy =
+      hostImportFailureKind(e) === 'declared-unresolvable'
+        ? `${root} DECLARES ${ORGANIZATIONS_PKG}, so repair its INSTALL there (\`pnpm install\`, ` +
+          'un-prune, rebuild its dist)'
+        : `declare ${ORGANIZATIONS_PKG} in ${root}'s own package.json and install it — being ` +
+          'reachable as somebody else\'s transitive dependency is not enough (#4719)';
     if (declared) {
       throw new Error(
         `${MULTI_ORG_ENV}=1 declares that ${ORGANIZATIONS_PKG} (enterprise, ADR-0081 D2) is ` +
-          `installed for this run, but it could not be resolved from ${hostRoot ?? process.cwd()}. ` +
+          `installed for this run, but it could not be resolved from ${root}. ` +
           'Refusing to skip the multi-org dogfood gates silently: a run that believes it is ' +
           'exercising cross-tenant isolation and is not would report green over gates that ' +
-          `never executed. Install/link ${ORGANIZATIONS_PKG} into the app under test, or unset ` +
+          `never executed. To fix: ${remedy}; or unset ` +
           `${MULTI_ORG_ENV} to accept the skip. (${detail})`,
       );
     }
     return {
       available: false,
       reason:
-        `${ORGANIZATIONS_PKG} (enterprise) is not resolvable from ${hostRoot ?? process.cwd()} — ` +
-        `skipping the multi-org gate. Set ${MULTI_ORG_ENV}=1 in a run that ships the package to ` +
-        'turn this skip into a failure. ' +
+        `${ORGANIZATIONS_PKG} (enterprise) is not resolvable from ${root} — ` +
+        `skipping the multi-org gate. To enable it, ${remedy}. Set ${MULTI_ORG_ENV}=1 in a run ` +
+        'that ships the package to turn this skip into a failure. ' +
         `(${detail})`,
     };
   }

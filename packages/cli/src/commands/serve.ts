@@ -24,7 +24,12 @@ import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-run
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
 // Shared with @objectstack/verify and the dogfood multi-org probes (#4700) —
 // node-only, hence the `/node` subpath rather than the edge-safe root export.
-import { createHostRequire, createHostImporter } from '@objectstack/types/node';
+import {
+  createHostImporter,
+  hostImportFailureKind,
+  isDeclaredByHost,
+  readHostDeclaration,
+} from '@objectstack/types/node';
 import {
   printHeader,
   printKV,
@@ -1548,14 +1553,22 @@ export default class Serve extends Command {
       // instead; the CLI's own resolution stays as the fallback for the
       // framework-owned packages the CLI depends on.
       //
+      // #4719: "resolve from the host root" now means "resolve what the host
+      // root DECLARES". The host lookup was a CJS require, CJS honours
+      // NODE_PATH, and the pnpm bin shim exports NODE_PATH pointing at the
+      // hoisted workspace store — so anything transitively reachable from
+      // anywhere in the workspace resolved as if the app had declared it, and
+      // whether the D5 wall below fired came down to whether `serve` was reached
+      // through that shim. The declaration is the contract; reachability is not.
+      //
       // Defined HERE, above the auth block, because the enterprise organizations
       // load inside it needs it: this helper used to be declared *after* that
       // block, so the organizations load fell back to a bare import, resolved in
       // the framework workspace, never found the cloud-private package, and every
       // walled-posture deployment hit the ADR-0093 D5 fail-fast and exited 1
       // (cloud#1013).
-      const hostRequire = createHostRequire();
-      const importFromHost = createHostImporter(hostRequire);
+      const hostRoot = process.cwd();
+      const importFromHost = createHostImporter(hostRoot);
 
       // 5d. Auto-register AuthPlugin (and paired Security/Audit) when the
       // 'auth' tier is enabled and no auth plugin is already configured.
@@ -1799,6 +1812,26 @@ export default class Serve extends Command {
                 // exact footgun this guard closes.
                 const cause = orgErr instanceof Error ? orgErr.message : String(orgErr);
                 if (!resolveAllowDegradedTenancy()) {
+                  // #4719 — TWO ABSENCES, TWO REMEDIES. Until the host lookup was
+                  // gated on the host's declaration, both arrived here as one
+                  // MODULE_NOT_FOUND and got one piece of advice: "declare it in
+                  // the app's package.json". For an operator who HAD declared it
+                  // and whose install was pruned, that sent them to re-read a
+                  // file that was already correct. The importer now says which
+                  // one it is, so this text can too.
+                  const declaration = readHostDeclaration('@objectstack/organizations', hostRoot);
+                  const remedy =
+                    hostImportFailureKind(orgErr) === 'declared-unresolvable'
+                      ? '      • this app DECLARES @objectstack/organizations ' +
+                        `(${declaration.field}: ${JSON.stringify(declaration.specifier)}) — the\n` +
+                        '        declaration is NOT the problem and re-reading package.json will not help.\n' +
+                        `        Repair the INSTALL in ${hostRoot}: run \`pnpm install\`, check that a\n` +
+                        '        production prune did not drop it, and that its dist is actually built — or\n'
+                      : '      • add @objectstack/organizations (the enterprise multi-org runtime) to THIS APP\n' +
+                        "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
+                        '          app, not from the framework it is linked out of. Being merely reachable\n' +
+                        '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
+                        '          (#4719) — that made this wall depend on how the process was launched — or\n';
                   console.error(
                     chalk.red(
                       `\n  ✖ FATAL: tenancy posture '${tenancyPosture}' was requested but ` +
@@ -1806,9 +1839,7 @@ export default class Serve extends Command {
                         '    so the organization wall is INACTIVE. Refusing to boot — a deployment that requested\n' +
                         '    multi-organization isolation must not serve traffic without it (ADR-0093 D5).\n\n' +
                         '    Fix one of:\n' +
-                        '      • add @objectstack/organizations (the enterprise multi-org runtime) to THIS APP\n' +
-                        "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
-                        '          app, not from the framework it is linked out of — or\n' +
+                        remedy +
                         "      • set OS_TENANCY_POSTURE=single (or unset OS_MULTI_ORG_ENABLED) to run single-org, or\n" +
                         '      • set OS_ALLOW_DEGRADED_TENANCY=1 to boot in an explicitly degraded single-org state.\n\n' +
                         `    cause: ${cause}\n`,
@@ -2035,20 +2066,14 @@ export default class Serve extends Command {
       // surface), while MCP and every other capability are unaffected. Gating on
       // a *declared* dep — not mere resolvability — makes this reliable in a
       // workspace/monorepo, where the package stays hoist-resolvable when undeclared.
-      const _fs = await import('node:fs');
-      const hostDeclaresDependency = (pkg: string): boolean => {
-        try {
-          const hostPkg = JSON.parse(
-            _fs.readFileSync(hostRequire.resolve('./package.json'), 'utf8'),
-          ) as Record<string, Record<string, string> | undefined>;
-          return Boolean(
-            hostPkg.dependencies?.[pkg] ?? hostPkg.devDependencies?.[pkg]
-              ?? hostPkg.optionalDependencies?.[pkg] ?? hostPkg.peerDependencies?.[pkg],
-          );
-        } catch {
-          return false;
-        }
-      };
+      //
+      // #4719 — this used to be a local re-implementation of that read. It was
+      // right, and it was the ONLY place in the boot path that asked the question
+      // the right way: the enterprise organizations load two blocks up asked
+      // "does it resolve", which a hoisted store answered yes to regardless. Both
+      // now go through the one owner in `@objectstack/types/node`, so "declared"
+      // cannot mean two different things in one file (Prime Directive #12).
+      const hostDeclaresDependency = (pkg: string): boolean => isDeclaredByHost(pkg, hostRoot);
       // `wantsAiService` is the AUTO (opt-in) signal: the host app listed the base
       // AI service — or the Studio that builds on it — in its OWN package.json. This
       // is a package.json READ (a deliberate authoring act), not a speculative
