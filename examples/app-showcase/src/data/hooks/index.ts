@@ -63,11 +63,15 @@ export const WarnOverBudgetHook = {
   label: 'Warn On Over-Budget Project',
   object: 'showcase_project',
   events: ['afterUpdate'] as LifecycleEvent[],
-  // Guard with has(): an afterUpdate fired by a partial write (e.g. the
-  // task-rollup that only touches task_count) carries a record WITHOUT
-  // spent/budget, and CEL throws "No such key" on a bare `record.spent`.
-  // has() is the missing-key-safe macro — the hook simply skips those.
-  condition: "has(record.spent) && has(record.budget) && record.spent > record.budget",
+  // Guard with `!= null`, NOT with `has()` (#4770, same lesson as #4649). A
+  // condition is evaluated against the STORED record overlaid with this
+  // write's payload, made total over the object's declared fields — so a
+  // partial write (the task-rollup that only touches task_count) still sees
+  // spent/budget, and `has(record.spent)` is uniformly TRUE for a declared
+  // field, including one holding null. Only `!= null` actually keeps
+  // `null > null` — which CEL has no overload for — from aborting the
+  // expression.
+  condition: "record.spent != null && record.budget != null && record.spent > record.budget",
   body: {
     language: 'js' as const,
     source: "var r = ctx.result || ctx.input || {}; ctx.log.warn('project over budget: ' + (r.name || r.id || 'unknown') + ' (' + r.spent + ' / ' + r.budget + ')');",

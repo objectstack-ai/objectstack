@@ -126,6 +126,10 @@ import {
   type FieldValidationError,
   type ValidationMessageContext,
 } from './record-validator.js';
+// Shared with the declarative hook-condition gate (#4770) so the two surfaces
+// that evaluate CEL against "the record" cannot drift apart on what that record
+// contains — see the module's own doc comment.
+import { materializeDeclaredFields } from '../declared-fields.js';
 
 type Mode = 'insert' | 'update';
 
@@ -477,35 +481,6 @@ function ruleNeedsPrior(r: unknown): boolean {
   return false;
 }
 
-/**
- * Materialise the object's DECLARED-but-absent fields as `null`, in place
- * (#1871 for insert, #4649 for update and for the `previous` binding).
- *
- * CEL is strict about missing keys: `record.x` on a record that does not carry
- * the key `x` aborts the whole predicate with `No such key`, which is NOT the
- * same as reading `null`. Whether a key is carried is a property of the DRIVER,
- * not of the data — a driver that stores only written columns returns a record
- * missing every column the write never touched — so without this a predicate's
- * evaluability depends on storage internals the author cannot see.
- *
- * Scope is deliberately the object's **declared fields only**. Materialising
- * every key a predicate happens to name would defeat the fail-closed step: a
- * typo'd `record.stauts` must stay unevaluable so it is reported, not silently
- * read as `null` and quietly answered "no violation".
- *
- * `undefined` counts as absent (not just a missing key): CEL treats an own key
- * holding `undefined` exactly as it treats no key at all.
- */
-function materializeDeclaredFields(
-  record: Record<string, unknown>,
-  fields: Record<string, ConditionalFieldDef> | undefined,
-): Record<string, unknown> {
-  if (!fields) return record;
-  for (const name of Object.keys(fields)) {
-    if (record[name] === undefined) record[name] = null;
-  }
-  return record;
-}
 
 /** Field-level conditional rules (B2): a field is required / read-only when its
  *  CEL predicate is TRUE over the record. */

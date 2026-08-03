@@ -231,6 +231,26 @@ condition: P`record.status in ['pending', 'in_review']`
 condition: P`record.type == 'enterprise' && record.region == 'APAC' && record.is_active == true`
 ```
 
+**`record` here is the RECORD, not this write's payload (#4770).** The condition
+is evaluated against the stored row overlaid with the fields this write carries,
+made total over the object's **declared** fields (`null` when a declared field is
+in neither). So:
+
+- Reference **any** declared field, not just the ones this update touches —
+  `record.done == true` works on an update that only sets `status`. (This is
+  unlike `ctx.input` / `ctx.result` inside the handler, which stay partial — see
+  Gotcha 1.)
+- A condition describes the record's **state**, not the diff. `record.done ==
+  true` fires on every update of an already-done record, not only on the update
+  that set it.
+- **Guard optional values with `!= null`, never with `has(...)`.** A declared
+  field holding `null` is *present*, so `has(record.spent)` is uniformly true and
+  `has(record.spent) && record.spent > record.budget` still faults on
+  `null > null`. `has()` answers "is this key declared at all", which is a
+  question about your spelling, not about your data.
+- An **undeclared** key (a typo) stays unevaluable: the condition is logged at
+  WARN and treated as false.
+
 #### `onError` — Error Handling
 
 The default is `'abort'` **unconditionally** — for `after*` hooks too, a sync
@@ -418,8 +438,10 @@ const full = await ctx.api.object('candidate').findOne({ where: { id: ctx.result
 // full.position_id is present even though this PATCH only set `stage`.
 ```
 
-(A declarative `condition` on an un-written field hits the same wall — guard it
-with the missing-key-safe `has(record.x)` macro.)
+(A declarative `condition` does **not** hit this wall — since #4770 it is
+evaluated against the stored record overlaid with the payload, so
+`record.position_id` is readable there even when the PATCH never wrote it. Guard
+optional values with `record.x != null`, not with `has(record.x)`.)
 
 ### ⚠️ Gotcha 2 — cross-object writes obey the *target's* sharing model
 
