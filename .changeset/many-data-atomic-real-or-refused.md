@@ -1,5 +1,5 @@
 ---
-"@objectstack/metadata-protocol": patch
+"@objectstack/metadata-protocol": minor
 ---
 
 fix(metadata-protocol): `deleteMany` / `updateMany` honour `atomic` for real, or refuse it (#4620)
