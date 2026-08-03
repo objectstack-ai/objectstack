@@ -17,7 +17,10 @@ export {
   MetadataViewerContributionSchema,
   SidebarGroupContributionSchema,
   ActionContributionSchema,
-  ActionLocationSchema,
+  // [#4737] Renamed from `ActionLocationSchema` — that bare name now belongs
+  // solely to `@objectstack/spec/ui`'s 7-value app-UI vocabulary. This is the
+  // 3-value Studio IDE surface enum for `ActionContributionSchema.location`.
+  ActionContributionLocationSchema,
   MetadataIconContributionSchema,
   PanelContributionSchema,
   PanelLocationSchema,
@@ -34,6 +37,7 @@ export {
   type MetadataViewerContribution,
   type SidebarGroupContribution,
   type ActionContribution,
+  type ActionContributionLocation,
   type MetadataIconContribution,
   type PanelContribution,
   type CommandContribution,
