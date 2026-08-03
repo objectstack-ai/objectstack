@@ -23,16 +23,20 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import url from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { countSites, listSchemaFiles } from './lib/strictness-ledger';
+import { analyzeSites, countSites, countStripSites, listSchemaFiles } from './lib/strictness-ledger';
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const SPEC = path.resolve(HERE, '..');
 const SRC = path.join(SPEC, 'src');
 const LEDGER = path.resolve(SPEC, '../../docs/audits/2026-07-unknown-key-strictness-ledger.md');
+
+/** Absolute path of a source file, relative to `packages/spec/src`. */
+const at = (rel: string) => path.join(SRC, rel);
 
 /** The directories the ledger triages file-by-file. */
 const TRIAGED = ['ui', 'data', 'automation', 'security', 'studio'] as const;
@@ -69,5 +73,115 @@ describe('strictness-ledger coverage walk', () => {
     // not sharing the gate's table parser, so a bug in that parser cannot make
     // both agree on a wrong answer.
     expect(undeclared).toEqual([]);
+  });
+});
+
+/**
+ * The site counter's own regression cover.
+ *
+ * Written after the #4001 re-measurement found the previous, textual counter
+ * wrong in both directions at once — counting `z.object({…})` that appeared in
+ * JSDoc prose, and missing both the prettier-wrapped `z\n  .object({` form and
+ * `z.looseObject(`. On `ui/` the two errors happened to cancel, so the section
+ * header was correct over two wrong rows.
+ *
+ * Every case below names a REAL site that the old counter got wrong, so the test
+ * is a red-on-known-input check rather than a restatement of current output.
+ */
+describe('site counting reads the AST, not the source text', () => {
+  it('does not count a z.object( that appears inside a comment', () => {
+    // Both "sites" the old regex found here are inside one JSDoc example.
+    expect(countSites(at('kernel/metadata-protection.zod.ts'))).toBe(0);
+    expect(countSites(at('shared/suggestions.zod.ts'))).toBe(0);
+    // And the case that mattered, because this file IS triaged: 9 → 8.
+    expect(countSites(at('ui/action.zod.ts'))).toBe(8);
+  });
+
+  it('counts a call the source wraps across lines (`z\\n  .object({`)', () => {
+    // ChartAggregateSchema is written wrapped; the old `z\.object\(` missed it.
+    const chart = analyzeSites(at('ui/chart.zod.ts'));
+    expect(chart).toHaveLength(7);
+    expect(chart.map((s) => s.name)).toContain('ChartAggregateSchema');
+
+    // The one that was hidden ENTIRELY: a wrapped call was this file's only
+    // site, so it counted zero — and a zero-site file is skipped by the coverage
+    // walk, which is how an authorable schema stayed out of the ledger while the
+    // gate reported "no undeclared schema files".
+    const trigger = analyzeSites(at('automation/time-relative-trigger.zod.ts'));
+    expect(trigger).toHaveLength(1);
+    expect(trigger[0].name).toBe('TimeRelativeTriggerSchema');
+  });
+
+  it('knows every object idiom, including z.looseObject(', () => {
+    const fv = analyzeSites(at('data/field-value.zod.ts'));
+    expect(fv).toHaveLength(2);
+    expect(fv.find((s) => s.name === 'FileValueSchema')?.idiom).toBe('z.looseObject');
+  });
+});
+
+/**
+ * Posture reading — the property that makes a remaining-work map possible at
+ * all. The gate could previously only ask "does this FILE contain any
+ * `.strict()`", which is why the campaign was still planning off counts of
+ * `strictObject(` occurrences: that idiom misses every schema closed with the
+ * OLDER `z.object(…).strict()` spelling, and reads `automation/` as 0 strict
+ * when it has 8.
+ *
+ * Each case pairs a real reading with a MUTATED copy of the same file, so the
+ * reading is shown to flip. A posture check that has only ever been seen green
+ * is the exact instrument this campaign keeps getting burned by.
+ */
+describe('posture reading, with a red control for each', () => {
+  /** Analyze a mutated copy of a real source file. */
+  const mutate = (rel: string, from: string, to: string) => {
+    const src = fs.readFileSync(path.join(SRC, rel), 'utf-8');
+    expect(src, `mutation anchor missing in ${rel}`).toContain(from);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'strictness-'));
+    const tmp = path.join(dir, path.basename(rel));
+    fs.writeFileSync(tmp, src.replace(from, to));
+    try {
+      return analyzeSites(tmp, rel);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('reads the strictObject( helper as strict — and as strip once un-converted', () => {
+    const rel = 'ui/action.zod.ts';
+    const live = analyzeSites(at(rel)).find((s) => s.name === 'ActionAiSchema');
+    expect(live?.posture).toBe('strict');
+    expect(live?.idiom).toBe('strictObject');
+
+    const red = mutate(rel, 'export const ActionAiSchema = strictObject({',
+      'export const ActionAiSchema = z.object({').find((s) => s.name === 'ActionAiSchema');
+    expect(red?.posture).toBe('strip');
+  });
+
+  it('reads the OLDER z.object(…).strict() spelling as strict too', () => {
+    // The reading the `strictObject(`-only count could not make. These four are
+    // why `security/` is done and `automation/` is not zero.
+    const perm = analyzeSites(at('security/permission.zod.ts'));
+    expect(perm.filter((s) => s.posture === 'strict')).toHaveLength(4);
+    expect(perm.find((s) => s.name === 'PermissionSetSchema')?.idiom).toBe('z.object');
+    expect(countStripSites(at('security/permission.zod.ts'))).toBe(0);
+  });
+
+  it('reads a default site as strip — and as strict once closed', () => {
+    const rel = 'automation/execution.zod.ts';
+    const live = analyzeSites(at(rel)).find((s) => s.name === 'ExecutionStepLogSchema');
+    expect(live?.posture).toBe('strip');
+
+    const red = mutate(rel, 'export const ExecutionStepLogSchema = lazySchema(() => z.object({',
+      'export const ExecutionStepLogSchema = lazySchema(() => z.object({}).strict().extend({')
+      .find((s) => s.name === 'ExecutionStepLogSchema');
+    expect(red?.posture).toBe('strict');
+  });
+
+  it('reads .passthrough() as passthrough, not as closed', () => {
+    // The deliberate renderer escape hatch. If this ever read as `strict` the
+    // remaining-work map would under-report, which is the failure direction that
+    // retires a reader's suspicion.
+    const dash = analyzeSites(at('ui/dashboard.zod.ts'));
+    expect(dash.filter((s) => s.posture === 'passthrough')).toHaveLength(1);
   });
 });

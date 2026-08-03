@@ -16,11 +16,27 @@
 // claims in it that are mechanically checkable.
 //
 // WHAT IT CHECKS
-//   1. Site counts. The ledger states its own method — "site counts are `z.object(`
-//      occurrences per file" — so every count is verifiable. A count that no longer
-//      matches means someone added or removed a schema without reclassifying it, and
-//      the row's `Class` verdict now covers sites nobody triaged. This is the ratchet:
-//      touching a file forces you back through the ledger.
+//   1. Site counts. Every object-constructing CALL in the file, read from the AST.
+//      A count that no longer matches means someone added or removed a schema without
+//      reclassifying it, and the row's `Class` verdict now covers sites nobody
+//      triaged. This is the ratchet: touching a file forces you back through the
+//      ledger.
+//      The counting used to be a regex over the source text, and the #4001
+//      re-measurement found it wrong in BOTH directions on seven files: it counted
+//      `z.object({…})` written inside JSDoc prose, and it missed the prettier-wrapped
+//      `z\n  .object({` form and `z.looseObject(` entirely. The worst case was
+//      `automation/time-relative-trigger.zod.ts`, which read as ZERO sites — and a
+//      zero-site file is deliberately SKIPPED by check 2, so an authorable schema sat
+//      outside the map while this gate printed "no undeclared schema files". Same
+//      shape as the non-recursive walk below, one layer further in: not the walk
+//      blind, but the counter feeding it. See `lib/strictness-ledger.ts`.
+//   5. The remaining-strip map. The triage tables say how much surface exists; that
+//      never answered how much is still OPEN, which is the number batches are planned
+//      against. Gated in both directions: a file with strip sites must have a row with
+//      matching counts, AND a row whose file has reached zero strip sites FAILS, so a
+//      closed file drops out. The reverse pin matters more than the forward one — this
+//      ledger has already had to record that it once listed a shipped feature as a
+//      TODO, and a worklist that can outlive its work will.
 //   2. Coverage. Every `*.zod.ts` under a triaged directory that HAS `z.object(` sites
 //      must appear in that directory's table. A new one is undeclared surface —
 //      exactly what the ledger exists to prevent. The walk is RECURSIVE; nested files
@@ -52,7 +68,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import url from 'node:url';
 
-import { countSites, listSchemaFiles } from './lib/strictness-ledger';
+import { analyzeSites, countSites, countStripSites, listSchemaFiles } from './lib/strictness-ledger';
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const SPEC = path.resolve(HERE, '..');
@@ -193,6 +209,111 @@ for (const [d, declared] of declaredByDir) {
   }
 }
 
+// ── The remaining-strip-site map (#4001 re-measurement) ─────────────────────
+//
+// The triage tables above say how much surface exists; they never said how much
+// of it is still OPEN. That number is what every batch plan is scheduled
+// against, and until it was measured the campaign was planning off counts of
+// `strictObject(` occurrences — which miss every schema closed with the older
+// `z.object(…).strict()` idiom, reading `automation/` as 0 strict when it has 8.
+//
+// So it is a table now, and gated in BOTH directions:
+//   forward — a file with strip sites must have a row with the right counts;
+//   reverse — a row whose file has reached zero strip sites FAILS.
+//
+// The reverse pin is the important half. A worklist that can outlive its work
+// will: this ledger has already had to record that it once listed a shipped
+// feature as a TODO, and the ADR-0010 debt list needed the same pin for the same
+// reason. A row that cannot survive its own completion cannot rot.
+interface StripRow { dir: string; file: string; strip: number; total: number; line: number }
+const stripRows: StripRow[] = [];
+const stripTotals = new Map<string, { strip: number; total: number; line: number }>();
+let sdir: string | null = null;
+
+for (let i = 0; i < md.length; i++) {
+  const line = md[i];
+  const header = line.match(/^#### `([a-z-]+)\/` — (\d+) strip of (\d+)/);
+  if (header) {
+    sdir = header[1];
+    stripTotals.set(sdir, { strip: Number(header[2]), total: Number(header[3]), line: i + 1 });
+    continue;
+  }
+  if (/^#{2,4} /.test(line) && !header) sdir = null;
+  if (!sdir || !line.startsWith('|')) continue;
+  const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+  if (cells.length < 4) continue;
+  const file = cells[0].match(/^`([^`]+\.zod\.ts)`$/)?.[1];
+  if (!file || !/^\d+$/.test(cells[1]) || !/^\d+$/.test(cells[2])) continue;
+  stripRows.push({ dir: sdir, file, strip: Number(cells[1]), total: Number(cells[2]), line: i + 1 });
+}
+
+const stripDeclared = new Map<string, Map<string, StripRow>>();
+for (const row of stripRows) {
+  const perDir = stripDeclared.get(row.dir) ?? new Map<string, StripRow>();
+  stripDeclared.set(row.dir, perDir);
+  perDir.set(row.file, row);
+
+  const abs = path.join(SRC, row.dir, row.file);
+  if (!fs.existsSync(abs)) {
+    errors.push(
+      `ledger:${row.line} — remaining-strip map lists \`${row.dir}/${row.file}\`, which does not exist.\n` +
+      `    → the file moved or was deleted; drop the row.`,
+    );
+    continue;
+  }
+  const sites = analyzeSites(abs);
+  const strip = sites.filter((s) => s.posture === 'strip').length;
+  if (strip === 0) {
+    errors.push(
+      `ledger:${row.line} — \`${row.dir}/${row.file}\` has NO strip sites left, but still has a row in the\n` +
+      `    remaining-strip map.\n` +
+      `    → the file is CLOSED: delete the row and decrement the "${row.dir}/ — N strip of M" header.\n` +
+      `      This table is a worklist; a row that outlives its work is how this ledger rotted before.`,
+    );
+  } else if (strip !== row.strip || sites.length !== row.total) {
+    errors.push(
+      `ledger:${row.line} — \`${row.dir}/${row.file}\` declares ${row.strip} strip of ${row.total}, found ${strip} of ${sites.length}.\n` +
+      `    → ${strip < row.strip ? 'sites were closed' : 'sites were opened or added'}. Update the row (and the section header),\n` +
+      `    and confirm the Class verdict still covers what is left.`,
+    );
+  }
+}
+
+for (const [d, perDir] of stripDeclared) {
+  const dirPath = path.join(SRC, d);
+  if (!fs.existsSync(dirPath)) continue;
+  const missing = listSchemaFiles(dirPath)
+    .filter((f) => !perDir.has(f) && countStripSites(path.join(dirPath, f)) > 0);
+  if (missing.length) {
+    errors.push(
+      `\`${d}/\` has ${missing.length} file(s) with strip sites missing from the remaining-strip map: ` +
+      `${missing.map((f) => `${f} (${countStripSites(path.join(dirPath, f))})`).join(', ')}\n` +
+      `    → add a row under \`#### \\\`${d}/\\\`\` with its strip/total counts and a per-schema Class verdict.`,
+    );
+  }
+}
+
+for (const [d, { strip, total, line }] of stripTotals) {
+  const rows = stripRows.filter((r) => r.dir === d);
+  const sumStrip = rows.reduce((a, r) => a + r.strip, 0);
+  const dirPath = path.join(SRC, d);
+  const actualTotal = fs.existsSync(dirPath)
+    ? listSchemaFiles(dirPath).reduce((a, f) => a + countSites(path.join(dirPath, f)), 0)
+    : 0;
+  if (sumStrip !== strip) {
+    errors.push(
+      `ledger:${line} — \`${d}/\` remaining-strip header says ${strip} strip, rows sum to ${sumStrip}.\n` +
+      `    → update the header to match the rows.`,
+    );
+  }
+  if (total !== actualTotal) {
+    errors.push(
+      `ledger:${line} — \`${d}/\` remaining-strip header says "of ${total}", the directory has ${actualTotal} sites.\n` +
+      `    → update the header; it must match the triage section total for the same directory.`,
+    );
+  }
+}
+
 // Section arithmetic.
 for (const [d, { declared, line }] of sectionTotals) {
   const sum = rows.filter((r) => r.dir === d).reduce((a, r) => a + r.counts.reduce((x, y) => x + y, 0), 0);
@@ -212,7 +333,13 @@ if (errors.length) {
 }
 
 const fileCount = rows.reduce((a, r) => a + r.files.length, 0);
+const openStrip = stripRows.reduce((a, r) => a + r.strip, 0);
 console.log(
   `✓ strictness ledger: ${fileCount} file(s) across ${sectionTotals.size} triaged director(ies) — ` +
   `site counts match, no undeclared schema files, section totals balance.`,
+);
+console.log(
+  `✓ remaining-strip map: ${stripRows.length} open file(s) / ${openStrip} strip site(s) across ` +
+  `${stripTotals.size} director(ies) — counts match, no file with strip sites is missing a row, ` +
+  `no closed file still carries one.`,
 );

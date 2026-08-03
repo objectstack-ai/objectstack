@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectKernel } from './kernel';
 import { ServiceLifecycle, PluginMetadata } from './plugin-loader';
 import type { Plugin } from './types';
@@ -228,6 +228,133 @@ describe('ObjectKernel', () => {
             expect(kernel.isRunning()).toBe(true);
 
             await kernel.shutdown();
+        });
+    });
+
+    // #4813 — the guard timer must not outlive the race it guards.
+    //
+    // These tests are about the *process*, not about the source: asserting
+    // "kernel.ts calls clearTimeout" would be a tautology that any refactor
+    // could satisfy while still pinning the event loop. What is asserted here
+    // is the observable consequence — after the work is done, nothing the
+    // guards armed is still holding the loop open.
+    describe('Startup timeout guards do not outlive the race (#4813)', () => {
+        /**
+         * Ref'd `Timeout` handles — `getActiveResourcesInfo()` reports only
+         * resources that are *currently keeping the event loop alive*, which
+         * is precisely the property that made `os migrate` hang ~120s after
+         * printing `✅ Graceful shutdown complete`.
+         */
+        const refdTimers = () =>
+            process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+
+        it('leaves no ref\'d timer behind after the plugin wins the race', async () => {
+            const plugin: PluginMetadata = {
+                name: 'fast-plugin-long-guard',
+                version: '1.0.0',
+                init: async () => {},
+                start: async () => {},
+                // The real value that hung one-shot CLI processes: ObjectQLPlugin.
+                startupTimeout: 120_000,
+            };
+
+            await kernel.use(plugin);
+
+            const before = refdTimers();
+            await kernel.bootstrap();
+            const after = refdTimers();
+
+            // Two guards were armed (init + start) and both lost their race.
+            // While either is still ref'd the process cannot exit for up to
+            // `startupTimeout` — 120s of idling after a 3s job.
+            expect(after).toBe(before);
+
+            await kernel.shutdown();
+        });
+
+        it('reclaims one guard per lifecycle hook, for every plugin', async () => {
+            const makePlugin = (n: number): PluginMetadata => ({
+                name: `guarded-plugin-${n}`,
+                version: '1.0.0',
+                init: async () => {},
+                start: async () => {},
+                startupTimeout: 120_000,
+            });
+
+            for (let n = 0; n < 4; n++) {
+                await kernel.use(makePlugin(n));
+            }
+
+            const before = refdTimers();
+            await kernel.bootstrap();
+
+            // The issue's probe caught exactly this shape: 8 ref'd Timeouts
+            // for 4 plugins (4 init + 4 start). The count must not scale with
+            // the plugin list — it must not grow at all.
+            expect(refdTimers()).toBe(before);
+
+            await kernel.shutdown();
+        });
+
+        it('still fires the guard when the plugin loses the race', async () => {
+            // The companion assertion to the two above: reclaiming the guard
+            // must not disarm it. `unref()` would satisfy "no ref'd timer" by
+            // detaching the guard from the loop — and a process with nothing
+            // else to run then exits *silently* instead of reporting the
+            // timeout. Clearing on settle keeps the guard armed exactly while
+            // the race is undecided.
+            const plugin: PluginMetadata = {
+                name: 'hanging-plugin',
+                version: '1.0.0',
+                init: async () => {
+                    await new Promise((resolve) => setTimeout(resolve, 5000));
+                },
+                startupTimeout: 50,
+            };
+
+            await kernel.use(plugin);
+
+            await expect(kernel.bootstrap()).rejects.toThrow(
+                'Plugin hanging-plugin init timeout after 50ms'
+            );
+        }, 1000);
+    });
+
+    describe('Startup timeout guards under fake timers (#4813)', () => {
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('schedules no pending timer once bootstrap has settled', async () => {
+            const kernelWithFakeTimers = new ObjectKernel({
+                logger: { level: 'error' },
+                gracefulShutdown: false,
+                skipSystemValidation: true,
+            });
+
+            const plugin: PluginMetadata = {
+                name: 'fake-timer-plugin',
+                version: '1.0.0',
+                init: async () => {},
+                start: async () => {},
+                startupTimeout: 120_000,
+            };
+
+            await kernelWithFakeTimers.use(plugin);
+
+            const before = vi.getTimerCount();
+            await kernelWithFakeTimers.bootstrap();
+
+            // Unlike `getActiveResourcesInfo()`, the fake-timer count includes
+            // unref'd timers — so this one distinguishes "the guard was
+            // reclaimed" from "the guard was merely detached from the loop".
+            expect(vi.getTimerCount()).toBe(before);
+
+            await kernelWithFakeTimers.shutdown();
         });
     });
 

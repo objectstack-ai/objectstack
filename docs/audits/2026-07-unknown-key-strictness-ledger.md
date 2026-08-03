@@ -387,6 +387,49 @@ dropped at parse, and nothing failed.
     closing a registered type is every package that parses that type**, not the
     package that declares it.
 
+19. **The site counter itself was wrong in both directions, and the two errors
+    cancelled.** Found by the 2026-08-03 re-measurement, by building a second,
+    independent counter and making the two disagree — seven files, in the gate
+    this campaign wrote specifically so its map could not go stale.
+
+    It **counted prose**: a `z.object({ … })` inside a JSDoc example is not a
+    site, and `ui/action.zod.ts` declared 9 where 8 exist
+    (`kernel/metadata-protection.zod.ts` and `shared/suggestions.zod.ts` were
+    entirely comment). It **missed the wrapped call**: prettier writes a long
+    chain as `z\n  .object({`, which `z\.object\(` cannot match — one site in
+    `ui/chart.zod.ts`, two in `kernel/manifest.zod.ts`. And it **did not know
+    `z.looseObject(`**, so `data/field-value.zod.ts` declared 1 of its 2.
+
+    On `ui/` the miscounts were −1 and +1, so the section total balanced
+    perfectly over two wrong rows — the gate's arithmetic check passing *because
+    of* a second error.
+
+    The consequential one was `automation/time-relative-trigger.zod.ts`. Its only
+    site is written wrapped, so it counted **zero**, and a zero-site file is
+    deliberately SKIPPED by the coverage walk ("nothing to classify"). An
+    authorable schema — a declarative trigger authors write by hand into a flow
+    start node — sat outside the map while the gate printed *"no undeclared
+    schema files"*. Note this is not the `data/driver/` failure repeated: that
+    walk was blind, whereas this walk was fine and the **counter feeding it**
+    returned a zero the walk then correctly honoured. A blind spot one layer
+    further in, reached through a correct code path.
+
+    Fifth instance of the pattern, and the reason the fix is structural rather
+    than another spelling bolted onto a regex: the counter now reads the AST, so
+    it cannot be fooled by formatting or by comments, and it stops needing to
+    learn each new idiom separately — the same move the envelope probe made in
+    finding 9 when it stopped needing a valid instance and started walking the
+    schema.
+
+    The same walk yields **posture** per site, which closes the gap that made
+    this re-measurement necessary at all: the ledger could say a file contained
+    `.strict()` *somewhere*, never how many of its sites were still open. The
+    2026-08-03 ruling was consequently scheduled against counts of `strictObject(`
+    occurrences — an idiom that misses every schema closed with the older
+    `z.object(…).strict()` spelling, reading `automation/` as **0 strict** when it
+    has 8, and `ui/` as 49 when it has 72. Both the map and the gate now carry the
+    open-site count directly (see the remaining-strip map below).
+
 ## Where this ended up
 
 **24 of 25 registered types closed** (from 9 when the line started), and the
@@ -431,16 +474,19 @@ block) when `position` joined the ratchet.
 
 ## File-level triage — the five authorable directories
 
-Site counts are object sites — `z.object(` or `strictObject(` — per file (2026-07-30, this branch).
-Classification is per the rule above; **(p)** marks a provisional call made
-from the file's exports/JSDoc rather than a full read — verify before
-tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
+Site counts are object sites — every `z.object(` / `strictObject(` /
+`z.strictObject(` / `z.looseObject(` CALL, read from the AST rather than matched
+textually (see `scripts/lib/strictness-ledger.ts` for why the textual method was
+wrong in both directions at once). Classification is per the rule above; **(p)**
+marks a provisional call made from the file's exports/JSDoc rather than a full
+read — verify before tightening (the #4001 "sharing-rule lesson": candidates,
+not verdicts).
 
 ### `ui/` — 198 sites
 
 | File | Sites | Class | Note / next action |
 |---|---|---|---|
-| `action.zod.ts` | 9 | authorable | param schema strict (#3746); remaining blocks ride later steps |
+| `action.zod.ts` | 8 | authorable | param schema strict (#3746); remaining blocks ride later steps. **9 → 8 at the #4001 re-measurement** — no schema changed: the ninth "site" was a `z.object(…)` inside a JSDoc paragraph, which the old textual counter could not tell from code |
 | `view.zod.ts` | 50 | authorable | partially strict (ADR-0089); long tail of sub-blocks. `bulkActionDefs` left this file in #4457 — see the row below |
 | `bulk-action.zod.ts` | 3 | authorable | **strict as of #4457** — `BulkActionDefSchema` (the def itself). It was `z.array(z.record(z.string(), z.any()))` inline in `view.zod.ts`: a selection-bar button with **no shape at all**, so `opeartion` / `excution: 'aggregate'` parsed and shipped as a button that ran the default behaviour. Its two other sites are `BulkActionParamSchema` and that param's `options` entry, both deliberately **open**: objectui's `BulkActionParam` declares a `[key: string]: unknown` catch-all for widget config (min/max/step/format), so `.passthrough()` is the honest mirror and strictness there would reject valid config — same call as `dashboard.zod.ts`'s widget `config`. The def also refuses the combinations the executor never reads (`patch` outside an update, `execution` outside a custom, `batchSize` on an aggregate) and a hand-written `actionDef`, which is renderer-attached |
 | `component.zod.ts` | 29 | authorable | **next candidate** — SDUI component defs; check React-prop open slots first (p) |
@@ -449,13 +495,13 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `dashboard.zod.ts` | 11 | authorable | partially strict |
 | `widget.zod.ts` | 9 | authorable (p) | |
 | `page.zod.ts` | 7 | authorable | partially strict (ADR-0089) |
-| `chart.zod.ts` / `i18n.zod.ts` / `responsive.zod.ts` | 6+6+4 | authorable (p) | i18n label shapes are wide-open records by design — verify |
+| `chart.zod.ts` / `i18n.zod.ts` / `responsive.zod.ts` | 7+6+4 | authorable (p) | i18n label shapes are wide-open records by design — verify. **`chart` 6 → 7 at the re-measurement** — again no schema changed: `ChartAggregateSchema` is written `z\n  .object({`, and the old counter's `z\.object\(` could not match across the line break |
 | `dataset.zod.ts` / `animation.zod.ts` / `dnd.zod.ts` / `keyboard.zod.ts` / `touch.zod.ts` | 4+4+4+4+7 | authorable (p) | interaction configs |
 | `offline.zod.ts` / `report.zod.ts` | 3 ea | authorable (p) | |
 | `notification.zod.ts` | 1 | authorable (p) | **#4610 dropped two sites** — the `./ui` `Notification` (toast/banner instance) and `NotificationConfig` (toaster global config) shapes were removed: zero importers in all three repos, and both shadowed live names owned elsewhere (`./api` owns the inbox row). What remains is `NotificationActionSchema`, part of the presentation vocabulary the ui entry keeps |
 | `sharing.zod.ts` | 2 | authorable (p) | public-sharing config |
 
-### `data/` — 161 sites
+### `data/` — 162 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
@@ -475,9 +521,9 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `mapping.zod.ts` | 3 | authorable (p) | |
 | `external-catalog.zod.ts` | 4 | wire (p) | |
 | `validation.zod.ts` | 6 | authorable | **strict as of #4001 batch 3b** — a `z.lazy()` discriminated union, so the one-call conversion does not apply: each of the six variants builds its own `strictObject` from a shared `BASE_VALIDATION_SHAPE`. Closing the base alone would have rejected correctly but suggested from the SHARED keys only, so a typo of a variant's own key (`transtions` → `transitions`) would get no rename. Site count 1 → 6 because the six variants are now object sites in their own right. The ADR-0010 envelope lives in the shared shape, so all six inherit it |
-| `field-value.zod.ts` / `seed.zod.ts` | 1+1 | mixed (p) | `seed` is strict (registered-types batch) |
+| `field-value.zod.ts` / `seed.zod.ts` | 2+1 | mixed (p) | `seed` is strict (registered-types batch). **`field-value` 1 → 2 at the re-measurement**: `FileValueSchema` is `z.looseObject(` — a THIRD object idiom the old counter did not know, so the site was invisible rather than classified. It is deliberately open (an uploaded file's metadata bag); `LocationValueSchema` beside it is the strip site |
 
-### `automation/` — 74 sites
+### `automation/` — 75 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
@@ -493,6 +539,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `builtin-node-config.zod.ts` | 8 | authorable | Same family (#4045): the CRUD quartet, `screen`, `map`. Written from what the executors read rather than from the descriptors' `configSchema` literals, and reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` — so unlike most rows here, this one already has a drift check of its own. Same candidacy note as `io-node-config` |
 | `schemaless-node-config.zod.ts` | 4 | authorable | Same family, third panel (#4278): `script` / `subflow` / `decision` (+ the decision branch item) — the descriptor-schemaless nodes whose form lives in objectui's hand-written table. Written from the executors; the drift check is objectui's `flow-node-config.spec-reconciliation` test (cross-repo, via the published exports). Since #4343 `script` and `subflow` ARE parsed at execute time (`parse-config.ts`) — `script` once retiring its `actionType` branches left it flat — so strictness candidacy now follows `io-node-config` on the same terms rather than being moot; `decision` stays export-only |
 | `webhook.zod.ts` | 1 | authorable (p) | spec-only (#3461) |
+| `time-relative-trigger.zod.ts` | 1 | authorable | **Undeclared until the #4001 re-measurement, and invisible for the worst possible reason**: `TimeRelativeTriggerSchema` is written `z\n  .object({`, the old textual counter matched zero sites, and a zero-site file is SKIPPED by the coverage walk as "nothing to classify". So the gate whose whole promise is "no undeclared surface" reported green over an authorable schema — the same shape as `data/driver/`, one layer subtler, because this time the file was not hidden by the walk but by the counter feeding it. Classification is not a guess: the file's own `@example` blocks author it by hand into a flow start node (`config: { timeRelative: { object, dateField, offsetDays, filter } }`), which is the authoring door. A stripped key here means the sweep silently never matches — `offsetDay` for `offsetDays` returns a trigger that never fires, reported as configured |
 | `flow-function.zod.ts` | 1 | authorable | `FlowFunctionDeclarationSchema` (#4396) — the `{ handler, effect }` form of a `defineStack({ functions })` entry. Authored, but note what an undeclared key here would be: a sibling of a **live function**, not data. `defineStack`'s union already rejects a record whose `handler` is not callable, and the boot-path reader is the hand-written `normalizeFlowFunctionEntry` rather than a `.parse()` (re-validating a live handler every boot buys nothing), so strictness would bind at authoring only. Candidate on the same verify-first rule as its `*-node-config` neighbours |
 
 `trigger-registry.zod.ts` had a row here (11 sites, "mixed — descriptors are code-registered (wire-ish); bindings authored") until #4499 deleted the file: all 11 sites were the third connector-vocabulary declaration (`ConnectorSchema` / `Authentication*` / `Operation*` / `ConnectorInstance`), and the old row's classification was optimistic twice over — nothing was ever code-registered against these descriptors and no binding was ever authored. The engine registers against `integration/connector.zod.ts` (ADR-0097), which keeps its own row.
@@ -533,6 +580,114 @@ at its build — detectable and fixable, with the rename suggested — rather th
 the silent narrowing it replaces. That is the trade this whole campaign makes,
 and the residual risk is named here so a reader with `objectui` access can close
 it rather than rediscover it.
+
+## Remaining strip sites — the batch-planning map (re-measured 2026-08-03)
+
+The tables above answer "how much surface is here". They never answered **"how
+much of it is still open"** — the `Class` column is a verdict about who writes
+the input, and the `Note` column said things like *"partially strict"*, which is
+prose. So the number every batch plan actually needs was, until this
+re-measurement, unmeasured: the 2026-08-03 maintainer ruling was scheduled
+against counts of `strictObject(` occurrences, which undercount strict sites by
+every schema closed with the OLDER `z.object(…).strict()` idiom — reading
+`automation/` as **0 strict** when it has 8, and `ui/` as 49 when it has 72.
+
+This section is that number, per file, and **it is gated** (`check:strictness-ledger`):
+
+- every file with at least one strip site must have a row here, with matching counts;
+- a row whose file reaches **zero** strip sites **fails the gate** — a closed file
+  drops out of this table. That reverse pin is what makes the table a ratchet
+  rather than a snapshot, and it is the lesson from the ADR-0010 debt list applied
+  one level up: *a worklist that can outlive its work will.*
+
+`Class` here is per SCHEMA, not per file, so a row's strip count can span two
+classes; where it does, the split is stated. **Only the authorable half is in the
+2026-08-03 ruling's forced scope** — wire/open rows are listed so the arithmetic
+is complete and so nobody re-triages them from scratch next batch.
+
+#### `automation/` — 67 strip of 75
+
+| File | Strip | Sites | Class | Batch |
+|---|---|---|---|---|
+| `execution.zod.ts` | 13 | 13 | wire | **out of scope** — engine-emitted run state; the ledger row already says "never strict" |
+| `etl.zod.ts` | 10 | 10 | mixed | 7 authorable (`ETLSource` + `.incremental`, `ETLDestination`, `ETLTransformation`, `ETLPipeline` + `.retry` + `.notifications`), 3 wire (`ETLPipelineRun` + `.stats` + `.error` — run state) |
+| `builtin-node-config.zod.ts` | 8 | 8 | authorable | CRUD quartet + `Screen` (+ `.options`) + `Map`; already has a bidirectional drift check (`builtin-node-form-zod-ledger.test.ts`) |
+| `flow.zod.ts` | 7 | 11 | mixed | 6 authorable (`FlowNode.connectorConfig` / `.position` / `.inputSchema` / `.waitEventConfig` / `.boundaryConfig`, `Flow.errorHandling`), 1 wire (`FlowVersionHistorySchema` — the ledger row already exempts it) |
+| `state-machine.zod.ts` | 6 | 6 | authorable (p) | `ActionRef` / `GuardRef` / `Transition` / `StateNode` + `.meta` / `StateMachine` |
+| `bpmn-interop.zod.ts` | 5 | 5 | wire (p) | **out of scope** — third-party BPMN import/export shapes; strictness turns an upstream addition into our parse crash |
+| `control-flow.zod.ts` | 5 | 5 | authorable (p) | `FlowRegion` / `Loop` / `ParallelBranch` / `Parallel` / `TryCatch` — validated structurally by `validateControlFlow` today, which is a sibling guard, not a key gate |
+| `node-executor.zod.ts` | 4 | 4 | wire | **out of scope** — executor registration contract, code-to-code |
+| `schemaless-node-config.zod.ts` | 4 | 4 | authorable | `Script` / `Subflow` / `DecisionCondition` / `Decision`; `script` + `subflow` ARE parsed at execute time since #4343 |
+| `io-node-config.zod.ts` | 2 | 2 | authorable | `NotifyConfig` / `HttpConfig` — the sibling contracts for the deliberately-open flow node `config` slot |
+| `flow-function.zod.ts` | 1 | 1 | authorable | `FlowFunctionDeclarationSchema`; binds at authoring only (the boot reader is `normalizeFlowFunctionEntry`, not a `.parse()`) |
+| `time-relative-trigger.zod.ts` | 1 | 1 | authorable | `TimeRelativeTriggerSchema` — **newly visible** (see its triage row); a stripped `offsetDay`/`withinDay` yields a trigger that never fires, reported as configured |
+| `webhook.zod.ts` | 1 | 1 | authorable (p) | `WebhookSchema`, spec-only (#3461) |
+
+**Authorable strip in `automation/`: 41 of 67.** This is the ruling's "known main body".
+
+#### `ui/` — 124 strip of 198
+
+| File | Strip | Sites | Class | Batch |
+|---|---|---|---|---|
+| `component.zod.ts` | 29 | 29 | authorable (p) | Largest single block left. SDUI component props — **verify the React-prop open slots first**; `check:react-declaration-parity` compares two DECLARATIONS and cannot tell you which props a renderer reads |
+| `view.zod.ts` | 20 | 50 | mixed | Top level and the form/page shapes are closed (ADR-0089 + the final batch). Remaining are sub-blocks; `UserFiltersSchema` is the one the last batch **named as deliberately left open** — it strips page-only keys with a test pinning that, so closing it needs its own verification |
+| `theme.zod.ts` | 14 | 14 | authorable (p) | Authored themes; `Typography` / `Animation` sub-blocks dominate |
+| `widget.zod.ts` | 9 | 9 | authorable (p) | Widget manifest + lifecycle/event/property/source |
+| `chart.zod.ts` | 7 | 7 | authorable (p) | Axis / series / annotation / interaction / config / groupBy / aggregate |
+| `touch.zod.ts` | 7 | 7 | authorable (p) | Gesture configs |
+| `i18n.zod.ts` | 6 | 6 | authorable (p) | ⚠️ the triage row warns label shapes are wide-open records **by design** — verify before closing |
+| `animation.zod.ts` | 4 | 4 | authorable (p) | |
+| `dnd.zod.ts` | 4 | 4 | authorable (p) | |
+| `keyboard.zod.ts` | 4 | 4 | authorable (p) | |
+| `responsive.zod.ts` | 4 | 4 | authorable (p) | |
+| `dataset.zod.ts` | 3 | 4 | authorable (p) | `DatasetDimension` / `DatasetMeasure` + `.derived` |
+| `offline.zod.ts` | 3 | 3 | authorable (p) | |
+| `dashboard.zod.ts` | 2 | 11 | authorable | Only `DashboardWidget.compareTo` and `.layout` left; `DashboardWidgetOptionsSchema` stays `passthrough` **deliberately** (renderer escape hatch — see the triage row) |
+| `report.zod.ts` | 2 | 3 | authorable (p) | `ReportSort` / `JoinedReportBlock` |
+| `sharing.zod.ts` | 2 | 2 | authorable (p) | `SharingConfig` / `EmbedConfig` |
+| `action.zod.ts` | 1 | 8 | authorable | `ActionParamSchema.options` — a plain `{ label, value }` pair; the cheapest win in the directory |
+| `app.zod.ts` | 1 | 18 | verify | `BaseNavItemSchema` — the base the strict discriminated-union members extend. Closing a base that is `.extend()`ed is the #4001 trap that bit `view` (finding 16); confirm the members' strictness is not already covering it before touching |
+| `bulk-action.zod.ts` | 1 | 3 | open | `BulkActionParamSchema.options`. ⚠️ **The triage row calls both this and its parent "deliberately open", but only the PARENT is `passthrough` — this one is plain strip.** Same intent, two postures; decide which the intent actually was |
+| `notification.zod.ts` | 1 | 1 | authorable (p) | `NotificationActionSchema` |
+
+**Authorable strip in `ui/`: 123 of 124** — everything except `bulk-action.zod.ts`'s
+`options`, which is `open`. Of those 123, `app.zod.ts`'s single site is held pending
+the finding-16 `.extend()` check rather than counted as ready.
+
+#### `data/` — 121 strip of 162
+
+| File | Strip | Sites | Class | Batch |
+|---|---|---|---|---|
+| `object.zod.ts` | 14 | 20 | authorable | The registered type's top level is closed (#1535/#4519/#4522); these are inner blocks — `Index`, `ObjectAccessConfig`, `Lifecycle` (+4 sub-blocks), `ObjectFieldGroup`, `ObjectExternalBinding`, `userActions`, `systemFields`, `activityMilestones`, `publicSharing`, `ObjectExtension`. Highest author volume in the repo |
+| `data-engine.zod.ts` | 13 | 13 | wire | **out of scope** — engine request/response contracts |
+| `external-lookup.zod.ts` | 12 | 12 | mixed (p) | `ExternalDataSource` + `.authentication` and the `ExternalLookup` tree are authored config; needs the per-schema read the ledger never did |
+| `seed-loader.zod.ts` | 12 | 12 | mixed (p) | Split is real: `SeedLoaderConfig` / `SeedIdentity` (+`.user`/`.org`) / `ReferenceResolution` are authored; `SeedLoadResult` / `SeedLoaderResult` (+`.summary`) / `ReferenceResolutionError` / `ObjectDependencyNode` / `ObjectDependencyGraph` / `SeedLoaderRequest` are loader runtime |
+| `filter.zod.ts` | 11 | 11 | open | **out of scope** — query dialect; user data flows through, validated semantically elsewhere |
+| `driver-nosql.zod.ts` | 10 | 10 | wire | **out of scope** |
+| `driver.zod.ts` | 9 | 9 | wire | **out of scope** — driver capability contract |
+| `analytics.zod.ts` | 8 | 8 | mixed (p) | `Metric` / `Dimension` / `Cube` / `AnalyticsQuery` — cube definitions are authored; needs a per-schema read |
+| `document.zod.ts` | 8 | 8 | wire (p) | `DocumentTemplate` / `ESignatureConfig` read authorable on their face — the `(p)` is unresolved, verify before scheduling either way |
+| `driver/memory.zod.ts` | 5 | 6 | authorable | The persistence-adapter union under `datasource.config`; `datasource.config` HAS been parsed against these since #4410, so strictness here now binds |
+| `query.zod.ts` | 5 | 5 | open | ⚠️ **classification conflict — see #4721.** The row calls the query dialect `open`; #4721 asks for `SortNodeSchema.strict()`. Both cannot be right. Resolve the class before writing code |
+| `external-catalog.zod.ts` | 4 | 4 | wire (p) | **out of scope** |
+| `hook.zod.ts` | 4 | 6 | wire | **out of scope** — `HookContextSchema` + `.session`/`.provenance`/`.user` are the runtime shape handed to a handler; verified in the data step |
+| `field.zod.ts` | 3 | 11 | authorable | `LocationCoordinates` / `CurrencyValue` / `Address` — field VALUE shapes, not field config; check whether they are record data (→ open) before closing |
+| `driver-sql.zod.ts` | 2 | 2 | wire | **out of scope** |
+| `field-value.zod.ts` | 1 | 2 | mixed (p) | `LocationValueSchema` — record data, very likely **open**; its sibling `FileValueSchema` is already `z.looseObject` |
+
+**Authorable strip in `data/`: ~22 firm** (`object` 14 + `driver/memory` 5 + `field` 3), **plus ~33 needing a per-schema verdict** (`external-lookup` 12, `seed-loader` 12, `analytics` 8, `field-value` 1). 66 are wire/open and out of the ruling's forced scope.
+
+#### `security/` — 13 strip of 20
+
+| File | Strip | Sites | Class | Batch |
+|---|---|---|---|---|
+| `explain.zod.ts` | 11 | 11 | wire | **out of scope** — permission-explain responses; the triage row already says "never strict" |
+| `rls.zod.ts` | 2 | 3 | wire | **out of scope** — `RLSUserContext` / `RLSEvaluationResult` are runtime shapes; the POLICY shape is closed |
+
+**Authorable strip in `security/`: 0. This directory is DONE.**
+
+`studio/` has **0 strip of 27** and so has no table here — batch 7 landed, and this
+is the confirmation the campaign's own progress log was missing.
 
 ## Other directories (coarse; classify per schema before touching)
 
@@ -610,6 +765,33 @@ it rather than rediscover it.
    same lens the registered-type batches used, and a cheaper one than reasoning
    about who consumes the output. When a future triage row needs promoting out
    of `(p)`, look for the factory first.
+
+3. **The 2026-08-03 ruling: close the remaining authorable surface inside the
+   v17 window** (wire/open shapes stay out of forced scope, decided by the
+   classification rule at the top of this file). The worklist is the
+   **remaining-strip map** above, which is measured and gated rather than
+   estimated — read it, do not re-derive it, and do not plan off `strictObject(`
+   occurrence counts (finding 19 explains what that undercounts).
+
+   Two things in that map need a decision before any code is written, and both
+   are classification questions rather than implementation ones:
+
+   - **`data/query.zod.ts` is classed `open`, and #4721 asks for
+     `SortNodeSchema.strict()`.** Both cannot be right. Measured, so the decision
+     is made against facts rather than recollection: `SortNodeSchema.parse({
+     field, direction: 'desc' })` returns `{ field, order: 'asc' }` — the wrong
+     rows, with no signal — and #4721's premise that the top level already
+     rejects unknown option keys is true but of a **different mechanism**:
+     #4371's check is a hand-written allowlist in `objectql/src/engine.ts`
+     (`rejectUnknownEngineOptions`) that iterates `Object.entries(bag)` at the
+     top level only. It is a bespoke guard at one door, which is this campaign's
+     finding 17 exactly, so "same invariant, one level down" is not available as
+     a justification — closing the sort node is a *new* door, not the completion
+     of an existing one.
+   - **`ui/app.zod.ts`'s `BaseNavItemSchema`** is the base that the strict
+     discriminated-union members `.extend()`. Finding 16 is the warning: closing
+     a base closes every extension of it, including any that is deliberately a
+     wire shape.
 
 Done in the registered-types batch: `strictObject` (`shared/strict-object.ts`)
 replaced the four-part wiring recipe, and `seed` + `doc` became the first two

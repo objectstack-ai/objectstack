@@ -541,16 +541,56 @@ export class ObjectKernel {
 
         this.currentlyInitializing = plugin.name;
         try {
-            const initPromise = plugin.init(this.context);
-            const timeoutPromise = new Promise<void>((_, reject) => {
-                setTimeout(() => {
-                    reject(new Error(`Plugin ${plugin.name} init timeout after ${timeout}ms`));
-                }, timeout);
-            });
-
-            await Promise.race([initPromise, timeoutPromise]);
+            await this.raceStartupTimeout(
+                plugin.init(this.context),
+                timeout,
+                `Plugin ${plugin.name} init timeout after ${timeout}ms`
+            );
         } finally {
             this.currentlyInitializing = undefined;
+        }
+    }
+
+    /**
+     * Race a plugin lifecycle hook against its startup-timeout guard, and
+     * reclaim the guard the moment the race settles (#4813).
+     *
+     * The guard used to be armed and then abandoned: when the plugin won the
+     * race, its `setTimeout` stayed ref'd in the event loop for the full
+     * `startupTimeout`, so every process idled that long after its work was
+     * done. One `os migrate` finished in 3s and then sat for 120s
+     * (`ObjectQLPlugin.startupTimeout`), held open by 8 orphaned guards — one
+     * per init plus one per start.
+     *
+     * Clearing on settle rather than `unref()`-ing at arm time is deliberate.
+     * An unref'd guard also stops pinning the loop, but it stops being a guard
+     * as well: if the hook never settles and nothing else keeps the loop alive,
+     * Node exits before the timer can fire and the timeout is never reported.
+     * The guard has to stay ref'd exactly as long as the race is undecided,
+     * which is what `clearTimeout` in a `finally` expresses.
+     *
+     * `operation` is widened to `T | PromiseLike<T>` because the Plugin
+     * contract permits a synchronous hook (`init`/`start` return
+     * `void | Promise<void>`); such a hook wins the race immediately and the
+     * guard is reclaimed on the same turn.
+     */
+    private async raceStartupTimeout<T>(
+        operation: T | PromiseLike<T>,
+        timeout: number,
+        message: string
+    ): Promise<T> {
+        let guard: ReturnType<typeof setTimeout> | undefined;
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            guard = setTimeout(() => {
+                reject(new Error(message));
+            }, timeout);
+        });
+
+        try {
+            return await Promise.race([operation, timeoutPromise]);
+        } finally {
+            clearTimeout(guard);
         }
     }
 
@@ -584,15 +624,12 @@ export class ObjectKernel {
         this.logger.debug(`Start: ${plugin.name}`, { plugin: plugin.name });
         
         try {
-            const startPromise = plugin.start(this.context);
-            const timeoutPromise = new Promise<void>((_, reject) => {
-                setTimeout(() => {
-                    reject(new Error(`Plugin ${plugin.name} start timeout after ${timeout}ms`));
-                }, timeout);
-            });
+            await this.raceStartupTimeout(
+                plugin.start(this.context),
+                timeout,
+                `Plugin ${plugin.name} start timeout after ${timeout}ms`
+            );
 
-            await Promise.race([startPromise, timeoutPromise]);
-            
             const duration = Date.now() - startTime;
             this.startedPlugins.add(plugin.name);
             this.pluginStartTimes.set(plugin.name, duration);
