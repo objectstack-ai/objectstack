@@ -59,6 +59,10 @@ export const Order = ObjectSchema.create({
 Condition expressions are **CEL** (evaluated by `@objectstack/formula`), not Salesforce-style formulas. Reference the incoming record via `record.<field>`, use `==`/`!=`, `&&`/`||`, and helpers like `isBlank(x)` and `has(record.field)`. A string condition is accepted as authoring shorthand and normalized to `{ dialect: 'cel', source }` at build time.
 </Callout>
 
+<Callout type="warn">
+**`has(x)` is not a null guard.** Predicates see a record that is *total* over the object's declared fields, so `has(record.end_date)` is true even when the value is `NULL` — `has(a) && has(b) && a < b` then reaches `null < null`, CEL has no overload, and the whole rule aborts (the write is rejected fail-closed). Write `record.start_date != null && record.end_date != null && record.end_date < record.start_date` instead. Since #4763 the `has()` form is **rejected at build/publish**: an ordering or arithmetic operator over a declared nullable field needs a real `!= null` guard. `has()` over an *undeclared* key — "was this in the PATCH at all?" — is untouched.
+</Callout>
+
 ## Common Properties
 
 All validation types share these base properties:
