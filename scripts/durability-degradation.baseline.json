@@ -7,13 +7,5 @@
     "'just run the update command', which is precisely how a gate stops meaning anything.",
     "Every entry names WHY it is still here and WHAT closes it."
   ],
-  "entries": [
-    {
-      "file": "packages/metadata/src/loaders/database-loader.ts",
-      "callee": "syncSchema",
-      "reason": "ensureSchema() catches a failed sys_metadata DDL, sets `schemaReady = true` and continues — every subsequent metadata write targets a table that may not exist. Real durability finding, NOT an accepted design. Left baselined only because packages/metadata/** was frozen for this round (#4556 was rewriting its write path concurrently); fixing it here would have collided.",
-      "tracked_by": "#4728",
-      "closes_when": "#4728 raises the swallow to `error` (or rethrows) and deletes this entry."
-    }
-  ]
+  "entries": []
 }

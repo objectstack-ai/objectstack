@@ -61,8 +61,6 @@ import { z } from 'zod';
 /** Supported view modes for metadata viewers */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
-// [#4653] The one activation vocabulary — see the note above the re-export below.
-import { ActivationEventSchema } from '../kernel/plugin-runtime.zod';
 
 /**
  * Shared history for this file (#4001).
@@ -288,34 +286,26 @@ export const StudioPluginContributionsSchema = lazySchema(() => strictObject({
 
 export type StudioPluginContributions = z.infer<typeof StudioPluginContributionsSchema>;
 
-// ─── Activation Events ───────────────────────────────────────────────
+// ─── Activation Events — REMOVED (#4657, ADR-0049) ───────────────────
+//
+// The `activationEvents` key (and the `ActivationEventSchema` it embedded,
+// which #4653 had just converged onto the kernel's structured `{ type,
+// pattern }` form) is retired: no Studio host — no runtime in any repo — ever
+// read it. Every plugin has always loaded and activated immediately on
+// registration, so the key's declared semantics ("when to load this plugin")
+// were a lie an author had no way to detect: `activationEvents:
+// [{ type: 'onMetadataType', pattern: 'flow' }]` parsed clean and deferred
+// nothing. The strict manifest parse below now rejects the key with the
+// prescription (see `guidance`). Lazy activation, if ever built, returns via
+// the enforce route of ADR-0049: executor first, vocabulary second.
 
-/**
- * [#4653] The local `z.string()` declaration that used to live here is gone —
- * `ActivationEventSchema` now names ONE declaration platform-wide, the
- * structured `{ type, pattern }` in `kernel/plugin-runtime.zod.ts`, re-exported
- * below (dual-source cleanup, #4535 C5).
- *
- * Why this side gave way, when the string form was the friendlier one: it
- * validated nothing. `z.string()` accepted `''`, `'banana'` and — the case that
- * matters — `'onMetadatType:flow'`, so the vocabulary this file documented
- * (`*`, `onMetadataType:`, `onCommand:`, `onView:`) lived only in prose and a
- * misspelling stayed silent forever. The kernel form gates the trigger on an
- * enum at authoring time, which is the whole point of declaring it. Its enum
- * was widened to the union of both vocabularies in the same change, so nothing
- * a studio author could express before is unexpressible now.
- *
- * FROM (pre-v17)                          TO (v17+)
- *   activationEvents: ['*']                 [{ type: 'onStartup',      pattern: '*' }]
- *   activationEvents: ['onMetadataType:flow'] [{ type: 'onMetadataType', pattern: 'flow' }]
- *   activationEvents: ['onCommand:my.cmd']  [{ type: 'onCommand',      pattern: 'my.cmd' }]
- *   activationEvents: ['onView:my.panel']   [{ type: 'onView',         pattern: 'my.panel' }]
- *
- * A manifest still carrying the string form fails `StudioPluginManifestSchema`
- * loudly at parse (it is a `strictObject`); there is no silent coercion, and no
- * automatic conversion is possible — see the changeset for why.
- */
-export { ActivationEventSchema, type ActivationEvent } from '../kernel/plugin-runtime.zod';
+const STUDIO_ACTIVATION_EVENTS_RETIRED =
+  '`studioPluginManifest.activationEvents` was removed in @objectstack/spec 17.0.0 '
+  + '(#4657, ADR-0049) — no Studio host ever read it: every plugin loads and activates '
+  + 'immediately on registration, so the declared lazy-activation window never existed. '
+  + 'Delete the key; `activate()` still runs at registration time. Lazy activation, if '
+  + 'built, returns via the enforce route of ADR-0049 with a vocabulary its executor '
+  + 'actually honours.';
 
 // ─── Studio Plugin Manifest ──────────────────────────────────────────
 
@@ -337,9 +327,19 @@ export const StudioPluginManifestSchema = lazySchema(() => strictObject({
     displayName: 'name', title: 'name',
     publisher: 'author', vendor: 'author',
     contributions: 'contributes', contribute: 'contributes',
-    activation: 'activationEvents', events: 'activationEvents', onActivate: 'activationEvents',
+    // NOTE: `activation` / `events` / `onActivate` used to alias
+    // `activationEvents`; the target key is retired (#4657), so they moved to
+    // `guidance` below — an alias must never point at a key the schema cannot
+    // accept (the `triggerPhrases` suggester trap, see shared/strict-object.ts).
   },
   guidance: {
+    // Retired key (#4657, ADR-0049) — the rejection carries the upgrade.
+    activationEvents: STUDIO_ACTIVATION_EVENTS_RETIRED,
+    // The VS Code spellings that used to alias it get the same prescription:
+    // pointing them at a removed key would bounce the author off a second error.
+    activation: STUDIO_ACTIVATION_EVENTS_RETIRED,
+    events: STUDIO_ACTIVATION_EVENTS_RETIRED,
+    onActivate: STUDIO_ACTIVATION_EVENTS_RETIRED,
     // VS Code manifest keys with no counterpart here. `main` is the dangerous
     // one: an author declares an entry point, gets a plugin that loads and
     // contributes nothing, and it looks exactly like a broken `activate()`.
@@ -351,7 +351,9 @@ export const StudioPluginManifestSchema = lazySchema(() => strictObject({
     keywords: 'there is no keyword index for Studio plugins',
     repository: 'manifest metadata is limited to `id` / `name` / `version` / `description` / `author`',
     icon: 'the manifest carries no icon — icons are Lucide names on the CONTRIBUTION (`contributes.metadataIcons`, or an action / panel / command `icon`)',
-    dependencies: 'Studio plugins declare no dependency graph; order activation with `activationEvents` instead',
+    dependencies:
+      'Studio plugins declare no dependency graph — every plugin loads and activates '
+      + 'immediately on registration, and contributions are independent of each other',
   },
 }, {
   /** 
@@ -384,17 +386,11 @@ export const StudioPluginManifestSchema = lazySchema(() => strictObject({
     commands: [],
   }),
 
-  /**
-   * Activation events — when to load this plugin.
-   *
-   * [#4653] The default is the structured equivalent of the pre-v17 `['*']`:
-   * eager activation. `'*'` did not need its own `type` — it always meant
-   * "activate immediately", which is exactly what `onStartup` already means on
-   * the kernel side, so eager survives as `onStartup` with the `'*'` pattern
-   * rather than as a tenth enum value that would duplicate it.
-   */
-  activationEvents: z.array(ActivationEventSchema)
-    .default([{ type: 'onStartup', pattern: '*' }]),
+  // `activationEvents` was REMOVED here (#4657, ADR-0049) — see the section
+  // comment above and the `guidance` entry that rejects it with the
+  // prescription. Its pre-removal default (`[{ type: 'onStartup', pattern:
+  // '*' }]`, i.e. eager) simply wrote down the only behaviour that ever
+  // existed, so removing the key changes nothing at runtime.
 }));
 
 export type StudioPluginManifest = z.infer<typeof StudioPluginManifestSchema>;

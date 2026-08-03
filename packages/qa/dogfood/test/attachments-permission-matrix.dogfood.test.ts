@@ -25,6 +25,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { StorageServicePlugin } from '@objectstack/service-storage';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { attachmentsFixtureStack, attachmentsFixtureSecurity } from './fixtures/attachments-fixture.js';
+import { organizationsAvailable, warnIfUnavailable } from './enterprise-organizations.js';
 
 const SYS = { isSystem: true } as const;
 const DAY_MS = 86_400_000;
@@ -525,13 +526,11 @@ describe('attachments permission matrix (#2755)', () => {
 });
 
 // ── (g) tenant isolation — enterprise multi-org boot ─────────────────────
-const organizationsAvailable = await import(/* webpackIgnore: true */ '@objectstack/organizations')
-  .then(() => true)
-  .catch(() => false);
-if (!organizationsAvailable) {
-  // eslint-disable-next-line no-console
-  console.warn('[dogfood] @objectstack/organizations (enterprise) not installed — skipping the attachments multi-tenant block');
-}
+// #4700: this probe was a bare `import()` resolved against this file's realpath
+// inside the framework workspace, so it was constant-false and block (g) had
+// never executed. Shared host-app resolution + a declarative switch now decide
+// it; see `enterprise-organizations.ts`.
+warnIfUnavailable('attachments multi-tenant block');
 
 describe.skipIf(!organizationsAvailable)('attachments cross-tenant isolation (g)', () => {
   let stack: VerifyStack;

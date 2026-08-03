@@ -27,6 +27,79 @@ interface Logger {
 /** Default field used for externalId matching on target objects */
 const DEFAULT_EXTERNAL_ID_FIELD = 'name';
 
+/** The environments a seed dataset can be scoped to — mirrors `SeedSchema.env`. */
+type SeedEnv = 'prod' | 'dev' | 'test';
+
+/** Every environment a dataset can declare — i.e. `SeedSchema.env`'s default. */
+const ALL_SEED_ENVS: readonly SeedEnv[] = ['prod', 'dev', 'test'];
+
+/**
+ * `NODE_ENV` spellings accepted for each seed environment.
+ *
+ * `NODE_ENV` is this repo's ONE established environment source — `os start`
+ * defaults it to `production`, `os dev` / `serve --dev` set `development`,
+ * vitest sets `test`, and every other environment-sensitive behaviour here
+ * (auto-DDL, the api-registry production guard, the sqlite step-down, the
+ * hot-reload seeder) already branches on it. Seeds reuse it rather than
+ * minting an `OS_SEED_ENV`, which would only trade one declared-but-unset key
+ * for another.
+ *
+ * The seed-enum spellings (`prod`/`dev`) are accepted alongside Node's
+ * canonical ones so an operator who read the `Seed.env` docs and exported
+ * `NODE_ENV=prod` gets what they meant instead of an indeterminate answer.
+ * This is normalization of an OPERATOR-supplied variable at a third-party
+ * boundary (Prime Directive #9 lists `NODE_ENV` as exactly that), not
+ * consumer-side tolerance of our own metadata contract.
+ */
+const NODE_ENV_TO_SEED_ENV: Readonly<Record<string, SeedEnv>> = {
+  production: 'prod',
+  prod: 'prod',
+  development: 'dev',
+  dev: 'dev',
+  test: 'test',
+};
+
+/**
+ * Resolve the environment `Seed.env` is gated on from `NODE_ENV`.
+ *
+ * Returns `undefined` when `NODE_ENV` is unset or names no seed environment
+ * (`staging`, `qa`, …) — i.e. the host never said where it is running. What
+ * that means for scoped datasets is decided in {@link SeedLoaderService.load}.
+ */
+function resolveSeedEnvFromNodeEnv(): SeedEnv | undefined {
+  const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env?.NODE_ENV;
+  if (typeof raw !== 'string') return undefined;
+  return NODE_ENV_TO_SEED_ENV[raw.trim().toLowerCase()];
+}
+
+/**
+ * Does this dataset apply to `env`?
+ *
+ * A dataset carrying no `env` at all is unrestricted — which is precisely what
+ * `SeedSchema.env`'s default (`['prod','dev','test']`) parses to. Every
+ * production call site parses its request through `SeedLoaderRequestSchema`
+ * first, so this only covers an in-process caller handing the loader an
+ * unparsed literal: it gets the schema's own answer rather than a second
+ * dialect of it.
+ */
+function datasetAllowsEnv(dataset: Seed, env: SeedEnv): boolean {
+  const declared = dataset.env as string[] | undefined;
+  if (!Array.isArray(declared)) return true;
+  return declared.includes(env);
+}
+
+/**
+ * True when a dataset NARROWED its scope below the schema default — the only
+ * datasets for which a resolvable environment changes anything, and therefore
+ * the only ones worth warning about when it cannot be resolved.
+ */
+function isEnvScopedDataset(dataset: Seed): boolean {
+  const declared = dataset.env as string[] | undefined;
+  if (!Array.isArray(declared)) return false;
+  return ALL_SEED_ENVS.some(e => !declared.includes(e));
+}
+
 /**
  * SeedLoaderService — Runtime implementation of ISeedLoaderService
  *
@@ -73,7 +146,16 @@ export class SeedLoaderService implements ISeedLoaderService {
 
   async load(request: SeedLoaderRequest): Promise<SeedLoaderResult> {
     const startTime = Date.now();
-    const config = request.config;
+    // Pin the environment `Seed.env` is gated on BEFORE anything reads config.
+    // Resolving it here — the one funnel every seeding path goes through — is
+    // deliberate. `env` stayed authorable, defaulted and type-checked while
+    // being completely inert purely because none of the six call sites that
+    // build a SeedLoaderRequest (app boot, per-org replay, hot reload, package
+    // apply, draft publish, marketplace install) ever passed it, so
+    // `filterByEnv` short-circuited on `undefined` and `dataset.env` was never
+    // read at all. Gating at those call sites instead would leave call site
+    // seven free to re-open the same hole (framework#4704).
+    const config = this.resolveEnvConfig(request.config, request.seeds);
     const allErrors: ReferenceResolutionError[] = [];
     const allResults: SeedLoadResult[] = [];
 
@@ -1352,9 +1434,71 @@ export class SeedLoaderService implements ISeedLoaderService {
   // Internal: Helpers
   // ==========================================================================
 
-  private filterByEnv(datasets: Seed[], env?: string): Seed[] {
+  /**
+   * Decide the environment this load filters on, and say so when it cannot.
+   *
+   * Precedence: an explicit `config.env` from the host always wins (it is the
+   * documented escape hatch and the only way to seed "as" another
+   * environment), then `NODE_ENV`.
+   *
+   * When neither answers, the load stays PERMISSIVE — every dataset is seeded,
+   * exactly as before this fix — but says so loudly if, and only if, a dataset
+   * actually narrowed its scope. Fail-open is the deliberate choice here:
+   * fail-closed would also drop a `env: ['prod']` dataset on a production host
+   * that merely forgot to export `NODE_ENV`, which is a silent data-loss
+   * regression strictly worse than the over-seeding it prevents. The
+   * indeterminate window is narrow by construction — both first-party boot
+   * paths pin `NODE_ENV` — so this is the embedded-host case, and it is now
+   * signposted rather than silent.
+   */
+  private resolveEnvConfig(config: SeedLoaderConfig, seeds: Seed[]): SeedLoaderConfig {
+    if (config.env) return config;
+
+    const resolved = resolveSeedEnvFromNodeEnv();
+    if (resolved) return { ...config, env: resolved };
+
+    const scoped = seeds.filter(isEnvScopedDataset);
+    if (scoped.length > 0) {
+      const named = scoped
+        .map(d => `${d.object} (env: ${(d.env as string[]).join(', ')})`)
+        .join('; ');
+      this.logger.warn(
+        `[SeedLoader] Cannot determine the runtime environment — NODE_ENV is unset or names no seed ` +
+          `environment, so ${scoped.length} environment-scoped dataset(s) were seeded EVERYWHERE ` +
+          `instead of only where they are declared: ${named}. Set NODE_ENV ` +
+          `(production | development | test) on the host, or pass an explicit \`config.env\`, to make ` +
+          `\`Seed.env\` take effect.`,
+        { scoped: scoped.map(d => d.object) },
+      );
+    }
+    return config;
+  }
+
+  /**
+   * Drop datasets that do not apply to the resolved environment.
+   *
+   * Skipping is the declared, intended outcome (that is what `env: ['dev']`
+   * asks for), so it logs at `info` rather than crying wolf on every
+   * production boot — but it always NAMES what it dropped, so "my demo rows
+   * are missing" is one log line to answer instead of a mystery.
+   */
+  private filterByEnv(datasets: Seed[], env?: SeedEnv): Seed[] {
     if (!env) return datasets;
-    return datasets.filter(d => (d.env as string[]).includes(env));
+
+    const kept: Seed[] = [];
+    const skipped: Seed[] = [];
+    for (const dataset of datasets) {
+      (datasetAllowsEnv(dataset, env) ? kept : skipped).push(dataset);
+    }
+
+    if (skipped.length > 0) {
+      this.logger.info(
+        `[SeedLoader] Environment '${env}': skipped ${skipped.length} dataset(s) scoped to other ` +
+          `environments: ${skipped.map(d => `${d.object} (env: ${(d.env as string[]).join(', ')})`).join('; ')}`,
+        { env, skipped: skipped.map(d => d.object) },
+      );
+    }
+    return kept;
   }
 
   private orderDatasets(datasets: Seed[], insertOrder: string[]): Seed[] {

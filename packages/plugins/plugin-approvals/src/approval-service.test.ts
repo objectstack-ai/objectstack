@@ -27,6 +27,12 @@ function makeFakeEngine() {
         if (!(v as any[]).some(sub => matches(row, sub))) return false;
         continue;
       }
+      // The record lock intersects the caller's predicate with the locked ids
+      // (#4778), so the fake has to compose branches the way a driver does.
+      if (k === '$and') {
+        if (!(v as any[]).every(sub => matches(row, sub))) return false;
+        continue;
+      }
       const rv = row[k];
       if (v != null && typeof v === 'object' && '$in' in (v as any)) {
         if (!(v as any).$in.includes(rv)) return false;
@@ -47,12 +53,16 @@ function makeFakeEngine() {
 
   /** Every `update` the service made, with the context it presented (#3783). */
   const writes: Array<{ object: string; data: any; context: any }> = [];
+  /** Every `find` anyone made — pins what a guard does NOT query (#4778). */
+  const finds: Array<{ object: string; options: any }> = [];
 
   return {
     _tables: tables,
     _hooks: hooks,
     _writes: writes,
+    _finds: finds,
     async find(object: string, options?: any) {
+      finds.push({ object, options });
       const rows = ensure(object).filter(r => matches(r, options?.filter ?? options?.where));
       if (options?.orderBy?.[0]) {
         // Canonical SortNode key only (spec/data/query.zod.ts): a sloppy
@@ -1911,6 +1921,215 @@ describe('record-lock hook (node era)', () => {
   it('unbindAllHooks removes the lock hook', () => {
     expect(unbindAllHooks(engine as any)).toBe(1);
     expect(engine._hooks['beforeUpdate']).toHaveLength(0);
+  });
+});
+
+// ── #4778: the lock has to survive a PREDICATE (multi) update ────────────
+//
+// `engine.update()` extracts `input.id` only from a SCALAR `where.id`; every
+// other predicate is a multi-row write that routes to `updateMany` and reaches
+// the hook with NO id. The hook used to open with `if (!id) return`, reading
+// "no row was resolved" as "nothing to authorize" when the truth was "nothing
+// was ever queried" (the #4757 / #4630 fail-open shape). Rewriting the very
+// same edit as `multi: true` then walked past the lock with NO privilege at
+// all — no admin, no isSystem, no `lockRecord: false`, no whitelisted field.
+//
+// Both halves are pinned here, because extending a guard to more rows fails
+// the other way just as easily: the refusals AND every exemption, on both
+// predicate shapes.
+describe('record-lock hook — predicate (multi) updates (#4778)', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+  const baseTime = new Date('2026-01-15T10:00:00Z').getTime();
+
+  /** The two shapes that carry no `input.id` and used to bypass the lock. */
+  const SHAPES: Array<[string, any]> = [
+    ['an id-operator predicate', { id: { $in: ['opp1'] } }],
+    ['a non-id predicate', { stage: 'new' }],
+  ];
+
+  const USER = { isSystem: false, positions: [], userId: 'u1' };
+
+  /** A `multi: true` update, i.e. the ctx the engine builds for `updateMany`. */
+  const predicateUpdate = (
+    where: any,
+    data: Record<string, unknown>,
+    rest: Record<string, unknown> = {},
+  ) =>
+    engine.fire('beforeUpdate', {
+      object: 'opportunity',
+      input: { data, options: { ...(where === undefined ? {} : { where }), multi: true } },
+      session: USER,
+      ...rest,
+    });
+
+  /** Re-open the pending request with a different node-config snapshot. */
+  const reopenWith = async (configExtra: Record<string, any>) => {
+    engine._tables['sys_approval_request'] = [];
+    engine._tables['sys_approval_action'] = [];
+    await svc.openNodeRequest(
+      openInput(['u9'], {}, { approvalStatusField: 'approval_status', ...configExtra }),
+      CTX,
+    );
+  };
+
+  beforeEach(async () => {
+    engine = makeFakeEngine();
+    n = 0;
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
+    bindApprovalLockHook(engine as any);
+    await svc.openNodeRequest(openInput(['u9'], {}, { approvalStatusField: 'approval_status' }), CTX);
+    // `opp1` carries the pending request; `opp2` is an unlocked neighbour that
+    // the same predicates also match.
+    engine._tables['opportunity'] = [
+      { id: 'opp1', amount: 100, stage: 'new' },
+      { id: 'opp2', amount: 100, stage: 'new' },
+    ];
+  });
+
+  // ── the hole itself ───────────────────────────────────────────────
+
+  it.each(SHAPES)('blocks %s that reaches the locked record', async (_label, where) => {
+    await expect(predicateUpdate(where, { amount: 999 })).rejects.toThrow(/RECORD_LOCKED/);
+  });
+
+  it('blocks an unscoped whole-table update — no predicate at all', async () => {
+    // `updateMany` gets an AST of `{ object }`, i.e. every row, so every locked
+    // row of the object is in reach. "No predicate" is the widest write there
+    // is; it must not be the one that reads as "nothing to authorize".
+    await expect(predicateUpdate(undefined, { amount: 999 })).rejects.toThrow(/RECORD_LOCKED/);
+  });
+
+  it('names the locked record and its object in the refusal', async () => {
+    await expect(predicateUpdate({ stage: 'new' }, { amount: 999 }))
+      .rejects.toThrow(/record 'opp1' of 'opportunity' is locked/);
+  });
+
+  // ── and it must not over-block: a lock is a PER-ROW verdict ────────
+
+  it('allows a predicate that reaches only unlocked rows', async () => {
+    await expect(predicateUpdate({ id: { $in: ['opp2'] } }, { amount: 999 })).resolves.toBeUndefined();
+  });
+
+  it('allows a non-id predicate that matches no locked row', async () => {
+    // `opp1` is `stage: 'new'`, so this predicate misses it. Resolving the row
+    // set is what makes the difference between refusing this write and
+    // refusing every bulk update on an object that has any approval open.
+    await expect(predicateUpdate({ stage: 'closed' }, { amount: 999 })).resolves.toBeUndefined();
+  });
+
+  it('never scans an object that has no pending approval at all', async () => {
+    engine._finds.length = 0;
+    await expect(
+      engine.fire('beforeUpdate', {
+        object: 'other_object',
+        input: { data: { amount: 999 }, options: { where: { stage: 'new' }, multi: true } },
+        session: USER,
+      }),
+    ).resolves.toBeUndefined();
+    // One bookkeeping probe, and nothing else: the bound is on locked records,
+    // so a mass update of unlocked rows costs a single query.
+    expect(engine._finds.map(f => f.object)).toEqual(['sys_approval_request']);
+  });
+
+  // ── fail closed when the row set cannot be decided ─────────────────
+
+  it('fails closed past the 1000-record bound', async () => {
+    for (let i = 0; i < 1001; i++) {
+      engine._tables['sys_approval_request'].push({
+        id: `extra_${i}`,
+        object_name: 'opportunity',
+        record_id: `bulk_${i}`,
+        status: 'pending',
+        node_config_json: JSON.stringify({ lockRecord: true }),
+      });
+    }
+    await expect(predicateUpdate({ stage: 'new' }, { amount: 999 }))
+      .rejects.toThrow(/RECORD_LOCKED.*more than 1000/s);
+  });
+
+  it('fails closed when the match set cannot be resolved', async () => {
+    const realFind = engine.find.bind(engine);
+    engine.find = (async (object: string, options?: any) => {
+      if (object === 'opportunity') throw new Error('driver unavailable');
+      return realFind(object, options);
+    }) as typeof engine.find;
+    await expect(predicateUpdate({ stage: 'new' }, { amount: 999 }))
+      .rejects.toThrow(/RECORD_LOCKED.*cannot determine which rows/s);
+  });
+
+  // ── every exemption moves with the guard (the other failure mode) ──
+
+  it.each(SHAPES)('allows engine self-writes (system session) via %s', async (_label, where) => {
+    await expect(
+      predicateUpdate(where, { amount: 999 }, { session: { isSystem: true, positions: [] } }),
+    ).resolves.toBeUndefined();
+  });
+
+  it.each(SHAPES)('allows an admin override via %s', async (_label, where) => {
+    await expect(
+      predicateUpdate(where, { amount: 999 }, { session: { isSystem: false, roles: ['admin'] } }),
+    ).resolves.toBeUndefined();
+  });
+
+  it.each(SHAPES)('allows a status-mirror write via %s', async (_label, where) => {
+    await expect(predicateUpdate(where, { approval_status: 'approved' })).resolves.toBeUndefined();
+  });
+
+  it.each(SHAPES)('allows the OWNING run to write its own target record via %s', async (_label, where) => {
+    await expect(
+      predicateUpdate(where, { amount: 999 }, { provenance: { flowRunId: 'run_1' } }),
+    ).resolves.toBeUndefined();
+  });
+
+  it.each(SHAPES)('allows the write when the node opted out of the lock, via %s', async (_label, where) => {
+    await reopenWith({ lockRecord: false });
+    await expect(predicateUpdate(where, { amount: 999 })).resolves.toBeUndefined();
+  });
+
+  // ── …and the exemptions stay as narrow as on the by-id path ────────
+
+  it('still blocks a DIFFERENT run on the predicate path', async () => {
+    await expect(
+      predicateUpdate({ stage: 'new' }, { amount: 999 }, { provenance: { flowRunId: 'run_other' } }),
+    ).rejects.toThrow(/RECORD_LOCKED/);
+  });
+
+  it('still blocks a mirror write that changes anything else too', async () => {
+    await expect(
+      predicateUpdate({ stage: 'new' }, { approval_status: 'approved', amount: 999 }),
+    ).rejects.toThrow(/RECORD_LOCKED/);
+  });
+
+  it('still blocks an identity-less caller with no provenance at all', async () => {
+    await expect(
+      engine.fire('beforeUpdate', {
+        object: 'opportunity',
+        input: { data: { amount: 999 }, options: { where: { stage: 'new' }, multi: true } },
+      }),
+    ).rejects.toThrow(/RECORD_LOCKED/);
+  });
+
+  it('judges a multi-row write by EACH request it reaches', async () => {
+    // Two records, two independent approvals: one opted out of the lock, one
+    // did not. A predicate spanning both is refused by the one that locks.
+    engine._tables['sys_approval_request'].push({
+      id: 'req_2',
+      object_name: 'opportunity',
+      record_id: 'opp2',
+      status: 'pending',
+      flow_run_id: 'run_2',
+      node_config_json: JSON.stringify({ lockRecord: false }),
+    });
+    await expect(predicateUpdate({ id: { $in: ['opp2'] } }, { amount: 999 })).resolves.toBeUndefined();
+    await expect(predicateUpdate({ id: { $in: ['opp1', 'opp2'] } }, { amount: 999 }))
+      .rejects.toThrow(/record 'opp1'/);
+  });
+
+  it('ignores a request that is no longer pending', async () => {
+    engine._tables['sys_approval_request'][0].status = 'approved';
+    await expect(predicateUpdate({ stage: 'new' }, { amount: 999 })).resolves.toBeUndefined();
   });
 });
 

@@ -1683,6 +1683,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
       '@objectstack/verify':
         specifier: workspace:*
         version: link:../../verify
@@ -2424,6 +2427,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
       '@types/node':
         specifier: ^26.1.2

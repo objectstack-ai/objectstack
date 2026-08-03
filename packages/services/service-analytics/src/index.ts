@@ -28,6 +28,7 @@ export {
   combineFilters,
   shiftRange,
   mergeByDimensions,
+  fillEmptyGroups,
 } from './dataset-executor.js';
 export type { DatasetSelection, CompareTo } from './dataset-executor.js';
 export { compileScopedFilterToSql } from './read-scope-sql.js';
