@@ -204,6 +204,24 @@ jobs:
       - name: Durability-degradation log-level guard
         run: pnpm check:durability-log-level
 
+      # Startup registry-verdict guard (#4777). One showcase cold start produced
+      # three instances of one shape in three unrelated subsystems: ask a
+      # registry "is X there?" while the boot is still filling it, treat the
+      # "no" as final, and RECORD it — cached on the instance (#4772
+      # plugin-auth), asserted in a warn (#4771 service-automation), or written
+      # to the database (#4769 objectql). The provider registers a moment later
+      # and nothing undoes the record. This gate walks the AST for that
+      # three-part shape: a pre-ready registry read (init()/constructor, or an
+      # ADR-0018 open capability registry before its seal) whose absent verdict
+      # is recorded. Reading is legal and must stay legal — a probe licensed by
+      # an ADR-0116 declaration, or one deferred into a closure/kernel:ready
+      # hook, is exactly the fix and is never flagged. Deliberately narrow: it
+      # cannot see a probe behind an indirection in another package, and it
+      # cannot see #4769 at all (that "registry" is a database table). Runs its
+      # own --self-test first.
+      - name: Startup registry-verdict guard
+        run: pnpm check:startup-registry-verdict
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that
