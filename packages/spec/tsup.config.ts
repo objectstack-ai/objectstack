@@ -21,7 +21,18 @@ const entries = [
   'src/shared/index.ts'
 ];
 
-// Generate DTS separately to avoid memory issues
+// Generate DTS separately to avoid memory issues.
+//
+// [#4845] The DTS pass runs under an explicit `--max-old-space-size` (see the
+// `build` script in package.json). That number is a CEILING V8 is allowed to
+// grow to, NOT a reservation — set it above what the machine can actually give
+// and V8 simply stops collecting aggressively, grows past physical memory, and
+// the kernel OOM-killer takes the process with NO diagnostic output at all
+// (`DTS Build start` followed straight by `ELIFECYCLE`). It was 12288 on a
+// 16 GB `ubuntu-latest` runner, which is that failure, not a guard against it:
+// four CI hits in one morning across PRs that shared no content — including one
+// pure-prose patch — and the fourth ejected a PR from the merge queue.
+// Keep this comfortably under the runner's physical memory.
 const isDts = process.env.BUILD_DTS === 'true';
 
 export default defineConfig({
