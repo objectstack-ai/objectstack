@@ -82,12 +82,21 @@ function makeStubEngine() {
         async find(table: string, opts: { where: Record<string, unknown> }) {
             if (table === 'sys_metadata_history') {
                 const out = historyRows.filter((h) => matchesHistory(h, opts.where));
-                if (opts && (opts as any).orderBy) {
-                    const { field, direction } = (opts as any).orderBy;
+                // QueryAST shape: `orderBy` is an ARRAY of `{ field, order }`
+                // (SortNodeSchema). This double used to destructure
+                // `{ field, direction }` off the array itself, so both names
+                // read `undefined` — it spoke the `direction` vocabulary the
+                // engine does not read (#4674) AND, because an array has no
+                // `.field`, sorted nothing at all. Either way a test built on
+                // it would have ratified the broken behaviour.
+                const orderBy = (opts as any).orderBy;
+                if (Array.isArray(orderBy) && orderBy.length > 0) {
                     out.sort((a: any, b: any) => {
-                        const av = a[field]; const bv = b[field];
-                        if (av < bv) return direction === 'desc' ? 1 : -1;
-                        if (av > bv) return direction === 'desc' ? -1 : 1;
+                        for (const { field, order } of orderBy) {
+                            const av = a[field]; const bv = b[field];
+                            if (av < bv) return order === 'desc' ? 1 : -1;
+                            if (av > bv) return order === 'desc' ? -1 : 1;
+                        }
                         return 0;
                     });
                 }

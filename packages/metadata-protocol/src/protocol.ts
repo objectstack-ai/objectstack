@@ -25,7 +25,7 @@ import {
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
-    type DroppedFieldsEvent, type QueryAST,
+    type DroppedFieldsEvent, type QueryAST, type EngineQueryOptions,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
@@ -3377,11 +3377,20 @@ export class ObjectStackProtocolImplementation implements
                 type: singular,
                 name: request.name,
             };
+            // `order`, NOT `direction`: the QueryAST sort shape is
+            // `SortNodeSchema` = `{ field, order }`, and both drivers normalize
+            // off `.order` with no fallback. `direction` is `IReportService`'s
+            // vocabulary and is silently DROPPED here (the schema is not
+            // `.strict()`), which left this query running ascending — the
+            // OLDEST `limit` audit events, i.e. the beginning of an object's
+            // life and never its recent changes (#4674). The `as any` is gone
+            // for the same reason: `EngineQueryOptions` rejects the wrong key,
+            // and erasing the type is what let it through.
             const rows = await this.engine.find('sys_metadata_audit', {
                 where,
-                orderBy: [{ field: 'occurred_at', direction: 'desc' }],
+                orderBy: [{ field: 'occurred_at', order: 'desc' }],
                 limit,
-            } as any);
+            });
             const events = (Array.isArray(rows) ? rows : []).map((r: any) => ({
                 id: r.id,
                 occurredAt:
@@ -5164,10 +5173,15 @@ export class ObjectStackProtocolImplementation implements
             const where = andClauses.length === 1 ? andClauses[0] : { $and: andClauses };
 
             try {
-                const opts: any = {
+                // `order`, NOT `direction` — see the audit-history query above.
+                // Ascending here returned the STALEST `perObject` matches and
+                // truncated away the recently-edited records a searcher is most
+                // likely to want (#4674). Typed rather than `any` so the
+                // contract rejects the wrong key at the call site.
+                const opts: EngineQueryOptions = {
                     where,
                     limit: perObject,
-                    orderBy: [{ field: 'updated_at', direction: 'desc' }],
+                    orderBy: [{ field: 'updated_at', order: 'desc' }],
                 };
                 if (request.context !== undefined) opts.context = request.context;
 
