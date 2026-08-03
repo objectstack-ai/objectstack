@@ -68,6 +68,17 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // target here.
   'integration/FieldMapping': 'integration/ConnectorFieldMapping', // 7 keys carried
   'data/FieldMapping': 'data/ImportFieldMapping', //                  4 keys carried
+
+  // #4738 / ADR-0112 D9a — `ConflictResolution` was published by THREE defs at
+  // once (automation ≠ integration ≠ ui, three disjoint vocabularies). The
+  // connector-sync side takes the domain prefix (0-key carry: it is an enum
+  // def, no authorable properties). The automation side was retired outright
+  // with the rest of `automation/sync.zod.ts` in the same change (deliberate
+  // manifest removal, NOT carried here — a real retirement must never ride the
+  // rename table). `ui/ConflictResolution` keeps the bare name: it is a
+  // distinct concept (client/server offline sync) and the only side with
+  // cross-repo consumers (objectui useOffline + re-export + parity ratchet).
+  'integration/ConflictResolution': 'integration/ConnectorConflictResolution',
 };
 
 /**

@@ -6,14 +6,13 @@ import { ExpressionInputSchema } from './expression.zod';
 /**
  * Base Field Mapping Protocol
  * 
- * Shared by: ETL, Sync, Connector, External Lookup
- * 
+ * Shared by: ETL, Connector, External Lookup
+ *
  * This module provides the canonical field mapping schema used across
  * ObjectStack for data transformation and synchronization.
- * 
+ *
  * **Use Cases:**
  * - ETL pipelines (data/mapping.zod.ts)
- * - Data synchronization (automation/sync.zod.ts)
  * - Integration connectors (integration/connector.zod.ts)
  * - External lookups (data/external-lookup.zod.ts)
  * 

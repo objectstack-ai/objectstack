@@ -7,7 +7,7 @@ import {
   // Data Sync
   DataSyncConfigSchema,
   SyncStrategySchema,
-  ConflictResolutionSchema,
+  ConnectorConflictResolutionSchema,
   
   // Webhook
   WebhookConfigSchema,
@@ -232,6 +232,18 @@ describe('DataSyncConfigSchema', () => {
     expect(() => DataSyncConfigSchema.parse({ batchSize: 0 })).toThrow();
     expect(() => DataSyncConfigSchema.parse({ batchSize: 10001 })).toThrow();
     expect(() => DataSyncConfigSchema.parse({ batchSize: 500 })).not.toThrow();
+  });
+
+  it('resolves conflicts with the CONNECTOR vocabulary, unchanged by the #4738 rename', () => {
+    // `ConflictResolution` → `ConnectorConflictResolution` renamed the TS
+    // export only; the authored value domain is byte-for-byte the same.
+    (['source_wins', 'target_wins', 'latest_wins', 'manual'] as const).forEach((v) => {
+      expect(() => ConnectorConflictResolutionSchema.parse(v)).not.toThrow();
+    });
+    // The retired automation-side vocabulary was disjoint precisely where it
+    // mattered — these values were never part of the connector strategy:
+    expect(() => ConnectorConflictResolutionSchema.parse('destination_wins')).toThrow();
+    expect(() => ConnectorConflictResolutionSchema.parse('merge')).toThrow();
   });
 });
 
@@ -815,8 +827,9 @@ describe('[#4684] RateLimitConfig no longer names two declarations', () => {
 //
 // The first two are base-and-superset, so "converge them" is a tempting read.
 // It is wrong in both directions: widening the base to 7 keys pushes connector
-// sync semantics onto `automation/sync.zod.ts` and `data/external-lookup.zod.ts`
-// which also extend it, and narrowing the connector side to 4 is a retirement of
+// sync semantics onto `data/external-lookup.zod.ts` which also extends it
+// (`automation/sync.zod.ts` embedded the base too until its retirement in
+// #4738), and narrowing the connector side to 4 is a retirement of
 // three live keys, not a naming fix. ADR-0112 D9a's prefix remedy applies, and
 // the file next door already demonstrates it: `data/ExternalFieldMappingSchema`
 // extends the same base and, purely because it carries a prefix, never entered

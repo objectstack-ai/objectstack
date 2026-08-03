@@ -22,7 +22,15 @@ export * from './etl.zod';
 // DeclarativeConnectorEntrySchema. One capability, one contract
 // (Prime Directive #12); the #4480 template cluster fell the same way.
 export * from './time-relative-trigger.zod';
-export * from './sync.zod';
+// `sync.zod.ts` (L1 "Simple Sync": DataSyncConfig, its ConflictResolution enum
+// and the Sync factory) was removed here (#4738, ledger #4535 C13+C15). The L1
+// layer was narrative-only — zero importers across objectstack / cloud /
+// objectui, no engine ever parsed or executed a DataSyncConfig, and the def was
+// unreachable from the metadata-type roots (#4650 gate). Connector-attached
+// sync config is `ConnectorSchema.syncConfig` (integration/connector.zod.ts,
+// the live parse path); multi-step transformation is `etl.zod.ts`. The bare
+// `ConflictResolution` name now belongs solely to `@objectstack/spec/ui`
+// (offline sync), which objectui consumes.
 export * from './state-machine.zod';
 export * from './node-executor.zod';
 export * from './flow-node-expression-paths';

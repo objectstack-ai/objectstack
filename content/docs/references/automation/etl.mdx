@@ -9,13 +9,15 @@ ETL (Extract, Transform, Load) Pipeline Protocol - LEVEL 2: Data Engineering
 
 Inspired by modern data integration platforms like Airbyte, Fivetran, and Apache NiFi.
 
-**Positioning in 3-Layer Architecture:**
+**Positioning in the sync/integration layering** (L1 "Simple Sync" was
 
-- **L1: Simple Sync** (automation/sync.zod.ts) - Business users - Sync Salesforce to Sheets
+retired in #4738 — narrative-only, zero consumers; see
 
-- **L2: ETL Pipeline** (THIS FILE) - Data engineers - Aggregate 10 sources to warehouse
+`packages/spec/docs/SYNC_ARCHITECTURE.md`):
 
-- **L3: Enterprise Connector** (integration/connector.zod.ts) - System integrators - Full SAP integration
+- **ETL Pipeline** (THIS FILE) - Data engineers - Aggregate 10 sources to warehouse
+
+- **Enterprise Connector** (integration/connector.zod.ts) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
 
 ETL pipelines enable automated data synchronization between systems, transforming
 
@@ -45,17 +47,11 @@ Supports complex operations: joins, aggregations, filtering, custom SQL.
 
 - Legacy system migration with transformation
 
-**When to downgrade:**
-
-- Simple 1:1 sync → Use [Simple Sync](./sync.zod.ts)
-
 **When to upgrade:**
 
 - Need full connector lifecycle (auth, webhooks, rate limits) → Use [Enterprise Connector](/docs/references/integration/connector)
 
-See also: `./sync.zod.ts` for Level 1 (simple sync)
-
-See also: [../[integration/connector.zod.ts](/docs/references/integration/connector)](/docs/references/integration/connector) for Level 3 (enterprise integration)
+See also: [../[integration/connector.zod.ts](/docs/references/integration/connector)](/docs/references/integration/connector) for the Enterprise Connector layer
 
 ## Use Cases
 

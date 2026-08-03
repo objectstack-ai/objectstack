@@ -8,10 +8,11 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
  * 
  * Inspired by modern data integration platforms like Airbyte, Fivetran, and Apache NiFi.
  * 
- * **Positioning in 3-Layer Architecture:**
- * - **L1: Simple Sync** (automation/sync.zod.ts) - Business users - Sync Salesforce to Sheets
- * - **L2: ETL Pipeline** (THIS FILE) - Data engineers - Aggregate 10 sources to warehouse
- * - **L3: Enterprise Connector** (integration/connector.zod.ts) - System integrators - Full SAP integration
+ * **Positioning in the sync/integration layering** (L1 "Simple Sync" was
+ * retired in #4738 — narrative-only, zero consumers; see
+ * `packages/spec/docs/SYNC_ARCHITECTURE.md`):
+ * - **ETL Pipeline** (THIS FILE) - Data engineers - Aggregate 10 sources to warehouse
+ * - **Enterprise Connector** (integration/connector.zod.ts) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
  * 
  * ETL pipelines enable automated data synchronization between systems, transforming
  * data as it moves from source to destination.
@@ -32,14 +33,10 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
  * - Multi-region databases → Consolidated reporting
  * - Legacy system migration with transformation
  * 
- * **When to downgrade:**
- * - Simple 1:1 sync → Use {@link file://./sync.zod.ts | Simple Sync}
- * 
  * **When to upgrade:**
  * - Need full connector lifecycle (auth, webhooks, rate limits) → Use {@link file://../integration/connector.zod.ts | Enterprise Connector}
- * 
- * @see {@link file://./sync.zod.ts} for Level 1 (simple sync)
- * @see {@link file://../integration/connector.zod.ts} for Level 3 (enterprise integration)
+ *
+ * @see {@link file://../integration/connector.zod.ts} for the Enterprise Connector layer
  * 
  * ## Use Cases
  * 

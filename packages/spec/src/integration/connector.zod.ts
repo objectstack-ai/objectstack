@@ -13,10 +13,11 @@ import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.
  * Connectors enable ObjectStack to sync data with SaaS apps, databases, file storage,
  * and message queues through a unified protocol.
  * 
- * **Positioning in 3-Layer Architecture:**
- * - **L1: Simple Sync** (automation/sync.zod.ts) - Business users - Sync Salesforce to Sheets
- * - **L2: ETL Pipeline** (automation/etl.zod.ts) - Data engineers - Aggregate 10 sources to warehouse
- * - **L3: Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration
+ * **Positioning in the sync/integration layering** (L1 "Simple Sync" was
+ * retired in #4738 — narrative-only, zero consumers; see
+ * `packages/spec/docs/SYNC_ARCHITECTURE.md`):
+ * - **ETL Pipeline** (automation/etl.zod.ts) - Data engineers - Aggregate 10 sources to warehouse
+ * - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
  * 
  * **SCOPE: Most comprehensive integration layer.**
  * Includes authentication, webhooks, rate limiting, field mapping, bidirectional sync,
@@ -64,11 +65,9 @@ import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.
  * - Microsoft Dynamics 365 connector
  * 
  * **When to downgrade:**
- * - Simple field sync → Use {@link file://../automation/sync.zod.ts | Simple Sync}
  * - Data transformation only → Use {@link file://../automation/etl.zod.ts | ETL Pipeline}
- * 
- * @see {@link file://../automation/sync.zod.ts} for Level 1 (simple sync)
- * @see {@link file://../automation/etl.zod.ts} for Level 2 (data engineering)
+ *
+ * @see {@link file://../automation/etl.zod.ts} for the ETL Pipeline layer (data engineering)
  * 
  * ## There is no "Trigger Registry" alternative
  *
@@ -81,7 +80,9 @@ import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.
  * per-provider template cluster). The same defect class as the
  * `capabilities.readOnly` prescription #4487 corrected: a signpost must land
  * somewhere enforced. Lightweight cases are served HERE — a connector instance
- * with simple `auth` — or by `automation/sync.zod.ts` / `etl.zod.ts` below.
+ * with simple `auth` — or by `automation/etl.zod.ts` for transformation
+ * pipelines. (The automation-side L1 "Simple Sync" file was itself retired as
+ * a dead end of the same class in #4738.)
  */
 
 // ============================================================================
@@ -163,16 +164,27 @@ export const SyncStrategySchema = lazySchema(() => z.enum([
 export type SyncStrategy = z.infer<typeof SyncStrategySchema>;
 
 /**
- * Conflict Resolution Strategy
+ * Connector Conflict Resolution Strategy
+ *
+ * Renamed from `ConflictResolution` (#4738, ADR-0112 D9a — the C9/C12
+ * prefixing lineage): that bare name was published by three entry points for
+ * three different declarations (#4411 trap). The connector-sync strategy takes
+ * the domain prefix; the bare `ConflictResolution` now belongs solely to
+ * `@objectstack/spec/ui` (offline client/server sync — a different concept
+ * with a disjoint vocabulary, and the only side with cross-repo consumers).
+ * The enum VALUES here are unchanged — authored `syncConfig.conflictResolution`
+ * metadata parses byte-for-byte the same. Note `@objectstack/spec/api` also
+ * exports `ConflictResolutionStrategy` (route conflicts) — a fourth, distinct
+ * name; unrelated to this rename.
  */
-export const ConflictResolutionSchema = lazySchema(() => z.enum([
+export const ConnectorConflictResolutionSchema = lazySchema(() => z.enum([
   'source_wins',    // External system data takes precedence
   'target_wins',    // ObjectStack data takes precedence
   'latest_wins',    // Most recently modified wins
   'manual',         // Flag for manual resolution
 ]).describe('Conflict resolution strategy'));
 
-export type ConflictResolution = z.infer<typeof ConflictResolutionSchema>;
+export type ConnectorConflictResolution = z.infer<typeof ConnectorConflictResolutionSchema>;
 
 /**
  * Data Synchronization Configuration
@@ -210,7 +222,7 @@ export const DataSyncConfigSchema = lazySchema(() => z.object({
   /**
    * Conflict resolution strategy
    */
-  conflictResolution: ConflictResolutionSchema.optional().default('latest_wins'),
+  conflictResolution: ConnectorConflictResolutionSchema.optional().default('latest_wins'),
   
   /**
    * Batch size for bulk operations

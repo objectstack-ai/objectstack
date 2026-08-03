@@ -1,92 +1,53 @@
 # Data Synchronization Architecture
 
-ObjectStack implements a **3-layer architecture** for data synchronization and integration, designed to serve different audiences and use cases.
+ObjectStack implements a **2-layer architecture** for data synchronization and integration, designed to serve different audiences and use cases.
+
+> **History note (v17):** this document used to describe a 3-layer architecture whose
+> first layer — **"L1: Simple Sync"** (`DataSyncConfig` in `automation/sync.zod.ts`) —
+> was retired in #4738. See [Retired: L1 Simple Sync](#retired-l1-simple-sync-v17)
+> for what happened and what to use instead. The historical L2/L3 numbering is kept
+> in the level headings so older references stay legible.
 
 ## Overview
 
 | Level | Protocol | File | Audience | Use Case | Complexity |
 |-------|----------|------|----------|----------|------------|
-| **L1: Simple Sync** | `DataSyncConfig` | `automation/sync.zod.ts` | Business users | Sync Salesforce to Google Sheets | ⭐ Simple |
 | **L2: ETL Pipeline** | `ETLPipeline` | `automation/etl.zod.ts` | Data engineers | Aggregate 10 sources to data warehouse | ⭐⭐ Moderate |
 | **L3: Enterprise Connector** | `Connector` | `integration/connector.zod.ts` | System integrators | Full SAP integration with advanced features | ⭐⭐⭐ Advanced |
 
 ---
 
-## Level 1: Simple Sync
+## Retired: L1 Simple Sync (v17)
 
-**File:** `packages/spec/src/automation/sync.zod.ts`  
-**Audience:** Business users, citizen developers  
-**Complexity:** ⭐ Simple
+**Removed in:** #4738 (dual-source ledger #4535, clusters C13+C15)
+**Was:** `DataSyncConfig` + `ConflictResolution` + the `Sync` factory in `packages/spec/src/automation/sync.zod.ts`
 
-### Purpose
+The L1 layer was **narrative-only**: no engine ever parsed, scheduled or executed a
+`DataSyncConfig` — the schema had zero importers across objectstack, cloud and
+objectui, was unreachable from the metadata-type roots (#4650 gate), and existed
+solely in this document's 3-layer story. Keeping a documented authoring surface
+that nothing enforces is exactly the `declared ≠ enforced` gap Prime Directive #10
+forbids, and its `DataSyncConfig` / `ConflictResolution` names collided with the
+live declarations in `integration/connector.zod.ts` and `ui/offline.zod.ts` (the
+#4411 dual-source trap).
 
-Simple, user-friendly synchronization between two systems. Designed for business users who need straightforward data sync without writing code.
+**What to use instead:**
 
-### Key Features
-
-- ✅ Bidirectional or unidirectional sync (push/pull)
-- ✅ Simple field mappings (name mapping only)
-- ✅ Basic filters
-- ✅ Scheduled or real-time sync
-- ❌ NO complex transformations (use ETL for that)
-- ❌ NO multi-source joins (use ETL for that)
-
-### Use Cases
-
-1. **CRM Integration** - Sync contacts between ObjectStack and Salesforce
-2. **Marketing Automation** - Push leads to HubSpot
-3. **Data Export** - Sync orders to Google Sheets for reporting
-
-### Example
-
-```typescript
-import { DataSyncConfig } from '@objectstack/spec/automation';
-
-const salesforceContactSync: DataSyncConfig = {
-  name: 'salesforce_contact_sync',
-  label: 'Salesforce Contact Sync',
-  
-  // Source: ObjectStack
-  source: {
-    object: 'contact',
-    filters: { status: 'active' }
-  },
-  
-  // Destination: Salesforce
-  destination: {
-    connectorInstanceId: 'salesforce_production',
-    externalResource: 'Contact',
-    operation: 'upsert',
-    mapping: {
-      first_name: 'FirstName',
-      last_name: 'LastName',
-      email: 'Email',
-      phone: 'Phone'
-    },
-    matchKey: ['email']
-  },
-  
-  direction: 'bidirectional',
-  syncMode: 'incremental',
-  conflictResolution: 'latest_wins',
-  schedule: '0 * * * *', // Hourly
-  enabled: true
-};
-```
-
-### Best Practices
-
-- Use for **single-source to single-destination** sync
-- Keep mappings **simple** (field renaming only)
-- Use **incremental mode** for large datasets
-- Set appropriate **conflict resolution** strategy
+- **Connector-attached sync** — `ConnectorSchema.syncConfig`
+  (`integration/connector.zod.ts`): the live, parsed sync-strategy surface
+  (strategy, direction, schedule, `conflictResolution`, batching, delete mode).
+- **Transformation pipelines** — `ETLPipeline` (`automation/etl.zod.ts`) for
+  multi-source, multi-stage data movement.
+- **Client offline sync** — `SyncConfigSchema` / `ConflictResolution`
+  (`ui/offline.zod.ts`): a *different* concept (client/server conflict handling)
+  that now owns the bare `ConflictResolution` name package-wide.
 
 ---
 
 ## Level 2: ETL Pipeline
 
-**File:** `packages/spec/src/automation/etl.zod.ts`  
-**Audience:** Data engineers, analytics teams  
+**File:** `packages/spec/src/automation/etl.zod.ts`
+**Audience:** Data engineers, analytics teams
 **Complexity:** ⭐⭐ Moderate
 
 ### Purpose
@@ -117,7 +78,7 @@ import { ETLPipeline } from '@objectstack/spec/automation';
 const dataWarehousePipeline: ETLPipeline = {
   name: 'customer_360_pipeline',
   label: 'Customer 360 Data Warehouse Pipeline',
-  
+
   // Extract from Salesforce
   source: {
     type: 'api',
@@ -130,7 +91,7 @@ const dataWarehousePipeline: ETLPipeline = {
       cursorField: 'LastModifiedDate'
     }
   },
-  
+
   // Transform: Join with support tickets, aggregate metrics
   transformations: [
     {
@@ -158,7 +119,7 @@ const dataWarehousePipeline: ETLPipeline = {
       }
     }
   ],
-  
+
   // Load to Snowflake
   destination: {
     type: 'warehouse',
@@ -171,7 +132,7 @@ const dataWarehousePipeline: ETLPipeline = {
     writeMode: 'upsert',
     primaryKey: ['customer_id']
   },
-  
+
   syncMode: 'incremental',
   schedule: '0 2 * * *', // Daily at 2 AM
   enabled: true
@@ -205,8 +166,8 @@ const dataWarehousePipeline: ETLPipeline = {
 
 ## Level 3: Enterprise Connector
 
-**File:** `packages/spec/src/integration/connector.zod.ts`  
-**Audience:** System integrators, enterprise architects  
+**File:** `packages/spec/src/integration/connector.zod.ts`
+**Audience:** System integrators, enterprise architects
 **Complexity:** ⭐⭐⭐ Advanced
 
 ### Purpose
@@ -220,7 +181,7 @@ Complete, production-grade integration with external systems. Includes authentic
 - ✅ **Rate Limiting**: Token bucket, leaky bucket algorithms
 - ✅ **Retry Policies**: Exponential backoff, circuit breaker
 - ✅ **Field Mapping**: With transformations and data type conversion
-- ✅ **Conflict Resolution**: Multiple strategies
+- ✅ **Conflict Resolution**: Multiple strategies (`ConnectorConflictResolution`)
 - ✅ **Security**: Signature verification, encryption
 - ✅ **Monitoring**: Health checks, metrics, logging
 
@@ -241,7 +202,7 @@ const sapConnector: Connector = {
   label: 'SAP ERP Integration',
   type: 'saas',
   description: 'Enterprise-grade SAP ERP integration',
-  
+
   // OAuth2 Authentication
   authentication: {
     type: 'oauth2',
@@ -251,7 +212,7 @@ const sapConnector: Connector = {
     clientSecret: process.env.SAP_CLIENT_SECRET!,
     scopes: ['read:orders', 'write:orders']
   },
-  
+
   // Data Sync Configuration
   syncConfig: {
     strategy: 'incremental',
@@ -263,7 +224,7 @@ const sapConnector: Connector = {
     batchSize: 1000,
     deleteMode: 'soft_delete'
   },
-  
+
   // Field Mappings with Transformations
   fieldMappings: [
     {
@@ -284,7 +245,7 @@ const sapConnector: Connector = {
       syncMode: 'bidirectional'
     }
   ],
-  
+
   // Webhooks for Real-time Events
   webhooks: [
     {
@@ -302,7 +263,7 @@ const sapConnector: Connector = {
       isActive: true
     }
   ],
-  
+
   // Rate Limiting
   rateLimitConfig: {
     strategy: 'token_bucket',
@@ -311,7 +272,7 @@ const sapConnector: Connector = {
     burstCapacity: 150,
     respectUpstreamLimits: true
   },
-  
+
   // Retry Configuration
   retryConfig: {
     strategy: 'exponential_backoff',
@@ -323,7 +284,7 @@ const sapConnector: Connector = {
     retryOnNetworkError: true,
     jitter: true
   },
-  
+
   connectionTimeoutMs: 30000,
   requestTimeoutMs: 60000,
   status: 'active',
@@ -365,20 +326,14 @@ const sapConnector: Connector = {
 | Do you need real-time webhooks? | **Yes** → L3 (Connector) |
 | Do you need advanced authentication (OAuth2, SAML)? | **Yes** → L3 (Connector) |
 | Do you need rate limiting and retry policies? | **Yes** → L3 (Connector) |
-| Is it a simple point-to-point sync? | **Yes** → L1 (Simple Sync) |
-| Are you a business user with no coding? | **Yes** → L1 (Simple Sync) |
+| Is it a simple point-to-point sync with an external system? | **Yes** → L3 (Connector) with `syncConfig` |
 | Are you building a data warehouse pipeline? | **Yes** → L2 (ETL) |
 | Are you integrating with an enterprise system? | **Yes** → L3 (Connector) |
+| Do you need client-side offline sync? | **Yes** → `ui/offline.zod.ts` (a separate protocol, not this layering) |
 
 ### Common Patterns
 
-#### Pattern 1: CRM Sync (L1)
-```
-ObjectStack → Simple Sync → Salesforce
-```
-Use **L1 Simple Sync** for straightforward bidirectional sync.
-
-#### Pattern 2: Analytics Pipeline (L2)
+#### Pattern 1: Analytics Pipeline (L2)
 ```
 Salesforce → ETL → Transform → Snowflake
 HubSpot    ↗           ↘ Analytics Dashboard
@@ -386,19 +341,20 @@ Stripe     ↗
 ```
 Use **L2 ETL Pipeline** for multi-source data warehousing.
 
-#### Pattern 3: Enterprise Integration (L3)
+#### Pattern 2: Enterprise Integration (L3)
 ```
 ObjectStack ↔ Enterprise Connector ↔ SAP
                     ↓
                Webhooks, Auth, Rate Limiting
 ```
-Use **L3 Enterprise Connector** for production-grade integrations.
+Use **L3 Enterprise Connector** for production-grade integrations — including
+straightforward point-to-point sync, via a connector instance with simple `auth`
+and a `syncConfig`.
 
-#### Pattern 4: Hybrid Approach
+#### Pattern 3: Hybrid Approach
 ```
 External API → L3 Connector → ObjectStack
 ObjectStack → L2 ETL → Data Warehouse
-ObjectStack → L1 Sync → Google Sheets
 ```
 Combine levels for complex scenarios.
 
@@ -406,16 +362,17 @@ Combine levels for complex scenarios.
 
 ## Migration Guide
 
-### From L1 to L2
+### From L3 (`syncConfig`) to L2
 
-When your simple sync needs complex transformations:
+When a connector's declarative sync needs complex transformations:
 
-**Before (L1):**
+**Before (L3 `syncConfig`):**
 ```typescript
-const sync: DataSyncConfig = {
-  name: 'order_sync',
-  source: { object: 'order' },
-  destination: { object: 'analytics_order' }
+const connector: Connector = {
+  name: 'orders',
+  type: 'saas',
+  authentication: { type: 'api-key', ... },
+  syncConfig: { strategy: 'incremental', direction: 'import' }
 };
 ```
 
@@ -423,7 +380,7 @@ const sync: DataSyncConfig = {
 ```typescript
 const pipeline: ETLPipeline = {
   name: 'order_analytics_pipeline',
-  source: { type: 'object', config: { object: 'order' } },
+  source: { type: 'api', connector: 'orders' },
   transformations: [
     { type: 'aggregate', config: { groupBy: ['customer_id'] } }
   ],
@@ -454,11 +411,6 @@ const connector: Connector = {
 ---
 
 ## API Reference
-
-### Level 1: Simple Sync
-- [DataSyncConfig Schema](../src/automation/sync.zod.ts)
-- [Field Mapping](../src/automation/sync.zod.ts#L97)
-- [Sync Execution Result](../src/automation/sync.zod.ts#L380)
 
 ### Level 2: ETL Pipeline
 - [ETLPipeline Schema](../src/automation/etl.zod.ts)

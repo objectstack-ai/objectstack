@@ -160,12 +160,16 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   },
   {
     id: 'cel-flow',
-    summary: 'flow / sync / loader branching + filter predicates',
+    summary: 'flow / loader branching + filter predicates',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'throw',
     enforcement: '@objectstack/formula celEngine (interpret) via the automation runtime',
     covers: [
       'automation/flow.zod.ts:condition',
-      'automation/sync.zod.ts:condition',
+      // `automation/sync.zod.ts:condition` (custom validation predicates on
+      // the L1 "Simple Sync" DataSyncConfig) left with the whole file in
+      // #4738 — the L1 layer was narrative-only, so no engine ever evaluated
+      // that predicate. Connector-attached sync (`ConnectorSchema.syncConfig`)
+      // declares no expression surface; nothing to re-point at.
       // `kernel/metadata-loader.zod.ts:filter` (on MetadataLoadOptions and
       // MetadataExportOptions) was removed with the rest of that file's
       // zero-consumer duplicate envelope family in #4411. The surviving

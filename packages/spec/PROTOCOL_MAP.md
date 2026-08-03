@@ -71,7 +71,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`approval.zod.ts`](src/automation/approval.zod.ts) | ⭐ | **Approval Node**. Flow node config for human approval pauses. |
 | [`webhook.zod.ts`](src/automation/webhook.zod.ts) | ⭐ | **Webhooks**. Outbound HTTP notification configuration. |
 | [`etl.zod.ts`](src/automation/etl.zod.ts) | | **ETL Jobs**. Extract-Transform-Load definitions. |
-| [`sync.zod.ts`](src/automation/sync.zod.ts) | | **Data Sync**. Bi-directional synchronization rules. |
 
 ---
 

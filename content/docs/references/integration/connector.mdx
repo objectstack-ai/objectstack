@@ -13,13 +13,15 @@ Connectors enable ObjectStack to sync data with SaaS apps, databases, file stora
 
 and message queues through a unified protocol.
 
-**Positioning in 3-Layer Architecture:**
+**Positioning in the sync/integration layering** (L1 "Simple Sync" was
 
-- **L1: Simple Sync** (automation/sync.zod.ts) - Business users - Sync Salesforce to Sheets
+retired in #4738 — narrative-only, zero consumers; see
 
-- **L2: ETL Pipeline** (automation/etl.zod.ts) - Data engineers - Aggregate 10 sources to warehouse
+`packages/spec/docs/SYNC_ARCHITECTURE.md`):
 
-- **L3: Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration
+- **ETL Pipeline** (automation/etl.zod.ts) - Data engineers - Aggregate 10 sources to warehouse
+
+- **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
 
 **SCOPE: Most comprehensive integration layer.**
 
@@ -95,13 +97,9 @@ Authentication is now imported from the canonical `auth/config.zod.ts`.
 
 **When to downgrade:**
 
-- Simple field sync → Use [Simple Sync](/docs/references/automation/sync)
-
 - Data transformation only → Use [ETL Pipeline](/docs/references/automation/etl)
 
-See also: [../[automation/sync.zod.ts](/docs/references/automation/sync)](/docs/references/automation/sync) for Level 1 (simple sync)
-
-See also: [../[automation/etl.zod.ts](/docs/references/automation/etl)](/docs/references/automation/etl) for Level 2 (data engineering)
+See also: [../[automation/etl.zod.ts](/docs/references/automation/etl)](/docs/references/automation/etl) for the ETL Pipeline layer (data engineering)
 
 ## There is no "Trigger Registry" alternative
 
@@ -123,7 +121,11 @@ per-provider template cluster). The same defect class as the
 
 somewhere enforced. Lightweight cases are served HERE — a connector instance
 
-with simple `auth` — or by `[automation/sync.zod.ts](/docs/references/automation/sync)` / `etl.zod.ts` below.
+with simple `auth` — or by `[automation/etl.zod.ts](/docs/references/automation/etl)` for transformation
+
+pipelines. (The automation-side L1 "Simple Sync" file was itself retired as
+
+a dead end of the same class in #4738.)
 
 <Callout type="info">
 **Source:** `packages/spec/src/integration/connector.zod.ts`
@@ -132,8 +134,8 @@ with simple `auth` — or by `[automation/sync.zod.ts](/docs/references/automati
 ## TypeScript Usage
 
 ```typescript
-import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorErrorCategorySchema, ConnectorFieldMappingSchema, ConnectorHealthSchema, ConnectorRateLimitConfigSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, ErrorMappingConfigSchema, ErrorMappingRuleSchema, HealthCheckConfigSchema, RateLimitStrategySchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
-import type { CircuitBreakerConfig, Connector, ConnectorErrorCategory, ConnectorFieldMapping, ConnectorHealth, ConnectorRateLimitConfig, ConnectorRetryStrategy, ConnectorStatus, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RateLimitStrategy, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
+import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorConflictResolutionSchema, ConnectorErrorCategorySchema, ConnectorFieldMappingSchema, ConnectorHealthSchema, ConnectorRateLimitConfigSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, ErrorMappingConfigSchema, ErrorMappingRuleSchema, HealthCheckConfigSchema, RateLimitStrategySchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
+import type { CircuitBreakerConfig, Connector, ConnectorConflictResolution, ConnectorErrorCategory, ConnectorFieldMapping, ConnectorHealth, ConnectorRateLimitConfig, ConnectorRetryStrategy, ConnectorStatus, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RateLimitStrategy, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
 
 // Validate data
 const result = CircuitBreakerConfigSchema.parse(data);
@@ -203,6 +205,20 @@ Circuit breaker configuration
 | **description** | `string` | optional |  |
 | **inputSchema** | `Record<string, any>` | optional | Input parameters schema (JSON Schema) |
 | **outputSchema** | `Record<string, any>` | optional | Output schema (JSON Schema) |
+
+
+---
+
+## ConnectorConflictResolution
+
+Conflict resolution strategy
+
+### Allowed Values
+
+* `source_wins`
+* `target_wins`
+* `latest_wins`
+* `manual`
 
 
 ---

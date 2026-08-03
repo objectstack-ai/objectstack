@@ -3,8 +3,6 @@
   "pages": [
     "---Connectors---",
     "connector",
-    "connector-auth",
-    "---Transport & Storage---",
-    "offline"
+    "connector-auth"
   ]
 }
