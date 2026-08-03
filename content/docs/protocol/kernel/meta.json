@@ -3,7 +3,6 @@
   "pages": [
     "index",
     "lifecycle",
-    "runtime-capabilities",
     "http-protocol",
     "realtime-protocol",
     "error-handling",

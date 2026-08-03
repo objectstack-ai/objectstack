@@ -15,11 +15,19 @@
  * object validation-rule / formula predicates, and UI action `visible` /
  * `disabled` predicates. Each error is located (flow/object/action +
  * node/edge/field) with a corrective message.
+ *
+ * Since #4763 it also carries the **null-guard** verdict: an ordering /
+ * arithmetic operator applied to a nullable declared field that no `!= null`
+ * test dominates is rejected here, so the `has(a) && has(b) && a < b` trap
+ * (which reads as a guard and is not one) never reaches a production write.
+ * See `validate-null-guards.ts` for the decision procedure and its scope.
  */
 
 import { validateExpression } from '@objectstack/formula';
 import { collectFlowGraphs, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 import type { FlowNodeParsed } from '@objectstack/spec/automation';
+
+import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
 
 export interface ExprIssue {
   where: string;
@@ -88,6 +96,90 @@ function buildFieldTypeIndex(objects: AnyRec[]): Map<string, Record<string, stri
   return idx;
 }
 
+/** The field list of an object, whichever of the two `fields` shapes it uses. */
+function fieldEntries(obj: AnyRec): Array<[string, AnyRec]> {
+  const fields = obj.fields;
+  if (Array.isArray(fields)) {
+    return (fields as AnyRec[])
+      .filter((f) => f && typeof f === 'object' && typeof f.name === 'string')
+      .map((f) => [f.name as string, f] as [string, AnyRec]);
+  }
+  if (fields && typeof fields === 'object') {
+    return Object.entries(fields as AnyRec)
+      .filter(([, def]) => !!def && typeof def === 'object')
+      .map(([n, def]) => [n, def as AnyRec] as [string, AnyRec]);
+  }
+  return [];
+}
+
+/**
+ * Can this declared field hold `null` when a predicate reads it? (#4763)
+ *
+ * Deliberately conservative — this feeds a **build-breaking** verdict, so every
+ * uncertainty resolves to "not nullable" (no finding). A field is treated as
+ * always-valued when it is `required`, carries a `defaultValue`, declares a
+ * default option (`options: [{ …, default: true }]` — the select idiom), or is
+ * an autonumber the platform populates.
+ */
+function isNullableField(def: AnyRec): boolean {
+  if (def.required === true) return false;
+  if (def.defaultValue !== undefined && def.defaultValue !== null) return false;
+  if (def.type === 'autonumber') return false;
+  const options = def.options;
+  if (Array.isArray(options) && options.some((o) => !!o && typeof o === 'object' && (o as AnyRec).default === true)) {
+    return false;
+  }
+  return true;
+}
+
+/** object name → set of field names that may hold `null` (#4763). */
+function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
+  const idx = new Map<string, Set<string>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const nullable = new Set<string>();
+    for (const [fname, def] of fieldEntries(obj)) {
+      if (isNullableField(def)) nullable.add(fname);
+    }
+    idx.set(name, nullable);
+  }
+  return idx;
+}
+
+/** The raw CEL source behind a predicate slot (string or `{ dialect, source }`). */
+function celSourceOf(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object') {
+    const rec = raw as AnyRec;
+    // A non-CEL dialect (`js`) has its own null semantics — not ours to judge.
+    if (typeof rec.dialect === 'string' && rec.dialect !== 'cel') return undefined;
+    if (typeof rec.source === 'string') return rec.source;
+  }
+  return undefined;
+}
+
+/**
+ * Every predicate a validation rule carries, including the ones nested inside a
+ * `conditional` rule's `then` / `otherwise` — the trap hides there just as
+ * happily as at the top level.
+ */
+function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw: unknown }> {
+  const out: Array<{ label: string; raw: unknown }> = [];
+  const name = typeof rule.name === 'string' ? rule.name : '?';
+  const here = path ? `${path} → '${name}'` : `'${name}'`;
+  const main = rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula;
+  if (main != null) out.push({ label: `validation rule ${here}`, raw: main });
+  if (rule.when != null) out.push({ label: `validation rule ${here} when-predicate`, raw: rule.when });
+  for (const branch of ['then', 'otherwise'] as const) {
+    const nested = rule[branch];
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      out.push(...rulePredicates(nested as AnyRec, `${here} ${branch}`));
+    }
+  }
+  return out;
+}
+
 /**
  * Validate every predicate in the stack. Returns the list of issues (empty =
  * clean). Caller decides how to surface / whether to fail the build.
@@ -97,6 +189,39 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   const objects = asArray(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(objects);
+  const nullableIndex = buildNullableFieldIndex(objects);
+
+  /**
+   * The #4763 null-guard gate. Scoped to the surfaces whose predicates are
+   * EVALUATED by CEL over a record made total for every declared field —
+   * validation rules (`rule-validator.ts`, fail-closed since #4649/#4761) and
+   * lifecycle hook `condition`s. Deliberately NOT applied to sharing-rule
+   * conditions (compiled to a SQL filter, where `NULL > x` is three-valued and
+   * never faults), flow conditions (flattened scope: a bare identifier may be a
+   * flow variable, not a field), or `Field.formula` expressions (whose blessed
+   * `guard ? value : null` shape has its own #3306 handling). Those surfaces are
+   * tracked separately rather than half-covered.
+   */
+  const checkNullGuards = (
+    where: string,
+    subject: string,
+    raw: unknown,
+    objectName: string | undefined,
+  ): void => {
+    if (!objectName) return;
+    const nullableFields = nullableIndex.get(objectName);
+    if (!nullableFields || nullableFields.size === 0) return;
+    const source = celSourceOf(raw);
+    if (!source) return;
+    for (const finding of findUnguardedNullableOperands(source, { nullableFields })) {
+      issues.push({
+        where,
+        message: nullGuardMessage(subject, objectName, finding),
+        source,
+        severity: 'error',
+      });
+    }
+  };
 
   const check = (
     where: string,
@@ -231,6 +356,11 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       check(where, rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula, objectName, 'record');
       // `conditional` rules carry a nested `when` predicate (record-scoped).
       check(`${where} when`, (rule as AnyRec).when, objectName, 'record');
+      // #4763 — null-guard gate over every predicate the rule carries, nested
+      // `then`/`otherwise` branches included.
+      for (const p of rulePredicates(rule, '')) {
+        checkNullGuards(`object '${objectName}' · ${p.label}`, p.label, p.raw, objectName);
+      }
     }
     // Field-level formulas (computed fields) reference the same object.
     const fields = obj.fields;
@@ -313,6 +443,13 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     const hookName = (hook.name as string) ?? '?';
     if (typeof hook.object === 'string') {
       check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record');
+      // #4763 — the third instance the issue found lived on exactly this path.
+      checkNullGuards(
+        `hook '${hookName}' (${hook.object}) condition`,
+        `hook '${hookName}' condition`,
+        hook.condition,
+        hook.object,
+      );
       continue;
     }
 
@@ -339,6 +476,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     for (const target of targets) {
       const mark = issues.length;
       check(`hook '${hookName}' (${target}) condition`, hook.condition, target, 'record');
+      checkNullGuards(
+        `hook '${hookName}' (${target}) condition`,
+        `hook '${hookName}' condition`,
+        hook.condition,
+        target,
+      );
       for (let i = mark; i < issues.length; i++) {
         const issue = issues[i];
         const key = `${issue.message}\u0000${issue.source ?? ''}`;

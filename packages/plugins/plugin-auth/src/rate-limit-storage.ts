@@ -147,6 +147,73 @@ export interface LazyCacheRateLimitStorageOptions {
   logger?: LoggerLike;
 }
 
+export interface LazyCounterStoreOptions extends LazyCacheRateLimitStorageOptions {
+  /**
+   * What is being counted, named verbatim in both log lines (e.g.
+   * `'rate-limit counters'`, `'per-number OTP send budget (#2780)'`). Two
+   * surfaces that degrade for the same reason must still be distinguishable in
+   * the log — an operator has to know WHICH budget stopped being global.
+   */
+  subject: string;
+  /**
+   * Optional extra sentence appended to the degraded warning, naming what the
+   * per-process fallback actually costs for this surface. "Degraded" is not
+   * self-explanatory when the currency is paid SMS.
+   */
+  degradedImpact?: string;
+}
+
+/**
+ * ADR-0069 D2 — resolve the store a cross-node counter counts in, **lazily, at
+ * the moment the counter is consumed**, with a bounded per-process fallback and
+ * a one-shot announcement of whichever branch was taken.
+ *
+ * This is the shared half of {@link createLazyCacheRateLimitStorage} (#4772),
+ * extracted in #4790 so the OTP send budget rides the SAME resolution path
+ * rather than a second copy of it. Everything in the "why lazy" story below
+ * applies to any ObjectStack counter that wants to be global: plugin start
+ * order decides nothing, because nothing is resolved at start.
+ *
+ * The returned function memoises the cache handle once it resolves, keeps
+ * exactly one in-process fallback per call site (so the degraded path still
+ * counts, per node), announces the bind once and warns about the degradation
+ * once. It never throws: a resolver that explodes is "no shared cache right
+ * now", asked again on the next count.
+ */
+export function createLazyCounterStore(opts: LazyCounterStoreOptions): () => Promise<CounterStore> {
+  const fallback = new InProcessCounterStore();
+  let cache: CounterStore | undefined;
+  let boundAnnounced = false;
+  let degradedWarned = false;
+
+  return async (): Promise<CounterStore> => {
+    if (!cache) {
+      try {
+        cache = (await opts.resolveCache()) ?? undefined;
+      } catch {
+        cache = undefined;
+      }
+      if (cache && !boundAnnounced) {
+        boundAnnounced = true;
+        opts.logger?.info?.(
+          `[auth] ${opts.subject} bound to the kernel cache service — enforced against ONE store across nodes iff the cache is shared (ADR-0069 D2)`,
+        );
+      }
+    }
+    if (cache) return cache;
+    if (!degradedWarned) {
+      degradedWarned = true;
+      opts.logger?.warn?.(
+        `[auth] ${opts.subject}: no cache service to count in — falling back to a per-process store. ` +
+          'This deployment has no `cache` service registered at all; a multi-node deployment needs a shared cache ' +
+          '(Redis via @objectstack/service-cache) or each node enforces the limit independently (ADR-0069 D2)' +
+          (opts.degradedImpact ? `. ${opts.degradedImpact}` : ''),
+      );
+    }
+    return fallback;
+  };
+}
+
 /**
  * ADR-0069 D2 — better-auth `rateLimit.customStorage` backed by the kernel
  * `cache` service, resolved **lazily, at the moment a counter is consumed**.
@@ -171,40 +238,17 @@ export interface LazyCacheRateLimitStorageOptions {
  * Scope note: this wires the RATE-LIMIT COUNTERS only. better-auth's
  * `secondaryStorage` (session snapshots) is a separate, deliberately untouched
  * decision — see the comment in `auth-plugin.ts` and `secondary-storage.ts`.
+ * ObjectStack's own per-number OTP budget counts through the same
+ * {@link createLazyCounterStore} resolution, one layer down (#4790).
  */
 export function createLazyCacheRateLimitStorage(
   opts: LazyCacheRateLimitStorageOptions,
 ): BetterAuthRateLimitStorage {
-  const fallback = new InProcessCounterStore();
-  let cache: CounterStore | undefined;
-  let boundAnnounced = false;
-  let degradedWarned = false;
-
-  const resolveStore = async (): Promise<CounterStore> => {
-    if (!cache) {
-      try {
-        cache = (await opts.resolveCache()) ?? undefined;
-      } catch {
-        cache = undefined;
-      }
-      if (cache && !boundAnnounced) {
-        boundAnnounced = true;
-        opts.logger?.info?.(
-          '[auth] rate-limit counters bound to the kernel cache service — enforced against ONE store across nodes iff the cache is shared (ADR-0069 D2)',
-        );
-      }
-    }
-    if (cache) return cache;
-    if (!degradedWarned) {
-      degradedWarned = true;
-      opts.logger?.warn?.(
-        '[auth] rate-limit counters have no cache service to count in — falling back to a per-process store. ' +
-          'This deployment has no `cache` service registered at all; a multi-node deployment needs a shared cache ' +
-          '(Redis via @objectstack/service-cache) or each node enforces the limit independently (ADR-0069 D2)',
-      );
-    }
-    return fallback;
-  };
+  const resolveStore = createLazyCounterStore({
+    resolveCache: opts.resolveCache,
+    ...(opts.logger ? { logger: opts.logger } : {}),
+    subject: 'rate-limit counters',
+  });
 
   return {
     consume: async (key, rule) => {
