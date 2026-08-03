@@ -70,8 +70,9 @@ protocol is identical.)
 
 ## Operational notes(实测坑位)
 
-队列与平台层的四条实测结论。共同点:**判据取命令的输出,不取 API 字段的字面值,
-也不取本地工作树的现状** —— 每一条都是在这一步上咬过人之后写下来的。
+队列与平台层的八条实测结论。共同点:**判据取命令的输出,不取 API 字段的字面值,
+也不取本地工作树的现状,更不取「看起来相邻」的两行日志** —— 每一条都是在这一步上
+咬过人之后写下来的。
 
 **1. 判断 PR 是否在合并队列,看 `gh-readonly-queue/*` 分支,不看 `auto_merge`
 字段。** 本仓 PR 入队后,REST 返回的 `auto_merge` 回落为 off(队列条目取代了挂起的
@@ -82,7 +83,17 @@ auto-merge),该字段对「在不在队列里」零信息量,据它反推会得�
 git ls-remote --heads origin 'refs/heads/gh-readonly-queue/*'
 ```
 
-分支名里带着这一批被打包的 PR 号;没有匹配分支才是真的没入队。
+分支名里带着这一批被打包的 PR 号;没有匹配分支才是真的没入队。另有三点在同一处
+咬过人:
+
+- **「判据不在 `origin/main` 上」是个二义读数。** 它同时兼容「在队列里等」和「压根
+  没入队」,而两者的处置完全相反(前者等,后者要动手)。#4852 的 auto-merge 从 10:15
+  就挂着,每轮只查 main、判为「排队中」,实际它因 CI 红从未入队 —— 空转 **100 分钟**。
+  落地检查永远是**两个读数**:队列分支 **和** `origin/main`,缺一不可。
+- 队列分支名里的 base sha 是**串成链**的(`pr-4878-<链上一条的结果 sha>`),顺着链读
+  得出自己排第几。
+- **PR 被转回 draft 会同时掉 auto-merge 与队列成员资格**,且不会自动恢复;转正之后
+  必须重新挂。
 
 **2. 队列踢出:先认签名,再决定重投。** 被踢出不等于 PR 有问题。今天 #4796 那条已知
 flaky 连踢五个互不相关的 PR,核对失败签名一致后原样重投,五个全部一次通过 —— 认签名
@@ -119,6 +130,62 @@ git show origin/main:<path>                  # 看某个文件在 main 上的现
 
 这条也写进派发词(step 5):dev 在自己的 worktree 里同样会踩,而 worktree 是从
 `origin/main` 切的、后续不会自己更新。
+
+**5. `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不会拿新的 main 重算。**
+第 2 条讲的是「同一签名再现要重新诊断」;这条讲另一半 —— 当红的原因是**基上缺一个
+已经合并的修复**时,重跑这个动作本身就是无效的。#4852 的 CI 红在止血 PR #4856
+落地**之前**,重跑一次仍是同一个 5000ms;直到 `git merge origin/main` 推了新提交,
+才拿到新的合并 ref。判别方法:比对那个修复的合并时间与本 run 的创建时间 —— 前者
+晚于后者,就只能推提交,重跑多少次都没用。
+
+> 与 `.github/workflows/rerun-safety-nightly.yml` **无关**:那个查的是「同一 checkout
+> 里跑两遍是否自洽」的测试污染,不是重跑语义。
+
+**6. 读数纪律 —— 三条各自产出过一个「我信了并据此行动」的错读数。** 第 4 条管的是
+「在哪棵树上读」,这一条管的是「命令本身是否在回答你以为的那个问题」。
+
+- **`cd X && cmd` 会短路。** Bash 工具每次调用 cwd 重置;`cd /home/user/objectui &&
+  git grep ...` 在路径不存在时 `cd` 失败、整条命令继续,于是**在当前仓里执行**,产出
+  假的「objectui 零消费方」。⛔ 跨仓一律 `git -C <path> grep`,不要用 `cd`。
+- **`git grep -c <pat> | wc -l` 数的是文件数,不是命中数。** 曾据此得出「分支比 main
+  命中更多」的荒谬结论。要命中数就不要再套 `wc -l`。
+- **裸名 grep 会被幸存家族当子串命中。** 核验 `system/EmailTemplate` 是否已退役时,
+  裸名命中的是仍然活着的 `EmailTemplateDefinition` 一族。退役核验一律**带引号精确
+  名**;更硬的判据是查**声明式**(`^(export )?(const|type|interface) <Name>\b`)而不是
+  查提及 —— 注释、pin 测试的断言词、迁移散文里出现该名是**正常且应当的**。
+
+统一原则:**零命中必须用一个「确定存在的邻近词」反查**,证伪「扫描器坏了 / 路径错了」
+这个解释。没有这个反查,零命中不成立。
+
+**7. CI 红了先拿完整日志归档,再下结论 —— 三条读日志的纪律。** 这是 2026-08-03 当天
+最贵的错误:公开断定四次 CI 红是**内核 OOM-killer 杀掉 DTS 构建**,据此开了 PR #4853,
+然后被 #4853 自己的 CI 推翻(它挂着新参数跑,红得一模一样)。真因是 #4796 那一族的
+5000ms 超时,由 #4856 修掉。完整更正见 #4845。三个叠加的错误各成一条:
+
+- **「completeness check 绿」≠「测试通过」。** `check-test-completeness.mjs` 只断言
+  没有 worker 静默死掉;workflow 自己的注释写着 *"A red suite plus a GREEN
+  completeness check means real test failures"*。
+- **turbo 并发输出的「相邻」≠「因果」。** `test` 的 `dependsOn` 只有 `["^build"]`
+  (只含上游),`packages/spec` 没有 `pretest`,所以 `--concurrency=4` 下 `spec#build`
+  与 `spec#test` 同时在跑,GitHub 又给整组打同一个时间戳。`X start` 紧接着
+  `ELIFECYCLE` 完全可能来自两个无关进程。**先查 `turbo.json` 的依赖边**,再谈因果。
+- **不要只看日志 tail。** 那次的 ~10 KB 尾巴被 `gen:schema` 的 1675 行清单吃光,真正
+  的失败行根本不在里面。取完整日志归档再判。
+
+诊断结论一旦公开发出又被推翻,**更正要发在同样公开的位置**,并把据它开的 PR 撤回
+draft、解绑 `Fixes`,免得一个错结论继续被当作已立案的事实引用。
+
+**8. 共享基础设施类修复,入队前按「症状」复查 main,不按 issue 号。**
+`.github/workflows/duplicate-fix-guard.yml` 已经在两个 PR 声明**同一个 `Fixes #N`**
+时把后开的那个判红(#4588 的产物)。**要记清它的覆盖边界**:同仓、同一个 issue 号。
+
+今天这一例正好落在边界外 —— PR #4864(本线)与 PR #4856(另一车道)修的是**同一个
+基础设施问题**,却挂在不同 issue 号下,门禁看不到任何重复。更糟的是 #4856 先合了
+`testTimeout: 60_000`,**#4864 若合进去会把它降回 30s**,即一次静默回退。
+
+规则:CI 配置、超时、构建脚本、门禁这类**共享基础设施**的修复,入队前跑
+`git log --oneline origin/main -- <该文件>`,确认在飞期间没有别人已经修掉;真撞上了,
+先比**数值与作用域**再决定关哪个 —— 后合的那个可能是回退,不是改进。
 
 ## Multi-repo coordination (backend / frontend / cloud)
 
@@ -643,6 +710,46 @@ Verdict per issue:
   the feedback block filled (same claim, new dev agent). **Max 2 rework
   rounds** per issue; a third failure escalates instead.
 - **ESCALATE** — see step 8.
+
+#### 入队与落地 —— ACCEPT 之后才是最容易丢单的一段
+
+**A. 碰生成物的 PR,入队前必须先同步 + 整体重生成。** 第 3 步只保证**同一批内**
+file-disjoint;它管不到**先后两单都碰 `packages/spec` 生成物**的情形 —— 而协议变更
+几乎必然如此。`.gitattributes` 把这七条路径路由到 `merge=os-regen`(⛔ 别只记住前
+五条 —— 后两条是文档产物,同样会被静默吞):
+
+```
+packages/spec/spec-changes.json
+packages/spec/authorable-surface.json
+packages/spec/json-schema.manifest.json
+packages/spec/api-surface.json
+packages/spec/api-surface-signatures.json
+docs/protocol-upgrade-guide.md
+content/docs/references/**
+```
+
+权威清单是 `.gitattributes` 本身(`grep os-regen .gitattributes`),不是这份拷贝 ——
+它增删过,以文件为准。
+
+该驱动会让 merge **exit 0、零冲突标记**,却**静默丢掉一侧的改动** —— 只有重新生成
+才暴露。2026-08-03 一天内在 #4809 / #4846 / #4841 三个 PR 上各复现一次。要求 dev
+按顺序做,四步缺一不可:
+
+1. `git merge origin/main`(⛔ 禁 rebase / force-push,AGENTS.md §3)
+2. `git checkout origin/main -- <上述生成物>`
+3. **整体重新生成**(⛔ 绝不做文本合并)
+4. 断言**所有兄弟单的条目都还在** —— #4878 落地时是四条 step17 条目并存
+
+一个比「条目还在」更硬的旁证:去查**上一单的实现体**是否完好(#4878 合并后核
+`conversions/registry.ts` 里 #4391 的 D2 conversion 仍有 16 处命中)。条目是索引,
+实现体才是被吞的重灾区。驱动本身另有缺陷(把绝对路径写死进最后跑过 `pnpm install`
+的那个 worktree),见 #4868。
+
+**B. 跟到 MERGED 为止,不是跟到「已入队」为止。** 「auto-merge 已挂上」不是终点,
+维护者对此有过明确纠正。每轮同时读**队列分支**与 `origin/main`(Operational notes
+1);红了先分签名,再在「原样重投 / 推新提交 / 重新诊断」三者里选(notes 2 与 5)。
+落地之后**再核一次落地判据本身** —— 队列的合并同样走 os-regen 驱动,A 里那个静默
+吞并在队列合并这一步一样能发生。
 
 ### 8. Escalate uncertainties to the maintainer
 

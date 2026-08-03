@@ -90,7 +90,7 @@ Two corollaries:
 |---|---|---|
 | **not `.strict()`** | `retiredKey()` tombstone | `retiredKey(guidance)` in `packages/spec/src/shared/retired-key.ts` — `z.never({ error: () => guidance }).optional()`. Two channels: `tsc` (input type `never`) and the parse (the prescription itself, not "unrecognized key"). |
 | **`.strict()`** | delete the key + guidance map | Delete from the shape; add an entry to a `*_RETIRED_KEY_GUIDANCE` record consumed by a `z.core.$ZodErrorMap` passed as `z.object(shape, { error: … }).strict()`. Reference: `packages/spec/src/ai/tool.zod.ts:29-93,180`. Also `object.zod.ts`'s `UNKNOWN_KEY_GUIDANCE` for object top-level keys. |
-| **nothing parses it** | neither | A prescription nobody can receive is noise. Drop the baseline lines deliberately and say so in the changeset — precedent `packages/spec/src/kernel/plugin-runtime.zod.ts:243-248`. |
+| **nothing parses it** | neither | A prescription nobody can receive is noise. Drop the baseline lines deliberately and say so in the changeset — precedents #3896 and #4834 (PR #4878), both in the kernel plugin-runtime family. The explanatory block that survived the family's deletion is `packages/spec/src/kernel/index.ts` (search `plugin-runtime.zod`). |
 
 Never plain-delete a key from a non-strict schema: zod strips it silently and
 you have replaced one silent no-op with another (the #2169 "Mark Done does
@@ -126,6 +126,35 @@ Note template for a tombstone entry (verbatim house style, e.g.
 `liveness/action.json`):
 
 > `REMOVED <date> (#<issue>) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-<N> conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); <what to do instead>.`
+
+### ⚠ 四张 ratchet 的可见性,按路线是**相反**的 —— 拿错对照就会判错
+
+验收时最常问的一句是「四张 ratchet 零变化,正常吗?」。**答案完全取决于你走的是哪条
+路线**,2026-08-03 一天内两种形态各实测到一例,正好互为对照:
+
+| 退役形态 | `api-surface` / `authorable-surface` / `json-schema.manifest` / `api-surface-signatures` | 实例 |
+|---|---|---|
+| 枚举**值**收窄(def 还在,少一个 value) | **字节完全相同 —— 仪器上不可见** | #4391 `crypto.hash`(PR #4871) |
+| 整 **def** 删除(schema 不再被 emit) | **必须变化** | #4834(PR #4878):`api-surface −12` / `authorable −23` / `manifest −5` |
+
+为什么会这样:这四张 ratchet 记录的是**导出面与 def 的存在性**,不是 def 内部的取值
+集合。枚举少一个 value,导出的名字、schema 的 key、def 的数量都没变,于是四张全都
+一模一样。
+
+后果是双向的,两边都很贵:
+
+- 把「枚举值收窄」的零变化**判成异常** → 白折腾,以为 agent 漏做了生成物;
+- 把「整 def 删除」的零变化**判成正常** → 放过一个**根本没真正删掉**的 def。
+
+所以验收顺序是:**先确定路线,再决定该期待什么读数**,不要反过来用读数去猜路线。
+整 def 删除还有一条自证信号:`json-schema.manifest.json` 的 ratchet(#2978)会先开火,
+要求你**有意删除**对应的 manifest key;删完重跑,per-key ratchet 会自行判定为 #4650
+路径 3(`def no longer emitted by this build`)。这串输出本身就是路线的证据,留在 PR 里。
+
+枚举值收窄既然对四张 ratchet 不可见,它的处方就只能挂在**枚举自己的 `error` map**
+上、按 `issue.input` 分派(`packages/spec/src/data/hook-body.zod.ts` 的
+`HookBodyCapability`,沿用 `object.managedBy: 'system'` 的先例)—— 三条路线里没有一条
+适用于「def 存活、只少一个值」。
 
 ### Writing the guidance string
 
