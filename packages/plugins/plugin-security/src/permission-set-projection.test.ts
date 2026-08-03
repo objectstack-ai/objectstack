@@ -9,9 +9,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { PermissionSetSchema } from '@objectstack/spec/security';
 import {
   permissionSetRowFields,
   permissionSetBodyFromRow,
+  permissionSpecBodyKeys,
+  pickRowStateColumns,
   mergeRowPatchIntoBody,
   recordDiffersFromBody,
   upsertEnvPermissionSet,
@@ -81,6 +84,21 @@ function makeProtocol(ql: any, declared: Record<string, any> = {}) {
       projector = fn;
     },
     async saveMetaItem(req: { type: string; name: string; item: any; actor?: string }) {
+      // [#4669] The REAL `PermissionSetSchema`, exactly as `saveMetaItem` runs
+      // it (metadata-protocol/src/protocol.ts → `resolveOverlaySchema`), same
+      // `[invalid_metadata]` 422 envelope. Without this the mock accepts any
+      // object and the suite stays green while every real backfill fails —
+      // which is how a 100%-failing projection shipped.
+      const parsed = PermissionSetSchema.safeParse(req.item);
+      if (!parsed.success) {
+        const summary = parsed.error.issues
+          .map((i: any) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+          .join('; ');
+        const err: any = new Error(`[invalid_metadata] permission/${req.name} failed spec validation: ${summary}`);
+        err.code = 'INVALID_METADATA';
+        err.status = 422;
+        throw err;
+      }
       const existing = overlayFor(req.name);
       if (existing) existing.metadata = JSON.stringify(req.item);
       else {
@@ -157,9 +175,80 @@ describe('permissionSetBodyFromRow / permissionSetRowFields (round-trip)', () =>
     expect(body.rowLevelSecurity[0].using).toBe('org == current_user.org');
     expect(body.tabPermissions).toEqual({ crm_leads: 'visible' });
     expect(body.adminScope.businessUnit).toBe('Sales');
-    expect(body.active).toBe(true);
     // and projecting the rebuilt body changes nothing
     expect(recordDiffersFromBody(row, body)).toBe(false);
+  });
+});
+
+// ── The definition ⊆ spec contract (#4669) ─────────────────────────────────
+//
+// `sys_permission_set` carries columns the DEFINITION does not (`active`, the
+// timestamps, the provenance trio). Feeding them to `saveMetaItem` is what
+// #4001's `.strict()` schema rejects, and what took the ADR-0094 D4 backfill
+// to a 100% failure rate.
+
+describe('row→body projection keeps ONLY spec-declared keys (#4669)', () => {
+  const legacyRow = () => ({
+    id: 'ps_1',
+    name: 'organization_admin',
+    ...permissionSetRowFields(envBody()),
+    // every storage column a real row carries…
+    active: true,
+    managed_by: 'admin',
+    package_id: null,
+    customized: false,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-02-02T00:00:00Z',
+    // …plus a column this code has never heard of
+    some_future_column: 'whatever',
+  });
+
+  it('the whitelist is DERIVED from the spec schema, not transcribed', () => {
+    const keys = permissionSpecBodyKeys();
+    // identical to PermissionSetSchema's own shape — the single source
+    expect([...keys].sort()).toEqual(Object.keys((PermissionSetSchema as any).shape).sort());
+    expect(keys.has('objects')).toBe(true);
+    expect(keys.has('systemPermissions')).toBe(true);
+    expect(keys.has('adminScope')).toBe(true);
+    // `active` is a TABLE column, never a spec key — that is the whole bug
+    expect(keys.has('active')).toBe(false);
+  });
+
+  it('drops `active` and every other storage column from the projected body', () => {
+    const body = permissionSetBodyFromRow(legacyRow());
+    for (const col of ['active', 'managed_by', 'package_id', 'customized', 'created_at', 'updated_at', 'id', 'some_future_column']) {
+      expect(body, `storage column '${col}' must not enter the metadata body`).not.toHaveProperty(col);
+    }
+    // the definition itself survives intact
+    expect(body.objects).toEqual(envBody().objects);
+    expect(body.systemPermissions).toEqual(envBody().systemPermissions);
+  });
+
+  it('every key the projection emits is one the spec ACCEPTS (parsed by the real schema)', () => {
+    const parsed = PermissionSetSchema.safeParse(permissionSetBodyFromRow(legacyRow()));
+    expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true);
+    // …and the reverse guard: a spec RENAME must fail here rather than silently
+    // dropping the value at runtime.
+    const keys = permissionSpecBodyKeys();
+    for (const key of Object.keys(permissionSetBodyFromRow(legacyRow()))) {
+      expect(keys.has(key), `body key '${key}' is not declared by PermissionSetSchema`).toBe(true);
+    }
+  });
+
+  it('filters a body STORED before #4001 (data at rest can still carry `active`)', () => {
+    // a legacy sys_metadata overlay written while the schema still stripped it
+    const legacyStored = { ...envBody(), active: false, _packageId: 'com.x' };
+    const merged = mergeRowPatchIntoBody(legacyStored, { label: 'Renamed' });
+    expect(merged).not.toHaveProperty('active');
+    expect(merged).not.toHaveProperty('_packageId');
+    expect(PermissionSetSchema.safeParse(merged).success).toBe(true);
+  });
+
+  it('pickRowStateColumns isolates the record-state columns (normalized)', () => {
+    expect(pickRowStateColumns({ active: 'false', label: 'x' })).toEqual({ active: false });
+    expect(pickRowStateColumns({ active: true })).toEqual({ active: true });
+    expect(pickRowStateColumns({ label: 'x' })).toBeNull();
+    expect(pickRowStateColumns(null)).toBeNull();
   });
 });
 
@@ -176,16 +265,28 @@ describe('upsertEnvPermissionSet (ADR-0094 — record is a pure projection)', ()
     expect(JSON.parse(row.object_permissions)).toEqual(envBody().objects);
   });
 
-  it('projects all facets (and active) onto an existing env-authored row', async () => {
+  it('projects all facets onto an existing env-authored row', async () => {
     const ql = makeQl();
     ql.permRows.push({ id: 'ps_env', name: 'organization_admin', managed_by: 'user', system_permissions: '[]', active: true });
-    const r = await upsertEnvPermissionSet(ql, envBody({ active: false }));
+    const r = await upsertEnvPermissionSet(ql, envBody());
     expect(r.updated).toBe(1);
     const row = ql.permRows[0];
     expect(row.id).toBe('ps_env'); // id stable — junction FKs stay valid
     expect(JSON.parse(row.system_permissions)).toEqual(['setup.access', 'manage_org_users']);
     expect(JSON.parse(row.admin_scope).businessUnit).toBe('Sales');
-    expect(row.active).toBe(false);
+  });
+
+  it('[#4669] NEVER re-flips `active` from a body — it is row state, not definition', async () => {
+    // A body carrying `active` can only be legacy data at rest (pre-#4001) or a
+    // caller mistake. Projecting it would silently undo an admin's
+    // deactivate — the record's switch is the record's own.
+    const ql = makeQl();
+    ql.permRows.push({ id: 'ps_env', name: 'organization_admin', managed_by: 'user', system_permissions: '[]', active: false });
+    await upsertEnvPermissionSet(ql, { ...envBody(), active: true } as any);
+    expect(ql.permRows[0].active, 'a stale body must not re-activate a deactivated set').toBe(false);
+    // …and a record the projector CREATES starts active (column default).
+    await upsertEnvPermissionSet(ql, envBody({ name: 'fresh_set' }));
+    expect(ql.permRows.find((r: any) => r.name === 'fresh_set')?.active).toBe(true);
   });
 
   it('projects onto a legacy row with ABSENT provenance (platform default)', async () => {
@@ -426,13 +527,74 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
     // metadata is the store that changed…
     const overlay = JSON.parse(ql.metaRows[0].metadata);
     expect(overlay.systemPermissions).toEqual(['setup.access']);
-    expect(overlay.active).toBe(false);
     expect(overlay.objects).toEqual(envBody().objects); // unmentioned facets preserved
+    // [#4669] …but `active` rode along as a COLUMN, never as a body key: the
+    // definition stays spec-clean while the record's switch still flips.
+    expect(overlay).not.toHaveProperty('active');
     // …and the record followed via projection
     expect(JSON.parse(ql.permRows[0].system_permissions)).toEqual(['setup.access']);
     expect(ql.permRows[0].active).toBe(false);
     expect(ql.permRows[0].id).toBe(rowId);
     expect(opCtx.result?.id).toBe(rowId);
+  });
+
+  it('[#4669] the activate/deactivate ACTIONS write the column and nothing else', async () => {
+    // `sys-permission-set.object.ts` ships two `type:'api'` actions that PATCH
+    // /data/sys_permission_set/{id} with `bodyExtra: { active: true|false }`.
+    // A row-state-only patch is not a definition write: it passes through to
+    // the driver, mints no overlay, and touches the metadata store not at all.
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    registerPermissionSetProjection(protocol, { ql });
+    await protocol.saveMetaItem({ type: 'permission', name: 'organization_admin', item: envBody() });
+    const rowId = ql.permRows[0].id;
+    const savesBefore = protocol.saves.length;
+    const metaRowsBefore = JSON.stringify(ql.metaRows);
+    const mw = makeMiddleware(ql, protocol);
+
+    for (const active of [false, true]) {
+      const nextCalled = await run(mw, {
+        object: 'sys_permission_set', operation: 'update', context: userCtx,
+        data: { id: rowId, active },
+      });
+      expect(nextCalled, 'the driver performs the column write, with its ordinary semantics').toBe(true);
+    }
+    expect(protocol.saves.length, 'no metadata write for a pure row-state patch').toBe(savesBefore);
+    expect(JSON.stringify(ql.metaRows)).toBe(metaRowsBefore);
+  });
+
+  it('[#4669] deactivating a PACKAGE-owned set mints no customization overlay', async () => {
+    const ql = makeQl();
+    const declaredBody = envBody({ name: 'crm_rep', systemPermissions: ['pkg.baseline'] });
+    (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    const protocol = makeProtocol(ql, { crm_rep: declaredBody });
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push({ id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]', active: true });
+    const mw = makeMiddleware(ql, protocol);
+    const nextCalled = await run(mw, {
+      object: 'sys_permission_set', operation: 'update', context: userCtx, data: { id: 'ps_pkg', active: false },
+    });
+    expect(nextCalled).toBe(true);
+    expect(ql.metaRows.length, 'switching a packaged set off is not a customization of it').toBe(0);
+    expect(ql.permRows[0].customized).toBeUndefined();
+  });
+
+  it('[#4669] INSERT honours an explicit `active` on the record (Clone action sends one)', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    registerPermissionSetProjection(protocol, { ql });
+    const mw = makeMiddleware(ql, protocol);
+    const opCtx: any = {
+      object: 'sys_permission_set', operation: 'insert', context: userCtx,
+      data: {
+        name: 'support_agent', label: 'Support Agent', active: false,
+        object_permissions: JSON.stringify({ ticket: { allowRead: true } }),
+      },
+    };
+    await run(mw, opCtx);
+    expect(protocol.saves[0].item, 'the definition never carries row state').not.toHaveProperty('active');
+    expect(ql.permRows[0].active).toBe(false);
+    expect(opCtx.result?.active).toBe(false);
   });
 
   it('UPDATE that renames is rejected (the name is the metadata identity)', async () => {
@@ -570,12 +732,90 @@ describe('reconcilePermissionSetProjection', () => {
     });
     const out = await reconcilePermissionSetProjection(protocol, { ql });
     expect(out.backfilledIntoMetadata).toBe(1);
+    expect(out.backfillFailed).toBe(0);
     expect(ql.metaRows.length).toBe(1);
     const body = JSON.parse(ql.metaRows[0].metadata);
     expect(body.objects).toEqual({ ticket: { allowRead: true } });
     // second run: the overlay now exists — nothing to backfill again
     const out2 = await reconcilePermissionSetProjection(protocol, { ql });
     expect(out2.backfilledIntoMetadata).toBe(0);
+  });
+
+  it('[#4669] a row carrying the `active` STORAGE COLUMN backfills instead of failing spec validation', async () => {
+    // The reported symptom: every `sys_permission_set` row has an `active`
+    // column, `permissionSetBodyFromRow` handed it to `saveMetaItem`, and
+    // #4001's `.strict()` schema rejected all of them — a 100%-failing
+    // backfill behind one `warn`, with `backfilledIntoMetadata` stuck at 0.
+    const ql = makeQl();
+    const protocol = makeProtocol(ql); // validates with the real PermissionSetSchema
+    ql.permRows.push({
+      id: 'ps_d8', name: 'd8_qc_user', managed_by: 'admin',
+      active: true, customized: false, package_id: null,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
+      label: 'D8 QC User', ...permissionSetRowFields(envBody({ name: 'd8_qc_user' })),
+    });
+    const logs: Array<{ level: string; msg: string }> = [];
+    const logger = {
+      info: (m: string) => logs.push({ level: 'info', msg: m }),
+      warn: (m: string) => logs.push({ level: 'warn', msg: m }),
+      error: (m: string) => logs.push({ level: 'error', msg: m }),
+    };
+    const out = await reconcilePermissionSetProjection(protocol, { ql, logger });
+    expect(out.backfilledIntoMetadata).toBe(1);
+    expect(out.backfillFailed).toBe(0);
+    expect(logs.some((l) => /backfill into metadata failed|FAILED/i.test(l.msg))).toBe(false);
+    const stored = JSON.parse(ql.metaRows[0].metadata);
+    expect(stored).not.toHaveProperty('active');
+    expect(stored.name).toBe('d8_qc_user');
+  });
+
+  it('[#4669/#4632] a REAL backfill failure is loud: error level, counted, consequence + fix', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    // Not a key problem — the stored facet JSON itself is off-contract, so no
+    // amount of key-filtering saves it. This is the case that MUST shout.
+    ql.permRows.push({
+      id: 'ps_bad', name: 'broken_set', managed_by: 'admin', active: true,
+      label: 'Broken Set', object_permissions: JSON.stringify({ ticket: { allowRead: 'yes-please' } }),
+    });
+    ql.permRows.push({
+      id: 'ps_bad2', name: 'broken_set_2', managed_by: 'admin', active: true,
+      label: 'Broken Set 2', object_permissions: JSON.stringify({ ticket: { nonsense: true } }),
+    });
+    // `error` follows the platform Logger contract: (message, error?, meta?).
+    const logs: Array<{ level: string; msg: string; meta?: any; cause?: Error }> = [];
+    const logger = {
+      info: (m: string, meta?: any) => logs.push({ level: 'info', msg: m, meta }),
+      warn: (m: string, meta?: any) => logs.push({ level: 'warn', msg: m, meta }),
+      error: (m: string, cause?: Error, meta?: any) => logs.push({ level: 'error', msg: m, cause, meta }),
+    };
+    const out = await reconcilePermissionSetProjection(protocol, { ql, logger });
+
+    // counted in the RESULT — not only in a log line nobody reads
+    expect(out.backfillFailed).toBe(2);
+    expect(out.backfilledIntoMetadata).toBe(0);
+    expect(ql.metaRows.length).toBe(0);
+
+    // level: error, never warn/info for a durability degradation
+    const errors = logs.filter((l) => l.level === 'error');
+    expect(errors.length).toBeGreaterThan(0);
+    expect(logs.some((l) => l.level === 'warn' && /backfill/i.test(l.msg))).toBe(false);
+    // said ONCE, at the first failure — not once per failed write
+    const firstFailure = errors[0]!;
+    expect(errors.filter((l) => /backfill into metadata FAILED/.test(l.msg)).length).toBe(1);
+    // the consequence…
+    expect(firstFailure.msg).toMatch(/Nothing will look broken/);
+    expect(firstFailure.msg).toMatch(/re-provision/);
+    // …and the fix
+    expect(firstFailure.msg).toMatch(/Fix:/);
+    expect(firstFailure.meta?.name).toBe('broken_set');
+
+    // the summary carries the failure too — an `info` "reconciled" line over a
+    // failed backfill is the reassuring half-truth the rule exists to remove
+    const summary = errors.at(-1)!;
+    expect(summary.msg).toMatch(/2 FAILED backfill/);
+    expect(summary.meta?.failedNames).toEqual(['broken_set', 'broken_set_2']);
+    expect(logs.some((l) => l.level === 'info' && /reconciled/.test(l.msg))).toBe(false);
   });
 
   it('heals a record that drifted from an EXISTING metadata definition (metadata wins)', async () => {

@@ -37,6 +37,8 @@
  * runtime-created sets a home package.
  */
 
+import { PermissionSetSchema } from '@objectstack/spec/security';
+
 export const SYSTEM_CTX = { isSystem: true };
 
 export function genId(prefix: string): string {
@@ -61,6 +63,17 @@ export async function tryUpdate(ql: any, object: string, data: any): Promise<boo
 export interface ProjectionLogger {
   info?: (m: string, meta?: Record<string, any>) => void;
   warn?: (m: string, meta?: Record<string, any>) => void;
+  /**
+   * Durability-degradation channel (AGENTS.md "Degradation log levels", #4632):
+   * a metadata write that was supposed to land and did not is an `error`, not a
+   * `warn` — nothing looks broken afterwards, which is exactly why the failure
+   * has to be loud.
+   *
+   * Signature matches `Logger.error` in `@objectstack/spec/contracts`
+   * (`message, error?, meta?` — the cause is its own argument), so the kernel
+   * logger satisfies this interface as-is.
+   */
+  error?: (m: string, error?: Error, meta?: Record<string, any>) => void;
 }
 
 /** Aggregated outcome of a projection pass (shared with the boot seeders). */
@@ -105,15 +118,81 @@ const parseMaybeJson = (v: any, fallback: any): any => {
 const asBool = (v: any): boolean => !(v === false || v === 0 || v === '0' || v === 'false');
 
 /**
+ * `sys_permission_set` columns that are ROW STATE, not part of the metadata
+ * DEFINITION — the spec declares no such key, so they must never travel into a
+ * metadata body (#4669). Each entry maps a column to the normalizer the record
+ * expects, so the data door can write it straight onto the record.
+ *
+ * `active` is the on/off switch the Setup list views filter on and the two
+ * lifecycle actions toggle (`bodyExtra: { active: true|false }` in
+ * `objects/sys-permission-set.object.ts`). It is runtime state OF THE RECORD,
+ * never a capability boundary its author declared — which is precisely why it
+ * is not, and should not be, a key on `PermissionSetSchema`.
+ */
+const ROW_STATE_COLUMNS: Readonly<Record<string, (v: any) => any>> = {
+  active: asBool,
+};
+
+/**
+ * The body keys the permission SPEC declares, read from the Zod schema's own
+ * shape — derived, never transcribed (#4669).
+ *
+ * `sys_permission_set` is a projection of a metadata definition, but the TABLE
+ * carries columns the definition does not: {@link ROW_STATE_COLUMNS}, the
+ * timestamps, and the `managed_by` / `package_id` / `customized` provenance.
+ * Until #4001 a row-derived body that dragged those along still parsed —
+ * `PermissionSetSchema` stripped the extras silently — so handing a whole row
+ * to `saveMetaItem` appeared to work. #4001 sealed the schema `.strict()`, and
+ * every such body began failing validation with `[invalid_metadata] …
+ * Unrecognized key(s) on this permission set: 'active'`, which took the
+ * ADR-0094 D4 boot backfill to a 100% failure rate.
+ *
+ * Derived from `.shape` rather than hand-listed because a literal list here
+ * would go stale the moment the spec grows a key — silently dropping it from
+ * every projected body, i.e. reproducing the very defect this fixes one layer
+ * over. `permission-set-projection.test.ts` additionally pins that every key
+ * the row→body seams can emit is one the spec declares, so a spec RENAME fails
+ * a test instead of quietly losing the value at runtime.
+ *
+ * Resolved on first use, not at module load: `PermissionSetSchema` is a
+ * {@link lazySchema} proxy and touching `.shape` at import time would
+ * materialize it for every process that merely loads this module.
+ */
+let cachedSpecBodyKeys: ReadonlySet<string> | null = null;
+export function permissionSpecBodyKeys(): ReadonlySet<string> {
+  return (cachedSpecBodyKeys ??= new Set(
+    Object.keys((PermissionSetSchema as unknown as { shape?: Record<string, unknown> }).shape ?? {}),
+  ));
+}
+
+/**
+ * Keep only what the permission spec declares. THE choke point every row→body
+ * seam passes through, so no storage column can reach `saveMetaItem` — neither
+ * from a live row nor from a body STORED before #4001 (data at rest written
+ * while the schema still stripped the extras can still carry `active`).
+ */
+function pickSpecDeclaredKeys(candidate: Record<string, any>): Record<string, any> {
+  const keys = permissionSpecBodyKeys();
+  const body: Record<string, any> = {};
+  for (const [key, value] of Object.entries(candidate)) {
+    if (keys.has(key)) body[key] = value;
+  }
+  return body;
+}
+
+/**
  * Inverse of {@link permissionSetRowFields}: rebuild a PermissionSet body from
  * a `sys_permission_set` row (snake_case JSON-string columns → camelCase
  * body). Used by the one-time boot backfill (a legacy data-door-created
  * record becomes a metadata item) and by the data-door update merge when a
  * name has no metadata presence yet.
+ *
+ * The result is filtered through {@link pickSpecDeclaredKeys}: a DEFINITION is
+ * what the spec declares, and nothing else off the row goes with it (#4669).
  */
 export function permissionSetBodyFromRow(row: any): any {
   const adminScope = row?.admin_scope ? parseMaybeJson(row.admin_scope, undefined) : undefined;
-  return {
+  return pickSpecDeclaredKeys({
     name: row?.name,
     label: row?.label ?? row?.name,
     ...(row?.description != null ? { description: row.description } : {}),
@@ -123,8 +202,34 @@ export function permissionSetBodyFromRow(row: any): any {
     rowLevelSecurity: parseMaybeJson(row?.row_level_security, []),
     tabPermissions: parseMaybeJson(row?.tab_permissions, {}),
     ...(adminScope ? { adminScope } : {}),
-    ...(row?.active != null ? { active: asBool(row.active) } : {}),
-  };
+  });
+}
+
+/**
+ * The row-state columns a data-door payload carries, normalized for the
+ * record — `null` when it carries none. These bypass the metadata store
+ * entirely: they are the record's own state (#4669).
+ */
+export function pickRowStateColumns(payload: any): Record<string, any> | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const out: Record<string, any> = {};
+  for (const [col, normalize] of Object.entries(ROW_STATE_COLUMNS)) {
+    if (col in payload) out[col] = normalize(payload[col]);
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Does this data-door payload touch the DEFINITION at all? Identity (`id` /
+ * `name`) and {@link ROW_STATE_COLUMNS} do not; anything else is treated as a
+ * definition edit and routes through the metadata store (an unrecognized
+ * column therefore keeps the pre-#4669 behavior rather than silently skipping
+ * the write-through).
+ */
+function touchesDefinition(payload: Record<string, any>): boolean {
+  return Object.keys(payload).some(
+    (k) => k !== 'id' && k !== 'name' && !(k in ROW_STATE_COLUMNS),
+  );
 }
 
 /**
@@ -222,7 +327,13 @@ export async function upsertEnvPermissionSet(
       id: genId('ps'),
       name: ps.name,
       ...permissionSetRowFields(ps),
-      active: ps.active != null ? asBool(ps.active) : true,
+      // [#4669] `active` is ROW STATE, never read from the definition body: a
+      // new record starts active (same as the package seeder and the field's
+      // own `defaultValue`), and the data door writes the column directly
+      // afterwards. Taking it from the body would also let a body STORED
+      // before #4001 — which may still carry a stale `active` — silently
+      // re-flip a record an admin had just deactivated.
+      active: true,
       // [A4 #2920] Unified provenance vocab: an env/Studio-authored set is
       // ADMIN-owned (formerly stamped 'user'). No runtime path branches on the
       // value except the 'package' guard, so this is a pure vocab rename.
@@ -236,8 +347,9 @@ export async function upsertEnvPermissionSet(
   // Facets follow the effective body; provenance columns are never touched
   // here — a package-owned row keeps its owner while carrying the overlay's
   // customization, and an env row keeps its user/platform/legacy provenance.
+  // [#4669] Facets only — `active` is row state and is NOT projected from the
+  // body (a projection pass must never re-flip a record's on/off switch).
   const patch: Record<string, any> = { id: existing.id, ...permissionSetRowFields(ps) };
-  if (ps.active != null) patch.active = asBool(ps.active);
   // Only stamp `customized` on package-owned rows (an overlay of a packaged
   // set). For env rows the concept doesn't apply — clear any stale flag.
   if (customized !== undefined) {
@@ -468,7 +580,17 @@ async function resolveTargetRows(ql: any, opCtx: any): Promise<any[]> {
   return [];
 }
 
-/** Column-patch → body-key merge for the data-door update redirect. */
+/**
+ * Column-patch → body-key merge for the data-door update redirect.
+ *
+ * Row-state columns ({@link ROW_STATE_COLUMNS}) are deliberately NOT merged —
+ * they are the record's state, applied to the record itself by the
+ * write-through (#4669). The merged result is filtered through
+ * {@link pickSpecDeclaredKeys} because `base` may be a body STORED before
+ * #4001 sealed the schema and can still carry a stripped-at-the-time `active`;
+ * without the filter that legacy row would make every subsequent data-door
+ * edit of the set fail spec validation.
+ */
 export function mergeRowPatchIntoBody(base: any, patch: Record<string, any>): any {
   const body: any = { ...stripDecorations(base) };
   if ('label' in patch) body.label = patch.label;
@@ -476,7 +598,6 @@ export function mergeRowPatchIntoBody(base: any, patch: Record<string, any>): an
     if (patch.description == null) delete body.description;
     else body.description = patch.description;
   }
-  if ('active' in patch) body.active = asBool(patch.active);
   if ('object_permissions' in patch) body.objects = parseMaybeJson(patch.object_permissions, {});
   if ('field_permissions' in patch) body.fields = parseMaybeJson(patch.field_permissions, {});
   if ('system_permissions' in patch) body.systemPermissions = parseMaybeJson(patch.system_permissions, []);
@@ -488,7 +609,7 @@ export function mergeRowPatchIntoBody(base: any, patch: Record<string, any>): an
     else body.adminScope = scope;
   }
   if (!body.objects || typeof body.objects !== 'object') body.objects = {};
-  return body;
+  return pickSpecDeclaredKeys(body);
 }
 
 /** Effective (layered, overlay-wins) body for a record's name, else the row itself. */
@@ -591,9 +712,19 @@ export function createPermissionSetWriteThrough(
         try {
           await protocol.saveMetaItem({ type: 'permission', name: row.name, item: permissionSetBodyFromRow(row), ...actorArg });
         } catch (e) {
-          logger?.warn?.('[security] failed to re-author restored permission set into metadata', {
-            name: row.name, error: (e as Error)?.message,
-          });
+          // [#4632 — AGENTS.md "Degradation log levels"] Durability, not
+          // functionality: the record is back and lists normally, but its
+          // definition never returned to the metadata store — the stores
+          // disagree silently until someone notices the set behaves like a
+          // legacy data-door row.
+          logger?.error?.(
+            '[security] restored permission set was NOT re-authored into metadata (ADR-0094 D3) — the record is ' +
+            'back and looks healthy, but the metadata store has no definition for it, so a metadata-driven ' +
+            're-provision will not recreate it. Fix: make the record body spec-valid (the error names the ' +
+            'offending key) and re-save the set through Setup, or re-run boot reconciliation.',
+            e as Error,
+            { name: row.name },
+          );
         }
       }
       return;
@@ -619,7 +750,15 @@ export function createPermissionSetWriteThrough(
         // (PermissionSetSchema) runs inside saveMetaItem and rejects an
         // off-contract body with a structured 422.
         await protocol.saveMetaItem({ type: 'permission', name, item: permissionSetBodyFromRow(row), ...actorArg });
-        results.push((await projectAndFetch(protocol, name)) ?? { name });
+        const record: any = (await projectAndFetch(protocol, name)) ?? { name };
+        // [#4669] Row state does not round-trip through metadata — the
+        // projector created the record with the column default, so an explicit
+        // `active` in the payload (the Clone action sends one) is applied here.
+        const rowState = pickRowStateColumns(row);
+        if (rowState && record.id && await tryUpdate(ql, 'sys_permission_set', { id: record.id, ...rowState })) {
+          Object.assign(record, rowState);
+        }
+        results.push(record);
       }
       opCtx.result = Array.isArray(opCtx.data) ? results : results[0];
       return; // driver write intentionally skipped — the record is projector-owned
@@ -639,12 +778,23 @@ export function createPermissionSetWriteThrough(
         err.status = 400;
         throw err;
       }
+      // [#4669] A patch that touches ONLY row state (`active` — what the
+      // activate/deactivate actions send as `bodyExtra`) is not a definition
+      // write at all: it goes to the driver untouched, so the column write
+      // keeps its ordinary engine semantics (history, updated_at, FLS) and no
+      // spurious "customization" overlay is minted on a packaged set. Routing
+      // it through the metadata store is what #4001's strict schema rejects.
+      if (!touchesDefinition(patch)) return next();
+      const rowState = pickRowStateColumns(patch);
       const results: any[] = [];
       for (const row of targets) {
         const base = await effectiveBodyForRow(protocol, ql, row);
         const body = mergeRowPatchIntoBody(base, patch);
         body.name = row.name;
         await protocol.saveMetaItem({ type: 'permission', name: row.name, item: body, ...actorArg });
+        // Row state rides along on the same patch but lands on the record, not
+        // in the definition (the projector above never touches these columns).
+        if (rowState) await tryUpdate(ql, 'sys_permission_set', { id: row.id, ...rowState });
         results.push((await projectAndFetch(protocol, row.name)) ?? { id: row.id, name: row.name });
       }
       opCtx.result = results.length === 1 ? results[0] : results;
@@ -684,6 +834,14 @@ export interface ProjectionReconcileOutcome {
   backfilledIntoMetadata: number;
   /** Records re-projected because they drifted from the effective body. */
   driftHealed: number;
+  /**
+   * Records whose backfill FAILED — each one is a definition the metadata
+   * store does not have and now never got. Counted (not just logged) so a
+   * caller/test can see the degradation without grepping a log: #4669 stayed
+   * invisible for a whole release precisely because the only signal was a
+   * `warn` and the counters stayed at zero.
+   */
+  backfillFailed: number;
 }
 
 /** Compare a record's projected columns against a body — true when they differ. */
@@ -695,7 +853,8 @@ export function recordDiffersFromBody(row: any, body: any): boolean {
   }
   if ((row?.label ?? null) !== (want.label ?? null)) return true;
   if ((row?.description ?? null) !== (want.description ?? null)) return true;
-  if (body?.active != null && asBool(row?.active) !== asBool(body.active)) return true;
+  // [#4669] `active` is row state, not a spec key — a definition body cannot
+  // declare it, so a record is never "drifted" on account of it.
   return false;
 }
 
@@ -718,7 +877,10 @@ export async function reconcilePermissionSetProjection(
   protocol: any,
   deps: ProjectionDeps,
 ): Promise<ProjectionReconcileOutcome> {
-  const out: ProjectionReconcileOutcome = { projectedFromMetadata: 0, backfilledIntoMetadata: 0, driftHealed: 0 };
+  const out: ProjectionReconcileOutcome = {
+    projectedFromMetadata: 0, backfilledIntoMetadata: 0, driftHealed: 0, backfillFailed: 0,
+  };
+  const failedNames: string[] = [];
   const { ql, logger } = deps;
   if (!ql || typeof ql.find !== 'function' || !protocol || typeof protocol.getMetaItemLayered !== 'function') {
     return out;
@@ -768,9 +930,30 @@ export async function reconcilePermissionSetProjection(
         });
         out.backfilledIntoMetadata += 1;
       } catch (e) {
-        logger?.warn?.('[security] permission-set backfill into metadata failed (ADR-0094 D4)', {
-          name: row.name, error: (e as Error)?.message,
-        });
+        out.backfillFailed += 1;
+        failedNames.push(String(row.name));
+        // [#4632 — AGENTS.md "Degradation log levels"] DURABILITY degradation:
+        // the record keeps listing and keeps resolving, so nothing looks
+        // broken — while the definition it is supposed to project stays absent
+        // from the only authoritative store. Said ONCE, at the first failure,
+        // with the consequence and the fix; the rest are counted and named in
+        // the summary line below. #4669: this was a `warn` with no counter,
+        // which is why a 100%-failing backfill sat green for a release.
+        if (out.backfillFailed === 1) {
+          logger?.error?.(
+            '[security] permission-set backfill into metadata FAILED (ADR-0094 D4) — this environment has ' +
+            '`sys_permission_set` records with NO metadata definition backing them, and the one-time backfill ' +
+            'did not write one. Nothing will look broken: the records still list in Setup and the evaluator ' +
+            'still resolves them from the table — but the definitions are absent from the metadata store, so a ' +
+            'metadata-driven re-provision (fresh environment, package reinstall, `meta resync`) recreates none ' +
+            'of them, and every boot retries and fails identically. Fix: make the record body spec-valid — the ' +
+            'error below names the offending key; `permissionSetBodyFromRow()` already drops storage columns ' +
+            '(`active`, timestamps, provenance), so a rejection here means the stored facet JSON itself is ' +
+            'off-contract — then reboot to re-run reconciliation, or delete the orphan record.',
+            e as Error,
+            { name: row.name },
+          );
+        }
       }
     } else if (recordDiffersFromBody(row, effective)) {
       // These names have NO env overlay (skipped above), so the effective
@@ -788,6 +971,19 @@ export async function reconcilePermissionSetProjection(
     }
   }
 
-  logger?.info?.('[security] sys_permission_set projection reconciled (ADR-0094 D4)', { ...out });
+  if (out.backfillFailed > 0) {
+    // The summary carries the same level as the degradation it summarizes —
+    // an `info` "reconciled" line over a failed backfill is the reassuring
+    // half-truth this rule exists to remove.
+    logger?.error?.(
+      `[security] sys_permission_set projection reconciled with ${out.backfillFailed} FAILED backfill(s) ` +
+      '(ADR-0094 D4) — those records have no metadata definition and will not survive a re-provision. ' +
+      'See the first-failure error above for the offending key and the fix.',
+      undefined,
+      { ...out, failedNames: failedNames.slice(0, 10) },
+    );
+  } else {
+    logger?.info?.('[security] sys_permission_set projection reconciled (ADR-0094 D4)', { ...out });
+  }
   return out;
 }
