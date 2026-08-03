@@ -94,6 +94,24 @@
  * field-level predicates evaluate far more often anyway, since their fault mode
  * was the same missing key.
  *
+ * ## `readonlyWhen`: the UNBOUND-ROOT case is fail-CLOSED (#4889)
+ *
+ * One carve-out was added to the paragraph above, and only one. A
+ * `readonlyWhen` predicate that faults because it names a scope ROOT this
+ * operation did not bind — `parent.status == 'paid'` with no master-detail
+ * header in hand — is not a broken predicate; it is a supported construct the
+ * evaluation site could not answer, and answering "not locked" writes a field
+ * the author declared frozen. That single case now resolves to LOCKED. Every
+ * OTHER `readonlyWhen` fault (undeclared key, null overload, parse error) keeps
+ * the fail-open policy this section describes, and `requiredWhen` / option
+ * `visibleWhen` are untouched. See {@link isReadonlyWhenLocked}.
+ *
+ * This is a NARROWING of ADR-0058 D5's "non-security predicate ⇒ fail soft"
+ * line, recorded as an addendum on that ADR alongside the same narrowing #4649
+ * and #4775 made at the two neighbouring write gates. Do not widen it back on
+ * the grounds that it reads inconsistent with D5's table — the table is what
+ * was amended, and ADR-0057 D10 (server enforces, client is courtesy) is why.
+ *
  * One consequence worth knowing before writing a predicate: because a declared
  * field is now always present, `has(record.<declared field>)` is uniformly TRUE
  * (a materialised `null` is a present key holding null — this is CEL's rule,
@@ -115,7 +133,7 @@
  * evaluator once per matched row — one payload, N priors (#3106).
  */
 
-import { ExpressionEngine } from '@objectstack/formula';
+import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 import Ajv, { type ValidateFunction } from 'ajv';
@@ -130,7 +148,7 @@ import {
 // that evaluate CEL against "the record" cannot drift apart on what that record
 // contains — see the module's own doc comment.
 import { materializeDeclaredFields } from '../declared-fields.js';
-import { describeCelFault } from '../cel-fault.js';
+import { describeCelFault, unknownVariableOf } from '../cel-fault.js';
 
 type Mode = 'insert' | 'update';
 
@@ -257,17 +275,36 @@ export function needsPriorRecord(
 }
 
 /**
+ * The master-detail header a `parent`-scoped predicate reads (#4889). `null`
+ * means "this operation could not resolve one" — which is NOT the same as
+ * "there is none to read": see {@link isReadonlyWhenLocked} for why the two
+ * resolve to opposite verdicts.
+ */
+export type ParentBinding = Record<string, unknown> | null | undefined;
+
+/**
  * Strip fields whose `readonlyWhen` CEL predicate is TRUE for the (merged)
  * record from an UPDATE payload — the field is locked, so an incoming change is
  * ignored (the persisted value is kept) rather than rejected. Returns the same
  * object when nothing is locked, else a shallow copy with the locked keys
- * removed. A broken predicate is fail-open (the change is allowed through).
+ * removed.
+ *
+ * `parent` (#4889) is the master-detail header row, bound for a detail object
+ * so a `parent.<field>` predicate — the documented "once the header invoice is
+ * Paid, its lines are frozen" lock — evaluates here and not only in the client
+ * grid. The engine resolves it (it owns the driver) and passes it in; pass
+ * `undefined` when the object is not a detail or the payload's predicates never
+ * name `parent`, and the binding is simply absent.
+ *
+ * A predicate that faults is fail-open (the change is allowed through) EXCEPT
+ * when the fault is an unbound scope root — see {@link isReadonlyWhenLocked}.
  */
 export function stripReadonlyWhenFields(
   objectSchema: { fields?: Record<string, ConditionalFieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
   previous: Record<string, unknown> | undefined | null,
   logger?: EvaluateRulesOptions['logger'],
+  parent?: ParentBinding,
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
@@ -275,7 +312,7 @@ export function stripReadonlyWhenFields(
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
-    if (isReadonlyWhenLocked(def, merged, previous ?? undefined, name, logger)) {
+    if (isReadonlyWhenLocked(def, merged, previous ?? undefined, name, logger, parent)) {
       if (result === data) result = { ...data };
       delete (result as Record<string, unknown>)[name];
       logger?.warn?.(`Field '${name}' is read-only (readonlyWhen) — ignoring incoming change`);
@@ -287,10 +324,38 @@ export function stripReadonlyWhenFields(
 /**
  * Evaluate one field's `readonlyWhen` predicate against a (merged) record.
  * TRUE ⇒ the field is locked for that record and the incoming change must be
- * dropped. A broken predicate is fail-open (returns `false` — the change is
- * allowed through), matching the strip's historical behaviour. Shared by the
- * single-id ({@link stripReadonlyWhenFields}) and bulk
+ * dropped. Shared by the single-id ({@link stripReadonlyWhenFields}) and bulk
  * ({@link stripReadonlyWhenFieldsMulti}) strips.
+ *
+ * ## Two faults, two answers (#4889)
+ *
+ * Until #4889 every fault took one exit — WARN and `false`, "not locked" — and
+ * that single answer had to serve two very different situations:
+ *
+ *  - **The predicate is broken on this record.** A typo'd key, a `null`
+ *    ordering overload, a parse error. The author has a bug; the field is not
+ *    demonstrably locked; the historical (and deliberate, documented) policy is
+ *    fail-OPEN. Unchanged here — an engine fault the author cannot act on must
+ *    not brick every write to the object.
+ *
+ *  - **The predicate names a ROOT this operation did not bind.** `parent.status
+ *    == 'paid'` where no master-detail header was resolved. The expression is
+ *    well-formed and spec-sanctioned; nothing about the RECORD says the field
+ *    is unlocked — we simply could not ask. Waving it through inverts the
+ *    guarantee: a field the author declared locked is written, the API answers
+ *    200, and the client grid still draws the cell as read-only, so the UI and
+ *    the database disagree with nobody told. ADR-0057 D10 puts enforcement on
+ *    the server; a lock that fails open leaves enforcement in the courtesy
+ *    layer. So an unbound root resolves to LOCKED — conservative toward the
+ *    author's declared intent, and the direction #4649 (validation predicates)
+ *    and #4775 (hook conditions) already took for their own unevaluable case.
+ *
+ * The two are distinguishable without guessing: cel-js says `Unknown variable:
+ * <root>` for the second and `No such key` / an overload / a parse fault for
+ * the first ({@link unknownVariableOf}). This is a LAST resort, not the plan —
+ * `@objectstack/lint` rejects a `parent`-scoped `readonlyWhen` on an object with
+ * no master-detail relation at build time, so the common authoring mistake never
+ * reaches a runtime this branch has to judge.
  */
 function isReadonlyWhenLocked(
   def: ConditionalFieldDef,
@@ -298,17 +363,76 @@ function isReadonlyWhenLocked(
   previous: Record<string, unknown> | undefined,
   name: string,
   logger?: EvaluateRulesOptions['logger'],
+  parent?: ParentBinding,
 ): boolean {
   const res = ExpressionEngine.evaluate<boolean>(toExpression(def.readonlyWhen!), {
     record: merged,
     previous,
+    // Bound ONLY when resolved. An absent binding is what makes the unbound-root
+    // fault below reachable, and that fault is the signal — binding `null` here
+    // would turn it into a `No such key` and re-open the fail-open hole.
+    ...(parent != null ? { extra: { parent } } : {}),
   });
   if (!res.ok) {
+    const unbound = unknownVariableOf(res.error);
+    if (unbound) {
+      logger?.warn?.(
+        `readonlyWhen for '${name}' reads '${unbound}', which is not bound for this operation — ` +
+          `treating the field as LOCKED (the declared lock is not waived because it could not be evaluated). ` +
+          `A 'parent'-scoped predicate needs the object to declare exactly one master_detail relationship.`,
+      );
+      return true;
+    }
     logger?.warn?.(`readonlyWhen for '${name}' failed to evaluate — change allowed through`);
     return false;
   }
   return res.value === true;
 }
+
+/**
+ * True when at least one `readonlyWhen` predicate the UPDATE payload touches
+ * reads the `parent` root (#4889) — the gate the engine uses to decide whether
+ * to resolve the master-detail header at all, so an object with no
+ * parent-scoped lock pays nothing.
+ *
+ * Decided from the parsed CEL AST ({@link collectCelRootIdentifiers}), not a
+ * substring scan, so a field literally named `parent_id` or a string constant
+ * `'parent'` cannot be mistaken for the binding. A predicate that does not
+ * parse answers `false`: it will fault at evaluation, where the fail-open /
+ * fail-closed judgment already lives — this gate does not duplicate it.
+ */
+export function hasParentScopedReadonlyWhenInPayload(
+  objectSchema: { fields?: Record<string, ConditionalFieldDef> } | undefined | null,
+  data: Record<string, unknown> | undefined | null,
+): boolean {
+  const fields = objectSchema?.fields;
+  if (!fields || !data) return false;
+  for (const [name, def] of Object.entries(fields)) {
+    if (!def?.readonlyWhen || !(name in data)) continue;
+    if (readsParentRoot(def.readonlyWhen)) return true;
+  }
+  return false;
+}
+
+/** Parsed-root memo — metadata predicates are a small, fixed set of sources. */
+const parentRootCache = new Map<string, boolean>();
+
+/** Does this predicate's CEL source reference the `parent` root? */
+function readsParentRoot(cond: string | Expression): boolean {
+  const expr = toExpression(cond);
+  if (expr.dialect !== 'cel') return false;
+  const source = typeof expr.source === 'string' ? expr.source : '';
+  if (!source) return false;
+  const cached = parentRootCache.get(source);
+  if (cached !== undefined) return cached;
+  const roots = collectCelRootIdentifiers(source);
+  const answer = roots.ok && roots.roots.includes(PARENT_ROOT);
+  parentRootCache.set(source, answer);
+  return answer;
+}
+
+/** The CEL scope root a master-detail header is bound under (`cel-engine.ts`). */
+const PARENT_ROOT = 'parent';
 
 /**
  * True when the UPDATE payload writes at least one field that declares a
@@ -343,6 +467,13 @@ export function hasReadonlyWhenInPayload(
  * predicate is fail-open for that row. INSERT is exempt (update path only),
  * symmetric with the single-id strip.
  *
+ * `parentForRow` (#4889) supplies each matched row's master-detail header, since
+ * N rows can hang off N different masters — the bulk counterpart of the
+ * single-id `parent` binding. The engine batch-reads the headers once and hands
+ * over a lookup; `undefined` (or a resolver returning nothing) leaves the
+ * binding absent for that row, which {@link isReadonlyWhenLocked} reads as
+ * LOCKED for a predicate that needs it.
+ *
  * Returns the same object when nothing is stripped, else a shallow copy with the
  * locked keys removed.
  */
@@ -351,6 +482,7 @@ export function stripReadonlyWhenFieldsMulti(
   data: Record<string, unknown> | undefined | null,
   priorRows: ReadonlyArray<Record<string, unknown>> | undefined | null,
   logger?: EvaluateRulesOptions['logger'],
+  parentForRow?: (row: Record<string, unknown> | undefined) => ParentBinding,
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
@@ -359,7 +491,14 @@ export function stripReadonlyWhenFieldsMulti(
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
     const lockedInSomeRow = rows.some((row) =>
-      isReadonlyWhenLocked(def, { ...(row ?? {}), ...data }, row ?? undefined, name, logger),
+      isReadonlyWhenLocked(
+        def,
+        { ...(row ?? {}), ...data },
+        row ?? undefined,
+        name,
+        logger,
+        parentForRow?.(row ?? undefined),
+      ),
     );
     if (lockedInSomeRow) {
       if (result === data) result = { ...data };

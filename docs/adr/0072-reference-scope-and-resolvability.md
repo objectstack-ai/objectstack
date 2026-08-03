@@ -53,7 +53,7 @@ for (const [k, v] of Object.entries(context.record))
 | Flow / edge / decision | `service-automation/src/engine.ts:946-964` | `record`,`previous`, **flattened record fields**, flow `variables`, node outputs, `$runId`/`$flowName` | bare **and** `record.x` |
 | Formula field (`Field.expression`) | `objectql/src/engine.ts:119` | `{ now, timezone, user, org, record }` | `record.x` only |
 | Validation (`script`/`cross_field`/`when`) | `objectql/src/validation/rule-validator.ts:289` | `{ record: {...previous,...patch}, previous }` | `record.x` only |
-| Field `visibleWhen`/`requiredWhen`/`readonlyWhen` | `objectql/src/validation/rule-validator.ts:178-190` | merged `record`, `previous`, (`parent` for master-detail) | `record.x` only |
+| Field `visibleWhen`/`requiredWhen`/`readonlyWhen` | `objectql/src/validation/rule-validator.ts:178-190` | merged `record`, `previous`, (`parent` for master-detail — server-bound for `readonlyWhen` since #4889; the client grid binds it for all three) | `record.x` only |
 | Hook lifecycle `condition` | `objectql/src/hook-wrappers.ts:84` | `{ record }` | `record.x` only |
 | RLS `using`/`check` (compile→filter) | `plugin-security/src/rls-compiler.ts:259` | `current_user.*` (+ pre-resolved membership), record field names | field operands; pushdown subset only |
 | Sharing-rule `condition` (compile→filter) | `plugin-sharing/src/bootstrap-declared-sharing-rules.ts:61` | record fields only | field operands; pushdown subset only |

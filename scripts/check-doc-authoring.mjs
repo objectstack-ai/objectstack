@@ -27,12 +27,37 @@
 // next subdirectory added under it is covered on arrival rather than missed the
 // same way twice.
 //
+// ## `docs/` is corpus too — but not all of it (#4929)
+//
+// #4916 fixed one direction (a root declared but no longer resolvable). This is
+// the symmetric one: a directory that really exists, really teaches metadata
+// authoring, and was simply never declared. `docs/` was that directory —
+// `docs/notes/crm-development-standards.mdx` alone carries 16 ts blocks, and
+// ADR-0010 / 0015 / 0017 / 0057 plus `docs/design/permission-model.md` all show
+// `defineX(...)` calls. AGENTS.md Prime Directive #13 sends every agent to grep
+// the ADRs before changing behaviour under them, so a bare literal in an ADR is
+// copied into app code exactly the way one in `skills/` is. It was added while
+// the corpus was still at zero violations: that window is the cheapest possible
+// moment to take a directory in, and once it closes the same decision becomes an
+// argument about either rewriting history or granting an exemption.
+//
+// Three subtrees are exempt **by path** below. They are process records, not
+// corpus — read the SKIP_PATHS comment for why that is a permanent exemption and
+// not a backlog item.
+//
+// The root is `docs`, not the three live subdirectories, for the same reason
+// #4913 took `.claude` rather than `.claude/skills`: a new subdirectory under it
+// is covered on arrival instead of being missed the same way twice. That also
+// covers the hand-written top-level guides (`docs/protocol-upgrade-guide.md`,
+// `docs/upgrading-to-11.md`, …), which are live instructions to the reader and
+// belong in scope.
+//
 // ## Dead roots are a hard error (#4916)
 //
 // `collectFiles()` used to walk each root inside `try { ... } catch {}`. Rename,
 // move or delete any one of them and the ENOENT was swallowed in place: the scan
 // finished the *remaining* roots and printed `✓ ... N files clean`, exit 0. From
-// outside, "all three roots are clean" and "one root was never opened" are the
+// outside, "every root is clean" and "one root was never opened" are the
 // same output with a smaller N, and nobody reads N. So every ROOT is now resolved
 // at startup and an unresolvable one fails the gate **by name**. There is no
 // optional root and no empty catch — see `assertRootsResolvable` for why a
@@ -43,7 +68,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 
-const ROOTS = ['.claude', 'skills', 'content'];
+const ROOTS = ['.claude', 'docs', 'skills', 'content'];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'references']);
 // Whole subtrees skipped by path, not by directory name — a bare name would also
 // skip a legitimately-named directory anywhere else in the corpus.
@@ -56,7 +81,29 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'references']);
 // is both slow and — worse — reports violations that belong to some other
 // branch's working tree. A gate whose failures are not about your change is a
 // gate people learn to ignore.
-const SKIP_PATHS = new Set(['.claude/worktrees']);
+//
+// `docs/audits`, `docs/handoff` and `docs/plans` are the historical exemption
+// (#4929) — NOT an oversight, and NOT a backlog item to shrink later. They are
+// dated, one-shot process records: an audit report, a handoff note, a plan
+// written on a particular day about the state of the repo on that day. Nothing
+// in them is offered to the reader as "author it this way"; they are evidence of
+// what was true then. Putting them in scope would subject a two-month-old
+// handoff to today's lint permanently, and the only two ways out of that red are
+// to edit the record — which falsifies it — or to add the exemption anyway, one
+// argument later. The rest of `docs/` is live instruction and stays in scope, so
+// the line is "does this document tell you how to write metadata now?", not
+// "is it under docs/?". A doc that starts as a plan and becomes the standing
+// guide should be moved out of `docs/plans` rather than exempted in place.
+//
+// (If one of these directories is ever renamed the skip silently stops matching
+// and its files enter the scan — a loud red, not a silent hole, which is the
+// safe direction for a stale entry to fail in.)
+const SKIP_PATHS = new Set([
+  '.claude/worktrees',
+  'docs/audits',
+  'docs/handoff',
+  'docs/plans',
+]);
 // Generated from spec/frontmatter — not hand-authored, don't police.
 const SKIP_FILES = new Set(['content/docs/ai/skills-reference.mdx']);
 
@@ -100,9 +147,9 @@ class DeadRootError extends Error {
  *
  * Deliberately no whitelist / no "optional root" flag. A whitelist is the right
  * shape when a root is *legitimately* absent in some checkout form, and none of
- * these three are: `.claude`, `skills` and `content` are all git-tracked
+ * these are: `.claude`, `docs`, `skills` and `content` are all git-tracked
  * directories with tracked files in them, so any checkout that can run
- * `pnpm check:doc-authoring` at the repo root has all three. Adding an optional
+ * `pnpm check:doc-authoring` at the repo root has all of them. Adding an optional
  * marker "just in case" would hand the next author a supported way to silence this
  * failure (`optional: true`) instead of fixing the rename — which is the empty
  * `catch {}` again, only spelled politely. If a root ever does become legitimately
@@ -175,6 +222,19 @@ function selfTest() {
     // ...and one in another agent's worktree copy must NOT be, or every parallel
     // agent's in-flight branch becomes this gate's problem.
     '.claude/worktrees/other-agent/skills/demo/SKILL.md': bare,
+    // #4929, both directions. The live `docs/` corpus is in scope...
+    'docs/adr/0010-metadata-protection-model.md': bare,
+    'docs/notes/crm-development-standards.mdx': bareNs,
+    'docs/design/permission-model.md': wrapped,
+    // ...including hand-written top-level guides, since the root is `docs`.
+    'docs/protocol-upgrade-guide.md': bare,
+    // ...and the dated process records are exempt by path. The SAME violating
+    // body sits in each of these three: if the exemption ever stops matching,
+    // these turn red and say so, instead of the pair of assertions below both
+    // passing for the wrong reason.
+    'docs/audits/2026-06-spec-audit.md': bare,
+    'docs/handoff/2026-06-handoff.md': bare,
+    'docs/plans/v18-rollout.md': bare,
     // Pre-existing roots keep working.
     'skills/legit/SKILL.md': wrapped,
     'content/docs/ui/pages.mdx': [jsFence, prose].join('\n\n'),
@@ -208,12 +268,31 @@ function selfTest() {
       false,
     );
     expect('SKIP_FILES still applies', files.includes('content/docs/ai/skills-reference.mdx'), false);
-    expect('markdown files collected', files.length, 4);
+    expect('markdown files collected', files.length, 8);
     expect('bare literal in .claude/skills is a violation', violations.some((v) => v.file === '.claude/skills/demo/SKILL.md'), true);
     expect('namespaced Input alias in .claude/agents is a violation', violations.some((v) => v.file === '.claude/agents/os-dev.md'), true);
     expect('defineX factory form passes', violations.some((v) => v.file === 'skills/legit/SKILL.md'), false);
     expect('non-ts fence and prose pass', violations.some((v) => v.file === 'content/docs/ui/pages.mdx'), false);
-    expect('total violations', violations.length, 2);
+
+    // --- #4929: the live docs/ corpus is reachable, the process records are not. ---
+    // Stated as two halves of one claim, because either half alone is satisfied by
+    // a scope that is simply wrong in the other direction: "docs/adr is red" is
+    // also true of a scope that swallows the whole of docs/, and "docs/handoff is
+    // green" is also true of the pre-#4929 scope that never opened docs/ at all.
+    expect('docs/adr is walked', files.includes('docs/adr/0010-metadata-protection-model.md'), true);
+    expect('docs/notes is walked', files.includes('docs/notes/crm-development-standards.mdx'), true);
+    expect('docs/design is walked', files.includes('docs/design/permission-model.md'), true);
+    expect('top-level docs guides are walked', files.includes('docs/protocol-upgrade-guide.md'), true);
+    expect('bare literal in docs/adr is a violation', violations.some((v) => v.file === 'docs/adr/0010-metadata-protection-model.md'), true);
+    expect('namespaced Input alias in docs/notes is a violation', violations.some((v) => v.file === 'docs/notes/crm-development-standards.mdx'), true);
+    expect('bare literal in a top-level docs guide is a violation', violations.some((v) => v.file === 'docs/protocol-upgrade-guide.md'), true);
+    expect('defineX form in docs/design passes', violations.some((v) => v.file === 'docs/design/permission-model.md'), false);
+    for (const exempt of ['docs/audits', 'docs/handoff', 'docs/plans']) {
+      expect(`${exempt} is not walked`, files.some((f) => f.startsWith(`${exempt}/`)), false);
+      expect(`${exempt} reports no violation`, violations.some((v) => v.file.startsWith(`${exempt}/`)), false);
+    }
+
+    expect('total violations', violations.length, 5);
 
     // --- Reverse proof for the dead-root hard error (#4916), made permanent. ---
     // Everything above ran green over a tree where all three roots resolve. That
@@ -230,7 +309,7 @@ function selfTest() {
 
     expect('a renamed ROOT throws instead of quietly scanning less', deadErr instanceof DeadRootError, true);
     expect('the failure names the dead root', deadErr?.roots?.join(',') ?? '<none>', '.claude');
-    expect('the failure does not blame the surviving roots', /skills|content/.test(deadErr?.message ?? ''), false);
+    expect('the failure does not blame the surviving roots', /docs|skills|content/.test(deadErr?.message ?? ''), false);
 
     // A ROOT that exists but is not a directory is dead in the same way: the old
     // `catch {}` swallowed its ENOTDIR exactly as it swallowed ENOENT.
@@ -255,7 +334,7 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude in, .claude/worktrees out), detection, and the dead-root hard error (red when a ROOT is renamed, green when restored) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, and the dead-root hard error (red when a ROOT is renamed, green when restored) all hold.');
 }
 
 function main() {

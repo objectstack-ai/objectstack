@@ -26,7 +26,7 @@ overrides:
   cookie@<0.7.0: 0.7.0
   svelte: ^5.55.7
   '@tootallnate/once@<2.0.1': 2.0.1
-  brace-expansion@>=5.0.0 <5.0.8: ^5.0.8
+  brace-expansion@>=5.0.0 <5.0.9: ^5.0.9
   sharp@>=0.34.0 <0.35.0: ^0.35.0
   react-router@<8.3.0: ^8.3.0
   '@sveltejs/kit@<2.69.1': ^2.69.1
@@ -5218,10 +5218,6 @@ packages:
 
   bowser@2.14.1:
     resolution: {integrity: sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg==}
-
-  brace-expansion@5.0.8:
-    resolution: {integrity: sha512-JZyDyq3D4AUifKTPOB7DELf6XsB3WdPuNxCtob1vFXPsSXhdAiHBWJ/tJ8HAc9aH84BK+5JFZLNkJKx3G9kzQg==}
-    engines: {node: 20 || >=22}
 
   brace-expansion@5.0.9:
     resolution: {integrity: sha512-ScQ4IuvIEF1TMlP7Zt+vjJ//9zlPb2SDcxWxM3bk8s6t6GGdJ7KO1dCcTidOPJKePW30LE/2cT7wCyPho9/Wxg==}
@@ -12067,10 +12063,6 @@ snapshots:
 
   bowser@2.14.1: {}
 
-  brace-expansion@5.0.8:
-    dependencies:
-      balanced-match: 4.0.4
-
   brace-expansion@5.0.9:
     dependencies:
       balanced-match: 4.0.4
@@ -14563,11 +14555,11 @@ snapshots:
 
   minimatch@10.2.3:
     dependencies:
-      brace-expansion: 5.0.8
+      brace-expansion: 5.0.9
 
   minimatch@10.2.5:
     dependencies:
-      brace-expansion: 5.0.8
+      brace-expansion: 5.0.9
 
   minimatch@10.2.6:
     dependencies:

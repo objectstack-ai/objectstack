@@ -94,8 +94,16 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   {
     id: 'cel-field-rule',
     summary: 'field UI rules (requiredWhen / readonlyWhen / visibleWhen)',
+    // `fail-soft-log` remains the tier for this row: a predicate that is BROKEN
+    // on the record (undeclared key, null overload, parse fault) is logged and
+    // skipped, on all three slots. One case is carved out and is not
+    // representable in the D5 enum — a `readonlyWhen` naming a scope root the
+    // write path could not bind (`parent` with no master-detail header) is held
+    // LOCKED rather than waved through (#4889, ADR-0058 addendum). The carve-out
+    // is inside the same evaluator and the same surface, so it does not split
+    // into a second row.
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
-    enforcement: '@objectstack/formula celEngine (interpret) — console (objectui) + server',
+    enforcement: '@objectstack/formula celEngine (interpret) — console (objectui) + server (rule-validator `readonlyWhen` strip binds `record`/`previous`, plus the master-detail header as `parent`)',
     covers: [
       'data/field.zod.ts:requiredWhen',
       'data/field.zod.ts:readonlyWhen',
