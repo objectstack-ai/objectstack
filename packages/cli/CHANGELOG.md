@@ -1,5 +1,59 @@
 # @objectstack/cli
 
+## 17.0.0-rc.3
+
+### Patch Changes
+
+- Updated dependencies [2e284b2]
+  - @objectstack/spec@17.0.0-rc.3
+  - @objectstack/account@17.0.0-rc.3
+  - @objectstack/setup@17.0.0-rc.3
+  - @objectstack/client@17.0.0-rc.3
+  - @objectstack/cloud-connection@17.0.0-rc.3
+  - @objectstack/core@17.0.0-rc.3
+  - @objectstack/formula@17.0.0-rc.3
+  - @objectstack/lint@17.0.0-rc.3
+  - @objectstack/mcp@17.0.0-rc.3
+  - @objectstack/metadata@17.0.0-rc.3
+  - @objectstack/metadata-protocol@17.0.0-rc.3
+  - @objectstack/objectql@17.0.0-rc.3
+  - @objectstack/observability@17.0.0-rc.3
+  - @objectstack/platform-objects@17.0.0-rc.3
+  - @objectstack/driver-memory@17.0.0-rc.3
+  - @objectstack/driver-mongodb@17.0.0-rc.3
+  - @objectstack/driver-sql@17.0.0-rc.3
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.3
+  - @objectstack/plugin-approvals@17.0.0-rc.3
+  - @objectstack/plugin-audit@17.0.0-rc.3
+  - @objectstack/plugin-auth@17.0.0-rc.3
+  - @objectstack/plugin-email@17.0.0-rc.3
+  - @objectstack/plugin-hono-server@17.0.0-rc.3
+  - @objectstack/plugin-reports@17.0.0-rc.3
+  - @objectstack/plugin-security@17.0.0-rc.3
+  - @objectstack/plugin-sharing@17.0.0-rc.3
+  - @objectstack/plugin-webhooks@17.0.0-rc.3
+  - @objectstack/rest@17.0.0-rc.3
+  - @objectstack/runtime@17.0.0-rc.3
+  - @objectstack/service-analytics@17.0.0-rc.3
+  - @objectstack/service-automation@17.0.0-rc.3
+  - @objectstack/service-cache@17.0.0-rc.3
+  - @objectstack/service-datasource@17.0.0-rc.3
+  - @objectstack/service-job@17.0.0-rc.3
+  - @objectstack/service-messaging@17.0.0-rc.3
+  - @objectstack/service-package@17.0.0-rc.3
+  - @objectstack/service-queue@17.0.0-rc.3
+  - @objectstack/service-realtime@17.0.0-rc.3
+  - @objectstack/service-settings@17.0.0-rc.3
+  - @objectstack/service-sms@17.0.0-rc.3
+  - @objectstack/service-storage@17.0.0-rc.3
+  - @objectstack/trigger-api@17.0.0-rc.3
+  - @objectstack/trigger-record-change@17.0.0-rc.3
+  - @objectstack/trigger-schedule@17.0.0-rc.3
+  - @objectstack/types@17.0.0-rc.3
+  - @objectstack/verify@17.0.0-rc.3
+  - @objectstack/plugin-pinyin-search@17.0.0-rc.3
+  - @objectstack/console@17.0.0-rc.3
+
 ## 17.0.0-rc.2
 
 ### Major Changes

@@ -1,5 +1,13 @@
 # @objectstack/plugin-pinyin-search
 
+## 17.0.0-rc.3
+
+### Patch Changes
+
+- @objectstack/core@17.0.0-rc.3
+- @objectstack/objectql@17.0.0-rc.3
+- @objectstack/types@17.0.0-rc.3
+
 ## 17.0.0-rc.2
 
 ### Patch Changes

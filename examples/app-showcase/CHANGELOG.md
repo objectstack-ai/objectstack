@@ -1,5 +1,20 @@
 # @objectstack/example-showcase
 
+## 0.3.14-rc.3
+
+### Patch Changes
+
+- Updated dependencies [2e284b2]
+  - @objectstack/spec@17.0.0-rc.3
+  - @objectstack/cloud-connection@17.0.0-rc.3
+  - @objectstack/connector-mcp@17.0.0-rc.3
+  - @objectstack/connector-openapi@17.0.0-rc.3
+  - @objectstack/connector-rest@17.0.0-rc.3
+  - @objectstack/connector-slack@17.0.0-rc.3
+  - @objectstack/driver-sql@17.0.0-rc.3
+  - @objectstack/runtime@17.0.0-rc.3
+  - @objectstack/service-datasource@17.0.0-rc.3
+
 ## 0.3.14-rc.2
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-auth",
-  "version": "17.0.0-rc.2",
+  "version": "17.0.0-rc.3",
   "license": "Apache-2.0",
   "description": "Authentication & Identity Plugin for ObjectStack",
   "main": "dist/index.js",

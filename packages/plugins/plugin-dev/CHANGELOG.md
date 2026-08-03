@@ -1,5 +1,26 @@
 # @objectstack/plugin-dev
 
+## 17.0.0-rc.3
+
+### Patch Changes
+
+- Updated dependencies [2e284b2]
+  - @objectstack/spec@17.0.0-rc.3
+  - @objectstack/account@17.0.0-rc.3
+  - @objectstack/setup@17.0.0-rc.3
+  - @objectstack/core@17.0.0-rc.3
+  - @objectstack/objectql@17.0.0-rc.3
+  - @objectstack/driver-memory@17.0.0-rc.3
+  - @objectstack/plugin-auth@17.0.0-rc.3
+  - @objectstack/plugin-hono-server@17.0.0-rc.3
+  - @objectstack/plugin-security@17.0.0-rc.3
+  - @objectstack/rest@17.0.0-rc.3
+  - @objectstack/runtime@17.0.0-rc.3
+  - @objectstack/service-i18n@17.0.0-rc.3
+  - @objectstack/service-realtime@17.0.0-rc.3
+  - @objectstack/service-storage@17.0.0-rc.3
+  - @objectstack/types@17.0.0-rc.3
+
 ## 17.0.0-rc.2
 
 ### Patch Changes

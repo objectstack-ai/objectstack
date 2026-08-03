@@ -1,5 +1,14 @@
 # @objectstack/service-external-datasource
 
+## 17.0.0-rc.3
+
+### Patch Changes
+
+- Updated dependencies [2e284b2]
+  - @objectstack/spec@17.0.0-rc.3
+  - @objectstack/core@17.0.0-rc.3
+  - @objectstack/types@17.0.0-rc.3
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

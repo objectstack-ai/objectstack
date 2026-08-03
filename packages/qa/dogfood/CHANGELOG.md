@@ -1,5 +1,31 @@
 # @objectstack/dogfood
 
+## 0.0.40-rc.3
+
+### Patch Changes
+
+- Updated dependencies [2e284b2]
+  - @objectstack/spec@17.0.0-rc.3
+  - @objectstack/example-crm@4.0.92-rc.3
+  - @objectstack/example-showcase@0.3.14-rc.3
+  - @objectstack/connector-mcp@17.0.0-rc.3
+  - @objectstack/connector-openapi@17.0.0-rc.3
+  - @objectstack/connector-rest@17.0.0-rc.3
+  - @objectstack/mcp@17.0.0-rc.3
+  - @objectstack/objectql@17.0.0-rc.3
+  - @objectstack/platform-objects@17.0.0-rc.3
+  - @objectstack/plugin-audit@17.0.0-rc.3
+  - @objectstack/plugin-auth@17.0.0-rc.3
+  - @objectstack/plugin-email@17.0.0-rc.3
+  - @objectstack/plugin-security@17.0.0-rc.3
+  - @objectstack/plugin-sharing@17.0.0-rc.3
+  - @objectstack/plugin-webhooks@17.0.0-rc.3
+  - @objectstack/service-analytics@17.0.0-rc.3
+  - @objectstack/service-messaging@17.0.0-rc.3
+  - @objectstack/service-storage@17.0.0-rc.3
+  - @objectstack/types@17.0.0-rc.3
+  - @objectstack/verify@17.0.0-rc.3
+
 ## 0.0.40-rc.2
 
 ### Patch Changes
