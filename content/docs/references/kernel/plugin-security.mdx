@@ -32,8 +32,8 @@ Features:
 ## TypeScript Usage
 
 ```typescript
-import { DependencyGraphSchema, DependencyGraphNodeSchema, PackageDependencySchema, PackageDependencyConflictSchema, PackageDependencyResolutionResultSchema, PluginProvenanceSchema, PluginTrustScoreSchema, SBOMSchema, SBOMEntrySchema, SecurityPolicySchema, SecurityScanResultSchema, SecurityVulnerabilitySchema, VulnerabilitySeverity } from '@objectstack/spec/kernel';
-import type { DependencyGraph, DependencyGraphNode, PackageDependency, PackageDependencyConflict, PackageDependencyResolutionResult, PluginProvenance, PluginTrustScore, SBOM, SBOMEntry, SecurityPolicy, SecurityScanResult, SecurityVulnerability, VulnerabilitySeverity } from '@objectstack/spec/kernel';
+import { DependencyGraphSchema, DependencyGraphNodeSchema, PackageDependencyConflictSchema, PackageDependencyResolutionResultSchema, PluginProvenanceSchema, PluginTrustScoreSchema, ResolvedPackageDependencySchema, SBOMSchema, SBOMEntrySchema, SecurityPolicySchema, SecurityScanResultSchema, SecurityVulnerabilitySchema, VulnerabilitySeverity } from '@objectstack/spec/kernel';
+import type { DependencyGraph, DependencyGraphNode, PackageDependencyConflict, PackageDependencyResolutionResult, PluginProvenance, PluginTrustScore, ResolvedPackageDependency, SBOM, SBOMEntry, SecurityPolicy, SecurityScanResult, SecurityVulnerability, VulnerabilitySeverity } from '@objectstack/spec/kernel';
 
 // Validate data
 const result = DependencyGraphSchema.parse(data);
@@ -71,22 +71,6 @@ A node in the dependency graph representing a resolved package
 | **depth** | `integer` | ✅ | Depth level in the dependency tree (0 = root) |
 | **isDirect** | `boolean` | ✅ | Whether this is a direct (top-level) dependency |
 | **metadata** | `{ name: string; description?: string; license?: string; homepage?: string }` | optional | Additional metadata about the package |
-
-
----
-
-## PackageDependency
-
-A package dependency with its version constraint
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Package name or identifier |
-| **versionConstraint** | `string` | ✅ | Semver range (e.g., `^1.0.0`, `>=2.0.0 <3.0.0`) |
-| **type** | `Enum<'required' \| 'optional' \| 'peer' \| 'dev'>` | ✅ | Category of the dependency relationship |
-| **resolvedVersion** | `string` | optional | Concrete version resolved during dependency resolution |
 
 
 ---
@@ -157,6 +141,22 @@ Trust score and verification status for a plugin
 | **level** | `Enum<'verified' \| 'trusted' \| 'neutral' \| 'untrusted' \| 'blocked'>` | ✅ | Computed trust level based on the overall score |
 | **badges** | `Enum<'official' \| 'verified-vendor' \| 'security-scanned' \| 'code-signed' \| 'open-source' \| 'popular'>[]` | ✅ | Verification badges earned by the plugin |
 | **updatedAt** | `string` | ✅ | ISO 8601 timestamp when the trust score was last updated |
+
+
+---
+
+## ResolvedPackageDependency
+
+A resolver-side package dependency: version constraint plus its resolution outcome
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Package name or identifier |
+| **versionConstraint** | `string` | ✅ | Semver range (e.g., `^1.0.0`, `>=2.0.0 <3.0.0`) |
+| **type** | `Enum<'required' \| 'optional' \| 'peer' \| 'dev'>` | ✅ | Category of the dependency relationship |
+| **resolvedVersion** | `string` | optional | Concrete version resolved during dependency resolution |
 
 
 ---

@@ -1,7 +1,4 @@
 {
-  "_comment": "Accepted cross-entry DUAL-SOURCE exports of @objectstack/spec (#4446): names that two or more public entry points export for DIFFERENT declarations, so which type a consumer gets depends on the import path \u2014 the #4411 trap. Shrink-only ratchet, judged by symbol identity (a re-export of one declaration from many entries is fine and not listed). A NEW name here fails check:dual-source-exports: converge on one declaration and re-export it, or rename one side \u2014 growing this list needs maintainer sign-off and shows up as this file in the diff. An entry that stops being dual-source fails until its line is deleted. Regenerate with: tsx scripts/check-dual-source-exports.ts --update (after pnpm build).",
-  "entries": [
-    "PackageDependency \u2014 [./cloud (type)] \u2260 [./kernel (type)]",
-    "PackageDependencySchema \u2014 [./cloud (const)] \u2260 [./kernel (const)]"
-  ]
+  "_comment": "Accepted cross-entry DUAL-SOURCE exports of @objectstack/spec (#4446): names that two or more public entry points export for DIFFERENT declarations, so which type a consumer gets depends on the import path — the #4411 trap. Shrink-only ratchet, judged by symbol identity (a re-export of one declaration from many entries is fine and not listed). A NEW name here fails check:dual-source-exports: converge on one declaration and re-export it, or rename one side — growing this list needs maintainer sign-off and shows up as this file in the diff. An entry that stops being dual-source fails until its line is deleted. Regenerate with: tsx scripts/check-dual-source-exports.ts --update (after pnpm build).",
+  "entries": []
 }

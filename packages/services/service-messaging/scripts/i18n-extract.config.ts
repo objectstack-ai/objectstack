@@ -27,7 +27,6 @@ import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
 
 export default defineStack({
-  name: 'service-messaging-i18n-extract',
   objects: [
     InboxMessage,
     NotificationReceipt,
