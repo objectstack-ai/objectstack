@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ConflictError, hashSpec } from '@objectstack/metadata-core';
 import { SysMetadataRepository } from '@objectstack/metadata-protocol';
+import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
 
 interface Row {
     id: string;
@@ -119,6 +120,10 @@ function makeFakeEngine() {
             return { id: found.row.id };
         },
         async delete(_t: string, opts: { where: Record<string, unknown> }) {
+            // [#4550] Pinned to ObjectQL.delete's OWN dispatch predicate. A double
+            // looser than the engine it stands in for is how #4434 shipped a REST
+            // route that answered 500 to every caller with its suite green.
+            assertEngineDeleteDispatch(opts);
             const found = findRow(opts.where);
             if (!found) return { deleted: 0 };
             rows.delete(found.key);

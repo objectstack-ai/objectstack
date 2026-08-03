@@ -75,6 +75,29 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
 
+/**
+ * The text behind an `ExpressionInput` slot — the CEL source, whichever shape
+ * it arrives in.
+ *
+ * `SharingRule.condition` is an `ExpressionInputSchema`: a bare string at
+ * authoring time, the `{ dialect, source }` envelope after parse, and
+ * `{ dialect, ast }` once `objectstack compile` lowers it. This rule sees all
+ * three (`input: 'parsed'`, falling back to the normalized stack under `os
+ * lint`), so each has to yield something to scan. The `ast` branch stringifies
+ * the node — a field reference survives as its identifier — while no branch
+ * ever reads `meta.rationale`, whose prose may legitimately name the very field
+ * it is explaining that the rule does NOT use.
+ */
+function expressionText(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (v && typeof v === 'object') {
+    const rec = v as AnyRec;
+    if (typeof rec.source === 'string') return rec.source;
+    if (rec.ast !== undefined) return JSON.stringify(rec.ast) ?? '';
+  }
+  return '';
+}
+
 /** True iff the object opted out of tenancy — platform-global, no org column. */
 function isTenancyDisabled(object: AnyRec): boolean {
   const tenancy = object.tenancy as AnyRec | undefined;
@@ -143,19 +166,32 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
     });
   });
 
-  // Sharing rules — criteria and recipient may both reach for the org parent.
+  // Sharing rules — the predicate and the recipient may both reach for the org
+  // parent, so both slots are scanned.
+  //
+  // The keys read here are the ones `SharingRuleSchema` DECLARES: `condition`
+  // (the CEL predicate) and `sharedWith` (the recipient). `criteria` / `filter`
+  // / `sharedTo` / `recipient` are NOT alternative spellings — the schema is
+  // `.strict()` and rejects them by name, with `sharingRuleUnknownKeyError`
+  // prescribing the canonical key. Reading them here as `??` fallbacks is what
+  // made this red line inert for every spec-valid stack (#4984): after parse
+  // they are always `undefined`, so the gate never fired. Alias tolerance
+  // belongs at the schema's refusal, not in a consumer (Prime Directive #12).
   asArray(cfg.sharingRules ?? cfg.sharing).forEach((rule, rIndex) => {
-    const criteria = JSON.stringify(rule.criteria ?? rule.filter ?? '');
-    const sharedTo = JSON.stringify(rule.sharedTo ?? rule.recipient ?? '');
-    if (criteria.includes(ORG_PARENT_FIELD) || sharedTo.includes(ORG_PARENT_FIELD)) {
+    const slots: Array<{ key: string; text: string }> = [
+      { key: 'condition', text: expressionText(rule.condition) },
+      { key: 'sharedWith', text: JSON.stringify(rule.sharedWith ?? '') ?? '' },
+    ];
+    for (const slot of slots) {
+      if (!slot.text.includes(ORG_PARENT_FIELD)) continue;
       findings.push({
         severity: 'error',
         rule: ORG_AXIS_PERMISSION_INHERITANCE,
         where: `sharing rule "${str(rule.name) || rIndex}"`,
-        path: `sharingRules[${rIndex}]`,
+        path: `sharingRules[${rIndex}].${slot.key}`,
         message:
-          `Sharing rule reads \`${ORG_PARENT_FIELD}\`, granting access by walking the organization ` +
-          `tree. ADR-0105 D6 forbids permission inheritance along the org axis.`,
+          `Sharing rule ${slot.key} reads \`${ORG_PARENT_FIELD}\`, granting access by walking the ` +
+          `organization tree. ADR-0105 D6 forbids permission inheritance along the org axis.`,
         hint: INHERITANCE_HINT,
       });
     }
@@ -171,14 +207,16 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
   asArray(cfg.sharingRules ?? cfg.sharing).forEach((rule, rIndex) => {
     const target = str(rule.object ?? rule.objectName);
     if (!target || !tenancyDisabledObjects.has(target)) return;
-    const sharedTo = (rule.sharedTo ?? rule.recipient) as AnyRec | undefined;
-    const recipientType = str(sharedTo?.type);
+    // `sharedWith` is the declared recipient key; `sharedTo` / `recipient` are
+    // spelt out only in the schema's rejection message (#4984).
+    const sharedWith = rule.sharedWith as AnyRec | undefined;
+    const recipientType = str(sharedWith?.type);
     if (recipientType !== 'business_unit') return;
     findings.push({
       severity: 'error',
       rule: ORG_AXIS_CROSS_ORG_BU_GRANT,
       where: `sharing rule "${str(rule.name) || rIndex}" on object "${target}"`,
-      path: `sharingRules[${rIndex}].sharedTo`,
+      path: `sharingRules[${rIndex}].sharedWith`,
       message:
         `A business-unit sharing rule targets "${target}", which opted out of tenancy ` +
         `(\`tenancy.enabled: false\`). Platform-global objects carry no organization column, so this ` +

@@ -94,6 +94,20 @@ jobs:
       - name: Doc/skill authoring guard
         run: pnpm check:doc-authoring
 
+      # #4851: the docs-accuracy-audit workflow carries its default scope inline
+      # (a workflow script runs in a vm with no filesystem, so it cannot enumerate
+      # content/docs/ itself). Hand-kept, that list rotted in BOTH directions —
+      # 16 entries pointing at files that no longer existed after the
+      # protocol/objectos → protocol/kernel rename, and 48 existing docs missing
+      # from it — while every "FULL audit" run reported green, which is how the
+      # accuracy defects in #4781 and #4817 survived ~2 months. This regenerates
+      # the list from the filesystem and fails when the two disagree either way.
+      # It lives in this job deliberately: the change that breaks the list is a
+      # docs rename, so a `packages/**` paths filter would blind the gate to
+      # exactly its own failure mode.
+      - name: Docs-audit scope is derived, not hand-kept
+        run: pnpm check:docs-audit-scope
+
       # ADR-0090 D3 vocabulary ratchet: "role" is reserved-forbidden in docs
       # and skills. Existing occurrences are frozen in the baseline (better-auth
       # boundary, ARIA samples, educational mentions); NEW occurrences fail.
@@ -274,6 +288,23 @@ jobs:
       # be wrong while every package is right.
       - name: Published-files whitelist guard
         run: pnpm check:published-files
+
+      # Engine test-double contract gate (#4550, from #4434). A test double
+      # LOOSER than the implementation it replaces turns a green suite into no
+      # suite at all, silently, on exactly the paths a double was introduced
+      # for. #4434 is the worked example: DELETE /sharing/rules/:idOrName
+      # answered 500 for every rule and both address forms from the day it was
+      # written, while `deleteRule drops rule + all its grants` asserted success
+      # against a fake engine that accepted the one call shape ObjectQL.delete
+      # refuses. This holds every fake ObjectQL engine's `delete` to the real
+      # dispatch predicate — imported from @objectstack/objectql, not
+      # hand-mirrored, so it cannot drift — with the pre-existing fakes in a
+      # shrink-only, measured baseline. Static AST only, so it needs no build
+      # and belongs in this job. Runs its own --self-test first: the detector
+      # can be broken while every fake is fine, and a scan that quietly stops
+      # matching would report OK while reading nothing (#4868's family).
+      - name: Engine test-double contract gate
+        run: pnpm check:engine-double-contract
 
   typecheck:
     name: TypeScript Type Check

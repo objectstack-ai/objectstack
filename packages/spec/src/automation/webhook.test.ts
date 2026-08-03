@@ -221,3 +221,75 @@ describe('WebhookSchema', () => {
     })).toThrow();
   });
 });
+
+// #4001 batch 11. The ledger carried this row as `authorable (p)` — "spec-only
+// (#3461)". Resolving the `(p)` found the opposite: three parse doors, one of
+// them a BOOT path. `plugin-webhooks`' `bootstrapDeclaredWebhooks` re-parses
+// every declared webhook before materializing it into `sys_webhook`, and a
+// failure there warns and SKIPS the subscription — so a rejection here is the
+// difference between a webhook that exists and one that does not.
+describe('unknown keys are rejected, not stripped (#4001 batch 11)', () => {
+  const valid = { name: 'wh_probe', url: 'https://hooks.example/x' };
+  const unknownKeyIssue = (value: unknown) => {
+    const result = WebhookSchema.safeParse(value);
+    expect(result.success).toBe(false);
+    return result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+  };
+
+  it('points the sys_webhook COLUMN names back at the spec keys', () => {
+    // `mapWebhookToRow` (plugin-webhooks) remaps `object → object_name` and
+    // `isActive → active` on the way into the table. Someone reading a row back
+    // and re-authoring from those column names is the concrete path here, and
+    // neither word is within edit distance of the key it means.
+    expect(unknownKeyIssue({ ...valid, object_name: 'task' })!.message)
+      .toContain('`object_name` → `object`');
+    expect(unknownKeyIssue({ ...valid, active: true })!.message)
+      .toContain('`active` → `isActive`');
+  });
+
+  it('points `events` at `triggers`', () => {
+    expect(unknownKeyIssue({ ...valid, events: ['create'] })!.message)
+      .toContain('`events` → `triggers`');
+  });
+
+  it('carries the #3494 removals as prescriptions, not bare rejections', () => {
+    for (const key of ['body', 'payloadFields', 'includeSession', 'authentication', 'retryPolicy']) {
+      const message = unknownKeyIssue({ ...valid, [key]: {} })!.message;
+      expect(message, `\`${key}\` should carry its #3494 reason`).toContain('#3494');
+    }
+  });
+
+  // The reason the ADR-0010 envelope is part of this change and not a
+  // follow-up. Both metadata load paths call `applyProtection` on EVERY type,
+  // so a package-loaded webhook already carries these keys by the time the boot
+  // parse sees it. `.strip` discarded them silently; `.strict()` without this
+  // declaration would have turned every package-shipped webhook into a skipped
+  // subscription after a redeploy — with one `warn` to say so.
+  it('accepts the ADR-0010 protection envelope the loader stamps on it', () => {
+    const parsed = WebhookSchema.parse({
+      ...valid,
+      _packageId: 'com.example.app', _packageVersion: '1.0.0', _provenance: 'package',
+      _lock: 'no-overlay', _lockSource: 'artifact', _lockReason: 'ships with the package',
+    });
+    expect(parsed._packageId).toBe('com.example.app');
+    expect(parsed._provenance).toBe('package');
+  });
+
+  it('accepts an authored `protection` block (the pre-envelope half of ADR-0010)', () => {
+    expect(WebhookSchema.safeParse({
+      ...valid,
+      protection: { lock: 'full', reason: 'Ships with the package.' },
+    }).success).toBe(true);
+  });
+
+  it('still accepts every key an author writes', () => {
+    const parsed = WebhookSchema.parse({
+      name: 'showcase_task_changed', label: 'Task Changed',
+      object: 'showcase_task', triggers: ['create', 'update', 'delete'],
+      url: 'https://hooks.example/showcase/task', method: 'POST',
+      headers: { 'X-A': 'b' }, timeoutMs: 5000, secret: 's', isActive: false,
+      description: 'd',
+    });
+    expect(parsed.isActive).toBe(false);
+  });
+});

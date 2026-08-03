@@ -5,11 +5,97 @@ description: State Machine protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-XState-inspired State Machine Protocol
+@module automation/state-machine
 
-Used to define strict business logic constraints and lifecycle management.
+XState-inspired State Machine Protocol — hierarchical states, guarded
 
-Prevent AI "hallucinations" by enforcing valid valid transitions.
+transitions, entry/exit actions. Used to declare strict business-logic
+
+constraints and lifecycle management, so an AI author cannot "hallucinate" a
+
+transition the machine never declared.
+
+## Where this is authored — the question #4001 had to answer first
+
+The ledger carried these shapes as `authorable (p)` — provisional, because
+
+nobody had checked. Checking matters here more than usual, because
+
+[ADR-0020](../../../docs/adr/0020-state-machine-converge-and-enforce.md)
+
+**retired this shape as a record-lifecycle declaration**: the top-level
+
+`workflow` metadata type and `object.stateMachines` are both gone, and a
+
+record's legal transitions are declared as a `state_machine` **validation
+
+rule** (`[data/validation.zod.ts](/docs/references/data/validation)`, a flat `\{ from: [to] \}` table — closed
+
+since #4001 batch 3b). A schema whose only doors were those two would be
+
+dead surface, and the campaign's own rule is that dead surface gets its
+
+ledger class corrected, not tightened.
+
+One door survives, and it is an authoring door: **`[ai/agent.zod.ts](/docs/references/ai/agent)`'s
+
+`lifecycle`** is `StateMachineSchema`, and `agent` is a registered metadata
+
+type — so `defineStack(\{ agents \})`, `POST /api/v1/meta/types/agent` and the
+
+Studio agent form all reach this file through `AgentSchema.parse()`. Verified
+
+by parse, not by reading: before this change,
+
+```ts
+
+AgentSchema.parse(\{ …, lifecycle: \{
+
+id: 'probe_machine', initial: 'draft', stats: \{ runs: 3 \},
+
+states: \{ draft: \{ onn: \{ APPROVE: 'done' \}, meta: \{ labell: 'Draft', owner: 'ops' \} \},
+
+done: \{ type: 'final' \} \},
+
+\} \})
+
+```
+
+**succeeded**, returning
+
+`\{ id, initial, states: \{ draft: \{ type: 'atomic', meta: \{\} \}, done: … \} \}` —
+
+`stats` gone, `meta`'s two keys gone, and `onn` (one keystroke from `on`)
+
+gone with every transition the author declared. A state machine whose whole
+
+purpose is to *deny* undeclared transitions had silently become one with no
+
+transitions at all, and reported success.
+
+So: `authorable`, and every shape below is `strictObject`.
+
+## `meta` is closed, deliberately
+
+XState treats `meta` as an open bag, so leaving it open was the plausible
+
+call and it was checked rather than assumed (the #4909 precedent: a slot
+
+whose openness is real should say `.passthrough()`, not strip). Three facts
+
+say closed here: the hand-written `StateNodeConfig` type beside this
+
+schema declares exactly four `meta` keys, so `passthrough` would open the
+
+Zod while `tsc` stayed shut — a new declared-≠-enforced split; nothing in
+
+this repo reads any `meta` key (`aiInstructions` has no consumer outside
+
+this file's own test); and the current behaviour is not openness but
+
+*strip* — the probe above shows an author's `meta` arriving as `\{\}`. There
+
+is no openness here to preserve, only a silence to end.
 
 <Callout type="info">
 **Source:** `packages/spec/src/automation/state-machine.zod.ts`

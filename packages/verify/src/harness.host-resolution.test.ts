@@ -72,8 +72,18 @@ interface TenancyShape {
 let appWithPackage: string;
 /** The same app WITHOUT it — the hard error must still fire. */
 let appWithoutPackage: string;
+/**
+ * #4719 — the package is INSTALLED in the app's own `node_modules` and the app
+ * never declares it. That is what a hoisted workspace store looks like to the
+ * resolver, and `bootStack` used to mount multi-tenant off it.
+ */
+let appInstalledButUndeclared: string;
 
-function writeApp(prefix: string, opts: { withOrganizations: boolean }): string {
+function writeApp(
+  prefix: string,
+  opts: { withOrganizations: boolean; declare?: boolean },
+): string {
+  const declare = opts.declare ?? opts.withOrganizations;
   const dir = mkdtempSync(join(tmpdir(), prefix));
   writeFileSync(
     join(dir, 'package.json'),
@@ -82,7 +92,7 @@ function writeApp(prefix: string, opts: { withOrganizations: boolean }): string 
         name: 'hostres-fixture',
         private: true,
         type: 'module',
-        ...(opts.withOrganizations ? { dependencies: { '@objectstack/organizations': '*' } } : {}),
+        ...(declare ? { dependencies: { '@objectstack/organizations': '*' } } : {}),
       },
       null,
       2,
@@ -110,10 +120,14 @@ function writeApp(prefix: string, opts: { withOrganizations: boolean }): string 
 beforeAll(() => {
   appWithPackage = writeApp('os-verify-org-host-ok-', { withOrganizations: true });
   appWithoutPackage = writeApp('os-verify-org-host-missing-', { withOrganizations: false });
+  appInstalledButUndeclared = writeApp('os-verify-org-host-undeclared-', {
+    withOrganizations: true,
+    declare: false,
+  });
 });
 
 afterAll(() => {
-  for (const dir of [appWithPackage, appWithoutPackage]) {
+  for (const dir of [appWithPackage, appWithoutPackage, appInstalledButUndeclared]) {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -176,6 +190,36 @@ describe('bootStack multiTenant — host-app package resolution (#4700)', () => 
       await expect(
         bootStack(app as never, { multiTenant: true, hostRoot: appWithoutPackage }),
       ).rejects.toThrow(new RegExp(`Install/link it in THIS APP \\(${appWithoutPackage}\\)`));
+    },
+    BOOT_TIMEOUT,
+  );
+
+  it(
+    'refuses an UNDECLARED package even though it sits in the app\'s node_modules (#4719)',
+    async () => {
+      // Same fixture package, same directory layout as the passing case above —
+      // only the `package.json` differs. Before #4719 the host lookup was a CJS
+      // `require`, which finds anything reachable (the app's own node_modules
+      // here; the pnpm shim's NODE_PATH store in the field), so `bootStack`
+      // mounted the enterprise plugin for an app that had never asked for it and
+      // the fixture's RLS posture silently depended on the workspace layout.
+      await expect(
+        bootStack(app as never, { multiTenant: true, hostRoot: appInstalledButUndeclared }),
+      ).rejects.toThrow(/requires the enterprise @objectstack\/organizations/);
+      expect(process.env.OS_TENANCY_POSTURE).toBeUndefined();
+    },
+    BOOT_TIMEOUT,
+  );
+
+  it(
+    'says DECLARE it, not just install it, when the app has it but never declared it (#4719)',
+    async () => {
+      // The remedy must be the one that works. Telling an operator to install a
+      // package that is demonstrably installed is the same unfollowable advice
+      // #4700 removed from this message, one layer along.
+      await expect(
+        bootStack(app as never, { multiTenant: true, hostRoot: appInstalledButUndeclared }),
+      ).rejects.toThrow(/DECLARE it in that app's package\.json/);
     },
     BOOT_TIMEOUT,
   );

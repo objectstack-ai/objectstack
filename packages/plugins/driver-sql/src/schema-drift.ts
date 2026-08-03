@@ -496,13 +496,280 @@ export interface ExpectedIndex {
   unique: boolean;
 }
 
+// ───────────────────────────────────────────────────────────────────────
+// Physical index key parts (#4884)
+//
+// Introspection used to read an index's key from the dialect's *column* view
+// (`PRAGMA index_info`, `pg_attribute`, `STATISTICS.COLUMN_NAME`), which
+// reports NOTHING for an expression key. A four-column index whose last key is
+// `COALESCE(package_id,'')` therefore read as three columns, and the differ
+// reported a mismatch against a four-column declaration on a database that was
+// exactly right. Everything below exists so the key is read as written, and so
+// an expression that pins one column is recognised as that column.
+// ───────────────────────────────────────────────────────────────────────
+
+/** One key part of a physical index, as introspection recovered it. */
+export type IndexKeyPart =
+  | { kind: 'column'; column: string }
+  /** `column` is the identity the expression pins, or null when unattributable. */
+  | { kind: 'expression'; sql: string; column: string | null };
+
+const BARE_IDENTIFIER = /^(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_$]*))$/;
+/** A literal any dialect might print inside `COALESCE`, optional `::type` cast included. */
+const SQL_LITERAL = /^(?:'(?:[^']|'')*'|-?\d+(?:\.\d+)?|null|true|false)(?:::[A-Za-z_][A-Za-z0-9_ ."]*)?$/i;
+
+/** Unwrap `"x"` / `` `x` `` / `[x]`, or null when `s` is not a single identifier. */
+function matchIdentifier(s: string): string | null {
+  const m = BARE_IDENTIFIER.exec(s.trim());
+  if (!m) return null;
+  return m[1] ?? m[2] ?? m[3] ?? m[4] ?? null;
+}
+
+/** Drop a trailing `::type` cast (Postgres prints them everywhere). */
+function stripCast(s: string): string {
+  const i = s.indexOf('::');
+  return i > 0 ? s.slice(0, i).trim() : s.trim();
+}
+
+/** Peel redundant wrapping parens: `(package_id)` → `package_id`. */
+function stripWrappingParens(s: string): string {
+  let out = s.trim();
+  while (out.startsWith('(') && out.endsWith(')')) {
+    const inner = out.slice(1, -1).trim();
+    if (splitTopLevelList(inner).length !== 1) break;
+    out = inner;
+  }
+  return out;
+}
+
+/**
+ * Peel casts and redundant parens until stable, then read the identifier.
+ * Postgres nests both — a varchar column inside `COALESCE` prints as
+ * `(package_id)::text` — so one pass in either order is not enough.
+ */
+function bareColumnOf(s: string): string | null {
+  let cur = s.trim();
+  for (let i = 0; i < 4; i++) {
+    const next = stripWrappingParens(stripCast(stripWrappingParens(cur)));
+    if (next === cur) break;
+    cur = next;
+  }
+  return matchIdentifier(cur);
+}
+
+/**
+ * Split a comma-separated SQL list at TOP level only — a comma inside nested
+ * parens or inside a quoted literal/identifier belongs to the part, not to the
+ * list. `a, b, COALESCE(c, '')` → `['a', 'b', "COALESCE(c, '')"]`.
+ */
+function splitTopLevelList(list: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < list.length; i++) {
+    const ch = list[i];
+    if (quote) {
+      // SQL escapes a quote by doubling it; skipping the pair keeps us in-quote.
+      if (ch === quote) {
+        if (list[i + 1] === quote) i++;
+        else quote = null;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') quote = ch;
+    else if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === ',' && depth === 0) {
+      out.push(list.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  const tail = list.slice(start).trim();
+  if (tail) out.push(tail);
+  return out;
+}
+
+/** Strip the per-key decorations `pg_get_indexdef` prints (`DESC`, `COLLATE …`). */
+function stripKeyPartModifiers(part: string): string {
+  let s = part.trim();
+  s = s.replace(/\s+nulls\s+(?:first|last)$/i, '');
+  s = s.replace(/\s+(?:asc|desc)$/i, '');
+  s = s.replace(/\s+collate\s+(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$.]*)$/i, '');
+  return s.trim();
+}
+
+/**
+ * Classify one physical index key part.
+ *
+ * The single equivalence this recognises is `COALESCE(col, <literal>)` ≡ `col`,
+ * and it is recognised deliberately, not liberally. ADR-0048 makes that form
+ * the canonical spelling of the overlay key: a plain UNIQUE index treats NULLs
+ * as distinct, so package-less globals would not be unique among themselves,
+ * and `COALESCE(package_id,'')` is how the runtime pins them. The expression
+ * therefore keys on *exactly* `package_id` — for identity purposes it is that
+ * column, and a UNIQUE index over it is strictly STRONGER than the same key
+ * spelled plainly. Reading it as a missing column is what produced the false
+ * "declares 4 columns, has 3" warning in #4884.
+ *
+ * Nothing else is coerced. An expression this cannot attribute to one column
+ * stays `{ column: null }`, which keeps the index out of every claim the
+ * differ makes ({@link isSyncReproducibleIndex}) rather than guessing at it.
+ */
+export function classifyIndexKeyPart(rawPart: string): IndexKeyPart {
+  const s = stripKeyPartModifiers(rawPart);
+  const bare = matchIdentifier(s);
+  if (bare !== null) return { kind: 'column', column: bare };
+
+  const coalesce = /^coalesce\s*\(([\s\S]*)\)$/i.exec(stripWrappingParens(s));
+  if (coalesce) {
+    const args = splitTopLevelList(coalesce[1]);
+    if (args.length >= 2) {
+      const column = bareColumnOf(args[0]);
+      const restAreLiterals = args.slice(1).every((a) => SQL_LITERAL.test(a.trim()));
+      if (column !== null && restAreLiterals) return { kind: 'expression', sql: rawPart, column };
+    }
+  }
+  return { kind: 'expression', sql: rawPart, column: null };
+}
+
+/** An index definition recovered from its `CREATE INDEX` text. */
+export interface ParsedIndexDdl {
+  /** Ordered key parts exactly as written — a column name, or an expression. */
+  keyParts: string[];
+  /** The definition carries a `WHERE` predicate (a partial index). */
+  partial: boolean;
+}
+
+/**
+ * Parse the key list and partial predicate out of a `CREATE INDEX` statement.
+ *
+ * Used for the two dialects that hand back the definition verbatim —
+ * `sqlite_master.sql` and `pg_get_indexdef()` — because their per-column
+ * catalogue views cannot express an expression key at all. Quote-aware, so a
+ * comma or paren inside a string literal never splits a key part.
+ */
+export function parseIndexDdl(sql: string): ParsedIndexDdl | null {
+  if (typeof sql !== 'string' || sql.length === 0) return null;
+  let depth = 0;
+  let quote: string | null = null;
+  let open = -1;
+  let close = -1;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (quote) {
+      if (ch === quote) {
+        if (sql[i + 1] === quote) i++;
+        else quote = null;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') quote = ch;
+    else if (ch === '(') {
+      if (depth === 0) open = i;
+      depth++;
+    } else if (ch === ')') {
+      depth--;
+      if (depth === 0) {
+        close = i;
+        break;
+      }
+    }
+  }
+  if (open < 0 || close < 0) return null;
+  const keyParts = splitTopLevelList(sql.slice(open + 1, close));
+  if (keyParts.length === 0) return null;
+  return { keyParts, partial: /(?:^|[\s)])where[\s(]/i.test(sql.slice(close + 1)) };
+}
+
+/**
+ * Fold parsed key parts into a {@link PhysicalIndex}, in key order: attributable
+ * parts land in `columns`, expression parts are additionally recorded verbatim
+ * so {@link isSyncReproducibleIndex} can see them.
+ */
+export function applyIndexKeyParts(index: PhysicalIndex, rawParts: string[]): void {
+  for (const raw of rawParts) {
+    const part = classifyIndexKeyPart(raw);
+    if (part.kind === 'column') {
+      index.columns.push(part.column);
+      continue;
+    }
+    (index.expressions ??= []).push(part.sql);
+    if (part.column !== null) index.columns.push(part.column);
+  }
+}
+
 /** An index that physically exists (see `SqlDriver.introspectIndexes`). */
 export interface PhysicalIndex {
   name: string;
+  /**
+   * The column identities the index keys on, in key order.
+   *
+   * An EXPRESSION key part contributes the column it resolves to when
+   * {@link classifyIndexKeyPart} can attribute it to one (`COALESCE(pkg,'')` →
+   * `pkg`, #4884) — the column IS in the key, it is merely written as an
+   * expression, and dropping it here is what made a healthy database read as
+   * three-column drift against a four-column declaration. A part that resolves
+   * to no single column is omitted (and recorded in {@link expressions}).
+   */
   columns: string[];
   unique: boolean;
   /** Backing index of the PRIMARY KEY — never metadata-managed. */
   primary?: boolean;
+  /**
+   * The index is restricted by a `WHERE` predicate (a SQLite / Postgres partial
+   * index). See {@link isSyncReproducibleIndex} for why this is load-bearing.
+   */
+  partial?: boolean;
+  /**
+   * Key parts written as SQL EXPRESSIONS rather than bare columns, verbatim and
+   * in key order. Empty/absent for an ordinary index. See
+   * {@link isSyncReproducibleIndex}.
+   */
+  expressions?: string[];
+}
+
+/**
+ * Could the additive index sync have produced this exact physical index — and,
+ * decisively, could it RECREATE it after a drop? (#4884)
+ *
+ * Every remedy this module proposes for an index rests on that second half.
+ * `drop_index` is safe only because a still-declared index would be
+ * re-materialized on the next sync; `recreate_index` drops before it creates.
+ * `syncDeclaredIndexes` builds indexes through knex's `table.unique(fields)` /
+ * `table.index(fields)` — plain columns, no predicate, no expressions — so an
+ * index carrying either is one it can NEITHER have created NOR rebuild. Naming
+ * it drift asserts an authorship we do not have, and pointing
+ * `--allow-destructive` at it proposes an unrecoverable drop.
+ *
+ * That is exactly what a fresh `app-showcase` boot did to
+ * `idx_sys_metadata_overlay_draft`: the ADR-0048 partial UNIQUE index the
+ * runtime creates for draft-overlay uniqueness matched no declaration, carried
+ * ObjectStack's `idx_<table>_` naming, and was therefore reported as an orphan
+ * to be dropped — i.e. the boot advised destroying a live data-integrity
+ * guarantee the same boot had just created.
+ */
+export function isSyncReproducibleIndex(index: PhysicalIndex): boolean {
+  return index.partial !== true && (index.expressions?.length ?? 0) === 0;
+}
+
+/**
+ * Is this index the framework's to manage rather than the additive sync's?
+ *
+ * Two independent witnesses, either of which is sufficient:
+ *  1. `runtimeCreated` — this very process executed the `CREATE INDEX` through
+ *     the driver's raw `execute()` seam. A database created seconds ago by this
+ *     build cannot be drifted from its own declaration, so a remedy here is
+ *     false by construction.
+ *  2. The index is not {@link isSyncReproducibleIndex} — durable across
+ *     restarts, and the only witness available on the second boot, when the
+ *     runtime ledger starts empty again.
+ */
+export function isRuntimeManagedIndex(
+  index: PhysicalIndex,
+  runtimeCreated?: ReadonlySet<string>,
+): boolean {
+  return runtimeCreated?.has(index.name) === true || !isSyncReproducibleIndex(index);
 }
 
 /**
@@ -705,8 +972,14 @@ export function diffManagedIndexes(args: {
   expected: ExpectedIndex[];
   legacy: LegacyUniqueReplacement[];
   physical: PhysicalIndex[];
+  /**
+   * Index names THIS process created through the driver's raw `execute()` DDL
+   * (#4884). Honoured as a runtime-managed marker — see
+   * {@link isRuntimeManagedIndex}.
+   */
+  runtimeCreated?: ReadonlySet<string>;
 }): ManagedDriftEntry[] {
-  const { table, expected, legacy, physical } = args;
+  const { table, expected, legacy, physical, runtimeCreated } = args;
   const out: ManagedDriftEntry[] = [];
   const byName = new Map(physical.map((p) => [p.name, p]));
   /** Physical index names accounted for — either declared, or already reported. */
@@ -719,7 +992,8 @@ export function diffManagedIndexes(args: {
     // collide with the legacy spelling be dropped.
     const present = l.legacyNames.filter((n) => {
       const p = byName.get(n);
-      return !!p && !p.primary && p.unique && p.columns.length === 1 && p.columns[0] === l.column;
+      if (!p || p.primary || isRuntimeManagedIndex(p, runtimeCreated)) return false;
+      return p.unique && p.columns.length === 1 && p.columns[0] === l.column;
     });
     if (present.length === 0) continue;
     for (const n of present) explained.add(n);
@@ -777,6 +1051,15 @@ export function diffManagedIndexes(args: {
       continue;
     }
     if (p.unique === e.unique && p.columns.join(',') === e.columns.join(',')) continue;
+    // The framework's own runtime migrations own some declared names — ADR-0048
+    // rebuilds `idx_sys_metadata_overlay_active` as a partial UNIQUE over
+    // `COALESCE(package_id,'')`, and `sys-metadata.object.ts` says in so many
+    // words that its four-column declaration is "the fallback shape for drivers
+    // without the runtime migration". Proposing a rebuild FROM that fallback
+    // would replace a stronger index with a weaker one, under a remedy
+    // (`recreate_index` → drop first) this differ cannot undo. Not ours to
+    // reconcile (#4884).
+    if (isRuntimeManagedIndex(p, runtimeCreated)) continue;
     // Same name, different definition. `syncDeclaredIndexes` skips by name, so
     // this never self-heals: it has to be dropped and rebuilt. Tightening to
     // UNIQUE is destructive — the CREATE can fail on existing duplicates, and
@@ -811,6 +1094,13 @@ export function diffManagedIndexes(args: {
   for (const p of physical) {
     if (p.primary || p.columns.length === 0 || explained.has(p.name)) continue;
     if (!isManagedIndexName(table, p)) continue;
+    // "Generated naming" is a NAME heuristic; it cannot tell an index the sync
+    // emitted from one the framework's runtime built under a similar name. The
+    // orphan remedy is a DROP, so the claim has to be stronger than a prefix:
+    // an index this differ could not recreate is never proposed for deletion
+    // (#4884 — the boot advised dropping `idx_sys_metadata_overlay_draft`, the
+    // partial UNIQUE enforcing draft-overlay uniqueness, on a healthy fresh DB).
+    if (isRuntimeManagedIndex(p, runtimeCreated)) continue;
     out.push({
       kind: 'unmapped_index',
       remoteName: table,

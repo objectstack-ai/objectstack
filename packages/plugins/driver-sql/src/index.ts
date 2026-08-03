@@ -14,6 +14,8 @@ export type {
 
 // Managed-schema drift / reconcile (#2186), incl. the index dimension (#3728)
 export {
+  applyIndexKeyParts,
+  classifyIndexKeyPart,
   diffManagedTable,
   driftKey,
   fieldHasColumn,
@@ -24,9 +26,12 @@ export {
   isIndexDriftOp,
   isInPlaceSchemaWork,
   isManagedIndexName,
+  isRuntimeManagedIndex,
+  isSyncReproducibleIndex,
   legacyUniqueIndexNames,
   legacyUniqueReplacements,
   normalizeDeclaredIndex,
+  parseIndexDdl,
   uniqueIndexesFromFields,
   INDEX_DRIFT_OPS,
 } from './schema-drift.js';
@@ -35,6 +40,8 @@ export type {
   DriftOp,
   DriftCategory,
   SqlDialectName,
+  IndexKeyPart,
+  ParsedIndexDdl,
   PhysicalColumn,
   PhysicalIndex,
   ExpectedIndex,

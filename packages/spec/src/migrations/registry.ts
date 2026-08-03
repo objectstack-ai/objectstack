@@ -783,7 +783,38 @@ const step17: MigrationStep = {
     + '`body.capabilities` on hooks and actions; it deliberately does NOT touch the '
     + '`ctx.crypto.hash(...)` call the body made under it, which never returned a value and '
     + 'which the author must delete. Hashing returns only WITH an implementation, through the '
-    + 'capability admission process.',
+    + 'capability admission process.\n\n'
+    + "It also removes `connector.rateLimitConfig` and its whole shape (#4911). This one is not "
+    + '"declared but unread" — it is declared but UNIMPLEMENTED, one step worse. The only token '
+    + "bucket the platform owns (runtime `security/rate-limit.ts`) is INBOUND: the dispatcher "
+    + 'calls `consume(key)` on a request fingerprint and answers 429. Nothing anywhere throttles '
+    + 'the calls a connector makes OUT, and no provider — `connector-rest`, `connector-openapi`, '
+    + '`connector-mcp`, `connector-slack` — reads the key or has a seam that could. So '
+    + '`strategy`, `maxRequests`, `windowSeconds`, `burstCapacity`, `respectUpstreamLimits` and '
+    + '`rateLimitHeaders` parsed cleanly and capped nothing, on a surface where the author '
+    + "believed they had bounded their spend against a third party's quota. `ConnectorRateLimit"
+    + 'Config` and the `RateLimitStrategy` enum it embedded had no other consumer and are removed '
+    + 'with the key, so importing either is TS2305 in v17 — the #4834 shape, and the same '
+    + 'implementation-first ruling: the vocabulary comes back WITH the engine, in one change. '
+    + 'It is deliberately NOT converted to `shared` `RateLimitConfig`, which limits the calls '
+    + 'others make to US; #4684 split their names for precisely this confusion, and rewriting an '
+    + 'outbound cap into an inbound one would throttle the wrong direction. Delete the key and '
+    + 'rate-limit where the calls are actually made — the connector provider or upstream gateway.\n\n'
+    + 'Last, it removes `dashboard.widgets[].responsive` (#4876) — the straggler of the #3896 '
+    + 'sweep above, which retired the literally same-named `view.responsive` on the same '
+    + 'evidence four days earlier. Re-measured before removal: no objectui code reads '
+    + '`widget.responsive` (DashboardRenderer, DashboardEditor and plugin-designer name it only '
+    + 'in comments), and there are zero authored instances repo-wide, so the conversion is '
+    + 'expected to be a no-op on every real source — it exists so that a stored dashboard '
+    + 'carrying the key is cleaned deterministically rather than meeting the tombstone at load. '
+    + 'What kept it alive was not evidence but a hole in the instrument: the liveness ledger '
+    + 'declares no `children` on `dashboard.widgets`, and the walk only drills one level through '
+    + 'an explicit `children`, so no widget-level key has ever been classified at all (filed as '
+    + '#4956, fixed separately). The removal is deliberately narrow — it takes the widget EMBED, '
+    + 'not the shape. `ResponsiveConfig` stays exported and stays live on '
+    + '`page.components[].responsive`, which objectui `useResponsiveConfig` genuinely reads, so '
+    + 'no import breaks and authors who need breakpoint behaviour today have somewhere real to '
+    + 'put it. Per-widget responsive layout returns if and when a renderer implements it.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -822,6 +853,8 @@ const step17: MigrationStep = {
     'retry-policy-converged',
     'object-enable-trash-mru-removed',
     'hook-body-crypto-hash-removed',
+    'connector-rate-limit-config-removed',
+    'dashboard-widget-responsive-removed',
   ],
   semantic: [
     {

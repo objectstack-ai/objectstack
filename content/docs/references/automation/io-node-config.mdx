@@ -45,11 +45,39 @@ the INTERPOLATED config, because that is the shape its executor reads —
 
 a `\{token\}` in a typed slot (`timeoutMs`, `durable`) resolves to its real
 
-type first. Unknown keys are the registration layer's job: `registerFlow()`
+type first.
 
-rejects keys the descriptor `configSchema` does not declare (the tightened
+## Unknown keys — closed here too, as of #4001 批 9
 
-#4059 check), while the parse here strips them.
+These contracts used to say "unknown keys are the registration layer's job":
+
+`registerFlow()` rejects keys the descriptor `configSchema` does not declare
+
+(the tightened #4059 check), and this parse merely stripped them. That is one
+
+door, and the #4001 campaign's second recurring finding is that a schema
+
+which strips by default leaves every OTHER door open — whoever writes the
+
+guard is fixing the bug in front of them, not auditing the surface.
+
+The registration check remains the first door a stored flow meets and the
+
+more informative one (it walks NESTED config against the descriptor's JSON
+
+Schema and prints the declared set per path, which a flat key list cannot).
+
+What changes is that a config reaching `parse()` by any OTHER route — a
+
+direct `NotifyConfigSchema.parse()` in tooling, a host that composes the
+
+engine without `registerFlow`, a future executor seam — no longer has its
+
+undeclared keys silently deleted. The two doors are kept in agreement by
+
+`io-node-form-zod-ledger.test.ts`, which reconciles this key set against the
+
+descriptor's in both directions.
 
 `connector_action` has no schema here on purpose: its config contract is
 

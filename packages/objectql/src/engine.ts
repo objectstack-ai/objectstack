@@ -17,7 +17,7 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
@@ -84,8 +84,14 @@ import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spe
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
+import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
+import { resolveMasterDetailRelation } from './master-detail.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
+import {
+  resolveEngineDeleteDispatch,
+  ENGINE_DELETE_REJECT_MESSAGE,
+  type EngineDeleteDispatchInput,
+} from './engine-delete-dispatch.js';
 import { applyHaving } from './having-filter.js';
 import {
   auditDanglingReferences,
@@ -631,6 +637,24 @@ function isEmptyReferenceValue(v: unknown): boolean {
   if (v === null || v === undefined || v === '') return true;
   if (Array.isArray(v)) return v.length === 0 || v.every((e) => e === null || e === undefined || e === '');
   return false;
+}
+
+/**
+ * [#4889] The master id a detail row's `parent` binding resolves against:
+ * the write's own value for the FK when it carries one (a REPOINT must be
+ * judged against the master it lands on), else the prior row's. Only a scalar
+ * id counts — an expanded relation object or an array is not an id this read
+ * can bind, and guessing one would be worse than leaving `parent` unbound.
+ */
+function masterIdOf(
+  fk: string,
+  data: Record<string, unknown> | null | undefined,
+  row: Record<string, unknown> | null | undefined,
+): string | number | undefined {
+  const raw = data && fk in data ? data[fk] : row?.[fk];
+  if (typeof raw === 'string') return raw === '' ? undefined : raw;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  return undefined;
 }
 
 /**
@@ -1414,6 +1438,50 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * Resolve the `NOW()` runtime token into the value the field's declared type
+   * actually stores (#4597).
+   *
+   * The engine — not the driver — owns this resolution, exactly as it owns
+   * `current_user`. `NOW()` is the mirror of #4560's crack: `current_user` was
+   * known to the engine and not to the DDL, so the DDL stored the token text;
+   * `NOW()` was known to the SQL driver and not to the engine, so every
+   * non-SQL datasource got the token text instead of a time. Resolving here
+   * makes one answer serve every driver.
+   *
+   * The shapes below are NOT invented: they are the canonical storage forms
+   * ADR-0053 already fixed and `SqlDriver.nowColumnDefault` already emits
+   * per type. Producing a full instant for a `Field.date` would trade the old
+   * cross-driver drift for a new one (SQL would keep collapsing it to a
+   * calendar day in `formatInput`, memory/mongodb would not), so the token
+   * resolves per declared type:
+   *
+   * | field type | stored form | matches |
+   * |---|---|---|
+   * | `date` | `YYYY-MM-DD` (UTC day) | `toDateOnly` / the `date` column DEFAULT |
+   * | `time` | `HH:MM:SS[.fff]` (UTC wall clock, `.000` trimmed) | `canonicalTimeOfDay` |
+   * | anything else | `YYYY-MM-DDTHH:MM:SS.sssZ` | `canonicalUtcDatetime` |
+   *
+   * "Anything else" deliberately includes non-temporal fields: a `text` field
+   * that opts into `NOW()` gets the instant, which is what the SQL column
+   * DEFAULT gives it today.
+   *
+   * `now` is the caller's per-insert snapshot, so two defaulted fields on one
+   * record cannot straddle a millisecond boundary.
+   */
+  private resolveNowDefault(fieldType: unknown, now: Date): string {
+    const iso = now.toISOString(); // YYYY-MM-DDTHH:MM:SS.sssZ
+    if (fieldType === 'date') return iso.slice(0, 10);
+    if (fieldType === 'time') {
+      const timeOfDay = iso.slice(11, 23); // HH:MM:SS.fff
+      // Trim a zero-millisecond `.000` so a defaulted row is byte-canonical and
+      // still matches an equality filter against `'HH:MM:SS'` — the same trim
+      // the SQL driver's time DEFAULT and `canonicalTimeOfDay` apply.
+      return timeOfDay.endsWith('.000') ? timeOfDay.slice(0, 8) : timeOfDay;
+    }
+    return iso;
+  }
+
+  /**
    * Build a HookContext.api: a ScopedContext that hooks can use to
    * read/write other objects within the same execution context.
    * Falls back to a system-elevated empty context when no execCtx
@@ -1428,9 +1496,12 @@ export class ObjectQL implements IObjectQLEngine {
    * Apply field defaults to an incoming insert payload. Defaults that are
    * Expression envelopes (e.g. `{ dialect: 'cel', source: 'today()' }`,
    * `{ dialect: 'cel', source: 'os.user.id' }`) are evaluated via
-   * `ExpressionEngine` against the calling user/org/now snapshot. Static
-   * defaults are applied verbatim. Records that already supplied a value for a
-   * field are left untouched.
+   * `ExpressionEngine` against the calling user/org/now snapshot. The
+   * `defaultValue` runtime TOKENS (`@objectstack/spec/data`'s
+   * `DEFAULT_VALUE_TOKENS` — `current_user` and `NOW()`, the whole family) are
+   * resolved here, so one declaration behaves identically on every driver.
+   * Static defaults are applied verbatim. Records that already supplied a value
+   * for a field are left untouched.
    *
    * "Supplied a value" means the field is present with a non-null value. Both an
    * OMITTED field (`undefined`) and an EXPLICIT `null` are treated as "not
@@ -1454,7 +1525,7 @@ export class ObjectQL implements IObjectQLEngine {
     const fieldsRaw = (schema as any)?.fields;
     if (!fieldsRaw || typeof fieldsRaw !== 'object') return record;
     // `fields` may be a Record<string, Field> (canonical) or an array (legacy).
-    const fieldEntries: Array<{ name: string; defaultValue?: unknown }> = Array.isArray(fieldsRaw)
+    const fieldEntries: Array<{ name: string; type?: unknown; defaultValue?: unknown }> = Array.isArray(fieldsRaw)
       ? fieldsRaw
       : Object.entries(fieldsRaw).map(([name, def]) => ({ name, ...(def as object) }));
     const out = { ...record };
@@ -1498,6 +1569,31 @@ export class ObjectQL implements IObjectQLEngine {
         // SQL emitted `DEFAULT 'current_user'` and the DATABASE overrode the
         // "leave it unset" decision below with a literal non-id (#4560).
         if (execCtx?.userId != null) out[f.name] = String(execCtx.userId);
+      } else if (isNowDefaultToken(dv)) {
+        // `NOW()` token → the insert-time clock, in the storage shape the
+        // field's declared type calls for ({@link resolveNowDefault}).
+        //
+        // The mirror of the `current_user` crack above (#4597 / #4560): this
+        // token was understood by the SQL driver and NOT by the engine, so
+        // `out[f.name] = dv` sent the literal string `'NOW()'` to every
+        // driver. SQL hid it — `formatInput`'s safety net swapped in a real
+        // timestamp before the wire — while memory/mongodb have no such net,
+        // so the same declaration behaved differently per datasource. That
+        // split surfaced two ways: a validation-visible field was REJECTED by
+        // the engine's own write validator ("must be a valid datetime"), and a
+        // `readonly`/`system` field — which `validateRecord` skips, i.e. the
+        // ~100 `created_at`/`updated_at` platform declarations — silently
+        // stored the four characters `NOW()`.
+        //
+        // Resolved from the caller's `nowSnapshot`, so every defaulted field
+        // in one insert (and every row of one batch) carries the SAME instant.
+        //
+        // The driver's own now-handling is unchanged and stays as defence in
+        // depth: `SqlDriver.formatInput`'s safety net (now unreachable from
+        // this path) and the native column DEFAULT, which still serves writes
+        // that bypass the engine entirely — the same division of labour
+        // `current_user` has.
+        out[f.name] = this.resolveNowDefault(f.type, now);
       } else {
         out[f.name] = dv;
       }
@@ -2393,6 +2489,90 @@ export class ObjectQL implements IObjectQLEngine {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * [#4889] The master-detail header a detail row's `parent`-scoped
+   * `readonlyWhen` reads, or `null` when this write cannot resolve one.
+   *
+   * `readonlyWhen: parent.status == 'paid'` is a documented **server**
+   * guarantee (ADR-0057 D10 puts enforcement here; the client grid is
+   * courtesy), but the strip is a pure function over the payload and the prior
+   * row — it has no driver and cannot fetch a header. So the engine resolves it
+   * and passes it in.
+   *
+   * The header id comes from the payload first, then the prior row: a write that
+   * REPOINTS the detail at another master must be judged against the master it
+   * is landing on, not the one it is leaving. Read as **system**: the lock is a
+   * data-integrity property of the header's state, not of the caller's
+   * visibility of it, and the caller's right to touch this detail at all was
+   * already settled upstream (RLS / `controlled_by_parent`, ADR-0055) before the
+   * write reached the strip.
+   *
+   * `null` on any failure — no relation, no id, header gone, read threw. It is
+   * NOT read as "unlocked": an unresolved binding leaves `parent` unbound, and
+   * `isReadonlyWhenLocked` treats a predicate that needs it as LOCKED.
+   */
+  private async resolveMasterDetailParent(
+    schema: any,
+    data: Record<string, unknown> | null | undefined,
+    priorRow: Record<string, unknown> | null | undefined,
+  ): Promise<Record<string, unknown> | null> {
+    const rel = resolveMasterDetailRelation(schema);
+    if (!rel) return null;
+    const parentId = masterIdOf(rel.fk, data, priorRow);
+    if (parentId == null) return null;
+    try {
+      const row = await this.findOne(rel.master, { where: { id: parentId }, context: { isSystem: true } } as any);
+      return (row as Record<string, unknown>) ?? null;
+    } catch (err) {
+      this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
+        object: rel.master, id: parentId, error: err,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Bulk counterpart of {@link resolveMasterDetailParent}: one read for the
+   * whole matched set, then a per-row lookup for
+   * `stripReadonlyWhenFieldsMulti`. A bulk update of N details under M masters
+   * costs ONE extra query, not N — the same "read the match set once" discipline
+   * the #3106 prior-row fetch follows.
+   */
+  private async resolveMasterDetailParents(
+    schema: any,
+    data: Record<string, unknown> | null | undefined,
+    priorRows: ReadonlyArray<Record<string, unknown>> | null | undefined,
+  ): Promise<(row: Record<string, unknown> | undefined) => Record<string, unknown> | null> {
+    const unbound = () => null;
+    const rel = resolveMasterDetailRelation(schema);
+    if (!rel) return unbound;
+    const ids = new Set<string>();
+    for (const row of priorRows ?? []) {
+      const id = masterIdOf(rel.fk, data, row);
+      if (id != null) ids.add(String(id));
+    }
+    if (ids.size === 0) return unbound;
+    const byId = new Map<string, Record<string, unknown>>();
+    try {
+      const rows = await this.find(rel.master, {
+        where: { id: { $in: [...ids] } },
+        context: { isSystem: true },
+      } as any) as Array<Record<string, unknown>>;
+      for (const row of Array.isArray(rows) ? rows : []) {
+        if (row?.id != null) byId.set(String(row.id), row);
+      }
+    } catch (err) {
+      this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
+        object: rel.master, error: err,
+      });
+      return unbound;
+    }
+    return (row) => {
+      const id = masterIdOf(rel.fk, data, row);
+      return id == null ? null : (byId.get(String(id)) ?? null);
+    };
   }
 
   /**
@@ -4363,7 +4543,8 @@ export class ObjectQL implements IObjectQLEngine {
     };
 
     await this.executeWithMiddleware(opCtx, async () => {
-      // Resolve field `defaultValue`s (including the `current_user` token)
+      // Resolve field `defaultValue`s (including the `current_user` and
+      // `NOW()` tokens)
       // BEFORE the beforeInsert hook runs, so a hook that DERIVES one field
       // from another can read the defaulted value instead of a stale `null`
       // (#2703). The hook still has final say — it runs after and may override
@@ -4768,7 +4949,16 @@ export class ObjectQL implements IObjectQLEngine {
                // field is read-only for this record's state, so the incoming
                // change is ignored (the persisted value is kept).
                const preRoWhen = hookContext.input.data as Record<string, unknown>;
-               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger) as any;
+               // [#4889] A `parent`-scoped predicate ("once the header invoice
+               // is Paid, its lines are frozen") needs the master-detail header
+               // bound as `parent`. Only the engine can fetch it, so the strip
+               // is a pure function of what we hand it — resolve here, gated on
+               // the payload actually touching such a predicate so a detail
+               // object with only `record`-scoped locks pays no extra read.
+               const roWhenParent = hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhen)
+                   ? await this.resolveMasterDetailParent(updateSchema, preRoWhen, priorRecord)
+                   : undefined;
+               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, roWhenParent) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
@@ -4828,7 +5018,15 @@ export class ObjectQL implements IObjectQLEngine {
                // single-id `stripReadonlyWhenFields`; INSERT stays exempt.
                if (payloadHasReadonlyWhen) {
                    const preRoWhenMulti = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger) as any;
+                   // [#4889] N matched rows can hang off N different masters, so
+                   // the `parent` binding is per row here. Batch-read the
+                   // distinct headers ONCE (the same shape as the single-id
+                   // resolution, one query instead of one per row) and hand the
+                   // strip a lookup.
+                   const parentForRow = hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti)
+                       ? await this.resolveMasterDetailParents(updateSchema, preRoWhenMulti, priorRows)
+                       : undefined;
+                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, parentForRow) as any;
                    reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
                // [#2948] Same static-`readonly` write guard on the bulk path —
@@ -5059,14 +5257,14 @@ export class ObjectQL implements IObjectQLEngine {
     // literally (driver.delete(object, {$in:[…]})) and both skip the #2982 AST
     // seeding below AND bypass the by-id RLS pre-image check. Leave `id`
     // undefined so the call routes to deleteMany with the scoped AST.
-    let id: any = undefined;
-    if (options?.where && typeof options.where === 'object' && 'id' in options.where) {
-        const whereId = (options.where as Record<string, unknown>).id;
-        const t = typeof whereId;
-        if (whereId !== null && (t === 'string' || t === 'number' || t === 'bigint')) {
-            id = whereId;
-        }
-    }
+    //
+    // [#4550] The decision lives in `engine-delete-dispatch.ts` so the fake
+    // engines that stand in for this method import it instead of re-deriving
+    // it. #4434 shipped a dead REST route green because plugin-sharing's fake
+    // accepted the one shape the `reject` branch below refuses; a double that
+    // reads THIS predicate cannot be looser than this method.
+    const dispatch = resolveEngineDeleteDispatch(options as EngineDeleteDispatchInput | undefined);
+    const id: any = dispatch.kind === 'by-id' ? dispatch.id : undefined;
 
     const opCtx: OperationContext = {
       object,
@@ -5134,7 +5332,10 @@ export class ObjectQL implements IObjectQLEngine {
                result = await driver.deleteMany(object, ast, hookContext.input.options as any);
                isPredicateWrite = true;
           } else {
-               throw new Error('Delete requires an ID or options.multi=true');
+               // The `reject` verdict of resolveEngineDeleteDispatch, re-asked
+               // here because a beforeDelete hook may have cleared the id since
+               // (#4550 keeps the wording in one place either way).
+               throw new Error(ENGINE_DELETE_REJECT_MESSAGE);
           }
 
           hookContext.event = 'afterDelete';

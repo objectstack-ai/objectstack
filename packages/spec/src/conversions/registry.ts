@@ -2226,6 +2226,65 @@ const dashboardInertKeysRemoved: MetadataConversion = {
 };
 
 /**
+ * dashboard.widgets[].responsive (#4876) — the same-named `view.responsive`
+ * went in the #3896 close-out above; this one escaped that sweep through a
+ * liveness drill gap rather than on evidence (`dashboard.json` declares no
+ * `children` on `widgets`, so no widget-level key was ever classified — filed
+ * as #4956). Re-measured 2026-08-03: no objectui code reads
+ * `widget.responsive`, and zero authored instances exist repo-wide.
+ *
+ * Deliberately a SEPARATE entry rather than another key on
+ * `dashboard-inert-keys-removed`: that entry's identity is the #3896 sweep, and
+ * folding a differently-evidenced removal into it would misattribute this one
+ * in `spec-changes.json` and the upgrade guide — the two places an upgrading
+ * author actually reads. Both are `toMajor: 17`, so a stored dashboard carrying
+ * both keys is cleaned by both in one replay.
+ *
+ * Strips ONLY the widget embed. The shared `ResponsiveConfig` shape is
+ * untouched and still live on `page.components[].responsive`.
+ */
+const dashboardWidgetResponsiveRemoved: MetadataConversion = {
+  id: 'dashboard-widget-responsive-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'dashboard.widgets[].responsive',
+  summary: "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; page.components[].responsive is unaffected)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'dashboards', (d, path) => {
+      const widgets = d.widgets;
+      if (!Array.isArray(widgets)) return d;
+      let touched = false;
+      const rebuilt = widgets.map((w, i) => {
+        if (!w || typeof w !== 'object' || Array.isArray(w)) return w;
+        const cleaned = stripKeys(w as Record<string, unknown>, ['responsive'], emit, `${path}.widgets[${i}]`);
+        if (cleaned !== w) touched = true;
+        return cleaned;
+      });
+      if (!touched) return d;
+      return { ...d, widgets: rebuilt };
+    });
+  },
+  fixture: {
+    before: {
+      dashboards: [{
+        name: 'ops_overview',
+        widgets: [{
+          id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'],
+          responsive: { columns: { xs: 12, lg: 4 }, order: { xs: 2, lg: 1 }, hiddenOn: ['xs'] },
+        }],
+      }],
+    },
+    after: {
+      dashboards: [{
+        name: 'ops_overview',
+        widgets: [{ id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'] }],
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
  * agent.knowledge — a grounding claim nothing enforced (the RAG path reads
  * `sourceIds` from the LLM's tool-call arguments, never the agent record).
  * Absorbs the former `agent-knowledge-topics-to-sources` rename (#3855):
@@ -3558,6 +3617,89 @@ const hookBodyCryptoHashRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * `connector.rateLimitConfig` — OUTBOUND throttling for an engine that does not
+ * exist (#4911, ADR-0049).
+ *
+ * Not "declared but unread" — *declared but unimplemented*, which is a step
+ * worse. The platform's only token bucket is `packages/runtime/src/security/
+ * rate-limit.ts`, and it is INBOUND: the dispatcher calls `consume(key)` on a
+ * request fingerprint and short-circuits with 429. There is no counterpart on
+ * the way out; no connector provider (`connector-rest`, `connector-openapi`,
+ * `connector-mcp`, `connector-slack`) reads the key, and no seam exists that
+ * could. So `strategy` / `maxRequests` / `windowSeconds` / `burstCapacity` /
+ * `respectUpstreamLimits` / `rateLimitHeaders` were six precise knobs an author
+ * could set — and would then believe capped their outbound call rate against a
+ * third-party API's quota. That belief is the defect: this is the false-
+ * compliance class ADR-0049 exists for, not cosmetic debt.
+ *
+ * The whole SHAPE goes, not just the key: `ConnectorRateLimitConfigSchema` and
+ * the `RateLimitStrategySchema` enum it embedded had no other consumer, and an
+ * exported schema with no consumer reads as a capability to whoever finds it
+ * (#3950). The vocabulary returns *with* an implementation, in one change —
+ * implementation-first, the ruling #4834 / PR #4878 set for the plugin-runtime
+ * family.
+ *
+ * Deliberately NOT converted to `shared/RateLimitConfig` (inbound API limiting,
+ * `windowMs`), the obvious-looking target: it limits the calls *others* make to
+ * us. Rewriting an outbound cap into an inbound one would throttle the wrong
+ * direction — a migration that silently changes behaviour, well outside D2's
+ * lossless scope. #4684 split their NAMES for this exact confusion; the honest
+ * conversion is a delete plus a prescription that says where throttling really
+ * lives (the connector provider / upstream gateway).
+ *
+ * `retiredFromLoadPath`: the key lies rather than being misspelled — the
+ * `flow-node-wait-timeout-keys-removed` distinction. Silently absorbing it at
+ * load would let the author keep believing they had configured a cap. The entry
+ * exists so stored 16.x/17-rc rows replay clean
+ * (`applyConversionsToStoredItem`) and `os migrate meta --from 16` rewrites
+ * author sources; live parses hit the `retiredKey()` tombstone instead.
+ */
+const connectorRateLimitConfigRemoved: MetadataConversion = {
+  id: 'connector-rate-limit-config-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'connector.rateLimitConfig',
+  summary:
+    "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; "
+    + "the runtime's only token bucket limits INBOUND requests, so every knob here was inert "
+    + 'while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'connectors', (c, path) =>
+      stripKeys(c, ['rateLimitConfig'], emit, path));
+  },
+  fixture: {
+    before: {
+      connectors: [
+        {
+          name: 'billing_api',
+          label: 'Billing API',
+          type: 'api',
+          rateLimitConfig: {
+            strategy: 'token_bucket',
+            maxRequests: 100,
+            windowSeconds: 60,
+            burstCapacity: 150,
+            respectUpstreamLimits: true,
+          },
+        },
+        // A connector that never authored the key keeps its identity — the
+        // copy-on-write contract `stripKeys` / `mapCollection` are built on.
+        { name: 'crm_sync', label: 'CRM Sync', type: 'saas' },
+      ],
+    },
+    // One notice per connector, not per knob: the block is what was removed.
+    // `retryConfig` and the timeouts beside it are untouched — they are live.
+    after: {
+      connectors: [
+        { name: 'billing_api', label: 'Billing API', type: 'api' },
+        { name: 'crm_sync', label: 'CRM Sync', type: 'saas' },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -3584,6 +3726,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowInertKeysRemoved,
     viewInertKeysRemoved,
     dashboardInertKeysRemoved,
+    dashboardWidgetResponsiveRemoved,
     agentKnowledgeRemoved,
     skillTriggerPhrasesRemoved,
     stackApiRequireAuthRemoved,
@@ -3603,6 +3746,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     objectManagedBySystemToSystemData,
     objectEnableTrashMruRemoved,
     hookBodyCryptoHashRemoved,
+    connectorRateLimitConfigRemoved,
   ],
 };
 

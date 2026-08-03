@@ -264,14 +264,8 @@ const sapConnector: Connector = {
     }
   ],
 
-  // Rate Limiting
-  rateLimitConfig: {
-    strategy: 'token_bucket',
-    maxRequests: 100,
-    windowSeconds: 60,
-    burstCapacity: 150,
-    respectUpstreamLimits: true
-  },
+  // (`rateLimitConfig` sat here until #4911 retired it — no outbound
+  // rate-limiting engine ever existed. Throttle at the provider/gateway.)
 
   // Retry Configuration
   retryConfig: {
@@ -404,7 +398,7 @@ const pipeline: ETLPipeline = {
 const connector: Connector = {
   authentication: { type: 'oauth2', ... },
   webhooks: [...],
-  rateLimitConfig: { ... }
+  retryConfig: { ... }
 };
 ```
 

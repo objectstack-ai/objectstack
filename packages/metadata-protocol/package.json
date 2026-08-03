@@ -35,6 +35,7 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
     "@objectstack/lint": "workspace:*",
+    "@objectstack/metadata": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",

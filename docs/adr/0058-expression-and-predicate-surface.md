@@ -22,6 +22,40 @@
 
 ---
 
+> **Addendum (2026-08, #4889) — D5's "non-security ⇒ fail soft" line is NARROWED
+> at the write-path gates: an UNEVALUABLE gate now fails CLOSED.**
+> D5 sorts fail policy by *security-relevance*, and it put validation, hook and
+> field predicates on the fail-soft side. Three findings since have shown that
+> the sorting axis was one notch off for a specific subset: the predicates that
+> **gate a write**. Fail-soft there does not mean "the rule was advisory"; it
+> means "the guarantee the author declared did not happen, and nothing told
+> anyone". The write returns 200, the client still renders the guard, and only a
+> log line disagrees.
+>
+> Three instances, one direction:
+>
+> | # | Gate | Old | New |
+> | :-- | :-- | :-- | :-- |
+> | #4649 | object validation predicate (`script`/`cross_field`/`when`) | skip rule + log | **reject the write**, naming the rule and key |
+> | #4775 | declarative hook `condition` | → `false` + log | **abort the operation** (`HookConditionError`) |
+> | #4889 | field `readonlyWhen` whose predicate names an **unbound scope root** (e.g. `parent` with no master-detail header resolved) | → "not locked", write lands | **treat the field as LOCKED** (strip it) |
+>
+> The narrowing is deliberately *not* "every CEL fault is now fail-closed". A
+> predicate that is simply BROKEN on this record — an undeclared key, a `null`
+> ordering overload, a parse error, an engine throw — keeps D5's fail-soft
+> policy at the field-predicate surfaces (`requiredWhen`, option `visibleWhen`,
+> and every non-scope `readonlyWhen` fault), because the author has no remedy for
+> an engine fault and bricking CRUD over one is the cure being worse. What
+> changed is the case where the expression is **well-formed and supported** and
+> the site simply could not bind what it names: there, "I could not check" must
+> not resolve to "allowed", because the *declaration itself* says otherwise.
+>
+> Read the Pass-2 evidence table below as a snapshot of 2026-06, not as current
+> behaviour, for those three rows. D5's tiering stands everywhere else — formula
+> → `null` + log, flow → throw, security predicates fail closed.
+
+---
+
 ## TL;DR
 
 ObjectStack exposes **~50 authorable declarations** that hold an expression — formulas, visibility/required/readonly predicates, validation rules, hook conditions, flow/edge conditions, sharing-rule conditions, RLS `using`/`check`, action/view/app visibility, notification/ETL/export/sync/connector conditions — and they all funnel through **one authoring primitive** (`ExpressionInputSchema` → `{ dialect: 'cel', source }`, helpers `cel`/`F`/`P`). The authoring surface is already unified and clean.

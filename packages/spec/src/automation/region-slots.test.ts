@@ -14,6 +14,24 @@
  * key names off `.shape`. A slot renamed in the schema fails here; so does a
  * slot that stops accepting a region. (Approach carried over from the
  * `flow-walk.test.ts` version it replaces.)
+ *
+ * ## The probe was rebuilt in #4001 批 10 — it had been running on `.strip`
+ *
+ * The original handed EVERY candidate key to EVERY schema in one payload —
+ * `try`, `catch` and `branches` to `loop` included — and depended on zod's
+ * default `.strip` to discard the ones that schema does not declare. So the
+ * moment the three container configs became `strictObject`, the probe payload
+ * stopped parsing at all and the function returned `[]` for every construct:
+ * a reconciliation test reporting "no schema accepts any region".
+ *
+ * It failed loudly, which is the only reason this reads as a footnote rather
+ * than as the campaign's third-category finding — an instrument that measures
+ * a surface by relying on the very leniency the campaign is removing will
+ * either break or, worse, quietly agree with itself. The repair keeps the
+ * behavioural question exactly as it was and drops the dependency: the payload
+ * is now built from the keys the schema itself declares, so each construct is
+ * asked only about slots it has. Strictly more honest than before, where a
+ * `loop` was asked about `catch` and the answer was thrown away unread.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -37,21 +55,42 @@ const REGION_BEARING_CONFIGS = {
 const region = () => ({ nodes: [{ id: 'probe', type: 'script', label: 'Probe' }], edges: [] });
 
 /**
+ * Candidate values, one per key a container construct might carry. `collection`
+ * is here as a REQUIRED SIBLING with a deliberately non-region value — the
+ * parse has to reach the region keys, and the arity check below must not
+ * mistake an inline-array collection for a list of regions.
+ */
+const PROBE_VALUES: Readonly<Record<string, unknown>> = {
+  collection: '{items}',
+  body: region(),
+  try: region(),
+  catch: region(),
+  branches: [region(), region()],
+};
+
+/**
  * Ask a config schema which of its keys accept a region — by handing it every
- * candidate at once and seeing which survive the parse in a region shape.
+ * candidate it DECLARES and seeing which survive the parse in a region shape.
  * Returns each surviving key with the arity it parsed at.
+ *
+ * Restricting the payload to the schema's own keys is what makes this work
+ * against a strict shape (see the module note): the question asked is
+ * unchanged, but the probe no longer needs the schema to silently swallow
+ * candidates that belong to a different construct.
  */
 function regionSlotsAccepted(
-  schema: { safeParse: (v: unknown) => { success: boolean; data?: unknown } },
+  schema: {
+    shape?: Record<string, unknown>;
+    safeParse: (v: unknown) => { success: boolean; data?: unknown };
+  },
 ): Array<{ key: string; arity: 'one' | 'many' }> {
-  const probes: Record<string, unknown> = {
-    // Required siblings, so the parse reaches the region keys at all.
-    collection: '{items}',
-    body: region(),
-    try: region(),
-    catch: region(),
-    branches: [region(), region()],
-  };
+  const declaredKeys = Object.keys(schema.shape ?? {});
+  // A schema with no readable shape is not a container config; probing it with
+  // the full candidate set would be the old strip-dependent behaviour again.
+  if (declaredKeys.length === 0) return [];
+  const probes = Object.fromEntries(
+    declaredKeys.filter((k) => k in PROBE_VALUES).map((k) => [k, PROBE_VALUES[k]]),
+  );
   const parsed = schema.safeParse(probes);
   if (!parsed.success) return [];
   const data = parsed.data as Record<string, unknown>;
@@ -102,6 +141,15 @@ describe('#4401 — FLOW_REGION_SLOTS reconciles with the ADR-0031 construct sch
     }
     // Guard against the probe going vacuous if the naming convention changes.
     expect(probed.length + accounted.size).toBeGreaterThanOrEqual(3);
+    // …and against it going vacuous the OTHER way: the probe now reads
+    // `.shape` and returns `[]` for anything it cannot read, so an empty
+    // result must mean "declares no region", never "could not be asked".
+    for (const [name, schema] of Object.entries(REGION_BEARING_CONFIGS)) {
+      expect(
+        Object.keys((schema as unknown as { shape: Record<string, unknown> }).shape ?? {}).length,
+        `${name} must expose a readable .shape or every probe above is vacuous`,
+      ).toBeGreaterThan(0);
+    }
   });
 
   it('marks exactly the array-valued slot as `many`', () => {

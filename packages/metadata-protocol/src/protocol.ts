@@ -1083,6 +1083,48 @@ function invalidSortError(
 }
 
 /**
+ * [#4721] A sort node that spells its direction `direction` instead of `order`.
+ *
+ * This is the one unknown key on this axis that has a KNOWN right answer, so it
+ * gets a rejection that carries the translation rather than a generic refusal.
+ * `direction` is not a typo — it is the live vocabulary of a neighbouring
+ * contract (`IReportService.orderBy`, `spec/src/contracts/report-service.ts`),
+ * which `plugin-auth/objectql-adapter.ts` already translates to `order` by hand.
+ * A necessary translation nothing enforced is exactly ADR-0049's shape.
+ *
+ * Measured on `main` before this rejection existed, on the schema side of the
+ * same door:
+ *
+ * ```
+ * SortNodeSchema.parse({ field: 'updated_at', direction: 'desc' })
+ *   →  { field: 'updated_at', order: 'asc' }
+ * ```
+ *
+ * So the failure was not "unsorted" — it was sorted the OTHER WAY, and with a
+ * `limit` that means a different set of rows came back under a 200. Worse than
+ * the family `invalidSortError` was built for (#3948, #4226): those return the
+ * right rows in an arbitrary order, this one returns the wrong rows.
+ *
+ * `INVALID_SORT` rather than a new code: one condition — "this sort was not
+ * applied as written" — keeps one wire code however the caller reached it.
+ */
+function invalidSortDirectionKeyError(param: string, field: string): Error {
+    return invalidSortError(
+        param,
+        `spells the sort direction for '${field}' as \`direction\`, which is not a key on this `
+        + 'axis — the QueryAST sort node is `{ field, order }`',
+        {
+            hint:
+                ` Write \`{ field: '${field}', order: 'desc' }\`. \`direction\` is`
+                + " `IReportService.orderBy`'s vocabulary, a genuinely different contract; on this"
+                + ' axis it was silently dropped and `order` fell back to `asc`, so a descending'
+                + ' request came back ascending — and with `limit`, a different set of rows.',
+            extra: { field, key: 'direction' },
+        },
+    );
+}
+
+/**
  * [#4254] An aggregation-axis value (`groupBy` / `aggregations`) whose SHAPE
  * the spec's `QueryAST` cannot read — a non-array, an entry that names no
  * field, a function or granularity outside the spec enums, a missing alias.
@@ -1140,6 +1182,13 @@ function invalidQueryError(
  * route and the runtime dispatcher a single answer instead of four. Anything
  * that still cannot be read as a sort is a 400 rather than a silent no-op: per
  * #3948, an unapplied sort must not look like an applied one.
+ *
+ * [#4721] One key gets named treatment on top of that: a node written
+ * `{ field, direction }` is refused with {@link invalidSortDirectionKeyError}
+ * rather than read as "sort by `field`, direction unspecified". It is the wire
+ * half of a door whose schema half is `SortNodeSchema`'s
+ * `aliases: { direction: 'order' }` — both closed in one change, because
+ * guarding one door only is the asymmetry #1535 shipped and #4522 came back for.
  */
 function normalizeSortNodes(value: unknown, param: string): Array<{ field: string, order: 'asc' | 'desc' }> {
     const direction = (raw: unknown, subject: string): 'asc' | 'desc' => {
@@ -1165,6 +1214,18 @@ function normalizeSortNodes(value: unknown, param: string): Array<{ field: strin
         if (el && typeof el === 'object' && !Array.isArray(el)) {
             const node = el as { field?: unknown, order?: unknown };
             if (typeof node.field === 'string' && node.field.trim()) {
+                // [#4721] `{ field, direction }` — the wire half of the door
+                // `SortNodeSchema`'s `aliases: { direction: 'order' }` closes on
+                // the schema side. Checked HERE and not left to the schema
+                // because an external caller's `orderBy` never reaches it: this
+                // normalizer runs at the ingress, ahead of any QueryAST parse.
+                //
+                // Rejecting only on a well-formed sort NODE is deliberate. In
+                // the sibling `{field: direction}` map form a key named
+                // `direction` is an ordinary column name ("sort by the
+                // `direction` column"), and that form does not reach this
+                // branch — it has no string `field`.
+                if ('direction' in node) throw invalidSortDirectionKeyError(param, node.field.trim());
                 return { field: node.field.trim(), order: direction(node.order, `'${node.field}'`) };
             }
         }

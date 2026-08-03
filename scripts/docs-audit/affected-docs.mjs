@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Map a set of `packages/**` code changes to the hand-written docs that reference
 // the affected packages, so a doc-accuracy audit can be scoped to what actually
-// changed instead of re-auditing all 128 hand-written docs every time.
+// changed instead of re-auditing every hand-written doc (178 of them today) each time.
 //
 // Usage:
 //   node scripts/docs-audit/affected-docs.mjs [sinceRef]   # docs affected by changes since <sinceRef> (default origin/main)

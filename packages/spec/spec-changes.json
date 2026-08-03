@@ -189,6 +189,12 @@
         "toMajor": 17
       },
       {
+        "surface": "dashboard.widgets[].responsive",
+        "to": "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; page.components[].responsive is unaffected)",
+        "conversionId": "dashboard-widget-responsive-removed",
+        "toMajor": 17
+      },
+      {
         "surface": "agent.knowledge",
         "to": "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
         "conversionId": "agent-knowledge-removed",
@@ -288,6 +294,12 @@
         "surface": "hook.body.capabilities / action.body.capabilities",
         "to": "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)",
         "conversionId": "hook-body-crypto-hash-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "connector.rateLimitConfig",
+        "to": "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; the runtime's only token bucket limits INBOUND requests, so every knob here was inert while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)",
+        "conversionId": "connector-rate-limit-config-removed",
         "toMajor": 17
       }
     ],
@@ -819,6 +831,12 @@
           "toMajor": 17
         },
         {
+          "surface": "dashboard.widgets[].responsive",
+          "to": "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; page.components[].responsive is unaffected)",
+          "conversionId": "dashboard-widget-responsive-removed",
+          "toMajor": 17
+        },
+        {
           "surface": "agent.knowledge",
           "to": "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
           "conversionId": "agent-knowledge-removed",
@@ -918,6 +936,12 @@
           "surface": "hook.body.capabilities / action.body.capabilities",
           "to": "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)",
           "conversionId": "hook-body-crypto-hash-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "connector.rateLimitConfig",
+          "to": "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; the runtime's only token bucket limits INBOUND requests, so every knob here was inert while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)",
+          "conversionId": "connector-rate-limit-config-removed",
           "toMajor": 17
         }
       ],

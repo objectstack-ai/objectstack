@@ -20,8 +20,22 @@
 // Nothing caught this because both sites erased their types (`} as any)` and
 // `const opts: any`), the protocol's `INVALID_SORT` normalizer does not run on
 // calls the protocol makes to `this.engine.find` directly, and that normalizer
-// rejects bad VALUES rather than unknown KEYS — the schema is not `.strict()`,
-// so `direction` was dropped rather than flagged.
+// rejected bad VALUES rather than unknown KEYS.
+//
+// ── #4721: the strip-era half of that last clause is RETIRED ─────────────────
+//
+// The sentence above used to end "— the schema is not `.strict()`, so
+// `direction` was dropped rather than flagged", and that was a pin on the SILENT
+// behaviour: a record of the hole, not a defence of it. #4720 (the two internal
+// sites above) fixed the callers `tsc` covers; #4721 closes the hole itself, on
+// both doors at once, so the pin is replaced by the rejection tests at the
+// bottom of this file. Measured on `main` before the change:
+//
+//   SortNodeSchema.parse({ field: 'updated_at', direction: 'desc' })
+//     →  { field: 'updated_at', order: 'asc' }
+//
+// EXTERNAL callers (REST / RPC `orderBy`) were never covered by #4720 at all —
+// they have no `tsc` — which is the gap #4721 exists for.
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
@@ -128,5 +142,97 @@ describe('searchAll sorts newest-first (#4674)', () => {
         const sort = optionsFrom(find).orderBy;
         expect(sort).toEqual([{ field: 'updated_at', order: 'desc' }]);
         expect(sort[0]).not.toHaveProperty('direction');
+    });
+});
+
+/**
+ * #4721 — the same vocabulary mistake made by an EXTERNAL caller.
+ *
+ * #4720 restored the types on the two internal sites above, which is the right
+ * cure for callers `tsc` can see. It does nothing for the other row of the
+ * table: a REST/RPC client putting `direction` in `orderBy` has no type checker,
+ * and got back an ordinary 200 over rows sorted the OTHER WAY — with `limit`,
+ * a different set of rows entirely, with no signal in the response.
+ *
+ * The rejection lives in `normalizeSortNodes`, which every ingress funnels
+ * through. Its schema-side twin is `SortNodeSchema`'s
+ * `aliases: { direction: 'order' }` (`spec/src/data/query.zod.ts`, pinned in
+ * `spec/src/data/query.test.ts`) — both closed in one change on purpose:
+ * a guard on one door only is the asymmetry #1535 shipped and #4522 came back
+ * for, and `SortNodeSchema.parse` is reachable by three paths the REST
+ * normalizer never sees.
+ */
+describe('an external `orderBy` spelling the direction `direction` is refused (#4721)', () => {
+    const CONTACT_ROWS = [
+        { id: 'r1', name: 'A', updated_at: '2024-01-01T00:00:00.000Z' },
+        { id: 'r2', name: 'B', updated_at: '2024-02-01T00:00:00.000Z' },
+    ];
+    const OBJECT = {
+        name: 'contact',
+        fields: {
+            name: { name: 'name', type: 'text' },
+            updated_at: { name: 'updated_at', type: 'datetime' },
+            // A real column literally called `direction`, so the map-form case
+            // below is not hypothetical.
+            direction: { name: 'direction', type: 'text' },
+        },
+    };
+
+    function makeProtocol() {
+        const find = makeFind({ contact: CONTACT_ROWS });
+        const engine = { registry: { getObject: (n: string) => (n === 'contact' ? OBJECT : undefined) }, find };
+        return { p: new ObjectStackProtocolImplementation(engine as any), find };
+    }
+
+    it.each([
+        ['array element', { orderBy: [{ field: 'updated_at', direction: 'desc' }] }],
+        ['unwrapped single node', { orderBy: { field: 'updated_at', direction: 'desc' } }],
+        ['OData spelling', { $orderby: [{ field: 'updated_at', direction: 'desc' }] }],
+    ])('is a 400 INVALID_SORT, not an ascending 200 — %s', async (_label, query) => {
+        const { p, find } = makeProtocol();
+        await expect(p.findData({ object: 'contact', query })).rejects.toMatchObject({
+            status: 400,
+            code: 'INVALID_SORT',
+        });
+        // The point of refusing at the ingress: the engine is never reached, so
+        // there is no "successful" wrong-direction page to mistake for an answer.
+        expect(find).not.toHaveBeenCalled();
+    });
+
+    it('the rejection names `order` — a refusal without the translation is no better', async () => {
+        const { p } = makeProtocol();
+        // `direction` is not a typo of `order`; edit distance can never bridge
+        // them, so a generic "unrecognized key" leaves the caller exactly where
+        // the silent strip did.
+        await expect(p.findData({
+            object: 'contact', query: { orderBy: [{ field: 'updated_at', direction: 'desc' }] },
+        })).rejects.toThrow(/`\{ field: 'updated_at', order: 'desc' \}`/);
+    });
+
+    it('rejects it even when `order` is also present', async () => {
+        const { p } = makeProtocol();
+        await expect(p.findData({
+            object: 'contact',
+            query: { orderBy: [{ field: 'updated_at', order: 'desc', direction: 'asc' }] },
+        })).rejects.toMatchObject({ code: 'INVALID_SORT' });
+    });
+
+    it('leaves a COLUMN named `direction` alone in the map form', async () => {
+        // `{ direction: 'desc' }` is the `{field: direction}` map — "sort by the
+        // `direction` column" — not a sort node with the wrong key. Refusing it
+        // would be the mirror-image bug: a legitimate query rejected because a
+        // column shares a name with a foreign vocabulary.
+        const { p, find } = makeProtocol();
+        await p.findData({ object: 'contact', query: { orderBy: { direction: 'desc' } } });
+        expect(optionsFrom(find).orderBy).toEqual([{ field: 'direction', order: 'desc' }]);
+    });
+
+    it('control — the canonical spelling still reaches the engine and sorts', async () => {
+        const { p, find } = makeProtocol();
+        const r: any = await p.findData({
+            object: 'contact', query: { orderBy: [{ field: 'updated_at', order: 'desc' }], limit: 1 },
+        });
+        expect(optionsFrom(find).orderBy).toEqual([{ field: 'updated_at', order: 'desc' }]);
+        expect(r.records.map((x: any) => x.id)).toEqual(['r2']);
     });
 });

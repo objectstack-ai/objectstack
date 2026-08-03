@@ -318,6 +318,42 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
             .rejects.toMatchObject({ status: 400, code: 'INVALID_SORT' });
     });
 
+    /**
+     * [#4721] The one unknown KEY on this axis, against the real engine.
+     *
+     * Every rejection above is about a bad VALUE — a field that does not exist,
+     * a direction that is not asc/desc. `{ field, direction }` is well-formed on
+     * both counts and was therefore accepted, with the foreign key stripped and
+     * `order` left on its `asc` default: a DESCENDING request answered
+     * ascending, 200, no signal. Paired with `top` that is not a reordered page
+     * but a different set of rows — the "latest N" footgun below, reached
+     * through a spelling rather than a typo.
+     *
+     * `direction` is `IReportService.orderBy`'s live vocabulary, which
+     * `plugin-auth/objectql-adapter.ts` already translates by hand; the schema
+     * half of this door (`SortNodeSchema`'s `aliases: { direction: 'order' }`)
+     * landed in the same change.
+     */
+    it('sorting with `direction` instead of `order` is a 400, not a silently ASCENDING page', async () => {
+        // The control first: this is what the caller meant, and it works.
+        expect(titles(await protocol.findData({
+            object: 'showcase_task', query: { orderBy: [{ field: 'title', order: 'desc' }], top: 2 },
+        }))).toEqual(['E', 'D']);
+
+        // Same request, foreign spelling. Pre-#4721 this resolved to ['A','B'] —
+        // the opposite end of the table, under an ordinary success.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { orderBy: [{ field: 'title', direction: 'desc' }], top: 2 },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_SORT', field: 'title' });
+
+        // And the rejection hands over the translation — `direction` → `order`
+        // is not reachable by edit distance, so a bare refusal would leave the
+        // caller exactly where the silent strip did.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { orderBy: [{ field: 'title', direction: 'desc' }] },
+        })).rejects.toThrow(/order: 'desc'/);
+    });
+
     it('an unapplied sort can no longer hide behind `top` — the "latest N" footgun', async () => {
         // This pairing is the whole reason the sort axis matters. Pre-fix it
         // answered 200 with an arbitrary 2 of 5 rows and no way to tell.

@@ -42,6 +42,76 @@
  * declared field, so (1) fails and the legitimate "was this key in the PATCH"
  * use stays legal. Equality (`==` / `!=`) is never flagged: CEL evaluates a
  * heterogeneous equality cleanly to `false` rather than faulting.
+ *
+ * ## Which surfaces this gate may cover — the totality criterion (#4811)
+ *
+ * #4763 wired two surfaces and left the rest "to be decided". The deciding
+ * property turns out not to be a matter of taste, and it is not "is this
+ * predicate CEL?" either. It is whether the record bound at evaluation time is
+ * **TOTAL over the object's declared fields** (`materializeDeclaredFields`,
+ * #1871/#4649). Measured against `@marcbachmann/cel-js`, the two bindings do
+ * not merely differ in wording — they inarguably invert:
+ *
+ * | predicate                | TOTAL binding (`{a: null}`) | SPARSE binding (`{}`)  |
+ * |:-------------------------|:----------------------------|:-----------------------|
+ * | `has(record.a)`          | `true`  ← the trap          | `false` ← a real guard |
+ * | `record.a < record.b`    | FAULT `no such overload`    | FAULT `No such key: a` |
+ * | `record.a != null`       | `false` ← **the fix works** | FAULT `No such key: a` |
+ *
+ * So on a total binding `has()` is uniformly true and useless while `!= null`
+ * is the cure; on a sparse binding `has()` is exactly the right guard and
+ * `!= null` **is itself a fault**. Running this gate over a sparse-bound
+ * surface would therefore reject correct metadata and prescribe a "fix" that
+ * breaks it — strictly worse than not covering the surface at all. Hence:
+ *
+ * **This module may only be wired to a surface whose record binding is total.**
+ *
+ * Surface ledger (each verdict traced to the code that decides it, so the next
+ * author does not have to re-derive it — #4811):
+ *
+ * | surface                        | binding | evidence                                                    | verdict |
+ * |:-------------------------------|:--------|:------------------------------------------------------------|:--------|
+ * | object validation rules        | TOTAL   | `rule-validator.ts` `materializeDeclaredFields(merged, …)`   | covered |
+ * | lifecycle hook `condition`     | TOTAL   | `hook-wrappers.ts` `materializeDeclaredFields(…)`            | covered |
+ * | field `requiredWhen`           | TOTAL   | same `merged` in `evaluateValidationRules` — fail-OPEN, so an unguarded predicate enforces NOTHING in silence | covered (#4811) |
+ * | field `readonlyWhen`           | sparse  | `stripReadonlyWhenFields` merges `{...previous, ...data}` and never materializes | excluded |
+ * | action `visible` / `disabled`  | sparse  | evaluated client-side; no materialization exists in `objectui` | excluded |
+ * | flow / edge `condition`        | sparse  | `record-change-trigger.ts` seeds `{...inputDoc, ...after}`   | excluded |
+ * | sharing-rule `condition`       | n/a     | compiled to a SQL filter; `NULL > x` is three-valued, never faults | excluded |
+ * | `Field.formula`                | n/a     | product judgement, not a wiring gap — see below              | excluded |
+ *
+ * The three exclusions that are *not* self-evident, spelled out because a
+ * surface excluded without a reason is indistinguishable from one nobody
+ * looked at — the failure mode this whole family of issues is about:
+ *
+ *  - **Action `visible` / `disabled`.** #4811 asked whether the ActionEngine
+ *    materializes declared fields before evaluating. It does not: the record
+ *    is whatever the client already fetched (a record-detail read, or a LIST
+ *    ROW carrying only the view's projected columns), and `objectui` contains
+ *    no materialization step on that path. The predicate does reach real CEL
+ *    (a bare authored string is normalized to a `{dialect:'cel'}` envelope by
+ *    `ExpressionInputSchema`, which the renderers preserve) and a fault IS
+ *    fail-closed — the action silently vanishes — so the *trap* is real here.
+ *    But with a sparse binding the prescription inverts (see the table), so the
+ *    gate cannot be the thing that catches it. Covering this surface requires
+ *    first deciding whether the action-predicate binding should be made total,
+ *    which is a platform contract change, not a lint change.
+ *  - **Flow / edge `condition`.** #4811 excluded these for flattened-scope
+ *    ambiguity ("a bare identifier may be a flow variable"). That reason does
+ *    not actually apply to this module — {@link findUnguardedNullableOperands}
+ *    only ever resolves `record.<f>` / `previous.<f>` and never a bare
+ *    identifier, and the engine binds `record` / `previous` unconditionally.
+ *    The real blocker is totality: the trigger seeds the record as
+ *    `{...inputDoc, ...after}`, so a declared column the write never mentioned
+ *    is an ABSENT key, and the `!= null` this gate prescribes would fault.
+ *    (The flattened-scope ambiguity is real for a *bare-identifier* checker —
+ *    flow inputs shadow record fields, and a node's `outputVariable` can
+ *    overwrite either — but that is a different, unbuilt pass.)
+ *  - **`Field.formula`.** Excluded by product judgement, not by this criterion:
+ *    a formula is `value`-role and natively nullable, and `guard ? value : null`
+ *    is the blessed shape (#3306 rewrites it via `dyn(...)`). Making guarded
+ *    arithmetic mandatory there would change what authors are *allowed to
+ *    write*, which is a decision for the maintainer, not a wiring gap to close.
  */
 
 import { Environment } from '@marcbachmann/cel-js';
@@ -355,17 +425,44 @@ export function findUnguardedNullableOperands(
 }
 
 /**
+ * What the surface actually DOES once the predicate aborts (#4811).
+ *
+ * Both outcomes are bugs, but they are *opposite* bugs, and an author needs to
+ * be told which one they have: "your write will be refused" and "your rule will
+ * never fire" send you to different places. Never guess one — read the
+ * surface's runtime and name what it really implements.
+ */
+export type NullGuardOutcome =
+  /** Validation rules + hook conditions: the fault propagates, the write is refused (#4761). */
+  | 'fail-closed'
+  /** Field `requiredWhen`: `rule-validator.ts` logs and skips, so nothing is enforced (#4811). */
+  | 'fail-open';
+
+const OUTCOME_CLAUSE: Record<NullGuardOutcome, string> = {
+  'fail-closed':
+    'so the rule enforces nothing and the write is rejected fail-closed (#4649/#4763)',
+  'fail-open':
+    'so the predicate is SKIPPED fail-open — the field is never actually required, the write ' +
+    'proceeds unchecked, and the only trace is a `requiredWhen … failed to evaluate — skipped` ' +
+    'log line (#4649/#4811)',
+};
+
+/**
  * The publish-time message for one finding. Names the rule, the operand and the
  * `!= null` fix (the three things the author needs), then closes with the
  * verbatim runtime sentence so the two gates speak with one voice.
  *
  * @param subject  How the site names itself, e.g. `validation rule 'end_after_start'`.
  * @param objectName  The object whose field list decided nullability.
+ * @param finding  The unguarded operand to report.
+ * @param outcome  What this surface's runtime does with the abort. Defaults to
+ *   `fail-closed` — what both #4763 surfaces do.
  */
 export function nullGuardMessage(
   subject: string,
   objectName: string | undefined,
   finding: NullGuardFinding,
+  outcome: NullGuardOutcome = 'fail-closed',
 ): string {
   const owner = objectName ? `'${objectName}'` : 'this object';
   const hasNote = finding.hasOnlyGuard
@@ -375,7 +472,7 @@ export function nullGuardMessage(
     `${subject} applies \`${finding.operator}\` to \`${finding.operand}\`, which ${owner} declares ` +
     `as nullable (no \`required: true\`, no \`defaultValue\`).${hasNote} At runtime the operand is ` +
     `null, CEL has no \`${finding.operator}\` overload for null, and the whole predicate aborts — ` +
-    `so the rule enforces nothing and the write is rejected fail-closed (#4649/#4763). ` +
+    `${OUTCOME_CLAUSE[outcome]}. ` +
     `The predicate compares a value that is null. ${NULL_GUARD_HINT}`
   );
 }

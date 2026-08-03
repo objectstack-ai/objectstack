@@ -27,12 +27,34 @@ import { defineCapability } from '@objectstack/spec';
  * organization. Granted to Operations (see permission-sets.ts); a future export
  * endpoint/action would gate itself with `requiredPermissions:
  * ['showcase.export_data']`.
+ *
+ * `packageId` is the ADR-0086 D3 AUTHOR-DECLARED provenance — the documented
+ * fallback the seeder reads when the registry has not stamped `_packageId`
+ * (`cap._packageId ?? cap.packageId` in `bootstrapDeclaredCapabilities`).
+ * Without an owning package the declaration is NOT materialized into
+ * `sys_capability` (a `managed_by:'package'` row with no `package_id` would
+ * make uninstall undefined), which left `OpsPermissionSet` granting a
+ * capability that never existed — one boot `warn` and an inert security
+ * declaration.
+ *
+ * Why it is authored here rather than inferred: the registry stamp never
+ * reaches an app-declared capability, because `capabilities` is missing from
+ * the metadata-array key list the ObjectQL engine registers a stack's
+ * collections through — so the "fallback" is in practice mandatory. That is a
+ * PLATFORM gap, filed as #4967 (together with the sharper half: a refused
+ * declaration is still counted as declared, which suppresses the back-compat
+ * derivation and leaves the capability existing nowhere), not something the
+ * showcase should work around. Declaring `packageId` is the spec's own
+ * sanctioned entry point, so this both fixes the app and demonstrates the
+ * field; when the platform stamps `_packageId` that takes precedence and this
+ * stays consistent with it.
  */
 export const ExportDataCapability = defineCapability({
   name: 'showcase.export_data',
   label: 'Export Showcase Data',
   description: 'Bulk-export showcase records (accounts, invoices) to CSV/XLSX.',
   scope: 'org',
+  packageId: 'com.example.showcase',
 });
 
 export const allCapabilities = [ExportDataCapability];

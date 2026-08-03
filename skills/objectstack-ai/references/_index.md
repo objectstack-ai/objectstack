@@ -22,7 +22,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Transitive dependencies
 
-- `node_modules/@objectstack/spec/src/automation/state-machine.zod.ts` — XState-inspired State Machine Protocol
+- `node_modules/@objectstack/spec/src/automation/state-machine.zod.ts` — XState-inspired State Machine Protocol — hierarchical states, guarded
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Field Type Enum
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)

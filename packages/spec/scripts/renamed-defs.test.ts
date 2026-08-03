@@ -138,15 +138,26 @@ describe('checkRenameTable', () => {
 });
 
 describe('the committed RENAMED_DEFS table', () => {
-  it('records the #4684 connector rate-limit rename', () => {
-    expect(RENAMED_DEFS['integration/RateLimitConfig']).toBe(
-      'integration/ConnectorRateLimitConfig',
-    );
+  it('no longer carries the #4684 connector rate-limit rename — #4911 absorbed it', () => {
+    // The #4684 rename (`integration/RateLimitConfig` →
+    // `integration/ConnectorRateLimitConfig`) and the #4911 retirement of the
+    // renamed def landed in the SAME unreleased major, so composed they are a
+    // plain delete. Two independent reasons the entry must be gone:
+    //   1. `checkRenameTable` rejects a target this build no longer emits —
+    //      leaving it would fail `gen:schema` before either ratchet runs;
+    //   2. a retirement must never ride this table (see the `automation/
+    //      ConflictResolution` note in lib/renamed-defs.ts) — it is carried by
+    //      the tombstone + D2 conversion + deliberate manifest deletion.
+    // Re-adding it would claim the def still exists under a new name.
+    expect(RENAMED_DEFS['integration/RateLimitConfig']).toBeUndefined();
+    expect(Object.values(RENAMED_DEFS)).not.toContain('integration/ConnectorRateLimitConfig');
   });
 
-  it('leaves the shared (inbound) declaration alone — only the connector side moved', () => {
-    // ADR-0112 D9a renames the CONNECTOR side so one name means one thing;
-    // `shared/RateLimitConfig` is the incumbent and keeps its name and its keys.
+  it('leaves the shared (inbound) declaration alone — only the connector side ever moved', () => {
+    // ADR-0112 D9a renamed the CONNECTOR side so one name means one thing;
+    // `shared/RateLimitConfig` is the incumbent, keeps its name and its keys,
+    // and #4911 (which retired the connector side) did not touch it — the
+    // inbound limiter is a real, enforced engine.
     expect(RENAMED_DEFS['shared/RateLimitConfig']).toBeUndefined();
   });
 

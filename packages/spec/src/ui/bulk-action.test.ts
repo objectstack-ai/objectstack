@@ -64,6 +64,52 @@ describe('BulkActionDefSchema (#4457)', () => {
       });
       expect(def.params?.[0]).toMatchObject({ min: 1, max: 90, step: 1 });
     });
+
+    // ── DELIBERATE OPENNESS — DO NOT "FIX" THIS INTO A STRICT SITE ──────────
+    // This assertion exists to be found by the next strictness sweep (#4001)
+    // and to stop it. `params[].options[]` is `.passthrough()` ON PURPOSE, on
+    // measured evidence rather than symmetry with its parent:
+    //
+    //   - `bulkParamToField` SPREADS every option entry into the field
+    //     metadata — `options?.map(o => ({ ...o, value: String(o.value) }))`,
+    //     objectui `packages/plugin-grid/src/components/bulkParamToField.ts:131`
+    //   - the vocabulary it lands in is `SelectOptionMetadata` (objectui
+    //     `packages/types/src/field-types.ts:288`), which declares `color` /
+    //     `icon` / `disabled` / `visibleWhen` beyond `{ label, value }` and
+    //     reads them (`option?.color`, `packages/fields/src/index.tsx:1089`)
+    //
+    // So a strip here does not protect an author from a typo; it deletes
+    // widget config the renderer would have honoured, silently — exactly the
+    // failure mode the def LEVEL's strictness exists to catch. Until the
+    // 2026-08-03 re-measure this level was bare strip while the ledger prose
+    // already called it open (maintainer verdict A: make the code match).
+    it('forwards unknown WIDGET config on an OPTION — deliberately open, not an oversight', () => {
+      const def = ok({
+        name: 'set_stage',
+        operation: 'update',
+        params: [{
+          name: 'stage',
+          type: 'select',
+          options: [
+            { label: 'In Review', value: 'in_review', color: '#8B5CF6', icon: 'eye' },
+            { label: 'Done', value: 'done', disabled: true, visibleWhen: "current_user.is_admin" },
+          ],
+        }],
+      });
+      const options = def.params?.[0]?.options;
+      expect(options?.[0]).toMatchObject({ label: 'In Review', value: 'in_review', color: '#8B5CF6', icon: 'eye' });
+      expect(options?.[1]).toMatchObject({ disabled: true, visibleWhen: 'current_user.is_admin' });
+    });
+
+    it('an option still requires the declared pair to be well-typed', () => {
+      // Open ≠ shapeless: passthrough forwards UNDECLARED keys, it does not
+      // relax the two keys the executor and the widget both read.
+      expect(reject({
+        name: 'set_stage',
+        operation: 'update',
+        params: [{ name: 'stage', type: 'select', options: [{ value: 'done' }] }],
+      }).join('\n')).toMatch(/params\.0\.options\.0\.label/);
+    });
   });
 
   describe('— a mis-spelled key is an error, not a silent default', () => {
