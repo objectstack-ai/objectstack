@@ -186,9 +186,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "父评论",
         help: "可选的父评论，用于嵌套回复"
       },
-      reply_count: {
-        label: "回复数"
-      },
       author_id: {
         label: "作者"
       },
@@ -215,14 +212,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       edited_at: {
         label: "编辑时间"
-      },
-      visibility: {
-        label: "可见性",
-        options: {
-          public: "公开",
-          internal: "内部",
-          private: "私有"
-        }
       },
       created_at: {
         label: "创建时间"

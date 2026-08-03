@@ -186,9 +186,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "親コメント",
         help: "ネストした返信用のオプションの親コメント"
       },
-      reply_count: {
-        label: "返信数"
-      },
       author_id: {
         label: "投稿者"
       },
@@ -215,14 +212,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       edited_at: {
         label: "編集日時"
-      },
-      visibility: {
-        label: "公開範囲",
-        options: {
-          public: "公開",
-          internal: "内部",
-          private: "非公開"
-        }
       },
       created_at: {
         label: "作成日時"

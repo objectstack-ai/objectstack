@@ -177,6 +177,16 @@ timeline. But weighing it against the implementation reality reversed that lean:
 | REST | ✅ generic data API | ❌ nested `/data/{obj}/{id}/feed` route unmounted (404) |
 | threads/mentions/reactions | ✅ fields already declared (`parent_id`, `reply_count`, `mentions`, `reactions`) | ✅ (but unreachable) |
 
+> **Note (#4756).** The row above records the field list **as it stood at
+> decision time**, and the decision itself is unchanged. One of those fields has
+> since been retired: `sys_comment.reply_count` was declared but never
+> incremented by anything, so it read `0` on every row forever — removed under
+> ADR-0049 enforce-or-remove, with a reply count taken as an aggregate over
+> `parent_id` children at read time. Threading itself (`parent_id`), mentions and
+> reactions are unaffected. `sys_comment.visibility` went with it in the same
+> change (never consulted by any gate; comment visibility derives from the record
+> `thread_id` names, #4630).
+
 Picking the durable, default, UI-wired system reaches "one backend" **now**, at
 near-zero risk. `service-feed`'s only real edge — one unified *typed* stream — is
 obtained on the chosen family by treating **`sys_activity` as the unified
