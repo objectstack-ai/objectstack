@@ -19,6 +19,7 @@ import type { HookHandler } from './engine.js';
 import { ExpressionEngine } from '@objectstack/formula';
 import { noopHookMetricsRecorder, type HookMetricsRecorder, type HookMetricOutcome } from './hook-metrics.js';
 import { materializeDeclaredFields } from './declared-fields.js';
+import { describeCelFault, type CelFault } from './cel-fault.js';
 
 export interface WrapDeclarativeOptions {
   /** Logger for declarative-layer diagnostics (timeouts, retries, swallowed errors). */
@@ -40,23 +41,109 @@ const noopLogger = {
 };
 
 /**
+ * A hook declared a `condition` and the platform could not work out its value
+ * (#4775). Thrown from the condition gate, which aborts the operation.
+ *
+ * ## Why an unevaluable condition is not `false`
+ *
+ * "The expression said no" and "the platform could not work out what the
+ * expression says" used to collapse into the same outcome — `logger.warn` and
+ * `return false` — and that single result carries OPPOSITE risks depending on
+ * the hook:
+ *
+ *   - a `before*` guard ("hold this write when the condition is met") swallowed
+ *     into `false` LETS THROUGH a write it was declared to stop;
+ *   - an `after*` audit ("leave a trace when the condition is met") swallowed
+ *     into `false` DROPS a record that was supposed to exist — an invisible
+ *     absence, since nobody goes looking for a row they don't know should be
+ *     there.
+ *
+ * So a declared condition the platform cannot evaluate is `declared ≠
+ * enforced`, and the resolution is the one #4649 already chose for validation
+ * predicates one module over: reject loudly, naming the hook and the key that
+ * would not resolve. `before*` and `after*` take the SAME direction —
+ * deliberately, and knowing the cost: a typo in an `afterUpdate` audit
+ * condition fails the write it was only watching. One rule, one answer; the
+ * platform does not grow a hidden second rule that says "which way this fails
+ * depends on the event name".
+ *
+ * ## It is NOT an `onError` case
+ *
+ * `onError` (`abort` | `log`) governs a HANDLER that threw. The condition gate
+ * runs BEFORE the handler is ever reached, so this error is raised outside its
+ * reach on purpose: routing it through `onError` would let `onError: 'log'`
+ * resurrect exactly the silent skip this error exists to abolish, and would
+ * mint a third set of semantics for the same word.
+ */
+export class HookConditionError extends Error {
+  override readonly name = 'HookConditionError';
+  /** The hook whose declared condition could not be evaluated. */
+  readonly hook: string;
+  readonly object?: string;
+  readonly event?: string;
+  /** The condition source, verbatim as authored. */
+  readonly condition: string;
+  /** `unevaluable` — compiled, but faulted on this record;
+   *  `uncompilable` — never compiled at all. */
+  readonly reason: 'unevaluable' | 'uncompilable';
+  /** One-line CEL fault summary (`kind: message`). */
+  readonly fault: string;
+  /** The key the expression read that the record does not carry, when known. */
+  readonly missingKey?: string;
+  /** True when the operation is a predicate (`multi: true`) bulk write, whose
+   *  N matched rows have no single prior state to bind (#4800/B1). */
+  readonly predicateBulkWrite?: boolean;
+
+  constructor(message: string, info: {
+    hook: string;
+    object?: string;
+    event?: string;
+    condition: string;
+    reason: 'unevaluable' | 'uncompilable';
+    fault: string;
+    missingKey?: string;
+    predicateBulkWrite?: boolean;
+  }) {
+    super(message);
+    this.hook = info.hook;
+    this.object = info.object;
+    this.event = info.event;
+    this.condition = info.condition;
+    this.reason = info.reason;
+    this.fault = info.fault;
+    this.missingKey = info.missingKey;
+    this.predicateBulkWrite = info.predicateBulkWrite;
+  }
+}
+
+/**
  * Wrap a hook handler so it honours the declarative fields defined on
  * `HookSchema`. The wrapping order, from outermost to innermost, is:
  *
- *   1. condition  → skip when formula evaluates falsy
+ *   1. condition  → skip when the formula evaluates FALSE; abort the operation
+ *                   when it cannot be evaluated at all (#4775)
  *   2. async      → fire-and-forget (after* events only)
  *   3. retry      → repeat on throw with backoff
  *   4. timeout    → abort if handler runs too long
  *   5. onError    → swallow when set to 'log'
+ *
+ * Step 1 sits OUTSIDE steps 2–5 on purpose. `async`, `retryPolicy`, `timeout`
+ * and `onError` are all about running the HANDLER; the condition decides
+ * whether there is a handler run at all. So a `HookConditionError` is not
+ * retried, is not fire-and-forgotten, and is never softened by
+ * `onError: 'log'` — see that class for why routing it through `onError` was
+ * refused.
  *
  * The condition formula is evaluated against two bindings, the same two a
  * validation predicate reads (#4784):
  *
  *   - `record`   — the record-shaped view built by {@link pickRecordPayload}:
  *     for a write, the stored record overlaid with this write's payload, made
- *     total over the object's declared fields (#4770). Read events typically
- *     have no record yet, so a condition on a `beforeFind` will simply skip
- *     when no data is present.
+ *     total over the object's declared fields (#4770). Read events carry no
+ *     record at all, so since #4775 a `record.*` condition on a `beforeFind`
+ *     REJECTS the read rather than quietly skipping — the hook was declared to
+ *     gate on a field the event does not have, and that is an authoring error
+ *     the platform can no longer paper over.
  *   - `previous` — the record's pre-write state, built by
  *     {@link pickPreviousPayload}: `ctx.previous`, made total over the same
  *     declared fields. Absent (an unbound CEL identifier) whenever the prior
@@ -84,37 +171,47 @@ export function wrapDeclarativeHook(
   });
 
   // Pre-compile condition once so each invocation is cheap.
-  let conditionFn: ((record: any, previous: Record<string, unknown> | undefined) => boolean) | undefined;
+  let conditionFn: ((ctx: HookContext) => boolean) | undefined;
   if (meta.condition) {
     // Accept either string shorthand or full Expression envelope.
     const expr: Expression = typeof meta.condition === 'string'
       ? { dialect: 'cel', source: meta.condition }
       : (meta.condition as Expression);
     if (expr.source && expr.source.trim()) {
+      const source = expr.source;
       const check = ExpressionEngine.compile(expr);
       if (check.ok) {
-        conditionFn = (record: any, previous: Record<string, unknown> | undefined) => {
+        conditionFn = (ctx: HookContext) => {
           // `previous` is passed through as-is: `undefined` means the binding
           // is OMITTED from the CEL scope (see `buildScope` in
           // @objectstack/formula), which is exactly what the validation side
           // does when no prior record is in hand. Binding it to an empty
           // object instead would answer `previous.x == null` with a
           // fabricated "yes" for a record whose prior state is unknown.
+          const record = pickRecordPayload(ctx);
+          const previous = pickPreviousPayload(ctx);
           const r = ExpressionEngine.evaluate<boolean>(expr, { record: record ?? {}, previous });
           if (!r.ok) {
-            logger.warn('[hook] condition evaluation failed; treating as false', {
-              hook: meta.name,
-              condition: expr.source,
-              error: r.error.message,
-            });
-            return false;
+            // [#4775] Fail LOUD. Not `false` — see `HookConditionError`.
+            throw unevaluableConditionError(meta, ctx, source, r.error, declaredFieldsFor(ctx));
           }
           return Boolean(r.value);
         };
       } else {
-        logger.warn('[hook] condition formula failed to compile; condition ignored', {
+        // [#4775] A condition that never compiled is the same defect one step
+        // earlier, and its old treatment ("condition ignored") was the WORSE
+        // half of the swallow: the gate disappeared entirely, so the hook fired
+        // on every write as though no condition had been declared. Reported at
+        // invocation rather than at bind time — a throw here would wedge boot
+        // for an app whose object nobody is even writing, and #4775's remit is
+        // to abort THE OPERATION that runs a broken hook.
+        const fault = check.error;
+        conditionFn = (ctx: HookContext) => {
+          throw uncompilableConditionError(meta, ctx, source, fault);
+        };
+        logger.error('[hook] condition formula failed to compile; every operation on this hook\'s object will be rejected until it is fixed', {
           hook: meta.name,
-          condition: expr.source,
+          condition: source,
           error: check.error.message,
         });
       }
@@ -194,10 +291,11 @@ export function wrapDeclarativeHook(
   };
 
   return async (ctx: HookContext): Promise<void> => {
-    // 1. Condition gate
+    // 1. Condition gate. Throws (#4775) when the condition cannot be
+    //    evaluated — deliberately OUTSIDE `runWithErrorPolicy`, so `onError`
+    //    never sees it and cannot soften it back into a silent skip.
     if (conditionFn) {
-      const record = pickRecordPayload(ctx);
-      if (!conditionFn(record, pickPreviousPayload(ctx))) {
+      if (!conditionFn(ctx)) {
         logger.debug('[hook] skipped by condition', {
           hook: meta.name,
           object: ctx.object,
@@ -340,6 +438,153 @@ function installFlatInput(ctx: HookContext): () => void {
  *  payload genuinely means "no value", never "unchanged". */
 function isInsertEvent(event: unknown): boolean {
   return event === 'beforeInsert' || event === 'afterInsert';
+}
+
+/**
+ * Is this operation a PREDICATE (`multi: true`) bulk write?
+ *
+ * The engine routes an update/delete to `updateMany`/`deleteMany` when the call
+ * carries no `id` and `options.multi` is set, and fires the lifecycle hook
+ * ONCE for the whole batch — `hookContext.previous` is never assigned and the
+ * payload is never merged with any stored row, because there are N stored rows
+ * and no single one of them is "the" prior state.
+ *
+ * Read off the same two facts the engine branches on (`input.id` absent +
+ * `options.multi`), which survive into the after-event context: `input.options`
+ * is rebuilt by `buildDriverOptions` as a COPY of the caller's bag, so `multi`
+ * is still there.
+ */
+function isPredicateBulkWrite(ctx: HookContext): boolean {
+  const input: any = ctx.input ?? {};
+  if (!input || typeof input !== 'object') return false;
+  if (input.id !== undefined && input.id !== null && input.id !== '') return false;
+  const options: any = input.options;
+  return Boolean(options && typeof options === 'object' && options.multi);
+}
+
+/**
+ * The rejection a condition that CANNOT BE EVALUATED produces (#4775).
+ *
+ * Mirrors `unevaluableRuleError` in `validation/rule-validator.ts` — same
+ * facts, same two explanatory sentences (both come out of the shared
+ * `cel-fault.ts`), so an author who has met one message can read the other.
+ *
+ * ## The predicate-bulk-write branch (#4800 / B1)
+ *
+ * A `multi: true` write matches N rows and fires the hook once, so two things
+ * the condition may legitimately name are simply not in hand:
+ *
+ *   - `previous` — unbound, because there is no single prior record;
+ *   - a DECLARED field the payload does not set — `record` is the payload
+ *     alone here, since merging it with "the" stored row would mean picking one
+ *     of N, and materialising declared fields to `null` would state something
+ *     false about all N.
+ *
+ * Both are the SAME situation and neither is an author typo, so the default
+ * `No such key: previous` — which reads as "you misspelled something" — is
+ * actively misleading. This branch names the batch, says why the binding is
+ * missing, and gives the one route that actually works. It does NOT create an
+ * exception: the write still fails (maintainer's ruling on #4800 — fail loud,
+ * no exemptions), it just fails with a diagnosis instead of a riddle.
+ *
+ * An UNDECLARED key still routes to the ordinary typo message even on a bulk
+ * write: that one IS a typo, and saying "this is a batch" about it would send
+ * the author down the wrong path.
+ *
+ * ⚠️ The escape route named below is deliberately the ONLY one. "Use a
+ * record-change flow trigger instead" was considered and REJECTED on evidence:
+ * that trigger subscribes to these very lifecycle hooks
+ * (`trigger-record-change/src/record-change-trigger.ts` → `engine.registerHook`),
+ * so on a `multi: true` update it also fires once with `ctx.previous`
+ * undefined — measured, not assumed. Naming it here would have made this
+ * message the next `declared ≠ delivered`. Its bulk semantics are filed
+ * separately.
+ */
+function unevaluableConditionError(
+  meta: Hook,
+  ctx: HookContext,
+  source: string,
+  error: CelFault,
+  declaredFields: Record<string, unknown> | undefined,
+): HookConditionError {
+  const { summary, missingKey, unknownVariable, detail } = describeCelFault(error, {
+    what: 'condition',
+    undeclaredKeyFix: "fix the hook's condition, or declare the field",
+  });
+  const head = `Hook '${meta.name}' could not evaluate its condition (${summary}) — operation aborted.`;
+
+  if (isPredicateBulkWrite(ctx)) {
+    // `previous` unbound → cel reports `Unknown variable: previous` (the ROOT
+    // is absent). A declared field the payload does not set → `No such key:
+    // <field>` (the root resolved; `record` is the bare payload here).
+    const bulkDetail = unknownVariable === 'previous'
+      ? ` The condition reads 'previous', but this is a PREDICATE bulk write (multi: true):` +
+        ` it matches many rows and fires the hook ONCE, so there is no single prior record to bind.` +
+        ` Rewrite the condition without 'previous', or target the write at one record (update by id).` +
+        ` A record-change flow trigger is NOT a way around this — it binds the same lifecycle hook` +
+        ` and receives the same unbound 'previous' on a bulk write.`
+      : missingKey && declaredFields && Object.prototype.hasOwnProperty.call(declaredFields, missingKey)
+        ? ` '${missingKey}' IS declared on this object, but this is a PREDICATE bulk write (multi: true):` +
+          ` the stored state of the matched rows is not in hand, so 'record' carries only this write's` +
+          ` payload. Reference only fields this write sets, or target the write at one record (update by id).`
+        : undefined;
+    if (bulkDetail !== undefined) {
+      return new HookConditionError(`${head}${bulkDetail}`, {
+        hook: meta.name,
+        object: ctx.object,
+        event: ctx.event,
+        condition: source,
+        reason: 'unevaluable',
+        fault: summary,
+        ...(missingKey ? { missingKey } : {}),
+        predicateBulkWrite: true,
+      });
+    }
+  }
+
+  return new HookConditionError(`${head}${detail}`, {
+    hook: meta.name,
+    object: ctx.object,
+    event: ctx.event,
+    condition: source,
+    reason: 'unevaluable',
+    fault: summary,
+    ...(missingKey ? { missingKey } : {}),
+  });
+}
+
+/**
+ * The rejection a condition that never COMPILED produces (#4775).
+ *
+ * Kept distinct from the unevaluable case because the fix is different: this
+ * one is broken for every record, on every object, forever — there is no input
+ * that makes it work. Its previous treatment (`condition ignored`) silently
+ * DELETED the gate, so a guard that was declared to hold writes back let all of
+ * them through and an audit fired on every write.
+ */
+function uncompilableConditionError(
+  meta: Hook,
+  ctx: HookContext,
+  source: string,
+  error: CelFault,
+): HookConditionError {
+  const { summary } = describeCelFault(error, {
+    what: 'condition',
+    undeclaredKeyFix: "fix the hook's condition",
+  });
+  return new HookConditionError(
+    `Hook '${meta.name}' declares a condition that does not compile (${summary}) — operation aborted.` +
+      ` The condition can never be evaluated, so the hook can neither run nor be skipped honestly;` +
+      ` fix the expression: ${source}`,
+    {
+      hook: meta.name,
+      object: ctx.object,
+      event: ctx.event,
+      condition: source,
+      reason: 'uncompilable',
+      fault: summary,
+    },
+  );
 }
 
 /**

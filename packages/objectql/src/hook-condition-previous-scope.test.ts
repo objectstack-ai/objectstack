@@ -122,19 +122,16 @@ describe('[#4784] hook condition binds `previous` alongside `record`', () => {
 
   it('an UNDECLARED key on `previous` stays unevaluable — typos stay reportable', async () => {
     const calls: string[] = [];
-    const { logger, conditionWarnings } = captureLogger();
+    const { logger } = captureLogger();
     const wrapped = wrapDeclarativeHook(
       makeHook('previous.dnoe != true'),
       (async () => { calls.push('ran'); }) as any,
       { logger },
     );
 
-    await wrapped(makeCtx());
-
+    // #4775: "reportable" is now "rejects the operation", not "logs a warn".
+    await expect(wrapped(makeCtx())).rejects.toThrow(/No such key: dnoe/);
     expect(calls).toEqual([]);
-    const warns = conditionWarnings();
-    expect(warns).toHaveLength(1);
-    expect(String(warns[0]![1]?.error)).toMatch(/No such key: dnoe/);
   });
 
   it('never leaks materialised nulls back into the engine\'s ctx.previous', async () => {
@@ -155,7 +152,7 @@ describe('[#4784] hook condition binds `previous` alongside `record`', () => {
 
   it('leaves `previous` UNBOUND on insert — verbatim the validation side', async () => {
     const calls: string[] = [];
-    const { logger, conditionWarnings } = captureLogger();
+    const { logger } = captureLogger();
     // `rule-validator.ts` binds `previous` only for `mode: 'update'` with a
     // prior record in hand; on insert it passes `undefined`, which omits the
     // identifier from the CEL scope. Referencing it on an insert event is
@@ -166,14 +163,15 @@ describe('[#4784] hook condition binds `previous` alongside `record`', () => {
       { logger },
     );
 
-    await wrapped(makeCtx({
+    // #4775: an unbound `previous` is unevaluable, and unevaluable rejects the
+    // insert rather than being swallowed into `false`.
+    await expect(wrapped(makeCtx({
       event: 'beforeInsert',
       previous: undefined,
       input: { data: { done: true } },
-    } as any));
+    } as any))).rejects.toThrow(/Unknown variable: previous/);
 
     expect(calls).toEqual([]);
-    expect(conditionWarnings()).toHaveLength(1);
   });
 
   it('a `record`-only condition on insert is unaffected by the added binding', async () => {
@@ -200,14 +198,18 @@ describe('[#4784] hook condition binds `previous` alongside `record`', () => {
     const { logger } = captureLogger();
     // A `multi: true` update matched N rows and fires the hook ONCE; there is
     // no single prior record. Binding `{}` or `null` would make
-    // `previous.done != true` answer for rows nobody read.
+    // `previous.done != true` answer for rows nobody read. #4775/B1: it stays
+    // unbound AND the write is rejected — with a diagnosis, not `No such key`.
     const wrapped = wrapDeclarativeHook(
       makeHook(TRANSITION),
       (async () => { calls.push('ran'); }) as any,
       { logger },
     );
 
-    await wrapped(makeCtx({ previous: undefined, input: { data: { done: true } } } as any));
+    await expect(wrapped(makeCtx({
+      previous: undefined,
+      input: { data: { done: true }, options: { multi: true } },
+    } as any))).rejects.toThrow(/PREDICATE bulk write/);
 
     expect(calls).toEqual([]);
   });
