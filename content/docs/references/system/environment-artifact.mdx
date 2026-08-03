@@ -5,41 +5,73 @@ description: Environment Artifact protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# Environment Artifact Format Protocol (v0)
+# Environment Artifact Envelope
 
-Defines the immutable envelope produced by `objectstack compile` and consumed
+THE single declaration of the environment artifact envelope (#4740,
 
-by the ObjectStack runtime at boot. The artifact carries everything a runtime instance
+#4535 C10 — maintainer route A′). `@objectstack/spec/cloud` re-exports
 
-needs to hydrate an environment kernel without reading control-plane DB rows
+this file; both entry points resolve to these exact symbols, so the
 
-directly.
+chosen entry point can never change the shape a consumer gets (the
+
+#4411 dual-source trap, closed for this name).
+
+Describes the response shape of
+
+`GET /api/v1/cloud/environments/:environmentId/artifact` — the assembled
+
+artifact ObjectOS pulls from the control plane, and the shape the runtime
+
+metadata loader parses at boot (`packages/metadata/src/plugin.ts`,
+
+`_parseAndRegisterArtifact` — the one runtime Zod parse of this envelope).
+
+Distinct from the marketplace `PackageArtifactSchema` (a .tgz file
+
+listing). This envelope wraps the compiled `ObjectStackDefinitionSchema`
+
+produced by `objectstack compile` together with control-plane assigned
+
+identity (`commitId`, `checksum`).
 
 ## Boundary
 
-- **Artifact (this schema):** environment metadata + inlined function code +
+- **Artifact (this schema):** compiled environment metadata plus
 
-plugin/driver requirements. Immutable, content-addressable via `commitId`
+provenance. Immutable, content-addressable via `commitId` and
 
-and `checksum`.
+`checksum`.
 
 - **Deployment Config (NOT in this schema):** business DB coordinates,
 
 credentials, environment identity, secrets. Injected at runtime.
 
-See `content/docs/concepts/north-star.mdx` §6.3 for the runtime-inputs
+See `content/docs/concepts/north-star.mdx` §6.3 for the
 
-boundary, and `ROADMAP.md` M1 for the milestone definition.
+runtime-inputs boundary.
 
-## Storage / Distribution
+## History (#4740)
 
-v0 stores the full payload inline. Future revisions may swap `metadata` /
+This file previously documented a richer "v0" envelope — a
 
-`functions` for a `payloadRef` that points at out-of-band storage (S3,
+`\{ algorithm, value \}` checksum object, a category-bag `metadata`, inlined
 
-signed URL). The envelope shape preserves room for that indirection without
+`functions[]`, a required plugin/driver `manifest`, and a reserved
 
-a breaking schema bump.
+`payloadRef` indirection — that NO producer or consumer ever implemented:
+
+`objectstack compile` ships function code as standalone runtime modules
+
+referenced from the compiled definition, and the control plane has always
+
+served the wire shape below (string SHA-256 checksum, `metadata` = the
+
+compiled definition). The declaration converged to the live wire shape;
+
+the never-implemented keys are tombstoned below (ADR-0049
+
+enforce-or-remove: declared = enforced, or absent).
 
 <Callout type="info">
 **Source:** `packages/spec/src/system/environment-artifact.zod.ts`
@@ -48,166 +80,14 @@ a breaking schema bump.
 ## TypeScript Usage
 
 ```typescript
-import { EnvironmentArtifactSchema, EnvironmentArtifactChecksumSchema, EnvironmentArtifactFunctionSchema, EnvironmentArtifactFunctionLanguageEnum, EnvironmentArtifactHashAlgorithmEnum, EnvironmentArtifactManifestSchema, EnvironmentArtifactMetadataSchema, EnvironmentArtifactPayloadRefSchema, EnvironmentArtifactRequirementSchema } from '@objectstack/spec/system';
-import type { EnvironmentArtifact, EnvironmentArtifactChecksum, EnvironmentArtifactFunction, EnvironmentArtifactManifest, EnvironmentArtifactMetadata, EnvironmentArtifactPayloadRef, EnvironmentArtifactRequirement } from '@objectstack/spec/system';
+import { Sha256DigestSchema } from '@objectstack/spec/system';
+import type { Sha256Digest } from '@objectstack/spec/system';
 
 // Validate data
-const result = EnvironmentArtifactSchema.parse(data);
+const result = Sha256DigestSchema.parse(data);
 ```
 
 ---
-
-## EnvironmentArtifact
-
-ObjectStack Environment Artifact envelope (v0)
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **schemaVersion** | `'0.1'` | ✅ | Environment artifact envelope schema version |
-| **environmentId** | `string` | ✅ | Environment identifier (control-plane scoped) |
-| **commitId** | `string` | ✅ | Content-addressable revision id |
-| **checksum** | `{ algorithm: Enum<'sha256' \| 'sha384' \| 'sha512'>; value: string }` | ✅ | Artifact integrity checksum |
-| **builtAt** | `string` | optional | ISO-8601 timestamp of when the artifact was built |
-| **builtWith** | `string` | optional | Build tool identifier |
-| **metadata** | `Record<string, any>` | ✅ | Compiled environment metadata grouped by category |
-| **functions** | `{ name: string; language: Enum<'javascript' \| 'typescript'>; code: string; source?: object; … }[]` | ✅ | Inlined function code packaged with the artifact |
-| **manifest** | `{ plugins?: { id: string; version?: string }[]; drivers?: { id: string; version?: string }[]; engine?: object }` | ✅ | Plugin/driver requirements baked into the artifact |
-| **payloadRef** | `{ url: string; expiresAt?: string; checksum: object }` | optional | Out-of-band payload reference (reserved for future use) |
-
-
----
-
-## EnvironmentArtifactChecksum
-
-Artifact integrity checksum
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **algorithm** | `Enum<'sha256' \| 'sha384' \| 'sha512'>` | ✅ | Hash algorithm used for the artifact checksum |
-| **value** | `string` | ✅ | Hex-encoded digest of the artifact body |
-
-
----
-
-## EnvironmentArtifactFunction
-
-A single inlined function
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Function machine name (snake_case) |
-| **language** | `Enum<'javascript' \| 'typescript'>` | ✅ | Source language of the function code |
-| **code** | `string` | ✅ | Inlined function source |
-| **source** | `{ path?: string; exportName?: string }` | optional | Source-map metadata for the function |
-| **hash** | `string` | optional | Hex SHA-256 of the inlined code |
-
-
----
-
-## EnvironmentArtifactFunctionLanguageEnum
-
-Source language of the function code
-
-### Allowed Values
-
-* `javascript`
-* `typescript`
-
-
----
-
-## EnvironmentArtifactHashAlgorithmEnum
-
-Hash algorithm used for the artifact checksum
-
-### Allowed Values
-
-* `sha256`
-* `sha384`
-* `sha512`
-
-
----
-
-## EnvironmentArtifactManifest
-
-Plugin/driver requirements baked into the artifact
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **plugins** | `{ id: string; version?: string }[]` | optional |  |
-| **drivers** | `{ id: string; version?: string }[]` | optional |  |
-| **engine** | `{ objectstack: string }` | optional |  |
-
-
----
-
-## EnvironmentArtifactMetadata
-
-Compiled environment metadata grouped by category
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **objects** | `any[]` | optional |  |
-| **fields** | `any[]` | optional |  |
-| **views** | `any[]` | optional |  |
-| **apps** | `any[]` | optional |  |
-| **pages** | `any[]` | optional |  |
-| **dashboards** | `any[]` | optional |  |
-| **reports** | `any[]` | optional |  |
-| **flows** | `any[]` | optional |  |
-| **workflows** | `any[]` | optional |  |
-| **triggers** | `any[]` | optional |  |
-| **agents** | `any[]` | optional |  |
-| **tools** | `any[]` | optional |  |
-| **skills** | `any[]` | optional |  |
-| **permissions** | `any[]` | optional |  |
-| **permissionSets** | `any[]` | optional |  |
-| **positions** | `any[]` | optional |  |
-| **translations** | `any[]` | optional |  |
-| **datasources** | `any[]` | optional |  |
-| **datasets** | `any[]` | optional |  |
-| **actions** | `any[]` | optional |  |
-| **apis** | `any[]` | optional |  |
-
-
----
-
-## EnvironmentArtifactPayloadRef
-
-Out-of-band payload reference (reserved for future use)
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **url** | `string` | ✅ | Signed URL pointing at the artifact payload |
-| **expiresAt** | `string` | optional | ISO-8601 expiry timestamp |
-| **checksum** | `{ algorithm: Enum<'sha256' \| 'sha384' \| 'sha512'>; value: string }` | ✅ | Checksum of the referenced payload |
-
-
----
-
-## EnvironmentArtifactRequirement
-
-A plugin or driver dependency declaration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Plugin/driver package id |
-| **version** | `string` | optional | SemVer range required by the environment |
 
 
 ---

@@ -4,118 +4,288 @@ import { describe, it, expect } from 'vitest';
 import {
   ENVIRONMENT_ARTIFACT_SCHEMA_VERSION,
   EnvironmentArtifactSchema,
-  EnvironmentArtifactChecksumSchema,
-  EnvironmentArtifactFunctionSchema,
-  EnvironmentArtifactManifestSchema,
+  Sha256DigestSchema,
 } from './environment-artifact.zod';
 
-describe('EnvironmentArtifactSchema', () => {
-  const minimal = {
-    schemaVersion: ENVIRONMENT_ARTIFACT_SCHEMA_VERSION,
-    environmentId: 'proj_01HABCDE',
-    commitId: 'commit_01HABCDE',
-    checksum: { algorithm: 'sha256' as const, value: 'a1b2c3d4' },
-    metadata: {},
-    functions: [],
-    manifest: {},
-  };
+// ─── [#4740] `EnvironmentArtifact(Schema)` has ONE declaration — ./system ───
+//
+// `./cloud` and `./system` both exported `EnvironmentArtifact` /
+// `EnvironmentArtifactInput` / `EnvironmentArtifactSchema` for two DIFFERENT
+// declarations (the #4411 trap — which shape a consumer got depended only on
+// the import path):
+//
+//   cloud/environment-artifact.zod.ts (pre-#4740) → the LIVE wire shape:
+//     string SHA-256 `checksum`, `metadata` = ObjectStackDefinitionSchema.
+//     The one runtime Zod parse of the envelope
+//     (packages/metadata/src/plugin.ts `_parseAndRegisterArtifact`) and all
+//     cloud-repo type imports used this side.
+//   system/environment-artifact.zod.ts (pre-#4740) → a documented richer
+//     "v0": `{ algorithm, value }` checksum object, category-bag `metadata`,
+//     inlined `functions[]`, required `manifest`, reserved `payloadRef` —
+//     NEVER implemented by any producer or consumer in any repo
+//     (objectstack / cloud / objectui). The two sides could not parse each
+//     other's artifacts.
+//
+// Maintainer ruling on #4740 (ledger #4535 C10): route A′ — converge on the
+// live wire shape as the SINGLE declaration in ./system, with ./cloud
+// re-exporting it (zero migration for the live consumers). Unlike C16
+// (#4739), the re-export is the SANCTIONED route here: both entries must
+// keep the name, but must resolve it to the ONE ./system declaration. A
+// fresh declaration on ./cloud is the forbidden route (S2 sabotage below).
+//
+// #4642 established that a compile-time conditional-type pin in this package
+// is a no-op (tsconfig excludes `**/*.test.ts`; vitest never enables
+// `typecheck`), so the load-bearing pin is the compiler-API test below, with
+// anti-vacuity guards; sabotage-verified in the PR.
 
-  it('accepts a minimal valid artifact', () => {
-    const parsed = EnvironmentArtifactSchema.parse(minimal);
-    expect(parsed.schemaVersion).toBe('0.1');
-    expect(parsed.functions).toEqual([]);
-  });
+/** Every export name of the retired, never-implemented v0 artifact family. */
+const RETIRED_V0_FAMILY = [
+  'EnvironmentArtifactChecksum', 'EnvironmentArtifactChecksumSchema',
+  'EnvironmentArtifactFunction', 'EnvironmentArtifactFunctionSchema',
+  'EnvironmentArtifactFunctionLanguage', 'EnvironmentArtifactFunctionLanguageEnum',
+  'EnvironmentArtifactHashAlgorithm', 'EnvironmentArtifactHashAlgorithmEnum',
+  'EnvironmentArtifactManifest', 'EnvironmentArtifactManifestSchema',
+  'EnvironmentArtifactMetadata', 'EnvironmentArtifactMetadataSchema',
+  'EnvironmentArtifactPayloadRef', 'EnvironmentArtifactPayloadRefSchema',
+  'EnvironmentArtifactRequirement', 'EnvironmentArtifactRequirementSchema',
+] as const;
 
-  it('defaults functions to an empty array when omitted', () => {
-    const { functions: _omit, ...rest } = minimal;
-    const parsed = EnvironmentArtifactSchema.parse(rest);
-    expect(parsed.functions).toEqual([]);
-  });
+describe('[#4740] `EnvironmentArtifact(Schema)` resolves to the ./system declaration everywhere', () => {
+  it('resolves the export surface: one declaration in ./system, ./cloud re-exports it, the v0 family is gone', async () => {
+    const ts = (await import('typescript')).default;
+    const { resolve, relative, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const { readFileSync } = await import('node:fs');
 
-  it('rejects unknown schemaVersion values', () => {
-    const result = EnvironmentArtifactSchema.safeParse({ ...minimal, schemaVersion: '9.9' });
-    expect(result.success).toBe(false);
-  });
+    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    // Every public entry point, read from package.json's exports map so a
+    // future entry cannot silently escape the uniqueness pin below.
+    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
+      exports: Record<string, unknown>;
+    };
+    const entries: Record<string, string> = {};
+    for (const sub of Object.keys(pkg.exports)) {
+      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
+      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
+      // './openapi.json' / './package.json' are not TypeScript entry points.
+    }
+    // Anti-vacuity: the enumeration must have found the real surface.
+    expect(Object.keys(entries)).toContain('./cloud');
+    expect(Object.keys(entries)).toContain('./system');
+    expect(Object.keys(entries).length).toBeGreaterThan(10);
 
-  it('requires environmentId and commitId', () => {
-    expect(EnvironmentArtifactSchema.safeParse({ ...minimal, environmentId: '' }).success).toBe(false);
-    expect(EnvironmentArtifactSchema.safeParse({ ...minimal, commitId: '' }).success).toBe(false);
-  });
-
-  it('passes through unknown metadata categories without dropping them', () => {
-    const parsed = EnvironmentArtifactSchema.parse({
-      ...minimal,
-      metadata: { objects: [{ name: 'account' }], futureCategory: [{ id: 'x' }] },
+    const program = ts.createProgram(Object.values(entries), {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      skipLibCheck: true,
+      noEmit: true,
     });
-    expect((parsed.metadata as Record<string, unknown>).futureCategory).toBeDefined();
+    const checker = program.getTypeChecker();
+    const unalias = (s: import('typescript').Symbol) =>
+      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
+
+    const exportsOf = (sub: string) => {
+      const sf = program.getSourceFile(entries[sub]);
+      const moduleSym = sf && checker.getSymbolAtLocation(sf);
+      // Without this guard a resolution failure would make every assertion
+      // below pass vacuously — the exact way a gate goes dormant (#4642).
+      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
+      return checker.getExportsOfModule(moduleSym!);
+    };
+
+    const originOf = (sym: import('typescript').Symbol, label: string) => {
+      const decl = unalias(sym).declarations?.[0];
+      expect(decl, `${label} must have a declaration`).toBeTruthy();
+      const declFile = decl!.getSourceFile();
+      return `${relative(specDir, declFile.fileName)}:${
+        declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
+      }`;
+    };
+
+    // 1. The surviving declaration: `./system` exports the envelope, declared
+    //    in system/environment-artifact.zod.ts — and still exports a
+    //    non-trivial surface, so the `not.toContain` checks below cannot pass
+    //    by resolving nothing.
+    const systemExports = exportsOf('./system');
+    expect(systemExports.length, './system must export a non-trivial surface').toBeGreaterThan(100);
+    const names = ['EnvironmentArtifact', 'EnvironmentArtifactInput', 'EnvironmentArtifactSchema'] as const;
+    const canonical: Record<string, string> = {};
+    for (const name of names) {
+      const sym = systemExports.find((e) => e.getName() === name);
+      expect(sym, `./system must export \`${name}\``).toBeTruthy();
+      const origin = originOf(sym!, `./system ${name}`);
+      expect(origin).toMatch(/^src\/system\/environment-artifact\.zod\.ts:\d+$/);
+      canonical[name] = origin;
+    }
+
+    // 2. The re-exporting side: `./cloud` keeps every pre-#4740 name, but
+    //    each resolves to the SAME ./system declaration — the sanctioned
+    //    route A′. A fresh cloud-side declaration flips this red (S2).
+    const cloudExports = exportsOf('./cloud');
+    for (const name of names) {
+      const sym = cloudExports.find((e) => e.getName() === name);
+      expect(sym, `./cloud must keep exporting \`${name}\``).toBeTruthy();
+      expect(
+        originOf(sym!, `./cloud ${name}`),
+        `./cloud must resolve \`${name}\` to the ./system declaration`,
+      ).toBe(canonical[name]);
+    }
+    // `Sha256Digest(Schema)` moved with the declaration; ./cloud keeps it by
+    // re-export too.
+    for (const name of ['Sha256Digest', 'Sha256DigestSchema']) {
+      const sys = systemExports.find((e) => e.getName() === name);
+      const cld = cloudExports.find((e) => e.getName() === name);
+      expect(sys, `./system must export \`${name}\``).toBeTruthy();
+      expect(cld, `./cloud must keep exporting \`${name}\``).toBeTruthy();
+      expect(originOf(cld!, `./cloud ${name}`)).toBe(originOf(sys!, `./system ${name}`));
+      expect(originOf(sys!, `./system ${name}`)).toMatch(
+        /^src\/system\/environment-artifact\.zod\.ts:\d+$/,
+      );
+    }
+
+    // 3. Uniqueness — the dual-source pin proper: across EVERY public entry,
+    //    an export named `EnvironmentArtifact(Input|Schema)` must resolve to
+    //    the ONE ./system declaration. Re-adding a second declaration under
+    //    any entry (S1/S2 sabotage) turns this red.
+    for (const sub of Object.keys(entries)) {
+      for (const name of names) {
+        for (const sym of exportsOf(sub).filter((e) => e.getName() === name)) {
+          expect(
+            originOf(sym, `${sub} ${name}`),
+            `${sub} must resolve \`${name}\` to the ./system declaration`,
+          ).toBe(canonical[name]);
+        }
+      }
+    }
+
+    // 4. The retired v0 family exists in NO entry any more.
+    for (const sub of Object.keys(entries)) {
+      const subNames = exportsOf(sub).map((e) => e.getName());
+      for (const gone of RETIRED_V0_FAMILY) {
+        expect(subNames, `${sub} must not name ${gone}`).not.toContain(gone);
+      }
+    }
+  });
+
+  it('keeps the runtime namespaces consistent with the compiler view', async () => {
+    const cloud = await import('../cloud/index');
+    const system = await import('./index');
+    // Re-export means the very same binding, not a lookalike.
+    expect(cloud.EnvironmentArtifactSchema).toBe(system.EnvironmentArtifactSchema);
+    expect(cloud.Sha256DigestSchema).toBe(system.Sha256DigestSchema);
+    for (const gone of RETIRED_V0_FAMILY) {
+      expect(gone in cloud, `cloud must not export ${gone}`).toBe(false);
+      expect(gone in system, `system must not export ${gone}`).toBe(false);
+    }
+  });
+});
+
+// ─── Wire-shape behavior ────────────────────────────────────────────────────
+
+const WIRE_CHECKSUM = '0123456789abcdef'.repeat(4); // 64 lowercase hex chars
+
+const wireMinimal = {
+  schemaVersion: ENVIRONMENT_ARTIFACT_SCHEMA_VERSION,
+  environmentId: 'proj_01HABCDE',
+  commitId: 'commit_01HABCDE',
+  checksum: WIRE_CHECKSUM,
+  metadata: {
+    objects: [{ name: 'account', label: 'Account', fields: {} }],
+  },
+};
+
+describe('EnvironmentArtifactSchema (wire shape)', () => {
+  it('accepts a minimal control-plane artifact', () => {
+    const parsed = EnvironmentArtifactSchema.parse(wireMinimal);
+    expect(parsed.schemaVersion).toBe('0.1');
+    expect(parsed.checksum).toBe(WIRE_CHECKSUM);
+    expect(parsed.metadata.objects?.[0]?.name).toBe('account');
+  });
+
+  it('defaults schemaVersion and rejects unknown versions', () => {
+    const { schemaVersion: _omit, ...rest } = wireMinimal;
+    expect(EnvironmentArtifactSchema.parse(rest).schemaVersion).toBe('0.1');
+    expect(EnvironmentArtifactSchema.safeParse({ ...wireMinimal, schemaVersion: '9.9' }).success).toBe(false);
   });
 
   it('accepts optional builtAt / builtWith provenance', () => {
     const parsed = EnvironmentArtifactSchema.parse({
-      ...minimal,
+      ...wireMinimal,
       builtAt: '2026-04-26T00:00:00Z',
-      builtWith: 'objectstack-cli@3.4.0',
+      builtWith: 'objectstack-cli@0.4.0',
     });
     expect(parsed.builtAt).toBe('2026-04-26T00:00:00Z');
   });
 
-  it('accepts optional payloadRef for future S3 indirection', () => {
-    const parsed = EnvironmentArtifactSchema.parse({
-      ...minimal,
-      payloadRef: {
-        url: 'https://artifacts.objectstack.io/proj_x/commit_y.json',
-        checksum: { algorithm: 'sha256' as const, value: 'deadbeef' },
-      },
-    });
-    expect(parsed.payloadRef?.url).toContain('artifacts.objectstack.io');
-  });
-});
-
-describe('EnvironmentArtifactChecksumSchema', () => {
-  it('accepts lowercase hex values', () => {
-    expect(EnvironmentArtifactChecksumSchema.parse({ value: 'abc123' }).algorithm).toBe('sha256');
-  });
-
-  it('rejects uppercase / non-hex values', () => {
-    expect(EnvironmentArtifactChecksumSchema.safeParse({ value: 'ABC123' }).success).toBe(false);
-    expect(EnvironmentArtifactChecksumSchema.safeParse({ value: 'not-hex' }).success).toBe(false);
-  });
-});
-
-describe('EnvironmentArtifactFunctionSchema', () => {
-  it('accepts a typical inlined function', () => {
-    const parsed = EnvironmentArtifactFunctionSchema.parse({
-      name: 'on_account_create',
-      code: 'export default async (ctx) => {}',
-    });
-    expect(parsed.language).toBe('javascript');
-  });
-
-  it('rejects function names that are not snake_case', () => {
+  it('validates metadata as an ObjectStackDefinition, not an opaque bag', () => {
     expect(
-      EnvironmentArtifactFunctionSchema.safeParse({ name: 'OnAccountCreate', code: '' }).success,
+      EnvironmentArtifactSchema.safeParse({ ...wireMinimal, metadata: { objects: 'not-an-array' } }).success,
     ).toBe(false);
-  });
-});
-
-describe('EnvironmentArtifactManifestSchema', () => {
-  it('accepts an empty manifest', () => {
-    expect(EnvironmentArtifactManifestSchema.parse({})).toEqual({});
+    expect(EnvironmentArtifactSchema.safeParse({ ...wireMinimal, metadata: [] }).success).toBe(false);
   });
 
-  it('accepts plugins, drivers and engine constraints', () => {
-    const parsed = EnvironmentArtifactManifestSchema.parse({
-      plugins: [{ id: '@objectstack/plugin-auth', version: '^3.0.0' }],
-      drivers: [{ id: '@objectstack/driver-sql' }],
-      engine: { objectstack: '>=3.0.0' },
+  // ⚠ #4666 pin — the checksum object→string convergence is a TYPE change
+  // invisible to the key-level authorable-surface gates (`checksum` exists in
+  // both shapes). These parses are the gate for it.
+  describe('checksum is a 64-char hex STRING (#4666 pin)', () => {
+    it('accepts a 64-char lowercase hex digest', () => {
+      expect(Sha256DigestSchema.parse(WIRE_CHECKSUM)).toBe(WIRE_CHECKSUM);
     });
-    expect(parsed.plugins?.[0].id).toBe('@objectstack/plugin-auth');
-    expect(parsed.engine?.objectstack).toBe('>=3.0.0');
+
+    it('rejects the retired `{ algorithm, value }` checksum object', () => {
+      const result = EnvironmentArtifactSchema.safeParse({
+        ...wireMinimal,
+        checksum: { algorithm: 'sha256', value: WIRE_CHECKSUM },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects non-64-char, uppercase and non-hex values', () => {
+      for (const bad of ['abc123', WIRE_CHECKSUM.slice(0, 63), WIRE_CHECKSUM.toUpperCase(), 'not-hex']) {
+        expect(Sha256DigestSchema.safeParse(bad).success, `must reject ${JSON.stringify(bad)}`).toBe(false);
+      }
+    });
   });
 
-  it('rejects malformed engine version ranges', () => {
-    expect(
-      EnvironmentArtifactManifestSchema.safeParse({ engine: { objectstack: 'not-a-range' } }).success,
-    ).toBe(false);
+  // The v0 keys are tombstoned, not silently stripped: authoring one raises
+  // the prescription itself (retiredKey, #3855), and `tsc` types the key
+  // `never` at the authoring site.
+  describe('retired v0 keys are tombstoned (#4740, ADR-0049)', () => {
+    it('rejects `functions` with the prescription', () => {
+      expect(() => EnvironmentArtifactSchema.parse({ ...wireMinimal, functions: [] }))
+        .toThrow(/`environmentArtifact\.functions` was removed in @objectstack\/spec 17\.0\.0.*Delete the key/s);
+    });
+
+    it('rejects `manifest` with the prescription', () => {
+      expect(() => EnvironmentArtifactSchema.parse({ ...wireMinimal, manifest: {} }))
+        .toThrow(/`environmentArtifact\.manifest` was removed in @objectstack\/spec 17\.0\.0.*metadata\.manifest/s);
+    });
+
+    it('rejects `payloadRef` with the prescription', () => {
+      expect(() => EnvironmentArtifactSchema.parse({ ...wireMinimal, payloadRef: { url: 'https://x' } }))
+        .toThrow(/`environmentArtifact\.payloadRef` was removed in @objectstack\/spec 17\.0\.0.*Delete the key/s);
+    });
+
+    it('a full pre-#4740 v0 artifact is rejected loudly, not half-parsed', () => {
+      const v0 = {
+        schemaVersion: '0.1',
+        environmentId: 'proj_01HABCDE',
+        commitId: 'commit_01HABCDE',
+        checksum: { algorithm: 'sha256', value: 'a1b2c3d4' },
+        metadata: { objects: [{ name: 'account', label: 'Account' }] },
+        functions: [{ name: 'on_account_create', code: 'export default async () => {}' }],
+        manifest: { plugins: [{ id: '@objectstack/plugin-auth' }] },
+      };
+      expect(EnvironmentArtifactSchema.safeParse(v0).success).toBe(false);
+    });
+
+    it('absent tombstoned keys stay absent from the parse result', () => {
+      const parsed = EnvironmentArtifactSchema.parse(wireMinimal);
+      expect(parsed).not.toHaveProperty('functions');
+      expect(parsed).not.toHaveProperty('payloadRef');
+      // NB `manifest` may legitimately appear INSIDE metadata (the stack
+      // manifest) — the tombstone governs the envelope level only.
+      expect(Object.keys(parsed)).not.toContain('manifest');
+    });
   });
 });

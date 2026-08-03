@@ -5,19 +5,25 @@ description: Environment Artifact protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-# Environment Artifact Envelope (M1)
+# Environment Artifact Envelope — re-export (#4740, #4535 C10)
 
-Describes the response shape of `GET /api/v1/cloud/environments/:environmentId/artifact`
+The envelope has exactly ONE declaration:
 
-— the assembled artifact ObjectOS pulls from the control plane.
+`../system/environment-artifact.zod` (maintainer route A′ on #4740 —
 
-Distinct from the marketplace `PackageArtifactSchema` (a .tgz file listing).
+`./system` holds the live wire shape, `./cloud` re-exports it). Importing
 
-This envelope wraps the compiled `ObjectStackDefinitionSchema` produced by
+from `@objectstack/spec/cloud` and `@objectstack/spec/system` yields the
 
-`objectstack compile` together with control-plane assigned identity
+SAME symbols, so the import path can never change the shape a consumer
 
-(`commitId`, `checksum`).
+gets (the #4411 dual-source trap, closed for this name).
+
+Do NOT re-declare the envelope here. A second declaration under this name
+
+is exactly what `check:dual-source-exports` and the symbol-identity pin in
+
+`../system/environment-artifact.test.ts` exist to reject.
 
 <Callout type="info">
 **Source:** `packages/spec/src/cloud/environment-artifact.zod.ts`
