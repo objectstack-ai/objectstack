@@ -406,6 +406,13 @@
         "rationale": "The `validateOnly` key promised a dry-run (\"validate records without persisting\") but no batch surface ever read it — updateManyData / deleteManyData / batchData persist regardless. There is no behaviour to preserve and nothing stored to rewrite (it only ever appeared in an HTTP request body). Callers must stop sending it."
       },
       {
+        "surface": "api.batchOperationResult — the per-row `results` entries of BatchUpdateResponse (`POST /data/:object/batch`, `/updateMany`, `/deleteMany`)",
+        "replacement": "`errors: ApiError[]` (was `error: string` — read `row.errors?.[0]?.message`, branch on `row.errors?.[0]?.code`), `data` (was `record`), and `index` (new — the row's position in the request array)",
+        "migrationId": "batch-row-result-schema-shape",
+        "toMajor": 17,
+        "rationale": "The rows the three bulk-write endpoints emitted had drifted from the schema that declared them: `BatchOperationResultSchema`, the client SDK's exported `BatchOperationResult` type and the reference docs all said `errors: ApiError[]` / `data` / `index`, while the wire carried `error: string` / `record` and never sent `index` at all. A TypeScript consumer written against the published type compiled, validated and read `undefined` at runtime — the declared-but-not-delivered shape this registry exists to close, on the response envelope (ADR-0119 D4 deferred the reconciliation off a bug fix; this is that tracked change, shipped in the 17 major window). The ADR-0119/#4620 rollback marking is structured in the same move: the `ROLLED_BACK:` / `NOT_ATTEMPTED:` message-string prefixes become registered `ApiError.code` values (message keeps the human-readable cause and causal row index), so \"attempted and undone\" vs \"never ran\" is machine-readable instead of a regex convention. A RESPONSE surface — nothing stored in stack metadata carries a batch row, so there is no source for the chain to rewrite; consumers of the legacy keys move their reads themselves. Off-contract readers only: the legacy keys were never in the schema or the SDK types, so a typed consumer needs no change. #4793."
+      },
+      {
         "surface": "data.query.joins",
         "replacement": "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted `fields` path for a single related column (`fields: ['owner.name']`)",
         "migrationId": "query-joins-retired",
@@ -937,6 +944,13 @@
           "migrationId": "batch-options-validate-only-retired",
           "toMajor": 17,
           "rationale": "The `validateOnly` key promised a dry-run (\"validate records without persisting\") but no batch surface ever read it — updateManyData / deleteManyData / batchData persist regardless. There is no behaviour to preserve and nothing stored to rewrite (it only ever appeared in an HTTP request body). Callers must stop sending it."
+        },
+        {
+          "surface": "api.batchOperationResult — the per-row `results` entries of BatchUpdateResponse (`POST /data/:object/batch`, `/updateMany`, `/deleteMany`)",
+          "replacement": "`errors: ApiError[]` (was `error: string` — read `row.errors?.[0]?.message`, branch on `row.errors?.[0]?.code`), `data` (was `record`), and `index` (new — the row's position in the request array)",
+          "migrationId": "batch-row-result-schema-shape",
+          "toMajor": 17,
+          "rationale": "The rows the three bulk-write endpoints emitted had drifted from the schema that declared them: `BatchOperationResultSchema`, the client SDK's exported `BatchOperationResult` type and the reference docs all said `errors: ApiError[]` / `data` / `index`, while the wire carried `error: string` / `record` and never sent `index` at all. A TypeScript consumer written against the published type compiled, validated and read `undefined` at runtime — the declared-but-not-delivered shape this registry exists to close, on the response envelope (ADR-0119 D4 deferred the reconciliation off a bug fix; this is that tracked change, shipped in the 17 major window). The ADR-0119/#4620 rollback marking is structured in the same move: the `ROLLED_BACK:` / `NOT_ATTEMPTED:` message-string prefixes become registered `ApiError.code` values (message keeps the human-readable cause and causal row index), so \"attempted and undone\" vs \"never ran\" is machine-readable instead of a regex convention. A RESPONSE surface — nothing stored in stack metadata carries a batch row, so there is no source for the chain to rewrite; consumers of the legacy keys move their reads themselves. Off-contract readers only: the legacy keys were never in the schema or the SDK types, so a typed consumer needs no change. #4793."
         },
         {
           "surface": "data.query.joins",

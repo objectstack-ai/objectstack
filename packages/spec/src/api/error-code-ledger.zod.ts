@@ -210,9 +210,11 @@ export const ERROR_CODE_LEDGER = {
     'METADATA_CONFLICT',
     'NAMESPACE_PREFIX',           // name violates the package namespace-prefix rule
     'NO_DRAFT',
+    'NOT_ATTEMPTED',              // atomic data-batch row never ran — an earlier row's failure aborted the batch (#4793)
     'NOT_CREATABLE',
     'NOT_OVERRIDABLE',
     'OVERLAY_PERSISTENCE_FAILED',
+    'ROLLED_BACK',                // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',
     'VERSION_NOT_FOUND',
