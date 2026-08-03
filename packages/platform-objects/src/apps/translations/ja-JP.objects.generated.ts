@@ -2746,7 +2746,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "マルチテナント分離のための組織。"
       },
       recorded_by: {
-        label: "記録者"
+        label: "記録者",
+        help: "User who made this change. NULL = system-initiated (boot sync, migration, scheduled job) — never a sentinel string."
       },
       recorded_at: {
         label: "記録日時"
