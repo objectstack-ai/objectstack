@@ -96,6 +96,46 @@ a hook can be, so review it as such:
 Where a wildcard is the honest answer, say so in `description` — it is the one
 place a reviewer can find out why the broad target was chosen.
 
+## The `condition` gate
+
+A declarative hook can carry a CEL `condition`, evaluated **before** the handler:
+the hook fires only when it is true. Three things about it changed in protocol 17,
+and the first is breaking.
+
+**An unevaluable condition aborts the operation (#4775).** A condition the platform
+could not work out used to emit a `logger.warn` and `return false` — the hook simply
+did not fire. "The condition said no" and "the platform could not evaluate the
+condition" carry *opposite* risks depending on the hook: swallowed into a `before*`
+guard it silently lets the write through; swallowed into an audit hook it silently
+drops the record. They are now distinct outcomes, and the second **fails the write**.
+Hooks that have been getting by on that skip will start failing — that is how you
+find out they were never enforcing anything.
+
+**The condition reads the record, not the payload (#4770).** It used to evaluate
+against `ctx.input.data` — only the fields the current write happened to carry — so
+`condition: "record.done == true"` did **not** run on the most ordinary updates there
+are (change the status, change the assignee), because `done` was not in the payload.
+It now evaluates against **stored ⊕ payload**: the prior record overlaid with this
+write's data, total over the object's declared fields (`null` for a declared field in
+neither), with the payload winning for the fields it carries. Undeclared or typo'd
+keys stay unresolvable — `record.stauts` is an error, not a silent `false`.
+
+**`previous` is bound, so a condition can express a transition (#4784).** The scope
+was a single `{ record }` root, which made the published `previous` form
+(`previous.status != 'escalated' && record.status == 'escalated'`, and the legacy
+`OLD.x` / `ISCHANGED(x)` mappings) abort with `No such key: previous`. It is now
+bound alongside `record`, built by the same helper the validation side uses, so one
+CEL expression means one thing on both surfaces.
+
+```ts
+// "after a task transitions to done" — not "whenever a done task is written"
+condition: P`previous.done != true && record.done == true`
+```
+
+Because `record` now means the record's *state*, `record.done == true` alone is true
+on **every** update of an already-done row. If you wrote a condition under the old
+payload semantics expecting "the write that changed it", add the `previous` half.
+
 ## Before Hook
 
 Mutate the incoming record before it is saved. The engine exposes the pending

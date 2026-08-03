@@ -104,7 +104,22 @@ Formula-based validation using expressions:
 }
 ```
 
-The `condition` is a **CEL** predicate and should evaluate to `true` when the data is **invalid**. A predicate that cannot be evaluated (parse error, unbound variable) is treated as a broken rule — it is logged and skipped rather than blocking the write.
+The `condition` is a **CEL** predicate and should evaluate to `true` when the data is **invalid**.
+
+A predicate that cannot be evaluated (parse error, unbound variable, a comparison
+CEL has no overload for) **rejects the write** with `VALIDATION_FAILED`, naming the
+rule and — when the fault is a missing key — the key the predicate read and how to
+fix it. Until protocol 17 such a rule was logged at WARN and *skipped*, so the write
+went through while the rule stayed declared and enforced nothing; a validation exists
+to reject a write, and "the rule could not be checked" must never resolve to
+"allowed" (#4649). `severity` still governs blocking — an unevaluable `warning` /
+`info` rule is logged and does not throw.
+
+The record a predicate reads is the stored row overlaid with this write's payload,
+**total over the object's declared fields** (`null` for a declared field present in
+neither), on update as well as insert — so a driver that stores only the columns it
+wrote no longer decides whether an expression is evaluable. That totality is also why
+`has()` is not a null guard: see the callout above.
 
 ### Uniqueness (use an index, not a validation rule)
 
