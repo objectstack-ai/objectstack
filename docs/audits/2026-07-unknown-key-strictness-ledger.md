@@ -529,7 +529,7 @@ not verdicts).
 | File | Sites | Class | Note |
 |---|---|---|---|
 | `flow.zod.ts` | 11 | authorable | **strict as of #4001** — the four outer authoring shapes at step 1, and **the six nested blocks at batch 11** (`FlowNode.connectorConfig` / `.position` / `.inputSchema` / `.waitEventConfig` / `.boundaryConfig`, `Flow.errorHandling`). The gap between those two dates is this campaign's own finding 17 inside its own file: closing the shells left the gate rejecting `nodee:` at node level while `connectorConfig: { connectorId, actionId, params: {…} }` parsed clean and the executor dispatched `input ?? {}` — a successful connector call carrying nothing. Worth recording precisely, because the obvious example is the wrong one: a slip on a REQUIRED key was always loud (it then reads as missing). What `.strip` swallowed here is the OPTIONAL half — the input map, the retry budget, `interrupting: false`, `required: true` — i.e. exactly the keys an author adds to CONSTRAIN behaviour, replaced by a permissive default without a word. Two things stay open and are now pinned in code with the reason, so a later sweep stops rather than "finishes" the file: the node `config` slot (ADR-0018 plugin namespace) and `FlowVersionHistorySchema` (the file's only WIRE shape — emitted on publish, never authored; its `definition` is `FlowSchema`, so the authored half inside a history record is gated anyway) |
-| `etl.zod.ts` | 10 | authorable (p) | authored pipelines — **candidate**. **−12 at #4738**: `sync.zod.ts` (the L1 "Simple Sync" file — `DataSyncConfig`, its `ConflictResolution` enum and satellites, formerly this row's co-candidate) was deleted whole rather than hardened: three-repo zero importers, no parse site, defs unreachable from the metadata-type roots (#4650 gate), so there was no author for strictness to protect (#4535 C13+C15). The integration-side `ConflictResolution` → `ConnectorConflictResolution` rename in the same change is name-only and moves no sites |
+| `etl.zod.ts` | 10 | mixed | **7 strict as of #4001 批 12** — the authoring half (`ETLSource` + `.incremental`, `ETLDestination`, `ETLTransformation`, `ETLPipeline` + `.retry` + `.notifications`). The other 3 — `ETLPipelineRun` + `.stats` + `.error` — are **deliberately left open**: engine-emitted run state (an id it minted, a status it reached, counters it accumulated), same disposition and same reason as `FlowVersionHistorySchema` above and all of `execution.zod.ts`. The exemption is recorded on the schema itself, not only here, because a note only this file carries is a note the next sweep does not read. The old blanket `authorable (p)` was too wide; verification split it. ⚠️ **Read the classification caveat before reusing this verdict**: `etl.zod.ts` has NO parse site in objectstack / objectui / cloud, so neither half could be settled by pointing at a live call. The 7 are authorable because the exported schema and type ARE the door (`SYNC_ARCHITECTURE.md` and the module's `@example` both hand-write `const p: ETLPipeline = { … }`) — the `webhook.zod.ts` posture. The 3 are wire on the shape's semantics plus settled precedent, NOT on an emit site anyone can point at today; if an ETL engine ever lands and a run result turns out to be operator-authored, that verdict is the one to revisit. Two out-of-scope findings were filed rather than fixed here: the `retry` block is a third retry-policy vocabulary #4661's convergence never reached (#4962), and all nine type aliases export the parsed shape under the bare name, which is why the SYNC_ARCHITECTURE.md pipeline examples do not compile (#4963). **−12 at #4738**: `sync.zod.ts` (the L1 "Simple Sync" file — `DataSyncConfig`, its `ConflictResolution` enum and satellites, formerly this row's co-candidate) was deleted whole rather than hardened: three-repo zero importers, no parse site, defs unreachable from the metadata-type roots (#4650 gate), so there was no author for strictness to protect (#4535 C13+C15). The integration-side `ConflictResolution` → `ConnectorConflictResolution` rename in the same change is name-only and moves no sites |
 | `execution.zod.ts` | 13 | wire | run-state envelopes — never strict. +5 at #4354 (the run-summary family: step metrics / skip reason / per-node / per-gate / the summary itself) — engine-emitted telemetry read by the Console and by operator queries, nobody authors them, so the `wire` verdict covers them unchanged |
 | `state-machine.zod.ts` | 6 | authorable | **strict as of #4001 批 10** — all six sites (`ActionRef` / `GuardRef` / `Transition` / `StateNode` + `.meta` / `StateMachine`). **The `(p)` was NOT a formality here.** ADR-0020 retired this XState shape as a *record-lifecycle* declaration — the top-level `workflow` metadata type and `object.stateMachines` are both gone, and a record's transitions live on the `state_machine` VALIDATION RULE instead — so had those been the only doors this file would be DEAD surface, and the correct action would have been to fix its class, not close it. One authoring door survives: `ai/agent.zod.ts`'s `lifecycle` is `StateMachineSchema`, and `agent` is a registered type, so `defineStack({ agents })` / meta REST / the Studio agent form all reach here through `AgentSchema.parse()`. Verified by parse: an agent whose lifecycle carried `stats`, a state with `onn` (one keystroke from `on`) and a `meta` with two unknown keys **parsed clean**, returning a machine with NO transitions at all — the declaration whose whole job is to deny undeclared transitions, silently emptied and reported valid. `.meta` was checked for the #4909 open-slot case and is CLOSED: the hand-written `StateNodeConfig` type declares exactly its four keys (passthrough would open the Zod while `tsc` stayed shut), nothing in the repo reads any `meta` key, and the prior behaviour was strip — an author's `meta` arrived as `{}` — so there was no openness to preserve. ⚠️ `ActionRef` / `GuardRef` are UNIONS: a strict branch's message does not reach the top (zod raises one `invalid_union` whose message is the literal `"Invalid input"`, with the real prescription nested in `issue.errors[]`), which `formatZodError` then flattens away — filed, not fixed here. **−1 at #4658**: the orphan `EventSchema` (`{ type, schema }`, an XState-style signal declaration nothing referenced — `StateMachineSchema` names event types as `on:` record keys) was deleted rather than converged with `kernel/events/core.zod.ts`'s envelope `EventSchema`, whose key set it did not intersect (#4535 C6). The remaining 6 sites and their verdict are unchanged |
 | `control-flow.zod.ts` | 5 | authorable | **strict as of #4001 批 10** — all five sites (`FlowRegion` / `Loop` / `ParallelBranch` / `Parallel` / `TryCatch`). The `(p)` resolves to authorable on the executors' own parse seam (`parseNodeConfig`, #4277) plus `validateControlFlow`'s region parse. **`validateControlFlow` is a sibling guard, not a key gate, and the two do not fight**: it answers single-entry / single-exit / acyclic, which no key check can decide, and the schema answers key membership, which no structural check can decide. They meet at exactly one seam — the guard `safeParse`s each region slot before analyzing it, so an undeclared region key now surfaces there as `<where>: invalid region — <the strictObject message>`, the guard's framing wrapping the schema's prescription. Nothing was duplicated and nothing removed; the guard simply stopped silently repairing its own input before judging it. Two curation entries had to be MEASURED rather than reasoned: the bare edit-distance fallback answers `itemVariable` with **`indexVariable`** — binding the loop INDEX where the author wanted the ITEM — so the alias exists to overrule a confidently wrong suggestion from this campaign's own helper (the `pii` → `min` shape, third instance); and `join`/`joinGateway` needed two DISTINCT prescriptions because `guidance` emits one bullet per key verbatim, so a shared string printed the same paragraph twice. Its test instrument also had to be rebuilt: `region-slots.test.ts` probed every construct with every candidate key at once and depended on `.strip` to discard the mismatches, so it returned "no schema accepts any region" the moment the shapes closed — it failed loudly, which is the only reason this is a footnote and not a fourth finding-3. Structural validation by `validateControlFlow` remains. **−1 at #4661**: `RetryPolicySchema` moved out to `shared/retry-policy.zod.ts` — `./automation` and `./system` published the same name for two different declarations (#4411), so the retry policy converged onto one. The site still exists and is still non-strict and authorable; it is simply no longer in a directory this ledger sections. ⚠️ That is a coverage gap worth knowing about: this audit sections `ui/` / `data/` / `automation/` / `security/` / `studio/` only, so a `shared/` shape is unaudited by construction. The tolerance is deliberate here — the `retryDelayMs` → `backoffMs` rename is tombstoned via `retiredKey()` precisely because a non-strict parent would otherwise swallow the old spelling |
@@ -606,12 +606,12 @@ classes; where it does, the split is stated. **Only the authorable half is in th
 2026-08-03 ruling's forced scope** — wire/open rows are listed so the arithmetic
 is complete and so nobody re-triages them from scratch next batch.
 
-#### `automation/` — 33 strip of 75
+#### `automation/` — 26 strip of 75
 
 | File | Strip | Sites | Class | Batch |
 |---|---|---|---|---|
 | `execution.zod.ts` | 13 | 13 | wire | **out of scope** — engine-emitted run state; the ledger row already says "never strict" |
-| `etl.zod.ts` | 10 | 10 | mixed | 7 authorable (`ETLSource` + `.incremental`, `ETLDestination`, `ETLTransformation`, `ETLPipeline` + `.retry` + `.notifications`), 3 wire (`ETLPipelineRun` + `.stats` + `.error` — run state) |
+| `etl.zod.ts` | 3 | 10 | wire | **Authorable half closed at 批 12** (7 sites: `ETLSource` + `.incremental`, `ETLDestination`, `ETLTransformation`, `ETLPipeline` + `.retry` + `.notifications`). What is left is `ETLPipelineRun` + `.stats` + `.error` — engine-emitted run state, exempt for the `FlowVersionHistorySchema` reason and pinned as such in `etl.test.ts`, so closing it means deleting a test that says not to. **This row shrinks without disappearing** — the second in `automation/` to do so, after `flow.zod.ts` reached its own wire floor of 1 at 批 11 (the two batches were in flight together and arrived at the same shape independently, which is the better evidence that it is the right one). Worth naming because the reverse pin cannot see it: the pin fires on zero, so a row that stops at its wire floor looks exactly like a row nobody finished. The Class column is the only thing separating them — read it before treating this as unfinished work |
 | `flow.zod.ts` | 1 | 11 | wire | **batch 11 closed the 6 authorable** (`FlowNode.connectorConfig` / `.position` / `.inputSchema` / `.waitEventConfig` / `.boundaryConfig`, `Flow.errorHandling`). The 1 left is `FlowVersionHistorySchema`, which this table has exempted since it was written — **do not close it**: it is emitted on publish, not authored, so closing it makes a future emitter-side field a parse failure for whoever reads history. The exemption now also lives beside the schema and in `flow.test.ts`, because a row in a table is not where the next person to open that file will look |
 | `bpmn-interop.zod.ts` | 5 | 5 | wire (p) | **out of scope** — third-party BPMN import/export shapes; strictness turns an upstream addition into our parse crash |
 | `node-executor.zod.ts` | 4 | 4 | wire | **out of scope** — executor registration contract, code-to-code |
@@ -625,6 +625,7 @@ gate went red on it still being there, not because someone remembered:
 | **批 9** (#4925) | `builtin-node-config` (8) · `schemaless-node-config` (4) · `io-node-config` (2) | — |
 | **批 10** (#4973) | `control-flow` (5) · `state-machine` (6) | — |
 | **批 11** (#4974) | `flow-function` (1) · `time-relative-trigger` (1) · `webhook` (1) | `flow.zod.ts` 7 → 1 |
+| **批 12** (#4979) | — | `etl.zod.ts` 10 → 3 |
 
 **How those waves met is worth recording, because it is the failure mode this
 table is most exposed to.** Each PR deleted its own rows and decremented this
@@ -633,23 +634,35 @@ overlap — and left only the header conflicted, while the subtotal line below i
 which conflicts with nothing, **merged clean and wrong**. No number was a mistake
 in isolation: each was correct against the branch that computed it.
 
-It has now happened three times in one day. 批 10 recorded it against 批 9's
+It has now happened four times in one day. 批 10 recorded it against 批 9's
 header; 批 11 then merged and its subtotal (`etl` 7 + `state-machine` 6 +
 `control-flow` 5) and 批 10's (`etl` 7 + `flow` 6 + three singles) were each
-right against their own branch and both wrong against the merge. So the rule is
-mechanical rather than remembered: **the header and the subtotal are recomputed
-from the surviving rows, never resolved in favour of a side**, and
-`check:strictness-ledger`'s arithmetic is what settles it. A clean-looking merge
-here is evidence of nothing.
+right against their own branch and both wrong against the merge; 批 12 made it
+four, and did so twice — once against 批 10 and again against 批 11 — which is
+the useful detail, because it means the count is not "once per wave" but once
+per *pair* of waves that overlap in flight. So the rule is mechanical rather
+than remembered: **the header and the subtotal are recomputed from the surviving
+rows, never resolved in favour of a side**, and `check:strictness-ledger`'s
+arithmetic is what settles it. A clean-looking merge here is evidence of nothing.
 
-**Authorable strip in `automation/`: 7 of 33** (was 41 of 67 before the three
-waves). What is left of the ruling's "known main body" is **`etl.zod.ts` alone**
-— `ETLSource` + `.incremental`, `ETLDestination`, `ETLTransformation`,
-`ETLPipeline` + `.retry` + `.notifications`. The other 26 strip sites here are
-wire and out of the ruling's forced scope: `execution` 13, `bpmn-interop` 5,
-`node-executor` 4, `etl`'s own 3 run-state shapes, and `flow.zod.ts`'s last site
-`FlowVersionHistorySchema` — which is why `flow` still has a row while having 0
-authorable left, and must not be read as unfinished work.
+**Authorable strip in `automation/`: 0 of 26** (was 41 of 67 when the ruling was
+written). **The ruling's `automation/` main body is complete** — every remaining
+strip site in this directory is wire, and none is in the forced scope:
+`execution` 13, `bpmn-interop` 5, `node-executor` 4, `etl`'s 3 run-state shapes,
+and `flow.zod.ts`'s last site `FlowVersionHistorySchema`.
+
+That leaves the section in a state this table has not been in before, and it is
+the state most likely to be misread: **two rows now sit at a deliberate wire
+floor** — `flow` at 1 (批 11) and `etl` at 3 (批 12) — rather than having
+disappeared. The reverse pin cannot see the difference. It fires when a file
+reaches zero, so it proves a row's work is *done*; it is completely silent about
+a row whose work is *deliberately partial*, and to the gate "finished, the rest
+is wire by decision" and "nobody got to it" are the same row. Only the `Class`
+column separates them, which makes that column load-bearing from here on rather
+than descriptive. Both waves drew the same conclusion independently and acted on
+it the same way: the decision is also written beside the schema and pinned in a
+test (`flow.test.ts`, `etl.test.ts`), because a row in a table is not where the
+next person to open that file will look.
 
 #### `ui/` — 123 strip of 198
 

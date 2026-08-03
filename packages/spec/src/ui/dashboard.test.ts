@@ -204,3 +204,73 @@ describe('Dashboard presentation sub-schemas', () => {
     })).toThrow();
   });
 });
+
+// ============================================================================
+// [#4876] `widgets[].responsive` is RETIRED — mirrors #3896's `view.responsive`
+// ============================================================================
+//
+// RUNTIME assertions, deliberately. #4642 established that a compile-time pin in
+// `packages/spec` is a no-op: `tsconfig.json` excludes `**/*.test.ts` and
+// `vitest.config.ts` never enables `typecheck`, so an `Assert< Equal< … > >`
+// here would be dead text. The tombstone's `tsc` channel is proved by the build
+// of the packages that author dashboards, not by this file.
+//
+// The pair below is the whole contract of this retirement: the widget embed
+// REJECTS with the prescription, and the shared shape it used to reference is
+// untouched everywhere else. Splitting one shared schema's two embeds is
+// exactly the change that silently over-reaches, so the control is not optional.
+describe('[#4876] DashboardWidgetSchema — retired `responsive`', () => {
+  const widget = { id: 'orders_kpi', type: 'metric', dataset: 'orders', values: ['total'] };
+
+  it('REJECTS an authored `responsive` with the prescription (not "unrecognized key")', () => {
+    let message = '';
+    try {
+      DashboardWidgetSchema.parse({
+        ...widget,
+        responsive: { columns: { xs: 12, lg: 4 }, hiddenOn: ['xs'] },
+      });
+    } catch (e) { message = String((e as Error).message); }
+
+    // The prescription itself, in the four parts an upgrading author needs:
+    // the fully-qualified key, the version, the issue, and the fix.
+    expect(message).toMatch(/dashboard\.widgets\[\]\.responsive/);
+    expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
+    expect(message).toMatch(/#4876/);
+    expect(message).toMatch(/Delete the key/);
+    // It must point at the surviving home for the capability, or an author who
+    // really wants breakpoints reads this as "responsive layout is gone".
+    expect(message).toMatch(/page\.components\[\]\.responsive/);
+    // `.strict()` on this schema would answer a DELETED key with a generic
+    // unrecognized-key error. The tombstone is what makes it a prescription —
+    // if this ever regresses to the strict path, this assertion is the tripwire.
+    expect(message).not.toMatch(/Unrecognized key/);
+  });
+
+  it('still accepts a widget with no `responsive` (the retirement strips nothing else)', () => {
+    const w = DashboardWidgetSchema.parse(widget);
+    expect(w).not.toHaveProperty('responsive');
+    expect(w.dataset).toBe('orders');
+  });
+
+  // ── CONTROL: the shared shape is NOT retired, only this embed ──────────────
+  it('CONTROL: `ResponsiveConfigSchema` is still exported and still parses', async () => {
+    const ui = await import('./index');
+    expect(ui.ResponsiveConfigSchema).toBeTruthy();
+    const cfg = ui.ResponsiveConfigSchema.parse({
+      columns: { xs: 12, lg: 4 }, order: { xs: 2, lg: 1 }, hiddenOn: ['xs'],
+    });
+    expect(cfg.columns).toEqual({ xs: 12, lg: 4 });
+    expect(cfg.hiddenOn).toEqual(['xs']);
+  });
+
+  it('CONTROL: `page.components[].responsive` parses exactly as before', async () => {
+    const { PageComponentSchema } = await import('./page.zod');
+    const c = PageComponentSchema.parse({
+      type: 'page:sidebar', properties: {},
+      responsive: { columns: { xs: 12, lg: 4 }, order: { xs: 2, lg: 1 }, hiddenOn: ['xs'] },
+    });
+    // Round-trips untouched — the page embed is a live consumer path
+    // (objectui `useResponsiveConfig`), not a second casualty of this removal.
+    expect(c.responsive).toEqual({ columns: { xs: 12, lg: 4 }, order: { xs: 2, lg: 1 }, hiddenOn: ['xs'] });
+  });
+});

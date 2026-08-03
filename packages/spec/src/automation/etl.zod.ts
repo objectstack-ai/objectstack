@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { CronExpressionInputSchema } from '../shared/expression.zod';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * ETL (Extract, Transform, Load) Pipeline Protocol - LEVEL 2: Data Engineering
@@ -99,10 +100,174 @@ export const ETLEndpointTypeSchema = lazySchema(() => z.enum([
 
 export type ETLEndpointType = z.infer<typeof ETLEndpointTypeSchema>;
 
+// ─── Unknown-key strictness (#4001 批 12, ADR-0078) ───────────────────
+//
+// The seven AUTHORING shapes in this file are closed against undeclared keys;
+// the three `ETLPipelineRun` shapes at the bottom stay tolerant. The split, and
+// how it was verified rather than assumed, is recorded on `ETLPipelineRunSchema`
+// — read it before closing anything else here.
+//
+// One thing to know about this file before reading the tables: `etl.zod.ts` has
+// **no parse site anywhere** in objectstack / objectui / cloud. That does not
+// make it unauthored — it makes the exported schema and the exported type the
+// whole authoring door (`const p: ETLPipeline = { … }`, as
+// `packages/spec/docs/SYNC_ARCHITECTURE.md` and this module's own `@example`
+// write it), the same posture the ledger already carries for `webhook.zod.ts`.
+// It does mean the curation below could not be measured from stored payloads
+// the way 批 9's was, because there are none. So every alias and guidance entry
+// here is instead anchored to a **sibling contract that exists in this repo**
+// and spells the same intent differently — each one names its anchor. Nothing
+// is written from imagination: the campaign's finding 7 is that a confidently
+// wrong prescription costs more than no prescription at all.
+
+/**
+ * The shared second half of the endpoint/transformation histories: where a
+ * misplaced setting actually goes.
+ *
+ * `source`, `destination` and each `transformation` all pair a small closed key
+ * set with an open `config: z.record(…)` bag, and that pairing is what makes an
+ * unknown key on these three a **misplacement** far more often than a typo.
+ * `table`, `schema`, `endpoint`, `path`, `format`, `condition`, `groupBy` are
+ * all real, load-bearing settings — one nesting level down. `.strip` deleted
+ * them where they stood, so the pipeline parsed clean and then ran against a
+ * `config` missing exactly the setting the author had written.
+ *
+ * The pointer lives in `history` — appended to *every* unknown-key message on
+ * these surfaces — rather than in a per-key `guidance` table, because the
+ * misplaced key is drawn from the open bag's unbounded vocabulary. Enumerating
+ * it would be guesswork; naming the destination is not.
+ */
+const ETL_CONFIG_SLOT_POINTER =
+  'If the key is a real setting (`table`, `schema`, `endpoint`, `path`, `format`, `condition`, `groupBy`, …) '
+  + 'it belongs one level down, inside the open `config` record — that bag is deliberately unconstrained and '
+  + 'is the only place this schema reads endpoint-specific settings from.';
+
+const ETL_SOURCE_HISTORY =
+  'Until #4001 an undeclared key on an ETL source was dropped silently — the pipeline parsed clean and '
+  + 'extracted with the key ignored. ' + ETL_CONFIG_SLOT_POINTER;
+
+const ETL_INCREMENTAL_HISTORY =
+  'Until #4001 an undeclared key here was dropped silently, and an incremental source whose cursor never '
+  + 'took effect re-extracts the whole table (or nothing) on every run while still reporting success.';
+
+/**
+ * Anchor: `DataSyncConfig` in `integration/connector.zod.ts` — the LIVE sibling
+ * (it is on the `ConnectorSchema.syncConfig` parse path) — calls this same thing
+ * `timestampField`, "Field to track last modification time". Identical intent,
+ * different word, and far outside the edit-distance window, which is exactly
+ * the category `aliases` exists for.
+ */
+const ETL_INCREMENTAL_ALIASES: Readonly<Record<string, string>> = {
+  timestampField: 'cursorField',
+};
+
+const ETL_DESTINATION_HISTORY =
+  'Until #4001 an undeclared key on an ETL destination was dropped silently — the pipeline parsed clean and '
+  + 'loaded with the key ignored. ' + ETL_CONFIG_SLOT_POINTER;
+
+/**
+ * Anchor: connector `syncConfig.strategy` (`SyncStrategySchema`,
+ * `integration/connector.zod.ts`) is ONE enum — `full | incremental | upsert |
+ * append_only` — whose four values split across TWO keys on this file: the
+ * write half (`upsert` / `append_only`) is the destination's `writeMode`, the
+ * extraction half (`full` / `incremental`) is the pipeline's `syncMode`.
+ *
+ * So the same borrowed word resolves to a different canonical key depending on
+ * which surface it was written on, and each surface names only its own half.
+ * Getting that right is the whole value of a hand-written alias here — a
+ * single global "strategy → syncMode" would send a destination author to the
+ * wrong key with full confidence.
+ */
+const ETL_DESTINATION_ALIASES: Readonly<Record<string, string>> = {
+  strategy: 'writeMode',
+};
+
+const ETL_TRANSFORMATION_HISTORY =
+  'Until #4001 an undeclared key on an ETL transformation was dropped silently — the step ran with the key '
+  + 'ignored and the pipeline reported success. ' + ETL_CONFIG_SLOT_POINTER;
+
+const ETL_PIPELINE_HISTORY =
+  'Until #4001 an undeclared key on an ETL pipeline was dropped silently — the pipeline parsed clean and '
+  + 'ran, minus whatever the key was meant to configure.';
+
+/** See {@link ETL_DESTINATION_ALIASES} — this is that enum's extraction half. */
+const ETL_PIPELINE_ALIASES: Readonly<Record<string, string>> = {
+  strategy: 'syncMode',
+};
+
+/**
+ * Anchor: `DataSyncConfig.direction` (`import | export | bidirectional`) is a
+ * declared key on the connector layer and a **documented absence** here — which
+ * makes it the likeliest wrong key for anyone arriving from that layer, exactly
+ * the shape 批 9 recorded for `outputVariable` on `update_record`.
+ */
+const ETL_PIPELINE_GUIDANCE: Readonly<Record<string, string>> = {
+  direction:
+    'An ETL pipeline has no `direction` key, by design: direction is stated STRUCTURALLY, by which endpoint '
+    + 'is `source` and which is `destination`. `direction` (import/export/bidirectional) is the CONNECTOR '
+    + "layer's spelling (`ConnectorSchema.syncConfig`); to reverse an ETL pipeline, swap the two endpoints.",
+};
+
+const ETL_RETRY_HISTORY =
+  'Until #4001 an undeclared key here was dropped silently and the block fell back to its defaults '
+  + '(3 attempts, 60s) while reporting the authored policy as accepted.';
+
+/**
+ * Anchor: `RetryPolicySchema` (`shared/retry-policy.zod.ts`) — the retry policy
+ * #4661 converged onto ONE declaration for `job.retryPolicy` and a `try_catch`
+ * node's `retry` region. This block is a **third** encoding of the same concept
+ * that the convergence did not reach, because it is an anonymous inline object
+ * with no exported name and so never appeared in the #4411 / #4535 dual-source
+ * scan that drove that work.
+ *
+ * Closing this shape does not fix the divergence — it makes it audible. The
+ * five entries below are the whole diff between the two vocabularies, stated
+ * where an author hits it. Whether to converge (and which default `maxAttempts`
+ * should then take: #4661 argues 0, this block ships 3) is #4962 — a contract
+ * decision, deliberately not made inside a strictness batch.
+ */
+const ETL_RETRY_ALIASES: Readonly<Record<string, string>> = {
+  maxRetries: 'maxAttempts',
+};
+
+/** The three keys the converged policy declares and this block deliberately does not. */
+const etlRetryAbsence = (key: string): string =>
+  `\`${key}\` is declared on the converged \`RetryPolicySchema\` (\`shared/retry-policy.zod.ts\`, #4661) but `
+  + `NOT on an ETL pipeline's \`retry\`, which declares only \`maxAttempts\` + \`backoffMs\` — a flat, uncapped, `
+  + `unjittered backoff. This is a documented ABSENCE, not a typo: nothing here would read the key. Converging `
+  + `the two vocabularies is tracked as #4962.`;
+
+const ETL_RETRY_GUIDANCE: Readonly<Record<string, string>> = {
+  retryDelayMs:
+    '`retryDelayMs` was the pre-17 automation-side spelling of the base delay and was removed in '
+    + '@objectstack/spec 17.0.0 (#4661); it is tombstoned on `RetryPolicySchema`. This block already spells it '
+    + '`backoffMs` — rename the key, the value (milliseconds before the first retry) is unchanged.',
+  backoffMultiplier: etlRetryAbsence('backoffMultiplier'),
+  maxRetryDelayMs: etlRetryAbsence('maxRetryDelayMs'),
+  jitter: etlRetryAbsence('jitter'),
+};
+
+const ETL_NOTIFICATIONS_HISTORY =
+  'Until #4001 an undeclared key here was dropped silently — nobody was notified and the run still reported '
+  + 'success, which is the one outcome this block exists to prevent.';
+
+/**
+ * Anchor: three in-repo surfaces spell the failure hook `onError`
+ * (`ui/widget.zod.ts`, `data/hook.zod.ts`'s declared key list,
+ * `kernel/plugin-loading.zod.ts`). This block spells it `onFailure`, and the
+ * two are six edits apart — unreachable by the distance fallback.
+ */
+const ETL_NOTIFICATIONS_ALIASES: Readonly<Record<string, string>> = {
+  onError: 'onFailure',
+};
+
 /**
  * ETL Source Configuration
  */
-export const ETLSourceSchema = lazySchema(() => z.object({
+export const ETLSourceSchema = lazySchema(() => strictObject({
+  surface: 'this ETL source',
+  history: ETL_SOURCE_HISTORY,
+}, {
   /**
    * Source type
    */
@@ -130,7 +295,11 @@ export const ETLSourceSchema = lazySchema(() => z.object({
    * Incremental sync configuration
    * Allows extracting only changed data
    */
-  incremental: z.object({
+  incremental: strictObject({
+    surface: 'this ETL incremental extraction config',
+    history: ETL_INCREMENTAL_HISTORY,
+    aliases: ETL_INCREMENTAL_ALIASES,
+  }, {
     enabled: z.boolean().default(false),
     cursorField: z.string().describe('Field to track progress (e.g., updated_at)'),
     cursorValue: z.unknown().optional().describe('Last processed value'),
@@ -142,7 +311,11 @@ export type ETLSource = z.infer<typeof ETLSourceSchema>;
 /**
  * ETL Destination Configuration
  */
-export const ETLDestinationSchema = lazySchema(() => z.object({
+export const ETLDestinationSchema = lazySchema(() => strictObject({
+  surface: 'this ETL destination',
+  history: ETL_DESTINATION_HISTORY,
+  aliases: ETL_DESTINATION_ALIASES,
+}, {
   /**
    * Destination type
    */
@@ -197,7 +370,17 @@ export type ETLTransformationType = z.infer<typeof ETLTransformationTypeSchema>;
 /**
  * ETL Transformation Configuration
  */
-export const ETLTransformationSchema = lazySchema(() => z.object({
+export const ETLTransformationSchema = lazySchema(() => strictObject({
+  surface: 'this ETL transformation',
+  history: ETL_TRANSFORMATION_HISTORY,
+  // No curated table. Every transformation-specific setting this file or
+  // SYNC_ARCHITECTURE.md ever writes (`condition`, `groupBy`, `joinKey`,
+  // `joinType`, `metrics`, `language`, `code`) lives inside the open `config`
+  // bag, so the pointer in `history` already answers them as a class; and this
+  // surface has no sibling contract spelling one of its four declared keys
+  // differently, so there is nothing an alias could honestly claim. Same
+  // reasoning as `HttpConfigSchema` in `io-node-config.zod.ts` (#4001 批 9).
+}, {
   /**
    * Transformation name
    */
@@ -241,7 +424,12 @@ export type ETLSyncMode = z.infer<typeof ETLSyncModeSchema>;
  * 
  * Complete definition of a data pipeline from source to destination with transformations.
  */
-export const ETLPipelineSchema = lazySchema(() => z.object({
+export const ETLPipelineSchema = lazySchema(() => strictObject({
+  surface: 'this ETL pipeline',
+  history: ETL_PIPELINE_HISTORY,
+  aliases: ETL_PIPELINE_ALIASES,
+  guidance: ETL_PIPELINE_GUIDANCE,
+}, {
   /**
    * Pipeline identifier (snake_case)
    */
@@ -299,7 +487,12 @@ export const ETLPipelineSchema = lazySchema(() => z.object({
   /**
    * Retry configuration for failed runs
    */
-  retry: z.object({
+  retry: strictObject({
+    surface: "this ETL pipeline's retry configuration",
+    history: ETL_RETRY_HISTORY,
+    aliases: ETL_RETRY_ALIASES,
+    guidance: ETL_RETRY_GUIDANCE,
+  }, {
     maxAttempts: z.number().int().min(0).default(3).describe('Max retry attempts'),
     backoffMs: z.number().int().min(0).default(60000).describe('Backoff in milliseconds'),
   }).optional().describe('Retry configuration'),
@@ -307,7 +500,11 @@ export const ETLPipelineSchema = lazySchema(() => z.object({
   /**
    * Notification configuration
    */
-  notifications: z.object({
+  notifications: strictObject({
+    surface: "this ETL pipeline's notification settings",
+    history: ETL_NOTIFICATIONS_HISTORY,
+    aliases: ETL_NOTIFICATIONS_ALIASES,
+  }, {
     onSuccess: z.array(z.string()).optional().describe('Email addresses for success notifications'),
     onFailure: z.array(z.string()).optional().describe('Email addresses for failure notifications'),
   }).optional().describe('Notification settings'),
@@ -341,8 +538,43 @@ export type ETLRunStatus = z.infer<typeof ETLRunStatusSchema>;
 
 /**
  * ETL Pipeline Run Result
- * 
- * Result of a pipeline execution
+ *
+ * Result of a pipeline execution.
+ *
+ * ## Deliberately NOT strict — the wire half of this file (#4001 批 12)
+ *
+ * Everything above this line closed against unknown keys. These three shapes —
+ * `ETLPipelineRunSchema` and its `stats` / `error` blocks — stay tolerant, and
+ * this comment is the exemption record so the next sweep reads a decision
+ * rather than an omission. Same disposition, same reason, as
+ * `FlowVersionHistorySchema` in `flow.zod.ts` and the whole of
+ * `execution.zod.ts` ("run-state envelopes — never strict").
+ *
+ * **Why.** Every key here is a fact the engine PRODUCES about a run that
+ * already happened: an id it minted, a status it reached, timestamps it
+ * observed, counters it accumulated, the error it caught. Nobody authors a run
+ * result — writing one by hand is not a use case, it is a lie about history.
+ * Strictness on a shape like this buys nothing (there is no author to protect
+ * from a silent strip) and costs the thing the campaign is most careful about:
+ * an engine that later reports one more counter would turn every existing
+ * reader's `.parse()` into a crash, which is how a tolerant wire shape becomes
+ * a breaking change by accident (#3712 did exactly this to `provenance` on
+ * `HookContextSchema`, and the ledger's `hook.zod.ts` row records the same
+ * split for the same reason).
+ *
+ * **How this was verified, and the limit of that verification.** The honest
+ * measurement is stated rather than dressed up: `etl.zod.ts` has NO parse site
+ * in objectstack, objectui or cloud, so neither half of this file could be
+ * classified by pointing at a live call. The seven above are authorable because
+ * the exported schema and type ARE the authoring door — `SYNC_ARCHITECTURE.md`
+ * and this module's `@example` both write `const p: ETLPipeline = { … }` by
+ * hand. These three are wire because their key set is engine-produced fact, and
+ * because no ETL engine exists yet the argument rests on the shape's semantics
+ * plus the campaign's settled precedent for exactly this pair — not on an emit
+ * site anyone can point at today. **The day an ETL engine lands, this comment
+ * is the thing to re-read**: if a run result turns out to be something an
+ * operator authors (a replay stub, a backfill marker), the verdict changes and
+ * the ledger row changes with it.
  */
 export const ETLPipelineRunSchema = lazySchema(() => z.object({
   /**

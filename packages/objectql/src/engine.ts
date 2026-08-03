@@ -17,7 +17,7 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
@@ -1438,6 +1438,50 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * Resolve the `NOW()` runtime token into the value the field's declared type
+   * actually stores (#4597).
+   *
+   * The engine — not the driver — owns this resolution, exactly as it owns
+   * `current_user`. `NOW()` is the mirror of #4560's crack: `current_user` was
+   * known to the engine and not to the DDL, so the DDL stored the token text;
+   * `NOW()` was known to the SQL driver and not to the engine, so every
+   * non-SQL datasource got the token text instead of a time. Resolving here
+   * makes one answer serve every driver.
+   *
+   * The shapes below are NOT invented: they are the canonical storage forms
+   * ADR-0053 already fixed and `SqlDriver.nowColumnDefault` already emits
+   * per type. Producing a full instant for a `Field.date` would trade the old
+   * cross-driver drift for a new one (SQL would keep collapsing it to a
+   * calendar day in `formatInput`, memory/mongodb would not), so the token
+   * resolves per declared type:
+   *
+   * | field type | stored form | matches |
+   * |---|---|---|
+   * | `date` | `YYYY-MM-DD` (UTC day) | `toDateOnly` / the `date` column DEFAULT |
+   * | `time` | `HH:MM:SS[.fff]` (UTC wall clock, `.000` trimmed) | `canonicalTimeOfDay` |
+   * | anything else | `YYYY-MM-DDTHH:MM:SS.sssZ` | `canonicalUtcDatetime` |
+   *
+   * "Anything else" deliberately includes non-temporal fields: a `text` field
+   * that opts into `NOW()` gets the instant, which is what the SQL column
+   * DEFAULT gives it today.
+   *
+   * `now` is the caller's per-insert snapshot, so two defaulted fields on one
+   * record cannot straddle a millisecond boundary.
+   */
+  private resolveNowDefault(fieldType: unknown, now: Date): string {
+    const iso = now.toISOString(); // YYYY-MM-DDTHH:MM:SS.sssZ
+    if (fieldType === 'date') return iso.slice(0, 10);
+    if (fieldType === 'time') {
+      const timeOfDay = iso.slice(11, 23); // HH:MM:SS.fff
+      // Trim a zero-millisecond `.000` so a defaulted row is byte-canonical and
+      // still matches an equality filter against `'HH:MM:SS'` — the same trim
+      // the SQL driver's time DEFAULT and `canonicalTimeOfDay` apply.
+      return timeOfDay.endsWith('.000') ? timeOfDay.slice(0, 8) : timeOfDay;
+    }
+    return iso;
+  }
+
+  /**
    * Build a HookContext.api: a ScopedContext that hooks can use to
    * read/write other objects within the same execution context.
    * Falls back to a system-elevated empty context when no execCtx
@@ -1452,9 +1496,12 @@ export class ObjectQL implements IObjectQLEngine {
    * Apply field defaults to an incoming insert payload. Defaults that are
    * Expression envelopes (e.g. `{ dialect: 'cel', source: 'today()' }`,
    * `{ dialect: 'cel', source: 'os.user.id' }`) are evaluated via
-   * `ExpressionEngine` against the calling user/org/now snapshot. Static
-   * defaults are applied verbatim. Records that already supplied a value for a
-   * field are left untouched.
+   * `ExpressionEngine` against the calling user/org/now snapshot. The
+   * `defaultValue` runtime TOKENS (`@objectstack/spec/data`'s
+   * `DEFAULT_VALUE_TOKENS` — `current_user` and `NOW()`, the whole family) are
+   * resolved here, so one declaration behaves identically on every driver.
+   * Static defaults are applied verbatim. Records that already supplied a value
+   * for a field are left untouched.
    *
    * "Supplied a value" means the field is present with a non-null value. Both an
    * OMITTED field (`undefined`) and an EXPLICIT `null` are treated as "not
@@ -1478,7 +1525,7 @@ export class ObjectQL implements IObjectQLEngine {
     const fieldsRaw = (schema as any)?.fields;
     if (!fieldsRaw || typeof fieldsRaw !== 'object') return record;
     // `fields` may be a Record<string, Field> (canonical) or an array (legacy).
-    const fieldEntries: Array<{ name: string; defaultValue?: unknown }> = Array.isArray(fieldsRaw)
+    const fieldEntries: Array<{ name: string; type?: unknown; defaultValue?: unknown }> = Array.isArray(fieldsRaw)
       ? fieldsRaw
       : Object.entries(fieldsRaw).map(([name, def]) => ({ name, ...(def as object) }));
     const out = { ...record };
@@ -1522,6 +1569,31 @@ export class ObjectQL implements IObjectQLEngine {
         // SQL emitted `DEFAULT 'current_user'` and the DATABASE overrode the
         // "leave it unset" decision below with a literal non-id (#4560).
         if (execCtx?.userId != null) out[f.name] = String(execCtx.userId);
+      } else if (isNowDefaultToken(dv)) {
+        // `NOW()` token → the insert-time clock, in the storage shape the
+        // field's declared type calls for ({@link resolveNowDefault}).
+        //
+        // The mirror of the `current_user` crack above (#4597 / #4560): this
+        // token was understood by the SQL driver and NOT by the engine, so
+        // `out[f.name] = dv` sent the literal string `'NOW()'` to every
+        // driver. SQL hid it — `formatInput`'s safety net swapped in a real
+        // timestamp before the wire — while memory/mongodb have no such net,
+        // so the same declaration behaved differently per datasource. That
+        // split surfaced two ways: a validation-visible field was REJECTED by
+        // the engine's own write validator ("must be a valid datetime"), and a
+        // `readonly`/`system` field — which `validateRecord` skips, i.e. the
+        // ~100 `created_at`/`updated_at` platform declarations — silently
+        // stored the four characters `NOW()`.
+        //
+        // Resolved from the caller's `nowSnapshot`, so every defaulted field
+        // in one insert (and every row of one batch) carries the SAME instant.
+        //
+        // The driver's own now-handling is unchanged and stays as defence in
+        // depth: `SqlDriver.formatInput`'s safety net (now unreachable from
+        // this path) and the native column DEFAULT, which still serves writes
+        // that bypass the engine entirely — the same division of labour
+        // `current_user` has.
+        out[f.name] = this.resolveNowDefault(f.type, now);
       } else {
         out[f.name] = dv;
       }
@@ -4471,7 +4543,8 @@ export class ObjectQL implements IObjectQLEngine {
     };
 
     await this.executeWithMiddleware(opCtx, async () => {
-      // Resolve field `defaultValue`s (including the `current_user` token)
+      // Resolve field `defaultValue`s (including the `current_user` and
+      // `NOW()` tokens)
       // BEFORE the beforeInsert hook runs, so a hook that DERIVES one field
       // from another can read the defaulted value instead of a stale `null`
       // (#2703). The hook still has final say — it runs after and may override

@@ -2,6 +2,7 @@
 
 import chalk from 'chalk';
 import type { ZodError } from 'zod';
+import type { TenancyPosture } from '@objectstack/spec/security';
 
 // ─── Constants ──────────────────────────────────────────────────────
 export const CLI_NAME = 'objectstack';
@@ -285,8 +286,31 @@ export interface ServerReadyOptions {
   driverLabel?: string;
   /** Resolved DB URL with credentials redacted. */
   databaseUrl?: string;
-  /** Whether the SecurityPlugin was wired in multi-tenant mode (default true). */
-  multiTenant?: boolean;
+  /**
+   * [ADR-0105 D1] The deployment's resolved tenancy posture — printed verbatim.
+   *
+   * This is the SAME fact serve wires the runtime from: it must be
+   * `resolveTenancyPosture()` (`@objectstack/types`), never a re-derivation.
+   * The banner used to take a boolean `multiTenant` sourced from
+   * `resolveMultiOrgEnabled()`, i.e. from `OS_MULTI_ORG_ENABLED` — the knob
+   * `OS_TENANCY_POSTURE` superseded, and which `resolveTenancyPosture()` now
+   * consults only as a fallback when the posture is unset. So a deployment
+   * booted with `OS_TENANCY_POSTURE=isolated` alone printed
+   * `Tenancy: single-tenant` while the organization wall was actually up and
+   * `Organizations` was in the plugin table one line below (framework#4801,
+   * observed in cloud#1020). Two sources for one fact, drifting.
+   *
+   * The field is the posture, not a boolean, for the same reason: tenancy is a
+   * three-valued spectrum (`single` | `group` | `isolated`), and a boolean
+   * cannot say `group` at all — it would have to lie, and the flattening is
+   * where the drift hides. Typing it as {@link TenancyPosture} also makes the
+   * old wiring a COMPILE error rather than a wrong-but-plausible line of
+   * output: `resolveMultiOrgEnabled()` returns `boolean` and no longer fits.
+   *
+   * Omitted → no `Tenancy:` row (unchanged: a caller with nothing to say says
+   * nothing, rather than guessing a posture).
+   */
+  tenancyPosture?: TenancyPosture;
   /**
    * Credentials of the dev admin seeded on an empty DB this boot (dev only).
    * When present, the banner surfaces them so backend debugging never has to
@@ -409,8 +433,10 @@ export function printServerReady(opts: ServerReadyOptions) {
     const dbInfo = opts.databaseUrl ? `${opts.driverLabel}  ${chalk.dim('→')} ${opts.databaseUrl}` : opts.driverLabel;
     console.log(chalk.dim(`  Driver:  ${dbInfo}`));
   }
-  if (opts.multiTenant !== undefined) {
-    console.log(chalk.dim(`  Tenancy: ${opts.multiTenant ? 'multi-tenant' : 'single-tenant'}`));
+  // [ADR-0105 D1] Print the posture verbatim — see `tenancyPosture` above for
+  // why this is not a boolean and why it must be the resolver's answer.
+  if (opts.tenancyPosture !== undefined) {
+    console.log(chalk.dim(`  Tenancy: ${opts.tenancyPosture}`));
   }
   console.log(chalk.dim(`  Plugins: ${opts.pluginCount} loaded`));
   if (opts.pluginNames && opts.pluginNames.length > 0) {

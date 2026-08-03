@@ -7220,7 +7220,7 @@
     "ui/DashboardWidget:options",
     "ui/DashboardWidget:requiresObject",
     "ui/DashboardWidget:requiresService",
-    "ui/DashboardWidget:responsive",
+    "ui/DashboardWidget:responsive [RETIRED]",
     "ui/DashboardWidget:suppressWarnings",
     "ui/DashboardWidget:title",
     "ui/DashboardWidget:type",
