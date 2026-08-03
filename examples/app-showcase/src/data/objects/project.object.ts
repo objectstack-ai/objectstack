@@ -106,7 +106,12 @@ export const Project = ObjectSchema.create({
       label: 'End After Start',
       description: 'Target end date must be on or after the start date.',
       fields: ['start_date', 'end_date'],
-      condition: P`has(record.start_date) && has(record.end_date) && record.end_date < record.start_date`,
+      // Guarded with `!= null`, NOT `has(...)` (#4649). `has(x)` asks whether
+      // the key is PRESENT — a declared column holding NULL is present, so
+      // `has(a) && has(b) && a < b` still faults on `null < null` and the rule
+      // enforced nothing on any project missing a date. It read as a guard and
+      // was not one.
+      condition: P`record.start_date != null && record.end_date != null && record.end_date < record.start_date`,
       message: 'Target End Date must be on or after the Start Date.',
     },
     {

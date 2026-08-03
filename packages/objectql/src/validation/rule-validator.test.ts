@@ -552,7 +552,10 @@ describe('script / cross_field predicates', () => {
     ).not.toThrow();
   });
 
-  it('fails open (no throw) on an un-evaluable predicate', () => {
+  // #4649 — this used to assert the opposite ("fails open"). A validation that
+  // could not be checked must not read as a pass; see rule-fail-closed.test.ts
+  // for the full contract.
+  it('fails CLOSED on an un-evaluable predicate (#4649)', () => {
     const schema = {
       validations: [
         {
@@ -565,7 +568,7 @@ describe('script / cross_field predicates', () => {
     };
     expect(() =>
       evaluateValidationRules(schema, { a: 1 }, 'update', { previous: { a: 0 } }),
-    ).not.toThrow();
+    ).toThrow(/rule 'broken' could not be evaluated/);
   });
 });
 
@@ -594,7 +597,7 @@ describe('introspection', () => {
     expect(needsPriorRecord(undefined)).toBe(false);
   });
 
-  it('needsPriorRecord recurses into conditional branches', () => {
+  it('needsPriorRecord is true for any conditional, and recurses into its branches', () => {
     // conditional wrapping a cross_field → needs prior.
     const wrapsPrior = {
       validations: [
@@ -609,7 +612,11 @@ describe('introspection', () => {
     };
     expect(needsPriorRecord(wrapsPrior)).toBe(true);
 
-    // conditional wrapping only a format → does not need prior.
+    // #4649 — a conditional wrapping only a format STILL needs the prior
+    // record: its `when` is evaluated against the merged record, so without the
+    // prior state it reads a PATCH as though it were the whole record. This
+    // assertion was `false` before #4649, which is why a `when` referencing an
+    // unchanged field used to fault and skip the guard entirely.
     const wrapsFormat = {
       validations: [
         {
@@ -621,7 +628,14 @@ describe('introspection', () => {
         },
       ],
     };
-    expect(needsPriorRecord(wrapsFormat)).toBe(false);
+    expect(needsPriorRecord(wrapsFormat)).toBe(true);
+
+    // A rule set with no conditional and no prior-dependent rule still needs
+    // nothing — the fetch is not universal.
+    const formatOnly = {
+      validations: [{ type: 'format' as const, name: 'f', message: 'm', field: 'email', format: 'email' }],
+    };
+    expect(needsPriorRecord(formatOnly)).toBe(false);
   });
 });
 
@@ -821,9 +835,26 @@ describe('conditional enforcement', () => {
     ).not.toThrow();
   });
 
-  it('fails open on an un-evaluable when predicate', () => {
+  // #4649 — was "fails open". Neither branch ran, so the guard the author
+  // declared did not happen; that must not read as a pass.
+  it('fails CLOSED on an un-evaluable when predicate (#4649)', () => {
     const broken = { validations: [{ ...schema.validations[0], when: { dialect: 'cel', source: 'this is (( not valid' } }] };
-    expect(() => evaluateValidationRules(broken, { account_type: 'enterprise', approver: null }, 'insert')).not.toThrow();
+    expect(() => evaluateValidationRules(broken, { account_type: 'enterprise', approver: null }, 'insert'))
+      .toThrow(/could not be evaluated/);
+  });
+
+  // The outer conditional's severity still governs an unevaluable `when` — an
+  // advisory guard stays advisory even when it is broken.
+  it('an un-evaluable when on a warning-severity conditional does not block', () => {
+    const broken = {
+      validations: [{
+        ...schema.validations[0],
+        severity: 'warning' as const,
+        when: { dialect: 'cel', source: 'this is (( not valid' },
+      }],
+    };
+    expect(() => evaluateValidationRules(broken, { account_type: 'enterprise', approver: null }, 'insert'))
+      .not.toThrow();
   });
 });
 

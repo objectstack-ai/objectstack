@@ -54,13 +54,53 @@
  *  - `severity`             → only `error` blocks the write. `warning` / `info`
  *                             are logged (best-effort) and never throw.
  *
- * ## Fail-open for *broken* rules, fail-closed for *violated* rules
+ * ## Fail-CLOSED for unevaluable predicates (#4649)
  *
- * A CEL predicate that cannot be evaluated (parse error, references an
- * unbound variable, …) is a broken rule, not a violated one — it is logged
- * and skipped rather than bricking every write to the object. A predicate
- * that evaluates cleanly to "violated", or a transition that is definitively
- * illegal, is fail-closed (the write is rejected).
+ * A validation exists to reject a write, so "the rule could not be checked"
+ * must never resolve to "the write goes through". Until #4649 a CEL predicate
+ * that faulted was logged at WARN and **skipped**: the rule stayed declared,
+ * listed in the metadata, and enforced nothing — on exactly the records whose
+ * shape triggered the fault. That inverts the guarantee the rule was written
+ * to give, and the only signal was a line in a log.
+ *
+ * Two changes close it, and they are load-bearing together:
+ *
+ *  1. **The record a predicate sees is TOTAL** — every field the object
+ *     declares is present, `null` when absent from both the payload and the
+ *     prior record ({@link materializeDeclaredFields}). This already held on
+ *     insert (#1871); #4649 extends it to update and to the `previous`
+ *     binding, so a predicate written against the object's DECLARED shape
+ *     always has a value to read no matter what the driver returned. Without
+ *     it, step 2 would 422 every legitimate predicate on any driver that
+ *     stores only written columns.
+ *  2. **What still faults is rejected** — a predicate that cannot be evaluated
+ *     over a total record references something the object does not declare (an
+ *     author typo, an unbound variable, a parse error). That is a broken rule,
+ *     and a broken *validation* fails closed: the write is rejected with a
+ *     message naming the rule and the offending key. Without step 1 this alone
+ *     would be unacceptable; without step 2 a typo'd predicate returns to
+ *     silently doing nothing.
+ *
+ * `severity` still governs blocking: an unevaluable `warning`/`info` rule is
+ * logged, never thrown — advisory rules stay advisory.
+ *
+ * Deliberately NOT changed here: a broken `regex` (`format`), an uncompilable
+ * JSON Schema (`json_schema`), the FIELD-level predicates (`requiredWhen` /
+ * `readonlyWhen` / option `visibleWhen`), and the defensive `catch` around a
+ * rule that THROWS all keep their existing fail-open policy — #4649 scoped
+ * itself to the object-level validation predicates it was filed about, and a
+ * thrown exception is an engine fault the author has no remedy for (rejecting
+ * on it would brick every write with nothing to fix). Step 1 makes the
+ * field-level predicates evaluate far more often anyway, since their fault mode
+ * was the same missing key.
+ *
+ * One consequence worth knowing before writing a predicate: because a declared
+ * field is now always present, `has(record.<declared field>)` is uniformly TRUE
+ * (a materialised `null` is a present key holding null — this is CEL's rule,
+ * and it is what the insert path has always done). `has()` therefore guards
+ * against an UNDECLARED key, not against an empty value; test emptiness with
+ * `record.x == null`. Pinned by test so the app-side `has(...)` idiom cannot be
+ * broken silently from under it.
  *
  * ## Prior-record plumbing
  *
@@ -143,7 +183,11 @@ interface ConditionalRule extends BaseRule {
  */
 interface RuleContext {
   data: Record<string, unknown>;
+  /** Prior state overlaid with the PATCH, made TOTAL over the declared fields
+   *  (#4649) — see {@link materializeDeclaredFields}. */
   merged: Record<string, unknown>;
+  /** The prior record, likewise made total (a COPY — the engine's own
+   *  `hookContext.previous` must not gain materialised nulls). */
   previous: Record<string, unknown> | undefined;
   mode: Mode;
   logger: EvaluateRulesOptions['logger'];
@@ -408,8 +452,10 @@ function isPreservableUnderAudit(name: string, def: ConditionalFieldDef): boolea
 /**
  * A rule needs the prior record if it reasons about the transition or compares
  * against unchanged fields (`state_machine` / `cross_field` / `script`), or if
- * it is a `conditional` whose branches (or `when`) recursively do. `format` and
- * `json_schema` only inspect the incoming value, so they never need it.
+ * it is a `conditional` — its `when` predicate is evaluated against the MERGED
+ * record, which is only a faithful view of the record with the prior state in
+ * hand. `format` and `json_schema` only inspect the incoming value, so they
+ * never need it.
  */
 function ruleNeedsPrior(r: unknown): boolean {
   if (r == null || typeof r !== 'object') return false;
@@ -419,11 +465,46 @@ function ruleNeedsPrior(r: unknown): boolean {
   }
   if (type === 'conditional') {
     const c = r as ConditionalRule;
-    // `when` is evaluated against the merged record; the branches may need prior
-    // state. Be conservative and fetch if either branch does.
-    return ruleNeedsPrior(c.then) || ruleNeedsPrior(c.otherwise);
+    // #4649 — a `conditional` needs the prior record as soon as it declares a
+    // `when`, not merely when a BRANCH does. `when` is evaluated against the
+    // merged record, so without the prior state it reads a PATCH as if it were
+    // the whole record: a `when` referencing an unchanged field used to fault
+    // (and skip the rule), and under fail-closed evaluation it would reject
+    // legitimate partial updates instead. Fetching is what makes the merged
+    // record total, and totality is what makes fail-closed safe.
+    return c.when != null || ruleNeedsPrior(c.then) || ruleNeedsPrior(c.otherwise);
   }
   return false;
+}
+
+/**
+ * Materialise the object's DECLARED-but-absent fields as `null`, in place
+ * (#1871 for insert, #4649 for update and for the `previous` binding).
+ *
+ * CEL is strict about missing keys: `record.x` on a record that does not carry
+ * the key `x` aborts the whole predicate with `No such key`, which is NOT the
+ * same as reading `null`. Whether a key is carried is a property of the DRIVER,
+ * not of the data — a driver that stores only written columns returns a record
+ * missing every column the write never touched — so without this a predicate's
+ * evaluability depends on storage internals the author cannot see.
+ *
+ * Scope is deliberately the object's **declared fields only**. Materialising
+ * every key a predicate happens to name would defeat the fail-closed step: a
+ * typo'd `record.stauts` must stay unevaluable so it is reported, not silently
+ * read as `null` and quietly answered "no violation".
+ *
+ * `undefined` counts as absent (not just a missing key): CEL treats an own key
+ * holding `undefined` exactly as it treats no key at all.
+ */
+function materializeDeclaredFields(
+  record: Record<string, unknown>,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): Record<string, unknown> {
+  if (!fields) return record;
+  for (const name of Object.keys(fields)) {
+    if (record[name] === undefined) record[name] = null;
+  }
+  return record;
 }
 
 /** Field-level conditional rules (B2): a field is required / read-only when its
@@ -580,20 +661,33 @@ export function evaluateValidationRules(
   const hasFieldRules = fieldsNeedPrior(fields);
   if (!hasRules && !hasFieldRules) return;
 
-  const previous = opts.previous ?? undefined;
+  const priorRecord = opts.previous ?? undefined;
+  // Is the record's persisted state actually in hand? On insert there is
+  // nothing to know (absence genuinely means "no value"); on update we know it
+  // only when the engine fetched the prior row. Without it, defaulting a field
+  // to `null` would not be materialising an absent value — it would be
+  // FABRICATING one that contradicts the stored row, so we leave the record as
+  // it is and let the (rare) unevaluable predicate fail closed. `ruleNeedsPrior`
+  // makes this path unreachable for every rule that reads the merged record.
+  const groundTruth = mode === 'insert' || priorRecord !== undefined;
+  // The `previous` CEL binding is made total too (#4649): a predicate reading
+  // `previous.x` for a declared column the driver did not return would
+  // otherwise fault — and now that faults are rejections, that would 422 a
+  // perfectly good rule. Copied, never mutated in place: the same object is the
+  // engine's `hookContext.previous`, which after-hooks observe.
+  const previous = mode === 'update' && priorRecord
+    ? materializeDeclaredFields({ ...priorRecord }, fields)
+    : priorRecord;
   // Merged view used by predicate rules: prior state overlaid with the PATCH,
   // so a rule referencing an unchanged field still sees its persisted value.
   const merged: Record<string, unknown> = { ...(previous ?? {}), ...data };
-  // #1871 — on INSERT, a field omitted entirely from the payload is absent from
-  // the record, so a `record.x == null` predicate sees a missing CEL key (which
-  // does not equal null) and silently can't match. Default declared-but-absent
-  // fields to null so an omitted optional reads as null — matching an explicit
-  // `null` and the UPDATE path (where the prior record already supplies them).
-  if (mode === 'insert' && fields) {
-    for (const name of Object.keys(fields)) {
-      if (!(name in merged)) merged[name] = null;
-    }
-  }
+  // #1871 (insert) / #4649 (update) — a field the payload omits is absent from
+  // the CEL scope, so `record.x == null` sees a missing key (which does not
+  // equal null) and aborts the whole predicate. Default declared-but-absent
+  // fields to null so an omitted optional reads as null, identically on insert
+  // and update: what a predicate can read is the object's DECLARED shape, not
+  // whatever subset of columns this driver happened to return.
+  if (groundTruth) materializeDeclaredFields(merged, fields);
   const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger, fields, messages: opts.messages };
 
   const errors: FieldValidationError[] = [];
@@ -777,10 +871,88 @@ function checkStateMachine(
   return null;
 }
 
+/** `No such key: <key>` is cel-js's word for "the predicate read something the
+ *  record does not carry" — the single most useful fact to put in front of the
+ *  author, since after materialisation it can only mean an UNDECLARED key. */
+const NO_SUCH_KEY_RE = /No such key:\s*([A-Za-z_$][\w$]*)/;
+
+/**
+ * The OTHER way a predicate written against a total record still faults: an
+ * ordering comparison (`<`, `>`, `<=`, `>=`) or arithmetic over a value that is
+ * `null`. CEL has no overload for it, so the whole predicate aborts.
+ *
+ * This one deserves its own sentence because the obvious guard does not work:
+ * `has(x)` is TRUE for a declared field holding `null` (CEL asks whether the key
+ * is PRESENT, not whether it has a usable value), so `has(a) && has(b) && a < b`
+ * still faults the moment either is null — on any driver that returns its NULL
+ * columns, which is most of them. Such a rule never enforced anything on those
+ * rows; #4649 is what makes that visible instead of silent.
+ */
+const NULL_OVERLOAD_RE = /no such overload/i;
+
+/**
+ * One-line summary of a CEL fault. The engine appends a source excerpt and a
+ * caret line to `message`, which is right for a log and wrong for an API error,
+ * so only the first line travels.
+ */
+function faultSummary(error: { kind: string; message: string }): string {
+  const first = String(error.message ?? '').split('\n')[0]!.trim();
+  return `${error.kind}: ${first || 'unknown error'}`;
+}
+
+/**
+ * The rejection a predicate that CANNOT BE EVALUATED produces (#4649).
+ *
+ * Not a violation — the rule never got to say yes or no — but it rejects the
+ * write all the same, because a validation whose verdict is unknown may not be
+ * read as "allowed". The message names the rule and, when the fault is a
+ * missing key, that key plus the two ways to fix it; `constraint` carries the
+ * same facts machine-readably so a client need not parse prose.
+ *
+ * The wire `code` stays `rule_violation`: the field-error catalog (ADR-0114,
+ * `packages/spec`) is closed and a broken rule is still "a declared rule
+ * rejected this write" from every consumer's point of view. `constraint.reason`
+ * is what distinguishes the two for anyone who cares.
+ */
+function unevaluableRuleError(
+  ruleName: string,
+  field: string,
+  error: { kind: string; message: string },
+  what: 'predicate' | 'when-predicate',
+): FieldValidationError {
+  const raw = String(error.message ?? '');
+  const summary = faultSummary(error);
+  const missingKey = NO_SUCH_KEY_RE.exec(raw)?.[1];
+  const nullOverload = !missingKey && NULL_OVERLOAD_RE.test(raw) && /null/.test(raw);
+  let detail = '';
+  if (missingKey) {
+    detail = ` The ${what} reads '${missingKey}', which this object does not declare — fix the rule's condition, or declare the field.`;
+  } else if (nullOverload) {
+    detail =
+      ` The ${what} compares a value that is null. Guard it with '!= null'` +
+      ` — 'has(x)' does NOT do that: a declared field holding null is still PRESENT, so has(x) is true.`;
+  }
+  return {
+    field,
+    code: 'rule_violation',
+    message:
+      `Validation rule '${ruleName}' could not be evaluated (${summary}) — write rejected.${detail}`,
+    constraint: {
+      rule: ruleName,
+      reason: 'unevaluable',
+      fault: summary,
+      ...(missingKey ? { missingKey } : {}),
+      ...(nullOverload ? { hint: 'null-comparison' } : {}),
+    },
+  };
+}
+
 /**
  * CEL predicate check (`script` / `cross_field`). The predicate expresses the
- * *failure* condition: if it evaluates TRUE the rule is violated. An
- * un-evaluable predicate is treated as a broken rule (logged, skipped).
+ * *failure* condition: if it evaluates TRUE the rule is violated. A predicate
+ * that cannot be evaluated — over a record already made total for every
+ * declared field — is a broken rule, and a broken validation is **fail-closed**
+ * (#4649): it rejects the write rather than waving it through.
  */
 function checkPredicate(
   rule: PredicateRule,
@@ -794,16 +966,20 @@ function checkPredicate(
     previous: previous ?? undefined,
   });
 
+  const field = rule.fields?.[0] ?? '_record';
+
   if (!result.ok) {
+    // Still logged — the operator needs the fault in the log even though the
+    // caller now gets it in the response. Note the verb: rejected, not skipped.
     logger?.warn?.(
-      `Validation rule '${rule.name}' predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — skipped`,
+      `Validation rule '${rule.name}' predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected (#4649)`,
     );
-    return null;
+    return unevaluableRuleError(rule.name, field, result.error, 'predicate');
   }
 
   if (result.value === true) {
     return {
-      field: rule.fields?.[0] ?? '_record',
+      field,
       code: 'rule_violation',
       message: rule.message,
     };
@@ -933,9 +1109,12 @@ function checkJsonSchema(
 /**
  * Conditional check (`conditional`). Evaluates the `when` predicate against the
  * merged record, then recurses into `then` (true) or `otherwise` (false) via
- * `evaluateRule`. An un-evaluable `when` is a broken rule (logged, fail-open).
- * The nested rule supplies the violation (field/code/message); the *outer*
- * conditional's `severity` governs whether it blocks (handled by the caller).
+ * `evaluateRule`. An un-evaluable `when` is **fail-closed** (#4649) for the same
+ * reason a `script` predicate is: neither branch ran, so the guard the author
+ * declared did not happen, and a validation that did not happen must not read as
+ * a pass. The nested rule supplies the violation (field/code/message) when the
+ * `when` DOES evaluate; the *outer* conditional's `severity` governs whether
+ * either outcome blocks (handled by the caller).
  */
 function checkConditional(
   rule: ConditionalRule,
@@ -948,9 +1127,9 @@ function checkConditional(
 
   if (!result.ok) {
     ctx.logger?.warn?.(
-      `Validation rule '${rule.name}' when-predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — skipped`,
+      `Validation rule '${rule.name}' when-predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected (#4649)`,
     );
-    return null;
+    return unevaluableRuleError(rule.name, '_record', result.error, 'when-predicate');
   }
 
   const branch = result.value === true ? rule.then : rule.otherwise;

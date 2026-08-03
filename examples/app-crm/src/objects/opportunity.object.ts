@@ -109,7 +109,11 @@ export const Opportunity = ObjectSchema.create({
       label: 'Close Date Must Be Future',
       description: 'Prevent back-dating the close_date of an OPEN opportunity. Closed (won/lost) deals legitimately carry a historical close date, so they are exempt.',
       fields: ['close_date'],
-      condition: P`has(record.close_date) && record.close_date < now() && record.stage != "closed_won" && record.stage != "closed_lost"`,
+      // `!= null`, not `has(...)` (#4649): `has(x)` is TRUE for a declared
+      // column holding NULL, so the old guard let `null < now()` fault and the
+      // rule silently did nothing on every opportunity created without a close
+      // date.
+      condition: P`record.close_date != null && record.close_date < now() && record.stage != "closed_won" && record.stage != "closed_lost"`,
       message: 'Close Date must be today or a future date.',
       events: ['insert'],
     },
