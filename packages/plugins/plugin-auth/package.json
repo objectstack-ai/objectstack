@@ -33,7 +33,7 @@
     "jose": "^6.2.5"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.1.2",
     "hono": "^4.12.32",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

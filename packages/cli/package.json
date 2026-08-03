@@ -108,7 +108,7 @@
     "@oclif/plugin-help": "^6.2.55",
     "@oclif/plugin-plugins": "^5.4.86",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.1.2",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
