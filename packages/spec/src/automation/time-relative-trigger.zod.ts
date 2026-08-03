@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * Time-Relative Trigger Protocol
@@ -66,10 +67,69 @@ const MACHINE_NAME = /^[a-z_][a-z0-9_]*$/;
  * Declarative descriptor for a time-relative trigger. Lives on a flow's start
  * node under `config.timeRelative`. Exactly ONE windowing mode — `withinDays`
  * (a range) or `offsetDays` (discrete thresholds) — must be set.
+ *
+ * ## Closed against unknown keys (#4001 batch 11, ADR-0078)
+ *
+ * This schema was off the strictness map entirely until the 2026-08-03
+ * re-measurement, and for a reason worth leaving here: its single site is
+ * written `z\n  .object({`, the ledger's old textual counter matched zero sites,
+ * and a zero-site file is SKIPPED by the coverage walk as "nothing to classify".
+ * The gate whose whole promise is *no undeclared authorable surface* printed
+ * green over this file. The counter now reads the AST (#4852) — but the schema
+ * it uncovered was still on default `.strip`, which is what this closes.
+ *
+ * The stakes here are higher than a dropped key usually is, because the
+ * descriptor lands on the node `config` slot, which is open BY DESIGN
+ * (ADR-0018) — so the outer flow gate cannot see a typo inside it, and the only
+ * gate that can is this one. And the failure is silent in both directions:
+ * {@link TimeRelativeTrigger} is `safeParse`d at BIND time by
+ * `TimeRelativeTriggerPlugin`, so before this change `offsetDay` (singular) or
+ * `withinDay` next to a valid mode key bound a sweep that ran daily, matched
+ * with the author's narrowing key discarded, and reported itself configured.
+ * After it, the bind refuses and the warning names the key and the fix.
  */
 export const TimeRelativeTriggerSchema = lazySchema(() =>
-  z
-    .object({
+  strictObject(
+    {
+      surface: "this flow start node's `config.timeRelative` descriptor",
+      aliases: {
+        // Different WORD, same intent — the words the neighbouring authoring
+        // surfaces use. `object`/`filter` are already the ObjectQL spellings
+        // (`objectName`/`filters` graduated to ADR-0087 conversions at 17), so
+        // an author arriving from a CRUD node's `config` brings exactly these.
+        objectName: 'object',
+        objectApiName: 'object',
+        filters: 'filter',
+        where: 'filter',
+        // The date field: `field` is what a record-change trigger calls its
+        // field, and `dateFieldName`/`targetField` are the same idea one word
+        // out. None is within edit distance of `dateField`.
+        field: 'dateField',
+        dateFieldName: 'dateField',
+        targetField: 'dateField',
+        limit: 'maxRecords',
+        batchSize: 'maxRecords',
+      },
+      guidance: {
+        // The cadence knob is real, but it is a SIBLING of this descriptor on
+        // the same `config`, not a member of it — the wrong-layer case the
+        // guidance channel exists for. `FlowSchema` carries the same
+        // prescription for a top-level `schedule`.
+        schedule:
+          '`schedule` is a sibling of `timeRelative` on the START node\'s `config`, not a key ' +
+          'inside it — write `config: { timeRelative: {…}, schedule: { type: \'cron\', ' +
+          'expression: \'0 8 * * *\' } }`. Omitting it means daily at 08:00 UTC.',
+        runAs:
+          '`runAs` is a FLOW-level key, not part of the descriptor. A sweep has no trigger ' +
+          'user, so under the default `runAs: \'user\'` its data operations are REFUSED ' +
+          '(#3760) — declare `runAs: \'system\'` beside `nodes`/`edges`.',
+      },
+      history:
+        'Until #4001 these were dropped silently — the descriptor still parsed and the sweep ' +
+        'still bound, so a mis-spelled window or filter produced a trigger that matched ' +
+        'nothing (or everything) while reporting itself as configured.',
+    },
+    {
       /**
        * Object whose records are swept. Its machine name — the canonical id
        * everywhere (matches exactly, snake_case).
@@ -144,10 +204,10 @@ export const TimeRelativeTriggerSchema = lazySchema(() =>
         .positive()
         .optional()
         .describe('Max records launched per sweep (default 1000). The sweep logs when it clamps.'),
-    })
-    .refine((v) => (v.withinDays === undefined) !== (v.offsetDays === undefined), {
-      message: 'Provide exactly one of `withinDays` (range mode) or `offsetDays` (offset mode).',
-    }),
+    },
+  ).refine((v) => (v.withinDays === undefined) !== (v.offsetDays === undefined), {
+    message: 'Provide exactly one of `withinDays` (range mode) or `offsetDays` (offset mode).',
+  }),
 );
 
 export type TimeRelativeTrigger = z.infer<typeof TimeRelativeTriggerSchema>;
