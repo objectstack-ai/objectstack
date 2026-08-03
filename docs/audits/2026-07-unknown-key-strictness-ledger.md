@@ -650,7 +650,9 @@ is complete and so nobody re-triages them from scratch next batch.
 | `bulk-action.zod.ts` | 1 | 3 | open | `BulkActionParamSchema.options`. ⚠️ **The triage row calls both this and its parent "deliberately open", but only the PARENT is `passthrough` — this one is plain strip.** Same intent, two postures; decide which the intent actually was |
 | `notification.zod.ts` | 1 | 1 | authorable (p) | `NotificationActionSchema` |
 
-**Authorable strip in `ui/`: ~122 of 124** (all but `bulk-action.options`, and `app.zod.ts` pending the extend check).
+**Authorable strip in `ui/`: 123 of 124** — everything except `bulk-action.zod.ts`'s
+`options`, which is `open`. Of those 123, `app.zod.ts`'s single site is held pending
+the finding-16 `.extend()` check rather than counted as ready.
 
 #### `data/` — 121 strip of 162
 
