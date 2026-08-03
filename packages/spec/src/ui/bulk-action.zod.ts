@@ -53,6 +53,22 @@ import { FieldType } from '../data/field.zod';
 //     the field renderer as-is (min/max/step/format). Locking it down would
 //     reject valid config, so declared keys are typed and the rest rides
 //     through, the same call `dashboard.zod.ts` makes for a widget's `config`.
+//   - `params[].options[]` is `.passthrough()` TOO — measured, not inherited
+//     from its parent by symmetry. objectui's option TYPE is closed
+//     (`Array<{ label; value }>`, `packages/types/src/objectql.ts:271`), but the
+//     type is not what an authored option meets: `bulkParamToField` SPREADS each
+//     entry — `options?.map(o => ({ ...o, value: String(o.value) }))`,
+//     `packages/plugin-grid/src/components/bulkParamToField.ts:131` — so every
+//     extra key survives verbatim into the field metadata, where the widget
+//     vocabulary is `SelectOptionMetadata`
+//     (`packages/types/src/field-types.ts:288`): `color` / `icon` / `disabled` /
+//     `visibleWhen` beyond the pair, and read (`option?.color`,
+//     `packages/fields/src/index.tsx:1089`). Stripping here therefore DELETES
+//     authored widget config the renderer would have honoured — the silent
+//     narrowing this file exists to stop. Until #4001's 2026-08-03 re-measure
+//     this level was bare strip while the ledger prose called it open: one
+//     intent, two postures. `passthrough` is that intent in machine-readable
+//     form; the prose alone had already been proven able to drift.
 //
 // KNOWN DIVERGENCE, DELIBERATELY NOT FIXED HERE. A bulk param and an action
 // param are the same idea under different spellings (`help`/`helpText`,
@@ -109,7 +125,7 @@ export const BulkActionParamSchema = lazySchema(() => z.object({
   options: z.array(z.object({
     label: z.string().describe('Option label (plain string — not i18n-resolved on this path).'),
     value: z.union([z.string(), z.number(), z.boolean()]).describe('Stored value.'),
-  })).optional().describe('Static options for select-style widgets.'),
+  }).passthrough()).optional().describe('Static options for select-style widgets. Each entry is `{ label, value }` plus any extra widget config — the entry is open (`.passthrough()`) because the renderer forwards unknown option keys to the field widget, which reads `color` / `icon` / `disabled` / `visibleWhen` beyond the declared pair.'),
   object: SnakeCaseIdentifierSchema.optional().describe("Target object for a `lookup` widget. (An ActionParam spells this `reference`.)"),
   labelField: z.string().optional().describe('Related-object field used as the option label for a `lookup` widget (defaults to name/full_name/email/id).'),
   multiple: z.boolean().optional().describe('Allow picking multiple values — the param value becomes an array and is written to the patch as-is.'),

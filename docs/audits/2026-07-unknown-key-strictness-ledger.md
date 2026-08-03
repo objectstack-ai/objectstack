@@ -488,7 +488,7 @@ not verdicts).
 |---|---|---|---|
 | `action.zod.ts` | 8 | authorable | param schema strict (#3746); remaining blocks ride later steps. **9 → 8 at the #4001 re-measurement** — no schema changed: the ninth "site" was a `z.object(…)` inside a JSDoc paragraph, which the old textual counter could not tell from code |
 | `view.zod.ts` | 50 | authorable | partially strict (ADR-0089); long tail of sub-blocks. `bulkActionDefs` left this file in #4457 — see the row below |
-| `bulk-action.zod.ts` | 3 | authorable | **strict as of #4457** — `BulkActionDefSchema` (the def itself). It was `z.array(z.record(z.string(), z.any()))` inline in `view.zod.ts`: a selection-bar button with **no shape at all**, so `opeartion` / `excution: 'aggregate'` parsed and shipped as a button that ran the default behaviour. Its two other sites are `BulkActionParamSchema` and that param's `options` entry, both deliberately **open**: objectui's `BulkActionParam` declares a `[key: string]: unknown` catch-all for widget config (min/max/step/format), so `.passthrough()` is the honest mirror and strictness there would reject valid config — same call as `dashboard.zod.ts`'s widget `config`. The def also refuses the combinations the executor never reads (`patch` outside an update, `execution` outside a custom, `batchSize` on an aggregate) and a hand-written `actionDef`, which is renderer-attached |
+| `bulk-action.zod.ts` | 3 | authorable | **strict as of #4457** — `BulkActionDefSchema` (the def itself). It was `z.array(z.record(z.string(), z.any()))` inline in `view.zod.ts`: a selection-bar button with **no shape at all**, so `opeartion` / `excution: 'aggregate'` parsed and shipped as a button that ran the default behaviour. Its two other sites are `BulkActionParamSchema` and that param's `options` entry, both deliberately **open** and both now `.passthrough()` — the param because objectui's `BulkActionParam` declares a `[key: string]: unknown` catch-all for widget config (min/max/step/format), so passthrough is the honest mirror and strictness would reject valid config (same call as `dashboard.zod.ts`'s widget `config`); the OPTION ENTRY on separate measured evidence, since its objectui type is closed and only the runtime path is open — `bulkParamToField` spreads each entry (`plugin-grid/src/components/bulkParamToField.ts:131`) into `SelectOptionMetadata` (`types/src/field-types.ts:288`), which declares and reads `color` / `icon` / `disabled` / `visibleWhen`. **This row said "both deliberately open" while only the parent was `passthrough`** — one intent, two postures, caught by the 2026-08-03 re-measure and closed by the ruling's verdict A (make the code match the prose). The lesson is the campaign's own: prose in this ledger is not a posture reading, which is why the remaining-strip map is gated and this column is not. The def also refuses the combinations the executor never reads (`patch` outside an update, `execution` outside a custom, `batchSize` on an aggregate) and a hand-written `actionDef`, which is renderer-attached |
 | `component.zod.ts` | 29 | authorable | **next candidate** — SDUI component defs; check React-prop open slots first (p) |
 | `theme.zod.ts` | 14 | authorable (p) | authored themes |
 | `app.zod.ts` | 18 | authorable | **strict as of #4001 PR B** — `AppSchema` + branding / area / context-selector / contribution, and the nav-item union converted to `z.discriminatedUnion('type', …)` (the union-error question, settled empirically: matched-branch-only errors, exact recursive paths, `toJSONSchema` clean). Per-target `params` stay open. PR A (#4142) tombstoned the seven audit-dead keys first |
@@ -625,7 +625,7 @@ is complete and so nobody re-triages them from scratch next batch.
 
 **Authorable strip in `automation/`: 41 of 67.** This is the ruling's "known main body".
 
-#### `ui/` — 124 strip of 198
+#### `ui/` — 123 strip of 198
 
 | File | Strip | Sites | Class | Batch |
 |---|---|---|---|---|
@@ -647,12 +647,22 @@ is complete and so nobody re-triages them from scratch next batch.
 | `sharing.zod.ts` | 2 | 2 | authorable (p) | `SharingConfig` / `EmbedConfig` |
 | `action.zod.ts` | 1 | 8 | authorable | `ActionParamSchema.options` — a plain `{ label, value }` pair; the cheapest win in the directory |
 | `app.zod.ts` | 1 | 18 | verify | `BaseNavItemSchema` — the base the strict discriminated-union members extend. Closing a base that is `.extend()`ed is the #4001 trap that bit `view` (finding 16); confirm the members' strictness is not already covering it before touching |
-| `bulk-action.zod.ts` | 1 | 3 | open | `BulkActionParamSchema.options`. ⚠️ **The triage row calls both this and its parent "deliberately open", but only the PARENT is `passthrough` — this one is plain strip.** Same intent, two postures; decide which the intent actually was |
 | `notification.zod.ts` | 1 | 1 | authorable (p) | `NotificationActionSchema` |
 
-**Authorable strip in `ui/`: 123 of 124** — everything except `bulk-action.zod.ts`'s
-`options`, which is `open`. Of those 123, `app.zod.ts`'s single site is held pending
+**Authorable strip in `ui/`: 123 of 123** — every remaining strip site in this
+directory is authorable. Of those 123, `app.zod.ts`'s single site is held pending
 the finding-16 `.extend()` check rather than counted as ready.
+
+The one `open` site this directory carried is **gone, and not by being closed**:
+`bulk-action.zod.ts`'s `BulkActionParamSchema.options` was the row that read
+*"the triage row calls this and its parent deliberately open, but only the PARENT
+is `passthrough`"*. The 2026-08-03 ruling settled the intent as **open** and the
+fix was to make the code say so — `.passthrough()` on the option item, so the
+posture and the prose agree. It leaves this map the way a resolved row is
+supposed to: the file now has **0** strip sites, so its row is deleted (the
+reverse pin above). Worth noting for the next batch that "resolve a row" has two
+exits, and the reverse pin cannot tell them apart — only the changeset and the
+triage row record which one was taken.
 
 #### `data/` — 121 strip of 162
 

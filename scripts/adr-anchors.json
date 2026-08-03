@@ -85,6 +85,11 @@
       "file": "packages/metadata-protocol/src/protocol.ts",
       "adrs": ["ADR-0119"],
       "invariant": "`batchData`'s `atomic` is REAL or REFUSED, never silent best-effort. An explicitly atomic batch runs inside ONE `engine.transaction()`, so a failure rolls back every prior write and the response reports zero successes (rows marked ROLLED_BACK / NOT_ATTEMPTED — reporting a rolled-back row as `success: true` was the original bug, not merely the missing transaction). A runtime that cannot roll back gets 501 NOT_IMPLEMENTED; degrading to best-effort is how the flag came to lie."
+    },
+    {
+      "file": "packages/spec/src/kernel/functional-completeness.ts",
+      "adrs": ["ADR-0078"],
+      "invariant": "Every rule here cites the runtime line that silently skips the instance, and every deliberate NON-rule cites the evidence that exempts it (ADR-0078 §6). `multiselect` without `options` is NOT flagged — `record-validator.ts` blesses it verbatim as free-form tags, which is §1 case (3) genuinely-optional; `user` relationships and `timeline`/`tree` views are exempt for their own stated reasons. A rule added without its skip-site citation, or an exemption 'fixed', is a false prescription: it tells an AI author to change working metadata, which is the failure this gate exists to prevent."
     }
   ]
 }
