@@ -161,10 +161,15 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * Pass-through to better-auth's `databaseHooks` option. Used by
    * platform consumers (objectos kernel) to attach a
    * `user.create.after` hook that auto-provisions a personal
-   * organization for JIT-created SSO users — better-auth's adapter
-   * bypasses kernel-level ObjectQL middleware, so this is the only
-   * hook point that fires for every user creation path (email signup,
-   * social/OIDC sign-in, admin-created accounts).
+   * organization for JIT-created SSO users.
+   *
+   * This is the seam to use because it is the ONE hook point every user
+   * creation path flows through (email signup, social/OIDC sign-in,
+   * admin-created accounts, SSO JIT) and ADR-0093 D2 gives such invariants a
+   * single owner there. It is NOT because better-auth's adapter escapes the
+   * data layer: it writes through the same ObjectQL instance and its
+   * middleware/lifecycle-hook chain does run — see
+   * `AuthManagerOptions.databaseHooks` for the hop-by-hop correction (#4802).
    */
   databaseHooks?: BetterAuthOptions['databaseHooks'];
 }
