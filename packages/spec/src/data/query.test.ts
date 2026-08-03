@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   QuerySchema,
   FieldNodeSchema,
+  SortNodeSchema,
   AggregationFunction,
   type QueryAST,
 } from './query.zod';
@@ -112,6 +113,85 @@ describe('FieldNode — the nested-select object form is REMOVED (#4196)', () =>
       fields: ['title'],
       expand: { owner: { object: 'user', fields: ['name'] } },
     } satisfies QueryAST)).not.toThrow();
+  });
+});
+
+/**
+ * #4721 — the sort node is closed against unknown keys, and `direction` gets a
+ * named translation on the way out.
+ *
+ * The number that made this worth a wire-breaking change is not "a key was
+ * dropped" but which way the rows then came back. Measured on `main` before the
+ * change:
+ *
+ * ```
+ * SortNodeSchema.parse({ field: 'updated_at', direction: 'desc' })
+ *   →  { field: 'updated_at', order: 'asc' }
+ * ```
+ *
+ * Descending in, ascending out, success reported. So these tests pin the
+ * REJECTION and the PRESCRIPTION, not merely "unknown keys are unrecognized":
+ * a strict schema whose error says `Unrecognized key(s): direction` and nothing
+ * else leaves the caller exactly where the silent strip did — they still do not
+ * know that the word they want is `order`. Edit distance cannot get there
+ * (`direction` → `order` is not a typo), which is why the alias table is the
+ * load-bearing half.
+ */
+describe('SortNode — closed, and `direction` carries its translation (#4721)', () => {
+  it('accepts the canonical two-key node, defaulting `order` to asc', () => {
+    expect(SortNodeSchema.parse({ field: 'updated_at', order: 'desc' }))
+      .toEqual({ field: 'updated_at', order: 'desc' });
+    expect(SortNodeSchema.parse({ field: 'updated_at' }))
+      .toEqual({ field: 'updated_at', order: 'asc' });
+  });
+
+  it('REJECTS `direction` instead of silently sorting the other way', () => {
+    const r = SortNodeSchema.safeParse({ field: 'updated_at', direction: 'desc' });
+    expect(r.success, 'this parsed to `order: asc` before #4721').toBe(false);
+    expect(r.error!.issues[0].message).toContain('`direction` → `order`');
+  });
+
+  it('names the surface and echoes the offending key', () => {
+    const message = SortNodeSchema.safeParse({ field: 'x', direction: 'desc' })
+      .error!.issues[0].message;
+    expect(message).toContain('this sort node');
+    expect(message).toContain('`direction`');
+  });
+
+  it('rejects `direction` even when `order` is also present', () => {
+    // Both keys written means the caller is guessing. Half-honouring the guess
+    // is how the two vocabularies stay alive; refusing it is how one wins.
+    expect(SortNodeSchema.safeParse({ field: 'x', order: 'desc', direction: 'asc' }).success)
+      .toBe(false);
+  });
+
+  it('closes the same door through `QueryAST.orderBy`, which is where it is written', () => {
+    const r = QuerySchema.safeParse({
+      object: 'sales',
+      orderBy: [{ field: 'updated_at', direction: 'desc' }],
+      limit: 20,
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error!.issues)).toContain('`direction` → `order`');
+
+    // The control: the canonical spelling still parses through the same path.
+    expect(QuerySchema.parse({
+      object: 'sales', orderBy: [{ field: 'updated_at', order: 'desc' }], limit: 20,
+    })).toMatchObject({ orderBy: [{ field: 'updated_at', order: 'desc' }] });
+  });
+
+  it('suggests a declared key for an ordinary typo, and never a tombstone', () => {
+    const message = SortNodeSchema.safeParse({ field: 'x', ordr: 'desc' })
+      .error!.issues[0].message;
+    expect(message).toContain('`ordr` → `order`');
+  });
+
+  it('leaves the REST of the query dialect open — the carve-out is this schema only', () => {
+    // `query.zod.ts` stays classed `open` in the strictness ledger; only
+    // `SortNodeSchema` was re-classed authorable. Pinned so a later blanket
+    // `.strict()` on the file is a deliberate decision with its own ruling
+    // rather than a side effect of this change (#4001 tracks the top level).
+    expect(QuerySchema.safeParse({ object: 'sales', nonsenseKey: 1 }).success).toBe(true);
   });
 });
 

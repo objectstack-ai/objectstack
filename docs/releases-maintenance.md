@@ -102,6 +102,41 @@ changesets also embed companion frontend notes inline ("Companion objectui PR
 ships…", renderer notes), which are enough to write an accurate Console section on
 their own.
 
+### Pin freshness — the gate on the release PR (#3340)
+
+Everything above reads the range `OLD_PIN..NEW_PIN`. That is exact, and it is also the
+whole blind spot: anything objectui merged **after** the current pin is outside every
+range, so it reaches no changeset, no changelog and no release page — and a
+complete-*looking* release record is indistinguishable from a complete one. Cutting v16
+that way lost four frontend changes, two of them `minor` features, while objectui `main`
+sat 4 commits and 21 pending changesets ahead of the pin.
+
+`scripts/check-objectui-pin-fresh.mjs` (`pnpm check:objectui-pin-fresh`) closes it. It is
+red when the pin is not objectui `main` (or the `--ref` you name), and it lists the
+commits ahead plus the `.changeset/*.md` files that exist at `main` and not at the pin.
+
+```bash
+pnpm check:objectui-pin-fresh                          # enforcing
+node scripts/check-objectui-pin-fresh.mjs --advisory   # report only
+node scripts/check-objectui-pin-fresh.mjs --ref v17.0.0 --json
+```
+
+- **Where it blocks:** the changesets **Version Packages / release PR**, via
+  `.github/workflows/objectui-pin-freshness.yml`. The job runs on every PR — so the
+  context always reports and can be a branch-protection *required* check — but passes
+  `--advisory` outside the release lane, because a pin lagging between bumps is the
+  normal state of an ordinary code PR.
+- **It is not the Console Pin Gate.** `ci.yml`'s **Console Pin Gate** (#4290) proves the
+  pinned SHA still **builds**; this one proves the pin is still **current**. Either can
+  be green while the other is red; neither replaces the other.
+- **Network failure is never green.** `git ls-remote` alone decides the verdict, so the
+  GitHub API (which only itemizes an already-established lag) can be rate-limited or
+  down without turning red into green — the degradation is printed, not swallowed. An
+  unreachable remote is reported as `unreadable` and exits non-zero.
+- **Fix when it fires:** `scripts/bump-objectui.sh` to move the pin (which writes the
+  `@objectstack/console` changeset for the crossed range), then re-source the Console
+  section with `scripts/objectui-range.mjs`.
+
 ## Drift guard
 
 `scripts/check-release-notes.mjs` (run in CI as `pnpm check:release-notes`) fails the
