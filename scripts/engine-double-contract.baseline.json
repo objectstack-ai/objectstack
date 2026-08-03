@@ -1,0 +1,238 @@
+{
+  "$comment": [
+    "Measured baseline for scripts/check-engine-double-contract.mjs (#4550).",
+    "",
+    "Each entry is a test file that declares a fake ObjectQL engine whose `delete` does NOT",
+    "route through `assertEngineDeleteDispatch` from @objectstack/objectql — so it may accept",
+    "a call the real engine refuses, which is exactly how #4434 shipped a dead REST route with",
+    "its suite green.",
+    "",
+    "SHRINK-ONLY and hand-edited under review. The checker fails in BOTH directions: a file",
+    "whose count went down must have its entry lowered or deleted in the same PR, and a file",
+    "with no unguarded double left must lose its entry entirely. There is deliberately no",
+    "`--fix`/`--update` flag — a generator would let a new lax fake be admitted by 'just run",
+    "the update command', which is precisely how a gate stops meaning anything.",
+    "",
+    "`unguarded` is measured by the scan, not asserted by hand. `why` says what stands between",
+    "the file and being pinned; `closes` says what removes the entry.",
+    "",
+    "WHAT THESE ENTRIES DO AND DO NOT CLAIM. They record that the double is structurally",
+    "looser than the contract. They do NOT claim the looseness is currently harmless — proving",
+    "that per file means running each suite with the guard installed, and the one package where",
+    "that was done wholesale in this PR (@objectstack/spec, 295 files) passed. The rest is",
+    "unproven either way, which is the honest state and the reason each entry is DEBT rather",
+    "than EXEMPT."
+  ],
+  "entries": [
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-org-scope.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/metadata-protocol does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/metadata-protocol does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-flow-canonicalization.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/metadata-protocol does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.recorded-by.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/metadata-protocol does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-actor-impersonation.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "The package DOES depend on @objectstack/objectql, so this is a one-line pin — deferred only because this PR's slice is the gate plus the package #4434 came from, and an unmeasured suite flipping red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite"
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-node.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "The package DOES depend on @objectstack/objectql, so this is a one-line pin — deferred only because this PR's slice is the gate plus the package #4434 came from, and an unmeasured suite flipping red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite"
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-override-audit.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "The package DOES depend on @objectstack/objectql, so this is a one-line pin — deferred only because this PR's slice is the gate plus the package #4434 came from, and an unmeasured suite flipping red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite"
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-restart-resume.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "The package DOES depend on @objectstack/objectql, so this is a one-line pin — deferred only because this PR's slice is the gate plus the package #4434 came from, and an unmeasured suite flipping red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite"
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-revise.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "The package DOES depend on @objectstack/objectql, so this is a one-line pin — deferred only because this PR's slice is the gate plus the package #4434 came from, and an unmeasured suite flipping red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite"
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-service.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "The package DOES depend on @objectstack/objectql, so this is a one-line pin — deferred only because this PR's slice is the gate plus the package #4434 came from, and an unmeasured suite flipping red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite"
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/auth-manager.optional-plugin-isolation.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/plugin-auth does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/plugins/plugin-reports/src/report-export-axis.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/plugin-reports does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/plugins/plugin-reports/src/report-service.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/plugin-reports does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/auto-org-admin-grant.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "HAND-MIRRORS the guard already (a copy of the #4434 fix's `if`), which is the second copy of the contract this gate exists to remove — but @objectstack/plugin-security does not depend on @objectstack/objectql, so replacing the copy with the producer's predicate needs a devDependency change.",
+      "closes": "add @objectstack/objectql to devDependencies, then replace the mirrored `if` with assertEngineDeleteDispatch(options)"
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/permission-set-projection.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/plugin-security does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/suggested-audience-bindings.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/plugin-security does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/plugins/plugin-webhooks/src/auto-enqueuer.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/plugin-webhooks does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/runtime/src/action-body-identity.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "The package DOES depend on @objectstack/objectql, so this is a one-line pin — deferred only because this PR's slice is the gate plus the package #4434 came from, and an unmeasured suite flipping red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite"
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/crud-config-aliases.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/crud-filter-guard.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/crud-runas.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/services/service-automation/src/fault-edge-guard-containment.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/services/service-automation/src/plugin-suspended-run-wiring.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/services/service-automation/src/record-lookup-expand.integration.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/services/service-automation/src/runas-grant-resolution.integration.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/services/service-automation/src/suspended-run-store.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "HAND-MIRRORS the guard already, which is the second copy of the contract this gate exists to remove — but @objectstack/service-automation does not depend on @objectstack/objectql, so replacing the copy with the producer's predicate needs a devDependency change.",
+      "closes": "add @objectstack/objectql to devDependencies, then replace the mirrored `if` with assertEngineDeleteDispatch(options)"
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-admin-plugin.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/service-datasource does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-secret-binder.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "@objectstack/service-datasource does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
+      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+    },
+    {
+      "file": "packages/services/service-queue/src/db-queue-adapter.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "HAND-MIRRORS the guard already, which is the second copy of the contract this gate exists to remove — but @objectstack/service-queue does not depend on @objectstack/objectql, so replacing the copy with the producer's predicate needs a devDependency change.",
+      "closes": "add @objectstack/objectql to devDependencies, then replace the mirrored `if` with assertEngineDeleteDispatch(options)"
+    },
+    {
+      "file": "packages/spec/src/contracts/data-engine.test.ts",
+      "unguarded": 1,
+      "kind": "EXEMPT",
+      "why": "Not a stand-in that code under test drives — it is a TYPE-CONFORMANCE witness that IDataEngine is implementable, asserting only `typeof engine.delete === 'function'`. And it cannot be pinned even in principle: @objectstack/objectql depends on @objectstack/spec, so the import would invert the dependency. Ran clean under the guard anyway (spec: 295/295 files passed with the dispatch guard installed in every engine double).",
+      "closes": "nothing — permanent"
+    }
+  ]
+}
