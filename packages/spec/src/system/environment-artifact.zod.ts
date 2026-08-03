@@ -10,9 +10,9 @@ import { ObjectStackDefinitionSchema } from '../stack.zod';
  *
  * THE single declaration of the environment artifact envelope (#4740,
  * #4535 C10 — maintainer route A′). `@objectstack/spec/cloud` re-exports
- * this file; both entry points resolve to these exact symbols, so which
- * import path a consumer picks can never change the shape it gets
- * (the #4411 dual-source trap, closed for this name).
+ * this file; both entry points resolve to these exact symbols, so the
+ * chosen entry point can never change the shape a consumer gets (the
+ * #4411 dual-source trap, closed for this name).
  *
  * Describes the response shape of
  * `GET /api/v1/cloud/environments/:environmentId/artifact` — the assembled
