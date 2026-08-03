@@ -103,7 +103,6 @@
     "system/ServiceConfig — no type export",
     "system/ServiceCriticality — no type export",
     "system/ServiceStatus — no type export",
-    "system/TenantProvisioningStatusEnum — no type export",
     "ui/AIChatWindowProps — no type export",
     "ui/ActionType — no type export",
     "ui/BreakpointColumnMap — no type export",

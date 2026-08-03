@@ -10,8 +10,6 @@
     "EnvironmentArtifactInput — [./cloud (type)] ≠ [./system (type)]",
     "EnvironmentArtifactSchema — [./cloud (const)] ≠ [./system (const)]",
     "PackageDependency — [./cloud (type)] ≠ [./kernel (type)]",
-    "PackageDependencySchema — [./cloud (const)] ≠ [./kernel (const)]",
-    "TenantPlan — [./cloud (type)] ≠ [./system (type)]",
-    "TenantPlanSchema — [./cloud (const)] ≠ [./system (const)]"
+    "PackageDependencySchema — [./cloud (const)] ≠ [./kernel (const)]"
   ]
 }
