@@ -283,6 +283,12 @@
         "to": "object capability flags 'enable.trash'/'enable.mru' removed (#3207, #2377 close-out — no recycle bin and no MRU tracking ever ran; both default-true flags gated nothing)",
         "conversionId": "object-enable-trash-mru-removed",
         "toMajor": 17
+      },
+      {
+        "surface": "hook.body.capabilities / action.body.capabilities",
+        "to": "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)",
+        "conversionId": "hook-body-crypto-hash-removed",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -885,6 +891,12 @@
           "surface": "object.enable.trash / object.enable.mru",
           "to": "object capability flags 'enable.trash'/'enable.mru' removed (#3207, #2377 close-out — no recycle bin and no MRU tracking ever ran; both default-true flags gated nothing)",
           "conversionId": "object-enable-trash-mru-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "hook.body.capabilities / action.body.capabilities",
+          "to": "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)",
+          "conversionId": "hook-body-crypto-hash-removed",
           "toMajor": 17
         }
       ],

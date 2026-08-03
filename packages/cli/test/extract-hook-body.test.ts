@@ -94,6 +94,44 @@ describe('extractHookBody', () => {
     expect(ext.capabilities.sort()).toEqual(['api.read', 'api.write', 'log']);
   });
 
+  // ── `crypto.hash` inference retired (#4391) ──────────────────────────────
+  //
+  // This inference was the amplifier that kept the missing implementation
+  // alive: writing `ctx.crypto.hash(...)` made the extractor GRANT the
+  // capability, so `os build` went green on a body guaranteed to throw at the
+  // first record write. The token left `HookBodyCapability` in spec 17, so
+  // re-adding the pattern would now emit a body the spec itself rejects.
+
+  it('does NOT infer a capability from ctx.crypto.hash (#4391)', () => {
+    const fn = async (ctx: any) => {
+      ctx.input.fingerprint = await ctx.crypto.hash('sha256', ctx.input.email);
+    };
+    const ext = extractHookBody(fn, 'hook hash');
+    expect(ext.capabilities).toEqual([]);
+    expect(ext.capabilities).not.toContain('crypto.hash');
+    // The source still travels verbatim — the extractor's job is not to rewrite
+    // the body, and the dead call is the author's to delete (the spec parse
+    // error on the declared token is what tells them so).
+    expect(ext.source).toContain('ctx.crypto.hash');
+  });
+
+  it('ignores crypto.hash in an explicit @capabilities override (#4391)', () => {
+    const fn = (_ctx: any) => {
+      // @capabilities api.read crypto.hash log
+      return 1;
+    };
+    const ext = extractHookBody(fn, 'hook f');
+    expect(ext.capabilities.sort()).toEqual(['api.read', 'log']);
+    expect(ext.capabilities).not.toContain('crypto.hash');
+  });
+
+  it('still infers crypto.uuid — the sibling that IS implemented (#4391)', () => {
+    const fn = (ctx: any) => {
+      ctx.input.trace = ctx.crypto.randomUUID();
+    };
+    expect(extractHookBody(fn, 'hook uuid').capabilities).toContain('crypto.uuid');
+  });
+
   // #1876 — a handler that references a module-scope helper is not self-
   // contained; extraction must throw so lowerCallables falls back to bundling
   // (which carries the closure) instead of shipping a body that ReferenceErrors.

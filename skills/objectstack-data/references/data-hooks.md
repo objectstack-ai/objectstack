@@ -406,7 +406,7 @@ single-record form is `update({ id, ...fieldsToChange })` — e.g.
 A body may only touch a `ctx` API it declared in `capabilities`. Calling an
 undeclared one **throws inside the VM** — `capability '<token>' not granted to
 hook '<name>' …` — which surfaces as a hook error (see Troubleshooting). The full
-set of legal tokens (`HookBodyCapability`) is exactly six:
+set of legal tokens (`HookBodyCapability`) is exactly five:
 
 | Token | Unlocks |
 |:--|:--|
@@ -414,7 +414,6 @@ set of legal tokens (`HookBodyCapability`) is exactly six:
 | `api.write` | `ctx.api.object(n).insert` / `update` / `delete` / `upsert` |
 | `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one driver transaction** (commit on return, rollback on throw). Pair it with `api.write`. |
 | `crypto.uuid` | `ctx.crypto.randomUUID()` |
-| `crypto.hash` | *declared token* for `ctx.crypto.hash(algo, data)` — the current WASM runner wires only `randomUUID`, so don't rely on `hash` yet |
 | `log` | `ctx.log.info` / `warn` / `error(msg, data?)` |
 
 There is **no `http.fetch` capability** by design — outbound calls go through

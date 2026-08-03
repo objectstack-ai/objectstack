@@ -3424,6 +3424,140 @@ const retryPolicyConverged: MetadataConversion = {
   },
 };
 
+/**
+ * The `crypto.hash` capability token leaves `HookBodyCapability` (protocol 17,
+ * #4391 — ADR-0049 enforce-or-remove).
+ *
+ * Four layers advertised the token and none implemented it: the spec enum, the
+ * doc table beside it, the CLI's build-time extractor (which INFERRED the token
+ * from a `ctx.crypto.hash` call, so `os build` blessed the very body that was
+ * about to fail) and `ScriptContext.crypto.hash`. `installCtx` wired only
+ * `randomUUID`, so the single call the token authorised threw inside the VM.
+ * Removed rather than implemented: crypto in the sandbox widens its capability
+ * and security-review surface, and zero complaints against a capability that
+ * throws on every use is the strongest liveness evidence there is.
+ *
+ * This is an enum-VALUE retirement, so there is no `retiredKey()` tombstone to
+ * hang the prescription on — the enum's own error map carries it
+ * (`CRYPTO_HASH_RETIRED`, data/hook-body.zod.ts), keyed on `issue.input` so that
+ * only the value which used to be legal gets the "was removed" message.
+ *
+ * `retiredFromLoadPath`: the enum rejects the token outright, so a live author
+ * is taught at parse rather than silently rewritten. The entry exists so stored
+ * 16.x/17-rc rows replay clean (`applyConversionsToStoredItem` — without it a
+ * pre-removal row flags `metadata_spec_invalid` forever, mislabelling
+ * chain-owned history as a current-contract violation) and so
+ * `os migrate meta --from 16` rewrites author sources. The
+ * `object-enable-trash-mru-removed` precedent, one level deeper: the token is a
+ * VALUE inside `body.capabilities`, not a key, so `stripKeys` cannot reach it.
+ *
+ * Note what the strip deliberately does NOT do: it removes the dead grant, not
+ * the `ctx.crypto.hash(...)` call the body made under it. That call has never
+ * returned a value, so nothing regresses — but the author is still left a dead
+ * line to delete, which is exactly what the prescription tells them to do.
+ */
+const hookBodyCryptoHashRemoved: MetadataConversion = {
+  id: 'hook-body-crypto-hash-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'hook.body.capabilities / action.body.capabilities',
+  summary:
+    "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed "
+    + 'ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)',
+  apply(stack, emit) {
+    const stripToken = (item: Dict, path: string): Dict => {
+      const body = item.body;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return item;
+      const caps = (body as Dict).capabilities;
+      if (!Array.isArray(caps) || !caps.includes('crypto.hash')) return item;
+      emit({ from: 'crypto.hash', to: '(removed)', path: `${path}.body.capabilities` });
+      return {
+        ...item,
+        body: { ...(body as Dict), capabilities: caps.filter((c) => c !== 'crypto.hash') },
+      };
+    };
+    const withHooks = mapCollection(stack, 'hooks', stripToken);
+    return mapCollection(withHooks, 'actions', stripToken);
+  },
+  fixture: {
+    before: {
+      hooks: [
+        {
+          name: 'fingerprint_lead',
+          object: 'crm_lead',
+          events: ['beforeInsert'],
+          body: {
+            language: 'js',
+            source: "ctx.input.fp = await ctx.crypto.hash('sha256', ctx.input.email);",
+            capabilities: ['crypto.hash', 'crypto.uuid'],
+          },
+        },
+        // a body without the retired token passes through untouched
+        {
+          name: 'stamp_lead',
+          object: 'crm_lead',
+          events: ['beforeInsert'],
+          body: {
+            language: 'js',
+            source: 'ctx.input.trace = ctx.crypto.randomUUID();',
+            capabilities: ['crypto.uuid'],
+          },
+        },
+      ],
+      actions: [
+        {
+          name: 'digest_deal',
+          type: 'script',
+          body: {
+            language: 'js',
+            source: "return ctx.crypto.hash('sha256', ctx.record.id);",
+            capabilities: ['crypto.hash'],
+          },
+        },
+      ],
+    },
+    // Surgical: `crypto.uuid` survives beside the stripped token, and the
+    // `capabilities` key itself stays (an empty grant set is legal).
+    after: {
+      hooks: [
+        {
+          name: 'fingerprint_lead',
+          object: 'crm_lead',
+          events: ['beforeInsert'],
+          body: {
+            language: 'js',
+            source: "ctx.input.fp = await ctx.crypto.hash('sha256', ctx.input.email);",
+            capabilities: ['crypto.uuid'],
+          },
+        },
+        {
+          name: 'stamp_lead',
+          object: 'crm_lead',
+          events: ['beforeInsert'],
+          body: {
+            language: 'js',
+            source: 'ctx.input.trace = ctx.crypto.randomUUID();',
+            capabilities: ['crypto.uuid'],
+          },
+        },
+      ],
+      actions: [
+        {
+          name: 'digest_deal',
+          type: 'script',
+          body: {
+            language: 'js',
+            source: "return ctx.crypto.hash('sha256', ctx.record.id);",
+            capabilities: [],
+          },
+        },
+      ],
+    },
+    // One per rewritten body — the hook and the action; `stamp_lead` is untouched.
+    expectedNotices: 2,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -3468,6 +3602,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     retryPolicyConverged,
     objectManagedBySystemToSystemData,
     objectEnableTrashMruRemoved,
+    hookBodyCryptoHashRemoved,
   ],
 };
 

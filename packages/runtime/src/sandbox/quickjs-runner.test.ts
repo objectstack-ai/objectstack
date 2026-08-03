@@ -143,6 +143,65 @@ describe('QuickJSScriptRunner — L2 hook script', () => {
     expect((r.value as string).length).toBeGreaterThanOrEqual(36);
   });
 
+  // ── `crypto.hash` retirement pins (#4391) ─────────────────────────────────
+  //
+  // `ScriptContext.crypto.hash` was typed on the host seam (and `crypto.hash`
+  // was an authorable token, and the CLI inferred it) while `installCtx` wired
+  // only `randomUUID`. The type promised a seam that never existed; spec 17
+  // removed it rather than implementing it, so nothing may re-declare it
+  // without also installing it.
+
+  it('the VM ctx.crypto exposes exactly randomUUID, under ANY grant (#4391)', async () => {
+    // The EXECUTABLE pin, and the load-bearing one. `@objectstack/runtime` has
+    // no `typecheck` script (it sits in the DEBT table of
+    // scripts/check-type-check-coverage.mjs), so a type-level assertion here
+    // would never be compiled — a dead pin reads as assurance and gives none.
+    // This enumerates what `installCtx` actually put on the seam instead.
+    //
+    // It is deliberately exhaustive rather than `hash`-specific: the defect was
+    // a member advertised ahead of its implementation, so ANY new member must
+    // come through a review that also updates this list.
+    //
+    // Every token the enum still offers is granted, so a failure cannot be
+    // misread as "the capability simply was not granted".
+    const allGrants = ['api.read', 'api.write', 'api.transaction', 'crypto.uuid', 'log'] as const;
+
+    const keys = await runner.runScript(
+      {
+        language: 'js',
+        source: 'return Object.keys(ctx.crypto).sort().join(",");',
+        capabilities: [...allGrants],
+      },
+      ctx(),
+      hookOpts,
+    );
+    expect(keys.value).toBe('randomUUID');
+
+    // And the specific regression: no hash function reachable by any spelling.
+    const typeofHash = await runner.runScript(
+      {
+        language: 'js',
+        source: 'return typeof ctx.crypto.hash;',
+        capabilities: [...allGrants],
+      },
+      ctx(),
+      hookOpts,
+    );
+    expect(typeofHash.value).toBe('undefined');
+  });
+
+  it('ScriptContext.crypto declares randomUUID and nothing else (#4391)', () => {
+    // Compile-time companion to the pin above. It is DORMANT today (runtime is
+    // not typechecked — see the note above) and arms itself the moment runtime
+    // onboards `typecheck`; it is kept because re-declaring the type without an
+    // implementation is the exact defect #4391 removed, and this is where the
+    // next reader will look for that rule.
+    type CryptoSeam = NonNullable< ScriptContext['crypto'] >;
+    type ExtraMembers = Exclude< keyof CryptoSeam, 'randomUUID' >;
+    const extraMembers: ExtraMembers[] = [];
+    expect(extraMembers).toEqual([]);
+  });
+
   it('reports script-thrown errors with origin name', async () => {
     await expect(
       runner.runScript(

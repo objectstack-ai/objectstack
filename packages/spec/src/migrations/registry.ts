@@ -718,7 +718,24 @@ const step17: MigrationStep = {
     + 'rewrite — one semantic TODO for config authors rather than a stack conversion, the '
     + '`validateOnly` shape. The key itself is tombstoned (the schema is not `.strict()`; a '
     + 'plain delete would strip it silently), and a config-driven webhooks/callbacks synthesis, '
-    + 'if ever wanted, returns via the enforce route of ADR-0049 through a new ADR.',
+    + 'if ever wanted, returns via the enforce route of ADR-0049 through a new ADR.\n\n'
+    + "Finally it removes the script-body capability token 'crypto.hash' (#4391). Four layers "
+    + 'declared it — the `HookBodyCapability` enum, the doc table beside it, the CLI extractor '
+    + 'and `ScriptContext.crypto.hash` — and none implemented it: `installCtx` wired only '
+    + '`randomUUID`, so the one call the token authorised threw inside the VM every time. The '
+    + 'build-time inference made it worse than an ordinary declared-but-unenforced key: writing '
+    + '`ctx.crypto.hash(...)` made the CLI ADD the capability for you, so `os build` went green '
+    + 'on the body that was guaranteed to fail at the first record write. Removed rather than '
+    + 'implemented (ADR-0049) — hashing inside the sandbox widens its capability and '
+    + 'security-review surface, and a capability that throws on every use yet drew zero '
+    + 'complaints in its whole life is its own liveness verdict. This is an enum VALUE, not a '
+    + 'key, so there is no `retiredKey()` tombstone: the enum error map carries the '
+    + 'prescription, keyed on the received value so that only the spelling which used to be '
+    + 'legal is told it "was removed". The conversion strips the dead token from '
+    + '`body.capabilities` on hooks and actions; it deliberately does NOT touch the '
+    + '`ctx.crypto.hash(...)` call the body made under it, which never returned a value and '
+    + 'which the author must delete. Hashing returns only WITH an implementation, through the '
+    + 'capability admission process.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -756,6 +773,7 @@ const step17: MigrationStep = {
     'object-managed-by-system-to-system-data',
     'retry-policy-converged',
     'object-enable-trash-mru-removed',
+    'hook-body-crypto-hash-removed',
   ],
   semantic: [
     {

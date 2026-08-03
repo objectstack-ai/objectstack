@@ -40,7 +40,7 @@ const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
   { rx: /\bnew\s+Function\s*\(/, reason: '`new Function()` is not allowed in hook/action bodies' },
 ];
 
-const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | 'crypto.uuid' | 'crypto.hash' | 'log' }> = [
+const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | 'crypto.uuid' | 'log' }> = [
   // Match `ctx.api.object(...)` directly OR a local alias like
   // `const api = ctx.api;` then `api.object(...)`. We accept any
   // identifier (or chain) ending in `.object(...)` followed by a known
@@ -49,7 +49,10 @@ const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | '
   { rx: /\.object\s*\([^)]+\)\s*\.\s*(?:find|findOne|count|aggregate|get|list)\b/, cap: 'api.read' },
   { rx: /\.object\s*\([^)]+\)\s*\.\s*(?:insert|update|upsert|delete|patch|remove|create)\b/, cap: 'api.write' },
   { rx: /ctx\.crypto\.randomUUID\b/, cap: 'crypto.uuid' },
-  { rx: /ctx\.crypto\.hash\b/, cap: 'crypto.hash' },
+  // NO `ctx.crypto.hash` pattern: the `crypto.hash` token was removed in spec 17
+  // (#4391) because the sandbox never installed the function. Inferring a
+  // capability from a call that always threw is what let `os build` bless a
+  // dead body — the inference was the amplifier, not the safety net.
   { rx: /ctx\.log\.(?:info|warn|error|debug)\b/, cap: 'log' },
 ];
 
@@ -57,7 +60,7 @@ export interface ExtractedBody {
   /** Pure function-body source (without the surrounding `(ctx) => {...}`). */
   source: string;
   /** Inferred capability tokens — may be merged with explicit `// @capabilities` line. */
-  capabilities: Array<'api.read' | 'api.write' | 'crypto.uuid' | 'crypto.hash' | 'log'>;
+  capabilities: Array<'api.read' | 'api.write' | 'crypto.uuid' | 'log'>;
   /** True when source is a single expression (arrow with implicit return). */
   isExpression: boolean;
 }
@@ -120,7 +123,6 @@ export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: s
         t === 'api.read' ||
         t === 'api.write' ||
         t === 'crypto.uuid' ||
-        t === 'crypto.hash' ||
         t === 'log'
       ) {
         inferred.add(t);
