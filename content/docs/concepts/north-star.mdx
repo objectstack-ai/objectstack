@@ -63,18 +63,18 @@ development live outside this repo.
 validated against `ObjectStackDefinitionSchema`). When published to Cloud it is
 wrapped in the immutable environment artifact envelope defined by
 `EnvironmentArtifactSchema` in
-`packages/spec/src/system/environment-artifact.zod.ts`.
+`packages/spec/src/system/environment-artifact.zod.ts` (the single
+declaration; `@objectstack/spec/cloud` re-exports it).
 
 The artifact contains:
 
 - `schemaVersion`
 - `environmentId`
 - `commitId`
-- `checksum`
-- `metadata`
-- `functions`
-- `manifest`
-- optional provenance and payload-reference fields
+- `checksum` — a SHA-256 hex digest (string) of the canonical `metadata`
+  serialization
+- `metadata` — the compiled `ObjectStackDefinition` itself
+- optional `builtAt` / `builtWith` provenance
 
 The artifact is enough to describe what the runtime should load. It is not
 enough to deploy by itself; the host still supplies deployment config.
