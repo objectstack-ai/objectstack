@@ -4495,6 +4495,18 @@ export class ObjectQL implements IObjectQLEngine {
            // record-change flow triggers work: their start-condition gate reads
            // `previous.*` (e.g. `status == "done" && previous.status != "done"`),
            // which silently fails when `previous` is absent.
+           //
+           // [#4784] It is ALSO what supplies the `previous` binding to a
+           // declarative hook `condition` (`hook-wrappers.ts`), which is how a
+           // TRANSITION is expressed there: `previous.done != true &&
+           // record.done == true`. Note this needs NO second demand-driven
+           // fetch — the existing gate already fetches whenever an afterUpdate
+           // hook exists, and afterUpdate is the event whose context carries
+           // `previous`. Deliberately: adding a "does the condition reference
+           // `previous`?" analysis on top would be dead code today. If this
+           // gate is ever NARROWED (e.g. scoped per object), hook conditions
+           // reading `previous` must be counted into the new demand test —
+           // pinned by `hook-condition-previous-scope.test.ts`.
            let priorRecord: Record<string, unknown> | null = null;
            const updateSchema = this._registry.getObject(object);
            const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(updateSchema);

@@ -576,8 +576,17 @@ Time-word cheat sheet across surfaces (do not mix them up):
 | Surface | Event-time record | Pre-event record | Live record |
 |:--------|:------------------|:-----------------|:------------|
 | Flow condition / `{…}` template | `record` (trigger snapshot) | `previous` | — (use a `get_record` node) |
-| Object hook (`ctx`) | `ctx.record` (write payload) | `ctx.previous` | — |
+| Object hook **handler** (`ctx`) | `ctx.input` (write payload); `ctx.result` after the write | `ctx.previous` | — (query via `ctx.ql`) |
+| Object hook **`condition`** (CEL) | `record` (stored ⊕ payload) | `previous` | — |
 | Approval `expression` approver | `trigger.*` | `vars.previous` | `current.*` |
+
+**There is no `ctx.record`.** `HookContext` declares `input` / `result` /
+`previous` / `session` / `ql` (plus `object` / `event`) — a handler reads the
+write payload as `ctx.input`. The bare `record` / `previous` roots are the
+**condition**'s CEL scope, not the handler's context object: `record` is the
+stored row overlaid with this write's payload (#4770) and `previous` is the
+pre-write row (#4784), both made total over the object's declared fields. See
+`objectstack-formula` §5 for where `previous` is bound and where it is not.
 
 ### Node Config (`ApprovalNodeConfigSchema`)
 

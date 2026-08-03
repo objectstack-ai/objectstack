@@ -99,7 +99,7 @@ scope as CEL — you do **not** learn three languages.
 | Concept | CEL |
 |:---|:---|
 | Current record field | `record.first_name` |
-| Previous record (update hooks) | `previous.status` |
+| Previous record (update hooks, validation rules) | `previous.status` — §5 |
 | Hook input payload | `input.amount` |
 | Identity context | `os.user.id`, `os.org.id`, `os.org.tier`, `os.env` |
 | Equality | `==` / `!=` |
@@ -273,6 +273,34 @@ P`previous.status != 'escalated' && record.status == 'escalated'`
 
 ISCHANGED-style logic does not exist as a function; use explicit `previous`
 comparison.
+
+`record` is the record's **state**, not this write's diff (#4770): stored row ⊕
+payload, so `record.status == 'escalated'` is true on *every* update of an
+already-escalated record. Comparing against `previous` is the only way to say
+"just became". Hook `condition`s and validation predicates bind the same two
+roots (#4784) — one scope, one meaning, whichever surface reads it.
+
+**Where `previous` is bound, and where it is not:**
+
+| Surface / event | `previous` |
+|:---|:---|
+| Update hook `condition` (single-record write), validation rule on update | the stored pre-write row |
+| Insert events (`beforeInsert` / `afterInsert`), validation rule on insert | **unbound** — there is no prior state |
+| Predicate bulk update (`multi: true`) hook `condition` | **unbound** — one write matches N rows and the hook fires once, so there is no single prior record |
+
+Referencing `previous` where it is unbound makes the whole expression
+unevaluable — so write insert-event conditions over `record` alone, and keep
+transition conditions to single-record writes.
+
+**`previous` is total over the object's declared fields.** A declared column the
+driver never returned reads as `null`, not as a fault. Guard with `!= null`,
+**never** with `has(...)`: a materialised `null` is a *present* key, so
+`has(previous.spent)` is uniformly true for a declared field and tells you
+nothing about its value.
+
+**Cost:** none of its own. `previous` rides on the prior row the engine already
+fetches for update hooks; a condition that never mentions it adds no fetch at
+all.
 
 ---
 

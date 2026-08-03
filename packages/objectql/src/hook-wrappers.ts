@@ -49,12 +49,23 @@ const noopLogger = {
  *   4. timeout    → abort if handler runs too long
  *   5. onError    → swallow when set to 'log'
  *
- * The condition formula is evaluated against the record-shaped view of the
- * context built by {@link pickRecordPayload}: for a write, the stored record
- * overlaid with this write's payload, made total over the object's declared
- * fields (#4770 — the same shape a validation predicate reads). Read events
- * typically have no record yet, so a condition on a `beforeFind` will simply
- * skip when no data is present.
+ * The condition formula is evaluated against two bindings, the same two a
+ * validation predicate reads (#4784):
+ *
+ *   - `record`   — the record-shaped view built by {@link pickRecordPayload}:
+ *     for a write, the stored record overlaid with this write's payload, made
+ *     total over the object's declared fields (#4770). Read events typically
+ *     have no record yet, so a condition on a `beforeFind` will simply skip
+ *     when no data is present.
+ *   - `previous` — the record's pre-write state, built by
+ *     {@link pickPreviousPayload}: `ctx.previous`, made total over the same
+ *     declared fields. Absent (an unbound CEL identifier) whenever the prior
+ *     state is not in hand, exactly as on the validation side.
+ *
+ * `previous` is what makes a TRANSITION expressible. Since #4770 `record` is
+ * the record's STATE, so `record.done == true` is true on every update of an
+ * already-done row; "just became done" is `previous.done != true &&
+ * record.done == true`.
  */
 export function wrapDeclarativeHook(
   meta: Hook,
@@ -73,7 +84,7 @@ export function wrapDeclarativeHook(
   });
 
   // Pre-compile condition once so each invocation is cheap.
-  let conditionFn: ((record: any) => boolean) | undefined;
+  let conditionFn: ((record: any, previous: Record<string, unknown> | undefined) => boolean) | undefined;
   if (meta.condition) {
     // Accept either string shorthand or full Expression envelope.
     const expr: Expression = typeof meta.condition === 'string'
@@ -82,8 +93,14 @@ export function wrapDeclarativeHook(
     if (expr.source && expr.source.trim()) {
       const check = ExpressionEngine.compile(expr);
       if (check.ok) {
-        conditionFn = (record: any) => {
-          const r = ExpressionEngine.evaluate<boolean>(expr, { record: record ?? {} });
+        conditionFn = (record: any, previous: Record<string, unknown> | undefined) => {
+          // `previous` is passed through as-is: `undefined` means the binding
+          // is OMITTED from the CEL scope (see `buildScope` in
+          // @objectstack/formula), which is exactly what the validation side
+          // does when no prior record is in hand. Binding it to an empty
+          // object instead would answer `previous.x == null` with a
+          // fabricated "yes" for a record whose prior state is unknown.
+          const r = ExpressionEngine.evaluate<boolean>(expr, { record: record ?? {}, previous });
           if (!r.ok) {
             logger.warn('[hook] condition evaluation failed; treating as false', {
               hook: meta.name,
@@ -180,7 +197,7 @@ export function wrapDeclarativeHook(
     // 1. Condition gate
     if (conditionFn) {
       const record = pickRecordPayload(ctx);
-      if (!conditionFn(record)) {
+      if (!conditionFn(record, pickPreviousPayload(ctx))) {
         logger.debug('[hook] skipped by condition', {
           hook: meta.name,
           object: ctx.object,
@@ -403,4 +420,56 @@ function pickRecordPayload(ctx: HookContext): any {
     return materializeDeclaredFields({ ...prior }, declaredFieldsFor(ctx));
   }
   return input;
+}
+
+/**
+ * The `previous` CEL binding: the record's state BEFORE this write (#4784).
+ *
+ * ## Why the binding exists at all
+ *
+ * #4770 made `record` mean the record's STATE (stored ⊕ payload) rather than
+ * this write's diff. That is the right meaning, but it left every TRANSITION
+ * inexpressible: `record.done == true` is true on every update of an
+ * already-done row, not only on the one that completed it — while the audit
+ * hooks that motivated it (`showcase_audit_task_completion`, whose own
+ * description says "after a task transitions to done") mean the transition.
+ * Comparing against `previous` is the only way to say that, and the surface
+ * next door — validation predicates — has bound `previous` all along. Two
+ * surfaces evaluating CEL "over the record" with different scopes is a drift
+ * an author cannot be expected to hold in their head, so the scopes are the
+ * same: `record` + `previous`, built by the same helper.
+ *
+ * ## Total, and copied
+ *
+ * Made total over the object's declared fields for the same reason `record`
+ * is ({@link materializeDeclaredFields}, #4649/#4770): whether a driver
+ * returns a column the write never touched is a storage detail the author
+ * cannot see, and `previous.x` on a row missing `x` aborts the WHOLE
+ * expression with `No such key` — which #4775 turns into a rejected write.
+ * An UNDECLARED key still faults, so a typo stays reportable.
+ *
+ * The copy is load-bearing: `ctx.previous` is the engine's own pre-image
+ * object, handed to every after-hook. Materialising in place would give those
+ * handlers columns the row never had (#4649 left the same note on the
+ * validation side).
+ *
+ * ## When it is ABSENT — verbatim the validation side's rule
+ *
+ * `rule-validator.ts` binds `previous` only for `mode: 'update'` with a prior
+ * record actually fetched, and passes `undefined` otherwise, which omits the
+ * identifier from the CEL scope. Same here:
+ *   - **insert** — there is no prior state, so `previous` is unbound and any
+ *     reference to it is an author error, reported as such;
+ *   - **predicate (`multi: true`) bulk update** — the engine matched N rows
+ *     and fires the hook ONCE, so there is no single prior record to bind;
+ *     `previous` stays unbound rather than being invented.
+ * Binding `null`/`{}` instead would make `previous.x == null` answer "yes"
+ * for a record whose prior state is simply unknown — a fabricated fact, the
+ * one thing materialisation is careful never to do.
+ */
+function pickPreviousPayload(ctx: HookContext): Record<string, unknown> | undefined {
+  if (isInsertEvent(ctx.event)) return undefined;
+  const prior = ctx.previous;
+  if (!prior || typeof prior !== 'object' || Array.isArray(prior)) return undefined;
+  return materializeDeclaredFields({ ...(prior as Record<string, unknown>) }, declaredFieldsFor(ctx));
 }

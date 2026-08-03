@@ -217,8 +217,8 @@ async: true
 #### `condition` — Declarative Filtering
 
 Skip handler execution if the condition is false. Author it as a **CEL
-predicate** over `record` (use `P\`...\`` from `@objectstack/spec`; SQL-style
-`=` / `AND` / `IN (...)` is not CEL):
+predicate** over `record` and `previous` (use `P\`...\`` from
+`@objectstack/spec`; SQL-style `=` / `AND` / `IN (...)` is not CEL):
 
 ```typescript
 // Only run for high-value accounts
@@ -229,6 +229,10 @@ condition: P`record.status in ['pending', 'in_review']`
 
 // Complex conditions
 condition: P`record.type == 'enterprise' && record.region == 'APAC' && record.is_active == true`
+
+// A TRANSITION — fires only on the update that completes the task,
+// not on later updates of an already-done record (#4784)
+condition: P`previous.done != true && record.done == true`
 ```
 
 **`record` here is the RECORD, not this write's payload (#4770).** The condition
@@ -240,9 +244,17 @@ in neither). So:
   `record.done == true` works on an update that only sets `status`. (This is
   unlike `ctx.input` / `ctx.result` inside the handler, which stay partial — see
   Gotcha 1.)
-- A condition describes the record's **state**, not the diff. `record.done ==
-  true` fires on every update of an already-done record, not only on the update
-  that set it.
+- `record` describes the record's **state**, not the diff. `record.done == true`
+  fires on every update of an already-done record, not only on the update that
+  set it. **For the transition, compare against `previous`** (#4784):
+  `previous.done != true && record.done == true`. `previous` is the stored
+  pre-write row, made total over the same declared fields, and it is the same
+  binding a validation predicate reads.
+- **`previous` is UNBOUND where there is no prior state**, and a reference to an
+  unbound root makes the whole condition unevaluable. That means: insert events
+  (`beforeInsert` / `afterInsert`) — write those over `record` alone — and
+  predicate (`multi: true`) bulk updates, where one write matches N rows and the
+  hook fires once, so there is no single prior record to bind.
 - **Guard optional values with `!= null`, never with `has(...)`.** A declared
   field holding `null` is *present*, so `has(record.spent)` is uniformly true and
   `has(record.spent) && record.spent > record.budget` still faults on
