@@ -23,7 +23,6 @@ import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
 
 export default defineStack({
-  name: 'plugin-webhooks-i18n-extract',
   objects: [SysWebhook] as any,
   translations: [
     { en: { objects: enObjects } },

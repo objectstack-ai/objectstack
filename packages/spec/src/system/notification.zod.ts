@@ -1,213 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { TemplateExpressionInputSchema } from '../shared/expression.zod';
-
-/**
- * Email Template Schema
- * 
- * Defines the structure and content of email notifications.
- * Supports variables for personalization and file attachments.
- * 
- * @example
- * ```json
- * {
- *   "id": "welcome-email",
- *   "subject": "Welcome to {{company_name}}",
- *   "body": "<h1>Welcome {{user_name}}!</h1>",
- *   "bodyType": "html",
- *   "variables": ["company_name", "user_name"],
- *   "attachments": [
- *     {
- *       "name": "guide.pdf",
- *       "url": "https://example.com/guide.pdf"
- *     }
- *   ]
- * }
- * ```
- */
 import { lazySchema } from '../shared/lazy-schema';
-export const EmailTemplateSchema = lazySchema(() => z.object({
-  /**
-   * Unique identifier for the email template
-   */
-  id: z.string().describe('Template identifier'),
-
-  /**
-   * Email subject line (supports variable interpolation)
-   */
-  subject: TemplateExpressionInputSchema.describe('Email subject — supports {{var}} interpolation'),
-
-  /**
-   * Email body content
-   */
-  body: TemplateExpressionInputSchema.describe('Email body content — supports {{var}} interpolation'),
-
-  /**
-   * Content type of the email body
-   * @default 'html'
-   */
-  bodyType: z.enum(['text', 'html', 'markdown']).optional().default('html').describe('Body content type'),
-
-  /**
-   * List of template variables for dynamic content
-   */
-  variables: z.array(z.string()).optional().describe('Template variables'),
-
-  /**
-   * File attachments to include with the email
-   */
-  attachments: z.array(z.object({
-    name: z.string().describe('Attachment filename'),
-    url: z.string().url().describe('Attachment URL'),
-  })).optional().describe('Email attachments'),
-}));
-
-/**
- * SMS Template Schema
- * 
- * Defines the structure of SMS text message notifications.
- * Includes character limits and variable support.
- * 
- * @example
- * ```json
- * {
- *   "id": "verification-sms",
- *   "message": "Your code is {{code}}",
- *   "maxLength": 160,
- *   "variables": ["code"]
- * }
- * ```
- */
-export const SMSTemplateSchema = lazySchema(() => z.object({
-  /**
-   * Unique identifier for the SMS template
-   */
-  id: z.string().describe('Template identifier'),
-
-  /**
-   * SMS message content (supports variable interpolation)
-   */
-  message: TemplateExpressionInputSchema.describe('SMS message content — supports {{var}} interpolation'),
-
-  /**
-   * Maximum character length for the SMS
-   * @default 160
-   */
-  maxLength: z.number().optional().default(160).describe('Maximum message length'),
-
-  /**
-   * List of template variables for dynamic content
-   */
-  variables: z.array(z.string()).optional().describe('Template variables'),
-}));
-
-/**
- * Push Notification Schema
- * 
- * Defines mobile and web push notification structure.
- * Supports rich notifications with actions and badges.
- * 
- * @example
- * ```json
- * {
- *   "title": "New Message",
- *   "body": "You have a new message from John",
- *   "icon": "https://example.com/icon.png",
- *   "badge": 5,
- *   "data": {"messageId": "msg_123"},
- *   "actions": [
- *     {"action": "view", "title": "View"},
- *     {"action": "dismiss", "title": "Dismiss"}
- *   ]
- * }
- * ```
- */
-export const PushNotificationSchema = lazySchema(() => z.object({
-  /**
-   * Notification title
-   */
-  title: z.string().describe('Notification title'),
-
-  /**
-   * Notification body text
-   */
-  body: TemplateExpressionInputSchema.describe('Notification body — supports {{var}} interpolation'),
-
-  /**
-   * Icon URL to display with notification
-   */
-  icon: z.string().url().optional().describe('Notification icon URL'),
-
-  /**
-   * Badge count to display on app icon
-   */
-  badge: z.number().optional().describe('Badge count'),
-
-  /**
-   * Custom data payload
-   */
-  data: z.record(z.string(), z.unknown()).optional().describe('Custom data'),
-
-  /**
-   * Action buttons for the notification
-   */
-  actions: z.array(z.object({
-    action: z.string().describe('Action identifier'),
-    title: z.string().describe('Action button title'),
-  })).optional().describe('Notification actions'),
-}));
-
-/**
- * In-App Notification Schema
- * 
- * Defines in-application notification banners and toasts.
- * Includes severity levels and auto-dismiss settings.
- * 
- * @example
- * ```json
- * {
- *   "title": "System Update",
- *   "message": "New features are now available",
- *   "type": "info",
- *   "actionUrl": "/updates",
- *   "dismissible": true,
- *   "expiresAt": 1704067200000
- * }
- * ```
- */
-export const InAppNotificationSchema = lazySchema(() => z.object({
-  /**
-   * Notification title
-   */
-  title: z.string().describe('Notification title'),
-
-  /**
-   * Notification message content
-   */
-  message: TemplateExpressionInputSchema.describe('Notification message — supports {{var}} interpolation'),
-
-  /**
-   * Notification severity type
-   */
-  type: z.enum(['info', 'success', 'warning', 'error']).describe('Notification type'),
-
-  /**
-   * Optional URL to navigate to when clicked
-   */
-  actionUrl: z.string().optional().describe('Action URL'),
-
-  /**
-   * Whether the notification can be dismissed by the user
-   * @default true
-   */
-  dismissible: z.boolean().optional().default(true).describe('User dismissible'),
-
-  /**
-   * Timestamp when notification expires (Unix milliseconds)
-   */
-  expiresAt: z.number().optional().describe('Expiration timestamp'),
-}));
 
 /**
  * Notification Channel Enum
@@ -241,13 +35,37 @@ export const NotificationChannelSchema = lazySchema(() => z.enum([
 // (single ingress, `@objectstack/spec/contracts`), the `notify` flow node
 // (`NotifyConfigSchema`, `@objectstack/spec/automation`) and the sys_*
 // notification objects. Its `./ui` twin was removed in the same change; the
-// bare name left the spec export surface entirely. The channel/template
-// vocabulary below stays: `NotificationChannel` is re-exported by
+// bare name left the spec export surface entirely.
+//
+// [#4616] `EmailTemplateSchema` / `EmailTemplate`, `SMSTemplateSchema` /
+// `SMSTemplate`, `PushNotificationSchema` / `PushNotification` and
+// `InAppNotificationSchema` / `InAppNotification` were removed from this
+// module too (ADR-0049 enforce-or-remove, v17 window). They existed ONLY as
+// the member shapes of the `NotificationConfigSchema.template` union #4610
+// deleted, so #4610 left them reachable from no parent schema and from no
+// metadata-type root — declared capability the runtime never read.
+//
+// What actually delivers, per channel, so the next reader does not re-derive
+// it (this vocabulary is where the confusion kept starting):
+//   - email  — the `email_template` metadata kind, whose ONE canonical schema
+//     is `EmailTemplateDefinitionSchema` (`system/email-template.zod.ts`,
+//     registered in `BUILTIN_METADATA_TYPE_SCHEMAS`), materialized into
+//     `sys_email_template` rows by `plugin-email`. The `EmailTemplateSchema`
+//     removed here was the *legacy* shape spec 7.1.0 explicitly demoted when
+//     it resolved that Prime Directive #8 double-declaration, keeping it
+//     "only as an inline sub-shape inside `Notification`" — the holder #4610
+//     removed.
+//   - sms    — `sys_notification_template` rows resolved by (topic, 'sms',
+//     locale) in `service-messaging/src/sms-channel.ts`, rendered by
+//     `template-renderer.ts`; the provider-side template is Aliyun's
+//     pre-registered `TemplateCode` in `service-sms` (`aliyun.ts`), a vendor
+//     API shape, not a spec constant.
+//   - push / in-app — no delivery implementation at all (#3197): the
+//     dispatcher dead-letters them. Declaring their payload shapes here
+//     advertised a capability nothing delivers.
+//
+// The channel vocabulary above stays: `NotificationChannel` is re-exported by
 // `@objectstack/spec/contracts` and consumed by `service-messaging`.
 
 // Type exports
 export type NotificationChannel = z.infer<typeof NotificationChannelSchema>;
-export type EmailTemplate = z.infer<typeof EmailTemplateSchema>;
-export type SMSTemplate = z.infer<typeof SMSTemplateSchema>;
-export type PushNotification = z.infer<typeof PushNotificationSchema>;
-export type InAppNotification = z.infer<typeof InAppNotificationSchema>;
