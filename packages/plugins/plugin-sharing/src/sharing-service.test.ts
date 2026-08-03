@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { SharingService } from './sharing-service.js';
 import { buildSharingMiddleware } from './sharing-plugin.js';
 
@@ -74,6 +75,9 @@ function makeFakeEngine(schemas: Record<string, any>) {
       return table[i];
     },
     async delete(object: string, options?: any) {
+      // [#4550] Pinned to ObjectQL.delete's own dispatch predicate — see the
+      // note in sharing-rule.test.ts for what a looser fake cost (#4434).
+      assertEngineDeleteDispatch(options);
       const table = ensure(object);
       const id = options?.where?.id ?? options?.id;
       const i = table.findIndex(r => r.id === id);

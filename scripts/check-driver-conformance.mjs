@@ -70,8 +70,26 @@
 // Every entry was measured against `main`. To clear one: write the suite, then
 // delete the entry in the same PR. Deleting without the suite fails CONSUMED;
 // keeping the entry alongside the suite fails RECONCILED.
+//
+// ## Dead scan roots are a hard error (#4930)
+//
+// Both axes of the matrix are read off disk, from two declared directories:
+// DRIVERS_DIR and CASE_SETS_DIR. `listDir` used to be
+// `try { return readdirSync(dir); } catch { return []; }`, so a root that was
+// renamed, moved or made unreadable simply produced an empty axis. DISCOVERED
+// and CLASSIFIED do catch that today — but they catch it as a *consequence*,
+// and they name the wrong cause: a renamed `packages/spec/src/data` reports five
+// separate "CASE_SETS names X, which <file> no longer exports" errors, which
+// reads as five deliberate deletions rather than one directory that moved. The
+// author's next action follows the message, so the message has to be the cause.
+//
+// Both roots are therefore resolved before anything is discovered, and a dead
+// one fails BY NAME up front. The `listDir` swallow is gone with them: an error
+// during a walk means the corpus was only partly read, and partial evidence of
+// coverage is exactly the wrong thing to resolve in coverage's favour.
+// Deliberately no whitelist and no optional-root flag — see `assertRootsResolvable`.
 
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -144,13 +162,58 @@ const LEDGER = [];
 
 // ── Discovery ───────────────────────────────────────────────────────────────
 
-const listDir = (dir) => {
-  try {
-    return readdirSync(dir);
-  } catch {
-    return [];
+/** A declared scan root that could not be resolved to a directory. Carries the names. */
+class DeadRootError extends Error {
+  constructor(dead) {
+    super(`unresolvable scan root(s): ${dead.map((d) => `${d.root} — ${d.reason}`).join('; ')}`);
+    this.name = 'DeadRootError';
+    this.dead = dead;
+    /** @type {string[]} just the root paths, for callers that only need to point. */
+    this.roots = dead.map((d) => d.root);
   }
-};
+}
+
+/**
+ * Resolve every declared scan root before discovering anything; throw naming the
+ * ones that are not directories.
+ *
+ * Deliberately no whitelist and no `optional: true` marker. `packages/plugins`,
+ * `packages/spec/src/data` and every driver's `src/` are git-tracked directories
+ * with tracked files in them, so any checkout that can run
+ * `pnpm check:driver-conformance` has all of them. An optional marker "just in
+ * case" would hand the next author a supported way to silence this failure
+ * instead of fixing the rename — the empty `catch { return []; }` again, only
+ * spelled politely. If a root ever does become legitimately absent, that is a real
+ * decision: record it with its condition and a test, don't relax the check.
+ *
+ * @throws {DeadRootError}
+ */
+function assertRootsResolvable(roots) {
+  const dead = [];
+  for (const root of roots) {
+    let st = null;
+    try {
+      st = statSync(root);
+    } catch (err) {
+      dead.push({
+        root,
+        reason: err?.code === 'ENOENT' ? 'does not exist' : `cannot be read (${err?.code ?? err})`,
+      });
+      continue;
+    }
+    if (!st.isDirectory()) dead.push({ root, reason: 'exists but is not a directory' });
+  }
+  if (dead.length) throw new DeadRootError(dead);
+}
+
+/**
+ * The entries of a directory the caller has already asserted is a scan root.
+ *
+ * No catch: an unresolvable root fails loudly in `assertRootsResolvable`, and an
+ * error here means the axis was only partly read — which must not resolve in
+ * coverage's favour (#4930).
+ */
+const listDir = (dir) => readdirSync(dir);
 
 /** Driver packages, from disk — never a hardcoded list. */
 function discoverDrivers() {
@@ -201,18 +264,26 @@ function discoverCaseSets() {
   return found;
 }
 
-/** Every `.ts` file under a directory, recursively. */
+/**
+ * Every `.ts` file under a directory, recursively.
+ *
+ * A driver's `src/` is a scan root like the other two: "this driver does not run
+ * the shared cases" must mean the files were read and the marker was absent, never
+ * that the directory could not be opened. So it is asserted, and nothing in the
+ * walk is swallowed (#4930).
+ */
 function walkTs(dir, out = []) {
-  for (const entry of listDir(dir)) {
+  assertRootsResolvable([dir]);
+  walkTsInto(dir, out);
+  return out;
+}
+
+function walkTsInto(dir, out) {
+  for (const entry of readdirSync(dir)) {
     if (entry === 'node_modules' || entry === 'dist') continue;
     const full = join(dir, entry);
-    let s;
-    try {
-      s = statSync(full);
-    } catch {
-      continue;
-    }
-    if (s.isDirectory()) walkTs(full, out);
+    const s = statSync(full);
+    if (s.isDirectory()) walkTsInto(full, out);
     else if (entry.endsWith('.ts')) out.push(full);
   }
   return out;
@@ -243,6 +314,11 @@ function consumes(driverDir, marker) {
 // ── The run ─────────────────────────────────────────────────────────────────
 
 function audit() {
+  // Both axes come off disk, so both roots must resolve before a single cell of
+  // the matrix is believed. Throws DeadRootError — `report()` turns it into a red
+  // that names the directory rather than the five downstream symptoms (#4930).
+  assertRootsResolvable([DRIVERS_DIR, CASE_SETS_DIR]);
+
   const drivers = discoverDrivers();
   const errors = [];
   const rows = [];
@@ -311,8 +387,30 @@ function audit() {
   return { drivers, rows, errors };
 }
 
+function reportDeadRoots(err) {
+  console.error('\n  x check-driver-conformance: declared scan root(s) do not resolve, so the matrix would\n' +
+    '    have been built from an axis nothing could read:\n');
+  for (const d of err.dead) console.error(`    ${d.root.startsWith(ROOT) ? d.root.slice(ROOT.length + 1) : d.root} — ${d.reason}`);
+  console.error(
+    '\n  DRIVERS_DIR and CASE_SETS_DIR (scripts/check-driver-conformance.mjs) must both be' +
+    '\n  directories in the checkout. If one was renamed or moved, point the constant at it; if it' +
+    '\n  was deleted, that is a deliberate decision to record. Do NOT restore a tolerant skip: this' +
+    '\n  used to be `catch { return []; }`, and a dead root produced an empty axis whose downstream' +
+    '\n  errors named the wrong cause (#4930).\n',
+  );
+}
+
 function report() {
-  const { drivers, rows, errors } = audit();
+  let audited;
+  try {
+    audited = audit();
+  } catch (err) {
+    if (!(err instanceof DeadRootError)) throw err;
+    reportDeadRoots(err);
+    process.exit(1);
+    return;
+  }
+  const { drivers, rows, errors } = audited;
 
   const covered = rows.filter((r) => r.state === 'covered').length;
   const debt = rows.filter((r) => r.state === 'debt').length;
@@ -410,12 +508,68 @@ function selfTest() {
   expect('a discovery that found something is not', discoveredErrors(['driver-anything']).length === 0);
   expect('discovers driver packages from disk', discoverDrivers().length > 0);
 
+  // --- Reverse proof for the dead-root hard error (#4930), made permanent. ---
+  // Everything above ran over roots that resolve, which proves nothing about a
+  // gate whose failure mode is discovering an empty axis. So break a root the way
+  // a rename breaks it, require red naming that root and not the survivor, then
+  // restore it and require green again. Red-then-green, in the same run, every run.
+  const tmpRoots = join(ROOT, 'node_modules', '.check-driver-conformance-selftest-roots');
+  try {
+    mkdirSync(join(tmpRoots, 'live'), { recursive: true });
+    const missing = join(tmpRoots, 'renamed-away');
+    let deadErr = null;
+    try { assertRootsResolvable([join(tmpRoots, 'live'), missing]); } catch (err) { deadErr = err; }
+    expect('a renamed scan root throws instead of yielding an empty axis', deadErr instanceof DeadRootError);
+    expect('the failure names the dead root', deadErr?.roots?.join(',') === missing);
+    expect('the failure does not blame the surviving root', !/live/.test(deadErr?.message ?? ''));
+    expect('the failure says why', deadErr?.dead?.[0]?.reason === 'does not exist');
+
+    // A root that exists but is not a directory is dead in the same way: the old
+    // `catch { return []; }` swallowed its ENOTDIR exactly as it swallowed ENOENT.
+    const asFile = join(tmpRoots, 'a-file');
+    writeFileSync(asFile, 'not a directory');
+    let notDirErr = null;
+    try { assertRootsResolvable([asFile]); } catch (err) { notDirErr = err; }
+    expect('a scan root that is a file is dead too',
+      notDirErr?.dead?.[0]?.reason === 'exists but is not a directory');
+
+    // An entry the walk cannot stat inside a driver's src/ is the same defect one
+    // level in: `catch { continue; }` used to drop it, and a dropped file that
+    // held the marker reads as "this driver does not run the case-set".
+    mkdirSync(join(tmpRoots, 'pkg', 'src'), { recursive: true });
+    writeFileSync(join(tmpRoots, 'pkg', 'src', 'a.ts'), 'export const a = 1;\n');
+    expect('a readable src/ walks clean', walkTs(join(tmpRoots, 'pkg', 'src')).length === 1);
+    symlinkSync(join(tmpRoots, 'no-such-target'), join(tmpRoots, 'pkg', 'src', 'dangling'));
+    let partialErr = null;
+    try { walkTs(join(tmpRoots, 'pkg', 'src')); } catch (err) { partialErr = err; }
+    expect('an entry the walk cannot stat is an error, not a smaller corpus', partialErr?.code === 'ENOENT');
+    rmSync(join(tmpRoots, 'pkg', 'src', 'dangling'));
+
+    // ...and roots that resolve are green, so the reds above were caused by the
+    // broken roots and nothing else.
+    let restored = null;
+    try { assertRootsResolvable([join(tmpRoots, 'live'), join(tmpRoots, 'pkg', 'src')]); } catch (err) { restored = err; }
+    expect('roots that resolve raise nothing', restored === null);
+    expect('restoring the tree makes the walk green again', walkTs(join(tmpRoots, 'pkg', 'src')).length === 1);
+
+    // The real roots this gate runs against resolve — the assertion is wired in,
+    // not merely defined.
+    let realErr = null;
+    try { assertRootsResolvable([DRIVERS_DIR, CASE_SETS_DIR]); } catch (err) { realErr = err; }
+    expect('the real DRIVERS_DIR and CASE_SETS_DIR both resolve', realErr === null);
+  } finally {
+    rmSync(tmpRoots, { recursive: true, force: true });
+  }
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-driver-conformance --self-test: ${failures.length} failure(s).\n`);
     process.exit(1);
   }
-  console.log('OK  self-test: detects driven / unused / re-declared fixtures, and discovers both axes.');
+  console.log(
+    'OK  self-test: detects driven / unused / re-declared fixtures, discovers both axes, and holds the '
+      + 'dead-root hard error (red when a scan root is renamed, green when restored).',
+  );
 }
 
 if (process.argv.includes('--self-test')) selfTest();

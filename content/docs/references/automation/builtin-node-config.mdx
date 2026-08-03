@@ -55,9 +55,45 @@ parse the RAW stored config — their typed slots are strings (or `unknown`
 
 where values interpolate), so `\{token\}` templates pass and resolve at the
 
-executor's existing interpolation points. Unknown keys are rejected earlier,
+executor's existing interpolation points.
 
-at `registerFlow()` (the tightened #4059 check); the parse here strips them.
+## Unknown keys — closed here too, as of #4001 批 9
+
+These contracts used to say "unknown keys are rejected earlier, at
+
+`registerFlow()` (the tightened #4059 check); the parse here strips them."
+
+The registration walk is still the first and more informative door — it
+
+descends NESTED config against the descriptor's JSON Schema, which is how it
+
+catches `fields[0].visibleIf` (#3528) and not just top-level typos — but
+
+"some other door is closed" is the exact reasoning #4001 exists to retire:
+
+the sibling of every guard in this campaign turned out to leave the other
+
+doors open, because its author was fixing one bug rather than auditing a
+
+surface. A config reaching `parse()` without passing registration (tooling
+
+that parses a contract directly, a host composing the engine itself) is no
+
+longer silently trimmed.
+
+The two doors are kept in agreement by `builtin-node-form-zod-ledger.test.ts`,
+
+which reconciles these key sets against the descriptors' in both directions.
+
+The per-key prescriptions below are the same curation the registration
+
+rejection carries in `FLOW_NODE_UNKNOWN_KEY_GUIDANCE` — the campaign's
+
+finding is that a bespoke guard's detection generalizes for free the moment
+
+a default flips, while its PROSE does not, so the prose is copied to the new
+
+door rather than left behind at the old one.
 
 Deliberately absent:
 

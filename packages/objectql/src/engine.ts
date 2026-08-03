@@ -86,6 +86,11 @@ import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, Validat
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
+import {
+  resolveEngineDeleteDispatch,
+  ENGINE_DELETE_REJECT_MESSAGE,
+  type EngineDeleteDispatchInput,
+} from './engine-delete-dispatch.js';
 import { applyHaving } from './having-filter.js';
 import {
   auditDanglingReferences,
@@ -5059,14 +5064,14 @@ export class ObjectQL implements IObjectQLEngine {
     // literally (driver.delete(object, {$in:[…]})) and both skip the #2982 AST
     // seeding below AND bypass the by-id RLS pre-image check. Leave `id`
     // undefined so the call routes to deleteMany with the scoped AST.
-    let id: any = undefined;
-    if (options?.where && typeof options.where === 'object' && 'id' in options.where) {
-        const whereId = (options.where as Record<string, unknown>).id;
-        const t = typeof whereId;
-        if (whereId !== null && (t === 'string' || t === 'number' || t === 'bigint')) {
-            id = whereId;
-        }
-    }
+    //
+    // [#4550] The decision lives in `engine-delete-dispatch.ts` so the fake
+    // engines that stand in for this method import it instead of re-deriving
+    // it. #4434 shipped a dead REST route green because plugin-sharing's fake
+    // accepted the one shape the `reject` branch below refuses; a double that
+    // reads THIS predicate cannot be looser than this method.
+    const dispatch = resolveEngineDeleteDispatch(options as EngineDeleteDispatchInput | undefined);
+    const id: any = dispatch.kind === 'by-id' ? dispatch.id : undefined;
 
     const opCtx: OperationContext = {
       object,
@@ -5134,7 +5139,10 @@ export class ObjectQL implements IObjectQLEngine {
                result = await driver.deleteMany(object, ast, hookContext.input.options as any);
                isPredicateWrite = true;
           } else {
-               throw new Error('Delete requires an ID or options.multi=true');
+               // The `reject` verdict of resolveEngineDeleteDispatch, re-asked
+               // here because a beforeDelete hook may have cleared the id since
+               // (#4550 keeps the wording in one place either way).
+               throw new Error(ENGINE_DELETE_REJECT_MESSAGE);
           }
 
           hookContext.event = 'afterDelete';

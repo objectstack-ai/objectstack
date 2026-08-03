@@ -74,11 +74,109 @@
  * `flow` spelling graduated into the ADR-0087 D2 conversion
  * `flow-node-subflow-flow-alias` (the `map.flow` path), so the executor only
  * ever sees `flowName`.
+ *
+ * ## Unknown keys — closed as of #4001 批 9, and this class had NO other door
+ *
+ * The descriptor-schema'd builtins have a registration-time key gate:
+ * `registerFlow()` walks each node's `config` against the descriptor's
+ * `configSchema` and hard-rejects what it does not declare (#4277). **These
+ * three node types are exempt from that walk** — by construction, since it
+ * derives the declared set from a `configSchema` they publish none of
+ * (`validateNodeConfigKeys`' schemaless exemption). So until now the entire
+ * `script` / `subflow` / `decision` config surface had exactly zero unknown-key
+ * enforcement at any layer: the execute-time parse #4343 added checks types and
+ * requiredness, and Zod's default `.strip` deleted everything else in silence.
+ *
+ * That is the #4001 asymmetry in its purest form — a guard was written for the
+ * door in front of its author, and the class it structurally could not cover is
+ * precisely the class with no second door. Closing these shapes is therefore
+ * not a duplicate check for `script` and `subflow`; it is their first one.
+ *
+ * `decision` is still export-only, so its strictness binds at authoring
+ * (`tsc`), in the published JSON Schema, and in objectui's reconciliation —
+ * not at run time. It is closed anyway, because the campaign's whole finding
+ * is that a shape left open accretes a test, a form and a fixture that assert
+ * the openness, and then closing it is a migration instead of an edit.
  */
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
+import { strictObject } from '../shared/strict-object';
+
+/**
+ * What a rejected key on these contracts silently did before #4001 批 9 — and
+ * for `script` / `subflow` / `decision`, what NOTHING else was catching.
+ */
+const SCHEMALESS_NODE_CONFIG_HISTORY =
+  'Until #4001 an undeclared key here was dropped in silence at every layer: these node types publish no '
+  + "descriptor `configSchema`, so `registerFlow()`'s undeclared-key rejection (#4277) structurally skips them, "
+  + 'and the execute-time parse checked only types and requiredness.';
+
+/**
+ * `script` prescriptions for the two ADR-0087 D2 aliases (#3796).
+ *
+ * `functionName` and `input` are retired SPELLINGS that
+ * `flow-node-script-config-aliases` rewrites at load, so — like the notify
+ * family — a config still carrying one at parse time carries the canonical key
+ * too (`renameConfigKey` leaves a shadowed alias alone). `input` earns its
+ * entry twice over: edit distance would suggest `inputs` without ever saying
+ * that `input` is *canonical* on `connector_action`'s `connectorConfig`, which
+ * is where the spelling leaked in from and where it must NOT be changed.
+ *
+ * The five `actionType`-branch keys need no entry here: `retiredKey()` puts the
+ * prescription in the shape itself, which is strictly stronger (it also types
+ * them `never`), and `strictObject` already keeps such keys out of the
+ * did-you-mean candidate list.
+ */
+const SCRIPT_KEY_GUIDANCE: Readonly<Record<string, string>> = {
+  functionName:
+    'The callable reference is `function` (#1870). `functionName` was the AI/template-emitted alias, rewritten at '
+    + 'load by the ADR-0087 D2 conversion `flow-node-script-config-aliases`; if `function` is already present the '
+    + 'conversion left `functionName` behind as a dead twin — delete it.',
+  input:
+    'The input map on a `script` node is `inputs` (plural). The singular `input` leaked in from '
+    + "`connector_action`, where `connectorConfig.input` is a DIFFERENT and canonical surface — do not \"fix\" that "
+    + 'one. `flow-node-script-config-aliases` rewrites this key at load; delete it once `inputs` carries the values.',
+};
+
+/** `subflow` prescriptions — one retired spelling, one wrong layer. */
+const SUBFLOW_KEY_GUIDANCE: Readonly<Record<string, string>> = {
+  flow:
+    'The invoked flow is named by `flowName`. `flow` was an undeclared executor fallback that no schema or form '
+    + 'ever described; it graduated into the ADR-0087 D2 conversion `flow-node-subflow-flow-alias` (#4278), which '
+    + 'rewrites it at load — so a surviving `flow` means `flowName` already won and this key is dead. Delete it.',
+  timeoutMs:
+    "A subflow step's timeout is the engine's per-node guard, so it belongs on the NODE, not in its config: "
+    + '`{ id, type: "subflow", timeoutMs: 30000, config: { … } }`. `FlowNodeSchema.timeoutMs` is the declared key.',
+};
+
+/**
+ * `decision` prescriptions for the legacy singular `config.condition` (#4414).
+ *
+ * This is the entry that could not be left to edit distance. `condition` →
+ * `conditions` is one character, so the suggester would confidently propose it
+ * — and taking that advice is the *worse* outcome: a decision that declares
+ * `conditions` here **and** carries per-edge `condition`s picks a branch and
+ * then lets that branch's edge re-decide, which is the double-declaration
+ * behind #4414 itself. Finding 7's shape ("this campaign's own helper
+ * signposting the way into the failure it exists to kill") applies exactly, so
+ * the rename is suppressed and the mechanism is named instead.
+ *
+ * The claim is measured, not assumed: `config.condition` is READ only on a
+ * `start` node (the trigger gate) and is inert on all nineteen other builtins —
+ * that is what `lint-flow-patterns`' `flow-inert-node-condition` advisory
+ * already says, and this table is where the same prose becomes a rejection.
+ */
+const DECISION_KEY_GUIDANCE: Readonly<Record<string, string>> = {
+  condition:
+    'Nothing reads `config.condition` on a `decision`: the key is the trigger gate on a `start` node and is inert '
+    + 'on every other node type (#4414), so a predicate written here never gates anything — it is still '
+    + 'parse-validated at registration, which is why a malformed one is caught and an INERT one was not. Branching '
+    + 'lives on the OUT-EDGES: give each branch its own `condition` and mark the fallback `isDefault: true`. Do not '
+    + 'reach for the plural `conditions` here on the strength of the spelling — declaring branches here AND on the '
+    + 'edges is the double-declaration #4414 was filed for. If the edges already carry the predicate, delete this key.',
+};
 
 // ─── script ──────────────────────────────────────────────────────────
 
@@ -119,7 +217,11 @@ import { retiredKey } from '../shared/retired-key';
  * `flow-node-script-branch-keys-removed` rewrites stored sources (moving a
  * shorthand `actionType` into `function`, where that is what it meant).
  */
-export const ScriptConfigSchema = lazySchema(() => z.object({
+export const ScriptConfigSchema = lazySchema(() => strictObject({
+  surface: 'this script node config',
+  history: SCHEMALESS_NODE_CONFIG_HISTORY,
+  guidance: SCRIPT_KEY_GUIDANCE,
+}, {
   /**
    * Registered function to call (`defineStack({ functions })`) — required: it
    * is the whole of what a `script` node does.
@@ -198,7 +300,11 @@ export type ScriptConfigParsed = z.infer<typeof ScriptConfigSchema>;
  * `flowName`. The node-level `timeoutMs` lives on {@link FlowNodeSchema}, not
  * here — a subflow step's timeout is the engine's per-node guard.
  */
-export const SubflowConfigSchema = lazySchema(() => z.object({
+export const SubflowConfigSchema = lazySchema(() => strictObject({
+  surface: 'this subflow node config',
+  history: SCHEMALESS_NODE_CONFIG_HISTORY,
+  guidance: SUBFLOW_KEY_GUIDANCE,
+}, {
   /** The flow to invoke (execute-time required). */
   flowName: z.string().min(1).describe('Flow invoked as this step (it may pause — approval / screen / wait)'),
   /** Values passed to the child's input variables; `{token}` templates resolve against the parent's variables. */
@@ -231,7 +337,24 @@ export type SubflowConfigParsed = z.infer<typeof SubflowConfigSchema>;
  * (objectui `flow-decision-edges`), never stored on the branch, so it is
  * deliberately absent here.
  */
-export const DecisionConditionSchema = lazySchema(() => z.object({
+export const DecisionConditionSchema = lazySchema(() => strictObject({
+  surface: 'this decision branch',
+  history: SCHEMALESS_NODE_CONFIG_HISTORY,
+  // `condition` is the EDGE's spelling of the same intent one layer out
+  // (`FlowEdgeSchema` declares it, and already aliases `expression`/`when`/
+  // `guard` TO it). The two surfaces spell one concept with two words, so the
+  // confusion is symmetric and the mirror alias belongs here — this is the
+  // `visibleWhen → visible` category, not a typo edit distance would reach.
+  aliases: { condition: 'expression' },
+  guidance: {
+    target:
+      'The designer\'s branch rows show a **Target** column, but it is VIRTUAL — objectui\'s `flow-decision-edges` '
+      + "projects it from the node's out-edges and applies edits back to them; it is never stored on the branch. "
+      + "Route by making this branch's `label` match an out-edge's `label` exactly (a label nothing claims cannot "
+      + 'route: traversal falls back to considering every out-edge, and `os validate` reports it as '
+      + '`flow-branch-label-unmatched`, #4414).',
+  },
+}, {
   /** Branch label — must match an out-edge's `label` to route anywhere. */
   label: z.string().describe("Branch label; the winning branch resumes down the out-edge with this label (no match → the out-edge marked isDefault, or one labelled 'default')"),
   /**
@@ -271,7 +394,11 @@ export type DecisionCondition = z.input<typeof DecisionConditionSchema>;
  * parse-validates on every node at registration but the decision executor never
  * reads; branching predicates live in `conditions[]` or on the edges.
  */
-export const DecisionConfigSchema = lazySchema(() => z.object({
+export const DecisionConfigSchema = lazySchema(() => strictObject({
+  surface: 'this decision node config',
+  history: SCHEMALESS_NODE_CONFIG_HISTORY,
+  guidance: DECISION_KEY_GUIDANCE,
+}, {
   /** Ordered branches; first true expression wins, else the declared default edge. */
   conditions: z.array(DecisionConditionSchema).optional()
     .describe('Ordered decision branches (first true expression wins; omit to branch purely on edge conditions)'),

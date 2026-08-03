@@ -119,9 +119,33 @@
  * it at a checkout of a pre-fix commit and the gate must REPORT; point it at
  * `main` and it must be clean. A gate that has only ever been green is
  * indistinguishable from a gate that matches nothing (#4690).
+ *
+ * ## Dead scan roots are a hard error (#4930)
+ *
+ * This audit's verdict — "none recording a verdict the boot can contradict" —
+ * is drawn from having read every `.ts` under the scan root. `collectSourceFiles`
+ * used to open with `try { entries = readdirSync(dir); } catch { return out; }`,
+ * so an unreadable directory contributed zero files and the walk carried on. At
+ * the root that was caught downstream (`files.length === 0` refuses to report
+ * success), but one level in it was not: a subdirectory that cannot be read
+ * silently shrinks the corpus while `files.length` stays comfortably non-zero,
+ * and the gate prints a green line over a scan that never opened part of its
+ * subject. That is the shape this script's own header spends a screen warning
+ * about, turned on the script itself.
+ *
+ * So the scan root is now resolved up front by `assertRootsResolvable`, which
+ * fails BY NAME and distinguishes "does not exist" from "exists but is not a
+ * directory" (the old `existsSync` accepted a file and then blamed the empty
+ * result), and the walk carries no catch at all: an error during it means the
+ * corpus was only partly read, which must not be reported as a clean audit.
+ * Deliberately no optional-root flag — see `assertRootsResolvable`.
  */
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import {
+    existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync,
+    writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative, sep, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -214,22 +238,63 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', 'c
 
 // ── Generic AST helpers ──────────────────────────────────────────────────────
 
-function collectSourceFiles(dir, out = []) {
-    let entries;
-    try {
-        entries = readdirSync(dir);
-    } catch {
-        return out;
+/** A declared scan root that could not be resolved to a directory. Carries the names. */
+class DeadRootError extends Error {
+    constructor(dead) {
+        super(`unresolvable scan root(s): ${dead.map((d) => `${d.root} — ${d.reason}`).join('; ')}`);
+        this.name = 'DeadRootError';
+        this.dead = dead;
+        /** @type {string[]} just the root paths, for callers that only need to point. */
+        this.roots = dead.map((d) => d.root);
     }
-    for (const entry of entries) {
-        if (SKIP_DIRS.has(entry)) continue;
-        const full = join(dir, entry);
-        let st;
+}
+
+/**
+ * Resolve every declared scan root before reading anything; throw naming the ones
+ * that are not directories.
+ *
+ * Deliberately no whitelist and no `optional: true` marker. The scan root is a
+ * git-tracked directory (or a path the operator passed to `--packages-dir` and is
+ * therefore asserting exists); no checkout that can run this gate is legitimately
+ * missing it. An optional marker "just in case" would hand the next author a
+ * supported way to silence this failure instead of fixing the rename — which is
+ * the empty `catch {}` again, only spelled politely. If a root ever does become
+ * legitimately absent, that is a real decision: record it with its condition and a
+ * test, don't relax the check.
+ *
+ * @throws {DeadRootError}
+ */
+function assertRootsResolvable(roots) {
+    const dead = [];
+    for (const root of roots) {
+        let st = null;
         try {
-            st = statSync(full);
-        } catch {
+            st = statSync(root);
+        } catch (err) {
+            dead.push({
+                root,
+                reason: err?.code === 'ENOENT' ? 'does not exist' : `cannot be read (${err?.code ?? err})`,
+            });
             continue;
         }
+        if (!st.isDirectory()) dead.push({ root, reason: 'exists but is not a directory' });
+    }
+    if (dead.length) throw new DeadRootError(dead);
+}
+
+/**
+ * Every auditable `.ts` file under `dir`, recursively.
+ *
+ * Nothing here is wrapped in a catch: an unresolvable root fails loudly in
+ * `assertRootsResolvable`, and an error *inside* the walk (a vanished file, a
+ * permission fault) means the corpus was only partly read — which must not be
+ * reported as a clean audit either (#4930).
+ */
+function collectSourceFiles(dir, out = []) {
+    for (const entry of readdirSync(dir)) {
+        if (SKIP_DIRS.has(entry)) continue;
+        const full = join(dir, entry);
+        const st = statSync(full);
         if (st.isDirectory()) {
             collectSourceFiles(full, out);
         } else if (
@@ -839,11 +904,28 @@ function baselineKey(f) {
 function run({ list = false, packagesDir } = {}) {
     const scanRoot = packagesDir ? resolve(packagesDir) : join(ROOT, 'packages');
     const relBase = packagesDir ? resolve(packagesDir, '..') : ROOT;
-    if (!existsSync(scanRoot)) {
-        console.error(`✗ startup-registry-verdict: nothing to scan — ${scanRoot} does not exist.`);
+    // The scan root must resolve BEFORE anything is concluded from the scan. The
+    // old guard was `existsSync`, which accepts a file: the run then fell through
+    // to `files.length === 0` and blamed an empty corpus for what is really a dead
+    // root, naming the wrong cause on the one line the operator reads (#4930).
+    let files;
+    try {
+        assertRootsResolvable([scanRoot]);
+        files = collectSourceFiles(scanRoot);
+    } catch (err) {
+        if (!(err instanceof DeadRootError)) throw err;
+        console.error('\n✗ startup-registry-verdict: the scan root does not resolve, so the audit would have\n' +
+            '  reported a verdict over a corpus it never opened:\n');
+        for (const d of err.dead) console.error(`  ${d.root} — ${d.reason}`);
+        console.error(
+            '\nThis check scans the workspace `packages/` tree (override with --packages-dir <p>). If the' +
+            '\ndirectory was renamed or moved, point the check at it; if it was deleted, that is a' +
+            '\ndeliberate decision to record. Do NOT restore a tolerant skip: the walk used to open with' +
+            '\n`catch { return out; }`, which turned an unreadable directory into a silently smaller' +
+            '\ncorpus (#4930).\n',
+        );
         return 1;
     }
-    const files = collectSourceFiles(scanRoot);
     if (files.length === 0) {
         // "Absence must be loud" — a scan that found no input must never exit 0
         // and read as a pass (#4690).
@@ -1277,11 +1359,78 @@ function selfTest() {
             console.log(`  ✓ ${c.name}`);
         }
     }
+    // --- Reverse proof for the dead-root hard error (#4930), made permanent. ---
+    // Every case above ran green over source text held in memory, which says
+    // nothing about whether the scan can reach the source text on disk. The defect
+    // fixed here is an audit that reports a clean verdict *because* it could not
+    // open (part of) its root. So drive the real walker over a real temporary
+    // tree: require green, break the root the way a rename breaks it, require red
+    // naming that root, then restore it and require the same green again.
+    const expectRoot = (label, got, want) => {
+        if (got !== want) {
+            failures++;
+            console.error(`  ✗ ${label}: expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`);
+        } else {
+            console.log(`  ✓ ${label}`);
+        }
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'check-startup-registry-verdict-selftest-'));
+    try {
+        mkdirSync(join(dir, 'packages', 'a', 'src'), { recursive: true });
+        mkdirSync(join(dir, 'packages', 'b', 'src'), { recursive: true });
+        writeFileSync(join(dir, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+        writeFileSync(join(dir, 'packages', 'a', 'src', 'x.test.ts'), 'export const t = 1;\n');
+        writeFileSync(join(dir, 'packages', 'b', 'src', 'y.ts'), 'export const y = 2;\n');
+        const scanRoot = join(dir, 'packages');
+
+        expectRoot('the walker reads both packages and skips the test file',
+            collectSourceFiles(scanRoot).length, 2);
+
+        // A root that is renamed away must fail by name, not scan zero files.
+        const renamed = join(dir, 'packages-renamed-by-self-test');
+        renameSync(scanRoot, renamed);
+        let deadErr = null;
+        try { assertRootsResolvable([scanRoot]); } catch (err) { deadErr = err; }
+        expectRoot('a renamed scan root throws instead of quietly scanning nothing',
+            deadErr instanceof DeadRootError, true);
+        expectRoot('the failure names the dead root', deadErr?.roots?.join(',') ?? '<none>', scanRoot);
+        expectRoot('the failure says why', deadErr?.dead?.[0]?.reason ?? '<none>', 'does not exist');
+
+        // A root that exists but is not a directory is dead in the same way — and
+        // is exactly what the old `existsSync` guard waved through.
+        writeFileSync(scanRoot, 'not a directory');
+        let notDirErr = null;
+        try { assertRootsResolvable([scanRoot]); } catch (err) { notDirErr = err; }
+        expectRoot('a scan root that is a file is dead too',
+            notDirErr?.dead?.[0]?.reason ?? '<none>', 'exists but is not a directory');
+        expectRoot('...and existsSync alone would have accepted it', existsSync(scanRoot), true);
+
+        // An entry the walk cannot stat INSIDE the root is the same defect one
+        // level in: `catch { continue; }` used to shrink the corpus while
+        // `files.length` stayed comfortably non-zero, so the loud empty-corpus
+        // guard never fired and the audit reported a clean verdict over a subject
+        // it had only partly read. A dangling symlink is that case, deterministically.
+        rmSync(scanRoot);
+        renameSync(renamed, scanRoot);
+        symlinkSync(join(dir, 'no-such-target'), join(scanRoot, 'c'));
+        let partialErr = null;
+        try { collectSourceFiles(scanRoot); } catch (err) { partialErr = err; }
+        expectRoot('an entry the walk cannot stat is an error, not a smaller corpus',
+            partialErr?.code, 'ENOENT');
+
+        // ...and restoring the tree restores the green, so the reds above were
+        // caused by the broken roots and nothing else.
+        rmSync(join(scanRoot, 'c'));
+        expectRoot('restoring the tree makes the walk green again', collectSourceFiles(scanRoot).length, 2);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+
     if (failures > 0) {
         console.error(`\n✗ self-test: ${failures} case(s) failed\n`);
         return 1;
     }
-    console.log(`\n✓ self-test: ${cases.length} case(s) passed\n`);
+    console.log(`\n✓ self-test: ${cases.length} analysis case(s) + the dead-root hard error (red when the scan root is renamed, green when restored) all passed\n`);
     return 0;
 }
 

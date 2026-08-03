@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
 
 /**
  * Protocol-level coverage for the per-item draft / publish / rollback /
@@ -133,6 +134,10 @@ function makeStubEngine() {
             return { id: found.row.id };
         },
         async delete(_t: string, opts: { where: Record<string, unknown> }) {
+            // [#4550] Pinned to ObjectQL.delete's OWN dispatch predicate. A double
+            // looser than the engine it stands in for is how #4434 shipped a REST
+            // route that answered 500 to every caller with its suite green.
+            assertEngineDeleteDispatch(opts);
             const found = findRow(opts.where);
             if (!found) return { deleted: 0 };
             rows.delete(found.key);

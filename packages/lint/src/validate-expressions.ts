@@ -28,6 +28,7 @@ import { collectFlowGraphs, resolveFlowNodeExpressions } from '@objectstack/spec
 import type { FlowNodeParsed } from '@objectstack/spec/automation';
 
 import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
+import type { NullGuardOutcome } from './validate-null-guards.js';
 
 export interface ExprIssue {
   where: string;
@@ -192,21 +193,30 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   const nullableIndex = buildNullableFieldIndex(objects);
 
   /**
-   * The #4763 null-guard gate. Scoped to the surfaces whose predicates are
-   * EVALUATED by CEL over a record made total for every declared field —
-   * validation rules (`rule-validator.ts`, fail-closed since #4649/#4761) and
-   * lifecycle hook `condition`s. Deliberately NOT applied to sharing-rule
-   * conditions (compiled to a SQL filter, where `NULL > x` is three-valued and
-   * never faults), flow conditions (flattened scope: a bare identifier may be a
-   * flow variable, not a field), or `Field.formula` expressions (whose blessed
-   * `guard ? value : null` shape has its own #3306 handling). Those surfaces are
-   * tracked separately rather than half-covered.
+   * The #4763 null-guard gate. Wired to exactly those surfaces whose predicates
+   * CEL evaluates over a record made **total** for every declared field
+   * (`materializeDeclaredFields`, #1871/#4649) — today: object validation rules
+   * (`rule-validator.ts`, fail-closed since #4761), lifecycle hook `condition`s,
+   * and field `requiredWhen` (#4811).
+   *
+   * Totality is the whole criterion, not a detail: on a total binding `has()` is
+   * uniformly true and `!= null` is the fix, while on a SPARSE one `has()` is a
+   * genuine guard and `!= null` faults with `No such key` — so pointing this gate
+   * at a sparse-bound surface would reject correct metadata and prescribe a fix
+   * that breaks it. `validate-null-guards.ts` carries the measured evidence table
+   * and the per-surface ledger (action predicates, flow conditions, field
+   * `readonlyWhen`, sharing rules and `Field.formula` are each excluded there with
+   * a traced reason). Read it before extending this call.
    */
   const checkNullGuards = (
     where: string,
     subject: string,
     raw: unknown,
     objectName: string | undefined,
+    // What THIS surface's runtime does once the predicate aborts. Passed
+    // explicitly rather than inferred, because the two possibilities are
+    // opposite failures and the message has to name the right one (#4811).
+    outcome: NullGuardOutcome = 'fail-closed',
   ): void => {
     if (!objectName) return;
     const nullableFields = nullableIndex.get(objectName);
@@ -216,7 +226,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     for (const finding of findUnguardedNullableOperands(source, { nullableFields })) {
       issues.push({
         where,
-        message: nullGuardMessage(subject, objectName, finding),
+        message: nullGuardMessage(subject, objectName, finding, outcome),
         source,
         severity: 'error',
       });
@@ -342,6 +352,28 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       for (const edge of graph.edges as unknown as AnyRec[]) {
         check(`${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition, objectName);
       }
+      // No `checkNullGuards` on node/edge conditions — and NOT for the reason
+      // #4811 first recorded (#4811 re-measured it). The stated blocker was the
+      // flattened scope: a bare identifier like `budget > 100000` might be a flow
+      // variable rather than a field. That is true of a bare-identifier checker,
+      // but this gate never resolves a bare identifier — it matches only
+      // `record.<f>` / `previous.<f>`, and the engine binds both roots
+      // unconditionally, so it is immune to that ambiguity.
+      //
+      // The real blocker is totality. `record-change-trigger.ts` seeds the flow's
+      // record as `{ ...inputDoc, ...after }` with no `materializeDeclaredFields`,
+      // so a declared column the write never mentioned is an ABSENT key, not a
+      // null one — and there `record.x != null` faults (`No such key`) exactly
+      // like the comparison it was meant to guard. The gate's prescription is
+      // unsound on this surface until the trigger's record is made total the way
+      // #4649 made the validation-rule and hook bindings total.
+      //
+      // (For the record, the flattened-scope ambiguity is separately real and
+      // would need its own criterion: flow inputs shadow record fields —
+      // `if (!variables.has(k))` in `AutomationEngine.execute` — and a node's
+      // `outputVariable` can overwrite either, so a sound bare-identifier pass
+      // must subtract flow inputs, every `outputVariable`, screen-collected
+      // variable names and node ids.)
     }
   }
 
@@ -364,30 +396,78 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     }
     // Field-level formulas (computed fields) reference the same object.
     const fields = obj.fields;
-    const fieldList = Array.isArray(fields)
+    // Paired with the field's NAME. `fields` has two authored shapes and the
+    // name lives in a different place in each: it is `f.name` in the array
+    // shape and the KEY in the name-keyed map shape. Walking `Object.values`
+    // dropped that key, so every diagnostic on a map-shaped object — the shape
+    // `Field.text({…})` authoring produces, i.e. the common one — was located
+    // at `field '?'` (#4811). Harmless-looking while the name only appeared in
+    // `where`; not harmless once a message has to tell the author which field
+    // to edit. Array entries keep their previous fallback so a nameless one is
+    // still validated rather than silently skipped.
+    const fieldList: Array<[string, AnyRec]> = Array.isArray(fields)
       ? (fields as AnyRec[])
-      : (fields && typeof fields === 'object' ? Object.values(fields as AnyRec) as AnyRec[] : []);
+          .filter((f) => !!f && typeof f === 'object')
+          .map((f) => [typeof f.name === 'string' ? f.name : '?', f] as [string, AnyRec])
+      : (fields && typeof fields === 'object'
+          ? Object.entries(fields as AnyRec)
+              .filter(([, def]) => !!def && typeof def === 'object')
+              .map(([n, def]) => [n, def as AnyRec] as [string, AnyRec])
+          : []);
 
     // (ADR-0062 D7's `field.columnName`-on-external-objects rejection was removed
     // with `field.columnName` itself in #2377: the field no longer exists, so there
     // is no dual-source ambiguity to guard — external column mapping is `external.columnMap`.)
 
-    for (const f of fieldList) {
+    for (const [fname, f] of fieldList) {
       // Field-level conditional rules are server-enforced (rule-validator) and
       // record-scoped — a bare ref silently fails the rule (required/readonly
       // not enforced = data-integrity hole). #1928 class, same as actions.
-      if (f && typeof f === 'object') {
-        const fname = (f.name as string) ?? '?';
-        for (const key of ['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen'] as const) {
-          check(`object '${objectName}' · field '${fname}' ${key}`, (f as AnyRec)[key], objectName, 'record');
-        }
+      for (const key of ['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen'] as const) {
+        check(`object '${objectName}' · field '${fname}' ${key}`, (f as AnyRec)[key], objectName, 'record');
       }
-      if (f && typeof f === 'object' && f.formula) {
+      // #4811 — `requiredWhen` is the one field-level slot that meets the
+      // null-guard gate's totality criterion: `evaluateValidationRules`
+      // evaluates it against the SAME `materializeDeclaredFields`-merged
+      // record the object's validation rules see. It is also the surface
+      // where an unguarded predicate hurts most quietly — a faulting
+      // `requiredWhen` is fail-OPEN (`rule-validator.ts` logs
+      // "failed to evaluate — skipped"), so the field is simply never
+      // required and the write sails through. Validation rules at least
+      // reject fail-closed since #4761.
+      //
+      // `readonlyWhen` is deliberately NOT included even though it sits on
+      // the same field: it is evaluated by `stripReadonlyWhenFields`, which
+      // builds `{ ...previous, ...data }` and never materializes, so its
+      // binding is sparse and `!= null` would be the wrong prescription
+      // there. Same for `conditionalRequired` / `visibleWhen`, which have no
+      // record-scoped total binding of their own. See the surface ledger in
+      // `validate-null-guards.ts`.
+      checkNullGuards(
+        `object '${objectName}' · field '${fname}' requiredWhen`,
+        `field '${fname}' requiredWhen`,
+        f.requiredWhen,
+        objectName,
+        'fail-open',
+      );
+      if (f.formula) {
         // formulas are `value` role (any return type), still CEL. They are
         // `record`-scoped — `record.<field>`, never bare — so flag bare refs (#1928).
+        //
+        // No `checkNullGuards` here, and unlike the action / flow surfaces this
+        // is NOT a totality verdict (#4811). A formula is `value`-role and
+        // natively nullable, and `guard ? value : null` is the blessed shape
+        // (#3306 rewrites it through `dyn(...)`). Whether unguarded arithmetic
+        // such as `record.budget - record.spent` should be *forbidden* here is a
+        // question about what authors are allowed to write — a product decision
+        // for the maintainer, not a wiring gap for a lint PR to close on its own.
+        // The convention already leans guarded (`showcase_project.budget_remaining`
+        // writes `(record.budget == null ? 0 : record.budget) - …`), so the cost of
+        // deciding later is low. Raise it as its own issue rather than widening
+        // this call. Ledger: `validate-null-guards.ts`.
         const res = validateExpression('value', f.formula as string | { dialect?: string; source?: string },
           objectName ? { objectName, fields: fieldIndex.get(objectName), fieldTypes: fieldTypeIndex.get(objectName), scope: 'record' } : { scope: 'record' });
-        const fieldWhere = `object '${objectName}' · field '${(f.name as string) ?? '?'}' formula`;
+        const fieldWhere = `object '${objectName}' · field '${fname}' formula`;
         for (const e of res.errors) issues.push({ where: fieldWhere, message: e.message, source: e.source, severity: 'error' });
         for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });
       }
@@ -415,6 +495,19 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     if (typeof action.disabled !== 'boolean') {
       check(`${where} · action '${name}' disabled`, action.disabled, obj, 'record');
     }
+    // No `checkNullGuards` here, and the reason is measured rather than assumed
+    // (#4811). These predicates DO reach real CEL — a bare authored string is
+    // normalized to a `{dialect:'cel'}` envelope by `ExpressionInputSchema` and
+    // `objectui`'s renderers preserve it — and a fault IS fail-closed, so the
+    // `has(a) && has(b) && a < b` trap genuinely bites here too: the action
+    // silently disappears on every record. What blocks the gate is the record
+    // BINDING: it is whatever the client fetched (a detail read, or a list row
+    // holding only the view's projected columns), and no materialization step
+    // exists anywhere on that path. On such a sparse binding `!= null` — the fix
+    // this gate prescribes — faults with `No such key`, so gating here would
+    // reject working metadata and hand the author a correction that breaks it.
+    // Covering this surface means first making the binding total, which is a
+    // platform contract change, not a lint change. Ledger: `validate-null-guards.ts`.
   };
   for (const action of asArray(stack.actions)) {
     checkAction('stack', action);
