@@ -1319,5 +1319,69 @@ describe('AuthPlugin', () => {
       const { manager } = await bootWith(async () => cache);
       expect((manager as any).config.secondaryStorage).toBeUndefined();
     });
+
+    // ── #4790 — the SECOND counter with the same hole: ObjectStack's own
+    // per-number OTP send budget (#2780). It shared state only through a
+    // host-supplied `secondaryStorage`, which the standard `serve` composition
+    // never supplies, so the declared per-number cap was cap×N across N nodes —
+    // in paid SMS. Same cure, same resolution path, deliberately NOT
+    // `secondaryStorage` (#4785).
+    describe('per-number OTP send budget (#2780 / #4790)', () => {
+      const PHONE = '+8613800000000';
+      const deliverableSms = { async send() { return { id: 'x', status: 'sent' }; }, isConfigured: () => true };
+
+      it('counts the budget in a cache registered AFTER auth init', async () => {
+        const cache = makeCache();
+        let registered = false;
+        const { ctx, manager } = await bootWith(async () => (registered ? cache : undefined));
+        expect((manager as any).config.sharedCounterStore).toBeTypeOf('function');
+
+        // CacheServicePlugin comes up 21ms later.
+        registered = true;
+        manager.setSmsService(deliverableSms as any);
+
+        await manager.assertPhoneOtpSendAllowed(PHONE);
+        // The send landed in the SHARED store — this is the assertion the
+        // pre-#4790 wiring could not satisfy in any standard composition.
+        expect([...cache.store.keys()]).toEqual([`phone-otp-sends:${PHONE}`]);
+        await expect(manager.assertPhoneOtpSendAllowed(PHONE))
+          .rejects.toThrow(/Too many verification codes/);
+
+        // Bound → an info line and NO warning: the operator must be able to
+        // tell "shared" from "degraded" without reading the code.
+        const info = (ctx.logger.info as any).mock.calls.map((c: any[]) => String(c[0]));
+        expect(info.some((m: string) => m.includes('per-number OTP send budget (#2780) bound to the kernel cache service'))).toBe(true);
+        expect((ctx.logger.warn as any).mock.calls
+          .map((c: any[]) => String(c[0]))
+          .filter((m: string) => m.includes('per-number OTP send budget'))).toEqual([]);
+      });
+
+      it('warns loudly at counting time when there is no cache — degraded, never disabled', async () => {
+        const { ctx, manager } = await bootWith(async () => undefined);
+        manager.setSmsService(deliverableSms as any);
+        const otpWarnings = () =>
+          (ctx.logger.warn as any).mock.calls
+            .map((c: any[]) => String(c[0]))
+            .filter((m: string) => m.includes('per-number OTP send budget'));
+
+        // Nothing is said at boot — a deployment that never sends an OTP is not
+        // warned about a store it never needs.
+        expect(otpWarnings()).toEqual([]);
+
+        await manager.assertPhoneOtpSendAllowed(PHONE);
+        // Still enforced, in-process.
+        await expect(manager.assertPhoneOtpSendAllowed(PHONE))
+          .rejects.toThrow(/Too many verification codes/);
+
+        expect(otpWarnings()).toHaveLength(1);
+        expect(otpWarnings()[0]).toContain('PAID SMS');
+        expect(otpWarnings()[0]).toContain('no `cache` service registered at all');
+        // Degraded → a warning and NO "bound" info line; the mirror image of
+        // the cache-present case above.
+        expect((ctx.logger.info as any).mock.calls
+          .map((c: any[]) => String(c[0]))
+          .filter((m: string) => m.includes('per-number OTP send budget'))).toEqual([]);
+      });
+    });
   });
 });

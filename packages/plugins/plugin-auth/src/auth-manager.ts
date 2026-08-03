@@ -26,6 +26,7 @@ import { isPlaceholderEmail } from './placeholder-email.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import type { TenancyService } from './tenancy-service.js';
 import { OtpSendGuard } from './otp-send-guard.js';
+import type { CounterStore } from './rate-limit-storage.js';
 import {
   PHONE_SMS_TOPICS,
   builtinPhoneSmsBody,
@@ -620,6 +621,26 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * drop the store.
    */
   rateLimitStorage?: NonNullable<BetterAuthOptions['rateLimit']>['customStorage'];
+
+  /**
+   * ADR-0069 D2 (#4790) — the store ObjectStack's OWN cross-node counters
+   * count in, resolved LAZILY (called per count, not at construction). Today
+   * that is the #2780 per-number OTP send budget; {@link rateLimitStorage}
+   * covers better-auth's own per-IP counters, which never pass through here.
+   *
+   * `AuthPlugin` supplies `createLazyCounterStore(...)` over the kernel `cache`
+   * service (`rate-limit-storage.ts`) — the same resolution the rate-limit
+   * counters use, so plugin start order decides nothing and a deployment
+   * WITHOUT a cache still counts, per process, and is told so. Absent → the
+   * budget is per-process silently, which is the pre-#4790 behaviour and is
+   * why this option exists.
+   *
+   * NOT `secondaryStorage`: handing better-auth one of those also relocates the
+   * session of record into the cache and silently disables the ADR-0069 D4
+   * session controls (#4785). A host that supplies `secondaryStorage`
+   * deliberately still wins for this budget — see `getOtpSendGuard`.
+   */
+  sharedCounterStore?: () => Promise<CounterStore>;
 }
 
 /**
@@ -2511,12 +2532,22 @@ export class AuthManager {
   private getOtpSendGuard(): OtpSendGuard {
     if (!this._otpSendGuard) {
       const otpCfg = this.config.phoneOtp ?? {};
+      // WHERE the budget is counted decides whether it is a budget at all
+      // (#4790): counted per process, a declared "5 per hour" is 5×N across N
+      // nodes. Precedence, most deliberate first:
+      //  1. a host-supplied `secondaryStorage` — an explicit cross-node KV;
+      //  2. `sharedCounterStore` — AuthPlugin's lazily-resolved kernel `cache`,
+      //     which also announces the degraded (no cache) case loudly;
+      //  3. neither → the guard's own bounded per-process store.
+      const storeOption = this.config.secondaryStorage
+        ? { storage: this.config.secondaryStorage }
+        : this.config.sharedCounterStore
+          ? { resolveStore: this.config.sharedCounterStore }
+          : {};
       this._otpSendGuard = new OtpSendGuard({
         ...(otpCfg.cooldownSeconds != null ? { cooldownSeconds: otpCfg.cooldownSeconds } : {}),
         ...(otpCfg.maxPerHour != null ? { maxPerHour: otpCfg.maxPerHour } : {}),
-        // Share better-auth's cross-node KV when wired (ADR-0069 D2) so the
-        // per-number budget is enforced against ONE store across nodes.
-        ...(this.config.secondaryStorage ? { storage: this.config.secondaryStorage } : {}),
+        ...storeOption,
       });
     }
     return this._otpSendGuard;
