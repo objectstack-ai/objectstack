@@ -55,12 +55,19 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { NOT_DRIVER_MANAGED, PENDING_MARKER, REGEN_ARTIFACTS, entryForPath } from './regen-artifacts.mjs';
+import {
+  DRIVER_NAME,
+  GIT_SETTINGS,
+  NOT_DRIVER_MANAGED,
+  PENDING_MARKER,
+  REGEN_ARTIFACTS,
+  entryForPath,
+} from './regen-artifacts.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -194,6 +201,117 @@ function hookIsExecutable() {
 }
 
 /**
+ * The driver registered in THIS clone must resolve — here, now (#4868).
+ *
+ * Every other check in this self-test builds a throwaway repo and registers its own
+ * driver into it, so all of them stayed green for weeks while the real
+ * `merge.os-regen.driver` in the shared `.git/config` pointed at a DELETED worktree
+ * and every real merge of a `merge=os-regen` path died with MODULE_NOT_FOUND. The
+ * self-test and the live merge path were simply not the same path. This check reads
+ * the live one, which is the only reason it can catch that class of failure.
+ *
+ * It fails in three distinguishable ways, all of which have happened or are one
+ * `pnpm install` away:
+ *   - the script the value names does not exist (the dangling-worktree bug);
+ *   - it exists but lives outside this worktree (bound to someone else's worktree —
+ *     green for whoever installed last, broken for everyone else, so this is the
+ *     check that catches the bug *before* the other worktree is removed);
+ *   - the value has drifted from what `setup-git-hooks.mjs` registers.
+ */
+function registeredDriverResolves() {
+  const { key, value: expected } = GIT_SETTINGS.find((s) => s.key === `merge.${DRIVER_NAME}.driver`);
+
+  let actual = '';
+  try {
+    actual = execFileSync('git', ['config', '--get', key], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    actual = ''; // unset — `git config --get` exits 1
+  }
+
+  if (!actual) {
+    // A supported state, not a failure: git falls back to a text merge, which is
+    // exactly the pre-#4675 behaviour. `pnpm install` registers it.
+    console.log(`✓ ${key} is unregistered — merges text-merge as they did before #4675`);
+    return true;
+  }
+
+  const expansion = expandDriverScript(actual);
+  if (expansion.skip) {
+    console.log(`✓ ${key} not checked for resolution (${expansion.skip})`);
+    return true;
+  }
+  if (expansion.error) return fail(`could not expand ${key} ("${actual}"): ${expansion.error}`);
+
+  const script = expansion.path;
+  if (!existsSync(script)) {
+    return fail(`${key} names a script that does not exist:\n`
+      + `    ${script}\n`
+      + `  Registered value: ${actual}\n`
+      + '  Every merge touching a merge=os-regen path in this clone dies with MODULE_NOT_FOUND,\n'
+      + '  and git leaves the path CONFLICTED with ours in it and no conflict markers.\n'
+      + '  Fix: pnpm install  (re-registers the driver for this worktree)');
+  }
+
+  const root = realpath(REPO_ROOT);
+  if (relative(root, realpath(script)).startsWith('..')) {
+    return fail(`${key} points OUTSIDE this worktree:\n`
+      + `    ${script}\n`
+      + `  Linked worktrees share one .git/config, so this is bound to another worktree and\n`
+      + '  breaks for everyone the moment that one is removed.\n'
+      + '  Fix: pnpm install  (re-registers the driver for this worktree)');
+  }
+
+  if (actual !== expected) {
+    return fail(`${key} has drifted from what setup-git-hooks.mjs registers.\n`
+      + `    registered: ${actual}\n`
+      + `    expected:   ${expected}\n`
+      + '  Fix: pnpm install');
+  }
+
+  console.log(`✓ merge.${DRIVER_NAME}.driver resolves in THIS worktree (${relative(root, realpath(script))})`);
+  return true;
+}
+
+/**
+ * Expand the driver value's script path the way git will: git hands a merge driver
+ * command to a shell, so `$(git rev-parse --show-toplevel)` is only meaningful once
+ * a shell has run it, from inside the worktree being merged.
+ */
+function expandDriverScript(value) {
+  // Drop the trailing %O %A %B %P placeholders; what remains is `node <script>`.
+  const command = value.replace(/(\s+%[A-Za-z])+\s*$/, '');
+  const expr = /^\s*node\s+(\S.*)$/.exec(command)?.[1];
+  if (!expr) return { skip: `not a \`node <script>\` command: "${value}"` };
+  try {
+    return {
+      path: execFileSync('sh', ['-c', `printf '%s' ${expr}`], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim(),
+    };
+  } catch (err) {
+    // No POSIX shell (some Windows setups). Git could not run the driver either,
+    // so there is nothing this check could assert that would still be true.
+    if (err?.code === 'ENOENT') return { skip: 'no POSIX shell available to expand it' };
+    return { error: err?.stderr?.toString().trim() || err?.message || String(err) };
+  }
+}
+
+/** Best-effort realpath: symlinked checkouts otherwise read as "outside the worktree". */
+function realpath(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
  * Prove the driver end to end against real git: a conflicting change on both
  * sides of a mapped path must come out resolved, marker-free, and recorded.
  * Asserting the behaviour rather than the wiring is the point — the wiring
@@ -207,7 +325,12 @@ function endToEnd() {
     git('config', 'user.email', 'selftest@objectstack.ai');
     git('config', 'user.name', 'self-test');
     git('config', 'merge.os-regen.name', 'regenerate instead of text-merging');
-    git('config', 'merge.os-regen.driver', `node ${join(REPO_ROOT, 'scripts/git-merge-regen.mjs')} %O %A %B %P`);
+    // Absolute on purpose, and NOT the value we register in a real clone: this temp
+    // repo is not the ObjectStack worktree, so the registered
+    // `$(git rev-parse --show-toplevel)` would resolve to `dir` — which has no
+    // scripts/. Here we want the driver under test, i.e. this clone's copy.
+    // Checking the value real clones get is `registeredDriverResolves()`'s job (#4868).
+    git('config', 'merge.os-regen.driver', `node "${join(REPO_ROOT, 'scripts/git-merge-regen.mjs')}" %O %A %B %P`);
 
     const target = REGEN_ARTIFACTS[0].path;
     mkdirSync(join(dir, dirname(target)), { recursive: true });
@@ -245,7 +368,13 @@ function endToEnd() {
 
 if (process.argv.includes('--self-test')) {
   console.log('git-merge-regen --self-test\n');
-  const results = [reconcileAttributes(), reconcileScripts(), hookIsExecutable(), endToEnd()];
+  const results = [
+    reconcileAttributes(),
+    reconcileScripts(),
+    hookIsExecutable(),
+    registeredDriverResolves(),
+    endToEnd(),
+  ];
   console.log(
     results.every(Boolean)
       ? `\n✓ merge driver wiring is consistent (${NOT_DRIVER_MANAGED.length} path(s) deliberately excluded).`

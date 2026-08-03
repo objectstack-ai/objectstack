@@ -308,11 +308,36 @@ roots (#4784) — one scope, one meaning, whichever surface reads it.
 |:---|:---|
 | Update hook `condition` (single-record write), validation rule on update | the stored pre-write row |
 | Insert events (`beforeInsert` / `afterInsert`), validation rule on insert | **unbound** — there is no prior state |
-| Predicate bulk update (`multi: true`) hook `condition` | **unbound** — one write matches N rows and the hook fires once, so there is no single prior record |
+| Predicate bulk update (`multi: true`) hook `condition` | **unbound** — one write matches N rows and the hook fires once, so there is no single prior record. `record` is the bare payload here too, so a *declared* field this write does not set is unevaluable as well |
 
-Referencing `previous` where it is unbound makes the whole expression
-unevaluable — so write insert-event conditions over `record` alone, and keep
-transition conditions to single-record writes.
+⚠️ **An unevaluable condition ABORTS the operation (#4775).** Referencing
+`previous` where it is unbound — like a typo'd key (`record.stauts`), a retired
+field, or a comparison CEL has no overload for — does **not** degrade to "the
+hook did not fire": it **fails the write**, with an error naming the hook and
+the key. Until protocol 17 the gate emitted a `logger.warn` and returned
+`false`, which is what makes this table load-bearing rather than stylistic: a
+`before*` guard swallowed into `false` silently let writes through, and an audit
+hook swallowed into `false` silently dropped records. Those are opposite
+failures, so "the condition said no" and "the platform could not work out what
+the condition says" are now different outcomes and the second one is loud —
+`before*` and `after*` in the same direction, with no `onError` escape
+(`onError` governs a handler that throws, and the condition is evaluated before
+any handler runs). A condition that does not even **compile** aborts the same
+way.
+
+So write insert-event conditions over `record` alone, and keep transition
+conditions to single-record writes — that mistake used to cost you a hook that
+quietly never ran, and now costs you every write the hook is attached to.
+
+**On a `multi: true` bulk update the cost lands on every batch (#4800/B1).**
+One hook condition reading `previous.*` makes *every* predicate bulk update of
+that object fail, and the failure names a hook that has nothing to do with the
+write. Fail-loud takes no exception here, but the error is a diagnosis rather
+than a raw `No such key: previous`: it says this is a predicate bulk write, that
+the N matched rows have no single prior record to bind, and gives the two ways
+out — rewrite the condition without `previous`, or target the write at one
+record (update by id). A record-change flow trigger is **not** a way around it:
+it binds the same lifecycle hook and receives the same unbound `previous`.
 
 **`previous` is total over the object's declared fields.** A declared column the
 driver never returned reads as `null`, not as a fault. Guard with `!= null`,
@@ -348,6 +373,11 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 | `IN (a, b, c)` | `in [a, b, c]` |
 | `ISCHANGED(x)` | `previous.x != record.x` |
 | `MONTH_DIFF`, `MID`, `LEFT`, `RIGHT`, `SUBSTITUTE` | _not in stdlib — propose addition_ |
+
+> ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which exists only
+> where `previous` is **bound** — see §5. On an insert event, or on a
+> `multi: true` predicate bulk update, it is not; since #4775 that does not
+> quietly skip the hook, it **fails the write**.
 
 ---
 

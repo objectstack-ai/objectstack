@@ -162,51 +162,76 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish a release the Changesets action left behind
+      - name: Ensure this version actually shipped (npm + runtime image)
         id: recover-publish
-        if: steps.changesets.outputs.published != 'true'
-        # changesets/action reaches its publish branch ONLY when there are zero
-        # pending changesets. An EMPTY changeset still counts as pending, so a
-        # `main` carrying only empty ones lands in
-        #     All changesets are empty; not creating PR
-        # and returns: no version PR, no publish, `published=false`, and a GREEN
-        # run. The version bump is already committed by then, so the release
-        # simply evaporates — 17.0.0-rc.2 sat versioned-in-repo and absent from
-        # npm with Release reporting success, and `docker` skipped with it
-        # (#4898). This is not an exotic state: `Check Changeset` sanctions the
-        # empty changeset as the "this PR releases nothing" declaration, so any
-        # ordinary docs/ci PR landing during the version-PR window produces it.
+        # `!cancelled()` is load-bearing, not decoration. GitHub wraps an `if:`
+        # naming no status function in an IMPLICIT success(), so the first
+        # version of this step — `if: steps.changesets.outputs.published !=
+        # 'true'` — could not fire in one of the two cases it exists for: the
+        # changesets step itself failing. On 89d2a4e it did exactly that. npm
+        # publish and the atomic tag push both succeeded, then creating the
+        # @objectstack/spec GitHub Release failed on the API's 125k body limit
+        # (#4900); the step went red, `published` stayed false, this step was
+        # skipped, and the 17.0.0-rc.2 runtime image was silently lost.
+        if: ${{ !cancelled() && steps.changesets.outputs.published != 'true' }}
+        # It also guards an INVARIANT rather than performing an action: the
+        # version in this repo must be on npm AND must have a matching runtime
+        # image. "Publish whatever is missing" — the first contract — was not
+        # enough: 89d2a4e's version was already on npm, so a publish-only step
+        # would have no-opped and lost the image just the same.
         #
-        # Detect it by the only fact that matters — the version in the repo is
-        # not on the registry — and repair it. `changeset publish` skips every
-        # version already published, so this is a no-op on the normal path
-        # (where main's version IS the last released one) and a repair on this
-        # one. Never a silent success: if the version is still missing after
-        # publishing, the job fails.
+        # The two ways the invariant breaks, both observed within one day:
+        #   - nothing published at all: changesets/action reaches its publish
+        #     branch only with ZERO pending changesets, and an EMPTY changeset
+        #     still counts, so a main carrying only empty ones prints "All
+        #     changesets are empty; not creating PR" and returns — no version
+        #     PR, no publish, and a GREEN run (#4898);
+        #   - published, then died before reporting it (#4900, above).
+        # `changeset publish` skips versions already on the registry, so the
+        # repair is idempotent and the whole step is a no-op on the normal path,
+        # where main's version IS the last released one and its image exists.
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           version=$(node -p "require('./packages/cli/package.json').version")
+
+          # ── npm ─────────────────────────────────────────────────────────────
           if npm view "@objectstack/cli@$version" version >/dev/null 2>&1; then
-            echo "@objectstack/cli@$version is already on npm — nothing left to publish."
+            echo "npm: @objectstack/cli@$version is present."
+          else
+            echo "::warning::@objectstack/cli@$version is versioned in this repo but absent from npm, and the Changesets action did not publish it (#4898) — publishing it now."
+            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            pnpm run release
+            if ! npm view "@objectstack/cli@$version" version >/dev/null 2>&1; then
+              echo "::error::publish ran but @objectstack/cli@$version is still not on npm"
+              exit 1
+            fi
+            echo "::warning::Recovered npm packages and git tags. The GitHub Releases and the ADR-0087 D4 spec-changes attachment were NOT created — those only exist on the Changesets action's own publish path. Create them by hand if this release needs them."
+          fi
+
+          # ── runtime image ───────────────────────────────────────────────────
+          # Reported through the job outputs so the `docker` job builds it. A
+          # failed probe counts as MISSING on purpose: a redundant rebuild costs
+          # a few minutes, a wrongly-skipped one leaves a published npm version
+          # with no image and nothing to say so.
+          if token=$(curl -fsS "https://ghcr.io/token?scope=repository:${GITHUB_REPOSITORY}:pull&service=ghcr.io" 2>/dev/null) \
+            && token=$(node -p 'JSON.parse(process.argv[1]).token' "$token" 2>/dev/null) \
+            && curl -fsS -o /dev/null -H "Authorization: Bearer $token" \
+                 -H 'Accept: application/vnd.oci.image.index.v1+json' \
+                 -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+                 "https://ghcr.io/v2/${GITHUB_REPOSITORY}/manifests/$version" 2>/dev/null
+          then
+            echo "ghcr: image for $version is present — release is complete."
             exit 0
           fi
 
-          echo "::warning::@objectstack/cli@$version is versioned in main but absent from npm and the Changesets action did not publish it (#4898) — publishing it now."
-          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          pnpm run release
-
-          if ! npm view "@objectstack/cli@$version" version >/dev/null 2>&1; then
-            echo "::error::publish ran but @objectstack/cli@$version is still not on npm"
-            exit 1
-          fi
+          echo "::warning::No ghcr image for $version (or the registry could not be probed) — requesting the Docker job."
           {
             echo "published=true"
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
-          echo "::warning::Recovered by the fallback path — npm packages and git tags are published, but the GitHub Releases and the ADR-0087 D4 spec-changes attachment were NOT created (those only exist on the Changesets action's own publish path). Create them by hand if this release needs them."
 
       - name: Attach spec-changes.json to the GitHub Release (ADR-0087 D4)
         # Rebuilds the change manifest with the api-surface diff against the
@@ -242,7 +267,15 @@ jobs:
     # for every npm release. Called as a reusable workflow so the same build
     # can be re-run manually via workflow_dispatch (e.g. base-image CVE
     # rebuilds) — see docker-publish.yml.
-    if: needs.release.outputs.published == 'true'
+    #
+    # `!cancelled()` rather than the default implicit success(): the release job
+    # can publish to npm and THEN fail (89d2a4e died creating the spec GitHub
+    # Release, #4900). A dependent job guarded by success() is skipped for any
+    # upstream failure, so the image was lost to a fault that happened after the
+    # packages were already public. The `published` output — which the recovery
+    # step above sets when an image is missing — is the real gate; the job's
+    # exit status is not.
+    if: ${{ !cancelled() && needs.release.outputs.published == 'true' }}
     permissions:
       contents: read
       packages: write

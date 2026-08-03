@@ -125,12 +125,21 @@ export function clampSummary(summary, limit = 180) {
  * it — the released frontend change would vanish from the release record, the
  * very failure this whole mechanism exists to prevent.
  *
- * @returns {{ entries: Array<{ path: string, sha: string, subject: string }>, totalCommits: number, commitsWithChangeset: number }}
+ * `commits` is every non-merge commit in the range (newest first) and
+ * `commitsWithChangesetShas` the subset that added one, so a caller can NAME
+ * the commits it is leaving out instead of only counting them (#4843).
+ *
+ * @returns {{ entries: Array<{ path: string, sha: string, subject: string }>, commits: Array<{ sha: string, subject: string }>, totalCommits: number, commitsWithChangeset: number, commitsWithChangesetShas: Set<string> }}
  */
 export function collectAddedChangesets(objectuiRoot, from, to) {
-  const totalCommits = git(objectuiRoot, ['log', '--no-merges', '--format=%H', `${from}..${to}`])
+  const commits = git(objectuiRoot, ['log', '--no-merges', '--format=%H%x09%s', `${from}..${to}`])
     .split('\n')
-    .filter(Boolean).length;
+    .filter(Boolean)
+    .map((line) => {
+      const tab = line.indexOf('\t');
+      return { sha: line.slice(0, tab), subject: line.slice(tab + 1) };
+    });
+  const totalCommits = commits.length;
 
   const raw = git(objectuiRoot, [
     'log',
@@ -164,7 +173,13 @@ export function collectAddedChangesets(objectuiRoot, from, to) {
     commitsWithChangeset.add(sha);
     entries.push({ path, sha, subject });
   }
-  return { entries, totalCommits, commitsWithChangeset: commitsWithChangeset.size };
+  return {
+    entries,
+    commits,
+    totalCommits,
+    commitsWithChangeset: commitsWithChangeset.size,
+    commitsWithChangesetShas: commitsWithChangeset,
+  };
 }
 
 /** Read a changeset's content at `to`, falling back to the commit that added it. */
@@ -196,31 +211,36 @@ export function inPreMode(frameworkRoot) {
 }
 
 /**
- * Build the digest for a range.
+ * THE criterion: which objectui changes over `from..to` actually ship in the
+ * frontend release, as objectui DECLARED it — plus a full account of what is
+ * being left out and why.
  *
- * @returns {{ bump: string, declaredLevel: string|null, breaking: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, totalCommits: number, downgradedMajor: boolean, body: string }}
+ * This is the single shared implementation. `bump-objectui.sh` (via
+ * `buildDigest` below, #4731) and `scripts/objectui-range.mjs` (#4843) both go
+ * through it, so the platform release record and the release page's Console
+ * section can never disagree about what "a releasing frontend change" means.
+ * Two copies of this rule would drift, and the first thing they would drift on
+ * is the class that already went missing once: breaking `refactor(...)!`.
+ *
+ * Nothing here reads a commit type. Grouping output BY type is presentation and
+ * belongs to the caller; it must never become a filter again.
+ *
+ * @returns {{ releasing: Array<object>, releaseNothingEntries: Array<object>, noChangesetCommits: Array<object>, releaseNothing: number, noChangeset: number, changesetsAdded: number, totalCommits: number }}
  */
-export function buildDigest({
-  objectuiRoot,
-  frameworkRoot = REPO_ROOT,
-  from,
-  to,
-  max = DEFAULT_MAX_ENTRIES,
-  bumpOverride = '',
-}) {
-  const { entries, totalCommits, commitsWithChangeset } = collectAddedChangesets(
+export function classifyRange({ objectuiRoot, from, to }) {
+  const { entries, commits, totalCommits, commitsWithChangesetShas } = collectAddedChangesets(
     objectuiRoot,
     from,
     to,
   );
 
   const releasing = [];
-  let releaseNothing = 0;
+  const releaseNothingEntries = [];
   for (const entry of entries) {
     const { packages, summary } = parseChangeset(readAt(objectuiRoot, to, entry.sha, entry.path));
     const level = highestLevel(packages);
     if (!level) {
-      releaseNothing++;
+      releaseNothingEntries.push({ ...entry, summary: summary || entry.subject });
       continue;
     }
     releasing.push({
@@ -235,6 +255,38 @@ export function buildDigest({
   // order. The class the old filter could not represent at all now leads.
   const order = { major: 0, minor: 1, patch: 2 };
   releasing.sort((a, b) => order[a.level] - order[b.level]);
+
+  const noChangesetCommits = commits.filter((c) => !commitsWithChangesetShas.has(c.sha));
+
+  return {
+    releasing,
+    releaseNothingEntries,
+    noChangesetCommits,
+    releaseNothing: releaseNothingEntries.length,
+    noChangeset: noChangesetCommits.length,
+    changesetsAdded: entries.length,
+    totalCommits,
+  };
+}
+
+/**
+ * Build the digest for a range.
+ *
+ * @returns {{ bump: string, declaredLevel: string|null, breaking: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, totalCommits: number, downgradedMajor: boolean, body: string }}
+ */
+export function buildDigest({
+  objectuiRoot,
+  frameworkRoot = REPO_ROOT,
+  from,
+  to,
+  max = DEFAULT_MAX_ENTRIES,
+  bumpOverride = '',
+}) {
+  const { releasing, releaseNothing, noChangeset, changesetsAdded, totalCommits } = classifyRange({
+    objectuiRoot,
+    from,
+    to,
+  });
 
   const declaredLevel = releasing.length
     ? releasing.reduce(
@@ -273,7 +325,6 @@ export function buildDigest({
     );
   }
 
-  const noChangeset = Math.max(0, totalCommits - commitsWithChangeset);
   const omitted = [];
   if (releaseNothing > 0) {
     omitted.push(
@@ -286,7 +337,7 @@ export function buildDigest({
 
   const accounting =
     `Derived from the changesets objectui declared over the range — ` +
-    `${releasing.length} releasing of ${entries.length} changeset${entries.length === 1 ? '' : 's'} added ` +
+    `${releasing.length} releasing of ${changesetsAdded} changeset${changesetsAdded === 1 ? '' : 's'} added ` +
     `across ${totalCommits} non-merge commit${totalCommits === 1 ? '' : 's'}` +
     (omitted.length ? `; omitted: ${omitted.join(', ')} (they ship no package code).` : '.');
 

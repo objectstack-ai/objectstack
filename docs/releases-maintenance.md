@@ -71,14 +71,31 @@ platform version maps to.
 Backend content comes from the spec/package changesets. Frontend content comes from
 objectui's history for the SHA range bundled in that release. Because `.objectui-sha`
 is version-controlled, `scripts/objectui-range.mjs` computes that range from any two
-framework revisions and prints the feat/fix commits grouped by type + the largest
-touched areas — ready to paste into a Console section:
+framework revisions and prints the frontend changes **objectui declared** over it —
+grouped by declared level (breaking / features / fixes), with the largest touched
+areas — ready to paste into a Console section:
 
 ```bash
 # frontend delta bundled between two framework revisions (needs ../objectui)
 node scripts/objectui-range.mjs <old-rev> <new-rev>   # e.g. the two release commits
 node scripts/objectui-range.mjs --from <sha> --to <sha> --json   # explicit SHAs / tooling
+node scripts/objectui-range.mjs <old-rev> <new-rev> --all         # also name what ships nothing
 ```
+
+**What "a frontend change" means here (#4843).** The list comes from the
+`.changeset/*.md` files objectui added over the range, via the same `classifyRange()`
+in `scripts/objectui-changeset-digest.mjs` that `bump-objectui.sh` uses to write the
+pin changeset (#4731) — one criterion, two consumers, so the platform release record
+and this page's Console section cannot disagree. A changeset with an empty frontmatter
+block is changesets' own "release-nothing" marker and is excluded; so is a commit that
+added no changeset. **Both exclusions are counted out loud in the printed markdown**,
+because the output *is* release-page body text and a reader cannot otherwise tell a
+filtered list from a complete one. Headings group by declared level; grouping is
+presentation and never a filter.
+
+This replaced a `feat|fix` guess on commit subjects. On the real range
+`7d9734d5e321..785b8a5d432c` that guess dropped 13 commits that actually released —
+6 of them breaking `refactor(...)!` — and listed 5 that release nothing.
 
 Without an objectui checkout it still prints the SHA range to inspect. The framework
 changesets also embed companion frontend notes inline ("Companion objectui PR
