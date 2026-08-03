@@ -476,16 +476,47 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
 
   /**
    * Pass-through to better-auth's `databaseHooks` option. better-auth fires
-   * these around its own adapter writes (e.g. when `genericOAuth` creates
-   * a JIT user during SSO login), which the kernel-level ObjectQL
-   * middleware does NOT observe — better-auth's adapter goes through
-   * `dataEngine` directly, bypassing the `ql.registerMiddleware` chain.
+   * these around its own adapter writes, including paths that never reach an
+   * HTTP route of ours (e.g. `genericOAuth` JIT-creating a user during SSO
+   * login).
    *
-   * The platform uses this to attach a `user.create.after` hook that
-   * auto-provisions a personal organization for every newly-created user
-   * (mirroring what SecurityPlugin's middleware does for direct
-   * ObjectQL inserts) so SSO-arriving users don't land on the empty
-   * "create organization" screen.
+   * **Use this seam — not an ObjectQL middleware on `sys_user` — to react to
+   * user creation.** The reason is ADR-0093 D2: an invariant over the user
+   * lifecycle gets exactly ONE owner, composed into `user.create.after`
+   * (`reconcile-membership.ts`), because that is the single seam every
+   * creation path already flows through (self-signup, admin create-user,
+   * import, SSO JIT). Re-deriving the invariant per creation path — or in a
+   * parallel data-layer middleware — is precisely the shape D2 eliminated.
+   * The platform's own use is a `user.create.after` hook that provisions a
+   * personal/default organization so SSO-arriving users don't land on the
+   * empty "create organization" screen.
+   *
+   * **Corrected mechanism (#4802).** This comment used to justify the rule by
+   * asserting that better-auth's adapter "goes through `dataEngine` directly,
+   * bypassing the `ql.registerMiddleware` chain". That is **not** true, and
+   * the claim was copied widely enough (framework + cloud) to keep producing
+   * wrong architectural conclusions, so it is refuted here rather than quietly
+   * deleted. Verified hop by hop:
+   *
+   * - `objectql/src/plugin.ts` registers ONE instance under both names —
+   *   `registerService('objectql', this.ql)` and `registerService('data',
+   *   this.ql)`; nothing else in the repo registers `data`.
+   * - `auth-plugin.ts` takes `ctx.getService<IDataEngine>('data')` and hands
+   *   that same instance to {@link createObjectQLAdapterFactory}.
+   * - `objectql-adapter.ts` writes with plain `dataEngine.insert(objectName,
+   *   …)` — there is no bypass/skip-middleware option to pass.
+   * - `ObjectQL.insert()` (`objectql/src/engine.ts`) wraps its body in
+   *   `executeWithMiddleware()`, whose only filter is the object name.
+   *
+   * So `ql.registerMiddleware(fn, { object: 'sys_user' })` **does** fire for
+   * better-auth's writes, and so do the engine's `beforeInsert`/`afterInsert`
+   * lifecycle hooks (the SCIM identity-source stamp in `auth-plugin.ts` relies
+   * on exactly that). What remains true is narrower and worth knowing: adapter
+   * writes carry `context.isSystem: true` (`withSystemContext`, pinned by
+   * `objectql-adapter.test.ts`), and every authorization middleware —
+   * security, sharing, the ADR-0092 identity write guard — early-returns on
+   * `isSystem` by design. A middleware that gates on `isSystem` therefore sees
+   * nothing; one that does not, runs.
    */
   databaseHooks?: BetterAuthOptions['databaseHooks'];
 
@@ -1001,11 +1032,14 @@ export class AuthManager {
       // better-auth plugins — registered based on AuthPluginConfig flags
       plugins,
 
-      // Database hooks (fired by better-auth's adapter writes — these run
-      // for SSO JIT-provisioning too, unlike kernel-level ObjectQL
-      // middleware which better-auth's adapter bypasses). The framework's
-      // identity-source stamp (`account.create.after`) is always composed in,
-      // preserving any host-supplied hooks.
+      // Database hooks (fired by better-auth's adapter writes — the ONE seam
+      // every user-creation path flows through, SSO JIT-provisioning included).
+      // ADR-0093 D2 makes that seam the single owner of the user-lifecycle
+      // invariants; see the `databaseHooks` option doc for why, and for the
+      // #4802 correction of the "adapter bypasses ObjectQL middleware" claim
+      // this comment used to carry. The framework's identity-source stamp
+      // (`account.create.after`) is always composed in, preserving any
+      // host-supplied hooks.
       databaseHooks: this.composeDatabaseHooks(this.config.databaseHooks),
 
       // Bootstrap bypass for `disableSignUp`. The first-run owner wizard

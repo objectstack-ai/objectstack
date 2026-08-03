@@ -510,7 +510,8 @@ not verdicts).
 | `external-lookup.zod.ts` | 12 | mixed (p) | authored config + wire results |
 | `seed-loader.zod.ts` | 12 | mixed (p) | seed file shapes are authored; loader state is runtime |
 | `field.zod.ts` | 11 | authorable | partially strict |
-| `filter.zod.ts` / `query.zod.ts` | 11+5 | open | query dialect — user data flows through; validated semantically elsewhere. `query.zod.ts` dropped one site in #4196: `FieldNodeSchema`'s nested-select object form was declared-but-inert and narrowed to `z.string()`, so the union's second member is gone. Four more left in #4286 with the `joins`/`windowFunctions` removals: `JoinNodeBaseSchema`, `WindowFunctionNodeSchema`, and `WindowSpecSchema`'s two blocks (outer + `frame`) were deleted with their clusters. Class unchanged |
+| `filter.zod.ts` | 11 | open | query dialect — user data flows through the predicate values; validated semantically elsewhere |
+| `query.zod.ts` | 5 | open, **except `SortNodeSchema` → authorable** | Blanket `open` was the imprecise verdict here, not the strictness. Four sites are the dialect proper (`BaseQuerySchema`, `AggregationNodeSchema`, `FullTextSearchSchema`, `GroupByNodeSchema`'s object arm) and keep the class. `SortNodeSchema` is not dialect: a closed two-key tuple `{field, order}` with **no user-data face at all** — so #4721 carved it out and it is **strict as of #4721** (`strictObject` + `aliases: { direction: 'order' }`). What that bought, measured on `main` first: `SortNodeSchema.parse({field, direction:'desc'})` → `{field, order:'asc'}` — the sort ran the OTHER WAY, and with `limit` that is a different set of rows under an ordinary 200. Per the 11:41Z ruling on #4721 this is a NEW door, not the completion of #4371's: that check is a hand-written top-level allowlist in `objectql/src/engine.ts` (`rejectUnknownEngineOptions`) that never recurses into `orderBy[]`, and `QuerySchema` itself is **not** strict (probe: `QuerySchema.safeParse({object:'sales', nonsenseKey:1}).success === true`) — top-level strictness is #4001's, tracked separately. Site history: one site dropped in #4196 (`FieldNodeSchema`'s nested-select object form narrowed to `z.string()`); four more in #4286 with the `joins`/`windowFunctions` removals (`JoinNodeBaseSchema`, `WindowFunctionNodeSchema`, `WindowSpecSchema`'s outer + `frame`) |
 | `driver-nosql.zod.ts` / `driver.zod.ts` / `driver-sql.zod.ts` | 10+9+2 | wire | driver capability contracts |
 | `datasource.zod.ts` | 6 | authorable | **strict as of #4001 data step** — all 6: `DatasourceSchema` (+ `pool` / `ssl`), `ExternalDatasourceSettingsSchema` (+ `validation`), `DriverDefinitionSchema`. **#4583 B/C dropped two more sites**: the `healthCheck` and `retryPolicy` blocks are gone — nothing scheduled a probe and nothing retried, so their strictness was validating a shape no code consumed. `config` stays `z.record` **at this level** by construction (per-driver shapes), but is no longer unchecked: **#4410** made `DatasourceSchema`'s refinement parse it against the contract for the declared driver (`driver/config-registry.zod.ts`), so the openness here is a shape this level cannot express rather than the absence of one. This row used to add "the driver's own `configSchema` validates them", which was false until #4410 landed the parse site it names. #4410 extended the same parse to each `readReplicas` entry; **#4468 retired that key** — no driver ever opened a replica connection and no query path splits reads from writes, so the entries were being checked against a contract nothing would apply. Strictness makes a dropped key loud; it cannot make a slot live, and a *precisely validated* dead slot is the more convincing lie | **#4583 dropped the ninth site**: `DatasourceCapabilities` is gone — eleven flags no code read, on a block whose strictness was the clearest case of this row's own closing sentence. `readOnly` in particular was *precisely validated* and completely inert, and had been relocated twice (#4410, #4465) toward somewhere it might be enforced; the shipped CRM example called a datasource a read replica on the strength of it while writes went through. Class unchanged
 | `driver/memory.zod.ts` / `driver/mongo.zod.ts` / `driver/postgres.zod.ts` | 6+1+1 | authorable | The per-driver shapes for the `config` slot — what an author actually writes under `datasource.config` (`host`, `port`, `filename`). **Undeclared here until the coverage walk went recursive** (see below): a subdirectory was invisible to the gate, so these sites sat outside the map while the map reported full coverage. **Strict as of #4410**, which is also what unblocked them: this row previously read "strictness here would enforce nothing" because nothing parsed `datasource.config` against these schemas and both `*DriverSpec.configSchema` literals were `{}`. Now `DatasourceSchema` parses `config` against them, and the same schemas project onto `configSchema` and onto the Studio connection form. (#4410 also ran the parse over each `readReplicas` entry; #4468 retired that key outright — see the row above.) `postgres.zod.ts` drops a site: its `ssl` was a `boolean | {ca, cert, key, …}` union, and the object arm is gone — certificates now live in the datasource-level `ssl` block (declared, strict, and until #4410 read by nobody), leaving `config.ssl` as the on/off shorthand. That narrowing is forced by the same projection: the Studio form renders anything that is not boolean/enum/number as a TEXT INPUT, so a union here would have produced a wizard whose every `ssl` value the new gate rejects. `memory.zod.ts` keeps 6 but loses two KEYS — `indexes` / `maxRecordsPerObject`, which `InMemoryDriverConfig` has no field for, removed under ADR-0049 rather than blessed by the new gate |
@@ -535,9 +536,9 @@ not verdicts).
 | `bpmn-interop.zod.ts` | 5 | wire (p) | interop import shapes |
 | `approval.zod.ts` | 4 | authorable | **strict as of #4001 step 3** — all four authoring schemas (node config / approver / escalation / decision-output). The published JSON schema carries `additionalProperties: false` into the Studio form AND `registerFlow()` config validation (#4027/#4040), so an unknown key in an approval node's `config` is rejected at registration too — verified: `z.toJSONSchema` on the strict lazySchema does not throw (#3746 hazard checked) |
 | `node-executor.zod.ts` | 4 | wire | executor contract |
-| `io-node-config.zod.ts` | 2 | authorable | `NotifyConfigSchema` / `HttpConfigSchema` (#4045) — the sibling contracts that validate the **open** `config` slot on flow `notify` / `http` nodes. Authored per-node, so the open-slot exemption above does not extend to them; candidate once the executors' own drift is verified |
-| `builtin-node-config.zod.ts` | 8 | authorable | Same family (#4045): the CRUD quartet, `screen`, `map`. Written from what the executors read rather than from the descriptors' `configSchema` literals, and reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` — so unlike most rows here, this one already has a drift check of its own. Same candidacy note as `io-node-config` |
-| `schemaless-node-config.zod.ts` | 4 | authorable | Same family, third panel (#4278): `script` / `subflow` / `decision` (+ the decision branch item) — the descriptor-schemaless nodes whose form lives in objectui's hand-written table. Written from the executors; the drift check is objectui's `flow-node-config.spec-reconciliation` test (cross-repo, via the published exports). Since #4343 `script` and `subflow` ARE parsed at execute time (`parse-config.ts`) — `script` once retiring its `actionType` branches left it flat — so strictness candidacy now follows `io-node-config` on the same terms rather than being moot; `decision` stays export-only |
+| `io-node-config.zod.ts` | 2 | authorable | `NotifyConfigSchema` / `HttpConfigSchema` (#4045) — the sibling contracts that validate the **open** `config` slot on flow `notify` / `http` nodes. Authored per-node, so the open-slot exemption above does not extend to them. **Strict as of #4001 批 9**; the node `config` SLOT itself stays open (ADR-0018 keeps `node.type` open, so the slot cannot be closed without closing the plugin extension point). Five `guidance` entries carry the ADR-0087 notify aliases (`to`/`subject`/`body`/`url`/`source`) |
+| `builtin-node-config.zod.ts` | 8 | authorable | Same family (#4045): the CRUD quartet, `screen`, `map`. Written from what the executors read rather than from the descriptors' `configSchema` literals, and reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` — so unlike most rows here, this one already has a drift check of its own. **Strict as of #4001 批 9.** The curated tables are the `FLOW_NODE_UNKNOWN_KEY_GUIDANCE` prose from `service-automation`'s registration door, plus two entries that door never had: `recordId` (measured on CRUD nodes across the repo's own flow fixtures, read by no executor — on `delete_record` that is #3810 wearing a key that looks like a constraint) and `outputVariable` on `update_record` / `delete_record` (a documented ABSENCE, and the likeliest wrong key precisely because five sibling contracts declare it) |
+| `schemaless-node-config.zod.ts` | 4 | authorable | Same family, third panel (#4278): `script` / `subflow` / `decision` (+ the decision branch item) — the descriptor-schemaless nodes whose form lives in objectui's hand-written table. Written from the executors; the drift check is objectui's `flow-node-config.spec-reconciliation` test (cross-repo, via the published exports — it compares `.shape` key sets, so strictness does not move it). Since #4343 `script` and `subflow` ARE parsed at execute time (`parse-config.ts`). **Strict as of #4001 批 9 — and this is the one row in the table where strictness is the FIRST unknown-key gate, not a second one**: `registerFlow()`'s #4277 rejection derives its declared set from a descriptor `configSchema`, so it structurally skips the schemaless class. `decision` stays export-only, closed anyway; its `condition` guidance suppresses a one-edit rename to `conditions` that #4414 proves is the worse outcome |
 | `webhook.zod.ts` | 1 | authorable (p) | spec-only (#3461) |
 | `time-relative-trigger.zod.ts` | 1 | authorable | **Undeclared until the #4001 re-measurement, and invisible for the worst possible reason**: `TimeRelativeTriggerSchema` is written `z\n  .object({`, the old textual counter matched zero sites, and a zero-site file is SKIPPED by the coverage walk as "nothing to classify". So the gate whose whole promise is "no undeclared surface" reported green over an authorable schema — the same shape as `data/driver/`, one layer subtler, because this time the file was not hidden by the walk but by the counter feeding it. Classification is not a guess: the file's own `@example` blocks author it by hand into a flow start node (`config: { timeRelative: { object, dateField, offsetDays, filter } }`), which is the authoring door. A stripped key here means the sweep silently never matches — `offsetDay` for `offsetDays` returns a trigger that never fires, reported as configured |
 | `flow-function.zod.ts` | 1 | authorable | `FlowFunctionDeclarationSchema` (#4396) — the `{ handler, effect }` form of a `defineStack({ functions })` entry. Authored, but note what an undeclared key here would be: a sibling of a **live function**, not data. `defineStack`'s union already rejects a record whose `handler` is not callable, and the boot-path reader is the hand-written `normalizeFlowFunctionEntry` rather than a `.parse()` (re-validating a live handler every boot buys nothing), so strictness would bind at authoring only. Candidate on the same verify-first rule as its `*-node-config` neighbours |
@@ -605,25 +606,31 @@ classes; where it does, the split is stated. **Only the authorable half is in th
 2026-08-03 ruling's forced scope** — wire/open rows are listed so the arithmetic
 is complete and so nobody re-triages them from scratch next batch.
 
-#### `automation/` — 67 strip of 75
+#### `automation/` — 53 strip of 75
 
 | File | Strip | Sites | Class | Batch |
 |---|---|---|---|---|
 | `execution.zod.ts` | 13 | 13 | wire | **out of scope** — engine-emitted run state; the ledger row already says "never strict" |
 | `etl.zod.ts` | 10 | 10 | mixed | 7 authorable (`ETLSource` + `.incremental`, `ETLDestination`, `ETLTransformation`, `ETLPipeline` + `.retry` + `.notifications`), 3 wire (`ETLPipelineRun` + `.stats` + `.error` — run state) |
-| `builtin-node-config.zod.ts` | 8 | 8 | authorable | CRUD quartet + `Screen` (+ `.options`) + `Map`; already has a bidirectional drift check (`builtin-node-form-zod-ledger.test.ts`) |
 | `flow.zod.ts` | 7 | 11 | mixed | 6 authorable (`FlowNode.connectorConfig` / `.position` / `.inputSchema` / `.waitEventConfig` / `.boundaryConfig`, `Flow.errorHandling`), 1 wire (`FlowVersionHistorySchema` — the ledger row already exempts it) |
 | `state-machine.zod.ts` | 6 | 6 | authorable (p) | `ActionRef` / `GuardRef` / `Transition` / `StateNode` + `.meta` / `StateMachine` |
 | `bpmn-interop.zod.ts` | 5 | 5 | wire (p) | **out of scope** — third-party BPMN import/export shapes; strictness turns an upstream addition into our parse crash |
 | `control-flow.zod.ts` | 5 | 5 | authorable (p) | `FlowRegion` / `Loop` / `ParallelBranch` / `Parallel` / `TryCatch` — validated structurally by `validateControlFlow` today, which is a sibling guard, not a key gate |
 | `node-executor.zod.ts` | 4 | 4 | wire | **out of scope** — executor registration contract, code-to-code |
-| `schemaless-node-config.zod.ts` | 4 | 4 | authorable | `Script` / `Subflow` / `DecisionCondition` / `Decision`; `script` + `subflow` ARE parsed at execute time since #4343 |
-| `io-node-config.zod.ts` | 2 | 2 | authorable | `NotifyConfig` / `HttpConfig` — the sibling contracts for the deliberately-open flow node `config` slot |
 | `flow-function.zod.ts` | 1 | 1 | authorable | `FlowFunctionDeclarationSchema`; binds at authoring only (the boot reader is `normalizeFlowFunctionEntry`, not a `.parse()`) |
 | `time-relative-trigger.zod.ts` | 1 | 1 | authorable | `TimeRelativeTriggerSchema` — **newly visible** (see its triage row); a stripped `offsetDay`/`withinDay` yields a trigger that never fires, reported as configured |
 | `webhook.zod.ts` | 1 | 1 | authorable (p) | `WebhookSchema`, spec-only (#3461) |
 
-**Authorable strip in `automation/`: 41 of 67.** This is the ruling's "known main body".
+Three rows left this table at **批 9** (#4001), the ruling's first `automation/`
+wave — `builtin-node-config.zod.ts` (8), `schemaless-node-config.zod.ts` (4) and
+`io-node-config.zod.ts` (2), all reaching zero strip. The reverse pin fired on
+all three before the rows were removed, which is the only evidence that a
+deletion here is bookkeeping rather than a guess.
+
+**Authorable strip in `automation/`: 27 of 53** (was 41 of 67). What remains of
+the ruling's "known main body" is `etl` 7, `flow` 6, `state-machine` 6,
+`control-flow` 5, and one each from `flow-function` / `time-relative-trigger` /
+`webhook`.
 
 #### `ui/` — 123 strip of 198
 
@@ -664,7 +671,7 @@ reverse pin above). Worth noting for the next batch that "resolve a row" has two
 exits, and the reverse pin cannot tell them apart — only the changeset and the
 triage row record which one was taken.
 
-#### `data/` — 121 strip of 162
+#### `data/` — 120 strip of 162
 
 | File | Strip | Sites | Class | Batch |
 |---|---|---|---|---|
@@ -678,14 +685,14 @@ triage row record which one was taken.
 | `analytics.zod.ts` | 8 | 8 | mixed (p) | `Metric` / `Dimension` / `Cube` / `AnalyticsQuery` — cube definitions are authored; needs a per-schema read |
 | `document.zod.ts` | 8 | 8 | wire (p) | `DocumentTemplate` / `ESignatureConfig` read authorable on their face — the `(p)` is unresolved, verify before scheduling either way |
 | `driver/memory.zod.ts` | 5 | 6 | authorable | The persistence-adapter union under `datasource.config`; `datasource.config` HAS been parsed against these since #4410, so strictness here now binds |
-| `query.zod.ts` | 5 | 5 | open | ⚠️ **classification conflict — see #4721.** The row calls the query dialect `open`; #4721 asks for `SortNodeSchema.strict()`. Both cannot be right. Resolve the class before writing code |
+| `query.zod.ts` | 4 | 5 | open | ~~⚠️ classification conflict — see #4721~~ **RESOLVED (11:41Z ruling, closed by #4721).** The conflict was real and the answer was that per-FILE classification was the imprecise instrument: `SortNodeSchema` was carved out as `authorable` and closed (`strictObject` + `aliases: { direction: 'order' }`), the other 4 sites keep `open`. Those 4 are the dialect proper — `BaseQuerySchema`, `AggregationNodeSchema`, `FullTextSearchSchema`, `GroupByNodeSchema`'s object arm — and `BaseQuerySchema`'s own top-level strictness is #4001's to schedule, deliberately **not** taken by #4721 |
 | `external-catalog.zod.ts` | 4 | 4 | wire (p) | **out of scope** |
 | `hook.zod.ts` | 4 | 6 | wire | **out of scope** — `HookContextSchema` + `.session`/`.provenance`/`.user` are the runtime shape handed to a handler; verified in the data step |
 | `field.zod.ts` | 3 | 11 | authorable | `LocationCoordinates` / `CurrencyValue` / `Address` — field VALUE shapes, not field config; check whether they are record data (→ open) before closing |
 | `driver-sql.zod.ts` | 2 | 2 | wire | **out of scope** |
 | `field-value.zod.ts` | 1 | 2 | mixed (p) | `LocationValueSchema` — record data, very likely **open**; its sibling `FileValueSchema` is already `z.looseObject` |
 
-**Authorable strip in `data/`: ~22 firm** (`object` 14 + `driver/memory` 5 + `field` 3), **plus ~33 needing a per-schema verdict** (`external-lookup` 12, `seed-loader` 12, `analytics` 8, `field-value` 1). 66 are wire/open and out of the ruling's forced scope.
+**Authorable strip in `data/`: ~22 firm** (`object` 14 + `driver/memory` 5 + `field` 3), **plus ~33 needing a per-schema verdict** (`external-lookup` 12, `seed-loader` 12, `analytics` 8, `field-value` 1). 65 are wire/open and out of the ruling's forced scope — 66 until #4721 closed `query.zod.ts`'s `SortNodeSchema`, which is the one row in this directory where the per-schema read moved a site OUT of `open` rather than confirming it.
 
 #### `security/` — 13 strip of 20
 
@@ -783,25 +790,39 @@ is the confirmation the campaign's own progress log was missing.
    estimated — read it, do not re-derive it, and do not plan off `strictObject(`
    occurrence counts (finding 19 explains what that undercounts).
 
-   Two things in that map need a decision before any code is written, and both
-   are classification questions rather than implementation ones:
+   Two things in that map needed a decision before any code was written, and
+   both were classification questions rather than implementation ones. The first
+   is now settled:
 
-   - **`data/query.zod.ts` is classed `open`, and #4721 asks for
-     `SortNodeSchema.strict()`.** Both cannot be right. Measured, so the decision
-     is made against facts rather than recollection: `SortNodeSchema.parse({
-     field, direction: 'desc' })` returns `{ field, order: 'asc' }` — the wrong
-     rows, with no signal — and #4721's premise that the top level already
-     rejects unknown option keys is true but of a **different mechanism**:
-     #4371's check is a hand-written allowlist in `objectql/src/engine.ts`
-     (`rejectUnknownEngineOptions`) that iterates `Object.entries(bag)` at the
-     top level only. It is a bespoke guard at one door, which is this campaign's
-     finding 17 exactly, so "same invariant, one level down" is not available as
-     a justification — closing the sort node is a *new* door, not the completion
-     of an existing one.
+   - ~~**`data/query.zod.ts` is classed `open`, and #4721 asks for
+     `SortNodeSchema.strict()`.**~~ **SETTLED (2026-08-03 11:41Z ruling; closed
+     by #4721.)** Measured, so the decision was made against facts rather than
+     recollection: `SortNodeSchema.parse({ field, direction: 'desc' })` returns
+     `{ field, order: 'asc' }` — the wrong rows, with no signal — while #4721's
+     premise that the top level already rejects unknown option keys turned out
+     to be about a **different mechanism** and, on re-measurement, not even true
+     of the schema: #4371's check is a hand-written allowlist in
+     `objectql/src/engine.ts` (`rejectUnknownEngineOptions`) that iterates
+     `Object.entries(bag)` at the top level only, and `QuerySchema` itself is not
+     strict (`QuerySchema.safeParse({object:'sales', nonsenseKey:1}).success ===
+     true`). That is finding 17 exactly — a bespoke guard at one door — so "same
+     invariant, one level down" was **not** available as a justification, and the
+     ruling does not use it: closing the sort node is a **new** door.
+
+     **The answer was that the FILE was the wrong unit.** `open` was awarded to
+     the query dialect because user data flows through predicate values;
+     `SortNodeSchema` is a closed two-key tuple with no user-data face, so it was
+     re-classed `authorable` and closed while the other four sites kept `open`.
+     The generalisable part: when a blanket per-file class collides with a
+     per-schema finding, **suspect the blanket first** — this ledger classifies
+     sites, and a file is only a convenient bag of them. Both doors were closed
+     in the same change (`SortNodeSchema` + `normalizeSortNodes` in
+     `metadata-protocol`), per finding 6's asymmetry.
+
    - **`ui/app.zod.ts`'s `BaseNavItemSchema`** is the base that the strict
      discriminated-union members `.extend()`. Finding 16 is the warning: closing
      a base closes every extension of it, including any that is deliberately a
-     wire shape.
+     wire shape. **Still open.**
 
 Done in the registered-types batch: `strictObject` (`shared/strict-object.ts`)
 replaced the four-part wiring recipe, and `seed` + `doc` became the first two

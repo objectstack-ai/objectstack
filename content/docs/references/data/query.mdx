@@ -7,7 +7,9 @@ description: Query protocol schemas
 
 Sort Node
 
-Represents "Order By".
+Represents "Order By" — one `\{ field, order \}` pair. Unknown keys are
+
+REJECTED (#4721); spell the direction `order`, never `direction`.
 
 <Callout type="info">
 **Source:** `packages/spec/src/data/query.zod.ts`

@@ -125,6 +125,44 @@ Undeclared aliases are NOT part of these contracts: `subflow`'s historical
 
 ever sees `flowName`.
 
+## Unknown keys — closed as of #4001 批 9, and this class had NO other door
+
+The descriptor-schema'd builtins have a registration-time key gate:
+
+`registerFlow()` walks each node's `config` against the descriptor's
+
+`configSchema` and hard-rejects what it does not declare (#4277). **These
+
+three node types are exempt from that walk** — by construction, since it
+
+derives the declared set from a `configSchema` they publish none of
+
+(`validateNodeConfigKeys`' schemaless exemption). So until now the entire
+
+`script` / `subflow` / `decision` config surface had exactly zero unknown-key
+
+enforcement at any layer: the execute-time parse #4343 added checks types and
+
+requiredness, and Zod's default `.strip` deleted everything else in silence.
+
+That is the #4001 asymmetry in its purest form — a guard was written for the
+
+door in front of its author, and the class it structurally could not cover is
+
+precisely the class with no second door. Closing these shapes is therefore
+
+not a duplicate check for `script` and `subflow`; it is their first one.
+
+`decision` is still export-only, so its strictness binds at authoring
+
+(`tsc`), in the published JSON Schema, and in objectui's reconciliation —
+
+not at run time. It is closed anyway, because the campaign's whole finding
+
+is that a shape left open accretes a test, a form and a fixture that assert
+
+the openness, and then closing it is a migration instead of an edit.
+
 <Callout type="info">
 **Source:** `packages/spec/src/automation/schemaless-node-config.zod.ts`
 </Callout>
