@@ -1,6 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { ObjectSchema } from '@objectstack/spec/data';
+import { SharingRuleSchema, type SharingRuleInput } from '@objectstack/spec/security';
 
 import {
   validateOrgAxisRedLines,
@@ -9,6 +11,104 @@ import {
 } from './validate-org-axis-red-lines.js';
 
 const rules = (stack: unknown) => validateOrgAxisRedLines(stack).map((f) => f.rule);
+
+/**
+ * ── The fixture/schema drift guard (#4984) ──────────────────────────────────
+ *
+ * Every sharing-rule fixture below is built through `sharingRule()`, which
+ * PARSES it with the real `SharingRuleSchema` before the lint ever sees it. A
+ * fixture that drifts from the spec surface therefore fails here, loudly, at
+ * the fixture — not silently, by exercising a code path no author can reach.
+ *
+ * This guard exists because its absence cost a red line. The pre-#4984 fixtures
+ * spelled the rule's keys `criteria` and `sharedTo`; `SharingRuleSchema` is
+ * `.strict()` and knows those two only as REJECTED aliases of `condition` and
+ * `sharedWith`. The lint read the aliases too, so the tests passed against a
+ * shape no spec-valid stack can contain: green tests, dead gate. Renaming the
+ * keys alone would fix today's bug and leave tomorrow's drift undetectable —
+ * this helper is the structural half of the fix.
+ *
+ * It returns the PARSED rule, which is also what the registry feeds the lint
+ * (`input: 'parsed'`): `condition` arrives as the `{ dialect, source }`
+ * envelope, not the authored string.
+ */
+function sharingRule(input: SharingRuleInput): Record<string, unknown> {
+  const result = SharingRuleSchema.safeParse(input);
+  if (!result.success) {
+    const detail = result.error.issues
+      .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('; ');
+    throw new Error(
+      `sharing-rule fixture is not spec-valid — the lint would be tested against a shape ` +
+        `no author can write (#4984). Keys given: ${Object.keys(input as object).join(', ')}. ${detail}`,
+    );
+  }
+  return result.data as unknown as Record<string, unknown>;
+}
+
+/** Same guard for the object fixtures rule ② reads (`tenancy` / `systemFields`). */
+function objectFixture(input: Record<string, unknown>): Record<string, unknown> {
+  const result = ObjectSchema.safeParse({
+    label: 'Fixture',
+    fields: { name: { type: 'text', label: 'Name' } },
+    ...input,
+  });
+  if (!result.success) {
+    throw new Error(
+      `object fixture is not spec-valid (#4984): ` +
+        result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; '),
+    );
+  }
+  return result.data as unknown as Record<string, unknown>;
+}
+
+/** A recipient that is beyond reproach, for fixtures whose subject is the predicate. */
+const HQ_TEAM = { type: 'team', value: 'hq' } as const;
+
+describe('sharing-rule fixtures track the spec surface (meta-test, #4984)', () => {
+  it('rejects a fixture spelled with the schema-rejected aliases', () => {
+    // The exact pre-#4984 fixture shapes. Each must now fail at the fixture.
+    expect(() =>
+      sharingRule({
+        name: 'hq_rollup',
+        object: 'work_order',
+        criteria: { parent_organization_id: 'org_hq' },
+      } as unknown as SharingRuleInput),
+    ).toThrow(/not spec-valid/);
+    expect(() =>
+      sharingRule({
+        name: 'plant_team',
+        object: 'work_order',
+        sharedTo: { type: 'business_unit', id: 'bu_plant_a' },
+      } as unknown as SharingRuleInput),
+    ).toThrow(/not spec-valid/);
+  });
+
+  it('rejects the rejected recipient alias `id` (the recipient shape is strict too)', () => {
+    expect(() =>
+      sharingRule({
+        name: 'r',
+        type: 'criteria',
+        object: 'work_order',
+        // `id` is an alias of `value`, rejected by `sharingRecipientUnknownKeyError`.
+        sharedWith: { type: 'business_unit', id: 'bu_plant_a' },
+        condition: 'true',
+      } as unknown as SharingRuleInput),
+    ).toThrow(/not spec-valid/);
+  });
+
+  it('accepts the canonical shape and hands the lint the PARSED envelope', () => {
+    const rule = sharingRule({
+      name: 'ok',
+      type: 'criteria',
+      object: 'work_order',
+      sharedWith: HQ_TEAM,
+      condition: "record.status == 'open'",
+    });
+    expect(rule.condition).toEqual({ dialect: 'cel', source: "record.status == 'open'" });
+    expect(rule.sharedWith).toEqual({ type: 'team', value: 'hq' });
+  });
+});
 
 describe('validateOrgAxisRedLines — ① no permission inheritance on the org axis', () => {
   it('flags an RLS `using` on a permission set that walks the org parent', () => {
@@ -62,14 +162,96 @@ describe('validateOrgAxisRedLines — ① no permission inheritance on the org a
     expect(findings[0].path).toBe('objects[0].rowLevelSecurity[0].using');
   });
 
-  it('flags a sharing rule whose criteria walk the org parent', () => {
+  it('flags a spec-valid sharing rule whose `condition` walks the org parent', () => {
+    // Exactly the stack #4984 showed passing `os validate` / `os build` / `os lint`.
+    const findings = validateOrgAxisRedLines({
+      sharingRules: [
+        sharingRule({
+          name: 'hq_sees_children',
+          type: 'criteria',
+          object: 'work_order',
+          sharedWith: HQ_TEAM,
+          condition: "record.parent_organization_id == 'org_hq'",
+        }),
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: ORG_AXIS_PERMISSION_INHERITANCE,
+      path: 'sharingRules[0].condition',
+    });
+    expect(findings[0].where).toBe('sharing rule "hq_sees_children"');
+    expect(findings[0].message).toMatch(/parent_organization_id/);
+  });
+
+  it('flags the pre-parse `condition` shape too (`os lint` runs on the normalized stack)', () => {
+    // Bare-string shorthand — what the author typed, before `ExpressionInputSchema`
+    // wraps it. The `parsed` tier falls back to `normalized` under `os lint`.
     expect(
       rules({
         sharingRules: [
-          { name: 'hq_rollup', object: 'work_order', criteria: { parent_organization_id: 'org_hq' } },
+          {
+            name: 'hq_sees_children',
+            type: 'criteria',
+            object: 'work_order',
+            sharedWith: { type: 'team', value: 'hq' },
+            condition: "record.parent_organization_id == 'org_hq'",
+          },
         ],
       }),
     ).toEqual([ORG_AXIS_PERMISSION_INHERITANCE]);
+  });
+
+  it('flags the compiled `{ dialect, ast }` condition shape', () => {
+    expect(
+      rules({
+        sharingRules: [
+          {
+            name: 'hq_sees_children',
+            object: 'work_order',
+            sharedWith: { type: 'team', value: 'hq' },
+            condition: {
+              dialect: 'cel',
+              ast: { type: 'binary', op: '==', left: { type: 'member', path: ['record', 'parent_organization_id'] } },
+            },
+          },
+        ],
+      }),
+    ).toEqual([ORG_AXIS_PERMISSION_INHERITANCE]);
+  });
+
+  it('flags a recipient that reaches for the org parent', () => {
+    const findings = validateOrgAxisRedLines({
+      sharingRules: [
+        sharingRule({
+          name: 'by_parent_org',
+          type: 'criteria',
+          object: 'work_order',
+          sharedWith: { type: 'team', value: 'parent_organization_id' },
+          condition: 'true',
+        }),
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('sharingRules[0].sharedWith');
+  });
+
+  it('does NOT resurrect the schema-rejected aliases — parse is that gate', () => {
+    // `criteria` / `filter` / `sharedTo` / `recipient` are rejected by
+    // `SharingRuleSchema` with a named fix-it. Reading them here as `??`
+    // fallbacks is what made this rule inert (#4984); a consumer must not
+    // tolerate what the producer's contract refuses (Prime Directive #12).
+    expect(
+      rules({
+        sharingRules: [
+          { name: 'a', object: 'work_order', criteria: { parent_organization_id: 'org_hq' } },
+          { name: 'b', object: 'work_order', filter: "record.parent_organization_id == 'x'" },
+          { name: 'c', object: 'work_order', sharedTo: { type: 'team', id: 'parent_organization_id' } },
+          { name: 'd', object: 'work_order', recipient: { type: 'team', id: 'parent_organization_id' } },
+        ],
+      }),
+    ).toEqual([]);
   });
 
   it('stays silent on membership-based and business-unit scoping (the sanctioned paths)', () => {
@@ -88,9 +270,15 @@ describe('validateOrgAxisRedLines — ① no permission inheritance on the org a
           },
         ],
         sharingRules: [
-          { name: 'plant_team', object: 'work_order', sharedTo: { type: 'business_unit', id: 'bu_plant_a' } },
+          sharingRule({
+            name: 'plant_team',
+            type: 'criteria',
+            object: 'work_order',
+            sharedWith: { type: 'business_unit', value: 'bu_plant_a' },
+            condition: "record.status == 'open'",
+          }),
         ],
-        objects: [{ name: 'work_order' }],
+        objects: [objectFixture({ name: 'work_order' })],
       }),
     ).toEqual([]);
   });
@@ -98,13 +286,21 @@ describe('validateOrgAxisRedLines — ① no permission inheritance on the org a
 
 describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal', () => {
   const platformGlobalStack = (tenancy: unknown) => ({
-    objects: [{ name: 'material_catalog', tenancy }],
+    objects: [
+      objectFixture(
+        tenancy === undefined
+          ? { name: 'material_catalog' }
+          : { name: 'material_catalog', tenancy },
+      ),
+    ],
     sharingRules: [
-      {
+      sharingRule({
         name: 'catalog_to_plant',
+        type: 'criteria',
         object: 'material_catalog',
-        sharedTo: { type: 'business_unit', id: 'bu_plant_a' },
-      },
+        sharedWith: { type: 'business_unit', value: 'bu_plant_a' },
+        condition: 'true',
+      }),
     ],
   });
 
@@ -114,7 +310,7 @@ describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal'
     expect(findings[0]).toMatchObject({
       severity: 'error',
       rule: ORG_AXIS_CROSS_ORG_BU_GRANT,
-      path: 'sharingRules[0].sharedTo',
+      path: 'sharingRules[0].sharedWith',
     });
     expect(findings[0].message).toMatch(/spans EVERY organization/);
   });
@@ -122,9 +318,15 @@ describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal'
   it('flags the `systemFields.tenant: false` spelling of the same opt-out', () => {
     expect(
       rules({
-        objects: [{ name: 'material_catalog', systemFields: { tenant: false } }],
+        objects: [objectFixture({ name: 'material_catalog', systemFields: { tenant: false } })],
         sharingRules: [
-          { name: 'r', object: 'material_catalog', sharedTo: { type: 'business_unit', id: 'bu' } },
+          sharingRule({
+            name: 'r',
+            type: 'criteria',
+            object: 'material_catalog',
+            sharedWith: { type: 'business_unit', value: 'bu' },
+            condition: 'true',
+          }),
         ],
       }),
     ).toEqual([ORG_AXIS_CROSS_ORG_BU_GRANT]);
@@ -138,9 +340,15 @@ describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal'
   it('allows a non-BU audience on a platform-global object', () => {
     expect(
       rules({
-        objects: [{ name: 'material_catalog', tenancy: { enabled: false } }],
+        objects: [objectFixture({ name: 'material_catalog', tenancy: { enabled: false } })],
         sharingRules: [
-          { name: 'r', object: 'material_catalog', sharedTo: { type: 'position', name: 'buyer' } },
+          sharingRule({
+            name: 'r',
+            type: 'criteria',
+            object: 'material_catalog',
+            sharedWith: { type: 'position', value: 'buyer' },
+            condition: 'true',
+          }),
         ],
       }),
     ).toEqual([]);
