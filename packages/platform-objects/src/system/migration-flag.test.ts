@@ -196,4 +196,72 @@ describe('fresh-datastore attestation (ADR-0104, 2026-07-30 addendum)', () => {
     expect(logger.warn).toHaveBeenCalled();
     expect(logger.info).not.toHaveBeenCalled();
   });
+
+  /**
+   * #4769. "Created empty" licenses a claim about CONTENT, and the boot doing
+   * the attesting is also the boot doing the seeding — so the claim has to be
+   * checked against what that boot has already written, not against the
+   * emptiness it remembers. One admitted value is a complete disproof.
+   */
+  describe('a boot may not attest a contract it has already broken (#4769)', () => {
+    const VIOLATED = {
+      count: 10,
+      first: {
+        object: 'showcase_task',
+        field: 'cover',
+        type: 'image',
+        detail: 'Expected an opaque sys_file id',
+      },
+    };
+
+    it('does not attest an id this boot has written violating values for', async () => {
+      const engine = fakeEngine();
+      engine.valueShapeViolationsAdmitted = () => ({ [MIGRATION]: VIOLATED });
+      const logger = { info: vi.fn(), warn: vi.fn() };
+
+      const attested = await attestFreshDatastore(engine, { logger });
+
+      expect(attested).not.toContain(MIGRATION);
+      expect(engine.tables.sys_migration.find((r) => r.id === MIGRATION)).toBeUndefined();
+      expect(await isDataMigrationVerified(engine, MIGRATION)).toBe(false);
+      // The operator is told which value cost them the gate, and what closes it.
+      const warning = String(logger.warn.mock.calls[0]?.[0] ?? '');
+      expect(warning).toContain('showcase_task.cover');
+      expect(warning).toContain('os migrate files-to-references --apply');
+    });
+
+    /**
+     * The two ids are attested at the same moment on the same evidence, but
+     * they stand for two different facts — a bad `cover` says nothing about
+     * whether a `location` is well formed. One contradiction must not sink
+     * the other gate, and must not spare its own.
+     */
+    it('declines only the contradicted id, and still attests the other', async () => {
+      const engine = fakeEngine();
+      engine.valueShapeViolationsAdmitted = () => ({ [MIGRATION]: VIOLATED });
+
+      const attested = await attestFreshDatastore(engine);
+
+      expect(attested).toEqual(
+        CREATION_ATTESTED_MIGRATION_IDS.filter((id) => id !== MIGRATION) as unknown as string[],
+      );
+      expect(await isDataMigrationVerified(engine, 'adr-0104-value-shapes')).toBe(true);
+    });
+
+    it('attests normally when the boot admitted nothing', async () => {
+      const engine = fakeEngine();
+      engine.valueShapeViolationsAdmitted = () => ({});
+
+      expect(await attestFreshDatastore(engine)).toEqual([...CREATION_ATTESTED_MIGRATION_IDS]);
+    });
+
+    it('an engine that cannot report reads as no counterexample (older build, fake)', async () => {
+      const engine = fakeEngine();
+      engine.valueShapeViolationsAdmitted = () => {
+        throw new Error('not implemented');
+      };
+
+      expect(await attestFreshDatastore(engine)).toEqual([...CREATION_ATTESTED_MIGRATION_IDS]);
+    });
+  });
 });

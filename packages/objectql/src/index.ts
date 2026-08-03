@@ -48,6 +48,7 @@ export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion
 // Export Engine
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
 export type { HookHandler, HookEntry, OperationContext, EngineMiddleware } from './engine.js';
+export type { AdmittedValueShapeViolationTally } from './engine.js';
 export { SummaryRecomputeError } from './summary-errors.js';
 export type { SummaryRecomputeFailure } from './summary-errors.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
@@ -75,6 +76,14 @@ export type { WrapDeclarativeOptions } from './hook-wrappers.js';
 // Export Validation
 export { ValidationError, validateRecord } from './validation/record-validator.js';
 export type { FieldValidationError } from './validation/record-validator.js';
+// [ADR-0104 / #4769] The counterexample a boot produces by ADMITTING an
+// off-shape value. Exported because the fresh-datastore attestation
+// (`@objectstack/platform-objects`) reads it before certifying anything: a
+// boot may not prove a contract it has itself just broken.
+export type {
+    AdmittedValueShapeViolation,
+    AdmittedValueShapeViolationSink,
+} from './validation/record-validator.js';
 // [ADR-0104 D1 / #3438] The value-shape scan behind `os migrate value-shapes`.
 // Read-only by design: it produces the evidence and the CALLER records the
 // flag. The engine deliberately does not depend on `@objectstack/platform-objects`
