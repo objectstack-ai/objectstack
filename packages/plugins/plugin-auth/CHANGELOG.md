@@ -1,5 +1,336 @@
 # Changelog
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- ce5242c: feat(auth,objectql,audit,security,spec): identity-table writes carry the real actor, so `sys_member` history stops saying "system" (#4586)
+
+  better-auth owns every write to the identity tables (`sys_member`, `sys_user`,
+  `sys_invitation`, …) and its ObjectQL adapter runs them `isSystem: true` **on
+  purpose** — the route already authorized the action under better-auth's own ACL,
+  and ADR-0092 D2 refuses user-context writes to those tables outright. The
+  consequence was that the human who clicked _make admin_ was known exactly once,
+  in the hook layer where the session exists, and then discarded: every
+  `trackHistory` transition on `sys_member` recorded `user_id: null` / "system",
+  and `sys_user_permission_set.granted_by` was written null by the auto-grant.
+  "Who made this person an org admin?" had no answer in the platform's own audit
+  log.
+
+  **What changed**
+
+  A request-scoped attribution seam, general rather than a `sys_member` special
+  case:
+
+  | Layer                        | Before                             | After                                                                                                                          |
+  | :--------------------------- | :--------------------------------- | :----------------------------------------------------------------------------------------------------------------------------- |
+  | `ExecutionContext`           | `userId` / `actor` only            | new optional `attributedUserId` — the human CREDITED for a write the system AUTHORIZED                                         |
+  | `HookContext`                | `session`, `user`                  | new `provenance.attributedUserId`, split off the context beside `session`                                                      |
+  | better-auth ObjectQL adapter | `{ isSystem: true }`               | `{ isSystem: true, attributedUserId }` when a request scope is open                                                            |
+  | audit writer                 | `user_id = session.userId ?? null` | falls back to `provenance.attributedUserId` when the session names nobody                                                      |
+  | `auto-org-admin-grant`       | `granted_by: null`, no `reason`    | the attributed human in `granted_by`, plus a machine-provenance `reason` naming the writer and the triggering `sys_member` row |
+
+  Outside a request scope nothing changes: writes stay bare `{ isSystem: true }`
+  and audit rows keep recording `null`. Absence is still never upgraded into a
+  caller, and never written as a sentinel string (ADR-0118 D1/D2).
+
+  **Hard constraint — attribution is not authority**
+
+  `attributedUserId` is read by exactly one consumer, the audit writer, and by no
+  security middleware. It never becomes `ExecutionContext.userId`, so it is never
+  the subject the engine authorizes as: not RLS `current_user`, not the ownership
+  stamp, not permission resolution. A context carrying only `attributedUserId`
+  authorizes exactly like an empty context (ANONYMOUS), and a context carrying it
+  beside `isSystem: true` authorizes exactly like `isSystem` alone. Re-authorizing
+  identity writes as the human would re-adjudicate a decision better-auth already
+  made — the second adjudication track ADR-0095 D3 closed. The constraint is
+  pinned by tests at three layers: the engine seam
+  (`packages/objectql/src/engine.test.ts`), the better-auth adapter
+  (`packages/plugins/plugin-auth/src/auth-actor-attribution.test.ts`), and the
+  live HTTP route (a plain member still cannot promote themselves).
+
+  **For authors and plugin developers**
+
+  `attributedUserId` is authorable on `ExecutionContext` and readable as
+  `ctx.provenance?.attributedUserId` in hooks. Use it to answer _who is
+  responsible_; keep using `ctx.session` / `ctx.user` to decide _what is
+  permitted_. The two are separate fields precisely so the distinction cannot be
+  blurred by accident.
+
+### Patch Changes
+
+- f2eb850: fix(plugin-auth): 限流计数器改为惰性解析 kernel cache —— 修掉误报的告警，也修掉「共享限流从未生效」的功能洞 (#4772)
+
+  `pnpm dev`（showcase）每次冷启都会打一条：
+
+  ```
+  WARN [auth] no cache service registered — rate-limit counters use a per-process in-memory
+       store; a multi-node deployment needs a shared cache (Redis) to enforce limits globally
+  ```
+
+  而 `CacheServicePlugin` 就在 **21ms 后**注册好了，它本来就在已加载插件列表里。这条告警把运维引向「你需要 Redis」，接完 Redis 还是同一条告警 —— 因为缺的不是 Redis。
+
+  **这不只是日志误报。** `AuthPlugin.init()` 里那次 `getServiceAsync('cache')`
+  探测的结论会被**冻结整个进程生命周期**：better-auth 实例是懒创建的，但它读的是 init
+  时定下的 config。所以标准组合下 auth 这一侧永远拿着「没有 cache」这个结论，限流计数器
+  **从未**用上共享存储 —— 多节点部署的限额从来没有被全局强制过，每个节点各算各的，轮换
+  节点即可绕过。ADR-0069 D2 声明的能力与运行时不一致。
+
+  **修法：把「取 cache 服务」放回真正用到它的那一刻。** 新增
+  `createLazyCacheRateLimitStorage()`，实现 better-auth 的 `rateLimit.customStorage`：
+  计数器被消费时才解析 `cache` 服务（这一刻必然在 `kernel:ready` 之后，因此与插件启动
+  顺序无关），解析到就一直用它。告警保留，但只在**计数器真的要用共享存储、而此刻确实
+  一个 cache 服务都没有**时才打一次 —— 那时它才是真信号，「加一个共享缓存」也才是对的
+  建议。真没有 cache 的部署仍然限流，只是退化成进程内计数（降级，不是关闭）。
+
+  **刻意走 `rateLimit.customStorage` 而不是 `secondaryStorage`。** 后者会连带把**会话
+  的记录之处**搬进缓存：better-auth 的 `createSession` 不再写 `sys_session` 行，
+  `findSession` 直接从缓存快照作答、根本不查库；而 ADR-0069 D4 的空闲超时 / 绝对时长
+  上限 / 并发上限**全部靠写那一行来撤销会话**。所以自动把 cache 绑成 `secondaryStorage`
+  会静默废掉 D4 的三个管控。本次因此不再从 cache 服务自动派生 `secondaryStorage`：
+  它回归「宿主显式提供才生效」，`cacheSecondaryStorage()` 改为从包根导出，供知情的宿主
+  自行选用。会话到底该存哪，是一个需要维护者裁定的架构问题，记录在 #4785。
+
+  对使用者的影响：
+
+  - 配了 cache 插件的部署不再出现那条 warn，改为一条 info（计数器已绑定到 cache 服务）；
+  - 多节点 + Redis cache 的部署，限流计数**现在真的**是全局的；
+  - 新增 `AuthManagerOptions.rateLimitStorage`（counters-only，不迁移会话）；宿主自己
+    提供的 `secondaryStorage` 行为不变，仍然优先并继续走
+    `rateLimit.storage: 'secondary-storage'`。
+
+- 8bd437f: fix(plugin-auth): 每号码 OTP 发送预算改用惰性解析的共享计数存储 —— 多节点下不再按节点数倍增 (#4790)
+
+  #2780 的「每号码 OTP 发送预算」（60s 冷却 + 每小时 5 条）此前**只有宿主显式提供
+  better-auth `secondaryStorage` 时才跨节点共享**：`AuthManager.getOtpSendGuard()` 唯一的
+  存储来源就是 `AuthManagerOptions.secondaryStorage`，而标准 `serve` 组合里没有任何一处
+  提供它（#4788 之后 `AuthPlugin` 也明确不再从 cache 服务派生它）。于是预算落在**每个进程
+  一份**：N 个节点的部署，一个号码实际能收到的是声明值的 N 倍，而且**没有任何信号**告诉你
+  它没兑现（ADR-0049 声明 ≠ 强制）。这里的计价单位是**真金白银的短信**。
+
+  这是 #4772 那条限流洞的同类，但是独立的一处：#4788 修的是 better-auth 自己的 `rateLimit`
+  计数器（走 `rateLimit.customStorage`），OTP 预算是 ObjectStack 在 `AuthManager` 里自己实现
+  的另一套计数，行为未被 #4788 改变。
+
+  **修法：复用 #4788 建好的那条路径，而不是再写一份。** `rate-limit-storage.ts` 中把「惰性
+  解析 → 绑定即宣告 → 解析不到就降级到有界的进程内存储并响亮告警」抽成
+  `createLazyCounterStore()`（`createLazyCacheRateLimitStorage()` 现在就是它的一层薄封装），
+  OTP 预算经由新的 `AuthManagerOptions.sharedCounterStore` 接同一条路径：
+
+  - **存储在每次发送校验时才解析**，因此 `CacheServicePlugin` 晚于 `AuthPlugin` 注册也照样
+    绑定得上（插件启动顺序不再决定任何事）—— 这正是 #4772 冻结结论造成的那个洞；
+  - 配了 cache 的多节点部署，每号码预算**现在真的是一份**，换节点不会重新获得冷却额度；
+  - 没有 cache 服务的部署**仍然限额**，只是降级为进程内计数，并在第一次真正计数时打一条
+    点名代价的 warn（「an N-node deployment can send up to N× the configured number of PAID
+    SMS to one number」）—— 降级不是关闭，两种情况在日志里可区分（绑定打 info，降级打 warn）。
+
+  **刻意不引入 `secondaryStorage` 来修它**（#4785）：那会把会话的记录之处搬进缓存，静默废掉
+  ADR-0069 D4 的三个会话管控。宿主自己提供的 `secondaryStorage` 对这个预算仍然优先且行为不变。
+
+  冷却与滚动小时窗的语义**未做任何改动**：计数依旧是按号码的时间戳滚动窗口，只是换了它所在的
+  存储。（固定窗口计数器无法表达「距上一次发送满 N 秒」，把它改成定窗会在窗口边界放行两倍突发
+  ——用一种倍增换另一种倍增。）
+
+  对使用者的影响：
+
+  - 新增 `AuthManagerOptions.sharedCounterStore`，`AuthPlugin` 自动填充，一般宿主无需感知；
+  - 新增导出 `createLazyCounterStore()` 与 `counterStoreFromKv()`；
+  - `OtpSendGuard` 新增 `resolveStore` 选项，原有的 `storage`（字符串 KV）选项保持可用。
+
+- 5046afe: fix(plugin-auth): OTP 冷却按声明值真正生效 —— 发送历史的保留时长不再被硬编码的 1 小时截断 (#4808)
+
+  `OtpSendGuard` 有**两个**维度:每号码「距上次发送至少 N 秒」的冷却(`cooldownSeconds`),
+  和每号码「滚动一小时内至多 M 条」的上限(`maxPerHour`)。它们需要**不同**的时间窗,而此前
+  两者共用了同一个硬编码的一小时:发送历史按 1 小时剪枝、也按 1 小时写 TTL。
+
+  于是把 `phoneOtp.cooldownSeconds` 配成**大于 3600** 时:配置被接受,没有校验错误,没有 warn,
+  但冷却所依据的那条历史记录在 1 小时处就被丢掉了 —— 声明「两次发送间隔 2 小时」,实际最多
+  只有 1 小时,**反滥用强度是声明值的一半,而且没有任何信号**(ADR-0049 声明 ≠ 强制)。
+  计价单位仍然是真金白银的短信。这与 #4790 是同一个 guard 上的**不同**缺陷,且改动前后行为
+  一致 —— 不是 #4806 引入的。
+
+  **修法(issue 的方向 1):保留时长跟随配置。** 历史保留 `max(1 小时, cooldownSeconds)`,
+  即「两个维度里还用得着它的那个更长的窗」;TTL 同步跟随,记录因此活得比它所度量的冷却更久。
+  每小时上限仍在**它自己的滚动一小时**内计数,所以超长冷却不会反过来把 `maxPerHour` 收得比
+  声明的更严。
+
+  **上限是拒绝,不是又一次截断。** `cooldownSeconds` 超过 `MAX_COOLDOWN_SECONDS`(86400,
+  即 24 小时)会在**启动时**抛错(`AuthPlugin.init()` 构造 `AuthManager` 处),错误信息给出
+  值、上限和改法。把截断点挪到更高的数字只是把同一个缺陷往外推一个量级;设上限的理由是:
+  一条号码的历史会在共享缓存里驻留整个冷却期,而超过一天的封锁已经不是发送节流而是账号锁定
+  (另一套机制、另一套管控)。这条边界同时把「`cooldownSeconds` 误填成毫秒」这类笔误变成
+  一次响亮的拒绝(5 分钟以上的意图都会被挡下)。校验放在**配置处**而不是首次发送处:guard
+  是惰性构造的,只在那里校验的话,一个配置错误会表现为 `/phone-number/send-otp` 的 500。
+
+  **默认配置行为完全未变**,并有测试锁定:未配置 `phoneOtp` 时仍是 60 秒冷却 + 每小时 5 条,
+  历史保留与 TTL 仍是 3600 秒。
+
+  对使用者的影响:
+
+  - `phoneOtp.cooldownSeconds` 现在在 1 小时以上也真正生效(上限 24 小时);
+  - 超过 24 小时、负数或非有限值的配置**开始被拒绝**——这些值此前从未按声明工作过(要么被
+    静默截断到 1 小时,要么被静默钳成 0 即关闭冷却),因此不存在依赖其旧行为的部署;
+  - 新增导出:常量 `MAX_COOLDOWN_SECONDS` 与校验函数 `assertOtpCooldownSeconds()`。
+
+- c03108c: fix(auth): a degraded tenancy posture must not hand out a default organization
+
+  `TenancyService.defaultOrgId()` documented "returns `null` under any walled
+  posture", but the implementation keyed on the posture actually **in force**
+  (`isolationActive()`) rather than the one the operator **requested**. Those two
+  disagree in exactly one state — DEGRADED: a deployment that asked for `group`
+  or `isolated` and could not enforce it (the enterprise `@objectstack/organizations`
+  package is absent) reports `posture: 'single'`, and the resolver then happily
+  answered with "the `slug='default'` org, or the only org that exists".
+
+  Everything downstream of that resolver binds new users to whatever it returns.
+  The membership reconciler (ADR-0093 D2) runs on `user.create.after` — the seam
+  every creation path flows through — so in a degraded deployment **every fresh
+  signup, admin-created user and SSO JIT user was auto-bound as a `member` of
+  whichever organization happened to be resolvable**, and `backfillMemberships`
+  (D6) would sweep the pre-existing member-less ones in on the next
+  `kernel:ready`.
+
+  This reached production. ObjectStack Cloud's control plane runs
+  `OS_MULTI_ORG_ENABLED=true` while deliberately not mounting the enterprise
+  package — it enforces its own control-plane org wall instead — so the
+  `org-scoping` probe missed, the posture resolved degraded, and self-serve
+  signups landed inside a stranger's organization with read access to that org's
+  environments (cloud#957).
+
+  `defaultOrgId()` now keys on `requestedPosture`: any walled request, enforced or
+  degraded, returns `null` and the framework never guesses. This is the same
+  judgement D6 already applies to the backfill — "a wrong org in a tenant-isolated
+  deployment is a data-exposure bug, not a convenience" — applied to the resolver
+  those consumers share. It also makes the resolver agree with the default-org
+  bootstrap in `AuthPlugin.start()`, which was already gated on the requested
+  posture.
+
+  Single-org deployments are unaffected: nothing about `requested: 'single'`
+  changes. A degraded deployment loses the auto-bind, which is the point — and
+  ADR-0093 D5 already refuses to boot that deployment at all unless the operator
+  sets `OS_ALLOW_DEGRADED_TENANCY=1`.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [be25f97]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [05d8a54]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [9fd9ae7]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [8aacf94]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [be90dea]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/platform-objects@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/rest@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

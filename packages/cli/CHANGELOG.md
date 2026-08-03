@@ -1,5 +1,1187 @@
 # @objectstack/cli
 
+## 17.0.0-rc.2
+
+### Major Changes
+
+- 0e96e46: refactor(spec,cli,runtime)!: 退役 `crypto.hash` 能力 —— 声明了四层、构建期还自动推断,沙箱从没实现(#4391,ADR-0049 enforce-or-remove)
+
+  `crypto.hash` 是四层声明、零层实现:`HookBodyCapability` 枚举收它、枚举旁的文档表列它、CLI 提取器**自动推断**它、`ScriptContext.crypto.hash` 还写了签名 —— 而 `installCtx` 只往 VM 的 `ctx.crypto` 上装了 `randomUUID`。于是这个 token 唯一授权的那次调用,**每一次都在 VM 里抛**。
+
+  这比普通的 declared ≠ enforced 更毒一档,坏就坏在**构建期推断**:作者(尤其是 AI 作者)写下 `ctx.crypto.hash(...)`,提取器就替他把能力加进 `capabilities`,`os build` 因此全绿 —— 系统亲手把人送进一条必炸的死路,而唯一诚实的记录是文档表格里一句 `_(not yet wired)_`,没有作者会先读表格再写 body。
+
+  **裁决是 remove,不是实现**(维护者 2026-08-02):从未实现、调用即抛、**零投诉** —— 对一个每次使用都抛错的能力来说,这本身就是最强的活性证据,没人需要它。在沙箱里实现 crypto 会扩大沙箱的能力面与安全审查面,那是长期成本而非一次性工时,无业务拉动不做。真需要哈希时按能力准入流程重提:**实现先行,声明随实现走**(ADR-0049 的 enforce 腿留给有实现的那天)。
+
+  ## FROM → TO
+
+  | 写了什么                            | 现在怎么办                                                                            |
+  | :---------------------------------- | :------------------------------------------------------------------------------------ |
+  | `capabilities: ['crypto.hash']`     | **删掉这个 token**。它从未授权成任何东西                                              |
+  | `await ctx.crypto.hash(algo, data)` | **删掉这次调用**。它从未返回过值 —— 今天能跑的代码没有一行依赖它                      |
+  | 确实需要哈希                        | 在 host 侧做(Connector recipe,或引擎侧 hook)。沙箱内哈希须走能力准入流程重开,实现先行 |
+
+  一句话修法:**两个都删**。`os migrate meta --from 16` 会自动帮你剥掉 token;那行**死调用是你自己要删的** —— 转换层刻意不改 body 源码(见下)。
+
+  ## 定级理由(逐条自证,未照抄前例)
+
+  三问按 #4535 §5 逐条走:
+
+  1. **会不会 TS2305 / TS2339?** 会,两处。`HookBodyCapability` 是 public 导出类型,把它当**字面量联合**用的代码(`const c: HookBodyCapability = 'crypto.hash'`、对 token 做穷举 switch)现在编译失败;`ScriptContext.crypto.hash` 的调用点以 TS2339 失败。实测三仓(objectstack / cloud / objectui)裸名扫描 `crypto.hash` / `ctx.crypto.hash` / `'crypto.hash'` —— **两个兄弟仓零命中**,本仓命中全在本 PR 内清理。
+  2. **有没有元数据迁移?** 有。token 是写在作者源 hook/action body `capabilities: []` 数组里的**值**,也会躺在已存的 `sys_metadata` 行里 —— 故注册了 ADR-0087 D2 转换 `hook-body-crypto-hash-removed`(D3 挂 protocol-17)。这是与 #4767 / #4783 / #4616 的分界:那三单退役的是**导出名 / 运行时描述符**,没有作者源可改写;本单有,和 `object-enable-trash-mru-removed` / #4734 同侧。
+  3. **形状变更?** 是**枚举值收窄**(6 → 5),不是 key 移除。故**没有 `retiredKey()` 墓碑** —— `capabilities` 这个 key 本身依然活着、依然被强制。处方改由枚举自己的 error map 承载,并按 `object.managedBy: 'system'` 的先例**以 `issue.input` 为键**:只有「曾经合法」的那个拼写会被告知「was removed」,写错成 `crypto.hsah` 的作者拿到的仍是 zod 自己那条列出合法 token 的消息 —— 告诉他「你的值被退役了」属于误导。
+
+  `@objectstack/cli` 与 `@objectstack/runtime` 同定 **major**:前者 `ExtractedBody.capabilities` 的公开联合类型收窄(赋值给它的代码 TS2322),后者 `ScriptContext.crypto` 少一个成员(TS2339)。
+
+  ## 门禁实报
+
+  枚举值收窄对四张 ratchet **全部不可见**,这一点值得单独记一笔:`authorable-surface.json` 记到 key 级(`data/ScriptBody:capabilities`),`json-schema.manifest.json` 记 def 名(`data/HookBodyCapability` 仍在),`packages/spec/json-schema/` 本身 gitignore。所以 `check:authorable-surface` / `check:api-surface` 实跑**零变化**,`check:liveness` / `check:empty-state` 同样 PASS(`capabilities` key 仍活,不产生台账行变更)。
+
+  也就是说:**本次移除没有任何一张基线能自动兜住它** —— 兜住它的只有本 PR 新增的 pin 测试(spec / cli / runtime 各一组,已 sabotage 实跑验证复活即红)。`check:generated` 8/8 绿,移动的是 `spec-changes.json`、`docs/protocol-upgrade-guide.md` 与两页生成参考文档(`data/hook-body.mdx`、`ui/action.mdx`,枚举选项随之少一项)。
+
+  ## 转换刻意不做的事
+
+  `hook-body-crypto-hash-removed` 只从 `body.capabilities` 里剥掉死 token,**不碰** body 源码里那行 `ctx.crypto.hash(...)`。这是有意的:那行调用从未返回过值,剥掉授权不会让任何还能跑的东西变坏;但把它一并「修好」会让作者失去唯一一个还在提醒他「这里有段死代码」的信号。`retiredFromLoadPath: true` —— 枚举当场拒绝,活作者在 parse 时就被教育,转换存在的意义是让已存的 16.x / 17-rc 行重放干净(否则永远被打成 `metadata_spec_invalid`,把链上历史误标成当期违约)以及让 `os migrate meta --from 16` 改写作者源。
+
+### Minor Changes
+
+- 0800433: Lint an action nobody placed (ADR-0078 Phase 3, Tier-A `action-locations`).
+
+  New advisory rule `action-no-placement`: an action that declares no
+  `locations` and that no list view places by name renders on **no** surface —
+  it parses, publishes, and appears in Setup, while no user can ever click it.
+  ADR-0078 names this shape in its opening paragraph and Phase 3 asks for
+  exactly this rule; the shared completeness predicate it envisioned was never
+  built, so this lands standalone, one verified shape at a time.
+
+  What made it verifiable now: objectui#3142 collapsed four disagreeing
+  renderers onto one placement predicate. Before that, `action:bar` and the
+  record header rendered an _undeclared_ action anyway, so the shape only looked
+  inert on paper. As of objectui 17.1 it is measurably inert.
+
+  Two things are deliberately **not** flagged:
+
+  - **`locations: []`** — the documented headless action (callable over REST /
+    MCP / AI, no UI surface). ADR-0110 D3 refuses an undeclared handler, so a
+    headless declaration is the only legal way to expose one. The rule therefore
+    distinguishes "nowhere, deliberately" (`[]`) from an unstated placement (key
+    absent) and only reports the latter.
+  - **Actions a view places by name** — `bulkActions`, `bulkActionDefs`
+    (including `execution: 'aggregate'` defs, whose whole point is an action with
+    no single-record home) and `rowActions`, across all three list-view tiers:
+    `views[i].list`, `views[i].listViews.<key>` and the object-embedded
+    `objects[i].listViews.<key>`.
+
+  Advisory, never fatal — a view in another installed package may be the one
+  placing the action, the same reason `validateSemanticRoles` and
+  `lintLivenessProperties` warn rather than gate.
+
+  Also: the action form schema in `@objectstack/metadata-protocol` no longer
+  declares `shortcut` / `bulkEnabled`. Both were retired as `retiredKey()`
+  tombstones in spec 17, and this schema is what the Studio designer renders its
+  fallback form from — so advertising them handed authors two inputs that could
+  only ever produce an unsaveable draft (objectui#3145 removed the matching
+  dedicated controls). And `content/docs/ui/actions.mdx` now says which surface
+  is the exception to location filtering, instead of a blanket claim its own
+  showcase contradicted.
+
+- a7163ea: The ADR-0078 completeness gate ships: a Zod-valid metadata instance that silently does nothing now fails at author time, on every authoring surface.
+
+  This closes the hole _between_ the platform's existing gates. An instance can be Zod-valid (gate 1 green), use only _live_ properties (gate 2 green), and a correctly-authored sibling can be proven to run (gate 3 green) — and still be dead, because it omits a config its consumer needs and the consumer silently no-ops. The founding case (cloud#687): an AI authored `{ type: 'summary' }` with no `summaryOperations`; the engine's index builder skips it, the field reads 0 forever, the dependent "occupancy rate" is stuck at 0 — and the agent reported the work done, because every gate it could see was green.
+
+  **Why this is worse than the unknown-key hole #4001 just closed.** There, the author wrote a key we don't know, and the parse now rejects it with a prescription. Here every key is one we know, the schema is satisfied, nothing warns, and the author gets a success. It manufactures false completion without the author mistyping anything — and the review step that catches a human's bare summary (seeing the field render `0`) is exactly the step AI authoring removes.
+
+  **One shared predicate, every surface — the ADR's core decision.** Instance-completeness checks previously existed _only_ in cloud's AI-build graph-lint, so a stack authored with `os` + a coding assistant, an MCP agent, `os validate` in CI, or by hand got none of them (`formula_without_expression` existed nowhere in the framework). The judgement now lives in `@objectstack/spec/kernel`'s `checkFieldCompleteness` / `checkViewCompleteness` — sibling of `isIncoherentAggregate`, the ADR-0019 pattern — consumed by the new `@objectstack/lint` `validate-functional-completeness` and registered as an author-time rule (28 → 29), so `os build` / `os validate` / `os lint` / MCP / hand authoring are all covered. Cloud graph-lint can re-home its duplicate rules onto the same predicate rather than drifting from it.
+
+  **Every rule cites the runtime line that makes it true**, because the completeness audit's scariest candidate — a "sharing rule fails open and shares every record" — collapsed on a three-file read, and #4001's last two batches shipped four confidently wrong prescriptions before learning the same thing:
+
+  | rule                                                          | the silent skip                                                                    | severity |
+  | ------------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------- |
+  | `field/summary-without-operations`                            | `engine.ts` — `if (!d.summaryOperations) continue`                                 | error    |
+  | `field/formula-without-expression`                            | `engine.ts` builds the formula plan only from fields that HAVE one                 | error    |
+  | `field/relationship-without-reference`                        | `$expand` — `if (!referenceObject) continue`                                       | error    |
+  | `field/choice-without-options` (`select`, `radio`)            | `record-validator.ts` — an empty option list disables server-side value validation | error    |
+  | `field/choice-without-options` (`checkboxes`)                 | same branch, but shared with free-form                                             | warning  |
+  | `view/layout-without-binding` (`kanban`, `calendar`, `gantt`) | renderer falls back to literal default field names                                 | warning  |
+
+  **The deliberate NON-rules are pinned as hard as the rules.** `multiselect` without options is _not_ flagged: `record-validator.ts` says verbatim `// free-form (tags without options)`. The runtime blesses it as a mode, which makes it ADR-0078 case (3) "genuinely optional" — flagging it would be another false prescription, and the test is where that attempt fails first. `timeline` / `tree` views are likewise out of v1: they have config schemas, but their renderer behaviour has not had its verification pass.
+
+  **It found a real one on its first run against a real app.** `showcase_field_zoo.f_summary` was a bare `Field.summary({ label: 'Roll-up Summary' })` — one line below an `f_formula` that _is_ complete, in the object whose entire job is to show what each field type looks like. So the canonical example of a roll-up in this repo computed nothing. It could not be fixed by adding `summaryOperations`: a roll-up aggregates a child into its parent, and the zoo is a leaf (`f_master_detail` makes it a child of `showcase_project`, and nothing is a child of the zoo). Removed, with the working examples named — `showcase_invoice.total` for the plain sum, `showcase_expense_report.total_amount` / `approved_amount` for the `summaryOperations.filter` variant. The rule it broke was the file's own: "relationship types point at the other showcase objects so they have REAL targets."
+
+  Tracked in #4544. This is Phase 1; Phase 2 (the cloud authoring-path config-drop fix) is in the `cloud` repo, and Phase 3 lands the Tier-B shapes one verification pass at a time.
+
+- 4bee182: fix(cli): every author-time rule that can gate runs on all three commands (#4409)
+
+  `os validate`, `os build` and `os lint` each hand-wired their own subset of the
+  author-time rules. Nothing connected the three lists, so "which rules run here?"
+  was answerable only by diffing three 800-line files by eye — and the answer
+  drifted every time a rule landed. The audit found 23 of 26 rules running on some
+  strict subset, nine of them able to emit `error`.
+
+  The worst direction was the least obvious. `os build` — the command that
+  PUBLISHES — was the weakest gate of the three: a flow whose expression approver
+  does not parse (`approval-expression-invalid`) built and published green, and
+  only `os lint` stopped it, while CI usually runs the other two. `os lint`
+  disagreed in _both_ directions at once, running one gating rule neither other
+  command ran and missing six that both of them ran, which is worse than no
+  pre-flight — the remaining options are re-verifying everything or learning to
+  distrust the signal.
+
+  This is the same failure mode's fifth appearance (#3583, #3782, #4384/#4394,
+  #4402). Each earlier repair removed an instance and left the MODE: a rule's
+  command coverage was whatever its author remembered to type, and forgetting was
+  silent. #4402's guard could not catch the rest — it filtered on the current
+  member names of one suite, so a rule hand-wired into two commands from outside
+  that suite passed it without a word. A name list only guards the names on it.
+
+  **The registry.** `AUTHORING_RULES` declares all 26 rules as data: tier
+  (`gating`/`advisory`), which stack tier they read (pre-parse `normalized` vs
+  `parsed`), which commands run them, and a written reason for the one narrowing.
+  All three commands consume it through `runAuthoringRules()`, so adding a rule is
+  a one-line edit that reaches every command at once. The three command files
+  shrink by ~1000 lines between them.
+
+  **The ratchet.** The wiring guard is no longer a name list: a `gating` rule on
+  fewer than three commands fails, a narrowed rule with no reason fails, a command
+  that calls or imports a registry rule directly fails, and an `advisory` claim is
+  checked against the rule's own source — so a gate cannot wear an advisory label
+  to buy itself partial coverage. That last check is the one #3760 needed, having
+  promoted a `lintFlowPatterns` rule from advisory to gating with nothing anywhere
+  asking whether its coverage should follow. Remaining direct calls are listed
+  with reasons, and a stale entry fails too, so the ratchet cannot rot into a
+  permanent permission slip.
+
+  **The verdict, not just the wiring.** A separate test plants one defect per
+  previously-blind gating rule and asserts all three commands gate on it, plus the
+  issue's own repro driven end-to-end through the real CLI: exit 1 on all three
+  where it was 1/0/0.
+
+  Two behaviour changes fall out of reporting every failing rule in one run
+  instead of exiting at the first failing gate: an author with three unrelated
+  problems now sees all three in one pass, and `--strict` covers every advisory
+  rather than the roughly half that happened to be printed inline.
+
+  Also closes the same hole one gate over: `collectAndLintDocs` failed `os build`
+  and never ran on `os validate`, invisible because the parity guard keyed on the
+  `lint*`/`validate*` naming convention and that gate is called `collect*`. The
+  guard now names each shared non-registry gate explicitly instead of
+  pattern-matching for them.
+
+  Cost is not what argued against any of this. The heavy dependencies
+  (`typescript` ~9 MB, `sucrase`) are already lazy and load only when a stack
+  carries the metadata that needs them, and the heaviest rule of the set has run
+  on all three commands as a reference-integrity suite member since #4340 without
+  anyone noticing. The one narrowed rule, `lintUniqueDeclarations`, is scoped
+  because `os lint` already reports it through `lintDataModel` — coverage
+  recorded, not coverage missing.
+
+- 5293114: fix(automation): a decision's three declared ways to route a branch are now one working model (#4414)
+
+  A `decision` node advertised three mechanisms for splitting a path and only one
+  of them did anything. The other two were the ADR-0049 `declared ≠ enforced`
+  shape, and the pair of them shipped a guard that does not guard in
+  `examples/app-crm`.
+
+  | mechanism                                            | before                                                                                                 | now                                                   |
+  | :--------------------------------------------------- | :----------------------------------------------------------------------------------------------------- | :---------------------------------------------------- |
+  | `edge.condition`                                     | ✅ the only one that worked                                                                            | unchanged                                             |
+  | `edge.isDefault`                                     | **zero readers** anywhere but the schema declaration                                                   | BPMN default flow, enforced in `traverseNext`         |
+  | `decision.config.conditions[].label` → `branchLabel` | matched **0** out-edge labels across every example app, then fell back to the full edge set in silence | routes; an unclaimable label is logged, not swallowed |
+
+  ## What was broken, end to end
+
+  `crm_convert_lead_wizard` means "already converted → abort screen; otherwise →
+  the wizard". It ran **both**: an already-converted lead got
+  "This lead has already been converted" and then walked straight into the
+  conversion wizard behind it. Four independent silences stacked up:
+
+  1. the decision's first condition was authored `{lead_record.status} ==
+'converted'` — braces in a slot declared bare CEL, so it was string-compared
+     and never true;
+  2. the second (`'true'`) therefore won, yielding `branchLabel: 'No — proceed'`;
+  3. no out-edge carried that label (they were `'Yes'` / `'No'`), so traversal
+     discarded the branch and considered every out-edge;
+  4. `e3b` was unconditional, so it ran regardless — and the natural fix, marking
+     it `isDefault: true`, was a dead key.
+
+  ## The model
+
+  `branchLabel` narrows the edge set → `condition` gates each edge → `isDefault`
+  catches whatever is left. Concretely:
+
+  - **`isDefault` is enforced.** A default edge is traversed only when no
+    conditional sibling of the same source node matched, and it is no longer part
+    of the unconditional parallel fan-out — that distinction is the whole point of
+    the marker. Passed over because a real branch won, its target records the same
+    `skipped` step a closed gate does (#4354).
+  - **An unclaimable branch label warns.** Traversal still falls back to the full
+    edge set (a run mid-flight must not die on a metadata error) but says so,
+    naming the computed branch and the out-edge labels that exist.
+  - **A decision that declares no `conditions` reports no branch.** It used to
+    report `'default'` unconditionally — a label no out-edge in the repo ever
+    carried — which is why every decision node fell back to the full edge set.
+    The `'default'` sentinel survives for the case it actually describes (declared
+    conditions, none matched) and is now claimed by the `isDefault` edge as well
+    as by an edge literally labelled `'default'`.
+  - **`conditions[].expression` is evaluated as the bare CEL it is declared to
+    be.** The raw string went to the legacy `{var}` template path, where
+    `lead.status == 'converted'` cannot resolve and the branch is decided by
+    string comparison. Unlike `edge.condition` this slot carries no
+    `ExpressionInput` envelope — the decision descriptor is deliberately
+    schemaless — so the executor supplies the dialect. A brace-in-CEL predicate
+    now fails loudly (ADR-0032 §1c) instead of deciding `false`.
+
+  ## Caught at authoring time too
+
+  Four new `os build` / `os validate` warnings, because a wrong route is silent at
+  run time by nature (Prime Directive #12):
+
+  `flow-branch-label-unmatched` (the shipped shape),
+  `flow-decision-unconditional-branch` (a guarded decision with an unconditional
+  sibling — the actual hole), `flow-default-edge-with-condition` and
+  `flow-multiple-default-edges`.
+
+  Both of the first two fire on the pre-fix `convert-lead.flow.ts` and are silent
+  after it.
+
+  ## Effect on flows that already exist
+
+  Enforcing `isDefault` changes how a **stored** flow behaves, and the flows it
+  changes are mostly Studio's own. `objectui`'s flow edge inspector has always
+  written `isDefault: true` when you bind an out-edge to a decision's default/else
+  branch — into a key with zero readers, so that edge ran unconditionally, in
+  parallel with whichever branch actually matched. Those flows now take exactly
+  one branch. That is the fix, but it is a behaviour change on existing data
+  rather than only on newly authored metadata, so it is worth knowing before
+  upgrading: a flow that quietly ran two paths will now run one.
+
+  Nothing changes for an edge that never carried the marker — `isDefault` defaults
+  to `false`, and an ordinary unconditional out-edge still fans out in parallel
+  exactly as before.
+
+  ## The example app
+
+  `crm_convert_lead_wizard`'s guard is now a plain exclusive gateway: the
+  redundant `config.conditions` is gone and `e3b` carries `isDefault: true`. One
+  mechanism per decision, and exactly one branch runs.
+
+  Verified: 11 new engine/executor tests (including the reported repro in both
+  directions), 12 new linter tests; `@objectstack/service-automation` 577 tests
+  and `@objectstack/cli` 652 tests green, all three example apps build with no new
+  findings.
+
+- d449b0c: fix(cli): gate the two decision-routing shapes that can never work, and flag the inert `config.condition` (#4414)
+
+  Two follow-ups to #4440, both about metadata that reads like a guard and is not
+  one.
+
+  ## Two rules promoted to `error`
+
+  `flow-branch-label-unmatched` and `flow-default-edge-with-condition` now FAIL the
+  build instead of warning. The bar for that — restated at the top of
+  `lint-flow-patterns.ts`, because the old one no longer described the set — is
+  **no reading of the author's metadata does what it says, deterministically, on
+  every run**. Both qualify: a branch label no out-edge carries cannot route, and
+  an edge that is both `isDefault` and conditional always lets the condition win,
+  so the marker routes nothing. Neither _fails_; both are wrong every time and
+  silently, which is worse.
+
+  The other two stay advisory on purpose, and the policy now says why:
+  `flow-decision-unconditional-branch` is usually a guard that does not guard, but
+  one guarded plus one unconditional out-edge is also a legal "maybe notify,
+  always continue" fan-out, and `flow-multiple-default-edges` can genuinely mean
+  "when nothing matched, do both". The bar is about _provability_, not severity of
+  consequence — failing a customer's build on a shape we cannot prove wrong is the
+  worse trade.
+
+  No wiring change was needed: `lintFlowPatterns` is already registered as
+  `tier: 'gating'` across all three commands (#4409), which is exactly the seam
+  `authoring-rule-wiring.test.ts` exists to guard.
+
+  ## New rule: `flow-inert-node-condition`
+
+  `config.condition` is the trigger gate on a `start` node and is read by **no
+  other node type** — the engine parse-validates it everywhere (so a malformed one
+  is caught) and then ignores it. On a `decision` the name makes it read as the
+  branch predicate, which is exactly how it got authored.
+
+  Three of the three bundled apps had one. `app-todo`'s `check_recurring` and
+  `app-showcase`'s `needs_exec` both carried a predicate their out-edges were
+  already enforcing — a third copy doing nothing. The showcase even had a comment
+  next to it saying the node condition "is not evaluated by the engine", and kept
+  it anyway; that is the residue this rule exists to stop accumulating. Both are
+  now plain exclusive gateways.
+
+  Advisory, not gating: the surrounding edges usually still route correctly, so
+  this is dead weight rather than a provable misroute. The node-type list is a
+  closed set of builtins we have actually read, not "everything that isn't
+  `start`" — ADR-0018 keeps `node.type` open and a plugin executor may legitimately
+  declare and read its own `config.condition`.
+
+  ## Studio
+
+  `objectstack-ai/objectui` carries the matching help-text fixes: the branch editor
+  said a `true` branch **is** the default/else path (it is how you _ask_ for one —
+  the marker goes on the out-edge), and the legacy single `Condition` field said
+  "prefer Branches above", which reads as "this works, but the other is better".
+  It does not work at all.
+
+- eb4204b: feat(automation): a `script` node's purity contract is declared, and a function that writes can say so (#4396)
+
+  The `script` executor's contract — _the named function returns a value; data I/O
+  stays on the flow graph_ — existed only as a comment inside the executor, while
+  #4354's run summary depended on it. That summary reports no record metrics for a
+  `script` step precisely because a pure function's writes are downstream
+  `create_record` / `update_record` nodes counting themselves. A function that
+  wrote anyway made its run report `selected: 30, acted: 0` — indistinguishable
+  from the broken sweep the counters exist to detect, recorded permanently on
+  `sys_automation_run`.
+
+  **The rule is now visible.** `ActionDescriptor` carries
+  `handlerContract: 'none' | 'pure'`, and the `script` descriptor publishes
+  `'pure'`, so the action catalog, the designer palette and the reference docs
+  state the rule an author has to follow instead of an executor holding it
+  privately.
+
+  **And a legitimate writer can opt out honestly.** A `defineStack({ functions })`
+  entry may declare what it does, in either shape:
+
+  ```ts
+  defineStack({
+    functions: {
+      scoreLead: (ctx) => ({ score: 42 }), // pure — the default
+      syncBilling: { handler: syncBilling, effect: "writes" }, // declared writer
+    },
+  });
+  ```
+
+  A step calling a declared writer reports `unmeasuredEffect`, so the run's
+  `unmeasured` tally keeps the broken-sweep query
+  (`selected > 0 AND acted = 0 AND unmeasured = 0`) off that flow — and only that
+  flow. Marking _every_ `script` step unmeasured was rejected: it would blind the
+  detector on every flow that calls any function in order to cover the few that
+  break the rule.
+
+  Nothing here is retired or renamed: a bare `functions: { fn }` entry is
+  unchanged and means `effect: 'pure'`. The declaration is carried end to end —
+  `ObjectQL.registerFunction` accepts `{ packageId, effect }` alongside the
+  existing `packageId` string and exposes `resolveFunctionEntry(name)`,
+  `objectstack build` lowers a declared entry without dropping it, and the
+  artifact loader re-attaches the module's callable to the declaration the JSON
+  carried.
+
+  **Also fixed:** `bindHooksToEngine` returned before registering a bundle's
+  functions when the stack declared no hooks, so a flow-only app's
+  `defineStack({ functions })` reached the engine as nothing and every `script`
+  node calling one failed with "no function named 'x' is registered".
+
+- 63b33e6: Wire `validateFormLayout` into the authoring-rule registry, and close the
+  registry from the other direction (#4449).
+
+  `validateFormLayout` was implemented, unit-tested, exported from
+  `@objectstack/lint` and given published rule ids (`form-field-unknown`,
+  `absolute-colspan-discouraged`) — and **no command ever called it**. It ran on
+  zero stacks for as long as it existed, so a form section referencing a field
+  that is not on the bound object, or pinning an absolute `colSpan` under a
+  per-surface derived column count, produced no output anywhere. It is now an
+  `advisory` entry in `AUTHORING_RULES`, so `os validate`, `os build` and
+  `os lint` all run it. It is a pure structured-metadata walk with no lazy
+  dependency, so all three commands pay nothing measurable.
+
+  The wiring guard (#4409) could not have found this. Every one of its invariants
+  starts FROM a registry and looks at the commands, which is blind by construction
+  to a rule that never entered a registry — the same shape as #4402's name list
+  guarding only the names on it, one layer up. The guard now also runs the reverse
+  subtraction: every `validate*` / `lint*` symbol on `@objectstack/lint`'s public
+  barrel, minus `AUTHORING_RULES` ∪ `REFERENCE_INTEGRITY_RULES`, must be empty or
+  carry a written reason in `UNWIRED_RULE_LEDGER`. The ledger ships empty: today's
+  difference was exactly this one rule.
+
+- 071d0dc: feat(runtime,cli,core): boot reconciliation and `os migrate resume` for the migration journal — an interrupted run can no longer go unnoticed (ADR-0119 D2, #4617)
+
+  Completes ADR-0119 D2. The runner and `sys_migration_journal` landed in #4668; this is the discovery channel that makes an interrupted run findable by someone who does not already know it happened.
+
+  **`MigrationRecoveryPlugin` (`@objectstack/runtime`)** — at `kernel:ready`, scans the journal for runs that started and never concluded, and warns per run: how many chunks committed, which have an **unknown** outcome (`chunk_started` with no `chunk_done`), whether a compensation was left half-finished, and the exact command that will act. It also owns the `migration-plans` registry service.
+
+  **`os migrate resume` (`@objectstack/cli`)** — lists interrupted runs (read-only, the default), or acts on one with `--run <id>`, under confirmation. Exits non-zero when a run ends `failed`, so a scripted recovery cannot move on from a migration that needs a human.
+
+  **`MigrationPlanRegistry` (`@objectstack/core`)** — where a resume finds the plan it has to re-run.
+
+  ## Boot discovers, the CLI acts
+
+  This is the design decision, and it is deliberate rather than incidental.
+
+  Resuming is a large, irreversible, potentially hour-long write against production data. Doing that as an unrequested side effect of a process starting is the kind of behaviour an operator finds out about from a graph. It is also not always possible at boot: a resume needs the plan's live callbacks, and the package that owns them may not be loaded in whichever process happened to restart first.
+
+  So boot surfaces the run and names the command; the command acts, under explicit operator intent. ADR-0119 D2's per-plan `onCrash` policy still decides **what** acting means — resume forward from the first chunk lacking `chunk_done`, or unwind what committed — it just does not decide **when**, and "when" is the part a human should own.
+
+  Deferring is safe precisely because of the runner's re-entrancy: `started ∧ ¬done` is durable, so an interrupted run stays exactly as recoverable an hour later as it was at boot. Nothing decays while the operator decides.
+
+  ## Why a plan registry exists at all
+
+  A journal cannot hold a plan. `forward` and `compensate` are functions and `load()` reads the live database, so none of it crosses a process boundary — which is why the journal records the plan **hash**, not the plan. Recovery therefore needs the plan handed back by the code that owns it, and `migration-plans` is that seam: between "the journal knows a run stopped at chunk 7" and "something in this process knows what chunk 7 was supposed to do".
+
+  A run whose plan no loaded package registers is **reported**, never silently skipped — the operator is told which plan id is missing. "Nothing to resume" and "the code that owns this run is not here" are different facts, and only one of them is safe to ignore.
+
+  ## Degradation
+
+  No engine, or no `sys_migration_journal` registered (a lean kernel that never composed platform-objects) → the scan is skipped in **silence**: such a kernel has no interrupted runs to find, and a warning there would train operators to ignore this plugin's output, which is the one thing it cannot afford. A scan that **fails**, by contrast, is reported — "I could not check" and "there is nothing to find" are different answers.
+
+  11 new tests pin the split (boot writes nothing to the journal), the three states an operator must tell apart (clean / interrupted / half-unwound), and both degradation paths.
+
+- 65f184b: fix(metadata)!: `sys_metadata_history.recorded_by` stores NULL, not the sentinel string `'system'` (#4556)
+
+  `recorded_by` is declared `Field.lookup('sys_user', { readonly: true })` — a
+  foreign key. The write path filled it with `actor ?? 'system'`, so every
+  metadata write without a caller actor (boot sync, migration, an internal call)
+  stored the **string** `'system'` in a column whose declared type says "the id
+  of a `sys_user` row". No such row exists, and `SystemUserId.SYSTEM`
+  (`'usr_system'`) is not auto-provisioned on the current runtime either, so the
+  value resolved to nothing under any reading. Any consumer that read the field
+  by its declaration — `expand`, an owner column in a report, an audit timeline
+  showing "who changed this" — got an id that could not be dereferenced.
+
+  It had already cost twice. #4441 had to exempt every `readonly` field from the
+  write-path referential-integrity check, because otherwise ordinary metadata
+  authoring (package create / publish / clone) was rejected. #4551's
+  dangling-reference audit had to skip the same set for the same reason. The
+  field ended up the platform's only reference column that is neither enforced
+  nor audited.
+
+  **The fix is on the write path, not the declaration.** `recorded_by` stays a
+  `lookup('sys_user')`; an actor-less write now stores `NULL`, and `NULL` means
+  "system-initiated (boot sync, migration, scheduled job)" — the standard
+  expression of "no link", and already what this column's `set_null` delete
+  behaviour means. No magic system-user account (a row that can never sign in yet
+  holds an identity is a new security surface), and no `actor_kind` companion
+  column.
+
+  **Breaking — the repository contract is now explicitly nullable.**
+
+  | Surface                                   | Before   | After                                 |
+  | :---------------------------------------- | :------- | :------------------------------------ |
+  | `PutOptions.actor`, `DeleteOptions.actor` | `string` | `string \| null` (still **required**) |
+  | `MetadataEvent.actor`                     | `string` | `string \| null`                      |
+  | `MetadataItem.authoredBy`                 | `string` | `string \| null`                      |
+
+  `actor` stays required rather than becoming optional on purpose: every call
+  site must state which of the two it is, so a forgotten actor cannot silently
+  become a fake foreign key. Migrating a caller:
+
+  - **Writers** — passing a real identity: unchanged. Passing `'system'`, `''`,
+    or a label to satisfy the type: pass `null` instead.
+  - **Readers** — `event.actor` and `item.authoredBy` can be `null`. Handle it at
+    the point of display (`actor ?? 'System'` in a UI string is fine — the fix is
+    that the _stored_ value no longer lies, not that no label may ever be shown).
+
+  Two read paths also stopped inventing a value: `SysMetadataRepository.history()`
+  and `getByHash()` rendered an absent actor as the string `'unknown'`, which is
+  indistinguishable from a real user id to anything that resolves the field. They
+  now surface `null`.
+
+  **Existing rows: `os migrate recorded-by`.** The stored `'system'` values are
+  rewritten to `NULL` by a new command, which runs the conversion through the
+  ADR-0119 D2 migration journal (chunk-atomic, resumable via `os migrate resume`).
+  It is a dry run by default and safe to re-run — it selects only rows still
+  holding the sentinel, so a second `--apply` converts nothing.
+
+  The rewrite is **semantically equivalent, not a reinterpretation**: this column
+  has only ever held that one sentinel, written by exactly one expression
+  (`actor ?? 'system'`), and both spellings mean "no actor" — only `NULL` is
+  expressible in the declared type.
+
+  Deliberately unchanged: `sys_metadata_audit.actor` is a `text` column whose
+  declaration already says "user id, system id, or `'system'`", so its `'system'`
+  default is honest and stays. The #4441 `readonly` narrowing and the #4551 audit
+  skip also stay — see the PR for why they are still correct.
+
+### Patch Changes
+
+- 8aacf94: fix(metadata-protocol): `duplicatePackage` stops minting pre-protocol flow rows (#4498)
+
+  `duplicatePackage` canonicalizes each source row before re-saving it, under a
+  stated guarantee: "duplication never mints new rows in a pre-protocol dialect."
+  It delivered that through `convertStoredItem`, which opens with
+  `if (singular === 'flow') return { item: data, notices: [] }` — so for flows the
+  guarantee was **not** delivered.
+
+  It did not fail loudly either. `FlowNodeSchema.config` is an open `z.record`, so
+  a pre-17 body (a `delete_record` carrying `config.filters`) sails through
+  `saveMetaItem`'s schema gate and lands verbatim in a brand-new row.
+
+  **Why this mattered more than an un-migrated row.** ADR-0087 justifies the whole
+  stored-metadata design on new writes always being canonical, _therefore_ the
+  stored pass being "a strictly shrinking concern". `duplicatePackage` was a live
+  producer contradicting that for flows: an operator could run
+  `os migrate meta --stored --apply`, get a clean report, duplicate a package, and
+  be back to having pre-protocol rows — with the report still saying protocol N
+  until the next run.
+
+  **The capability was already reachable.** The reason for the flow skip is real —
+  flow-node conversions carry ADR-0078's open-namespace conflict guard, which needs
+  the automation engine's live executor registry to tell a rename from a clobber.
+  But the protocol is constructed with an accessor for the kernel's service table
+  (the same one `analytics` and `package` are read from), and the automation
+  service registers under `automation`. A new private `resolveFlowCanonicalizer`
+  reads `canonicalizeStoredFlow` (#4454) off it, so every caller running next to a
+  live engine gets flow coverage without threading anything.
+
+  - **`duplicatePackage`** canonicalizes flow rows through it. A refused rename
+    fails that item into the existing `failed[]` naming the token — copying the
+    un-renamed body would mint exactly the row this fixes. A flow that cannot
+    canonicalize fails the same way. With no engine reachable (a control-plane or
+    metadata-only host) the source body is copied as-is: no worse than the source
+    row already is, and failing an unrelated duplication over it would be its own
+    regression.
+  - **`migrateStoredMetadata`'s `canonicalizeFlow` becomes an override.** It now
+    defaults to the resolver. The CLI stopped passing one — it boots its inert
+    engine into the same kernel, so both routes reached the same instance, and two
+    routes to one capability is how they drift. The parameter stays for callers
+    with no registry and for testing the flow branch without an engine.
+  - **Resolution is lazy, per call.** Plugin init order does not guarantee
+    `automation` is in the table when the protocol is assembled (the CLI adds it
+    after ObjectQL by design), so caching `undefined` from a too-early read would
+    disable flow canonicalization for the life of the process.
+
+  Two smaller honesty fixes ride along: a source item that fails _conversion_ (a
+  tombstoned key throws) is now reported as such instead of as `unparseable
+metadata`, and `migrateStoredMetadata`'s "no engine" skip reason says no
+  automation service is reachable rather than blaming the caller for not supplying
+  one.
+
+  Reads are unchanged. `getMetaItems` / `getMetaItem` / `getMetaItemLayered` /
+  `loadMetaFromDb` still skip flows — they are reads, covered by `registerFlow`
+  canonicalizing at execution, and are not producing bad data. Duplication was the
+  one that writes.
+
+- 4f13be2: Liveness coverage is complete: the nine remaining registered metadata types are
+  governed (#4488) — `app`, `book`, `doc`, `email_template`, `job`, `mapping`,
+  `seed`, `translation`, `validation` — and `PENDING_GOVERNANCE` is empty. Every
+  type in the metadata-type registry now has a ledger with per-property verdicts,
+  evidence, and a `verifiedAt` stamp.
+
+  Spec:
+
+  - Nine new ledgers under `packages/spec/liveness/` (≈150 verdicts). Highlights:
+    the ENTIRE `email_template` authoring surface is dead (nothing materializes
+    metadata items into the `sys_email_template` rows `sendTemplate` reads — an
+    admin editing the password-reset mail in Studio changes nothing; #4509);
+    `app.areas[].visible` / `areas[].requiredPermissions` are fail-open dead
+    gates (item-level siblings ARE enforced); `translation.validationMessages`
+    is read by nothing while #3778's own migration table steers authors into it;
+    `job`/`validation` have runtime-authoring doors disconnected from their
+    execution points (#4509). `doc` and `seed` are fully live.
+  - `check-liveness.mts`: the walker now sees through `z.preprocess` pipes
+    (takes the OUT side when the IN side is a transform) — `translation`'s
+    registered schema was unwalkable before this.
+  - `liveness/README.md`: the per-type count table's method is now decided and
+    recorded (it mirrors `check-liveness.mts --json` `byStatus`, the number CI
+    enforces); all rows regenerated from one run, and the two-generations-stale
+    `webhook` row rewritten to the post-#3489/#3494 state.
+
+  CLI:
+
+  - `lint-liveness-properties` registers the six newly governed types that carry
+    `authorWarn` entries (`apps`, `books`, `jobs`, `emailTemplates`, `mappings`,
+    `translations`), so authors hear about the misleading keys at compile time.
+
+- b25a116: fix(verify): resolve the enterprise organizations package from the HOST APP (#4700)
+
+  `bootStack(app, { multiTenant: true })` — and therefore `objectstack verify
+--multi-tenant` — could never load `@objectstack/organizations`. Node ESM
+  resolves a bare `import()` against the **importer's own realpath**, which for
+  `packages/verify` is inside the framework workspace, while the enterprise
+  package is cloud-private and only ever lives in the verified app's
+  `node_modules`. Every real host app fell into the catch and was told to
+  "Install/link it in this workspace" — about a package it had already installed.
+  Same defect class as cloud#1013, which fixed `objectstack serve`; #4699 fixed
+  that one call site and this issue tracked the two the sweep left behind.
+
+  **New: `@objectstack/types/node`.** The host-app resolver (`createHostRequire` /
+  `createHostImporter`) moved out of `packages/cli/src/utils/import-from-host.ts`
+  — where `@objectstack/verify` and the dogfood suite could not import it without
+  inverting the dependency direction — into a **node-only subpath export** of
+  `@objectstack/types`. One behaviour, one source; the CLI now consumes it and its
+  private copy is deleted.
+
+  It is a subpath and **not** the root export because `@objectstack/types` is a
+  dependency of `@objectstack/hono` ("edge-compatible REST API server for
+  Cloudflare Workers, Deno, Bun, and Node") and of the plugin layer a `LiteKernel`
+  boots on Workers. The root entry reaches zero `node:` builtins, and a Workers
+  bundle breaks on `node:module` even when nothing calls it. `tsup` emits the two
+  entries as separate self-contained bundles (`splitting: false`), and a test
+  walks the root's import graph and fails on the first reachable `node:`
+  specifier, so the isolation is enforced rather than merely intended. Same
+  arrangement `@objectstack/metadata` already ships for its `./node` subpath.
+
+  **New: `BootOptions.hostRoot`** (optional, defaults to `process.cwd()`) names
+  the app whose `node_modules` supplies those optional packages — for a harness
+  booting an app that is not the working directory.
+
+  **The dogfood multi-org gates had never run.** Two suites probed availability
+  with the same bare `import()` and so were **constant-false** — not "false
+  because absent" but false by construction, in every environment including the
+  cloud CI whose comment claimed it ran them. The #1994 cross-tenant RLS proof and
+  the attachments cross-tenant isolation block had therefore never executed while
+  the suite reported green (Prime Directive #10, test-suite edition). They now
+  resolve like the runtime does, and `OS_TEST_MULTI_ORG_ENABLED=1` declares that a
+  run is expected to ship the package — turning a silent skip into a loud failure,
+  so a run can no longer pass by quietly not running the gates it exists for.
+
+- 127f091: 修复:每个 `os migrate` 子命令关停后,#4551 悬空引用巡检都会把 `sys_metadata` / `sys_view_definition` 报成 `unreadableObjects`(#4747)
+
+  一条**成功**的命令过去会在返回 JSON 之后打出两行 `ERROR Find operation failed` 和一份
+  `unreadableObjects` 非空的巡检报告 —— 对抓 ERROR 的 CI 流水线是直接误报源,更要命的是它把
+  `unreadableObjects` 变成了恒为真的告警:那个桶存在的意义正是区分「我没能检查」和「我检查了,
+  没问题」,一个每次健康运行都非空的桶不再携带任何信息。
+
+  两处静默空转叠出了这个结果:
+
+  - `ObjectQLPlugin` 的关停逻辑写在 `stop()` 里,而内核的插件契约是 `init`/`start`/`destroy` ——
+    `stop()` 从来没有被任何人调用过,ADR-0057 巡检定时器因此在任何宿主上都不会被解除。改为
+    `destroy()`(与 `DefaultDatasourcePlugin` 一致)。
+  - `bootSchemaStack().shutdown()` 调的是 `(runtime as any).stop?.()`,而 `Runtime` 根本没有
+    `stop` —— 可选调用把「没有关停」伪装成了「关停过了」。改为走内核自己的 `kernel.shutdown()`,
+    与 `os serve` 收到 SIGTERM 时同一条路径。
+
+  同时 `LifecycleService.stop()` 不再只是清定时器:它还会把「引擎正在拆」这一位交给正在飞行中的
+  sweep,巡检据此在读之前停手。因关停而失败的读**不再进入** `unreadableObjects` —— 那不是关于
+  数据源的证据;报告改用新增的 `DanglingReferenceReport.aborted` 记录「这次没跑完」,所以不完整
+  依然是响的,只是不再占用发现桶。
+
+  **真正读不出来的对象(数据源故障)照旧进 `unreadableObjects`**,巡检在 CLI 场景也照旧运行 ——
+  这里没有「一次性命令不跑巡检」的开关,只有「引擎活着才读」的生命周期边界。
+
+- 9fd9ae7: Init-time service consumption is now declared everywhere, and the declaration is enforced (#4471, ADR-0116). A new CI gate (`check:init-service-contract`) walks every plugin's `init()` call graph — including private helpers, the shape that shipped #4420 — and errors on any init-reachable `getService('X')` of a workspace-provided service that is not covered by `dependencies`, `optionalDependencies`, or `requiresServices`. Eleven previously undeclared init-time consumers (metadata, rest, cli serve plugins, and seven services) now declare `optionalDependencies` on their providers, so the kernel orders them deterministically instead of by registration luck; each still degrades on purpose when the provider is not composed. Plugin authors: a best-effort init-time `getService` must declare its provider in `optionalDependencies` (declared tolerance) — the checker never exempts it.
+- 0f9faa2: The liveness gate now governs every registered metadata type (#4487)
+
+  `GOVERNED` in `check-liveness.mts` was a hand-maintained list, and nothing ever
+  compared it against the registry it claims to cover. It governed **15 of 25**
+  registered metadata types while reporting itself complete. A type in the other
+  ten was authorable — served by `/api/v1/meta/types/:type`, editable in Studio —
+  and was never asked who reads its properties, so an inert key on it was
+  invisible to CI and its silence read as success.
+
+  `datasource` was in that state for its entire life. #4410, #4465 and #4481 found
+  six inert keys on it **by hand**, two of them security-shaped: `schemaMode` was
+  dropped between the record and the connection spec, so a database ObjectStack
+  must never run DDL against was constructed as `managed`; `ssl` stopped at the
+  record, so a TLS block with a CA certificate in it configured nothing while
+  looking identical to one that worked.
+
+  **The gate is now answerable to the registry.** Every registered type must be in
+  `GOVERNED` or in `PENDING_GOVERNANCE` with a reason and an issue. Registering a
+  type and forgetting the ledger fails CI with the entry to write. The reverse rots
+  too, so it also fails: a `PENDING_GOVERNANCE` row for a type that has since been
+  governed claims a debt that no longer exists.
+
+  **`datasource` is now governed** — `liveness/datasource.json`, all 43 properties
+  classified with evidence. The result is the highest dead ratio of any governed
+  type: **20 of 43 have no runtime consumer.**
+
+  | Dead cluster                                   | Why                                                                                                                                                                                                                                                                                                                  |
+  | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `capabilities.*` (11)                          | The engine gates pushdown on the runtime driver's own `supports.*` object — `autonumber`, `batchSchemaSync`, `queryDateGranularity` — a different mechanism whose vocabulary does not overlap this block at all. `having-filter.ts` says it outright: "SQL pushdown can come later behind a driver capability flag." |
+  | `healthCheck.*` (3)                            | Nothing schedules a datasource probe. Liveness is checked on demand through the driver handle's `ping()`.                                                                                                                                                                                                            |
+  | `retryPolicy.*` (4)                            | No connect or query path retries.                                                                                                                                                                                                                                                                                    |
+  | `external.label`, `external.requirePermission` | No reader.                                                                                                                                                                                                                                                                                                           |
+
+  **One correction ships with this**, and it is the reason the audit was worth
+  doing rather than a bookkeeping exercise. `capabilities.readOnly` reads as a
+  safety switch and gates nothing — and **two shipped prescriptions pointed
+  authors at it**: the `externalSettingsUnknownKeyError` guidance in
+  `datasource.zod.ts` ("or `capabilities.readOnly` to describe the driver") and
+  the #4465 changeset's relocation table. Both now name `external.allowWrites:
+false`, which is the write gate the ObjectQL engine actually checks. An author
+  who followed the old advice believed they had marked a datasource non-writable
+  and had not. The v17 release notes carried a matching false claim — that an
+  unregistered `capabilities` key made the engine stop pushing work down to the
+  driver — corrected in the same change.
+
+  Two traps worth naming, because both nearly produced a wrong verdict here:
+
+  - **`healthCheck` and `retryPolicy` are name collisions.** A bare grep for
+    either returns plenty of live readers — the plugin health monitor, `hook`,
+    `job` — none of which is this type. `hook.retryPolicy` even spells its delay
+    `backoffMs` where this declares `baseDelayMs`; the shape mismatch is the tell
+    that nothing reads both.
+  - **objectui's `DatasourcePreview` renders `pool`, `ssl`, `retryPolicy` and
+    `healthCheck` as panels**, and is cited as evidence for none of them. That is
+    the standing rule in `liveness/README.md`, and #4481 is the fresh precedent:
+    the only "consumer" of `readReplicas` in either repo was a preview pill.
+
+  The CLI advisory lint picks the ledger up automatically, so `os compile` now
+  warns an author who sets any of the 20. That needed one line beyond the ledger —
+  `datasource` had to be added to `TYPE_COLLECTIONS`. Coverage grows by marking
+  entries `authorWarn` only _within_ a type the lint already walks; a newly
+  governed type needs its collection registered or its ledger warns nobody.
+
+  Nine types remain ungoverned and are now enumerated rather than implied:
+  `app`, `book`, `doc`, `email_template`, `job`, `mapping`, `seed`, `translation`,
+  `validation` (#4488).
+
+- 83cf2d3: feat(migrate,metadata-protocol): `os migrate meta --stored` rewrites sys_metadata rows so the read-path chain has a finish line (#4327)
+
+  #4317 closed the correctness gap from the read side: every stored-row
+  rehydration seam replays the full ADR-0087 conversion chain, retired entries
+  included, so a row written under any past protocol is _served_ canonical
+  forever. What it deliberately did not do is make the rows themselves canonical.
+  A pre-17 row keeps its legacy bytes, the chain re-lowers it on every load, and
+  each affected row logs one conversion notice per process — deduped, but back
+  every boot. Until now the only things that ever rewrote such a row were a Studio
+  re-save and `duplicatePackage`.
+
+  **`os migrate meta --stored`** is the pass that ends it for a deployment that
+  runs it. It walks `sys_metadata` — `active` and `draft`, every organization —
+  replays the same `applyConversionsToStoredItem` chain, and re-saves each changed
+  body through the normal write path, so a rewritten row gets a
+  `sys_metadata_history` entry, a fresh checksum and the mutation projectors,
+  exactly like an author's save. The history row's `source` is `migrate-stored`,
+  so a later diff distinguishes an upgrade from somebody's edit.
+
+  ```bash
+  os migrate meta --stored                    # preview: per-row report, writes nothing
+  os migrate meta --stored --apply            # rewrite the rows (prompts)
+  os migrate meta --stored --apply --yes --json   # CI / scripts
+  os migrate meta --stored --type view        # restrict to a type (repeatable)
+  ```
+
+  **Preview is the default and `--apply` is the only writing mode** — the house
+  rule its siblings already keep (#3617's "a dry run changes nothing"), and it
+  applies with more force here because what moves is metadata: every affected
+  row's checksum and a history entry per row. An apply run also refuses to start
+  while another process holds the SQLite database, for the same reason
+  `os migrate files-to-references --apply` does.
+
+  **Nothing gates on this having run.** #3855's conclusion stands — an
+  operator-run migration cannot be relied upon, so the read path remains the
+  guarantee for every deployment, and no `sys_migration` flag is recorded (a flag
+  would advertise enforcement that does not exist). What a run buys is hygiene —
+  rows stop carrying pre-protocol dialects, so diffs, exports and history are
+  clean going forward, and the recurring notices go quiet — plus one thing that
+  was previously unobtainable: **an operator can assert it.** A run with nothing
+  left to do exits `0`, a deployment with rows still on an old dialect exits `1`,
+  so "my metadata is on protocol N" becomes a CI check rather than a belief.
+
+  Three things the pass declines, and reports rather than counting as done:
+  `flow` rows (their seam is `AutomationEngine.registerFlow`, which holds the
+  executor registry the node-type conflict guard needs), types with no repository
+  write path (`agent` — rewriting there would record no history and force a draft
+  live), and rows that still fail the current schema after conversion (a genuine
+  contract violation the write path is right to refuse; it keeps reading through
+  the chain and stays fixable in Studio).
+
+  Also new, and usable without the CLI: `protocol.migrateStoredMetadata()` returns
+  the same structured report an admin route would render, and `saveMetaItem`
+  accepts an optional `source` for the history/audit rows. `source` is not
+  request-derived — the REST layer builds its save request field by field and
+  never forwards a client-supplied value, so provenance stays something the server
+  states rather than something a caller claims.
+
+- 4b945fc: Author-time rules now gate the RUNTIME metadata write path, not just the CLI (#4463)
+
+  The 26 author-time rules `os validate` / `os build` / `os lint` share (#4409) ran on
+  those three commands and nowhere else. Every runtime metadata write — Studio's
+  designer, REST `/meta` item CRUD, an MCP/AI agent authoring a flow — reaches
+  `saveMetaItem`, which did a per-type Zod `safeParse` and stopped. For a tenant that
+  was not the weakest of four doors, it was the **only** door: a `sys_metadata`
+  overlay row is not in the CLI's config file, so there was no command they could run
+  instead. An approval flow whose `expression` approver is broken CEL
+  (`record.owner ==`) is Zod-valid, so it saved, registered, and failed at the node's
+  entry the first time it fired — the exact body `os lint` had rejected since #4409.
+
+  **One shared core, one runtime gate.**
+
+  - The rule registry moved from `packages/cli` into `@objectstack/lint`
+    (`AUTHORING_RULES`), and the CLI now calls it there. Five rule modules moved with
+    it (`lintFlowPatterns`, `lintLivenessProperties`, `lintAutonumberFormats`,
+    `lintViewRefs`, `data-model-rules`), unchanged. There is one table; a second one
+    cannot be introduced without failing `authoring-rule-wiring.test.ts`.
+  - New kernel-safe subpath export **`@objectstack/lint/runtime`** — the entry the
+    metadata write path imports. Running the gate loads neither `typescript` nor
+    `sucrase`, pinned by a new `runtime-lazy-deps.test.ts` alongside the existing
+    `lazy-deps.test.ts`, which is unchanged.
+  - Each registry entry now declares `surfaces` (`cli` / `runtime-publish`) plus
+    either the metadata `runtimeTypes` it judges or a written `surfaceReason`. The
+    ratchet fails an entry that answers neither.
+
+  **Behaviour**
+
+  - A `state: 'active'` `saveMetaItem` — and the draft→active promotion in
+    `publishMetaItem` — of a **flow** runs the flow / approval / expression /
+    reference rule families. A gating finding is refused with **422
+    `INVALID_METADATA`**, in the same structured envelope the Zod failure already
+    used, with `rule` / `path` / `where` / `message` / `hint` per issue.
+  - **Draft saves are never gated** — a draft is allowed to be half-finished and
+    cannot execute.
+  - Only the write is judged: the rules run twice (context with and without the
+    submitted item) and only findings the item _added_ can refuse it, so a
+    pre-existing violation in a stored row never blocks an unrelated save. Stored
+    rows keep being read.
+  - Escape hatch **`OS_ALLOW_UNLINTED_METADATA_WRITES=1`** turns the refusal into a
+    loud log for a migration window. Unset it once the metadata is fixed — the
+    runtime executes what it published.
+
+  Only `flow` writes are gated in this pass; every other metadata type carries a
+  recorded reason in the registry.
+
+- 16fc124: fix(cli): `objectstack serve` resolves the enterprise multi-org runtime from the app, not from the framework (cloud#1013)
+
+  Any self-hosted deployment that requested a walled tenancy posture
+  (`OS_TENANCY_POSTURE=group` or `isolated`, or `OS_MULTI_ORG_ENABLED=1`) refused
+  to boot:
+
+  ```
+  ✖ FATAL: tenancy posture 'isolated' was requested but @objectstack/organizations
+    could not be loaded, so the organization wall is INACTIVE. Refusing to boot.
+    cause: Cannot find package '@objectstack/organizations' imported from …/packages/cli/src/commands/serve.ts
+  ```
+
+  …however the package was installed. `serve` loaded it with a **bare**
+  `import('@objectstack/organizations')`, and Node ESM resolves a bare specifier
+  against the **importer's own realpath** — the CLI's, inside the framework
+  workspace it is linked out of. `@objectstack/organizations` ships in the cloud
+  distribution and lives in the _served app's_ `node_modules`, so that import
+  could never succeed and declaring the dependency in the app changed nothing. The
+  only way past the ADR-0093 D5 fail-fast was `OS_ALLOW_DEGRADED_TENANCY=1`, i.e.
+  booting with the organization wall inactive — exactly the state D5 exists to
+  prevent.
+
+  The load now goes through the same host-app resolver `serve` already used for
+  the AI service packages (`createHostImporter`, extracted to
+  `src/utils/import-from-host.ts`): resolve from the host app's root, import the
+  resolved path, and fall back to the CLI's own resolution only for the
+  framework-owned packages the CLI itself depends on. **Declare
+  `@objectstack/organizations` in your app's `package.json`** and a walled posture
+  boots.
+
+  Two smaller changes ride along:
+
+  - A package the host resolves but that **throws while it loads** now propagates
+    its real error instead of being re-imported bare and reported as
+    `MODULE_NOT_FOUND` — a broken package used to be misreported as a missing one
+    (silently skipped for optional services, or a fatal telling the operator to
+    install what was already installed).
+  - The D5 fatal now names _the app_ as the place the package has to go.
+
+- 29326f8: fix(cli): `os serve` 区分「多组织包缺席」与「插件自己拒绝挂载」(#4818)
+
+  `os serve` 在走 walled posture(`OS_TENANCY_POSTURE=group` / `isolated`)时,
+  把 `importFromHost('@objectstack/organizations')` 和
+  `kernel.use(new mod.OrganizationsPlugin())` 放在**同一个 `try`** 里,于是插件在
+  **构造 / 挂载**阶段抛出的任何错误都被当成「包加载不出来」上报:文案说
+  `@objectstack/organizations could not be loaded`,给出的出路里包含
+  `OS_ALLOW_DEGRADED_TENANCY=1`,而该 env 已设时更会把它**降级成一条 warning 并继续启动**。
+
+  这是两件事,解法相反:
+
+  | 事实         | 解法                   | `OS_ALLOW_DEGRADED_TENANCY`     |
+  | ------------ | ---------------------- | ------------------------------- |
+  | 包缺席       | 装上它 / 改单组织      | 适用(operator 明确接受能力缺席) |
+  | 插件拒绝挂载 | 按插件自己报的原因处理 | **不适用**                      |
+
+  合并后的代价是实打实的:包明明在镜像里,日志却把人指向模块解析 / `NODE_PATH` /
+  依赖 prune;更糟的是那条逃生口会吞掉插件自己的拒绝,等于把插件在守的闸门搬到一个
+  env 变量上。
+
+  现在按**哪个阶段抛错**分类(不看错误形状 —— 该包是 `importFromHost` 动态加载的,
+  CLI 与它可能持有不同模块实例,`instanceof` 和具名 `code` 判据都脆;framework 也不该
+  编码插件的私有语义):
+
+  - **import 阶段失败 = 包缺席** —— 行为完全不变:同样的 ADR-0093 D5 文案,
+    `OS_ALLOW_DEGRADED_TENANCY=1` 依旧可以显式降级启动。
+  - **构造 / 挂载阶段失败 = 插件自己拒绝** —— 原样上报插件的错误(message,以及它自带的
+    `code`,通用打印、不作解释),明说包**已找到并加载**、不必去查模块解析,并声明
+    `OS_ALLOW_DEGRADED_TENANCY` 对这条路径**不适用**;**无条件 `process.exit(1)`**。
+
+  ADR-0093 D5 的态度不变:要求了隔离就不能假装有,仍然拒绝启动 —— 变的只是「为什么拒绝」
+  和「告诉 operator 什么」。唯一的行为变化是 `OS_ALLOW_DEGRADED_TENANCY=1` 不再能让一个
+  拒绝挂载的多组织插件被吞掉并继续启动;若你此前依赖这一点,请改用
+  `OS_TENANCY_POSTURE=single`,或处理插件报出的原因。
+
+- 304423e: feat(automation,migrate): `os migrate meta --stored` now covers flow rows too (#4454)
+
+  #4327 gave the stored-metadata conversion chain a finish line for every
+  metadata type except `flow` — the one type where the most stored dialect
+  actually lives, since the graduated conversions `flow-node-crud-filter-alias`,
+  `flow-node-crud-object-alias`, `flow-node-notify-config-aliases` and
+  `flow-node-script-config-aliases` are all flow-node entries. Flow-node
+  conversions carry ADR-0078's open-namespace conflict guard, which has to consult
+  the _live_ executor registry to tell a rename from a clobber, and the metadata
+  layer has no way to obtain one. Flows were reported `skipped` with that reason.
+  They are now converted.
+
+  **One canonicalization policy, two shapes.**
+  `AutomationEngine.canonicalizeStoredFlow` is the single implementation and
+  `registerFlow` calls it, so the load seam and the migration can never disagree
+  about what "canonical" means. It returns `parsed` (for execution — the
+  `FlowSchema.parse` + #4347 region output, schema defaults materialized) and
+  `storable` (for persistence).
+
+  **`storable` excludes schema defaults, and that is the load-bearing decision.**
+  Measured rather than assumed: driving a pre-17 flow through all three steps
+  _removes_ nothing — `FlowSchema` is strict since #4001, so an unrecognized key
+  throws instead of being silently dropped, which means the
+  `graftNormalizedOperators` precedent (it exists because the _view_ parse strips
+  Studio-only auxiliary keys) does not transfer — and _adds_ only defaults:
+  `version`, `runAs`, per-edge `type` / `isDefault`. Persisting a default the
+  author never wrote would pin every migrated row to today's value while untouched
+  rows follow tomorrow's: two populations with different behaviour, which is
+  exactly the drift this pass exists to remove. So the write-back is the
+  conversion result plus the `{dialect, source}` envelopes the schema derives for
+  edge conditions, and nothing else.
+
+  One subtlety worth knowing if you extend this: that envelope is a schema
+  transform, not a conversion, so it emits **no** notice while still changing the
+  body. Reading notices alone — correct for every other metadata type — would call
+  such a row canonical and leave it re-deriving on every boot. Both passes are
+  copy-on-write, so identity is the exact test for flows.
+
+  **New: `AutomationServicePluginOptions.armRuntime`** (default `true`, so every
+  server, dev stack and test host is unaffected). Set `false` and the plugin
+  brings up the engine and the complete node registry — built-ins plus whatever
+  `automation:ready` contributes, because a _partial_ registry would make the
+  conflict guard read a live custom node type as unowned and rewrite over it — and
+  then stops before anything is armed:
+
+  | Skipped when `armRuntime: false`                         | Why it must be                                                                                |
+  | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+  | flow pull + `kernel:ready` / `metadata:reloaded` re-sync | `registerFlow` calls `activateFlowTrigger` — record triggers and scheduled jobs would go live |
+  | declarative connector materialization                    | opens real connections; an MCP provider spawns a child process                                |
+  | suspended-run wait-timer re-arm                          | would resume someone's paused approval mid-migration                                          |
+
+  `os migrate meta --stored` boots the plugin in that mode. A migration process
+  must not become a second server.
+
+  A refused rename — the guard firing because the old node-type token is a live
+  name something else owns in this environment — fails that row loudly, naming the
+  token and its owner. Never a silent skip, never a clobber. A flow that cannot
+  canonicalize at all (a strict-schema violation, a malformed control-flow region)
+  is reported as failed with the parse message rather than persisted as a guess;
+  such a row cannot register today either, so the report is telling you about a
+  flow that is already broken at runtime.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [0800433]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [85a966f]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [257d97a]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [7e7a605]
+- Updated dependencies [2f05139]
+- Updated dependencies [fa94b2c]
+- Updated dependencies [328ccc5]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [0b795da]
+- Updated dependencies [c2a1134]
+- Updated dependencies [941dec4]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [f2eb850]
+- Updated dependencies [8bd437f]
+- Updated dependencies [5046afe]
+- Updated dependencies [203a449]
+- Updated dependencies [6dcbbc3]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [58434f5]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [84b4a3a]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [072806a]
+- Updated dependencies [be25f97]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [462b713]
+- Updated dependencies [36030ff]
+- Updated dependencies [c4ab50b]
+- Updated dependencies [6117f7b]
+- Updated dependencies [be25f97]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [ff17642]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [8aacf94]
+- Updated dependencies [4c45be1]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [05d8a54]
+- Updated dependencies [9b43ee2]
+- Updated dependencies [ec975f1]
+- Updated dependencies [68c02c2]
+- Updated dependencies [eb4204b]
+- Updated dependencies [25784cf]
+- Updated dependencies [4f13be2]
+- Updated dependencies [459f925]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [cb5a75e]
+- Updated dependencies [84b6e58]
+- Updated dependencies [f160ba4]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [127f091]
+- Updated dependencies [9fd9ae7]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [8e53e5d]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [4c80fd6]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [040ecd2]
+- Updated dependencies [63b33e6]
+- Updated dependencies [8aacf94]
+- Updated dependencies [6beb708]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [83cf2d3]
+- Updated dependencies [071d0dc]
+- Updated dependencies [beefe89]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [69b509f]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [0d9a779]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [65f184b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [4b945fc]
+- Updated dependencies [1ee48bc]
+- Updated dependencies [705e5c8]
+- Updated dependencies [f61edce]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [0657f6b]
+- Updated dependencies [666f542]
+- Updated dependencies [21676eb]
+- Updated dependencies [ba5ff2f]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [304423e]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [26bb053]
+- Updated dependencies [be90dea]
+- Updated dependencies [04b9776]
+- Updated dependencies [04f1182]
+- Updated dependencies [c03108c]
+- Updated dependencies [5647006]
+- Updated dependencies [50185a8]
+- Updated dependencies [d6bd5a1]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [c2a1134]
+- Updated dependencies [48fbacb]
+- Updated dependencies [24915d2]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/runtime@17.0.0-rc.2
+  - @objectstack/lint@17.0.0-rc.2
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/metadata-protocol@17.0.0-rc.2
+  - @objectstack/objectql@17.0.0-rc.2
+  - @objectstack/plugin-auth@17.0.0-rc.2
+  - @objectstack/plugin-audit@17.0.0-rc.2
+  - @objectstack/plugin-security@17.0.0-rc.2
+  - @objectstack/plugin-webhooks@17.0.0-rc.2
+  - @objectstack/platform-objects@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/service-analytics@17.0.0-rc.2
+  - @objectstack/service-automation@17.0.0-rc.2
+  - @objectstack/plugin-approvals@17.0.0-rc.2
+  - @objectstack/rest@17.0.0-rc.2
+  - @objectstack/service-storage@17.0.0-rc.2
+  - @objectstack/client@17.0.0-rc.2
+  - @objectstack/console@17.0.0-rc.2
+  - @objectstack/driver-sql@17.0.0-rc.2
+  - @objectstack/driver-memory@17.0.0-rc.2
+  - @objectstack/driver-mongodb@17.0.0-rc.2
+  - @objectstack/metadata@17.0.0-rc.2
+  - @objectstack/service-datasource@17.0.0-rc.2
+  - @objectstack/observability@17.0.0-rc.2
+  - @objectstack/plugin-sharing@17.0.0-rc.2
+  - @objectstack/plugin-email@17.0.0-rc.2
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+  - @objectstack/verify@17.0.0-rc.2
+  - @objectstack/service-job@17.0.0-rc.2
+  - @objectstack/service-queue@17.0.0-rc.2
+  - @objectstack/service-settings@17.0.0-rc.2
+  - @objectstack/service-messaging@17.0.0-rc.2
+  - @objectstack/plugin-hono-server@17.0.0-rc.2
+  - @objectstack/cloud-connection@17.0.0-rc.2
+  - @objectstack/account@17.0.0-rc.2
+  - @objectstack/setup@17.0.0-rc.2
+  - @objectstack/formula@17.0.0-rc.2
+  - @objectstack/mcp@17.0.0-rc.2
+  - @objectstack/plugin-reports@17.0.0-rc.2
+  - @objectstack/service-cache@17.0.0-rc.2
+  - @objectstack/service-package@17.0.0-rc.2
+  - @objectstack/service-realtime@17.0.0-rc.2
+  - @objectstack/service-sms@17.0.0-rc.2
+  - @objectstack/trigger-api@17.0.0-rc.2
+  - @objectstack/trigger-record-change@17.0.0-rc.2
+  - @objectstack/trigger-schedule@17.0.0-rc.2
+  - @objectstack/plugin-pinyin-search@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

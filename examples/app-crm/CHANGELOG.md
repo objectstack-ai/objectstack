@@ -1,5 +1,273 @@
 # @objectstack/example-crm
 
+## 4.0.92-rc.2
+
+### Patch Changes
+
+- e533b0b: feat(spec)!: retire `datasource.capabilities` — eleven flags nothing read, one of them a safety claim (#4583)
+
+  `DatasourceCapabilities` declared eleven booleans — `transactions`, seven `query*`
+  flags, `joins`, `fullTextSearch`, `readOnly`, `dynamicSchema` — all strict-guarded,
+  all read by nothing. Pushdown is decided by the runtime driver's own `supports.*`
+  object, a different mechanism entirely, so a datasource declaring
+  `queryAggregations: false` never once changed which engine path ran. The block is
+  removed rather than bridged: there was nothing on the other side to connect it to.
+
+  **`readOnly` is why this is not tidy-up.** It reads as a safety property and was
+  authored as one — the shipped CRM example labelled a datasource "CRM Analytics Read
+  Replica" on the strength of it, while the datasource accepted writes exactly like the
+  primary. The key had already been MOVED twice toward somewhere it might be enforced,
+  out of `config` in #4410 and into `capabilities` in #4465, and was inert at every
+  address. This removes it instead of moving it a third time.
+
+  **Removing it does not hand you a working replacement, and the rejection says so.**
+  The one enforced datasource-wide write gate is `external.allowWrites: false`, and it
+  applies only to a FEDERATED datasource — `assertWriteAllowed` returns early for a
+  `managed` (or unset-`schemaMode`) datasource, so that key would be equally inert for a
+  local database. **A managed datasource has no read-only gate at all**; that gap is
+  #4584, deliberately not invented here. Until it is answered, enforce read-only where
+  it is real: grant the connection SELECT-only at the database.
+
+  FROM → TO:
+
+  ```ts
+  // before — parsed cleanly, changed nothing
+  defineDatasource({
+    name: 'analytics', driver: 'sqlite', config: { filename: ':memory:' },
+    capabilities: { readOnly: true, queryAggregations: true },
+  })
+
+  // after — delete the block; for a FEDERATED datasource the enforced gate is:
+  defineDatasource({
+    name: 'warehouse', driver: 'postgres', config: { … },
+    schemaMode: 'external',
+    external: { allowWrites: false },
+  })
+  ```
+
+  `os migrate meta --from 16` rewrites it automatically (ADR-0087 conversion
+  `datasource-capabilities-removed`). Both `DatasourceSchema` and
+  `DriverDefinitionSchema` are `.strict()`, so a leftover key is a loud rejection
+  carrying the prescription — never a silent strip.
+
+  Also fixed: `READ_ONLY_BELONGS_ON_DATASOURCE`, the prescription every SQL driver
+  shares for a `readOnly` written inside `config`, was still sending authors _to_ the
+  removed key. It now names the enforced gate and states plainly where that gate does
+  not apply — a prescription that lands on an inert key manufactures exactly the belief
+  it was meant to correct.
+
+  The `datasource` liveness ledger drops from 20 dead properties to 9 (remaining:
+  `healthCheck` ×3, `retryPolicy` ×4, `external` ×2 — batches B/C/D of #4583).
+
+- 5293114: fix(automation): a decision's three declared ways to route a branch are now one working model (#4414)
+
+  A `decision` node advertised three mechanisms for splitting a path and only one
+  of them did anything. The other two were the ADR-0049 `declared ≠ enforced`
+  shape, and the pair of them shipped a guard that does not guard in
+  `examples/app-crm`.
+
+  | mechanism                                            | before                                                                                                 | now                                                   |
+  | :--------------------------------------------------- | :----------------------------------------------------------------------------------------------------- | :---------------------------------------------------- |
+  | `edge.condition`                                     | ✅ the only one that worked                                                                            | unchanged                                             |
+  | `edge.isDefault`                                     | **zero readers** anywhere but the schema declaration                                                   | BPMN default flow, enforced in `traverseNext`         |
+  | `decision.config.conditions[].label` → `branchLabel` | matched **0** out-edge labels across every example app, then fell back to the full edge set in silence | routes; an unclaimable label is logged, not swallowed |
+
+  ## What was broken, end to end
+
+  `crm_convert_lead_wizard` means "already converted → abort screen; otherwise →
+  the wizard". It ran **both**: an already-converted lead got
+  "This lead has already been converted" and then walked straight into the
+  conversion wizard behind it. Four independent silences stacked up:
+
+  1. the decision's first condition was authored `{lead_record.status} ==
+'converted'` — braces in a slot declared bare CEL, so it was string-compared
+     and never true;
+  2. the second (`'true'`) therefore won, yielding `branchLabel: 'No — proceed'`;
+  3. no out-edge carried that label (they were `'Yes'` / `'No'`), so traversal
+     discarded the branch and considered every out-edge;
+  4. `e3b` was unconditional, so it ran regardless — and the natural fix, marking
+     it `isDefault: true`, was a dead key.
+
+  ## The model
+
+  `branchLabel` narrows the edge set → `condition` gates each edge → `isDefault`
+  catches whatever is left. Concretely:
+
+  - **`isDefault` is enforced.** A default edge is traversed only when no
+    conditional sibling of the same source node matched, and it is no longer part
+    of the unconditional parallel fan-out — that distinction is the whole point of
+    the marker. Passed over because a real branch won, its target records the same
+    `skipped` step a closed gate does (#4354).
+  - **An unclaimable branch label warns.** Traversal still falls back to the full
+    edge set (a run mid-flight must not die on a metadata error) but says so,
+    naming the computed branch and the out-edge labels that exist.
+  - **A decision that declares no `conditions` reports no branch.** It used to
+    report `'default'` unconditionally — a label no out-edge in the repo ever
+    carried — which is why every decision node fell back to the full edge set.
+    The `'default'` sentinel survives for the case it actually describes (declared
+    conditions, none matched) and is now claimed by the `isDefault` edge as well
+    as by an edge literally labelled `'default'`.
+  - **`conditions[].expression` is evaluated as the bare CEL it is declared to
+    be.** The raw string went to the legacy `{var}` template path, where
+    `lead.status == 'converted'` cannot resolve and the branch is decided by
+    string comparison. Unlike `edge.condition` this slot carries no
+    `ExpressionInput` envelope — the decision descriptor is deliberately
+    schemaless — so the executor supplies the dialect. A brace-in-CEL predicate
+    now fails loudly (ADR-0032 §1c) instead of deciding `false`.
+
+  ## Caught at authoring time too
+
+  Four new `os build` / `os validate` warnings, because a wrong route is silent at
+  run time by nature (Prime Directive #12):
+
+  `flow-branch-label-unmatched` (the shipped shape),
+  `flow-decision-unconditional-branch` (a guarded decision with an unconditional
+  sibling — the actual hole), `flow-default-edge-with-condition` and
+  `flow-multiple-default-edges`.
+
+  Both of the first two fire on the pre-fix `convert-lead.flow.ts` and are silent
+  after it.
+
+  ## Effect on flows that already exist
+
+  Enforcing `isDefault` changes how a **stored** flow behaves, and the flows it
+  changes are mostly Studio's own. `objectui`'s flow edge inspector has always
+  written `isDefault: true` when you bind an out-edge to a decision's default/else
+  branch — into a key with zero readers, so that edge ran unconditionally, in
+  parallel with whichever branch actually matched. Those flows now take exactly
+  one branch. That is the fix, but it is a behaviour change on existing data
+  rather than only on newly authored metadata, so it is worth knowing before
+  upgrading: a flow that quietly ran two paths will now run one.
+
+  Nothing changes for an edge that never carried the marker — `isDefault` defaults
+  to `false`, and an ordinary unconditional out-edge still fans out in parallel
+  exactly as before.
+
+  ## The example app
+
+  `crm_convert_lead_wizard`'s guard is now a plain exclusive gateway: the
+  redundant `config.conditions` is gone and `e3b` carries `isDefault: true`. One
+  mechanism per decision, and exactly one branch runs.
+
+  Verified: 11 new engine/executor tests (including the reported repro in both
+  directions), 12 new linter tests; `@objectstack/service-automation` 577 tests
+  and `@objectstack/cli` 652 tests green, all three example apps build with no new
+  findings.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [7e7a605]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [ff17642]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [8aacf94]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/runtime@17.0.0-rc.2
+  - @objectstack/spec@17.0.0-rc.2
+
 ## 4.0.92-rc.1
 
 ### Patch Changes

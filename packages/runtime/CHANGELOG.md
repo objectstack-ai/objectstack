@@ -1,5 +1,765 @@
 # @objectstack/runtime
 
+## 17.0.0-rc.2
+
+### Major Changes
+
+- 0e96e46: refactor(spec,cli,runtime)!: 退役 `crypto.hash` 能力 —— 声明了四层、构建期还自动推断,沙箱从没实现(#4391,ADR-0049 enforce-or-remove)
+
+  `crypto.hash` 是四层声明、零层实现:`HookBodyCapability` 枚举收它、枚举旁的文档表列它、CLI 提取器**自动推断**它、`ScriptContext.crypto.hash` 还写了签名 —— 而 `installCtx` 只往 VM 的 `ctx.crypto` 上装了 `randomUUID`。于是这个 token 唯一授权的那次调用,**每一次都在 VM 里抛**。
+
+  这比普通的 declared ≠ enforced 更毒一档,坏就坏在**构建期推断**:作者(尤其是 AI 作者)写下 `ctx.crypto.hash(...)`,提取器就替他把能力加进 `capabilities`,`os build` 因此全绿 —— 系统亲手把人送进一条必炸的死路,而唯一诚实的记录是文档表格里一句 `_(not yet wired)_`,没有作者会先读表格再写 body。
+
+  **裁决是 remove,不是实现**(维护者 2026-08-02):从未实现、调用即抛、**零投诉** —— 对一个每次使用都抛错的能力来说,这本身就是最强的活性证据,没人需要它。在沙箱里实现 crypto 会扩大沙箱的能力面与安全审查面,那是长期成本而非一次性工时,无业务拉动不做。真需要哈希时按能力准入流程重提:**实现先行,声明随实现走**(ADR-0049 的 enforce 腿留给有实现的那天)。
+
+  ## FROM → TO
+
+  | 写了什么                            | 现在怎么办                                                                            |
+  | :---------------------------------- | :------------------------------------------------------------------------------------ |
+  | `capabilities: ['crypto.hash']`     | **删掉这个 token**。它从未授权成任何东西                                              |
+  | `await ctx.crypto.hash(algo, data)` | **删掉这次调用**。它从未返回过值 —— 今天能跑的代码没有一行依赖它                      |
+  | 确实需要哈希                        | 在 host 侧做(Connector recipe,或引擎侧 hook)。沙箱内哈希须走能力准入流程重开,实现先行 |
+
+  一句话修法:**两个都删**。`os migrate meta --from 16` 会自动帮你剥掉 token;那行**死调用是你自己要删的** —— 转换层刻意不改 body 源码(见下)。
+
+  ## 定级理由(逐条自证,未照抄前例)
+
+  三问按 #4535 §5 逐条走:
+
+  1. **会不会 TS2305 / TS2339?** 会,两处。`HookBodyCapability` 是 public 导出类型,把它当**字面量联合**用的代码(`const c: HookBodyCapability = 'crypto.hash'`、对 token 做穷举 switch)现在编译失败;`ScriptContext.crypto.hash` 的调用点以 TS2339 失败。实测三仓(objectstack / cloud / objectui)裸名扫描 `crypto.hash` / `ctx.crypto.hash` / `'crypto.hash'` —— **两个兄弟仓零命中**,本仓命中全在本 PR 内清理。
+  2. **有没有元数据迁移?** 有。token 是写在作者源 hook/action body `capabilities: []` 数组里的**值**,也会躺在已存的 `sys_metadata` 行里 —— 故注册了 ADR-0087 D2 转换 `hook-body-crypto-hash-removed`(D3 挂 protocol-17)。这是与 #4767 / #4783 / #4616 的分界:那三单退役的是**导出名 / 运行时描述符**,没有作者源可改写;本单有,和 `object-enable-trash-mru-removed` / #4734 同侧。
+  3. **形状变更?** 是**枚举值收窄**(6 → 5),不是 key 移除。故**没有 `retiredKey()` 墓碑** —— `capabilities` 这个 key 本身依然活着、依然被强制。处方改由枚举自己的 error map 承载,并按 `object.managedBy: 'system'` 的先例**以 `issue.input` 为键**:只有「曾经合法」的那个拼写会被告知「was removed」,写错成 `crypto.hsah` 的作者拿到的仍是 zod 自己那条列出合法 token 的消息 —— 告诉他「你的值被退役了」属于误导。
+
+  `@objectstack/cli` 与 `@objectstack/runtime` 同定 **major**:前者 `ExtractedBody.capabilities` 的公开联合类型收窄(赋值给它的代码 TS2322),后者 `ScriptContext.crypto` 少一个成员(TS2339)。
+
+  ## 门禁实报
+
+  枚举值收窄对四张 ratchet **全部不可见**,这一点值得单独记一笔:`authorable-surface.json` 记到 key 级(`data/ScriptBody:capabilities`),`json-schema.manifest.json` 记 def 名(`data/HookBodyCapability` 仍在),`packages/spec/json-schema/` 本身 gitignore。所以 `check:authorable-surface` / `check:api-surface` 实跑**零变化**,`check:liveness` / `check:empty-state` 同样 PASS(`capabilities` key 仍活,不产生台账行变更)。
+
+  也就是说:**本次移除没有任何一张基线能自动兜住它** —— 兜住它的只有本 PR 新增的 pin 测试(spec / cli / runtime 各一组,已 sabotage 实跑验证复活即红)。`check:generated` 8/8 绿,移动的是 `spec-changes.json`、`docs/protocol-upgrade-guide.md` 与两页生成参考文档(`data/hook-body.mdx`、`ui/action.mdx`,枚举选项随之少一项)。
+
+  ## 转换刻意不做的事
+
+  `hook-body-crypto-hash-removed` 只从 `body.capabilities` 里剥掉死 token,**不碰** body 源码里那行 `ctx.crypto.hash(...)`。这是有意的:那行调用从未返回过值,剥掉授权不会让任何还能跑的东西变坏;但把它一并「修好」会让作者失去唯一一个还在提醒他「这里有段死代码」的信号。`retiredFromLoadPath: true` —— 枚举当场拒绝,活作者在 parse 时就被教育,转换存在的意义是让已存的 16.x / 17-rc 行重放干净(否则永远被打成 `metadata_spec_invalid`,把链上历史误标成当期违约)以及让 `os migrate meta --from 16` 改写作者源。
+
+### Minor Changes
+
+- 430dcc2: fix(runtime,lint): `action.body` binds a handler only for `type: 'script'` (#4352)
+
+  `ActionSchema.body` has always described itself as "Only used when type is
+  `script`", and its JSDoc went further — "Only meaningful when
+  `type === 'script'`. When set, the runtime invokes the body inside the sandbox
+  … and ignores `target`." The runtime read none of it:
+  `actionBodyRunnerFactory` bound a handler the moment `body` parsed, and
+  `collectBundleActions` collected any named action. A `type: 'url'` action
+  carrying a leftover `body` was therefore registered in the action registry and
+  executed in the sandbox — reachable through
+  `POST /api/v1/actions/:object/:action` and through
+  `ql.object(o).execute(name)`, and counted by the governance inventory as a live
+  handler.
+
+  Declared ≠ enforced, in the shape that is hardest to debug: an author flips
+  `type` from `script` to `url`, reasonably concludes the body is now dead code,
+  and it keeps running with nothing anywhere saying so.
+
+  **Behaviour change.** `body` now runs only under `type: 'script'`:
+
+  | Action                                                         | Before    | After                                                  |
+  | :------------------------------------------------------------- | :-------- | :----------------------------------------------------- |
+  | `type: 'script'` + `body`                                      | body runs | unchanged — body runs                                  |
+  | `type` omitted + `body`                                        | body runs | unchanged — body runs (`ActionType.default('script')`) |
+  | `type: 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'` + `body` | body ran  | **no handler is bound**; the refusal is logged         |
+
+  Only an action that **explicitly** declares a non-`script` type _and_ carries a
+  `body` changes behaviour. An omitted `type` still means `script`, because the
+  collectors walk raw bundle objects — a `strict: false` `defineStack` or a legacy
+  `manifest.actions[]` never passes through `ActionSchema`, so the schema's own
+  default has to be applied at the gate rather than assumed to have been applied
+  already.
+
+  **FROM → TO.** If you have an action whose body you want to keep running, set
+  `type: 'script'` and move the navigation/dispatch target elsewhere; if you want
+  the target behaviour, delete the now-inert `body`:
+
+  ```diff
+    {
+      name: 'open_portal',
+  -   type: 'url',
+  +   type: 'script',
+      target: '/portal',
+      body: { language: 'js', source: "await ctx.api.object('lead').update(…)", capabilities: ['api.write'] },
+    }
+  ```
+
+  The refusal is **not** silent — silence would only relocate the invisibility the
+  issue is about. `actionBodyRunnerFactory` logs a warning naming the action, its
+  declared `type`, and both fixes.
+
+  Authoring-time rejection of the same contradiction already shipped in #4438
+  (`ActionSchema` rejects `body` alongside a non-`script` `type`), so what remains
+  reachable here is data at rest published before that gate existed, plus bundles
+  that never parsed. This release closes that half. New tests also pin that the
+  **publish gate resolves to the rejecting schema** — through
+  `getMetadataTypeSchema('action')` and `ObjectSchema.actions` — so a re-point of
+  either registration cannot silently reopen the hole while the schema's own unit
+  tests stay green.
+
+  `@objectstack/lint`'s `validate-action-body-writes` filters by `type` again.
+  #4344 deliberately made that rule type-blind on the grounds that "the runtime
+  binds a handler from `action.body` alone … checking what executes beats checking
+  what the schema says should" — true then, and the comment predicted its own
+  revision. Execution and declaration are the same set again, so a non-`script`
+  body no longer produces write-set advice about writes that provably never
+  happen; the publish gate names that metadata's real defect (`type`) with its own
+  prescription.
+
+  `collectBundleActions` stays deliberately type-blind: it feeds governance
+  surfaces that must enumerate every declared action, bound or not, and the other
+  bind path (`engine.setDefaultActionRunner`, for Studio-authored actions) never
+  walks it. The gate lives at the single point where a `body` becomes an
+  executable handler, so there is no second copy of the rule to drift.
+
+- 63b33e6: A `datasourceMapping` rule is routing, not a hint — an object mapped to an
+  unreachable datasource no longer silently reads and writes the DEFAULT store
+  (#4462).
+
+  **Observable behavior change; read this before upgrading.** Measured on `main`
+  during the v17 verification: map an object to a Postgres datasource with a bad
+  URL and the boot succeeds, `/ready` answers `200`, the datasource name appears in
+  **zero** log lines, `POST /api/v1/data/<mapped object>` returns `201` — and the
+  row is physically in the default store. The operator finds out by opening the
+  database they declared and finding it empty. ADR-0062 D2's phase-1 note called a
+  mapping-only datasource "decorative" to keep an example byte-for-byte unchanged;
+  what that bought was a silent data-placement bug.
+
+  The fix is a pair, and each half is what makes the other correct:
+
+  1. **Routing stops falling through** (`@objectstack/objectql`). `getDriver` step
+     2: a mapping rule that MATCHES and names a datasource with no live driver now
+     throws — `DatasourceUnavailableError` when the connect layer recorded a
+     verdict, otherwise an error naming the object, the datasource and the two
+     remedies. `default` still resolves onward: the default driver keeps its
+     natural name (#3826), so step 5 is how routing to it works.
+  2. **ADR-0062 D2 grows gate (d)** (`@objectstack/service-datasource`,
+     `@objectstack/runtime`). A datasource a mapping rule routes at least one
+     object to is auto-connected at boot, and a boot-time connect failure is
+     **fatal** with an operator-readable reason — the same call gate (b) already
+     makes for an explicit `object.datasource` binding, now correct for (d)
+     because half 1 removed the fallback. `OS_ALLOW_DRIVER_CONNECT_FAILURE` still
+     degrades the boot instead, as for every other fatal connect.
+
+  The mapped-object list is resolved by the boot path from the engine's own
+  matcher (`ObjectQLEngine.resolveMappedDatasource`, newly public) and passed to
+  `connectDeclared({ mappedObjects })`; the connection service never re-derives
+  rule matching. Two matchers drifting by one clause would connect a datasource
+  routing never uses, or route to one nothing connects — the defect again.
+
+  **What to do if this breaks your boot.** It means a `datasourceMapping` rule in
+  your stack points at a datasource that cannot be connected. Either fix the
+  datasource configuration, or delete the rule — the second is what
+  `examples/app-crm` did in this change, and it is what keeps that example's
+  runtime behavior identical: its rules routed everything to an unconnected
+  `:memory:` datasource, i.e. to the default store by fall-through.
+
+- ac471a0: **BREAKING**: `IAutomationService.getSuspendedScreen(runId)` is now **async** — it returns `Promise<ScreenSpec | null>` instead of `ScreenSpec | null` (#4515).
+
+  FROM → TO for anyone calling or implementing it:
+
+  ```ts
+  // caller
+  - const screen = automationService.getSuspendedScreen(runId);
+  + const screen = await automationService.getSuspendedScreen(runId);
+
+  // implementer
+  - getSuspendedScreen(runId: string): ScreenSpec | null
+  + async getSuspendedScreen(runId: string): Promise<ScreenSpec | null>
+  ```
+
+  One-line fix: `await` the call (the enclosing function is almost certainly already `async`), and make any test double resolve rather than return (`mockResolvedValue`, not `mockReturnValue`).
+
+  Why it had to change: the method could only ever read the engine's in-memory hot cache, because a synchronous signature cannot consult the durable suspended-run store. `SuspendedRun.screen` _is_ persisted (`sys_automation_run.screen_json`) and `resume()` cold-reads it back, so after a process restart a still-suspended screen run could be resumed (`POST …/runs/:runId/resume` → 200) while `GET …/runs/:runId/screen` returned 404 “No pending screen for run” — the refresh-safe re-fetch failing in exactly the situation it exists for (page refresh, another device), and the rendering half of ADR-0019's durable-suspend promise missing while the resuming half shipped.
+
+  `AutomationEngine.getSuspendedScreen` now takes the hot cache as its fast path and falls through to the store via the same loader `resume()` rehydrates from. A run that does not exist, is no longer suspended, or paused at a non-screen node still resolves to `null`, so `GET …/runs/:runId/screen` keeps returning 404 for genuinely absent runs. No sync variant of the method remains on the contract.
+
+- eb4204b: feat(automation): a `script` node's purity contract is declared, and a function that writes can say so (#4396)
+
+  The `script` executor's contract — _the named function returns a value; data I/O
+  stays on the flow graph_ — existed only as a comment inside the executor, while
+  #4354's run summary depended on it. That summary reports no record metrics for a
+  `script` step precisely because a pure function's writes are downstream
+  `create_record` / `update_record` nodes counting themselves. A function that
+  wrote anyway made its run report `selected: 30, acted: 0` — indistinguishable
+  from the broken sweep the counters exist to detect, recorded permanently on
+  `sys_automation_run`.
+
+  **The rule is now visible.** `ActionDescriptor` carries
+  `handlerContract: 'none' | 'pure'`, and the `script` descriptor publishes
+  `'pure'`, so the action catalog, the designer palette and the reference docs
+  state the rule an author has to follow instead of an executor holding it
+  privately.
+
+  **And a legitimate writer can opt out honestly.** A `defineStack({ functions })`
+  entry may declare what it does, in either shape:
+
+  ```ts
+  defineStack({
+    functions: {
+      scoreLead: (ctx) => ({ score: 42 }), // pure — the default
+      syncBilling: { handler: syncBilling, effect: "writes" }, // declared writer
+    },
+  });
+  ```
+
+  A step calling a declared writer reports `unmeasuredEffect`, so the run's
+  `unmeasured` tally keeps the broken-sweep query
+  (`selected > 0 AND acted = 0 AND unmeasured = 0`) off that flow — and only that
+  flow. Marking _every_ `script` step unmeasured was rejected: it would blind the
+  detector on every flow that calls any function in order to cover the few that
+  break the rule.
+
+  Nothing here is retired or renamed: a bare `functions: { fn }` entry is
+  unchanged and means `effect: 'pure'`. The declaration is carried end to end —
+  `ObjectQL.registerFunction` accepts `{ packageId, effect }` alongside the
+  existing `packageId` string and exposes `resolveFunctionEntry(name)`,
+  `objectstack build` lowers a declared entry without dropping it, and the
+  artifact loader re-attaches the module's callable to the declaration the JSON
+  carried.
+
+  **Also fixed:** `bindHooksToEngine` returned before registering a bundle's
+  functions when the stack declared no hooks, so a flow-only app's
+  `defineStack({ functions })` reached the engine as nothing and every `script`
+  node calling one failed with "no function named 'x' is registered".
+
+- 8aacf94: feat(rest,runtime,client): `POST /meta/_migrate-stored` — run the stored-metadata migration without a shell (#4327)
+
+  `os migrate meta --stored` (#4327) gave ADR-0087's stored-metadata chain a finish
+  line, but only for someone who can reach the deployment's database from a
+  terminal. A hosted operator cannot, so on a managed deployment the chain had no
+  finish line at all — just the per-read conversion, running forever, with no way
+  to assert what protocol the rows are on.
+
+  The same pass is now reachable over HTTP:
+
+  ```ts
+  const preview = await client.meta.migrateStored(); // writes nothing
+  const result = await client.meta.migrateStored({ apply: true });
+  const flows = await client.meta.migrateStored({ types: ["flow"] });
+  ```
+
+  It returns the same `StoredMigrationReport` the CLI renders, and takes the same
+  posture:
+
+  - **Preview by default.** `apply` must be literally `true`; an empty body, a
+    missing body, and `"apply": "yes"` all preview. Nothing is inferred.
+  - **Gated on `manage_metadata`.** Unlike the single-item `PUT /meta/:type/:name`
+    next door, this rewrites every eligible row in the deployment, so it demands
+    the ADR-0066 D1 authoring capability rather than just a session, and answers
+    `403` otherwise. The gate runs before the protocol is probed, so an
+    unauthorized caller cannot use `403`-vs-`501` to learn which kernels can be
+    migrated. `/meta`'s anonymous-deny umbrella still closes it to anonymous
+    callers first.
+  - **Attributed to the caller.** The `actor` recorded on the history and audit
+    rows names the user who fired it — that is the question those rows exist to
+    answer.
+
+  **Flows need no extra setup on this path.** The CLI has to boot an inert
+  automation engine to hold the executor registry ADR-0078's conflict guard needs;
+  a server already has a live one, and the protocol resolves it from the services
+  registry itself (#4498), so this route covers flow rows by simply running in the
+  process that owns them.
+
+  Registered on both the REST server and the runtime dispatcher's `/meta` domain,
+  ledgered in both route ledgers, and mounted before `/:type` so the
+  leading-underscore segment is never captured as a metadata type name.
+
+- 071d0dc: feat(runtime,cli,core): boot reconciliation and `os migrate resume` for the migration journal — an interrupted run can no longer go unnoticed (ADR-0119 D2, #4617)
+
+  Completes ADR-0119 D2. The runner and `sys_migration_journal` landed in #4668; this is the discovery channel that makes an interrupted run findable by someone who does not already know it happened.
+
+  **`MigrationRecoveryPlugin` (`@objectstack/runtime`)** — at `kernel:ready`, scans the journal for runs that started and never concluded, and warns per run: how many chunks committed, which have an **unknown** outcome (`chunk_started` with no `chunk_done`), whether a compensation was left half-finished, and the exact command that will act. It also owns the `migration-plans` registry service.
+
+  **`os migrate resume` (`@objectstack/cli`)** — lists interrupted runs (read-only, the default), or acts on one with `--run <id>`, under confirmation. Exits non-zero when a run ends `failed`, so a scripted recovery cannot move on from a migration that needs a human.
+
+  **`MigrationPlanRegistry` (`@objectstack/core`)** — where a resume finds the plan it has to re-run.
+
+  ## Boot discovers, the CLI acts
+
+  This is the design decision, and it is deliberate rather than incidental.
+
+  Resuming is a large, irreversible, potentially hour-long write against production data. Doing that as an unrequested side effect of a process starting is the kind of behaviour an operator finds out about from a graph. It is also not always possible at boot: a resume needs the plan's live callbacks, and the package that owns them may not be loaded in whichever process happened to restart first.
+
+  So boot surfaces the run and names the command; the command acts, under explicit operator intent. ADR-0119 D2's per-plan `onCrash` policy still decides **what** acting means — resume forward from the first chunk lacking `chunk_done`, or unwind what committed — it just does not decide **when**, and "when" is the part a human should own.
+
+  Deferring is safe precisely because of the runner's re-entrancy: `started ∧ ¬done` is durable, so an interrupted run stays exactly as recoverable an hour later as it was at boot. Nothing decays while the operator decides.
+
+  ## Why a plan registry exists at all
+
+  A journal cannot hold a plan. `forward` and `compensate` are functions and `load()` reads the live database, so none of it crosses a process boundary — which is why the journal records the plan **hash**, not the plan. Recovery therefore needs the plan handed back by the code that owns it, and `migration-plans` is that seam: between "the journal knows a run stopped at chunk 7" and "something in this process knows what chunk 7 was supposed to do".
+
+  A run whose plan no loaded package registers is **reported**, never silently skipped — the operator is told which plan id is missing. "Nothing to resume" and "the code that owns this run is not here" are different facts, and only one of them is safe to ignore.
+
+  ## Degradation
+
+  No engine, or no `sys_migration_journal` registered (a lean kernel that never composed platform-objects) → the scan is skipped in **silence**: such a kernel has no interrupted runs to find, and a warning there would train operators to ignore this plugin's output, which is the one thing it cannot afford. A scan that **fails**, by contrast, is reported — "I could not check" and "there is nothing to find" are different answers.
+
+  11 new tests pin the split (boot writes nothing to the journal), the three states an operator must tell apart (clean / interrupted / half-unwound), and both degradation paths.
+
+- ea90179: fix(data,runtime,drivers): four ADR-0112 envelope defects found in the v17 verification sweep (#4431, #4435, #4436, #4483)
+
+  Four independent surfaces where the answer a caller received contradicted the
+  contract the surface declares. All four were found driving a real showcase boot
+  against `17.0.0-rc.1` and are catalogued in the #4482 rollup.
+
+  - **#4431 — a sandbox capability denial answered 400.** A denial is the sandbox
+    refusing to run untrusted code that asked for a capability it does not hold,
+    which is the crash contract's case (#3951), not a deliberate rejection of a
+    malformed request. It now answers 500, and the `SandboxError:` debug prefix
+    no longer reaches the client.
+
+  - **#4435 — PATCH/DELETE of a nonexistent record answered 200 success.** The
+    write path returned `record: null` / `success: true` for an id that resolves
+    to nothing, while GET on the same id correctly 404s; `deleteMany` reported
+    every typo'd id as deleted. Both now answer `RECORD_NOT_FOUND`, so a caller
+    can no longer read a successful envelope as proof the write landed.
+
+  - **#4436 — the unsupported-filter-operator refusal shipped without
+    `error.code`.** A refusal with no code is unmatchable by a client, and the
+    message leaked the internal `[sql-driver]` prefix. It now speaks
+    `INVALID_FILTER` without the driver prefix.
+
+  - **#4483 — the `$search` auto field set admitted its lead field
+    unconditionally.** `nameField`/`name`/`title` were prepended without passing
+    `SEARCH_AUTO_EXCLUDED_FIELDS`, so a search could be aimed at the primary key.
+    The lead field now only ORDERS the set it is already a member of; it can no
+    longer admit one.
+
+  These change responses that were observably wrong, so callers coded against the
+  buggy shapes — a 200 on a missing record, a 400 on a capability denial — will
+  see different status codes. Graded `minor` on that basis rather than `patch`.
+
+- dadb43f: refactor(spec,client,metadata-protocol,runtime)!: retire the workflow service slot — declared end to end, implemented nowhere (#4451)
+
+  The `workflow` slot was ADR-0078's silently-inert declaration at every layer at
+  once: a `CoreServiceName` nothing ever registered or resolved (ADR-0115
+  Evidence 5 — "no code in this repository resolves either slot", verified across
+  both repositories), an `IWorkflowService` contract with zero implementations, a
+  `WorkflowProtocol` whose three methods no code ever provided, a discovery
+  `routes.workflow` field no builder could truthfully populate, and a
+  `/api/v1/workflow` advertisement for a path no host ever mounted (the
+  pre-#3586 `DEFAULT_DISPATCHER_ROUTES` already listed it among routes that
+  never existed). The capability it promised is live elsewhere and has been for
+  majors: record state machines are enforced by the `state_machine` validation
+  rule, approvals are first-class flow nodes on the approvals runtime
+  (ADR-0019), and record-triggered automation is lifecycle hooks +
+  `record_change` flows (`service-automation`).
+
+  FROM → TO:
+
+  - `CoreServiceName 'workflow'` / `ServiceRequirementDef.workflow` /
+    `CORE_SERVICE_PROVIDER['workflow']` → removed; there is no slot to fill.
+  - `IWorkflowService` (`@objectstack/spec/contracts`) → removed; no
+    implementation ever existed. Register nothing — use the mechanisms above.
+  - `WorkflowProtocol` + `GetWorkflowConfigRequest/Response`,
+    `WorkflowState`, `GetWorkflowStateRequest/Response`,
+    `WorkflowTransitionRequest/Response` (`@objectstack/spec/api`) → removed,
+    along with the seven published JSON schemas. Delete the import; nothing
+    ever answered these shapes.
+  - Discovery `routes.workflow` / `services.workflow` / `features.workflow`
+    (metadata-protocol + runtime builders) → absent. A reader keying on them
+    only ever saw `unavailable` / `false`; delete the read.
+  - `RouterConfig.mounts.workflow` → removed; there was never a surface to
+    mount at it.
+  - `RestApiRouteCategory 'workflow'` → removed; categorize automation-adjacent
+    routes as `'automation'`.
+  - `@objectstack/client` re-exports of the four workflow types → removed with
+    their source. (The `client.workflow.*` methods were already removed earlier
+    in the v17 cycle — this retires the types they returned.)
+  - Also removed: the stray `graphql` entry in `CORE_SERVICE_PROVIDER` and the
+    `graphql: { route: '/graphql' }` discovery entry — `graphql` was never a
+    `CoreServiceName`, and the dispatcher had already dropped `/graphql` as out
+    of the product plan (#2462 follow-on).
+
+  The retirement kit: the `workflow-service-slot-retired` semantic migration
+  (major 17) carries this prescription into `spec-changes.json`, the generated
+  upgrade guide and the `spec_changes` MCP tool. These are TS/API surfaces and a
+  discovery response field — never stored in stack metadata — so there is no
+  load-path conversion and nothing for `os migrate meta` to rewrite; the
+  21 `authorable-surface.json` baseline lines and 7 `json-schema.manifest.json`
+  entries for the deleted schemas are dropped deliberately in the same change
+  (the plugin-runtime precedent: a prescription nobody can receive is noise —
+  nothing parses these shapes any more).
+
+### Patch Changes
+
+- 7e7a605: fix(runtime): carry the capability channel onto an AI route's `req.user` (#4705)
+
+  `/ai/*` was the one route domain in the platform where a capability check could
+  not be written. The dispatcher builds `req.user` from the request's
+  ExecutionContext, and `resolveAuthzContext` resolves a caller into **two** lists
+  that look alike and are not:
+
+  | ExecutionContext field | Carries                                                                                                                            |
+  | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+  | `permissions`          | permission-**set names** (`admin_full_access`, `organization_admin`, `member_default`) plus the synthesized `ai_seat`              |
+  | `systemPermissions`    | **capabilities** — `manage_metadata`, `studio.access`, `setup.access`, … — the union of every resolved set's `systemPermissions[]` |
+
+  Only the first was copied. Every other surface gates on the second
+  (`domains/meta.ts`'s `manage_metadata` check, `action-execution.ts`,
+  `rest-server.ts`), so the same test written against an AI route's
+  `req.user.permissions` was **permanently false** — a gate built on it would not
+  have tightened the route, it would have closed it on platform admins too. That
+  is what blocked the capability gate on
+  `POST /api/v1/ai/tools/:toolName/execute`, where any authenticated user can
+  currently run any registered tool (`create_object`, `apply_blueprint`,
+  `create_seed`) in the default configuration.
+
+  `req.user` now carries `systemPermissions` alongside `permissions`, with the
+  same fail-closed default the neighbouring fields use: a non-array — or an
+  ExecutionContext that has none, since the field is optional — becomes `[]`,
+  never `undefined`. The two channels are copied **side by side and never merged**:
+  flattening either into the other would corrupt every existing reader of
+  `permissions` while appearing to fix this.
+
+  This is transport only. No route in this package gates on the new field, and the
+  declared-but-unenforced `route.permissions` mechanism is untouched — consumers
+  decide policy, on the platform's existing `systemPermissions` contract.
+
+  The other producer of an AI-route `req.user` — `dispatcher-plugin`'s
+  `resolveRequestUser`, backing the concrete per-route mounts — has no
+  ExecutionContext to read and stays capability-less on purpose. It now says so in
+  the same shape (`systemPermissions: []`, spelled out rather than omitted) so a
+  consumer never sees `undefined` on one path and `[]` on the other, and so needs
+  no fallback of its own to tell them apart.
+
+- 2826d1e: fix(automation,approvals): an approval decision can no longer succeed while its flow stays parked (#4420)
+
+  A flow paused at an `approval` node, a deploy, then an approver clicking
+  Approve: the request row flipped to `approved`, the UI toasted success — and
+  the flow never moved. No next-stage request, no error, the record's mirrored
+  status frozen mid-workflow. Approval flows pause for days by design, so a
+  restart mid-flight is the normal case: every release could quietly zombify
+  every in-flight approval, with the approvers none the wiser.
+
+  Durable suspended runs (#1518) had shipped and were not the missing piece. Two
+  other things were.
+
+  **The wiring could enable a store over a table nobody had created.** Object
+  registration and store activation resolve different services in different
+  phases — `manifest` at `init()`, `objectql` at `start()` — and the plugin
+  declared no ordering. Composed ahead of ObjectQL, `init()` found no `manifest`,
+  warned, and continued; `start()` then attached the DB-backed store anyway. Every
+  suspend failed with `no such table: sys_automation_run` into a log line nobody
+  read, pauses silently stayed in memory, and the next restart lost them all.
+  Now: `AutomationServicePlugin` declares `optionalDependencies:
+['com.objectstack.engine.objectql']` (order-if-present, per ADR-0116 — an
+  engine-less kernel must still boot); a registration missed at `init()` is
+  retried at `start()`, which still lands before ObjectQL's schema sync; the
+  store is never attached when registration did not happen, and says so at
+  **error** level instead of warning; the table is probed once at boot so a
+  broken setup surfaces there rather than one failed write at a time; and a
+  failed durable write of a paused run is logged at error — it is data loss in
+  waiting, not a warning.
+
+  **A reported resume failure read as success.** `AutomationEngine.resume()`
+  answers a lost run by _returning_ `{ success: false }`, never by throwing.
+  `ApprovalService` discarded that return value, and `decide()` counted only a
+  thrown error as failure — so a decision against a dead run came back
+  `resumed: true`, HTTP 200. Resume failures are now classified
+  (`RUN_NOT_FOUND`, `STORE_UNAVAILABLE`, `RESUME_IN_PROGRESS`, joining
+  `PERMISSION_DENIED` / `INVALID_SIGNAL`), so a run that is gone for good is
+  distinguishable from a store that is merely unreachable, and the raw resume
+  route maps them to 404 / 503 / 409.
+
+  Approvals acts on them. A new `AutomationEngine.hasSuspendedRun(runId)` — which
+  reads the suspension store, unlike `getRun()`, and throws rather than answering
+  `false` when the store is unreadable — pre-flights every flow-advancing
+  operation (`decide`, `sendBack`, `resubmit`) **before its first write**, so the
+  zombie half-state is never created rather than merely reported: the decision
+  fails with `RESUME_TARGET_LOST` (HTTP 409) and the request stays actionable. A
+  resume that fails after the decision is durable can no longer be undone, but it
+  now throws `RESUME_FAILED` (HTTP 500) naming the stranded run instead of
+  reporting success. A concurrent duplicate resume stays benign — the engine's
+  idempotency guard is doing its job — and reports through the new optional
+  `resumeError` field. Recall and revise-window cancellation stay non-fatal by
+  design (they abandon the request), but log at error with the reason instead of
+  swallowing it. Compositions with no automation engine attached are unaffected.
+
+  Existing zombie requests from affected deployments (already `approved`, run
+  stranded) are not repaired by this change — `releaseDeadRunRequests` only
+  sweeps requests that are still `pending`.
+
+- ff17642: fix(runtime): declarative `defineJob` cron jobs are actually scheduled (#4567)
+
+  Every background job authored as `defineJob({ schedule: { type: 'cron', … } })`
+  was **silently never scheduled**. `JobSchema.parse` rewrites the cron
+  `expression` into the canonical expression envelope
+  (`{ dialect: 'cron', source: '0 1 * * *' }` — the authoring/persistence tier),
+  but `AppPlugin` handed `job.schedule` verbatim to `IJobService.schedule`, whose
+  boundary contract documents `expression` as a **bare cron string** because
+  `CronJobAdapter` passes it straight to croner. croner rejected the object
+  (`CronPattern: Pattern has to be of type string.`), the throw was swallowed by a
+  per-job `try/catch` that only `warn`ed, and the author saw a green build and a
+  green boot with the job never running. `interval` / `once` schedules and
+  flow `schedule` triggers were unaffected.
+
+  **Fix (contract-first).** The authoring→boundary downgrade now happens at the one
+  place the two tiers meet — `AppPlugin`'s declarative-job registration, alongside
+  the existing `retryPolicy` / `timeout` threading — via
+  `toBoundaryJobSchedule()`. The adapters stay strict: no `typeof === 'object'`
+  tolerance was added downstream, so the boundary keeps exactly one shape.
+  A schedule that cannot be reduced to it (unknown type, AST-only or non-`cron`
+  expression envelope, missing `intervalMs` / `at`) is rejected by name.
+
+  **The failure path is no longer silent.** A job that cannot be scheduled now logs
+  at **error** level with its own message (`Background job FAILED TO SCHEDULE — it
+will never run`), plus a boot summary line when any job failed, and increments
+  the new `job_schedule_failures_total` counter
+  (`SEMCONV.jobScheduleFailuresTotal`, labels `app` / `job`) on the observability
+  metrics registry. "Failed to schedule" no longer shares the quiet `warn` used by
+  "handler not found in bundle.functions" — the first is an outage of declared
+  work, the second is a job that was never going to run.
+
+  No authoring change is required: existing `defineJob` cron declarations start
+  working on upgrade.
+
+- 20bc357: fix(spec,metadata-protocol,runtime): discovery stops advertising routes for the kernel-internal cache/queue/job slots (#4318)
+
+  The metadata-protocol discovery builder declared `/api/v1/cache`, `/api/v1/queue`
+  and `/api/v1/jobs` — three paths that existed nowhere else in the repository: no
+  dispatcher domain, no adapter mount, no plugin registration, and the shipped
+  providers (`service-cache`/`-queue`/`-job`) are in-process contracts that will
+  never mount one. Every default boot therefore advertised a route inside the same
+  `ServiceInfo` whose `handlerReady: false` said the opposite — a single record
+  contradicting itself (ADR-0076 D12).
+
+  These slots are route-less now, like `realtime` — but unlike `realtime` an
+  unmarked real implementation stays `available`: the slot's contract is
+  in-process, so "no HTTP surface" is not reduced capability for it. `handlerReady`
+  is reported `false` on both discovery builders — for a route-less slot it is not
+  a proxy for anything, it is the fact itself (the dispatcher used to claim
+  `handlerReady: true` here for an unmarked occupant, a handler that does not
+  exist). The explanatory message is written once, as
+  `inProcessServiceMessage(slot)` in `@objectstack/spec/system`, so the two
+  builders cannot drift apart.
+
+- 5a84d41: fix(automation): `resume` enforces the suspended screen's declared field contract (#4477)
+
+  A `screen` node's `config.fields` is a complete input contract — the author
+  declares the keys, their `required`-ness, and (via `visibleWhen`) when a field
+  is even asked for. The RENDER half honoured all of it: the paused result and
+  `GET …/runs/:runId/screen` carry `required` and `visibleWhen` intact. There was
+  no VALIDATION half — `POST …/runs/:runId/resume` folded whatever bag it was
+  handed straight into the flow variables, so a caller that skipped the dialog and
+  posted here directly was unconstrained by every `required` the author wrote.
+  Missing required fields, and keys the screen never declared, all completed the
+  run with `success: true`.
+
+  Screen flows are the one place where the declared field contract is the ONLY
+  contract — no object schema sits behind a screen node to catch a bad bag
+  downstream. The platform already enforces the analogous contract everywhere else
+  this seam appears: action params (ADR-0104 D2), record writes (ADR-0113),
+  approval `decisionOutputs` (#3447). This is that rule for screen resume, built in
+  the same shape.
+
+  `resume` now refuses a non-conforming submission with the new
+  `AutomationResult.code` `'INVALID_SCREEN_INPUT'` (a transport maps it to **400**,
+  as the automation domain route now does) and an `Invalid screen input: …` message
+  that names each violation and lists the declared field names. The refusal happens
+  BEFORE the suspension is consumed, so the pause stays live and the legitimate
+  submission still lands.
+
+  `visibleWhen` is evaluated against the SUBMITTED values first (layered over the
+  run's variable snapshot), so a hidden field's `required` never fires — enforcing
+  it would dead-end the run at a field the user was never shown, which is #3528
+  reproduced server-side. A predicate that cannot be evaluated is logged and
+  treated as hidden rather than visible: the client decides what the user saw, and
+  a broken predicate is not evidence a field was on screen.
+
+  Scope, deliberately narrow — three shapes keep the historical pass-through:
+
+  - an **object-form** screen (`kind: 'object-form'`), whose `fields` is empty by
+    construction because the client renders the object's own form and the write
+    path enforces that object's `required` fields itself;
+  - a **message-only** screen (`waitForInput: true`, no fields), which declares no
+    keys and so constrains none — the same pass-through `enforceActionParams`
+    gives a param-less action;
+  - `signal.output`, the node-OUTPUT namespace, which belongs to the approval-style
+    resume envelope rather than to the screen's collected-values channel.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [0800433]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [257d97a]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [328ccc5]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [f2eb850]
+- Updated dependencies [8bd437f]
+- Updated dependencies [5046afe]
+- Updated dependencies [203a449]
+- Updated dependencies [6dcbbc3]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [58434f5]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [462b713]
+- Updated dependencies [36030ff]
+- Updated dependencies [c4ab50b]
+- Updated dependencies [6117f7b]
+- Updated dependencies [be25f97]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [ff17642]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [8aacf94]
+- Updated dependencies [4c45be1]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [05d8a54]
+- Updated dependencies [9b43ee2]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [cb5a75e]
+- Updated dependencies [84b6e58]
+- Updated dependencies [f160ba4]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [127f091]
+- Updated dependencies [9fd9ae7]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [4c80fd6]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [63b33e6]
+- Updated dependencies [8aacf94]
+- Updated dependencies [6beb708]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [83cf2d3]
+- Updated dependencies [071d0dc]
+- Updated dependencies [beefe89]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [69b509f]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [0d9a779]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [65f184b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [4b945fc]
+- Updated dependencies [1ee48bc]
+- Updated dependencies [705e5c8]
+- Updated dependencies [f61edce]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [0657f6b]
+- Updated dependencies [666f542]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [304423e]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [26bb053]
+- Updated dependencies [be90dea]
+- Updated dependencies [04f1182]
+- Updated dependencies [c03108c]
+- Updated dependencies [5647006]
+- Updated dependencies [50185a8]
+- Updated dependencies [d6bd5a1]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [24915d2]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/metadata-protocol@17.0.0-rc.2
+  - @objectstack/objectql@17.0.0-rc.2
+  - @objectstack/plugin-auth@17.0.0-rc.2
+  - @objectstack/plugin-security@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/rest@17.0.0-rc.2
+  - @objectstack/driver-sql@17.0.0-rc.2
+  - @objectstack/driver-memory@17.0.0-rc.2
+  - @objectstack/metadata@17.0.0-rc.2
+  - @objectstack/service-datasource@17.0.0-rc.2
+  - @objectstack/observability@17.0.0-rc.2
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+  - @objectstack/metadata-core@17.0.0-rc.2
+  - @objectstack/formula@17.0.0-rc.2
+  - @objectstack/service-cluster@17.0.0-rc.2
+  - @objectstack/service-i18n@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Major Changes

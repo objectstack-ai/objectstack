@@ -1,5 +1,460 @@
 # @objectstack/platform-objects
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- 98877c9: feat(core,platform-objects,spec): the ADR-0119 D2 migration-journal runner — a migration killed mid-run is resumable to completion or compensable to clean, with journal rows proving which (#4617)
+
+  **The gap D1 left open.** ADR-0119 D1 made `engine.transaction()` reachable
+  through the contract, which is the right answer for multi-write atomicity that
+  fits in one transaction. Migration-class work does not fit: a million-row
+  backfill cannot hold one write-lock for its duration, `driver-memory`'s
+  `beginTransaction` deep-clones the entire database (O(db) per begin),
+  `ObjectQL.transaction()` binds the **default driver only** so a multi-datasource
+  migration silently commits part of its work outside it, and a process **killed**
+  — as distinct from a thrown error — defeats in-process rollback entirely. So the
+  unit of atomicity is the _chunk_, and durability across chunks is a journal.
+
+  Four consumers had each converged on the same four moves — dry-run preflight,
+  undo journal, LIFO compensation, re-entrant forward recovery (ADR-0105 D13
+  promotion, ADR-0117 D8's ownership backfill, the org lifecycle transitions, and
+  D10 master-data distribution #4585). One copy is engineering; four is platform
+  debt, and the fourth author would have had to rediscover the invariant below
+  from scratch.
+
+  **New: `runMigrationJournal` (`@objectstack/core`).** Preflight runs every
+  step's read-only validator before any step writes, so a plan that would fail at
+  step 3 has not written step 1. Rows are chunked per the `bulk-write.ts`
+  discipline; each chunk's writes run inside `engine.transaction()`. On failure,
+  committed chunks are compensated newest-first, each in its own transaction. On
+  restart, a rediscovered run resumes forward from the first chunk lacking
+  `chunk_done`, or unwinds, per the plan's `onCrash` policy. Forward and
+  compensate callbacks receive an `attempt` counter; `attempt > 1` means the prior
+  outcome is UNKNOWN and the callback must recheck by natural key before
+  re-writing — the same at-least-once contract `bulk-write.ts` already documents,
+  reused rather than re-derived.
+
+  **The invariant that carries the design:** `chunk_done(i)` is written **inside**
+  the chunk's own transaction, so `done ⇔ committed` holds by construction;
+  `chunk_started(i)` is written autonomously **before** it. That asymmetry is what
+  gives `started ∧ ¬done` exactly one meaning — _the outcome is unknown_ — which
+  is the only state a crash can leave and the only state recovery reasons about.
+  Making both writes symmetric would look tidier and would destroy recovery.
+
+  **New: `sys_migration_journal` (`@objectstack/platform-objects`).** Rows keyed
+  `(run_id, seq)` under a unique index, so a resumed run that miscomputes its next
+  sequence fails loudly rather than double-recording an event. Registered
+  unconditionally alongside `sys_migration` because recovery must be discoverable
+  with **zero host wiring** — a journal some kernels compose and others do not is
+  a journal a boot scanner cannot rely on (ADR-0078). Distinct in grain from
+  `sys_migration`, which holds one durable verdict per named migration; this holds
+  many rows per _run_. Read-only over the API; writes go through the runner in
+  system context.
+
+  **The runner refuses rather than degrades**, in four places: the runtime cannot
+  roll back; any preflight fails; the plan declares `onCrash: 'compensate'` but a
+  step cannot compensate; or a resume's plan hash disagrees with the journal
+  (resuming a changed plan would apply chunk boundaries the journal never
+  described). A compensation failure halts and is journalled — never swallowed —
+  and the run ends `failed`, not `compensated`, because a database in a state no
+  clean story covers must not be reported as a tidy rollback.
+
+  **`engineCanRollBack` is now shared.** The two-level probe (engine method AND
+  default-driver `beginTransaction`) was the same condition written twice — here
+  and in `batchData`'s atomic gate. It now lives in `@objectstack/core` and
+  `@objectstack/metadata-protocol` imports it, as a type predicate so callers do
+  not each re-narrow the optional member by hand. Two copies of "can this runtime
+  actually roll back?" drift by one clause and leave one caller believing it has
+  atomicity it does not have.
+
+  Boot reconciliation and `os migrate resume` land separately; `findInterruptedRuns`
+  is the discovery primitive they will consume, and is exported here.
+
+  **Docs:** ADR-0118 (plugin-reachable transactions) is renumbered **ADR-0119**.
+  It merged one day after an unrelated ADR-0118 (非用户 actor 的平台契约) and the
+  earlier merge holds the number; citations of "ADR-0118 D1/D2/D3/D4" written
+  before 2026-08-03 mean the renumbered record.
+
+- ce92674: feat(email): declared email templates reach the mail service (#4509)
+
+  Authoring an `email_template` was a silent no-op. `EmailService.sendTemplate`
+  resolves `(name, locale)` against **`sys_email_template` rows**, and the only
+  writers of those rows were the built-in auth templates plus a code-constructed
+  `EmailServicePluginOptions.templates` that no bootstrapper ever passed. Every
+  door an author can actually use — a stack's `emailTemplates:`, an
+  `*.email-template.ts` file, Studio's metadata-admin list, `PUT /meta` — parked
+  items in a metadata store nothing read back. So an admin could "fix" the
+  password-reset email in Studio, get a success toast, and watch users keep
+  receiving the built-in copy: ADR-0078 false compliance on **authentication
+  mail**. This is the shape #3461 had for webhooks, closed the same way (ADR-0049
+  enforce-or-remove, route: enforce).
+
+  **`bootstrapDeclaredEmailTemplates`** now materializes declared templates into
+  `sys_email_template` at boot. Each item is validated through
+  `EmailTemplateDefinitionSchema.parse()` — the spec schema finally has a real
+  consumer, defaults and all — and projected with `mapTemplateToRow`, which is the
+  **same** mapping the built-in seeder uses, extracted and shared so the two doors
+  cannot drift apart. A malformed template warns and is skipped rather than
+  crashing boot.
+
+  **Runtime writes take effect immediately.** Unlike `webhook`, `email_template`
+  is `allowRuntimeCreate: true`, so a boot-only bridge would have left a Studio
+  save inert until the next restart — the same bug, half-fixed. The plugin also
+  subscribes to `email_template` metadata changes and re-materializes the single
+  changed item; withdrawing a template deactivates its rows (across locales)
+  rather than deleting them.
+
+  **Three breaks sat on this path, not one**, and closing any two of them would
+  still have shipped a template that never sent:
+
+  - `@objectstack/objectql` never registered a manifest's `emailTemplates:` into
+    the metadata registry at all — the key was simply missing from the generic
+    ingestion list, so the bridge's own source was empty.
+  - The built-in seeder left `managed_by` at the column's `'admin'` default, which
+    made platform templates masquerade as admin-authored. Since the bridge refuses
+    to overwrite admin rows, a built-in would have permanently outranked the
+    template an app declared. Built-ins now stamp `managed_by: 'platform'`.
+  - Nothing materialized declared metadata into rows.
+
+  **Seed-not-clobber** mirrors `sys_webhook` (#3489) and `sys_sharing_rule`
+  (#2909): `sys_email_template` gains `managed_by` / `customized`. Declared
+  templates re-seed every boot as `managed_by: 'package'`; a row an admin created
+  (`admin`) or edited (`customized`, stamped by a `beforeUpdate` hook) is never
+  overwritten, so reworded transactional mail survives redeploys. This is a
+  separate axis from `is_system`, which keeps its existing meaning for built-ins.
+
+  The `email_template` liveness ledger flips from 13 dead properties to fully
+  live, with an ADR-0054 runtime proof bound on `subject`
+  (`email-template-materialization`): it boots a real stack, authors a template
+  that overrides a built-in auth template, and asserts the **authored** wording is
+  what reaches the transport.
+
+- 0848bea: feat(spec)!: retire the overloaded `managedBy: 'system'` bucket — the residue becomes `system-data` (#3355)
+
+  **FROM → TO: `managedBy: 'system'` → `managedBy: 'system-data'`.** One-line fix:
+  rename the value. Nothing else about the object changes. `os migrate meta --from 16`
+  rewrites it for you; stored metadata is CONVERTED by the ADR-0087 entry
+  `object-managed-by-system-to-system-data`, never silently reinterpreted.
+
+  ADR-0103 split the overloaded `system` bucket in v16, and it split it
+  **additively**: the 20 engine-owned objects moved to the new explicit
+  `engine-owned`, while the 8 admin/user-writable ones — the RBAC link tables
+  (`sys_user_position`, `sys_user_permission_set`, `sys_position_permission_set`),
+  `sys_user_preference`, `sys_approval_delegation`, and the three messaging config
+  grids — stayed behind on `system`. That was the right move for a v16 that could
+  not break authors, but it left the enum in a state where the surviving value
+  names the half that had already moved out: `system` sitting on precisely the
+  objects a user writes.
+
+  That is not a cosmetic complaint. An author choosing between `system` and
+  `engine-owned` had nothing in the vocabulary to choose _on_, so the bucket was
+  re-overloadable by anyone reading the name in good faith — a model author most
+  of all, since "system table" reads as "the engine owns this" in every other
+  codebase. `system-data` states both boundaries explicitly: the **schema** is the
+  platform's (versus `platform`, which is tenant-modelled), the **data** is the
+  admin's or the user's (versus `engine-owned`, where the engine owns both).
+
+  Because v16 already drained the engine side, the conversion is a **one-to-one
+  mechanical value rename** with no judgement call — by construction every
+  remaining `system` declaration is writable platform data.
+
+  **One deliberate consequence — the affordance default flips.** `system` defaulted
+  LOCKED and each of the 8 objects re-opened its writes with a
+  `userActions: { create: true, edit: true, delete: true }` block. `system-data`
+  defaults **WRITABLE** (full CRUD), because a bucket that exists to say "the data
+  is yours" should not make every member ask for it back. Those blocks are now
+  redundant and have been deleted from the 8 platform objects; keep `userActions`
+  only to **NARROW**. If you converted an object that carried no `userActions`, it
+  gains the generic affordances — the honest reading of the bucket it moved into.
+
+  **No enforcement moves.** The engine write guard, the `DelegatedAdminGate`, RLS
+  and permission sets all adjudicate off resolved affordances and the principal,
+  never off the bucket name. `system-data` simply joins `platform` / `config` as a
+  bucket the fail-closed guard does not cover, because a writable default has
+  nothing to close on. The 8 objects passed that guard before (via `userActions`)
+  and pass it now (via the bucket default), for the same resolved-affordance
+  reason.
+
+  `'system'` is **retired from the load path**: the enum rejects it with a
+  prescription naming `system-data` and the one-line fix. Absorbing it silently at
+  load would leave every author still writing the name this rename exists to
+  unteach.
+
+- ce92674: feat(spec)!: retire the standalone `validation` metadata kind (#4509, ADR-0088)
+
+  A validation rule authored as its own artifact bound to nothing and gated no
+  write. `ValidationRuleSchema` carries **no object-binding key** — no `object`,
+  no `objectName` — and all six variants are `strictObject`, so an author could
+  not supply one either. No merge step existed. The only code that expected such a
+  key was a reference-tracker row scanning a field the schema would have stripped.
+  Meanwhile the engine evaluates exactly one shape: the object's own
+  `validations[]` array, on insert and on every matched update row.
+
+  So a rule created through the standalone door — a `*.validation.ts` file, or
+  Studio's Validations list — parsed, saved, reported success, and intercepted
+  nothing. Including a `state_machine` rule, which ADR-0020 routes through this
+  same vocabulary: an author could believe they had locked down record state
+  transitions and have changed nothing at all.
+
+  Under ADR-0088 the kind fails the admission test on its first clause: a rule has
+  no independent lifecycle, because it only means something against an object. And
+  unlike the sibling disconnects closed in this batch, it could not be bridged into
+  one — the shape has nowhere to name its object.
+
+  **The rule vocabulary is untouched.** `ValidationRuleSchema` and all six
+  variants are unchanged and fully live; the engine's evaluation path is not
+  modified by this change. It is the _kind_ that was inert, not the schema. The
+  liveness ledger keeps governing it through the gate's `SPEC_ONLY_SCHEMAS`
+  override (alongside `webhook` and `query`), because an ungoverned live schema is
+  exactly how the next drift would hide.
+
+  **Migration.** Move the rule into the owning object's `validations:` array — the
+  rule body is identical, same schema, same six variants:
+
+  ```ts
+  // before — a standalone *.validation.ts, which never ran
+  export default defineValidation({ name: 'amount_positive', type: 'script', … })
+
+  // after — on the object, where rules are evaluated
+  ObjectSchema.create({
+    name: 'invoice',
+    validations: [{ name: 'amount_positive', type: 'script', … }],
+  })
+  ```
+
+  Removed: the registry entry (and its `*.validation.ts` / `*.validation.yml`
+  patterns), the `MetadataTypeSchema` member, the metadata-core lockstep enum
+  member, the schema-map entry, the create seed, Studio's Validations nav item and
+  its hand-crafted form, and the dangling reference-tracker row. Standalone rows
+  already in `sys_metadata` are left alone — they were never evaluated, so nothing
+  changes behaviorally.
+
+### Patch Changes
+
+- c44dd5e: fix(objectql,platform-objects): 一次启动不能证明它自己随即违反的契约 —— ADR-0104 空库自证改为在本次启动写完数据后下结论 (#4769)
+
+  一个全新部署第一次 `pnpm dev` 全绿(130 rows,0 ERROR),**第二次启动开始永久 10 条
+  ERROR**、10 条种子记录写不进去。数据没变、代码没变,只是重启了一次;被拒的正是首启
+  自己写进去的数据。
+
+  根因不是哪个值算错了,是**顺序反了**。`sys_migration` 里那两行
+  (`adr-0104-file-references` / `adr-0104-value-shapes`)带着
+  `{"attested":"datastore-created-empty"}` 写在 `kernel:ready`,而同一次启动的 seed
+  还在往里写行。「空库 ⇒ 没有历史值」这个推理成立的前提是**没有数据可写**,而它恰恰
+  写在即将写入 130 行之前 —— 证明落笔那一刻是真的,一秒之后就不是了。于是首启在
+  warn-first 下把数据留下,之后每一次启动读到这张证书、进入 strict、拒掉前任写下的
+  那批行。
+
+  ## 改了什么
+
+  **证书必须覆盖它所声称的那批数据。**
+
+  - **写入时机**:新库自证改为在**本次启动自己的数据落定之后**进行 ——
+    `app:seeded`(inline seed 结算点,含超出 `OS_INLINE_SEED_BUDGET_MS` 后台跑完的
+    那一半),不 seed 的 kernel 仍由 `kernel:ready` 兜底。两条路径进的是同一个幂等
+    调用。
+  - **写入前提**:`attestFreshDatastore` 先问引擎「这次启动放行过违反该契约的值吗」。
+    引擎在 warn-first 放行每一个不合形状的值时,用**与 strict 模式完全相同的判定**把
+    它记下来 —— 证明干净需要扫全库,证伪只需要一个反例,而这个反例写路径已经算出来
+    了。任一条被本次启动证伪的迁移 id **不再自证**,部署维持 warn-first(真实且可
+    恢复),并在日志里指名是哪个 `对象.字段` 让这道闸没关上、该跑哪条 `os migrate`。
+    两行一起改:`adr-0104-file-references` 与 `adr-0104-value-shapes` 各自独立判定,
+    一个 `cover` 不合形状不牵连 `location`,反之亦然。
+  - **写入之后**:证书若在签发之后被本次启动推翻(操作员显式开了
+    `OS_ALLOW_LAX_MEDIA_VALUES` / `OS_ALLOW_LAX_VALUE_SHAPES`,或后台 seed 收尾晚于
+    签发),引擎**撤销**它 —— `verified_at` 清空、`blocking` 记上、`details` 保留原
+    `attested` 并补一条 `revoked`。只针对**本次启动亲手创建的库**上的自证行:扫过全
+    库的真实迁移证据不会被一次写入的观察推翻。
+
+  **记忆化的第二张脸也一并修了。** 首启之所以「看起来是绿的」,一半靠的是进程内正好
+  缓存了 `false`。`sys_migration` 在 kernel init 期间才注册,而第一条写可能赶在它之
+  前 —— 那次读根本没读到账本,却被当成结论冻结了一整个进程的姿态。现在区分两种否定:
+  **问过了、账本说不**(结论,照旧缓存)与**根本问不到**(未注册 / 查询抛错 —— 依旧
+  答 `false`,闸依旧关着,但不记住,下一次写再问一次)。代价是账本存在之前每次写多一
+  次 registry 查表(在任何查询之前就短路),账本可读之后即止。
+
+  启动横幅那条 ADR-0104 建议行(`kernel:bootstrapped`)也改为直接读账本而非读记忆化
+  结果 —— 否则一个刚刚自证成功的新部署会被告知去跑一条已经不需要跑的迁移。
+
+  ## 对既有部署的影响
+
+  - 数据本来就合规的新部署:行为不变,照旧 born-migrated,启动即 strict。
+  - 种子数据不合规的新部署:**不再**发出那张假证书。首启与之后每一次启动一致地停在
+    warn-first,并且每次都告诉你是哪一个值、跑哪条命令。数据本身该怎么修还是怎么修
+    (showcase 的 `cover` 种子值在 #4774 单独跟踪)。
+  - 已经跑过 `os migrate … --apply` 的部署:完全不受影响 —— 扫描得来的证据不经由本
+    次改动的任何路径改写。
+
+- 5966c2a: feat(spec)!: retire the five keys the advisory lint could never have warned about — mapping `extractQuery`/`errorPolicy`/`batchSize`, contextSelector `includeAll`/`placement` (#4509)
+
+  Five authorable keys parsed, stored, and controlled nothing. What groups them is
+  not the type they sit on but **why they had to go out in a major rather than
+  after a deprecation cycle**: four of the five carry schema DEFAULTS, and a
+  default materialises at parse time — so the liveness advisory lint cannot tell a
+  value the author wrote from one the schema supplied. Marking them would have
+  warned on every mapping and every selector in existence, which is why the ledger
+  recorded them as `_authorWarnSkipped` instead. For a key in that state, removal
+  is not the escalation after a warning. It is the only channel that ever reaches
+  the author.
+
+  **The retirement kit:**
+
+  | FROM                                | TO          | Fix                                                                                                                                            |
+  | ----------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `mapping.extractQuery`              | _(removed)_ | Delete the key. Exports run through the ordinary query API (`POST /api/v1/data/:object/query`) — no exporter has ever read a mapping artifact. |
+  | `mapping.errorPolicy`               | _(removed)_ | Delete the key. Error handling on the import path belongs to the import REQUEST's own options, not the stored mapping.                         |
+  | `mapping.batchSize`                 | _(removed)_ | Delete the key. The write path sizes its own batches. **Do not relocate the value** — see below.                                               |
+  | `app.contextSelectors[].includeAll` | _(removed)_ | Delete the key. Selectors are mandatory-scope; widen `optionsSource.filter` to widen the choices.                                              |
+  | `app.contextSelectors[].placement`  | _(removed)_ | Delete the key. Selectors always render in the sidebar header; `'topbar'` placed nothing.                                                      |
+
+  Run `os migrate meta --from 16` to rewrite existing sources automatically.
+
+  **`includeAll` is the one worth reading twice.** It was not unread — it was
+  deliberately _disobeyed_, and for a security reason. A context selector is a
+  mandatory scope, so an "All" row would clear the scope on a surface that exists
+  to be scoped; on Studio's package selector that means listing the platform's own
+  system/cloud kernel packages to a developer who scoped to their own package. The
+  renderer never offered an All row regardless of the flag, so `includeAll: false`
+  hardened nothing and `includeAll: true` unlocked nothing. `STUDIO_APP` shipped
+  authoring `includeAll: true` against a renderer that ignored it — that authoring
+  site goes with the key in this change.
+
+  **`batchSize` deliberately offers no rename.** `bulkActionDef.batchSize`,
+  `connector.batchSize`, `sync.batchSize`, `offline.batchSize`, the seed loader's
+  and the NoSQL driver cursor's are all LIVE and enforced — but each is a
+  different key on a different type sizing its own path, and none of them sizes a
+  mapping import. The rejection says so explicitly, because "removed" plus a
+  familiar name one line away is exactly how a dead setting gets laundered into a
+  live-looking one. Same trap `datasource.retryPolicy` had to defuse against
+  `hook`/`job` `retryPolicy` (which spell the delay `backoffMs`) one issue
+  earlier.
+
+  Both schemas are `.strict()`, so the keys are deleted from the shape and
+  rejected with a `guidance` prescription rather than tombstoned; their liveness
+  rows are deleted rather than kept. The retired ALIAS spellings (`query`,
+  `onError`, `errorHandling`, `errorMode`, `batch`, `chunkSize`, `skipErrors`,
+  `showall`, `location`) route to the same prescriptions instead of suggesting a
+  rename onto a key that is also gone.
+
+  Registered as the ADR-0087 D2 conversion `mapping-inert-keys-removed` and an
+  extension of `app-dead-authoring-keys-removed`, both wired into the protocol-17
+  D3 chain step. The mapping conversion is scoped to the `mappings` collection
+  deliberately — a stack-wide strip would delete an enforced `batchSize` from
+  connector, sync, bulk-action and offline shapes.
+
+  `datasource` reached zero dead keys in #4583; `mapping` reaches zero here.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [65f184b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/metadata-core@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

@@ -1,5 +1,403 @@
 # @objectstack/driver-mongodb
 
+## 17.0.0-rc.2
+
+### Major Changes
+
+- c6d1cb4: refactor(spec,drivers)!: retire `IDataDriver.findStream` — a required method with no caller, whose two main implementations did the opposite of what it promised (#4484, ADR-0049 enforce-or-remove)
+
+  `findStream` was a **required** method on the driver contract — every driver and
+  every test double had to implement it — documented as the read
+
+  > Optimized for large datasets to avoid memory overflow.
+
+  Three things were true about it at once, and each is worse in the light of the
+  others.
+
+  **Nothing called it.** Not the query engine (there is no `stream` entry on it),
+  not REST export, not import, not any bulk-read path. Repo-wide, outside the
+  contract declaration and the three driver implementations, every single hit was
+  a test double — and roughly twenty of those satisfied the required method like
+  this:
+
+  ```ts
+  findStream() { throw new Error('not implemented'); }
+  ```
+
+  Twenty stubs that throw, across four packages, for years, and no test ever went
+  red. That is not an anecdote about test hygiene; it is the proof of absence. A
+  method whose every double throws is a method nothing reaches.
+
+  **Two of the three implementations inverted its one guarantee.** `SqlDriver` and
+  `InMemoryDriver` both did this:
+
+  ```ts
+  const results = await this.find(object, query, options); // ← the entire result set
+  for (const row of results) yield row;
+  ```
+
+  The whole table is resident in memory before the first `yield`. A caller who
+  believed the doc comment and reached for `findStream` precisely because a result
+  set was too large would have hit the overflow it existed to prevent, at exactly
+  the scale where it mattered. `SqlDriver` carried a `TODO: Use Knex .stream()`
+  admitting it.
+
+  **The one real implementation dropped a parameter.** `MongoDBDriver._findStream`
+  did walk a cursor — but it was the only read in that driver never routed through
+  `buildFindOptions`, so it hardcoded `projection: { _id: 0 }` and silently
+  discarded `query.fields`. (#4459 unified `find`/`findOne` onto `buildFindOptions`
+  and recorded in its TSDoc that `_findStream` was left out. This removal subsumes
+  that divergence rather than fixing it — there is nothing left to fix it for.)
+
+  Rather than manufacture a caller to justify three implementations, the method is
+  retired. If a cursor-based read is wanted, it should arrive **with** the caller
+  that needs it, so the contract can be shaped by a real requirement instead of
+  being reverse-engineered from a doc comment nobody could test.
+
+  **Migration.**
+
+  | Wrote                                                      | Write instead                                              |
+  | ---------------------------------------------------------- | ---------------------------------------------------------- |
+  | `for await (const row of driver.findStream(obj, q)) { … }` | page `driver.find(obj, { ...q, limit, offset })` in a loop |
+  | `findStream(…) { … }` on your own driver                   | delete the method (see below)                              |
+  | `findStream() { throw new Error('ni'); }` in a test double | delete the line                                            |
+
+  Paging `find()` is not a downgrade from what `findStream` actually did: on SQL
+  and memory it is strictly better (bounded pages instead of one full
+  materialisation), and the paged read is the one with an **enforced** guarantee —
+  `IDataDriver.find` requires a total order across the whole walk, checked by the
+  shared `PAGINATION_CASES` / `PAGINATION_UNORDERED_CASES` fixtures in
+  `data/pagination-conformance.ts`. `findStream` never had a conformance case at
+  all.
+
+  **Driver authors: nothing breaks on you.** An implementation left in place still
+  compiles — an extra method is not an error on a class or a widened object — it is
+  simply never reached, so deleting it is cleanup you can do whenever. The break is
+  on the **caller** side: `driver.findStream(...)` no longer type-checks, and there
+  were no callers.
+
+  **No tombstone, deliberately.** The other v17 retirements tombstone their key so
+  authoring it fails loudly with a prescription. That would be noise here.
+  `DriverInterfaceSchema` describes a contract that code _implements_; nothing in
+  either repository ever ran a driver object through `.parse()`, so a
+  `retiredKey()` there would carry its prescription to no one. The channel that can
+  carry it is `tsc`, and `tsc` reports it where it is actionable — at a call site.
+  The key is removed from the schema and from `IDataDriver`, and the retirement is
+  registered as the `data-driver-find-stream-retired` semantic entry in the
+  protocol-17 chain step (ADR-0087 D3), so `spec-changes.json`, the generated
+  upgrade guide and the `spec_changes` MCP tool all carry it. There is no
+  `os migrate meta` step: a driver is code, never stack metadata, so the chain has
+  no source to rewrite.
+
+  **Left standing on purpose:** `DriverCapabilities.streaming`, the capability flag
+  whose only referent was this method. It has no readers either (and the values
+  written into it were already wrong — `SqlDriver` declared `streaming: false`
+  while implementing `findStream`, `InMemoryDriver` declared `true` for the
+  copy-everything version), but removing a key from the capabilities literal breaks
+  every driver that writes it, third-party included, and the same audit should
+  cover the other ~30 flags in one pass rather than one at a time. Tracked as
+  #4634.
+
+- d9fa683: refactor(spec)!: retire the 31 inert `DriverCapabilities` bits — declared by every driver, read by nothing (#4634, ADR-0049)
+
+  The #4484 findStream close-out left one loose end: `DriverCapabilities.streaming`
+  described a contract method that no longer exists — and a full liveness audit of
+  the record (#4634, across objectstack + cloud, objectui confirmed clean) found
+  `streaming` was not the exception but the rule. Of 34 declared bits, **three**
+  have a decision-making reader and **thirty-one** were written by every driver
+  and consulted by no engine, planner, REST layer or renderer:
+
+  - Their `.describe()` strings promised engine adaptation that was never built
+    ("If false, ObjectQL will fetch all records and filter in memory" — no such
+    fallback ever keyed off the bit).
+  - Zero readers let values go WRONG unnoticed: `SqlDriver` declared
+    `streaming: false` while implementing `findStream`; `InMemoryDriver` declared
+    `streaming: true` over a full-table read — the exact inverse of the guarantee.
+  - The real mechanism everywhere else is **method presence**: transactions gate
+    on `driver.beginTransaction`, aggregate pushdown on
+    `typeof driver.aggregate === 'function'`, schema sync on
+    `typeof driver.syncSchema === 'function'`, and the REQUIRED CRUD/bulk methods
+    are called unconditionally.
+
+  Survivors (each with a named reader — the bits method presence cannot carry):
+
+  | bit                    | reader                                                                                   |
+  | ---------------------- | ---------------------------------------------------------------------------------------- |
+  | `queryDateGranularity` | engine aggregate dispatch (`engine.ts`), `checkDateBucketParity` (`@objectstack/verify`) |
+  | `autonumber`           | engine defers autonumber generation to the driver (`engine.ts`)                          |
+  | `batchSchemaSync`      | engine ANDs it with `syncSchemasBatch` presence (`engine.ts` / `plugin.ts`)              |
+
+  Migration (FROM → TO):
+
+  - Any of the 31 bits (`create`/`read`/`update`/`delete`, `bulkCreate`/
+    `bulkUpdate`/`bulkDelete`, `transactions`/`savepoints`/`isolationLevels`,
+    `queryFilters`/`queryAggregations`/`querySorting`/`queryPagination`/
+    `queryWindowFunctions`/`querySubqueries`/`queryCTE`/`joins`,
+    `fullTextSearch`/`jsonQuery`/`geospatialQuery`/`streaming`/`jsonFields`/
+    `arrayFields`/`vectorSearch`, `schemaSync`/`migrations`/`indexes`,
+    `connectionPooling`/`preparedStatements`/`queryCache`) in a `supports`
+    literal or a `DriverConfig.capabilities` object → **delete the key**. Each is
+    tombstoned (`retiredKey()`), not silently stripped: authoring one is a `tsc`
+    error against `IDataDriver.supports` and a parse error carrying the per-key
+    prescription, which names the mechanism that actually decides the behaviour.
+  - `batchSchemaSync` dropped its `.default(false)` for `.optional()` — absence
+    already meant `false` at both readers, so `supports: {}` is now a valid,
+    minimal advertisement. If you read `capabilities.batchSchemaSync` from a
+    _parsed_ config and relied on the materialised `false`, treat absence as
+    `false` (both engine readers always did).
+  - Driver packages: `InMemoryDriver.supports` is now `{}`,
+    `MongoDBDriver.supports` is `{ batchSchemaSync: true }`, `SqlDriver.supports`
+    is `{ queryDateGranularity, autonumber: true, batchSchemaSync: false }`.
+    Reading a removed bit off these literals no longer type-checks — and no code
+    in any repository did.
+  - A future capability (streaming reads, vector search, …) returns **with its
+    caller and its reader in the same change** — the enforce route of ADR-0049 —
+    never as a dangling boolean.
+
+  The retirement kit: 31 `retiredKey()` tombstones on the non-strict schema
+  (parse + `tsc` both audible; the schema IS parsed via
+  `DriverConfigSchema.capabilities` and its SQL/NoSQL extensions); ADR-0087 D3
+  semantic migration `driver-capabilities-inert-bits-removed` (a driver is CODE,
+  never stack metadata — `supports` lives in driver classes and `DriverConfig`
+  is plugin TS configuration, so there is no stored row or stack source for a D2
+  conversion to rewrite; the stack-tree neighbour `datasource.capabilities` was
+  retired separately in #4583); baselines (`authorable-surface.json` [RETIRED]
+  lines, `json-schema.manifest.json`) regenerated deliberately; compiler-API pin
+  asserting every retired bit is unwritable (`undefined`) and every live bit is
+  not, sabotage-verified both ways (S1 schema resurrection, S2 driver literal
+  resurrection).
+
+  No runtime behaviour changes — that impossibility is the point: every removed
+  bit had zero readers, and the three live bits keep theirs.
+
+### Patch Changes
+
+- 9b43ee2: test(drivers): the filter-logic standard now covers the backend it was counted without (#4405)
+
+  `FILTER_LOGIC_CASES` (#3774) opens by calling itself the standard "the four
+  independent FilterCondition backends are each checked against". Five backends
+  exist. `driver-mongodb`'s `translateFilter` was missed, not excluded — an
+  independent implementation whose `$and`/`$or`/`$not` translation shares no line
+  of code with the SQL compiler or the in-memory matcher, and the only one whose
+  target language cannot spell the standard directly: MongoDB has no
+  document-level `$not` at all (the server answers `unknown top level operator:
+$not`), so a negation has to leave as `$nor`, and a branch's own keys have to
+  stay in one document while `$and`/`$or` clauses are lifted beside them. That
+  route was never checked against the shared cases. Both DEBT rows the #4363 gate
+  recorded are now cleared, and `scripts/check-driver-conformance.mjs` reports
+  `ok` for every cell of the matrix.
+
+  **`driver-mongodb` runs the table twice, and the split is deliberate.**
+  `mongodb-filter-logic-translation.test.ts` drives every shared case through
+  `translateFilter` and evaluates the emitted MongoDB _document_ over the shared
+  fixture — a pure function, no server, so it always runs. That matters here more
+  than anywhere: `mongodb-memory-server` downloads a ~123 MB binary from
+  fastdl.mongodb.org, and a defect only a downloadable binary can catch is a
+  defect nobody catches on a restricted network. Its in-process reader is strict
+  by construction — every shape it does not model throws instead of evaluating to
+  true, a document-level `$not` included — and its own discrimination is pinned by
+  cases that require a widened document to FAIL the case it widens, so "all green"
+  cannot mean "the reader says yes to everything".
+  `mongodb-filter-logic-conformance.test.ts` runs the same table against a real
+  mongod and answers the one question the first half cannot — does MongoDB agree?
+  — skipping cleanly (never silently) when the binary is unreachable.
+
+  **`driver-sqlite-wasm` runs the table through its own engine.** It inherits
+  `SqlDriver`'s filter compiler, so nothing is re-implemented; what the suite pins
+  is that a nested `(… AND …) OR (… AND …)` survives the custom sql.js dialect
+  that compiles, binds and marshals it — the same seam its temporal and pagination
+  suites cover for their clauses. Tracked as DEBT rather than EXEMPT because
+  "inherits, therefore fine" is the assumption those suites exist to disprove; the
+  suite is what disproves it.
+
+  **No divergence was found.** `translateFilter` answers all seventeen shared
+  cases correctly today, `$not`-inside-a-branch and nested `$and`-inside-`$or`
+  included, so no translation change ships here — what changes is that the next
+  edit to it cannot quietly widen a filter. Both suites were verified to be
+  discriminating rather than decorative by reintroducing the #3774 miscompile
+  (propagating `or` into a branch's own contents): 15 of the mongodb translation
+  suite's 26 tests fail, and 13 of the wasm suite's 18.
+
+  `packages/spec`'s `filter-logic-conformance.ts` header now says five and names
+  the fifth — a code comment; no schema, export or generated artifact moved.
+
+- ec975f1: fix(objectql,driver-mongodb)!: `findOne` must say which record it wants, and executes every option it declares (#4419)
+
+  `findOne` reads a single row, which makes its predicate the only thing between
+  the caller and _an arbitrary record_. When the predicate is missing the result is
+  not `null` — it is the object's **first row**: a real, plausible-looking record
+  with nothing to do with the request, which the `if (!row)` check every call site
+  already has cannot catch, and which then propagates into whatever is computed
+  next. Reported downstream: line items defaulting their price from the first
+  product in the catalog rather than the selected one, and "is this deal already
+  closed?" answered against an unrelated record while the write that followed
+  correctly targeted the intended id. A throw would have been caught in
+  development; a `null` would have been caught by the null-check. A valid-looking
+  wrong record defeats both.
+
+  **Breaking — `findOne` now refuses a query that selects nothing in particular.**
+
+  FROM → TO:
+
+  | Was                                                         | Now write                                                           | Meaning                                          |
+  | ----------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------ |
+  | `findOne(o)`, `findOne(o, {})`, `findOne(o, { where: {} })` | `findOne(o, { where: … })`                                          | the record matching this predicate               |
+  |                                                             | `findOne(o, { search: 'Acme' })`                                    | the record this search finds                     |
+  |                                                             | `findOne(o, { orderBy: [{ field: 'created_at', order: 'desc' }] })` | the FIRST record in this order — the newest      |
+  |                                                             | `find(o, { limit: 1 })`                                             | any row will genuinely do, said at the call site |
+
+  One-line fix: add the `where` you meant, or `orderBy` if you meant "the newest
+  one", or switch to `find(o, { limit: 1 })` if any row will do. The error names
+  all four. `find` and `count` are unchanged — returning or counting every row is
+  an honest answer; only `findOne`'s implicit "just one of them" turns a missing
+  predicate into a confidently wrong record. The guard reads the CALLER's
+  predicate, before RLS/sharing middleware injects its own: a tenant filter
+  narrows which rows are visible, it does not make "whichever comes first"
+  something the caller asked for.
+
+  **Two silent drops that produced the same wrong record are fixed with it.**
+
+  - **`findOne({ search })` applies the search.** The ADR-0061 `search` →
+    cross-field `$contains` expansion lived inline in `find` and nowhere else,
+    while `find` and `findOne` are checked against the SAME legal-key set — so
+    `search` passed the gate, rode onto the AST, and reached a driver. No driver
+    reads `ast.search`. The read therefore ran with no predicate at all and
+    `limit: 1` did the rest. The expansion is now one method both call.
+  - **`MongoDBDriver.findOne` applies `orderBy`, `fields` and `offset`.** It
+    translated `query.where` and dropped the rest, so `findOne({ orderBy })` did
+    not return the newest record — it returned whichever document the scan reached
+    first. `find` and `_findStream` in the same driver had always handled all
+    three. This one matters beyond Mongo: the guard above tells an unpredicated
+    caller to reach for `orderBy`, and an escape hatch one backend ignores is not
+    an escape hatch. No ordering is IMPOSED when the caller supplies none — both
+    drivers keep that carve-out (#4363), and `SqlDriver`'s comment about Mongo
+    "never sorting" is corrected, since it cited the dropped parameter as
+    agreement.
+
+  **And a gate so the class does not come back.** A drift pin walks
+  `ENGINE_OPTION_KEY_SETS.findOne` and requires each declared key to have an
+  observable effect — on the AST the driver receives, on the driver options, or in
+  an explicit "not executed, and here is why" entry (only `limit`, which the
+  contract's `limit: 1` overrides). `search` sat declared-but-unexecuted through
+  two rounds of hardening because nothing asked that question.
+
+  Together with #4346 (`filter` → `where` folds on every entry point) and #4400
+  (unknown option keys throw), a read parameter the engine does not execute now
+  fails at the call site instead of quietly changing the answer.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Patch Changes

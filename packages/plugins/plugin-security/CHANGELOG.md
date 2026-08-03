@@ -1,5 +1,399 @@
 # @objectstack/plugin-security
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- ce5242c: feat(auth,objectql,audit,security,spec): identity-table writes carry the real actor, so `sys_member` history stops saying "system" (#4586)
+
+  better-auth owns every write to the identity tables (`sys_member`, `sys_user`,
+  `sys_invitation`, …) and its ObjectQL adapter runs them `isSystem: true` **on
+  purpose** — the route already authorized the action under better-auth's own ACL,
+  and ADR-0092 D2 refuses user-context writes to those tables outright. The
+  consequence was that the human who clicked _make admin_ was known exactly once,
+  in the hook layer where the session exists, and then discarded: every
+  `trackHistory` transition on `sys_member` recorded `user_id: null` / "system",
+  and `sys_user_permission_set.granted_by` was written null by the auto-grant.
+  "Who made this person an org admin?" had no answer in the platform's own audit
+  log.
+
+  **What changed**
+
+  A request-scoped attribution seam, general rather than a `sys_member` special
+  case:
+
+  | Layer                        | Before                             | After                                                                                                                          |
+  | :--------------------------- | :--------------------------------- | :----------------------------------------------------------------------------------------------------------------------------- |
+  | `ExecutionContext`           | `userId` / `actor` only            | new optional `attributedUserId` — the human CREDITED for a write the system AUTHORIZED                                         |
+  | `HookContext`                | `session`, `user`                  | new `provenance.attributedUserId`, split off the context beside `session`                                                      |
+  | better-auth ObjectQL adapter | `{ isSystem: true }`               | `{ isSystem: true, attributedUserId }` when a request scope is open                                                            |
+  | audit writer                 | `user_id = session.userId ?? null` | falls back to `provenance.attributedUserId` when the session names nobody                                                      |
+  | `auto-org-admin-grant`       | `granted_by: null`, no `reason`    | the attributed human in `granted_by`, plus a machine-provenance `reason` naming the writer and the triggering `sys_member` row |
+
+  Outside a request scope nothing changes: writes stay bare `{ isSystem: true }`
+  and audit rows keep recording `null`. Absence is still never upgraded into a
+  caller, and never written as a sentinel string (ADR-0118 D1/D2).
+
+  **Hard constraint — attribution is not authority**
+
+  `attributedUserId` is read by exactly one consumer, the audit writer, and by no
+  security middleware. It never becomes `ExecutionContext.userId`, so it is never
+  the subject the engine authorizes as: not RLS `current_user`, not the ownership
+  stamp, not permission resolution. A context carrying only `attributedUserId`
+  authorizes exactly like an empty context (ANONYMOUS), and a context carrying it
+  beside `isSystem: true` authorizes exactly like `isSystem` alone. Re-authorizing
+  identity writes as the human would re-adjudicate a decision better-auth already
+  made — the second adjudication track ADR-0095 D3 closed. The constraint is
+  pinned by tests at three layers: the engine seam
+  (`packages/objectql/src/engine.test.ts`), the better-auth adapter
+  (`packages/plugins/plugin-auth/src/auth-actor-attribution.test.ts`), and the
+  live HTTP route (a plain member still cannot promote themselves).
+
+  **For authors and plugin developers**
+
+  `attributedUserId` is authorable on `ExecutionContext` and readable as
+  `ctx.provenance?.attributedUserId` in hooks. Use it to answer _who is
+  responsible_; keep using `ctx.session` / `ctx.user` to decide _what is
+  permitted_. The two are separate fields precisely so the distinction cannot be
+  blurred by accident.
+
+- 328ccc5: fix(security,analytics): scope /analytics/query to the caller's readable records, and refuse a measure over a missing field (#4467, #4437)
+
+  Two defects on the analytics query path, both found by the v17 verification run
+  (#3909 / #4482), both reproduced against a live showcase server before the fix
+  and re-verified with the same requests after.
+
+  ## #4467 — `/analytics/query` applied no record-level scoping
+
+  `ISecurityService.getReadFilter` documents itself as "the same filter the engine
+  middleware AND-s into every find", and exists precisely for paths that bypass
+  that middleware — its own doc comment names the analytics raw-SQL path. But the
+  chain it mirrors is TWO sibling middlewares: plugin-security's RLS injection and
+  plugin-sharing's owner/share visibility filter (`buildSharingMiddleware` AND-s
+  `buildReadFilter` into `ast.where` for `find`/`findOne`/`count`/`aggregate`).
+  Only the RLS half was ever computed here, and analytics has no other source of
+  scope, so the OWD/share predicate simply never existed on that path.
+
+  Live repro: `showcase_private_note` is `sharingModel: 'private'`; an admin owns
+  5 notes, a member holds read shares on exactly 2 and no `viewAllRecords`.
+  `GET /data/showcase_private_note` correctly returned 2 for the member, while
+  `POST /analytics/query {measures:['count']}` returned 5 — and adding
+  `dimensions:['title']` returned all five titles, i.e. the VALUES of a column
+  that caller may not read, not merely a bad count. Any authenticated caller who
+  could reach `/analytics` could enumerate the field values of every row of any
+  object exposed as a cube, regardless of OWD, sharing rules, or RLS.
+
+  `getReadFilter` now resolves plugin-sharing's `buildReadFilter` through the
+  late-bound `sharing` service and AND-composes it with the RLS filter — the same
+  composition the two middlewares reach by both writing into `ast.where`. It also
+  computes the ADR-0057 D1 `__readScope` depth that the security middleware
+  normally stashes on the context for plugin-sharing to widen its owner-match
+  with, using the same `getEffectiveScope` call the middleware makes: no
+  middleware runs on this path, and without it a caller granted `unit`/`org` read
+  depth would be silently narrowed to `own`. The sharing predicate is resolved for
+  every non-system caller AHEAD of the RLS stand-down branches, because those are
+  the RLS middleware's own early exits and none of them is a reason to drop a
+  sibling middleware's predicate; a sharing-resolution failure denies outright
+  rather than falling through to half a scope.
+
+  **Why `minor` rather than `patch`.** This is an observable behaviour change on a
+  public read surface, in the narrowing direction: analytics results that a
+  principal could previously read they now cannot. Counts drop, `dimensions`
+  groupings lose rows, and any dashboard, report, or export built on
+  `/analytics/query` over an owner-private object will show smaller numbers for
+  non-superuser principals — correctly, but visibly. Deployments that had (however
+  unknowingly) come to depend on the unscoped totals will see them change on
+  upgrade, so this warrants more than a patch-level note even though it is a
+  security fix. No API signature changed: `ISecurityService.getReadFilter`'s
+  declaration is untouched — the implementation merely started honouring the
+  contract it already documented.
+
+  ## #4437 — a measure naming a missing field 500'd with SQLITE_ERROR
+
+  `inferMeasure('ghost_sum')` maps a suffix convention onto a field name and has
+  no way to know the field exists, so it built `SUM(ghost)`, the driver threw
+  `no such column`, and the caller got
+  `500 {"code":"SQLITE_ERROR","message":"Internal server error"}` — a driver error
+  class as the `error.code` for what is a plain typo, which ADR-0112 forbids. A
+  dotted spelling took the same path (`measures:['total.sum']` prefix-strips to
+  `sum` → `SUM(sum)` → 500). The DATA route has refused the identical mistake with
+  a `400 INVALID_FIELD` naming the field since #4315/#4254.
+
+  `AnalyticsService.ensureCube` now validates each measure's resolved source field
+  against the backing object's field names before any SQL is built, and rejects
+  with the same envelope the data route produces (`400 INVALID_FIELD` carrying
+  `field`, `object`, `param`, `measure`) so one mistake has one shape across
+  `/data` and `/analytics`. The new `getObjectFieldNames` config hook reads the
+  same schema registry `isRegisteredObject` already consults and the data path's
+  own gate reads, so "which fields exist" has a single answer across both routes.
+
+  The gate is tiered exactly like the #3867 cube-inference gate, deliberately
+  narrow: it applies only when the cube's `sql` is a bare object name (an authored
+  cube whose `sql` is a real SQL expression has no field list to check against),
+  only when the probe answers (no data engine, or an external datasource whose
+  columns are not mirrored locally, stands down), and only to measures whose
+  source is a bare column — `count(*)` has no source field, and a dotted
+  cross-object reference resolves through a join this layer cannot see, so both
+  pass through untouched. `id`/`created_at`/`updated_at` are admitted
+  unconditionally, matching the data path's `resolveQueryFields`: a gate stricter
+  than the engine it guards would reject queries that used to work. Validation
+  runs before the cube is registered, so a rejected query leaves no trace in the
+  registry — otherwise a retry would find a "registered" cube carrying the bogus
+  measure and sail straight into SQL.
+
+  This half is `minor` for the same envelope reason: a request that used to return
+  500 now returns 400 with a different `code`, which is a visible contract change
+  for any caller branching on the response.
+
+- 6dcbbc3: fix(plugin-security): the org-admin auto-grant can actually revoke — demoted admins really do lose tenant admin (#4640)
+
+  `auto-org-admin-grant`'s only delete channel called
+  `ql.delete(object, id, { context })`. The engine's signature is two arguments —
+  `delete(object, options?: EngineDeleteOptions)` — so the id landed in the option
+  bag, `rejectUnknownEngineOptions` read its character indices (`'0'`, `'1'`, …)
+  as unknown option keys and threw, and `tryDelete`'s `catch` swallowed it. The
+  system context in the discarded third argument went with it.
+
+  That wrapper is the module's **only** delete channel, so all three revoke paths
+  were silent no-ops for the module's entire life:
+
+  1. **Demotion and member removal did not take the capability back.**
+     `organization/update-member-role` moving someone from `owner`/`admin` back to
+     `member` reconciled, deleted nothing, and returned
+     `{ action: 'skipped', reason: 'delete_failed' }` while the
+     `sys_user_permission_set` row stayed put. That row carries wildcard
+     `viewAllRecords`/`modifyAllRecords` → `isTenantAdmin()`, so the demoted user
+     remained a **tenant admin**.
+  2. **The ADR-0105 D4 superseded-variant convergence never converged.** A posture
+     change left the old `organization_admin` / `organization_admin_no_bypass` row
+     in force — on a wall-less deployment, that is the unbounded variant.
+  3. **The `kernel:ready` orphan sweep never swept** (membership deleted, grant
+     left behind).
+
+  The call now matches every other `ql.delete` call site in the repo:
+  `ql.delete(object, { where: { id }, context: SYSTEM_CTX })`.
+
+  ## ⚠️ Behaviour change: people will lose tenant admin on upgrade — that is the fix working
+
+  Existing deployments have accumulated `sys_user_permission_set` rows that should
+  have been revoked when someone was demoted or removed from an organization.
+  After this release the `kernel:ready` backfill reconciles them, and every one of
+  those grants is deleted on the first boot. Concretely, on upgrade:
+
+  - users demoted from `owner`/`admin` to `member` at any point in the past
+    **stop being tenant admins**;
+  - users whose membership was deleted lose their orphaned org-scoped grant;
+  - deployments that changed `tenancy.posture` converge on the posture's variant
+    instead of keeping both.
+
+  Nobody loses access they were _supposed_ to have: the grade that qualified them
+  was already taken away, and only the capability row outlived it. If a specific
+  person should keep blanket visibility, grant it deliberately —
+  `admin_full_access` or an explicitly authored permission set — rather than
+  through a better-auth membership grade. Expect `[security] revoked org-admin
+capability` lines in the boot log naming each one.
+
+  Failed revokes are no longer silent either: a delete the datastore rejects logs
+  `[security] org-admin grant revoke FAILED — capability still in force`, and a
+  reconcile that found grant rows and removed none logs that it left them behind.
+  A capability the platform decided to withdraw and could not is exactly the
+  outcome that must reach an operator.
+
+- 0848bea: feat(spec)!: retire the overloaded `managedBy: 'system'` bucket — the residue becomes `system-data` (#3355)
+
+  **FROM → TO: `managedBy: 'system'` → `managedBy: 'system-data'`.** One-line fix:
+  rename the value. Nothing else about the object changes. `os migrate meta --from 16`
+  rewrites it for you; stored metadata is CONVERTED by the ADR-0087 entry
+  `object-managed-by-system-to-system-data`, never silently reinterpreted.
+
+  ADR-0103 split the overloaded `system` bucket in v16, and it split it
+  **additively**: the 20 engine-owned objects moved to the new explicit
+  `engine-owned`, while the 8 admin/user-writable ones — the RBAC link tables
+  (`sys_user_position`, `sys_user_permission_set`, `sys_position_permission_set`),
+  `sys_user_preference`, `sys_approval_delegation`, and the three messaging config
+  grids — stayed behind on `system`. That was the right move for a v16 that could
+  not break authors, but it left the enum in a state where the surviving value
+  names the half that had already moved out: `system` sitting on precisely the
+  objects a user writes.
+
+  That is not a cosmetic complaint. An author choosing between `system` and
+  `engine-owned` had nothing in the vocabulary to choose _on_, so the bucket was
+  re-overloadable by anyone reading the name in good faith — a model author most
+  of all, since "system table" reads as "the engine owns this" in every other
+  codebase. `system-data` states both boundaries explicitly: the **schema** is the
+  platform's (versus `platform`, which is tenant-modelled), the **data** is the
+  admin's or the user's (versus `engine-owned`, where the engine owns both).
+
+  Because v16 already drained the engine side, the conversion is a **one-to-one
+  mechanical value rename** with no judgement call — by construction every
+  remaining `system` declaration is writable platform data.
+
+  **One deliberate consequence — the affordance default flips.** `system` defaulted
+  LOCKED and each of the 8 objects re-opened its writes with a
+  `userActions: { create: true, edit: true, delete: true }` block. `system-data`
+  defaults **WRITABLE** (full CRUD), because a bucket that exists to say "the data
+  is yours" should not make every member ask for it back. Those blocks are now
+  redundant and have been deleted from the 8 platform objects; keep `userActions`
+  only to **NARROW**. If you converted an object that carried no `userActions`, it
+  gains the generic affordances — the honest reading of the bucket it moved into.
+
+  **No enforcement moves.** The engine write guard, the `DelegatedAdminGate`, RLS
+  and permission sets all adjudicate off resolved affordances and the principal,
+  never off the bucket name. `system-data` simply joins `platform` / `config` as a
+  bucket the fail-closed guard does not cover, because a writable default has
+  nothing to close on. The 8 objects passed that guard before (via `userActions`)
+  and pass it now (via the bucket default), for the same resolved-affordance
+  reason.
+
+  `'system'` is **retired from the load path**: the enum rejects it with a
+  prescription naming `system-data` and the one-line fix. Absorbing it silently at
+  load would leave every author still writing the name this rename exists to
+  unteach.
+
+### Patch Changes
+
+- 0d9a779: fix(security): 让 permission-set 投影只写 spec 认的键，并把静默失败的 backfill 变响亮 (#4669)
+
+  ADR-0094 D4 的 permission-set backfill 在 #4001 之后 **100% 失败**：`sys_permission_set`
+  每一行都有 `active` 存储列，`permissionSetBodyFromRow()` 把整行转成 metadata body 时把它
+  一起带上，而 #4001 已经把 `PermissionSetSchema` 封成 `.strict()` —— 于是每一次
+  `saveMetaItem` 都抛 `[invalid_metadata] … Unrecognized key(s) on this permission set:
+'active'`。失败被 `catch` 成一条 `warn`、计数器不加一，所以测试全绿、没有任何自动信号：
+  一个整条停摆的投影路径就这样过了一个发布周期。
+
+  **归属判定：`active` 是行状态，不是声明。** 它的全部消费面 —— 表列、`highlightFields`、
+  Setup 列表视图的过滤器、两个启停动作的 `bodyExtra: { active: … }` —— 都是记录的运行时开关，
+  不是作者声明的能力边界。所以修法是在**投影侧挑键**，而不是把状态提升进 spec
+  （`packages/spec/**` 零改动）。
+
+  - `permissionSetBodyFromRow()` / `mergeRowPatchIntoBody()` 现在都经过一个**从
+    `PermissionSetSchema.shape` 派生**的键白名单（不是手抄的字符串数组 —— 手抄的话 spec 加键
+    时这里又会静默漏，正是本 bug 的翻版）。存储列（`active`、时间戳、`managed_by` /
+    `package_id` / `customized`）一律不进 metadata body；`#4001` 之前**已经落库**、body 里
+    仍带着 `active` 的历史 overlay 行，也在同一个闸口被滤掉，因此它们的数据门编辑不再报 422。
+  - 两个启停动作行为不变：只含行状态的 PATCH 不再被改写成 metadata 写入，而是原样交给驱动
+    执行列写入（保留 history / `updated_at` / FLS 等正常语义），并且不会再给一个包自带的
+    permission set 平白造出一条“customization” overlay。投影通道则不再从 body 读 `active` ——
+    一次投影不会再用陈旧 body 把管理员刚停用的 set 重新打开。
+  - backfill 真失败时按 AGENTS.md「Degradation log levels」(#4632) 变响亮：`error` 级、
+    文案写明后果（记录照常列出、看起来一切正常，但定义不在 metadata 里，重新 provision 不会
+    重建它）与修复动作，并新增 `ProjectionReconcileOutcome.backfillFailed` 计数，让降级出现在
+    结果里而不只在日志里。
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/platform-objects@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/formula@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

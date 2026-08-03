@@ -1,5 +1,1129 @@
 # @objectstack/metadata-protocol
 
+## 17.0.0-rc.2
+
+### Major Changes
+
+- ac37fc6: fix(metadata-protocol)!: batch per-row results now deliver the declared `BatchOperationResultSchema` shape (#4793)
+
+  **Breaking wire change** on the per-row `results` entries of the three
+  bulk-write endpoints — `POST /data/:object/batch`, `/updateMany`,
+  `/deleteMany`. The rows had drifted from the schema that declares them:
+  `BatchOperationResultSchema`, the client SDK's exported `BatchOperationResult`
+  type and the reference docs all said `errors: ApiError[]` / `data` / `index`,
+  while the wire carried `error: string` / `record` and never sent `index`. A
+  TypeScript consumer written against the published type compiled, validated,
+  and read `undefined` at runtime. The wire now delivers exactly what is
+  declared (a conformance pin parses every emitted row against the schema, so
+  the two cannot silently fork again).
+
+  **FROM → TO, per row:**
+
+  | Before (legacy wire) | After (declared schema)     | Your fix                                                                                           |
+  | -------------------- | --------------------------- | -------------------------------------------------------------------------------------------------- |
+  | `row.error` (string) | `row.errors` (`ApiError[]`) | read `row.errors?.[0]?.message`; branch on `row.errors?.[0]?.code`                                 |
+  | `row.record`         | `row.data`                  | rename the read                                                                                    |
+  | — (never sent)       | `row.index` (number)        | new — the row's position in the request array; use it to correlate failure rows that carry no `id` |
+  | `row.droppedFields`  | `row.droppedFields`         | unchanged                                                                                          |
+
+  **Rollback marking is structured now.** The `ROLLED_BACK:` /
+  `NOT_ATTEMPTED:` message-string prefixes that #4620 introduced (see the
+  `many-data-atomic-real-or-refused` changeset — its description of those
+  markers is superseded by this entry) are promoted to first-class
+  `ApiError.code` values, registered in the spec's ERROR_CODE_LEDGER:
+
+  - `errors[0].code === 'ROLLED_BACK'` — the row was written, then undone by the
+    atomic batch rollback; `message` carries the causal row's index and error.
+  - `errors[0].code === 'NOT_ATTEMPTED'` — the row never ran; an earlier row's
+    failure aborted the batch.
+  - the causal row keeps its own error code (e.g. `RECORD_NOT_FOUND`,
+    `VALIDATION_FAILED`; an unclassified engine throw maps to `INTERNAL_ERROR`,
+    with `httpStatus` mirrored when the error carried one).
+
+  Branch on the code — do **not** regex message prefixes; the prefixes are gone.
+
+  **Who is affected:** only readers of the _legacy_ keys — which were never in
+  the schema or the SDK types, so they were reachable only via `as any` or bare
+  JS. Code written against `BatchOperationResult` (the published contract) needed
+  this change to start working and needs no migration. There is no
+  dual-emission or compatibility fallback: this is a hard cut inside the v17
+  major window, and the old keys simply no longer exist on the wire.
+
+- 65f184b: fix(metadata)!: `sys_metadata_history.recorded_by` stores NULL, not the sentinel string `'system'` (#4556)
+
+  `recorded_by` is declared `Field.lookup('sys_user', { readonly: true })` — a
+  foreign key. The write path filled it with `actor ?? 'system'`, so every
+  metadata write without a caller actor (boot sync, migration, an internal call)
+  stored the **string** `'system'` in a column whose declared type says "the id
+  of a `sys_user` row". No such row exists, and `SystemUserId.SYSTEM`
+  (`'usr_system'`) is not auto-provisioned on the current runtime either, so the
+  value resolved to nothing under any reading. Any consumer that read the field
+  by its declaration — `expand`, an owner column in a report, an audit timeline
+  showing "who changed this" — got an id that could not be dereferenced.
+
+  It had already cost twice. #4441 had to exempt every `readonly` field from the
+  write-path referential-integrity check, because otherwise ordinary metadata
+  authoring (package create / publish / clone) was rejected. #4551's
+  dangling-reference audit had to skip the same set for the same reason. The
+  field ended up the platform's only reference column that is neither enforced
+  nor audited.
+
+  **The fix is on the write path, not the declaration.** `recorded_by` stays a
+  `lookup('sys_user')`; an actor-less write now stores `NULL`, and `NULL` means
+  "system-initiated (boot sync, migration, scheduled job)" — the standard
+  expression of "no link", and already what this column's `set_null` delete
+  behaviour means. No magic system-user account (a row that can never sign in yet
+  holds an identity is a new security surface), and no `actor_kind` companion
+  column.
+
+  **Breaking — the repository contract is now explicitly nullable.**
+
+  | Surface                                   | Before   | After                                 |
+  | :---------------------------------------- | :------- | :------------------------------------ |
+  | `PutOptions.actor`, `DeleteOptions.actor` | `string` | `string \| null` (still **required**) |
+  | `MetadataEvent.actor`                     | `string` | `string \| null`                      |
+  | `MetadataItem.authoredBy`                 | `string` | `string \| null`                      |
+
+  `actor` stays required rather than becoming optional on purpose: every call
+  site must state which of the two it is, so a forgotten actor cannot silently
+  become a fake foreign key. Migrating a caller:
+
+  - **Writers** — passing a real identity: unchanged. Passing `'system'`, `''`,
+    or a label to satisfy the type: pass `null` instead.
+  - **Readers** — `event.actor` and `item.authoredBy` can be `null`. Handle it at
+    the point of display (`actor ?? 'System'` in a UI string is fine — the fix is
+    that the _stored_ value no longer lies, not that no label may ever be shown).
+
+  Two read paths also stopped inventing a value: `SysMetadataRepository.history()`
+  and `getByHash()` rendered an absent actor as the string `'unknown'`, which is
+  indistinguishable from a real user id to anything that resolves the field. They
+  now surface `null`.
+
+  **Existing rows: `os migrate recorded-by`.** The stored `'system'` values are
+  rewritten to `NULL` by a new command, which runs the conversion through the
+  ADR-0119 D2 migration journal (chunk-atomic, resumable via `os migrate resume`).
+  It is a dry run by default and safe to re-run — it selects only rows still
+  holding the sentinel, so a second `--apply` converts nothing.
+
+  The rewrite is **semantically equivalent, not a reinterpretation**: this column
+  has only ever held that one sentinel, written by exactly one expression
+  (`actor ?? 'system'`), and both spellings mean "no actor" — only `NULL` is
+  expressible in the declared type.
+
+  Deliberately unchanged: `sys_metadata_audit.actor` is a `text` column whose
+  declaration already says "user id, system id, or `'system'`", so its `'system'`
+  default is honest and stays. The #4441 `readonly` narrowing and the #4551 audit
+  skip also stay — see the PR for why they are still correct.
+
+### Minor Changes
+
+- 0800433: Lint an action nobody placed (ADR-0078 Phase 3, Tier-A `action-locations`).
+
+  New advisory rule `action-no-placement`: an action that declares no
+  `locations` and that no list view places by name renders on **no** surface —
+  it parses, publishes, and appears in Setup, while no user can ever click it.
+  ADR-0078 names this shape in its opening paragraph and Phase 3 asks for
+  exactly this rule; the shared completeness predicate it envisioned was never
+  built, so this lands standalone, one verified shape at a time.
+
+  What made it verifiable now: objectui#3142 collapsed four disagreeing
+  renderers onto one placement predicate. Before that, `action:bar` and the
+  record header rendered an _undeclared_ action anyway, so the shape only looked
+  inert on paper. As of objectui 17.1 it is measurably inert.
+
+  Two things are deliberately **not** flagged:
+
+  - **`locations: []`** — the documented headless action (callable over REST /
+    MCP / AI, no UI surface). ADR-0110 D3 refuses an undeclared handler, so a
+    headless declaration is the only legal way to expose one. The rule therefore
+    distinguishes "nowhere, deliberately" (`[]`) from an unstated placement (key
+    absent) and only reports the latter.
+  - **Actions a view places by name** — `bulkActions`, `bulkActionDefs`
+    (including `execution: 'aggregate'` defs, whose whole point is an action with
+    no single-record home) and `rowActions`, across all three list-view tiers:
+    `views[i].list`, `views[i].listViews.<key>` and the object-embedded
+    `objects[i].listViews.<key>`.
+
+  Advisory, never fatal — a view in another installed package may be the one
+  placing the action, the same reason `validateSemanticRoles` and
+  `lintLivenessProperties` warn rather than gate.
+
+  Also: the action form schema in `@objectstack/metadata-protocol` no longer
+  declares `shortcut` / `bulkEnabled`. Both were retired as `retiredKey()`
+  tombstones in spec 17, and this schema is what the Studio designer renders its
+  fallback form from — so advertising them handed authors two inputs that could
+  only ever produce an unsaveable draft (objectui#3145 removed the matching
+  dedicated controls). And `content/docs/ui/actions.mdx` now says which surface
+  is the exception to location filtering, instead of a blanket claim its own
+  showcase contradicted.
+
+- 98877c9: feat(spec,metadata-protocol): `IObjectQLEngine.transaction` joins the slot contract, and `batchData`'s `atomic` flag becomes real — rollback or refusal, never silent best-effort (ADR-0119 D1/D4, #4612)
+
+  **D1 — the contract fix.** `ObjectQL.transaction()` — ADR-0034's ambient
+  transaction, shipped since v8.0.0 — was reachable from plugin space only
+  through `as unknown as` casts: the metadata protocol's atomic publish and its
+  `transactionalBatch` discovery probe, and the sys-metadata repository's
+  `withTxn`, each declared a private structural slice of an engine none of them
+  import. It is now declared on `IObjectQLEngine`, required per that contract's
+  own rule, with its caveats written into the TSDoc as part of the declared
+  meaning rather than left to be discovered: it covers the **default driver
+  only**, and when that driver has no `beginTransaction` the callback runs with
+  no transaction and no rollback. `MetadataHostEngine` and the sys-metadata
+  repository's engine surface now type their optional member as
+  `IObjectQLEngine['transaction']`, so a narrow host surface can no longer drift
+  from the real signature. Runtime `typeof === 'function'` probes stay — that is
+  test-double defence the type system does not replace.
+
+  **D4 — the honesty fix.** `batchData`'s `options.atomic` promised "rollback
+  entire batch on any failure (transaction mode)" and delivered a `break`
+  statement. Every write before the failure stayed committed, and — the part that
+  did the real damage — the response reported those rows `success: true` under
+  the one flag whose job is to guarantee they were undone.
+
+  Now an explicitly atomic batch runs inside ONE `engine.transaction()`: the
+  first failure rolls back every prior write, and the response says so
+  (`succeeded: 0`, with rows marked `ROLLED_BACK:` / the causal error /
+  `NOT_ATTEMPTED:`, and no row reporting success). On a runtime that cannot roll
+  back — no `transaction()`, or a default driver without `beginTransaction` — an
+  atomic request is **refused** with `501 NOT_IMPLEMENTED` rather than silently
+  degrading, matching the cross-object `/batch` route. `atomic` takes precedence
+  over `continueOnError`, whose own description already scoped it to
+  `atomic=false`. In atomic mode the upsert path no longer falls back to an
+  insert when its update throws: inside an aborted transaction that fallback can
+  only fail with a secondary error that buries the real cause.
+
+  **Aligned declaration.** `BatchOptionsSchema.atomic` declared `.default(true)`
+  while no enforcement site delivered atomicity — and the REST route forwards the
+  original request body rather than the parsed output, so the declared default
+  never reached the loop at all. The default is now `false`: the declaration is
+  aligned down to what every site already does, rather than up to what none of
+  them did. Honouring the old `true` would have silently flipped the failure
+  semantics of every existing batch caller and hard-failed ordinary batches on
+  any driver that cannot transact. Callers who were explicitly sending
+  `atomic: true` now get what they always asked for; callers sending nothing keep
+  today's behaviour exactly.
+
+  If you were passing `atomic: true` and relying on partial results surviving a
+  failure, that was the bug — switch to `atomic: false` (or omit it) for
+  best-effort semantics.
+
+  ADR-0119 also rules on two items landing separately: D2 specifies a
+  framework-owned migration-journal runner for multi-step migrations too large
+  for one transaction, and D3 retires the declared-but-unimplemented
+  `IDataEngine.batch?`.
+
+- 4c80fd6: fix(metadata-protocol): `deleteMany` / `updateMany` honour `atomic` for real, or refuse it (#4620)
+
+  ADR-0119 D4 made `batchData`'s `atomic` flag a real guarantee. Its two siblings
+  in the same file were out of that PR's confirmed scope and kept the defect:
+
+  - **`deleteManyData` was fake-atomic.** `atomic: true` opened no transaction; it
+    only `break`-ed the loop, so every row deleted before the failure stayed
+    **deleted** while the response called itself atomic and reported those rows
+    `success: true`. Worse than the `batchData` case it was copied from, because a
+    partial delete has no natural undo — a client cannot reconstruct the rows from
+    its own request.
+  - **`updateManyData` ignored `atomic` entirely.** The option was accepted,
+    declared in `BatchOptionsSchema` with an all-or-nothing contract, and never
+    read: a caller asking for atomicity silently got best-effort, with no signal.
+
+  Both now run the **same** atomic arm as `batchData`, extracted into one shared
+  runner so a fourth copy of transaction handling cannot drift into a fourth lie:
+
+  - `atomic: true` runs the whole batch inside ONE `engine.transaction()`; the
+    first failure rolls back every prior write.
+  - A rolled-back batch reports **zero successes**. Rows that had succeeded are
+    marked `ROLLED_BACK: record <i> failed — <cause>`, rows never reached are
+    `NOT_ATTEMPTED: atomic batch aborted by record <i>`, and the causal row keeps
+    its own error — so a client can tell "attempted, undone" from "never ran".
+  - `atomic` outranks `continueOnError`, whose contract text already scoped it to
+    `atomic=false`.
+
+  **Behaviour change to be aware of:** a runtime that cannot roll back (no
+  `engine.transaction()`, or a default driver without `beginTransaction`) now
+  **refuses** an `atomic: true` `deleteMany` / `updateMany` with `501
+NOT_IMPLEMENTED` instead of silently running best-effort — the same fail-closed
+  gate `batchData` uses. That silent downgrade is the defect class this fixes; if
+  you want best-effort, ask for it (`atomic: false`, or omit the option), or probe
+  the runtime's transaction support before sending. Non-atomic behaviour of both
+  endpoints — including the `continueOnError` interaction and their response
+  shapes — is unchanged.
+
+- 83cf2d3: feat(migrate,metadata-protocol): `os migrate meta --stored` rewrites sys_metadata rows so the read-path chain has a finish line (#4327)
+
+  #4317 closed the correctness gap from the read side: every stored-row
+  rehydration seam replays the full ADR-0087 conversion chain, retired entries
+  included, so a row written under any past protocol is _served_ canonical
+  forever. What it deliberately did not do is make the rows themselves canonical.
+  A pre-17 row keeps its legacy bytes, the chain re-lowers it on every load, and
+  each affected row logs one conversion notice per process — deduped, but back
+  every boot. Until now the only things that ever rewrote such a row were a Studio
+  re-save and `duplicatePackage`.
+
+  **`os migrate meta --stored`** is the pass that ends it for a deployment that
+  runs it. It walks `sys_metadata` — `active` and `draft`, every organization —
+  replays the same `applyConversionsToStoredItem` chain, and re-saves each changed
+  body through the normal write path, so a rewritten row gets a
+  `sys_metadata_history` entry, a fresh checksum and the mutation projectors,
+  exactly like an author's save. The history row's `source` is `migrate-stored`,
+  so a later diff distinguishes an upgrade from somebody's edit.
+
+  ```bash
+  os migrate meta --stored                    # preview: per-row report, writes nothing
+  os migrate meta --stored --apply            # rewrite the rows (prompts)
+  os migrate meta --stored --apply --yes --json   # CI / scripts
+  os migrate meta --stored --type view        # restrict to a type (repeatable)
+  ```
+
+  **Preview is the default and `--apply` is the only writing mode** — the house
+  rule its siblings already keep (#3617's "a dry run changes nothing"), and it
+  applies with more force here because what moves is metadata: every affected
+  row's checksum and a history entry per row. An apply run also refuses to start
+  while another process holds the SQLite database, for the same reason
+  `os migrate files-to-references --apply` does.
+
+  **Nothing gates on this having run.** #3855's conclusion stands — an
+  operator-run migration cannot be relied upon, so the read path remains the
+  guarantee for every deployment, and no `sys_migration` flag is recorded (a flag
+  would advertise enforcement that does not exist). What a run buys is hygiene —
+  rows stop carrying pre-protocol dialects, so diffs, exports and history are
+  clean going forward, and the recurring notices go quiet — plus one thing that
+  was previously unobtainable: **an operator can assert it.** A run with nothing
+  left to do exits `0`, a deployment with rows still on an old dialect exits `1`,
+  so "my metadata is on protocol N" becomes a CI check rather than a belief.
+
+  Three things the pass declines, and reports rather than counting as done:
+  `flow` rows (their seam is `AutomationEngine.registerFlow`, which holds the
+  executor registry the node-type conflict guard needs), types with no repository
+  write path (`agent` — rewriting there would record no history and force a draft
+  live), and rows that still fail the current schema after conversion (a genuine
+  contract violation the write path is right to refuse; it keeps reading through
+  the chain and stays fixable in Studio).
+
+  Also new, and usable without the CLI: `protocol.migrateStoredMetadata()` returns
+  the same structured report an admin route would render, and `saveMetaItem`
+  accepts an optional `source` for the history/audit rows. `source` is not
+  request-derived — the REST layer builds its save request field by field and
+  never forwards a client-supplied value, so provenance stays something the server
+  states rather than something a caller claims.
+
+- 4b945fc: Author-time rules now gate the RUNTIME metadata write path, not just the CLI (#4463)
+
+  The 26 author-time rules `os validate` / `os build` / `os lint` share (#4409) ran on
+  those three commands and nowhere else. Every runtime metadata write — Studio's
+  designer, REST `/meta` item CRUD, an MCP/AI agent authoring a flow — reaches
+  `saveMetaItem`, which did a per-type Zod `safeParse` and stopped. For a tenant that
+  was not the weakest of four doors, it was the **only** door: a `sys_metadata`
+  overlay row is not in the CLI's config file, so there was no command they could run
+  instead. An approval flow whose `expression` approver is broken CEL
+  (`record.owner ==`) is Zod-valid, so it saved, registered, and failed at the node's
+  entry the first time it fired — the exact body `os lint` had rejected since #4409.
+
+  **One shared core, one runtime gate.**
+
+  - The rule registry moved from `packages/cli` into `@objectstack/lint`
+    (`AUTHORING_RULES`), and the CLI now calls it there. Five rule modules moved with
+    it (`lintFlowPatterns`, `lintLivenessProperties`, `lintAutonumberFormats`,
+    `lintViewRefs`, `data-model-rules`), unchanged. There is one table; a second one
+    cannot be introduced without failing `authoring-rule-wiring.test.ts`.
+  - New kernel-safe subpath export **`@objectstack/lint/runtime`** — the entry the
+    metadata write path imports. Running the gate loads neither `typescript` nor
+    `sucrase`, pinned by a new `runtime-lazy-deps.test.ts` alongside the existing
+    `lazy-deps.test.ts`, which is unchanged.
+  - Each registry entry now declares `surfaces` (`cli` / `runtime-publish`) plus
+    either the metadata `runtimeTypes` it judges or a written `surfaceReason`. The
+    ratchet fails an entry that answers neither.
+
+  **Behaviour**
+
+  - A `state: 'active'` `saveMetaItem` — and the draft→active promotion in
+    `publishMetaItem` — of a **flow** runs the flow / approval / expression /
+    reference rule families. A gating finding is refused with **422
+    `INVALID_METADATA`**, in the same structured envelope the Zod failure already
+    used, with `rule` / `path` / `where` / `message` / `hint` per issue.
+  - **Draft saves are never gated** — a draft is allowed to be half-finished and
+    cannot execute.
+  - Only the write is judged: the rules run twice (context with and without the
+    submitted item) and only findings the item _added_ can refuse it, so a
+    pre-existing violation in a stored row never blocks an unrelated save. Stored
+    rows keep being read.
+  - Escape hatch **`OS_ALLOW_UNLINTED_METADATA_WRITES=1`** turns the refusal into a
+    loud log for a migration window. Unset it once the metadata is fixed — the
+    runtime executes what it published.
+
+  Only `flow` writes are gated in this pass; every other metadata type carries a
+  recorded reason in the registry.
+
+- 304423e: feat(automation,migrate): `os migrate meta --stored` now covers flow rows too (#4454)
+
+  #4327 gave the stored-metadata conversion chain a finish line for every
+  metadata type except `flow` — the one type where the most stored dialect
+  actually lives, since the graduated conversions `flow-node-crud-filter-alias`,
+  `flow-node-crud-object-alias`, `flow-node-notify-config-aliases` and
+  `flow-node-script-config-aliases` are all flow-node entries. Flow-node
+  conversions carry ADR-0078's open-namespace conflict guard, which has to consult
+  the _live_ executor registry to tell a rename from a clobber, and the metadata
+  layer has no way to obtain one. Flows were reported `skipped` with that reason.
+  They are now converted.
+
+  **One canonicalization policy, two shapes.**
+  `AutomationEngine.canonicalizeStoredFlow` is the single implementation and
+  `registerFlow` calls it, so the load seam and the migration can never disagree
+  about what "canonical" means. It returns `parsed` (for execution — the
+  `FlowSchema.parse` + #4347 region output, schema defaults materialized) and
+  `storable` (for persistence).
+
+  **`storable` excludes schema defaults, and that is the load-bearing decision.**
+  Measured rather than assumed: driving a pre-17 flow through all three steps
+  _removes_ nothing — `FlowSchema` is strict since #4001, so an unrecognized key
+  throws instead of being silently dropped, which means the
+  `graftNormalizedOperators` precedent (it exists because the _view_ parse strips
+  Studio-only auxiliary keys) does not transfer — and _adds_ only defaults:
+  `version`, `runAs`, per-edge `type` / `isDefault`. Persisting a default the
+  author never wrote would pin every migrated row to today's value while untouched
+  rows follow tomorrow's: two populations with different behaviour, which is
+  exactly the drift this pass exists to remove. So the write-back is the
+  conversion result plus the `{dialect, source}` envelopes the schema derives for
+  edge conditions, and nothing else.
+
+  One subtlety worth knowing if you extend this: that envelope is a schema
+  transform, not a conversion, so it emits **no** notice while still changing the
+  body. Reading notices alone — correct for every other metadata type — would call
+  such a row canonical and leave it re-deriving on every boot. Both passes are
+  copy-on-write, so identity is the exact test for flows.
+
+  **New: `AutomationServicePluginOptions.armRuntime`** (default `true`, so every
+  server, dev stack and test host is unaffected). Set `false` and the plugin
+  brings up the engine and the complete node registry — built-ins plus whatever
+  `automation:ready` contributes, because a _partial_ registry would make the
+  conflict guard read a live custom node type as unowned and rewrite over it — and
+  then stops before anything is armed:
+
+  | Skipped when `armRuntime: false`                         | Why it must be                                                                                |
+  | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+  | flow pull + `kernel:ready` / `metadata:reloaded` re-sync | `registerFlow` calls `activateFlowTrigger` — record triggers and scheduled jobs would go live |
+  | declarative connector materialization                    | opens real connections; an MCP provider spawns a child process                                |
+  | suspended-run wait-timer re-arm                          | would resume someone's paused approval mid-migration                                          |
+
+  `os migrate meta --stored` boots the plugin in that mode. A migration process
+  must not become a second server.
+
+  A refused rename — the guard firing because the old node-type token is a live
+  name something else owns in this environment — fails that row loudly, naming the
+  token and its owner. Never a silent skip, never a clobber. A flow that cannot
+  canonicalize at all (a strict-schema violation, a malformed control-flow region)
+  is reported as failed with the parse message rather than persisted as a guess;
+  such a row cannot register today either, so the report is telling you about a
+  flow that is already broken at runtime.
+
+- ea90179: fix(data,runtime,drivers): four ADR-0112 envelope defects found in the v17 verification sweep (#4431, #4435, #4436, #4483)
+
+  Four independent surfaces where the answer a caller received contradicted the
+  contract the surface declares. All four were found driving a real showcase boot
+  against `17.0.0-rc.1` and are catalogued in the #4482 rollup.
+
+  - **#4431 — a sandbox capability denial answered 400.** A denial is the sandbox
+    refusing to run untrusted code that asked for a capability it does not hold,
+    which is the crash contract's case (#3951), not a deliberate rejection of a
+    malformed request. It now answers 500, and the `SandboxError:` debug prefix
+    no longer reaches the client.
+
+  - **#4435 — PATCH/DELETE of a nonexistent record answered 200 success.** The
+    write path returned `record: null` / `success: true` for an id that resolves
+    to nothing, while GET on the same id correctly 404s; `deleteMany` reported
+    every typo'd id as deleted. Both now answer `RECORD_NOT_FOUND`, so a caller
+    can no longer read a successful envelope as proof the write landed.
+
+  - **#4436 — the unsupported-filter-operator refusal shipped without
+    `error.code`.** A refusal with no code is unmatchable by a client, and the
+    message leaked the internal `[sql-driver]` prefix. It now speaks
+    `INVALID_FILTER` without the driver prefix.
+
+  - **#4483 — the `$search` auto field set admitted its lead field
+    unconditionally.** `nameField`/`name`/`title` were prepended without passing
+    `SEARCH_AUTO_EXCLUDED_FIELDS`, so a search could be aimed at the primary key.
+    The lead field now only ORDERS the set it is already a member of; it can no
+    longer admit one.
+
+  These change responses that were observably wrong, so callers coded against the
+  buggy shapes — a 200 on a missing record, a 400 on a capability denial — will
+  see different status codes. Graded `minor` on that basis rather than `patch`.
+
+- ce92674: feat(spec)!: retire the standalone `validation` metadata kind (#4509, ADR-0088)
+
+  A validation rule authored as its own artifact bound to nothing and gated no
+  write. `ValidationRuleSchema` carries **no object-binding key** — no `object`,
+  no `objectName` — and all six variants are `strictObject`, so an author could
+  not supply one either. No merge step existed. The only code that expected such a
+  key was a reference-tracker row scanning a field the schema would have stripped.
+  Meanwhile the engine evaluates exactly one shape: the object's own
+  `validations[]` array, on insert and on every matched update row.
+
+  So a rule created through the standalone door — a `*.validation.ts` file, or
+  Studio's Validations list — parsed, saved, reported success, and intercepted
+  nothing. Including a `state_machine` rule, which ADR-0020 routes through this
+  same vocabulary: an author could believe they had locked down record state
+  transitions and have changed nothing at all.
+
+  Under ADR-0088 the kind fails the admission test on its first clause: a rule has
+  no independent lifecycle, because it only means something against an object. And
+  unlike the sibling disconnects closed in this batch, it could not be bridged into
+  one — the shape has nowhere to name its object.
+
+  **The rule vocabulary is untouched.** `ValidationRuleSchema` and all six
+  variants are unchanged and fully live; the engine's evaluation path is not
+  modified by this change. It is the _kind_ that was inert, not the schema. The
+  liveness ledger keeps governing it through the gate's `SPEC_ONLY_SCHEMAS`
+  override (alongside `webhook` and `query`), because an ungoverned live schema is
+  exactly how the next drift would hide.
+
+  **Migration.** Move the rule into the owning object's `validations:` array — the
+  rule body is identical, same schema, same six variants:
+
+  ```ts
+  // before — a standalone *.validation.ts, which never ran
+  export default defineValidation({ name: 'amount_positive', type: 'script', … })
+
+  // after — on the object, where rules are evaluated
+  ObjectSchema.create({
+    name: 'invoice',
+    validations: [{ name: 'amount_positive', type: 'script', … }],
+  })
+  ```
+
+  Removed: the registry entry (and its `*.validation.ts` / `*.validation.yml`
+  patterns), the `MetadataTypeSchema` member, the metadata-core lockstep enum
+  member, the schema-map entry, the create seed, Studio's Validations nav item and
+  its hand-crafted form, and the dangling reference-tracker row. Standalone rows
+  already in `sys_metadata` are left alone — they were never evaluated, so nothing
+  changes behaviorally.
+
+- dadb43f: refactor(spec,client,metadata-protocol,runtime)!: retire the workflow service slot — declared end to end, implemented nowhere (#4451)
+
+  The `workflow` slot was ADR-0078's silently-inert declaration at every layer at
+  once: a `CoreServiceName` nothing ever registered or resolved (ADR-0115
+  Evidence 5 — "no code in this repository resolves either slot", verified across
+  both repositories), an `IWorkflowService` contract with zero implementations, a
+  `WorkflowProtocol` whose three methods no code ever provided, a discovery
+  `routes.workflow` field no builder could truthfully populate, and a
+  `/api/v1/workflow` advertisement for a path no host ever mounted (the
+  pre-#3586 `DEFAULT_DISPATCHER_ROUTES` already listed it among routes that
+  never existed). The capability it promised is live elsewhere and has been for
+  majors: record state machines are enforced by the `state_machine` validation
+  rule, approvals are first-class flow nodes on the approvals runtime
+  (ADR-0019), and record-triggered automation is lifecycle hooks +
+  `record_change` flows (`service-automation`).
+
+  FROM → TO:
+
+  - `CoreServiceName 'workflow'` / `ServiceRequirementDef.workflow` /
+    `CORE_SERVICE_PROVIDER['workflow']` → removed; there is no slot to fill.
+  - `IWorkflowService` (`@objectstack/spec/contracts`) → removed; no
+    implementation ever existed. Register nothing — use the mechanisms above.
+  - `WorkflowProtocol` + `GetWorkflowConfigRequest/Response`,
+    `WorkflowState`, `GetWorkflowStateRequest/Response`,
+    `WorkflowTransitionRequest/Response` (`@objectstack/spec/api`) → removed,
+    along with the seven published JSON schemas. Delete the import; nothing
+    ever answered these shapes.
+  - Discovery `routes.workflow` / `services.workflow` / `features.workflow`
+    (metadata-protocol + runtime builders) → absent. A reader keying on them
+    only ever saw `unavailable` / `false`; delete the read.
+  - `RouterConfig.mounts.workflow` → removed; there was never a surface to
+    mount at it.
+  - `RestApiRouteCategory 'workflow'` → removed; categorize automation-adjacent
+    routes as `'automation'`.
+  - `@objectstack/client` re-exports of the four workflow types → removed with
+    their source. (The `client.workflow.*` methods were already removed earlier
+    in the v17 cycle — this retires the types they returned.)
+  - Also removed: the stray `graphql` entry in `CORE_SERVICE_PROVIDER` and the
+    `graphql: { route: '/graphql' }` discovery entry — `graphql` was never a
+    `CoreServiceName`, and the dispatcher had already dropped `/graphql` as out
+    of the product plan (#2462 follow-on).
+
+  The retirement kit: the `workflow-service-slot-retired` semantic migration
+  (major 17) carries this prescription into `spec-changes.json`, the generated
+  upgrade guide and the `spec_changes` MCP tool. These are TS/API surfaces and a
+  discovery response field — never stored in stack metadata — so there is no
+  load-path conversion and nothing for `os migrate meta` to rewrite; the
+  21 `authorable-surface.json` baseline lines and 7 `json-schema.manifest.json`
+  entries for the deleted schemas are dropped deliberately in the same change
+  (the plugin-runtime precedent: a prescription nobody can receive is noise —
+  nothing parses these shapes any more).
+
+### Patch Changes
+
+- 98877c9: feat(core,platform-objects,spec): the ADR-0119 D2 migration-journal runner — a migration killed mid-run is resumable to completion or compensable to clean, with journal rows proving which (#4617)
+
+  **The gap D1 left open.** ADR-0119 D1 made `engine.transaction()` reachable
+  through the contract, which is the right answer for multi-write atomicity that
+  fits in one transaction. Migration-class work does not fit: a million-row
+  backfill cannot hold one write-lock for its duration, `driver-memory`'s
+  `beginTransaction` deep-clones the entire database (O(db) per begin),
+  `ObjectQL.transaction()` binds the **default driver only** so a multi-datasource
+  migration silently commits part of its work outside it, and a process **killed**
+  — as distinct from a thrown error — defeats in-process rollback entirely. So the
+  unit of atomicity is the _chunk_, and durability across chunks is a journal.
+
+  Four consumers had each converged on the same four moves — dry-run preflight,
+  undo journal, LIFO compensation, re-entrant forward recovery (ADR-0105 D13
+  promotion, ADR-0117 D8's ownership backfill, the org lifecycle transitions, and
+  D10 master-data distribution #4585). One copy is engineering; four is platform
+  debt, and the fourth author would have had to rediscover the invariant below
+  from scratch.
+
+  **New: `runMigrationJournal` (`@objectstack/core`).** Preflight runs every
+  step's read-only validator before any step writes, so a plan that would fail at
+  step 3 has not written step 1. Rows are chunked per the `bulk-write.ts`
+  discipline; each chunk's writes run inside `engine.transaction()`. On failure,
+  committed chunks are compensated newest-first, each in its own transaction. On
+  restart, a rediscovered run resumes forward from the first chunk lacking
+  `chunk_done`, or unwinds, per the plan's `onCrash` policy. Forward and
+  compensate callbacks receive an `attempt` counter; `attempt > 1` means the prior
+  outcome is UNKNOWN and the callback must recheck by natural key before
+  re-writing — the same at-least-once contract `bulk-write.ts` already documents,
+  reused rather than re-derived.
+
+  **The invariant that carries the design:** `chunk_done(i)` is written **inside**
+  the chunk's own transaction, so `done ⇔ committed` holds by construction;
+  `chunk_started(i)` is written autonomously **before** it. That asymmetry is what
+  gives `started ∧ ¬done` exactly one meaning — _the outcome is unknown_ — which
+  is the only state a crash can leave and the only state recovery reasons about.
+  Making both writes symmetric would look tidier and would destroy recovery.
+
+  **New: `sys_migration_journal` (`@objectstack/platform-objects`).** Rows keyed
+  `(run_id, seq)` under a unique index, so a resumed run that miscomputes its next
+  sequence fails loudly rather than double-recording an event. Registered
+  unconditionally alongside `sys_migration` because recovery must be discoverable
+  with **zero host wiring** — a journal some kernels compose and others do not is
+  a journal a boot scanner cannot rely on (ADR-0078). Distinct in grain from
+  `sys_migration`, which holds one durable verdict per named migration; this holds
+  many rows per _run_. Read-only over the API; writes go through the runner in
+  system context.
+
+  **The runner refuses rather than degrades**, in four places: the runtime cannot
+  roll back; any preflight fails; the plan declares `onCrash: 'compensate'` but a
+  step cannot compensate; or a resume's plan hash disagrees with the journal
+  (resuming a changed plan would apply chunk boundaries the journal never
+  described). A compensation failure halts and is journalled — never swallowed —
+  and the run ends `failed`, not `compensated`, because a database in a state no
+  clean story covers must not be reported as a tidy rollback.
+
+  **`engineCanRollBack` is now shared.** The two-level probe (engine method AND
+  default-driver `beginTransaction`) was the same condition written twice — here
+  and in `batchData`'s atomic gate. It now lives in `@objectstack/core` and
+  `@objectstack/metadata-protocol` imports it, as a type predicate so callers do
+  not each re-narrow the optional member by hand. Two copies of "can this runtime
+  actually roll back?" drift by one clause and leave one caller believing it has
+  atomicity it does not have.
+
+  Boot reconciliation and `os migrate resume` land separately; `findInterruptedRuns`
+  is the discovery primitive they will consume, and is exported here.
+
+  **Docs:** ADR-0118 (plugin-reachable transactions) is renumbered **ADR-0119**.
+  It merged one day after an unrelated ADR-0118 (非用户 actor 的平台契约) and the
+  earlier merge holds the number; citations of "ADR-0118 D1/D2/D3/D4" written
+  before 2026-08-03 mean the renumbered record.
+
+- 58434f5: fix(metadata-protocol): boot hydration grafts each overlay row's protection envelope from ITS OWN package (#4624)
+
+  `loadMetaFromDb` (boot hydration) kept a **third** inline copy of the
+  overlay→SchemaRegistry registration rule, and its artifact lookup was
+  **unscoped** — the exact pre-#1828 shape ADR-0048 removed from `getMetaItems`:
+  with two installed packages shipping the same `type`/`name`, a name-colliding
+  overlay row grafted the **first-registered** package's
+  `_lock`/`_lockReason`/`_packageId`/`_provenance` onto another package's row at
+  every kernel boot. A row customized under package B could come up wearing
+  package A's identity and lock.
+
+  The non-object branch now delegates to the ONE shared
+  `hydrateOverlayIntoRegistry` (introduced by #4521 for the read-side hydration
+  and the write-through), passing the row's own `package_id` — one rule, one
+  implementation, and the ADR-0048 package-scoped lookup applies at boot exactly
+  as it does on read and write.
+
+  No other boot behaviour changes:
+
+  - **Boot order** — when packaged artifacts have not loaded yet at hydration
+    time, the scoped lookup finds nothing, exactly like the unscoped one did,
+    and the row registers unchanged.
+  - **Package-less (global) rows** — `package_id IS NULL` keeps the legacy
+    best-effort first-match graft, identical to the read-side hydration.
+  - **Row selection** — the helper carries no environment gate; which rows
+    `loadMetaFromDb` loads is decided by its query, unchanged here.
+
+- 5b843fb: fix(automation,spec): the cold-boot flow bind must survive the read path's own annotations (cloud#971)
+
+  `getMetaItems({ type: 'flow' })` decorates every served item with
+  `_diagnostics` (and `_draft` on a preview read). The cold-boot bind fed that
+  served document straight into `engine.registerFlow` → `FlowSchema.parse`, and
+  since #4001 closed the metadata schemas an unrecognized key **throws** instead
+  of being dropped — so every flow failed to register on every boot with
+  `unrecognized_keys: ["_diagnostics"]`. Not fatal only by luck: the
+  record-change plugin binds record flows a second way, so automations kept
+  firing behind one WARN per flow. A flow whose only binding path is this one
+  would have gone silently dead.
+
+  Fixed at the read seam (`readFlowDefsFromProtocol`), not by loosening
+  `FlowSchema`: the payload is malformed because we decorated it, so the
+  producer's annotation is the producer's to remove.
+
+  `@objectstack/spec` gains `METADATA_READ_DECORATIONS` / `stripReadDecorations`
+  (`kernel/metadata-read-decorations`) — the list moves out of
+  `metadata-protocol`, where it was module-private, so the producer and its
+  cross-layer consumers share one definition. `metadata-protocol` re-exports
+  `stripReadDecorations` unchanged; no public surface is removed.
+
+- 20bc357: fix(spec,metadata-protocol,runtime): discovery stops advertising routes for the kernel-internal cache/queue/job slots (#4318)
+
+  The metadata-protocol discovery builder declared `/api/v1/cache`, `/api/v1/queue`
+  and `/api/v1/jobs` — three paths that existed nowhere else in the repository: no
+  dispatcher domain, no adapter mount, no plugin registration, and the shipped
+  providers (`service-cache`/`-queue`/`-job`) are in-process contracts that will
+  never mount one. Every default boot therefore advertised a route inside the same
+  `ServiceInfo` whose `handlerReady: false` said the opposite — a single record
+  contradicting itself (ADR-0076 D12).
+
+  These slots are route-less now, like `realtime` — but unlike `realtime` an
+  unmarked real implementation stays `available`: the slot's contract is
+  in-process, so "no HTTP surface" is not reduced capability for it. `handlerReady`
+  is reported `false` on both discovery builders — for a route-less slot it is not
+  a proxy for anything, it is the fact itself (the dispatcher used to claim
+  `handlerReady: true` here for an unmarked occupant, a handler that does not
+  exist). The explanatory message is written once, as
+  `inProcessServiceMessage(slot)` in `@objectstack/spec/system`, so the two
+  builders cannot drift apart.
+
+- 8aacf94: fix(metadata-protocol): `duplicatePackage` stops minting pre-protocol flow rows (#4498)
+
+  `duplicatePackage` canonicalizes each source row before re-saving it, under a
+  stated guarantee: "duplication never mints new rows in a pre-protocol dialect."
+  It delivered that through `convertStoredItem`, which opens with
+  `if (singular === 'flow') return { item: data, notices: [] }` — so for flows the
+  guarantee was **not** delivered.
+
+  It did not fail loudly either. `FlowNodeSchema.config` is an open `z.record`, so
+  a pre-17 body (a `delete_record` carrying `config.filters`) sails through
+  `saveMetaItem`'s schema gate and lands verbatim in a brand-new row.
+
+  **Why this mattered more than an un-migrated row.** ADR-0087 justifies the whole
+  stored-metadata design on new writes always being canonical, _therefore_ the
+  stored pass being "a strictly shrinking concern". `duplicatePackage` was a live
+  producer contradicting that for flows: an operator could run
+  `os migrate meta --stored --apply`, get a clean report, duplicate a package, and
+  be back to having pre-protocol rows — with the report still saying protocol N
+  until the next run.
+
+  **The capability was already reachable.** The reason for the flow skip is real —
+  flow-node conversions carry ADR-0078's open-namespace conflict guard, which needs
+  the automation engine's live executor registry to tell a rename from a clobber.
+  But the protocol is constructed with an accessor for the kernel's service table
+  (the same one `analytics` and `package` are read from), and the automation
+  service registers under `automation`. A new private `resolveFlowCanonicalizer`
+  reads `canonicalizeStoredFlow` (#4454) off it, so every caller running next to a
+  live engine gets flow coverage without threading anything.
+
+  - **`duplicatePackage`** canonicalizes flow rows through it. A refused rename
+    fails that item into the existing `failed[]` naming the token — copying the
+    un-renamed body would mint exactly the row this fixes. A flow that cannot
+    canonicalize fails the same way. With no engine reachable (a control-plane or
+    metadata-only host) the source body is copied as-is: no worse than the source
+    row already is, and failing an unrelated duplication over it would be its own
+    regression.
+  - **`migrateStoredMetadata`'s `canonicalizeFlow` becomes an override.** It now
+    defaults to the resolver. The CLI stopped passing one — it boots its inert
+    engine into the same kernel, so both routes reached the same instance, and two
+    routes to one capability is how they drift. The parameter stays for callers
+    with no registry and for testing the flow branch without an engine.
+  - **Resolution is lazy, per call.** Plugin init order does not guarantee
+    `automation` is in the table when the protocol is assembled (the CLI adds it
+    after ObjectQL by design), so caching `undefined` from a too-early read would
+    disable flow canonicalization for the life of the process.
+
+  Two smaller honesty fixes ride along: a source item that fails _conversion_ (a
+  tombstoned key throws) is now reported as such instead of as `unparseable
+metadata`, and `migrateStoredMetadata`'s "no engine" skip reason says no
+  automation service is reachable rather than blaming the caller for not supplying
+  one.
+
+  Reads are unchanged. `getMetaItems` / `getMetaItem` / `getMetaItemLayered` /
+  `loadMetaFromDb` still skip flows — they are reads, covered by `registerFlow`
+  canonicalizing at execution, and are not producing bad data. Duplication was the
+  one that writes.
+
+- 63b33e6: One canonical type key at the `/meta` read/write/delete boundary (#4432).
+
+  #3985 made the per-type gates accept both spellings of the `/meta` type segment
+  (`/meta/actions` and `/meta/action`). It did not FOLD them, so the two spellings
+  addressed two different namespaces and the layers below disagreed about which
+  one an item lived in. `saveMetaItem`, `getMetaItem`, `getMetaItems`,
+  `getMetaItemLayered`, `getMetaItemCached` and `deleteMetaItem` now fold the type
+  to its canonical singular (Prime Directive #3) as their first act, so every layer
+  below them reads one key.
+
+  The damaging consequence was not the duplicate row — it was the shadowing.
+  `getMetaItems` hydrated overlay rows back into the SchemaRegistry under the
+  CALLER's spelling, so one plural-spelled read minted a plural registry entry;
+  from the next read on, `listItems('actions')` was no longer empty, the singular
+  fallback that had been supplying every code-authored action stopped running, and
+  a single overlay row hid the entire code-authored listing — on a spelling no
+  DELETE could address, because the delete path resolved the singular. Listing and
+  dispatch then disagreed about an item that had been deleted.
+
+  Reads of data AT REST still try the other spelling as a fallback: rows written
+  under a plural `type` before this fix are real, and nothing rewrites them on
+  upgrade. What changed is that nothing WRITES or REGISTERS a non-canonical key any
+  more.
+
+- 6beb708: fix(metadata-protocol): a just-saved overlay is dispatchable immediately, not after the next listing (#4521)
+
+  The #4432 F1 verification found that immediately after a successful
+  `PUT /api/v1/meta/action/<name>`, `GET /api/v1/meta/action` already listed the
+  overlay while `POST /api/v1/actions/<object>/<name>` answered the ADR-0110
+  "has no declaration" 404 — and a later POST succeeded. Nothing expired in
+  between: the _listing_ is what repaired it.
+
+  The lagging cache was the engine's `SchemaRegistry`. The runtime dispatch path
+  (`resolveRouteActionDeclaration`) reads it as the live view of metadata, but
+  `saveMetaItem` only wrote through it for `object` — every other overlay type
+  reached the registry solely via the READ-side hydration in `getMetaItems`, so
+  "has anyone listed this type yet?" silently decided whether a saved action
+  could be invoked.
+
+  The fix is at the producer, per Prime Directive #12 — no retry, sleep, or
+  fallback was added at the dispatch site:
+
+  - `saveMetaItem` (publish mode), draft publishing (`runPublishSideEffects`),
+    and `rollbackMetaItem` now write EVERY overlay type through the registry via
+    a shared `applyRegistryWriteThrough`, so an item that is listable is
+    dispatchable in the same breath.
+  - The write-through and the read-side hydration share one implementation
+    (`hydrateOverlayIntoRegistry`), including the ADR-0010 §3.3 protection-envelope
+    graft and the ADR-0048 package-scoped artifact lookup — a read and a write
+    can no longer leave the registry in two different states for the same row.
+  - Unchanged boundaries: drafts still never leak into the live registry, the
+    `environmentId` scoping gate matches the read side, ADR-0110's 404 for a
+    genuinely absent declaration stands, and DELETE ("reset to artifact default")
+    still restores the packaged artifact — the overlay is a plain-key shadow, not
+    an in-place overwrite.
+
+- 69b509f: fix(metadata-protocol): 元数据审计历史与全局搜索按 `order` 排序,不再按 `direction` (#4674)
+
+  `protocol.ts` 里两处内部 `engine.find` 调用把排序写成 `{ field, direction: 'desc' }`。QueryAST 的排序形状是 `SortNodeSchema` = `{ field, order }`,两个真实驱动都只认 `.order` 且没有 `direction` 回退——`undefined === 'desc'` 为假,于是两个查询实际都在**升序**运行。`direction` 是 `IReportService` 的词汇,是另一份契约,这正是错误拼写看起来合理的原因。
+
+  由于两个查询都带 `limit`,方向错误不只是把一页重排,而是**改变了哪些行会被返回**:
+
+  - **元数据审计历史**取到的是最旧的 `limit` 条事件——一个对象生命的开头,而永远不是它最近的变更。在长期存在的对象上,编辑者要找的东西一条也看不到。
+  - **全局搜索**取到的是最陈旧的 `perObject` 条匹配,最近编辑过的记录恰好被 `limit` 截断掉——而那正是搜索者最可能想要的。
+
+  两处的 `as any` / `: any` 一并去掉:`EngineQueryOptions.orderBy` 是 `SortNodeSchema[]`,本来就会拒绝 `direction`,而类型擦除正是让它溜过去的原因。恢复类型是这次改动价值的大头,因为对内部调用方来说 `tsc` 就是那条被执行的渠道。
+
+- 1ee48bc: fix(objectql,metadata-protocol): a tenant-authored overlay must not read back as a code artifact
+
+  `saveMetaItem` refuses to write an artifact-backed item of a type that has not
+  opted into overlay writes (`not_overridable`), and it asks
+  `registry.getArtifactItem` who is artifact-backed. That answer was "anything
+  whose `_packageId` is not the literal string `sys_metadata`" — a sentinel that
+  only holds on the save path. The boot-time rehydration of `sys_metadata`
+  registers each row under its REAL package id (`app.<slug>`), which every
+  runtime-authored item has carried since packages became mandatory.
+
+  So an app the user had just built through Studio (or the AI build agent) came
+  back from the next kernel rebuild looking code-shipped, and the following edit
+  was refused with a 403 — permanently. Live capture: two identical `modify_field`
+  calls on the same object seconds apart, the first published LIVE and the second
+  `not_overridable`, because the first one's auto-publish triggered the rebuild in
+  between (cloud#970).
+
+  Provenance is the axis that actually separates the two (ADR-0010 `_provenance`:
+  `'package'` for loader-introduced items, `'org'` for tenant-authored), so ask it:
+  the `sys_metadata` hydration now stamps `_provenance: 'org'`, and
+  `getArtifactItem` no longer treats such an item as an artifact. An item with no
+  provenance under a real package id is unchanged, so nothing that was protected
+  becomes writable.
+
+- 705e5c8: fix(metadata-protocol): a flow save that skipped canonicalization says so (#4580)
+
+  `saveMetaItem` canonicalizes flow bodies before the schema gate (#4542). When the
+  canonicalizer throws — it is stricter than the gate: strict parse, cycle
+  detection, control-flow region validation — the save falls back to the raw body
+  so a work-in-progress draft with a temporary cycle stays saveable. That fallback
+  is correct and unchanged. It was also completely silent.
+
+  Of the four postures at this seam, three announce themselves: a clean
+  canonicalization heals the row, a refused rename fails with `409
+FLOW_CONVERSION_CONFLICT` naming the token, and a host with no automation service
+  is reported by `os migrate meta --stored`. The throw-fallback said nothing, so a
+  save that skipped canonicalization was indistinguishable from one that healed the
+  row — and a body that is _both_ a legacy dialect and unparseable by the strict
+  canonicalizer re-persisted verbatim. That is the exact #4542 symptom, arriving
+  silently, while the boot warning for legacy stored rows tells the author that
+  re-saving is the remedy.
+
+  The fallback now emits a `console.warn` naming the flow and the canonicalizer's
+  own error, deduped once per flow per process (the `convertStoredItem` pattern —
+  Studio autosaves the same draft repeatedly, and a WIP cycle throws on every
+  write). This aligns the write seam with ADR-0087 D2's "loud" posture, where
+  conversions emit notices, reads warn once per row, and `migrateStoredMetadata`
+  reports `failed` with the message.
+
+  No behavior change: the body still saves, the schema gate stays the arbiter, and
+  `registerFlow` still refuses to arm a malformed flow. Refusing the save in
+  publish mode was considered and rejected — publish is the default mode, so it
+  would silently tighten validation for every existing caller, and it could only be
+  enforced on hosts that have an automation service, making the same body saveable
+  on a control-plane host and a 422 on an automation host.
+
+- f61edce: fix(metadata-protocol): `saveMetaItem` canonicalizes flow bodies on write — a Studio edit now heals a legacy flow row like every other type's (#4542)
+
+  The once-per-boot stored-conversion warning promises that re-saving a row
+  ("Studio edit → save") persists the canonical shape. That held for every type
+  except `flow`: the read path serves stored flows verbatim (the ADR-0078
+  open-namespace conflict guard needs the engine's live executor registry, so
+  `convertStoredItem` skips them), and `FlowNodeSchema.config` is an open
+  `z.record`, so the legacy dialect an author was served (`config.filters`, pre-17
+  node aliases) sailed back through `saveMetaItem`'s schema gate and re-persisted
+  verbatim. A flow row stayed `pending` in `os migrate meta --stored` no matter
+  how many times an author edited it — only the migration itself could retire it.
+
+  `saveMetaItem` now runs the #4498 resolver (`resolveFlowCanonicalizer`) on flow
+  bodies **before** the schema gate and persists `storable` — conversions plus the
+  derived condition envelopes, deliberately not the schema's defaults (ADR-0087).
+  The pass is copy-on-write, so already-canonical bodies (including the ones
+  `migrateStoredMetadata` and `duplicatePackage` hand in) are untouched.
+
+  Failure postures, same as the duplication seam:
+
+  - **A refused node-type rename** (the old token is a live name owned by a custom
+    executor here) refuses the save with `409 FLOW_CONVERSION_CONFLICT`, naming
+    the token and path — never a silent legacy persist. 409 rather than 422
+    because the body may be perfectly valid: the refusal comes from environment
+    state, so resubmitting the same body cannot help.
+  - **A body the canonicalizer cannot parse** falls back to the raw save and
+    today's schema gate — in draft AND publish mode. `canonicalizeStoredFlow` is
+    stricter than the gate (cycle detection, control-flow regions), and a
+    work-in-progress draft with a temporary cycle must not become unsaveable;
+    `registerFlow` still refuses to arm a malformed flow either way.
+  - **No automation service reachable** (a control-plane or metadata-only host):
+    the save behaves exactly as before — a host must not start refusing flow
+    writes it accepted yesterday. `os migrate meta --stored` reports what it
+    could not canonicalize.
+
+  Reads are still unchanged — served bodies keep the stored dialect ("reads
+  diagnose, never drop"); the heal happens on the way back in.
+
+- 0657f6b: fix(seed): enforce `Seed.env` — environment-scoped datasets no longer seed everywhere
+
+  `Seed.env` was authorable, defaulted and type-checked, but inert. `SeedLoaderService`
+  filtered on the **loader config's** `env`, and none of the six call sites that build a
+  `SeedLoaderRequest` (app boot, per-org replay, hot reload, package apply, draft publish,
+  marketplace install) ever passed one — so `config.env` was always `undefined`, the filter
+  short-circuited, and `dataset.env` was never read. A dataset marked `env: ['dev']` seeded
+  into production exactly as if it were marked `['prod']`, which is the dangerous direction:
+  the rows most likely to carry that marking are demo users, fake customers and seeded
+  credentials.
+
+  The loader now resolves the environment itself, at the one funnel every seeding path goes
+  through:
+
+  - **Source is `NODE_ENV`** — the environment source this repo already uses everywhere
+    (`os start` defaults it to `production`, `os dev` / `serve --dev` set `development`,
+    vitest sets `test`). No new environment variable and no new authorable key. `production`
+    / `development` / `test` and the seed-enum spellings `prod` / `dev` are accepted,
+    case-insensitively.
+  - **An explicit `config.env` still wins**, so a host can seed "as" another environment.
+  - **A dataset that declares no `env`** (the schema default `['prod','dev','test']`) seeds
+    in every environment, exactly as before — no existing deployment loses rows.
+  - **When the environment cannot be determined** (NODE_ENV unset, or a value like
+    `staging`), the loader stays permissive and seeds everything — but logs a **warning**
+    naming each environment-scoped dataset, the accepted `NODE_ENV` values and the
+    `config.env` escape hatch. Fail-open is deliberate: fail-closed would also drop an
+    `env: ['prod']` dataset on a production host that merely forgot to export `NODE_ENV`,
+    a silent data-loss regression worse than the over-seeding it prevents.
+  - **Skipped datasets are always named** in an `info` log, so "my demo rows are missing" is
+    one log line to answer rather than a mystery.
+
+  The resolved environment is also what seed CEL expressions now bind `env` to, so a seed's
+  `env` and the loader's filter can no longer disagree.
+
+  No API or schema change: `Seed.env` and `SeedLoaderConfig.env` are unchanged, and no
+  package export was added.
+
+- 666f542: fix(seed-loader): the per-org tenant stamp is an id, not a natural key — stop
+  re-resolving it and dropping it
+
+  In a multi-org deployment the SeedLoader's per-organization replay landed
+  **every row org-less**, so a freshly created organization booted with a CRM
+  whose tables held data nobody could see: the tenant wall (`organization_id =
+<active org>`) hides a NULL-org row from all members, including the org's own
+  owner.
+
+  The stamp and the reference pass disagreed about what `organization_id` holds.
+  The loader writes `config.organizationId` — the replay target's **id** — into
+  the record; the reference pass then sees a field declared as a lookup →
+  `sys_organization` and resolves its value as a **natural key**, probing
+  `sys_organization.name`. That misses, and a missed reference is dropped rather
+  than kept, taking the tenant attribution with it. The `id` fallback probe cannot
+  rescue it either: under replay every probe is AND-scoped with `organization_id =
+<target org>`, and `sys_organization` — being the tenant table itself — carries
+  no such column, so that probe matches nothing by construction.
+
+  What hid it for so long is the **id shape**. `looksLikeInternalId` recognises
+  UUID and Mongo ObjectId and short-circuits resolution for both, so any fixture
+  that minted UUID organization ids passed. Every organization better-auth
+  actually creates is `org_<base36>` — including the default organization
+  `ensureDefaultOrganization` bootstraps on first boot — and that shape is not
+  recognised. The defect therefore fired on real deployments and on nothing else.
+
+  The loader now remembers that it wrote the stamp itself and skips resolution for
+  that one field. A seed that authors `organization_id` explicitly still goes
+  through resolution, so naming an organization by its natural key keeps working.
+
+  Reported by `apps/ee-tenant-crm-showcase` in the cloud repo, which reproduces
+  the whole path end-to-end: two organizations over one database, each replaying
+  the artifact's seed datasets into its own private copy.
+
+- ad5fe25: fix(spec,objectql,metadata-protocol): a `user` field carries its target in the TYPE — bare `{type:'user'}` is not targetless
+
+  `field.zod` defines `user` as "a lookup specialized to the `sys_user` system
+  object … target fixed to the `sys_user` system object", and `Field.user()` —
+  unlike `Field.lookup(reference, …)` — takes no target argument and writes
+  `reference: 'sys_user'` itself. The target is a constant of the type.
+
+  Two callers read `field.reference` raw and so disagreed: the protocol's expand
+  gate refused `?expand=<a bare user field>` with `400 INVALID_FIELD … declares no
+target object`, and objectql's expand loop skipped it. Metadata authored without
+  the redundant `reference` — hand-written JSON, an AI author, a Studio form — was
+  read as under-specified when it was complete. Live capture (cloud#983): an
+  AI-built app's very first screen rendered an error page over that 400.
+
+  New: `referenceTargetOf` in `@objectstack/spec/data` — the single arbiter of
+  "what does this reference field point at", next to `REFERENCE_VALUE_TYPES` (the
+  set those same two callers already share for "is this a reference at all"). Both
+  halves of the expand path read it, so the gate can no longer refuse a field the
+  engine would have expanded, nor bless one it skips.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [0800433]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [85a966f]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [459f925]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [8e53e5d]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [65f184b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [4b945fc]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/lint@17.0.0-rc.2
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+  - @objectstack/metadata-core@17.0.0-rc.2
+  - @objectstack/formula@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Major Changes

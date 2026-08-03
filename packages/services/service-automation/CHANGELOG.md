@@ -1,5 +1,762 @@
 # @objectstack/service-automation
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- 2826d1e: fix(automation,approvals): an approval decision can no longer succeed while its flow stays parked (#4420)
+
+  A flow paused at an `approval` node, a deploy, then an approver clicking
+  Approve: the request row flipped to `approved`, the UI toasted success — and
+  the flow never moved. No next-stage request, no error, the record's mirrored
+  status frozen mid-workflow. Approval flows pause for days by design, so a
+  restart mid-flight is the normal case: every release could quietly zombify
+  every in-flight approval, with the approvers none the wiser.
+
+  Durable suspended runs (#1518) had shipped and were not the missing piece. Two
+  other things were.
+
+  **The wiring could enable a store over a table nobody had created.** Object
+  registration and store activation resolve different services in different
+  phases — `manifest` at `init()`, `objectql` at `start()` — and the plugin
+  declared no ordering. Composed ahead of ObjectQL, `init()` found no `manifest`,
+  warned, and continued; `start()` then attached the DB-backed store anyway. Every
+  suspend failed with `no such table: sys_automation_run` into a log line nobody
+  read, pauses silently stayed in memory, and the next restart lost them all.
+  Now: `AutomationServicePlugin` declares `optionalDependencies:
+['com.objectstack.engine.objectql']` (order-if-present, per ADR-0116 — an
+  engine-less kernel must still boot); a registration missed at `init()` is
+  retried at `start()`, which still lands before ObjectQL's schema sync; the
+  store is never attached when registration did not happen, and says so at
+  **error** level instead of warning; the table is probed once at boot so a
+  broken setup surfaces there rather than one failed write at a time; and a
+  failed durable write of a paused run is logged at error — it is data loss in
+  waiting, not a warning.
+
+  **A reported resume failure read as success.** `AutomationEngine.resume()`
+  answers a lost run by _returning_ `{ success: false }`, never by throwing.
+  `ApprovalService` discarded that return value, and `decide()` counted only a
+  thrown error as failure — so a decision against a dead run came back
+  `resumed: true`, HTTP 200. Resume failures are now classified
+  (`RUN_NOT_FOUND`, `STORE_UNAVAILABLE`, `RESUME_IN_PROGRESS`, joining
+  `PERMISSION_DENIED` / `INVALID_SIGNAL`), so a run that is gone for good is
+  distinguishable from a store that is merely unreachable, and the raw resume
+  route maps them to 404 / 503 / 409.
+
+  Approvals acts on them. A new `AutomationEngine.hasSuspendedRun(runId)` — which
+  reads the suspension store, unlike `getRun()`, and throws rather than answering
+  `false` when the store is unreadable — pre-flights every flow-advancing
+  operation (`decide`, `sendBack`, `resubmit`) **before its first write**, so the
+  zombie half-state is never created rather than merely reported: the decision
+  fails with `RESUME_TARGET_LOST` (HTTP 409) and the request stays actionable. A
+  resume that fails after the decision is durable can no longer be undone, but it
+  now throws `RESUME_FAILED` (HTTP 500) naming the stranded run instead of
+  reporting success. A concurrent duplicate resume stays benign — the engine's
+  idempotency guard is doing its job — and reports through the new optional
+  `resumeError` field. Recall and revise-window cancellation stay non-fatal by
+  design (they abandon the request), but log at error with the reason instead of
+  swallowing it. Compositions with no automation engine attached are unaffected.
+
+  Existing zombie requests from affected deployments (already `approved`, run
+  stranded) are not repaired by this change — `releaseDeadRunRequests` only
+  sweeps requests that are still `pending`.
+
+- 5293114: fix(automation): a decision's three declared ways to route a branch are now one working model (#4414)
+
+  A `decision` node advertised three mechanisms for splitting a path and only one
+  of them did anything. The other two were the ADR-0049 `declared ≠ enforced`
+  shape, and the pair of them shipped a guard that does not guard in
+  `examples/app-crm`.
+
+  | mechanism                                            | before                                                                                                 | now                                                   |
+  | :--------------------------------------------------- | :----------------------------------------------------------------------------------------------------- | :---------------------------------------------------- |
+  | `edge.condition`                                     | ✅ the only one that worked                                                                            | unchanged                                             |
+  | `edge.isDefault`                                     | **zero readers** anywhere but the schema declaration                                                   | BPMN default flow, enforced in `traverseNext`         |
+  | `decision.config.conditions[].label` → `branchLabel` | matched **0** out-edge labels across every example app, then fell back to the full edge set in silence | routes; an unclaimable label is logged, not swallowed |
+
+  ## What was broken, end to end
+
+  `crm_convert_lead_wizard` means "already converted → abort screen; otherwise →
+  the wizard". It ran **both**: an already-converted lead got
+  "This lead has already been converted" and then walked straight into the
+  conversion wizard behind it. Four independent silences stacked up:
+
+  1. the decision's first condition was authored `{lead_record.status} ==
+'converted'` — braces in a slot declared bare CEL, so it was string-compared
+     and never true;
+  2. the second (`'true'`) therefore won, yielding `branchLabel: 'No — proceed'`;
+  3. no out-edge carried that label (they were `'Yes'` / `'No'`), so traversal
+     discarded the branch and considered every out-edge;
+  4. `e3b` was unconditional, so it ran regardless — and the natural fix, marking
+     it `isDefault: true`, was a dead key.
+
+  ## The model
+
+  `branchLabel` narrows the edge set → `condition` gates each edge → `isDefault`
+  catches whatever is left. Concretely:
+
+  - **`isDefault` is enforced.** A default edge is traversed only when no
+    conditional sibling of the same source node matched, and it is no longer part
+    of the unconditional parallel fan-out — that distinction is the whole point of
+    the marker. Passed over because a real branch won, its target records the same
+    `skipped` step a closed gate does (#4354).
+  - **An unclaimable branch label warns.** Traversal still falls back to the full
+    edge set (a run mid-flight must not die on a metadata error) but says so,
+    naming the computed branch and the out-edge labels that exist.
+  - **A decision that declares no `conditions` reports no branch.** It used to
+    report `'default'` unconditionally — a label no out-edge in the repo ever
+    carried — which is why every decision node fell back to the full edge set.
+    The `'default'` sentinel survives for the case it actually describes (declared
+    conditions, none matched) and is now claimed by the `isDefault` edge as well
+    as by an edge literally labelled `'default'`.
+  - **`conditions[].expression` is evaluated as the bare CEL it is declared to
+    be.** The raw string went to the legacy `{var}` template path, where
+    `lead.status == 'converted'` cannot resolve and the branch is decided by
+    string comparison. Unlike `edge.condition` this slot carries no
+    `ExpressionInput` envelope — the decision descriptor is deliberately
+    schemaless — so the executor supplies the dialect. A brace-in-CEL predicate
+    now fails loudly (ADR-0032 §1c) instead of deciding `false`.
+
+  ## Caught at authoring time too
+
+  Four new `os build` / `os validate` warnings, because a wrong route is silent at
+  run time by nature (Prime Directive #12):
+
+  `flow-branch-label-unmatched` (the shipped shape),
+  `flow-decision-unconditional-branch` (a guarded decision with an unconditional
+  sibling — the actual hole), `flow-default-edge-with-condition` and
+  `flow-multiple-default-edges`.
+
+  Both of the first two fire on the pre-fix `convert-lead.flow.ts` and are silent
+  after it.
+
+  ## Effect on flows that already exist
+
+  Enforcing `isDefault` changes how a **stored** flow behaves, and the flows it
+  changes are mostly Studio's own. `objectui`'s flow edge inspector has always
+  written `isDefault: true` when you bind an out-edge to a decision's default/else
+  branch — into a key with zero readers, so that edge ran unconditionally, in
+  parallel with whichever branch actually matched. Those flows now take exactly
+  one branch. That is the fix, but it is a behaviour change on existing data
+  rather than only on newly authored metadata, so it is worth knowing before
+  upgrading: a flow that quietly ran two paths will now run one.
+
+  Nothing changes for an edge that never carried the marker — `isDefault` defaults
+  to `false`, and an ordinary unconditional out-edge still fans out in parallel
+  exactly as before.
+
+  ## The example app
+
+  `crm_convert_lead_wizard`'s guard is now a plain exclusive gateway: the
+  redundant `config.conditions` is gone and `e3b` carries `isDefault: true`. One
+  mechanism per decision, and exactly one branch runs.
+
+  Verified: 11 new engine/executor tests (including the reported repro in both
+  directions), 12 new linter tests; `@objectstack/service-automation` 577 tests
+  and `@objectstack/cli` 652 tests green, all three example apps build with no new
+  findings.
+
+- ac471a0: **BREAKING**: `IAutomationService.getSuspendedScreen(runId)` is now **async** — it returns `Promise<ScreenSpec | null>` instead of `ScreenSpec | null` (#4515).
+
+  FROM → TO for anyone calling or implementing it:
+
+  ```ts
+  // caller
+  - const screen = automationService.getSuspendedScreen(runId);
+  + const screen = await automationService.getSuspendedScreen(runId);
+
+  // implementer
+  - getSuspendedScreen(runId: string): ScreenSpec | null
+  + async getSuspendedScreen(runId: string): Promise<ScreenSpec | null>
+  ```
+
+  One-line fix: `await` the call (the enclosing function is almost certainly already `async`), and make any test double resolve rather than return (`mockResolvedValue`, not `mockReturnValue`).
+
+  Why it had to change: the method could only ever read the engine's in-memory hot cache, because a synchronous signature cannot consult the durable suspended-run store. `SuspendedRun.screen` _is_ persisted (`sys_automation_run.screen_json`) and `resume()` cold-reads it back, so after a process restart a still-suspended screen run could be resumed (`POST …/runs/:runId/resume` → 200) while `GET …/runs/:runId/screen` returned 404 “No pending screen for run” — the refresh-safe re-fetch failing in exactly the situation it exists for (page refresh, another device), and the rendering half of ADR-0019's durable-suspend promise missing while the resuming half shipped.
+
+  `AutomationEngine.getSuspendedScreen` now takes the hot cache as its fast path and falls through to the store via the same loader `resume()` rehydrates from. A run that does not exist, is no longer suspended, or paused at a non-screen node still resolves to `null`, so `GET …/runs/:runId/screen` keeps returning 404 for genuinely absent runs. No sync variant of the method remains on the contract.
+
+- 68c02c2: fix(automation): `evaluateCondition` decides the dialect from the source, not from the caller (#4336)
+
+  `AutomationEngine.evaluateCondition` picked its engine by asking whether an
+  `{ dialect, source }` **envelope** was present. A condition handed to it as a
+  plain string therefore never reached the CEL engine: it fell through to the
+  legacy `{var}` template path, which substitutes brace holes and then compares
+  whatever text is left — **as text**. Nothing errored, and the run was recorded
+  as `success`, with the failure direction depending on the predicate:
+
+  | Handed in              | Actually evaluated                     | Result                               |
+  | :--------------------- | :------------------------------------- | :----------------------------------- |
+  | `existingTask == null` | `'existingTask' === 'null'`            | always **false** — gate never opens  |
+  | `record.rating >= 4`   | `'record.rating' >= '4'` → `'r' > '4'` | always **true** — branch pinned open |
+
+  #4414 fixed the one built-in that was reaching this — the `decision` executor
+  now wraps `conditions[].expression` in a CEL envelope before calling. This
+  fixes the **evaluator**, so the next caller does not have to remember: the
+  dialect is now read from the source, and a condition is CEL unless it actually
+  contains a `{var}` hole. `evaluateCondition` is public API, so a
+  plugin-registered node executor evaluating its own predicate was getting the
+  table above with nothing to warn it.
+
+  **The legacy `{var}` dialect keeps working** where it always did —
+  `{amount} > 100`, `{status} == active`, `{a.b} == 7` — and gains the two things
+  it was missing:
+
+  - **A quoted literal compares as its contents.** `{status} == 'active'` used to
+    compare `active` against `'active'` — quotes included — and was false for
+    every value of `status`. It is the spelling the flow docs showed, and quoting
+    a string literal is what every other predicate surface requires.
+  - **It no longer answers `false` when it could not resolve something.** A `{…}`
+    hole matching no flow variable (`{lead_record.status}` — `get_record` stores
+    the whole row under one name, so that key never exists) and a substituted
+    value that is neither a boolean, a number, nor part of a comparison are
+    refused with the source and the offending reference attached. Both used to be
+    a silent `false`, which ADR-0032 §1c forbids: a predicate that cannot be
+    evaluated is a fault, never a quiet branch decision.
+
+  Braces inside an explicit `dialect: 'cel'` envelope remain the #1491 brace-trap
+  and still throw — stating the dialect is the author saying "this is CEL". The
+  sniff reads the source outside string literals, so `record.label == '{pending}'`
+  stays CEL and compares the field.
+
+  **Tightening to know about:** a bare string that is not valid CEL now raises
+  where it previously string-compared to some answer. That includes the
+  host-language payloads the safety tests use (`process.exit(1)`,
+  `require("fs")…`) — nothing executed before and nothing executes now, since CEL
+  has no `process`, no `require` and no arrow functions, but the failure is a
+  reported fault instead of a silent `false`.
+
+- eb4204b: feat(automation): a `script` node's purity contract is declared, and a function that writes can say so (#4396)
+
+  The `script` executor's contract — _the named function returns a value; data I/O
+  stays on the flow graph_ — existed only as a comment inside the executor, while
+  #4354's run summary depended on it. That summary reports no record metrics for a
+  `script` step precisely because a pure function's writes are downstream
+  `create_record` / `update_record` nodes counting themselves. A function that
+  wrote anyway made its run report `selected: 30, acted: 0` — indistinguishable
+  from the broken sweep the counters exist to detect, recorded permanently on
+  `sys_automation_run`.
+
+  **The rule is now visible.** `ActionDescriptor` carries
+  `handlerContract: 'none' | 'pure'`, and the `script` descriptor publishes
+  `'pure'`, so the action catalog, the designer palette and the reference docs
+  state the rule an author has to follow instead of an executor holding it
+  privately.
+
+  **And a legitimate writer can opt out honestly.** A `defineStack({ functions })`
+  entry may declare what it does, in either shape:
+
+  ```ts
+  defineStack({
+    functions: {
+      scoreLead: (ctx) => ({ score: 42 }), // pure — the default
+      syncBilling: { handler: syncBilling, effect: "writes" }, // declared writer
+    },
+  });
+  ```
+
+  A step calling a declared writer reports `unmeasuredEffect`, so the run's
+  `unmeasured` tally keeps the broken-sweep query
+  (`selected > 0 AND acted = 0 AND unmeasured = 0`) off that flow — and only that
+  flow. Marking _every_ `script` step unmeasured was rejected: it would blind the
+  detector on every flow that calls any function in order to cover the few that
+  break the rule.
+
+  Nothing here is retired or renamed: a bare `functions: { fn }` entry is
+  unchanged and means `effect: 'pure'`. The declaration is carried end to end —
+  `ObjectQL.registerFunction` accepts `{ packageId, effect }` alongside the
+  existing `packageId` string and exposes `resolveFunctionEntry(name)`,
+  `objectstack build` lowers a declared entry without dropping it, and the
+  artifact loader re-attaches the module's callable to the declaration the JSON
+  carried.
+
+  **Also fixed:** `bindHooksToEngine` returned before registering a bundle's
+  functions when the stack declared no hooks, so a flow-only app's
+  `defineStack({ functions })` reached the engine as nothing and every `script`
+  node calling one failed with "no function named 'x' is registered".
+
+- 25784cf: fix(automation,approvals): 节点类型校验推迟到插件贡献完成之后 —— approval flow 不再被误报"运行时会失败" (#4771)
+
+  showcase 每次冷启都打印 8 条断言:这些 flow "will fail at execution time"。8 条全是假的。
+  `AutomationServicePlugin.start()` 从 ObjectQL registry 拉起 flow 并**当场**校验节点类型,而
+  `ApprovalsServicePlugin.start()` 在 0.8 秒后才注册 `approval` 执行器 —— 校验器在词汇表还没
+  成型的时候就下了结论。
+
+  真正的代价不是噪音,是信号丢失:**真的没装 approvals 插件**的部署会得到一模一样的 8 条告警,
+  所以这条 warn 无法区分"健康"和"坏掉",信噪比为 0。
+
+  ADR-0018 明确把节点词汇表定义为**开放、可运行时扩展**的(插件通过
+  `registerNodeExecutor(type)` 贡献类型)。因此校验只在词汇表**封闭**的那一刻才成立:
+
+  - `AutomationEngine.sealNodeTypeVocabulary()` —— 宣告词汇表封闭,对**所有**已注册 flow 跑一次
+    权威校验,每个有问题的 flow warn 一条。`AutomationServicePlugin` 在 `kernel:bootstrapped`
+    调用它(严格晚于每个插件的 `start()` 和每个 `kernel:ready` handler —— 本插件自己的
+    `kernel:ready` 还会再注册一批 flow,别的插件也可能在它的 `kernel:ready` 里贡献执行器)。
+  - `AutomationEngine.getUnknownNodeTypeAudit(): UnknownNodeTypeAuditEntry[]` —— 同一发现的
+    **状态**形态,供 host(CLI 启动摘要、健康检查)直接读,而不是去 grep 日志。与
+    `getTriggerBindingAudit()` 同一套路。
+  - 封闭之后 `registerFlow` **恢复即时告警**:Studio 发布 / dev reload 进正在运行的服务器时,
+    词汇表确实是完整的,那句断言此时为真。所以这是时序修复,不是把告警静音。
+
+  告警文案也随之改成它现在能承诺的事:"Every plugin has started, so nothing will register them
+  now — these nodes fail at execution time with NO_EXECUTOR",并给出补救动作。
+
+  一并修掉同一缺陷类的另一半:`ApprovalsServicePlugin` 在**拿不到 automation 引擎**时,把
+  "`approval` 节点没注册"记成 `info` —— 而 dev 的默认日志级别是 `warn`,于是**真降级发生时反而
+  看不见**(#4632:静默降级必须响亮)。现在是 `warn`,写明后果(该部署里每个 ADR-0019 approval
+  flow 都会以 NO_EXECUTOR 失败)和补救(装 `@objectstack/service-automation`)。`catch` 同时收窄
+  到"服务查找"这一步,`registerApprovalNode` 内部真出错时会以自己的身份抛出,而不再被贴上
+  "no automation engine" 的错误标签;`automation` 服务存在但不接受节点执行器的分支从前**一条日志
+  都不打**,现在同样 warn。
+
+  **嵌入式 host 注意**:直接 `new AutomationEngine()` 而不经过 `AutomationServicePlugin` 的宿主,
+  需要在自己的插件都装好之后调用一次 `sealNodeTypeVocabulary()`,才能拿到这条告警(以及之后的
+  即时校验)。
+
+- fd3013a: feat(spec,automation)!: converge `script` to a function call — retire the `actionType` branches — and parse `script` / `subflow` config at execute time (#4343)
+
+  A `script` node had four ways to name what it ran and only one of them ran anything.
+  Protocol 17 keeps that one and retires the rest.
+
+  - **`config.actionType: 'email' | 'slack'`** were **logger-backed stubs**. They wrote a
+    line, reported success, and delivered nothing — under any configuration, installed
+    messaging service or not. Every bundled example used one; none of them ever sent
+    anything.
+  - **`config.template` / `.recipients` / `.variables`** fed those stubs, so they addressed
+    a message no channel sent. (The examples did not even reach them: they passed the
+    payload in `inputs`, which the built-in branch never read.)
+  - **inline `config.script`** was recognized and **never executed** — the built-in runtime
+    has no server-side JS sandbox, so the node warned and completed as a no-op.
+  - **any other `actionType`** was shorthand for a registered-function name — a second
+    spelling of `config.function` — and `'invoke_function'` was a marker that named nothing
+    on its own.
+
+  What remains is what worked: `config.function` (now **required**) names a registered
+  function, `config.inputs` feeds it, `config.outputVariable` binds its return value.
+
+  **The replacements are three different mechanisms, not one rename.**
+
+  | Retired                                                           | Use instead                                                                                                                                        |
+  | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `actionType: 'email'` (+ `template` / `recipients` / `variables`) | a `notify` node — it delivers through the messaging service: the in-app inbox by default, real email once `@objectstack/plugin-email` is installed |
+  | `actionType: 'slack'`                                             | a `connector_action` node with the Slack connector, or an `http` node posting to an incoming webhook — `notify` has no Slack channel               |
+  | `actionType: 'my_fn'` (shorthand)                                 | `function: 'my_fn'` — the conversion moves it for you                                                                                              |
+  | `script: '…'` (inline JS)                                         | move the logic into a registered function and call it via `config.function`                                                                        |
+
+  **Execute-time parse.** `script` and `subflow` now run their config through the contract
+  before executing, the seam #4277 gave the flat builtins — a violation refuses the node as
+  a **guard** (wrong metadata; no `fault` edge may route it, #3863). `script` could not join
+  that seam while its legal key set depended on `actionType`: a flat parse would either
+  reject valid shapes or wave everything through. Converging the node is what made the
+  contract fit. `subflow`'s hand-written `flowName` check became the same parse, so its
+  message is now `subflow 'n1': config does not satisfy the subflow contract —
+config.flowName: …`. `decision` deliberately stays export-only: its one key is optional,
+  so a parse would check nothing.
+
+  **Migration.** `os migrate meta --from 16` rewrites stored sources; authoring one of these
+  keys in TypeScript is a compile error carrying the same prescription. A shorthand
+  `actionType` **converts into `function`** — that is what it named — unless `function` is
+  already set, in which case it was dead metadata the executor never reached. The other four
+  keys are dropped outright: nothing read them, so there is no value to preserve, and
+  rebuilding the intent is an authoring decision (the table above) rather than something a
+  mechanical rewrite can guess.
+
+  The keys leave the **load path** (`retiredFromLoadPath`) with the rest of the keys retired
+  for _misdescribing themselves_ rather than for being renamed: absorbing
+  `actionType: 'email'` silently would let an author keep believing the flow sends mail. The
+  one seam that still replays it is `registerFlow`, which rehydrates data at rest (#3903) —
+  a row in `sys_metadata` has no author for a tombstone to teach. So a stored email-stub node
+  arrives stripped of the keys nothing read and then **refuses for naming no callable**,
+  where it used to log a line and report success. That flip is the behavior change to expect.
+
+  **A build gap this surfaced, fixed here.** `FlowFunctionEntrySchema` now also accepts a
+  **lowered handler ref** (a non-empty string), the form `objectstack build` produces: the
+  CLI lowers every inline callable to a serialisable ref _before_ the stack is parsed (it
+  must — `z.function()` wraps callables and would break the ref mapping), so a built
+  manifest holds `{ myFn: 'myFn' }`, which neither previous member accepted. The result was
+  that `defineStack({ functions })` — a documented, first-class mechanism — could not
+  survive a build at all. Nothing had noticed because no bundled example used it; #4343
+  turns that from latent into blocking, since `config.function` becomes the only thing a
+  `script` node can run. `Hook.handler` already declared exactly this pair (`z.union([
+z.string(), <function> ])`, "string, post-build / inline function, pre-build"), so this
+  brings `functions` onto the platform's established shape rather than inventing one. A
+  string carries no callable and `normalizeFlowFunctionEntry` still drops it by design — the
+  real functions ride in the sibling ESM module the build emits, merged by name — so
+  hand-authoring one registers nothing and fails loudly at execute ("no function named '…'
+  is registered"), never silently.
+
+  Also in this change: the retired constants `SCRIPT_BUILTIN_ACTION_TYPES`,
+  `SCRIPT_INVOKE_FUNCTION_ACTION_TYPE` and the `ScriptBuiltinActionType` type are removed
+  (they described the dispatch set that no longer exists); `os validate` names a retired key
+  and its replacement instead of reporting a generic missing callable; and the `#3796`
+  alias fixture, which carried `actionType: 'invoke_function'` through both sides, no longer
+  describes an end state protocol 17 can reach — the rename itself is untouched. No liveness
+  ledger row moves: the gate walks `FlowSchema`, whose `nodes[].config` is
+  `z.record(z.unknown())`, so these keys were never governed by one.
+
+- 304423e: feat(automation,migrate): `os migrate meta --stored` now covers flow rows too (#4454)
+
+  #4327 gave the stored-metadata conversion chain a finish line for every
+  metadata type except `flow` — the one type where the most stored dialect
+  actually lives, since the graduated conversions `flow-node-crud-filter-alias`,
+  `flow-node-crud-object-alias`, `flow-node-notify-config-aliases` and
+  `flow-node-script-config-aliases` are all flow-node entries. Flow-node
+  conversions carry ADR-0078's open-namespace conflict guard, which has to consult
+  the _live_ executor registry to tell a rename from a clobber, and the metadata
+  layer has no way to obtain one. Flows were reported `skipped` with that reason.
+  They are now converted.
+
+  **One canonicalization policy, two shapes.**
+  `AutomationEngine.canonicalizeStoredFlow` is the single implementation and
+  `registerFlow` calls it, so the load seam and the migration can never disagree
+  about what "canonical" means. It returns `parsed` (for execution — the
+  `FlowSchema.parse` + #4347 region output, schema defaults materialized) and
+  `storable` (for persistence).
+
+  **`storable` excludes schema defaults, and that is the load-bearing decision.**
+  Measured rather than assumed: driving a pre-17 flow through all three steps
+  _removes_ nothing — `FlowSchema` is strict since #4001, so an unrecognized key
+  throws instead of being silently dropped, which means the
+  `graftNormalizedOperators` precedent (it exists because the _view_ parse strips
+  Studio-only auxiliary keys) does not transfer — and _adds_ only defaults:
+  `version`, `runAs`, per-edge `type` / `isDefault`. Persisting a default the
+  author never wrote would pin every migrated row to today's value while untouched
+  rows follow tomorrow's: two populations with different behaviour, which is
+  exactly the drift this pass exists to remove. So the write-back is the
+  conversion result plus the `{dialect, source}` envelopes the schema derives for
+  edge conditions, and nothing else.
+
+  One subtlety worth knowing if you extend this: that envelope is a schema
+  transform, not a conversion, so it emits **no** notice while still changing the
+  body. Reading notices alone — correct for every other metadata type — would call
+  such a row canonical and leave it re-deriving on every boot. Both passes are
+  copy-on-write, so identity is the exact test for flows.
+
+  **New: `AutomationServicePluginOptions.armRuntime`** (default `true`, so every
+  server, dev stack and test host is unaffected). Set `false` and the plugin
+  brings up the engine and the complete node registry — built-ins plus whatever
+  `automation:ready` contributes, because a _partial_ registry would make the
+  conflict guard read a live custom node type as unowned and rewrite over it — and
+  then stops before anything is armed:
+
+  | Skipped when `armRuntime: false`                         | Why it must be                                                                                |
+  | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+  | flow pull + `kernel:ready` / `metadata:reloaded` re-sync | `registerFlow` calls `activateFlowTrigger` — record triggers and scheduled jobs would go live |
+  | declarative connector materialization                    | opens real connections; an MCP provider spawns a child process                                |
+  | suspended-run wait-timer re-arm                          | would resume someone's paused approval mid-migration                                          |
+
+  `os migrate meta --stored` boots the plugin in that mode. A migration process
+  must not become a second server.
+
+  A refused rename — the guard firing because the old node-type token is a live
+  name something else owns in this environment — fails that row loudly, naming the
+  token and its owner. Never a silent skip, never a clobber. A flow that cannot
+  canonicalize at all (a strict-schema violation, a malformed control-flow region)
+  is reported as failed with the parse message rather than persisted as a guess;
+  such a row cannot register today either, so the report is telling you about a
+  flow that is already broken at runtime.
+
+### Patch Changes
+
+- 5b843fb: fix(automation,spec): the cold-boot flow bind must survive the read path's own annotations (cloud#971)
+
+  `getMetaItems({ type: 'flow' })` decorates every served item with
+  `_diagnostics` (and `_draft` on a preview read). The cold-boot bind fed that
+  served document straight into `engine.registerFlow` → `FlowSchema.parse`, and
+  since #4001 closed the metadata schemas an unrecognized key **throws** instead
+  of being dropped — so every flow failed to register on every boot with
+  `unrecognized_keys: ["_diagnostics"]`. Not fatal only by luck: the
+  record-change plugin binds record flows a second way, so automations kept
+  firing behind one WARN per flow. A flow whose only binding path is this one
+  would have gone silently dead.
+
+  Fixed at the read seam (`readFlowDefsFromProtocol`), not by loosening
+  `FlowSchema`: the payload is malformed because we decorated it, so the
+  producer's annotation is the producer's to remove.
+
+  `@objectstack/spec` gains `METADATA_READ_DECORATIONS` / `stripReadDecorations`
+  (`kernel/metadata-read-decorations`) — the list moves out of
+  `metadata-protocol`, where it was module-private, so the producer and its
+  cross-layer consumers share one definition. `metadata-protocol` re-exports
+  `stripReadDecorations` unchanged; no public surface is removed.
+
+- 4c45be1: fix(convention): a best-effort degradation that costs DURABILITY logs `error`, not `warn` — and a gate that enforces it (#4632)
+
+  #4420: the durable suspended-run store attached to a table that was never
+  created. Every write failed into a `warn` nobody read, every restart dropped all
+  in-flight approvals, and the process reported perfect health the entire time —
+  the symptom surfaced a release after the cause. #4460 raised that **one** site to
+  `error`. This makes it the rule, because the _class_ is what recurs.
+
+  **The rule** (AGENTS.md → "Degradation log levels") is a question, not an
+  adjective, so an agent can apply it while writing the `catch`:
+
+  > After the degradation, does the system still look "normal" from the outside,
+  > while something it claims is persisted has not actually landed?
+  > Yes → `error`. No → `warn`/`info` is right.
+
+  An `error` here owes two things in its first line: the **consequence** (what is
+  not durable, and that the system will keep looking healthy anyway) and the
+  **fix** (the composition change that restores durability, or the explicit opt-out
+  that makes the degradation deliberate). Say it once, not once per failed write.
+
+  **Sites raised to `error`** — each was reviewed individually; escalating a
+  functional degradation is the mirror-image failure and was deliberately avoided:
+
+  | Where                                            | What was silently lost                                                                                                                   |
+  | :----------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
+  | `objectql` schema sync, per object               | DDL never ran — the object stays registered, routed and rendered while its table/columns do not exist                                    |
+  | `objectql` schema sync, summary                  | `info: Schema sync complete` printed over a pass with failures; now an `error` naming the count                                          |
+  | `objectql` reload-time schema sync               | a Studio edit adds a field, the UI shows it, the API accepts it, the column was never created                                            |
+  | `ObjectQL.syncSchemas()`                         | an **empty** `catch` — marketplace install and template seeding wrote into tables this failure means do not exist, then reported success |
+  | `service-automation` wait-timer re-arm (4 paths) | runs stay persisted but nothing re-arms them: every approval paused before the restart hangs forever                                     |
+
+  **Deliberately left at `warn`** — the rule cuts both ways, and over-applying it
+  trains everyone to skim `error`: the batch→sequential schema-sync fallback (it
+  _recovers_), and "no job service is registered" on the re-arm path (a declared
+  absence in a host that never composed auto-resume — nothing was promised and
+  then broken).
+
+  **It has teeth.** A convention that lives only in AGENTS.md is the same
+  "declared ≠ enforced" shape this repo keeps paying to fix, so
+  `pnpm check:durability-log-level` walks the AST for `catch` blocks guarding a
+  declared vocabulary of durability-critical operations and fails when one
+  degrades below `error` without rethrowing. It follows same-file helpers (so
+  extracting a reporter cannot quietly defeat it) and ships its own `--self-test`.
+  Deliberately narrow: it cannot _discover_ a new durability seam, only stop known
+  ones from regressing — extend `DURABILITY_CRITICAL_CALLEES` in the same PR that
+  fixes a new one.
+
+  No API, schema or behaviour changes — only the level, and the text, of what
+  already-failing paths report.
+
+- f3141d8: fix(spec): a node that publishes no descriptor configSchema can now own an expression-ledger entry (#4439)
+
+  `FLOW_NODE_EXPRESSION_PATHS` is the #4027 ledger that tells `registerFlow` and
+  `objectstack validate` which config keys hold expressions, and in which dialect.
+  Its ratchet (`config-expression-ledger.test.ts`) derives what it expects from
+  descriptor `configSchema` `xExpression` markers, and fails in **both**
+  directions — an undeclared marker, or a ledger entry nothing declares.
+
+  `decision` / `script` / `subflow` publish **no** descriptor `configSchema` on
+  purpose: a published partial schema would drop the editors their hand-written
+  Studio forms need (the #4210 incident), so their contract lives in
+  `schemaless-node-config.zod.ts`. Those two rules compose into a hole — an
+  expression slot on a schemaless node is structurally unreachable by the ratchet,
+  and because the reverse direction rejects unclaimed entries, it cannot be
+  entered by hand either.
+
+  `decision.conditions[].expression` sat in that hole. Its own schema says
+  _"Bare CEL predicate deciding this branch"_ and its own comment names `{…}` as
+  the #1491 trap, and no validator walked it — so `{lead_record.status} ==
+'converted'` passed `tsc`, passed `objectstack validate`, passed registration.
+  #4414 made that fail loudly at run time; this makes it fail at build time,
+  which is the delay #4027 exists to remove.
+
+  ## The fix
+
+  The ratchet now reads **both** declaration channels:
+
+  - **descriptor `configSchema`** — unchanged, enumerated from the live registry;
+  - **`schemaless-node-config.zod.ts`** — the marker rides
+    `.meta({ xExpression })` through `z.toJSONSchema`, the same channel
+    `loop.collection` has used since objectui#2670.
+
+  Spec hands the second channel over as JSON Schema
+  (`getSchemalessNodeConfigJsonSchemas()`, memoized, `input` mode — the shape a
+  descriptor's `configSchema` already is), so the ratchet walks both with the
+  _same_ function. No second notion of "a declared expression property", which is
+  the duplication a ledger exists to remove, and no `zod` dependency added to
+  `service-automation`. Each channel is separately asserted non-empty, so a broken
+  derivation on one side cannot hide behind the other's results.
+
+  `SCHEMALESS_NODE_CONFIG_SCHEMAS` is also exported for anything else that needs
+  to reason about all node config contracts. Additive — objectui's
+  `flow-node-config` reconciliation imports each schema by name and is unaffected.
+
+  ## The sweep
+
+  The other schemaless slots were checked and deliberately carry no marker:
+  `script.template` is a template **id**, not a body; `script.inputs` /
+  `script.variables` / `subflow.input` are values that interpolate `{token}` —
+  text-with-holes, the shape essentially every node config string has, already
+  covered generically by `validate-flow-template-paths` and the CLI flow linter.
+  A `flow-template` ledger entry means something narrower: a _reference that must
+  resolve to a value_, like `loop.collection`. So `decision.conditions[]
+.expression` is the only genuinely declared expression slot on the class — now
+  recorded in the ledger's header so it is not re-derived.
+
+  ## Docs corrected
+
+  The flows guide taught the **wrong dialect** for decision predicates in three
+  places (`'{order_amount} > 10000'`), plus a "braces missing in a decision
+  expression" warning that inverted after #4414 — and `FlowNodeSchema`'s own
+  `@example` did the same. All corrected to bare CEL, with the history stated so
+  an author with a braced predicate knows what changed and why their build now
+  fails. The dialect table drops from three dialects to two: predicates never take
+  braces, values always do.
+
+  Verified: 13 new/updated tests across the ratchet, the engine's registration
+  pass and `@objectstack/lint` (including the exact app-crm predicate rejected at
+  both `registerFlow` and `objectstack validate`); `pnpm build`, `pnpm typecheck`
+  (122 tasks), `pnpm lint` and `check:docs` clean.
+
+- 5a84d41: fix(automation): `resume` enforces the suspended screen's declared field contract (#4477)
+
+  A `screen` node's `config.fields` is a complete input contract — the author
+  declares the keys, their `required`-ness, and (via `visibleWhen`) when a field
+  is even asked for. The RENDER half honoured all of it: the paused result and
+  `GET …/runs/:runId/screen` carry `required` and `visibleWhen` intact. There was
+  no VALIDATION half — `POST …/runs/:runId/resume` folded whatever bag it was
+  handed straight into the flow variables, so a caller that skipped the dialog and
+  posted here directly was unconstrained by every `required` the author wrote.
+  Missing required fields, and keys the screen never declared, all completed the
+  run with `success: true`.
+
+  Screen flows are the one place where the declared field contract is the ONLY
+  contract — no object schema sits behind a screen node to catch a bad bag
+  downstream. The platform already enforces the analogous contract everywhere else
+  this seam appears: action params (ADR-0104 D2), record writes (ADR-0113),
+  approval `decisionOutputs` (#3447). This is that rule for screen resume, built in
+  the same shape.
+
+  `resume` now refuses a non-conforming submission with the new
+  `AutomationResult.code` `'INVALID_SCREEN_INPUT'` (a transport maps it to **400**,
+  as the automation domain route now does) and an `Invalid screen input: …` message
+  that names each violation and lists the declared field names. The refusal happens
+  BEFORE the suspension is consumed, so the pause stays live and the legitimate
+  submission still lands.
+
+  `visibleWhen` is evaluated against the SUBMITTED values first (layered over the
+  run's variable snapshot), so a hidden field's `required` never fires — enforcing
+  it would dead-end the run at a field the user was never shown, which is #3528
+  reproduced server-side. A predicate that cannot be evaluated is logged and
+  treated as hidden rather than visible: the client decides what the user saw, and
+  a broken predicate is not evidence a field was on screen.
+
+  Scope, deliberately narrow — three shapes keep the historical pass-through:
+
+  - an **object-form** screen (`kind: 'object-form'`), whose `fields` is empty by
+    construction because the client renders the object's own form and the write
+    path enforces that object's `required` fields itself;
+  - a **message-only** screen (`waitForInput: true`, no fields), which declares no
+    keys and so constrains none — the same pass-through `enforceActionParams`
+    gives a param-less action;
+  - `signal.output`, the node-OUTPUT namespace, which belongs to the approval-style
+    resume envelope rather than to the screen's collected-values channel.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/formula@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Major Changes

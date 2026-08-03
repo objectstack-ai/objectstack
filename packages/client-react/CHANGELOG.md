@@ -1,5 +1,228 @@
 # @objectstack/client-react
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- 0884452: feat(client-react): bulk-write hooks, and `useAutoRefresh` now refreshes on predicate writes (#4678)
+
+  #4639 gave predicate writes (`multi: true` update/delete) their own event
+  contract — `data.records.updated` / `data.records.deleted`, carrying a
+  `matched` count and no record — and `@objectstack/client` exposes them via
+  `subscribeBulkData`. The React hooks never caught up: all three realtime data
+  hooks delegated to `subscribeData`, so React consumers could not see bulk
+  writes at all.
+
+  The sharpest edge was **`useAutoRefresh`**. Its whole job is "refetch when the
+  data changes", and a predicate write is the case that dirties a list hardest —
+  one statement can change or delete every row on screen. It sat still for those
+  while refetching dutifully for a single-row edit.
+
+  - **New `useBulkDataSubscription(object)`** returning the latest
+    `BulkDataEvent`, and **`useBulkDataSubscriptionCallback(object, cb)`** for
+    the refetch/side-effect case.
+  - **`useAutoRefresh` now watches both streams.** Safe here in a way it is not
+    for `useDataSubscription`: this hook's output is a refetch signal, not an
+    event body, so the shape difference that keeps the two contracts apart never
+    reaches the caller. When `options.recordId` narrows it to one record it still
+    refetches on a bulk event — a count cannot say whether that record was in the
+    match set, and a redundant query beats showing a row a predicate write
+    already changed.
+  - **`useDataSubscription` / `useDataSubscriptionCallback` are unchanged** and
+    still per-record only. Their callbacks are typed `(event: DataEvent) => void`;
+    letting a `BulkDataEvent` through would hand them an object whose `recordId`
+    and record body are `undefined` — the defect #4626 removed.
+
+### Patch Changes
+
+- 21855f8: fix(client-react): stop five hooks from looping on dependency identity (#4693, #4694)
+
+  Five hooks keyed a `useCallback`/`useEffect` on values the caller supplies
+  inline — `where` / `fields` / `orderBy` objects, `onSuccess` / `onError`
+  handlers, and the `fetcher` `useMetadata` takes as a required positional
+  argument. Inline means a fresh identity on every render, so the effect re-ran on
+  every render; because the fetch hooks call `setState`, that render caused
+  another. The result was an unbounded request loop under the hooks' own
+  documented usage.
+
+  Requests issued in 250ms by a single mounted component, measured before and
+  after:
+
+  | hook                                | before | after |
+  | ----------------------------------- | -----: | ----: |
+  | `useQuery` (inline `where`)         |   4691 |     1 |
+  | `useInfiniteQuery` (inline `where`) |   6611 |     1 |
+  | `useObject` (no options at all)     |   4306 |     1 |
+  | `useView` (inline `onSuccess`)      |   8197 |     1 |
+  | `useMetadata` (inline `fetcher`)    |   7654 |     1 |
+
+  `useObject` and `useMetadata` needed no particular usage to loop: the former
+  depended on its own `data` and `etag` state while writing both, and the latter
+  takes its fetcher positionally, so there is no non-inline way to call it.
+  `useMutation` was never affected — no effect drives it.
+
+  The same root cause churned the realtime subscriptions (#4694):
+  `useAutoRefresh` with an unmemoized `refetch` — which is what `useQuery`
+  returned on every render — resubscribed on both streams every render, losing any
+  event delivered in the unsubscribe/resubscribe gap.
+
+  Two internal primitives fix both halves: `stableKey` derives a dependency from a
+  structural value (sorted keys, array order preserved) so a rebuilt-but-equal
+  object is a no-op, and `useEventCallback` gives a handler a fixed identity while
+  always invoking its latest version. Neither is exported.
+
+  A changed _value_ still refetches, and every stabilized handler is asserted to
+  run its newest version rather than the one captured when the effect first ran —
+  the ref indirection would otherwise trade a loop for a stale closure. 13 tests
+  cover this, each verified by reverting the fix it guards.
+
+- bbb1192: test(client-react): give the package a test harness and pin the realtime hooks' behavior (#4682)
+
+  `packages/client-react` shipped 8 public hooks with `build` and `typecheck` as
+  its only scripts and not a single test file. `tsc --noEmit` cannot see any of
+  what actually breaks in a hook: a dependency array is a value, not a type, so a
+  missing entry, a missing cleanup, and a callback that never fires all typecheck
+  perfectly. #4678 was precisely that shape — `useAutoRefresh` ignored predicate
+  writes, the one case that dirties a list hardest, and no type noticed.
+
+  Adds the workspace's first DOM test environment (`jsdom` + `@testing-library/
+react`, `environment: 'jsdom'` — every other package runs `node`) and 17 tests
+  over the realtime hooks, covering the three things the type checker is blind to:
+
+  - **Re-subscription on dependency change** — changing `object` opens a
+    subscription on the new name and releases the old one; a re-render that
+    changes nothing must not churn. Also pins that the hooks key on the primitive
+    `options?.recordId` / `options?.packageId` rather than on the options object's
+    identity, so an equal-but-new object stays a no-op.
+  - **Release on unmount** — every subscription hook unsubscribes, including
+    `useAutoRefresh`, which holds two.
+  - **Delivery** — events reach state and callbacks, and `useAutoRefresh`
+    refetches on the per-record _and_ the bulk stream (the #4678 regression pin).
+
+  Each assertion was verified by sabotage: dropping the `object` dep, deleting a
+  cleanup, and reverting `useAutoRefresh` to the single-stream version each turn
+  the suite red, and only reverting turns it green again.
+
+  The package is picked up by CI's `Test Core` shards automatically — they
+  partition by package off `turbo ls`, so a `test` script is all that was needed.
+
+  No runtime code changed.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [84b4a3a]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [462b713]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [8aacf94]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/client@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Patch Changes

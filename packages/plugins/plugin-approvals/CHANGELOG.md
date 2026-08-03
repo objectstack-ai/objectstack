@@ -1,5 +1,429 @@
 # @objectstack/plugin-approvals
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- 2826d1e: fix(automation,approvals): an approval decision can no longer succeed while its flow stays parked (#4420)
+
+  A flow paused at an `approval` node, a deploy, then an approver clicking
+  Approve: the request row flipped to `approved`, the UI toasted success — and
+  the flow never moved. No next-stage request, no error, the record's mirrored
+  status frozen mid-workflow. Approval flows pause for days by design, so a
+  restart mid-flight is the normal case: every release could quietly zombify
+  every in-flight approval, with the approvers none the wiser.
+
+  Durable suspended runs (#1518) had shipped and were not the missing piece. Two
+  other things were.
+
+  **The wiring could enable a store over a table nobody had created.** Object
+  registration and store activation resolve different services in different
+  phases — `manifest` at `init()`, `objectql` at `start()` — and the plugin
+  declared no ordering. Composed ahead of ObjectQL, `init()` found no `manifest`,
+  warned, and continued; `start()` then attached the DB-backed store anyway. Every
+  suspend failed with `no such table: sys_automation_run` into a log line nobody
+  read, pauses silently stayed in memory, and the next restart lost them all.
+  Now: `AutomationServicePlugin` declares `optionalDependencies:
+['com.objectstack.engine.objectql']` (order-if-present, per ADR-0116 — an
+  engine-less kernel must still boot); a registration missed at `init()` is
+  retried at `start()`, which still lands before ObjectQL's schema sync; the
+  store is never attached when registration did not happen, and says so at
+  **error** level instead of warning; the table is probed once at boot so a
+  broken setup surfaces there rather than one failed write at a time; and a
+  failed durable write of a paused run is logged at error — it is data loss in
+  waiting, not a warning.
+
+  **A reported resume failure read as success.** `AutomationEngine.resume()`
+  answers a lost run by _returning_ `{ success: false }`, never by throwing.
+  `ApprovalService` discarded that return value, and `decide()` counted only a
+  thrown error as failure — so a decision against a dead run came back
+  `resumed: true`, HTTP 200. Resume failures are now classified
+  (`RUN_NOT_FOUND`, `STORE_UNAVAILABLE`, `RESUME_IN_PROGRESS`, joining
+  `PERMISSION_DENIED` / `INVALID_SIGNAL`), so a run that is gone for good is
+  distinguishable from a store that is merely unreachable, and the raw resume
+  route maps them to 404 / 503 / 409.
+
+  Approvals acts on them. A new `AutomationEngine.hasSuspendedRun(runId)` — which
+  reads the suspension store, unlike `getRun()`, and throws rather than answering
+  `false` when the store is unreadable — pre-flights every flow-advancing
+  operation (`decide`, `sendBack`, `resubmit`) **before its first write**, so the
+  zombie half-state is never created rather than merely reported: the decision
+  fails with `RESUME_TARGET_LOST` (HTTP 409) and the request stays actionable. A
+  resume that fails after the decision is durable can no longer be undone, but it
+  now throws `RESUME_FAILED` (HTTP 500) naming the stranded run instead of
+  reporting success. A concurrent duplicate resume stays benign — the engine's
+  idempotency guard is doing its job — and reports through the new optional
+  `resumeError` field. Recall and revise-window cancellation stay non-fatal by
+  design (they abandon the request), but log at error with the reason instead of
+  swallowing it. Compositions with no automation engine attached are unaffected.
+
+  Existing zombie requests from affected deployments (already `approved`, run
+  stranded) are not repaired by this change — `releaseDeadRunRequests` only
+  sweeps requests that are still `pending`.
+
+- 0848bea: feat(spec)!: retire the overloaded `managedBy: 'system'` bucket — the residue becomes `system-data` (#3355)
+
+  **FROM → TO: `managedBy: 'system'` → `managedBy: 'system-data'`.** One-line fix:
+  rename the value. Nothing else about the object changes. `os migrate meta --from 16`
+  rewrites it for you; stored metadata is CONVERTED by the ADR-0087 entry
+  `object-managed-by-system-to-system-data`, never silently reinterpreted.
+
+  ADR-0103 split the overloaded `system` bucket in v16, and it split it
+  **additively**: the 20 engine-owned objects moved to the new explicit
+  `engine-owned`, while the 8 admin/user-writable ones — the RBAC link tables
+  (`sys_user_position`, `sys_user_permission_set`, `sys_position_permission_set`),
+  `sys_user_preference`, `sys_approval_delegation`, and the three messaging config
+  grids — stayed behind on `system`. That was the right move for a v16 that could
+  not break authors, but it left the enum in a state where the surviving value
+  names the half that had already moved out: `system` sitting on precisely the
+  objects a user writes.
+
+  That is not a cosmetic complaint. An author choosing between `system` and
+  `engine-owned` had nothing in the vocabulary to choose _on_, so the bucket was
+  re-overloadable by anyone reading the name in good faith — a model author most
+  of all, since "system table" reads as "the engine owns this" in every other
+  codebase. `system-data` states both boundaries explicitly: the **schema** is the
+  platform's (versus `platform`, which is tenant-modelled), the **data** is the
+  admin's or the user's (versus `engine-owned`, where the engine owns both).
+
+  Because v16 already drained the engine side, the conversion is a **one-to-one
+  mechanical value rename** with no judgement call — by construction every
+  remaining `system` declaration is writable platform data.
+
+  **One deliberate consequence — the affordance default flips.** `system` defaulted
+  LOCKED and each of the 8 objects re-opened its writes with a
+  `userActions: { create: true, edit: true, delete: true }` block. `system-data`
+  defaults **WRITABLE** (full CRUD), because a bucket that exists to say "the data
+  is yours" should not make every member ask for it back. Those blocks are now
+  redundant and have been deleted from the 8 platform objects; keep `userActions`
+  only to **NARROW**. If you converted an object that carried no `userActions`, it
+  gains the generic affordances — the honest reading of the bucket it moved into.
+
+  **No enforcement moves.** The engine write guard, the `DelegatedAdminGate`, RLS
+  and permission sets all adjudicate off resolved affordances and the principal,
+  never off the bucket name. `system-data` simply joins `platform` / `config` as a
+  bucket the fail-closed guard does not cover, because a writable default has
+  nothing to close on. The 8 objects passed that guard before (via `userActions`)
+  and pass it now (via the bucket default), for the same resolved-affordance
+  reason.
+
+  `'system'` is **retired from the load path**: the enum rejects it with a
+  prescription naming `system-data` and the one-line fix. Absorbing it silently at
+  load would leave every author still writing the name this rename exists to
+  unteach.
+
+### Patch Changes
+
+- 5a84d41: fix(approvals): record an admin override of a staffed approver slate AS an override (#4466)
+
+  An admin who is not in a request's `pending_approvers` may still act on it — the
+  `#3424` privileged-override path exists so a request routed to an unstaffed
+  position, or to approvers who have all left, is not undecidable forever. The
+  override is defensible; what was not is what the audit trail recorded.
+
+  `sys_approval_action` had no override column at all. So an admin overriding a
+  properly-staffed slate wrote a row **byte-for-byte identical** to the designated
+  approver approving normally: a reader of the timeline saw `approve` by the admin
+  and could not tell whether the admin _was_ an approver or _overrode_ the ones who
+  were, and the bypassed approver's later `409 INVALID_STATE` was the only trace —
+  existing only if they happened to try. The platform knows at decision time (it
+  took the `isOverrideActor` branch to admit the call at all), so this was dropped
+  information, not unavailable information. The whole point of an approval record
+  is to answer "who authorized this, and were they entitled to?".
+
+  `sys_approval_action` now carries **`via_override`** (boolean, optional), set on
+  exactly the actions admitted by that branch — `decideNode`'s approve/reject and
+  `reassign`'s admin rescue. It is surfaced on `ApprovalActionRow.via_override`
+  (`@objectstack/spec/contracts`), returned by `listActions`, and added to the
+  object's `highlightFields` and two grid list views so a timeline can say
+  "overrode the approver slate" instead of rendering it as an ordinary approval.
+
+  Three distinctions the column keeps apart deliberately:
+
+  - **`true`** — the actor held no slot in the slate and was admitted only by the
+    override branch.
+  - **`false`** — checked, and it was not an override. An admin who _is_ a
+    designated approver is approving normally and records `false`: the marker is
+    about which branch admitted the call, not about whether the actor holds admin
+    rights.
+  - **absent** — a row written before this column existed. "Not recorded" is not
+    the same claim as "not an override", so `rowFromAction` maps `null` to
+    `undefined` rather than to `false`.
+
+  Additive and nullable, so this needs no data migration: existing rows keep
+  working and simply read as unrecorded. Levelled `patch` rather than `minor`
+  because nothing an author writes changes — but note it _is_ an observable
+  behaviour change on a read surface: `listActions` responses and the
+  `sys_approval_action` grid views now carry a field consumers did not see before,
+  and `sys_approval_action` gains a column on next schema sync.
+
+- 0b795da: fix(approvals): the record lock now holds for predicate (`multi`) updates (#4778)
+
+  The ADR-0019 record lock — "while a record has a pending `sys_approval_request`,
+  block edits to it" — was enforced only for updates that reach the hook with an
+  `input.id`. The engine extracts that id from a **scalar** `where.id` alone; an
+  operator object (`{ $in: [...] }`) or any other predicate is a multi-row write
+  that routes to `updateMany` and arrives with no id. The hook opened with
+  `if (!id) return`, so it read _"no row was resolved"_ as _"there is nothing to
+  authorize"_ when the truth was _"nothing was ever queried"_.
+
+  Rewriting the very same edit as `multi: true` therefore walked straight past the
+  lock:
+
+  ```ts
+  // rec_1 carries a pending approval, lockRecord is not disabled
+  await ql.update(
+    "crm_opportunity",
+    { amount: 999 },
+    { where: { id: "rec_1" } }
+  ); // RECORD_LOCKED
+  await ql.update(
+    "crm_opportunity",
+    { amount: 999 },
+    { where: { id: { $in: ["rec_1"] } }, multi: true }
+  ); // went through
+  await ql.update(
+    "crm_opportunity",
+    { amount: 999 },
+    { where: { name: "x" }, multi: true }
+  ); // went through
+  ```
+
+  No privilege was needed for that bypass — not an `admin` role, not `isSystem`,
+  not `lockRecord: false`, not a whitelisted `approvalStatusField`. Every caller
+  shape that can spell a predicate (SDK, ObjectQL, a flow's `update_record`) could
+  produce it. It is the same fail-open reasoning fixed for `sys_attachment`
+  (#4757) and `sys_comment` (#4630), in the one place where it needed no
+  privilege at all.
+
+  **The hook now resolves the rows a write touches before deciding.** By-id writes
+  are unchanged (the driver writes by primary key, so the rest of `where` must not
+  narrow the verdict). A predicate write is decided by intersecting the caller's
+  predicate with the records that are actually locked — which is also what keeps
+  it cheap: the query is bounded by the object's **pending approvals**, never by
+  the update's match set, so a mass update of 50 000 unlocked rows costs one
+  bookkeeping probe and is allowed. An unscoped `multi` update over the whole
+  table reaches every locked row of the object and is refused while any is held.
+
+  **Fail-closed, both ways.** Past 1 000 locked records — the bound the attachment
+  and comment guards use — or if the intersection query fails, the write is
+  refused rather than allowed: the lock could not prove the write misses a locked
+  row. The approvals bookkeeping being unreadable at all stays the one fail-open,
+  as before: this hook is global over every object, so a kernel without
+  `sys_approval_request` would otherwise refuse every update in the deployment.
+  Both the bookkeeping and the match-set resolution are read under a **system**
+  context — a guard's own input must never be narrowed by the caller's
+  visibility, since a locked row you cannot read is still a row you may not write.
+
+  **Every exemption moved with the guard**, which is the other way this class of
+  fix goes wrong — a guard extended to more rows that carries only its deny rules
+  turns a fail-open into a false-positive. `isSystem`, the `admin` override, the
+  `approvalStatusField` status mirror, `lockRecord: false` and the owning run's
+  `flowRunId` (#3456 / #3712) all decide a predicate write exactly as they decide
+  a by-id write, each pinned by tests on both predicate shapes. Refusals now name
+  the record and object that are locked.
+
+- c2a1134: fix(approvals): find the zombie requests nothing was looking at (#4469)
+
+  #4460 stopped new zombies being produced; the rows already stuck had no mechanism
+  to find or release them. The failure shape (#4420) is a request flipped to
+  `approved` / `rejected` / `returned` whose `flow_run_id` points at a run that no
+  longer exists — the decision landed, the flow never moved. Any deployment on
+  17.0.0-rc.1 that hit the wiring hole and crossed a restart mid-approval can be
+  carrying these rows.
+
+  `releaseDeadRunRequests` could not see them, and the reason is worth stating
+  plainly: it scans `status: 'pending'`, and the very step that zombifies a request
+  is the one that takes it OUT of `pending`. The act of breaking it removed it from
+  the only sweeper's field of view — a large part of why this class of failure
+  stayed silent. It could not have answered the question even if it had looked: its
+  liveness oracle is `getRun`, which reads the execution LOG and returns `null` for
+  a perfectly ALIVE suspended run after a restart. It treats `null` as alive
+  (conservative, and correct for what it does) — which is exactly why it has no way
+  to say "this run is really gone".
+
+  Adds `ApprovalService.inspectStrandedRequests()`, which uses BOTH oracles and
+  reports only rows that fail both:
+
+  - `hasSuspendedRun(runId) === false` — the suspension store itself says no live
+    pause exists. It THROWS when the store cannot be read, and that case is
+    SKIPPED and counted as `undetermined`, never condemned: an unreadable store
+    means "unknown", and a storage outage must not be published as a lost run.
+  - `getRun(runId) == null` — no terminal history row either. A run that merely
+    finished is not stranded; a request whose run neither waits nor ever completed
+    is.
+
+  **It reports; it never rewrites.** No status is changed and no run is cancelled.
+  The decision genuinely happened — a human approved or rejected — and silently
+  rolling it back would make the audit trail disagree with the facts. The report
+  carries what an operator needs to decide: which requests are stuck at which step,
+  and what the mirrored status field on the business record still reads (usually
+  the stale value the user is staring at). Whether to re-run the downstream actions
+  or re-open the approval is a judgement call this cannot make.
+
+  It rides the existing escalation/dead-run sweep clock, so the finding surfaces in
+  the logs without an operator knowing to go looking for it. `recalled` is
+  deliberately out of scope: a recall abandons its run on purpose, and reporting
+  those would bury the real findings under expected ones.
+
+  New export: `StrandedApprovalRequest` (the report row shape).
+
+- 25784cf: fix(automation,approvals): 节点类型校验推迟到插件贡献完成之后 —— approval flow 不再被误报"运行时会失败" (#4771)
+
+  showcase 每次冷启都打印 8 条断言:这些 flow "will fail at execution time"。8 条全是假的。
+  `AutomationServicePlugin.start()` 从 ObjectQL registry 拉起 flow 并**当场**校验节点类型,而
+  `ApprovalsServicePlugin.start()` 在 0.8 秒后才注册 `approval` 执行器 —— 校验器在词汇表还没
+  成型的时候就下了结论。
+
+  真正的代价不是噪音,是信号丢失:**真的没装 approvals 插件**的部署会得到一模一样的 8 条告警,
+  所以这条 warn 无法区分"健康"和"坏掉",信噪比为 0。
+
+  ADR-0018 明确把节点词汇表定义为**开放、可运行时扩展**的(插件通过
+  `registerNodeExecutor(type)` 贡献类型)。因此校验只在词汇表**封闭**的那一刻才成立:
+
+  - `AutomationEngine.sealNodeTypeVocabulary()` —— 宣告词汇表封闭,对**所有**已注册 flow 跑一次
+    权威校验,每个有问题的 flow warn 一条。`AutomationServicePlugin` 在 `kernel:bootstrapped`
+    调用它(严格晚于每个插件的 `start()` 和每个 `kernel:ready` handler —— 本插件自己的
+    `kernel:ready` 还会再注册一批 flow,别的插件也可能在它的 `kernel:ready` 里贡献执行器)。
+  - `AutomationEngine.getUnknownNodeTypeAudit(): UnknownNodeTypeAuditEntry[]` —— 同一发现的
+    **状态**形态,供 host(CLI 启动摘要、健康检查)直接读,而不是去 grep 日志。与
+    `getTriggerBindingAudit()` 同一套路。
+  - 封闭之后 `registerFlow` **恢复即时告警**:Studio 发布 / dev reload 进正在运行的服务器时,
+    词汇表确实是完整的,那句断言此时为真。所以这是时序修复,不是把告警静音。
+
+  告警文案也随之改成它现在能承诺的事:"Every plugin has started, so nothing will register them
+  now — these nodes fail at execution time with NO_EXECUTOR",并给出补救动作。
+
+  一并修掉同一缺陷类的另一半:`ApprovalsServicePlugin` 在**拿不到 automation 引擎**时,把
+  "`approval` 节点没注册"记成 `info` —— 而 dev 的默认日志级别是 `warn`,于是**真降级发生时反而
+  看不见**(#4632:静默降级必须响亮)。现在是 `warn`,写明后果(该部署里每个 ADR-0019 approval
+  flow 都会以 NO_EXECUTOR 失败)和补救(装 `@objectstack/service-automation`)。`catch` 同时收窄
+  到"服务查找"这一步,`registerApprovalNode` 内部真出错时会以自己的身份抛出,而不再被贴上
+  "no automation engine" 的错误标签;`automation` 服务存在但不接受节点执行器的分支从前**一条日志
+  都不打**,现在同样 warn。
+
+  **嵌入式 host 注意**:直接 `new AutomationEngine()` 而不经过 `AutomationServicePlugin` 的宿主,
+  需要在自己的插件都装好之后调用一次 `sealNodeTypeVocabulary()`,才能拿到这条告警(以及之后的
+  即时校验)。
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [65f184b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/platform-objects@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+  - @objectstack/metadata-core@17.0.0-rc.2
+  - @objectstack/formula@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

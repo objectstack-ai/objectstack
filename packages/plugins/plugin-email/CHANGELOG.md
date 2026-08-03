@@ -1,5 +1,179 @@
 # @objectstack/plugin-email
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- ce92674: feat(email): declared email templates reach the mail service (#4509)
+
+  Authoring an `email_template` was a silent no-op. `EmailService.sendTemplate`
+  resolves `(name, locale)` against **`sys_email_template` rows**, and the only
+  writers of those rows were the built-in auth templates plus a code-constructed
+  `EmailServicePluginOptions.templates` that no bootstrapper ever passed. Every
+  door an author can actually use — a stack's `emailTemplates:`, an
+  `*.email-template.ts` file, Studio's metadata-admin list, `PUT /meta` — parked
+  items in a metadata store nothing read back. So an admin could "fix" the
+  password-reset email in Studio, get a success toast, and watch users keep
+  receiving the built-in copy: ADR-0078 false compliance on **authentication
+  mail**. This is the shape #3461 had for webhooks, closed the same way (ADR-0049
+  enforce-or-remove, route: enforce).
+
+  **`bootstrapDeclaredEmailTemplates`** now materializes declared templates into
+  `sys_email_template` at boot. Each item is validated through
+  `EmailTemplateDefinitionSchema.parse()` — the spec schema finally has a real
+  consumer, defaults and all — and projected with `mapTemplateToRow`, which is the
+  **same** mapping the built-in seeder uses, extracted and shared so the two doors
+  cannot drift apart. A malformed template warns and is skipped rather than
+  crashing boot.
+
+  **Runtime writes take effect immediately.** Unlike `webhook`, `email_template`
+  is `allowRuntimeCreate: true`, so a boot-only bridge would have left a Studio
+  save inert until the next restart — the same bug, half-fixed. The plugin also
+  subscribes to `email_template` metadata changes and re-materializes the single
+  changed item; withdrawing a template deactivates its rows (across locales)
+  rather than deleting them.
+
+  **Three breaks sat on this path, not one**, and closing any two of them would
+  still have shipped a template that never sent:
+
+  - `@objectstack/objectql` never registered a manifest's `emailTemplates:` into
+    the metadata registry at all — the key was simply missing from the generic
+    ingestion list, so the bridge's own source was empty.
+  - The built-in seeder left `managed_by` at the column's `'admin'` default, which
+    made platform templates masquerade as admin-authored. Since the bridge refuses
+    to overwrite admin rows, a built-in would have permanently outranked the
+    template an app declared. Built-ins now stamp `managed_by: 'platform'`.
+  - Nothing materialized declared metadata into rows.
+
+  **Seed-not-clobber** mirrors `sys_webhook` (#3489) and `sys_sharing_rule`
+  (#2909): `sys_email_template` gains `managed_by` / `customized`. Declared
+  templates re-seed every boot as `managed_by: 'package'`; a row an admin created
+  (`admin`) or edited (`customized`, stamped by a `beforeUpdate` hook) is never
+  overwritten, so reworded transactional mail survives redeploys. This is a
+  separate axis from `is_system`, which keeps its existing meaning for built-ins.
+
+  The `email_template` liveness ledger flips from 13 dead properties to fully
+  live, with an ADR-0054 runtime proof bound on `subject`
+  (`email-template-materialization`): it boots a real stack, authors a template
+  that overrides a built-in auth template, and asserts the **authored** wording is
+  what reaches the transport.
+
+### Patch Changes
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/platform-objects@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/formula@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Patch Changes

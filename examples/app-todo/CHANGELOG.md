@@ -1,5 +1,273 @@
 # @objectstack/example-todo
 
+## 4.0.92-rc.2
+
+### Patch Changes
+
+- 7d21581: feat(spec)!: retire the six remaining `authorWarn` dead keys — book/group `translations`, `job.id`, `translation.validationMessages`, `app.homePageId`, `app.areas[].order` (#4667)
+
+  The #4488 liveness audit marked as `authorWarn` the keys whose _declaration_
+  actively misleads — not merely unread, but shaped so an author reasonably
+  concludes they configure something. #4509 and #4583 cleared the rest; these six
+  are what remained, and each shipped with its own reason for reading alive.
+
+  **The retirement kit:**
+
+  | FROM                             | TO          | Fix                                                                                          |
+  | -------------------------------- | ----------- | -------------------------------------------------------------------------------------------- |
+  | `book.translations`              | _(removed)_ | Delete the key. Localize the **docs** — `doc.translations` is live on every doc render path. |
+  | `book.groups[].translations`     | _(removed)_ | Same. Tombstoned, since `BookGroupSchema` is not `.strict()`.                                |
+  | `job.id`                         | _(removed)_ | Delete the key. `name` is the job's identity everywhere.                                     |
+  | `translation.validationMessages` | _(removed)_ | Delete the key. Author the message on the rule: `object.validations[].message`.              |
+  | `app.homePageId`                 | _(removed)_ | Delete the key. Reorder `navigation`; set `isDefault` for the root landing.                  |
+  | `app.areas[].order`              | _(removed)_ | Delete the key. Reorder the `areas` array itself.                                            |
+
+  Run `os migrate meta --from 16` to rewrite existing sources automatically.
+
+  **Each read alive for a different reason, and the prescriptions say which:**
+
+  - **book `translations`** — _proximity_. `doc.translations`, two files over, same
+    name and shape, works on every read path. The book-level map was parsed,
+    stored and round-tripped, and rendered in the authoring locale to every
+    reader: the tree endpoint and the portal emit `label` / `description`
+    verbatim.
+  - **`job.id`** — _its own description_. "Defaults to `name` when omitted"
+    advertises an identity override that does not exist. `name` is the scheduling
+    key, the `sys_job` row key, and the `JobExecution.jobId` stamp — so two jobs
+    differing only in `id` were one job declared twice.
+  - **`translation.validationMessages`** — _the platform's own signposts, twice_.
+    The schema example showed a concrete override, and #3778's legacy-key
+    migration table steered retired `errors:` authors straight into it. **That
+    guidance entry is rewritten here**: retiring one dead key by pointing at
+    another is the defect, not the fix.
+  - **`app.homePageId`** — _a second source for one fact_. Not unread: objectui's
+    console consumed it in `resolveLandingRoute()` and it was the only thing
+    deciding where an app opened. (This entry first shipped saying otherwise;
+    corrected in #4709, which upheld the removal.) What condemns the key is its
+    shape — an ID cross-reference into `navigation` with no referential integrity,
+    falling back to the first item _silently_ when the id dangled. If "land
+    somewhere other than first" is ever wanted again it belongs on the navigation
+    item itself, not on a pointer that can miss.
+  - **`app.areas[].order`** — _the sibling that works_. Nav-item `order` really is
+    sorted; area-level order never was, and both renderers iterate the array as
+    authored.
+
+  **Routes differ, deliberately.** `book.groups[].translations` and
+  `app.homePageId` are **tombstoned** (`retiredKey`: `never` at compile time, a
+  prescription at parse time) — the group schema is a plain `z.object`, where a
+  bare delete would have zod silently strip the key, trading one silent no-op for
+  another. The other four are strict deletions carrying `guidance`. Retired alias
+  spellings (`i18n`, `home`, `homepage`, `landingpage`, `sort`) route to the same
+  prescriptions rather than renaming onto keys that are gone.
+
+  Registered as three ADR-0087 D2 conversions (`book-translations-removed`,
+  `job-id-removed`, `translation-validation-messages-removed`) plus an extension
+  of `app-dead-authoring-keys-removed`, all wired into the protocol-17 D3 chain.
+
+  **Also corrected, both found by the gates rather than by grep:** the published
+  `objectstack-i18n` skill taught `validationMessages` in a copy-paste example
+  (an AI reproduces that verbatim), and `examples/app-todo` authored the group in
+  three locales — where the `en` entries merely duplicated the rule's own text and
+  the zh-CN / ja-JP translations had never once been rendered.
+
+  After this, the only `authorWarn` keys left in the ledger are the two fail-open
+  area gates tracked in #4651, which need a decision rather than a patch.
+
+- d449b0c: fix(cli): gate the two decision-routing shapes that can never work, and flag the inert `config.condition` (#4414)
+
+  Two follow-ups to #4440, both about metadata that reads like a guard and is not
+  one.
+
+  ## Two rules promoted to `error`
+
+  `flow-branch-label-unmatched` and `flow-default-edge-with-condition` now FAIL the
+  build instead of warning. The bar for that — restated at the top of
+  `lint-flow-patterns.ts`, because the old one no longer described the set — is
+  **no reading of the author's metadata does what it says, deterministically, on
+  every run**. Both qualify: a branch label no out-edge carries cannot route, and
+  an edge that is both `isDefault` and conditional always lets the condition win,
+  so the marker routes nothing. Neither _fails_; both are wrong every time and
+  silently, which is worse.
+
+  The other two stay advisory on purpose, and the policy now says why:
+  `flow-decision-unconditional-branch` is usually a guard that does not guard, but
+  one guarded plus one unconditional out-edge is also a legal "maybe notify,
+  always continue" fan-out, and `flow-multiple-default-edges` can genuinely mean
+  "when nothing matched, do both". The bar is about _provability_, not severity of
+  consequence — failing a customer's build on a shape we cannot prove wrong is the
+  worse trade.
+
+  No wiring change was needed: `lintFlowPatterns` is already registered as
+  `tier: 'gating'` across all three commands (#4409), which is exactly the seam
+  `authoring-rule-wiring.test.ts` exists to guard.
+
+  ## New rule: `flow-inert-node-condition`
+
+  `config.condition` is the trigger gate on a `start` node and is read by **no
+  other node type** — the engine parse-validates it everywhere (so a malformed one
+  is caught) and then ignores it. On a `decision` the name makes it read as the
+  branch predicate, which is exactly how it got authored.
+
+  Three of the three bundled apps had one. `app-todo`'s `check_recurring` and
+  `app-showcase`'s `needs_exec` both carried a predicate their out-edges were
+  already enforcing — a third copy doing nothing. The showcase even had a comment
+  next to it saying the node condition "is not evaluated by the engine", and kept
+  it anyway; that is the residue this rule exists to stop accumulating. Both are
+  now plain exclusive gateways.
+
+  Advisory, not gating: the surrounding edges usually still route correctly, so
+  this is dead weight rather than a provable misroute. The node-type list is a
+  closed set of builtins we have actually read, not "everything that isn't
+  `start`" — ADR-0018 keeps `node.type` open and a plugin executor may legitimately
+  declare and read its own `config.condition`.
+
+  ## Studio
+
+  `objectstack-ai/objectui` carries the matching help-text fixes: the branch editor
+  said a `true` branch **is** the default/else path (it is how you _ask_ for one —
+  the marker goes on the out-edge), and the legacy single `Condition` field said
+  "prefer Branches above", which reads as "this works, but the other is better".
+  It does not work at all.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [257d97a]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [7e7a605]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [84b4a3a]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [462b713]
+- Updated dependencies [36030ff]
+- Updated dependencies [c4ab50b]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [ff17642]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [4c45be1]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [9b43ee2]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [cb5a75e]
+- Updated dependencies [84b6e58]
+- Updated dependencies [f160ba4]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [127f091]
+- Updated dependencies [9fd9ae7]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [8aacf94]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [beefe89]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [1ee48bc]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [26bb053]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [50185a8]
+- Updated dependencies [d6bd5a1]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [24915d2]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/runtime@17.0.0-rc.2
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/objectql@17.0.0-rc.2
+  - @objectstack/client@17.0.0-rc.2
+  - @objectstack/service-knowledge@17.0.0-rc.2
+  - @objectstack/metadata@17.0.0-rc.2
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.2
+  - @objectstack/mcp@17.0.0-rc.2
+  - @objectstack/knowledge-memory@17.0.0-rc.2
+
 ## 4.0.92-rc.1
 
 ### Patch Changes

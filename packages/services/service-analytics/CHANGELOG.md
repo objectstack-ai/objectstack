@@ -1,5 +1,442 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.0.0-rc.2
+
+### Major Changes
+
+- 3c7bcc0: feat(spec)!: converge the 11 contracts-vs-domain dual-source type names (#4538)
+
+  `packages/spec/src/contracts/` hand-wrote parameter/result interfaces whose
+  names collided with same-named zod-derived types in the domains — the #4411
+  trap, tracked as 11 rows of `dual-source-exports.baseline.json`. Each name was
+  judged individually against a three-repo import-level scan (framework, cloud,
+  objectui): which declaration actually flows at runtime decides the direction.
+  All 11 rows are deleted from the baseline; no name below is exported twice
+  anymore.
+
+  **Converged — `./contracts` now re-exports the domain zod type (same
+  declaration on both entries, imports keep compiling from either):**
+
+  - `NotificationChannel` → `system/notification.zod`'s
+    `z.infer<NotificationChannelSchema>` (member sets were identical).
+  - `ValidationResult` → `kernel/plugin-validator.zod` (shapes were identical).
+  - `HealthStatus` → `kernel/startup-orchestrator.zod` (`details` narrows
+    `Record<string, any>` → `Record<string, unknown>`).
+  - `PluginStartupResult` → `kernel/startup-orchestrator.zod`. FROM `plugin:
+Plugin` (live object) and `error?: Error` TO the serializable projection
+    (`plugin: { name, version? }`-passthrough, `error?: { name, message,
+stack?, code? }`). Neither side had any consumer outside spec; the
+    zod-validatable shape wins.
+  - `StartupOptions` → `kernel/startup-orchestrator.zod` — the PARSED tier
+    (defaults applied). `IStartupOrchestrator.orchestrateStartup` now takes
+    `StartupOptionsInput` (the caller-authored all-optional tier, also
+    re-exported from `./contracts`). Fix for callers typed to the old
+    all-optional `StartupOptions`: rename to `StartupOptionsInput`.
+  - `JobExecution` → `system/job.zod`. The system schema's `duration` field is
+    RENAMED `durationMs` — that is what every job adapter produces and what the
+    `sys_job_run.duration_ms` column round-trips; the schema described records
+    nothing ever wrote. Fix: `duration` → `durationMs` when parsing
+    `JobExecutionSchema` payloads.
+  - `AnalyticsQuery` → `data/analytics.zod`. The domain schema aligned to the
+    contract's semantics first: `timezone` LOST its `.default('UTC')` — absence
+    is meaningful (the engine resolves org timezone, #1982/#2018; the
+    `/analytics` entry always refused to apply that default). The schema is now
+    transform-free, so `AnalyticsQuery` ≡ `AnalyticsQueryInput` (both kept
+    exported). Fix for code that relied on `.parse()` injecting `timezone:
+'UTC'`: pass the timezone explicitly or resolve it via the engine chain
+    (`selection.timezone ?? context.timezone ?? 'UTC'`).
+
+  **Renamed — two genuinely different concepts were sharing one name (both
+  flow at runtime):**
+
+  - `./contracts` `DriverCapabilities` → **`AnalyticsDriverCapabilities`**
+    (`{ nativeSql, objectqlAggregate, inMemory }`, the analytics strategy-chain
+    execution-path probe). The `DriverCapabilities` name now belongs solely to
+    the data domain's driver feature-flag record (`DriverCapabilitiesSchema`,
+    what `IDataDriver.supports` declares). Fix: importers of the trio from
+    `@objectstack/spec/contracts` (or `@objectstack/service-analytics`, whose
+    re-export is renamed in lockstep) rename the import; importers who meant
+    the driver flags import `DriverCapabilities` from `@objectstack/spec/data`.
+
+  **Removed — the domain-side declaration was dead (zero import-level consumers
+  in framework/cloud/objectui; the #4411 family's last survivors):**
+
+  - `system` `MetadataExportOptionsSchema` / `MetadataExportOptions` and
+    `MetadataImportOptionsSchema` / `MetadataImportOptions` (the
+    `output`/`source`-directory bags). The names now have ONE declaration each:
+    the `IMetadataService.exportMetadata` / `importMetadata` parameter
+    interfaces on `./contracts` (`types`/`namespaces`/`format` and
+    `conflictResolution`/`validate`/`dryRun`), which `MetadataManager`
+    implements. No tombstone/D2 conversion, deliberately — these are runtime
+    option-bag types, not authorable metadata (same reasoning as #4458).
+    `@objectstack/metadata` re-exports the two names from `./contracts` now
+    (it previously re-exported the dead system-side shapes its own manager
+    did not accept).
+  - `system` `JobSchedule` (the `= Schedule` back-compat alias). The name's one
+    declaration is the `IJobService.schedule` boundary shape on `./contracts`
+    (plain-string cron `expression`); the authored metadata type keeps its real
+    name `Schedule`. Fix: `import type { JobSchedule } from
+'@objectstack/spec/system'` → `Schedule` (authoring tier) or the
+    `./contracts` `JobSchedule` (service boundary), whichever you meant.
+
+### Minor Changes
+
+- fa94b2c: fix(service-analytics): a measure a query never reported reads 0 for a count/sum on every merge seam (#4708)
+
+  A dataset measure carrying its own `filter` runs as a separate grouped
+  sub-query and is merged back onto the selected dimensions. A `GROUP BY` over a
+  filtered row set emits **no group at all** for a dimension value the filter
+  excludes entirely, so the measure comes back **absent**, not `0` — and
+  `computeDerived` treats an absent operand as unknowable, so every ratio over it
+  goes null too. The cell then renders blank, which is visually identical to "no
+  data for this row" and means the opposite.
+
+  The bias runs the worst possible way: the rows that blank are the ones whose
+  numerator matched nothing — the **worst-performing rows**. A `lead_source` that
+  won nothing rendered as "no data" while one that won everything rendered fine.
+
+  The empty-group value is now filled **by aggregate kind** into every measure
+  column the assembled grid lists but no query reported:
+
+  | aggregate                 | over an excluded group | why                                                                 |
+  | :------------------------ | :--------------------- | :------------------------------------------------------------------ |
+  | `count`, `count_distinct` | `0`                    | "how many rows matched" has an exact answer when the answer is none |
+  | `sum`                     | `0`                    | the identity element of the empty set                               |
+  | `avg`, `min`, `max`       | stays `null`           | genuinely undefined — there is nothing to average                   |
+
+  Filling all five with `0` would trade this lie for its mirror image, reporting a
+  measurement nobody made, so the kinds are judged separately (via
+  `emptyGroupValueFor`, shared with the authoring-side coherence checks).
+
+  **Only cells are filled, never rows.** A dimension value no query reported at
+  all has genuinely no data and stays out of the grid.
+
+  **What changes beyond the measure-scoped seam.** The fill previously ran before
+  the `compareTo` merge, and that merge _appends_ a row for every bucket the
+  PREVIOUS window had and this one does not. Every base measure on those rows —
+  including unfiltered ones — was absent, so a lead source that sold last month
+  and nothing this month rendered as "no data" instead of `0`: the same worst-row
+  bias, one merge later. The fill now runs after every merge and covers all base
+  measures plus their `<measure>__compare` columns.
+
+  Widgets that worked around this with `?? 0` in the consumer or a `coalesce` in
+  the measure can drop it; the coercion belongs in the executor, which is the only
+  layer that knows which aggregate produced the gap.
+
+  **New export.** `fillEmptyGroups(rows, columnAggregates)` is exported from the
+  package root beside `mergeByDimensions`, so a host assembling a grid outside
+  `DatasetExecutor` can apply the same aggregate-kind rule rather than
+  reimplementing it — which is what makes this a `minor` rather than a `patch`.
+
+- 328ccc5: fix(security,analytics): scope /analytics/query to the caller's readable records, and refuse a measure over a missing field (#4467, #4437)
+
+  Two defects on the analytics query path, both found by the v17 verification run
+  (#3909 / #4482), both reproduced against a live showcase server before the fix
+  and re-verified with the same requests after.
+
+  ## #4467 — `/analytics/query` applied no record-level scoping
+
+  `ISecurityService.getReadFilter` documents itself as "the same filter the engine
+  middleware AND-s into every find", and exists precisely for paths that bypass
+  that middleware — its own doc comment names the analytics raw-SQL path. But the
+  chain it mirrors is TWO sibling middlewares: plugin-security's RLS injection and
+  plugin-sharing's owner/share visibility filter (`buildSharingMiddleware` AND-s
+  `buildReadFilter` into `ast.where` for `find`/`findOne`/`count`/`aggregate`).
+  Only the RLS half was ever computed here, and analytics has no other source of
+  scope, so the OWD/share predicate simply never existed on that path.
+
+  Live repro: `showcase_private_note` is `sharingModel: 'private'`; an admin owns
+  5 notes, a member holds read shares on exactly 2 and no `viewAllRecords`.
+  `GET /data/showcase_private_note` correctly returned 2 for the member, while
+  `POST /analytics/query {measures:['count']}` returned 5 — and adding
+  `dimensions:['title']` returned all five titles, i.e. the VALUES of a column
+  that caller may not read, not merely a bad count. Any authenticated caller who
+  could reach `/analytics` could enumerate the field values of every row of any
+  object exposed as a cube, regardless of OWD, sharing rules, or RLS.
+
+  `getReadFilter` now resolves plugin-sharing's `buildReadFilter` through the
+  late-bound `sharing` service and AND-composes it with the RLS filter — the same
+  composition the two middlewares reach by both writing into `ast.where`. It also
+  computes the ADR-0057 D1 `__readScope` depth that the security middleware
+  normally stashes on the context for plugin-sharing to widen its owner-match
+  with, using the same `getEffectiveScope` call the middleware makes: no
+  middleware runs on this path, and without it a caller granted `unit`/`org` read
+  depth would be silently narrowed to `own`. The sharing predicate is resolved for
+  every non-system caller AHEAD of the RLS stand-down branches, because those are
+  the RLS middleware's own early exits and none of them is a reason to drop a
+  sibling middleware's predicate; a sharing-resolution failure denies outright
+  rather than falling through to half a scope.
+
+  **Why `minor` rather than `patch`.** This is an observable behaviour change on a
+  public read surface, in the narrowing direction: analytics results that a
+  principal could previously read they now cannot. Counts drop, `dimensions`
+  groupings lose rows, and any dashboard, report, or export built on
+  `/analytics/query` over an owner-private object will show smaller numbers for
+  non-superuser principals — correctly, but visibly. Deployments that had (however
+  unknowingly) come to depend on the unscoped totals will see them change on
+  upgrade, so this warrants more than a patch-level note even though it is a
+  security fix. No API signature changed: `ISecurityService.getReadFilter`'s
+  declaration is untouched — the implementation merely started honouring the
+  contract it already documented.
+
+  ## #4437 — a measure naming a missing field 500'd with SQLITE_ERROR
+
+  `inferMeasure('ghost_sum')` maps a suffix convention onto a field name and has
+  no way to know the field exists, so it built `SUM(ghost)`, the driver threw
+  `no such column`, and the caller got
+  `500 {"code":"SQLITE_ERROR","message":"Internal server error"}` — a driver error
+  class as the `error.code` for what is a plain typo, which ADR-0112 forbids. A
+  dotted spelling took the same path (`measures:['total.sum']` prefix-strips to
+  `sum` → `SUM(sum)` → 500). The DATA route has refused the identical mistake with
+  a `400 INVALID_FIELD` naming the field since #4315/#4254.
+
+  `AnalyticsService.ensureCube` now validates each measure's resolved source field
+  against the backing object's field names before any SQL is built, and rejects
+  with the same envelope the data route produces (`400 INVALID_FIELD` carrying
+  `field`, `object`, `param`, `measure`) so one mistake has one shape across
+  `/data` and `/analytics`. The new `getObjectFieldNames` config hook reads the
+  same schema registry `isRegisteredObject` already consults and the data path's
+  own gate reads, so "which fields exist" has a single answer across both routes.
+
+  The gate is tiered exactly like the #3867 cube-inference gate, deliberately
+  narrow: it applies only when the cube's `sql` is a bare object name (an authored
+  cube whose `sql` is a real SQL expression has no field list to check against),
+  only when the probe answers (no data engine, or an external datasource whose
+  columns are not mirrored locally, stands down), and only to measures whose
+  source is a bare column — `count(*)` has no source field, and a dotted
+  cross-object reference resolves through a join this layer cannot see, so both
+  pass through untouched. `id`/`created_at`/`updated_at` are admitted
+  unconditionally, matching the data path's `resolveQueryFields`: a gate stricter
+  than the engine it guards would reject queries that used to work. Validation
+  runs before the cube is registered, so a rejected query leaves no trace in the
+  registry — otherwise a retry would find a "registered" cube carrying the bogus
+  measure and sail straight into SQL.
+
+  This half is `minor` for the same envelope reason: a request that used to return
+  500 now returns 400 with a different `code`, which is a visible contract change
+  for any caller branching on the response.
+
+- 6117f7b: fix(spec,service-analytics): a percentage measure carries its SCALE, so a ratio of 1 is 100% (objectui#3136)
+
+  A `%` format string says how to PRINT a number, not what scale that number is
+  on — and the two readings collide at exactly `1`, which is both "100%" (a 0–1
+  ratio at full compliance) and "1%" (a single percentage point). With nothing on
+  the wire to tell them apart, renderers guessed from the value's magnitude and
+  resolved the collision the wrong way: an SLA / pass-rate dashboard reporting
+  `sla_rate = 1` displayed **"1.0%"** — "everything met the SLA" read as "1% met
+  the SLA" — on both the KPI card and the dataset table.
+
+  The scale was never actually unknowable; it just never left the server. A
+  measure declaring `derived: { op: 'ratio' }` is a 0–1 fraction _by definition_,
+  and a measure aggregating a `percent` field has whatever scale that field
+  stores. Both facts sit in metadata the enrichment pass already reads for the
+  ADR-0053 currency chain — which walks back to the source field, checks
+  `type === 'currency'`, and rides the resolved code onto the result column.
+  Percentages got no such treatment. They do now, through the same seam.
+
+  **`percentScaleOf(field)` (`@objectstack/spec/data`)** is the one place the
+  question is answered. A `percent` field stores a FRACTION unless it declares
+  `max > 1` (e.g. `min: 0, max: 100`), which marks whole-percent storage — the
+  same rule the percent edit widget already writes by, so a value round-trips.
+  Non-`percent` fields get no opinion: a plain `number` an author formatted with
+  a `%` keeps meaning exactly what their format string says.
+
+  **`AnalyticsResult.fields[].percentScale`** carries the answer: `'fraction'`
+  (`1` ⇒ "100%") or `'whole'` (`1` ⇒ "1%"), absent when the column is not a
+  percentage. `queryDataset` sets it from the measure's `derived.op === 'ratio'`
+  first, then the source field's scale. `currency` — emitted since ADR-0053 but
+  only ever written through a cast — is now declared on the same interface.
+
+  The config seam `measureCurrency` is renamed **`sourceFieldMeta`** and returns
+  `max` alongside `type`/`defaultCurrency`. The old name had already outgrown
+  itself: the date-bucketing path reads `type` through it to tell a `date`
+  dimension from a `datetime` one, and the percent chain is its third consumer.
+
+  Renderers that receive `percentScale` must scale by it rather than inferring
+  from the value; one that does not receive it (an older server) keeps whatever
+  fallback it has, so this is additive on the wire.
+
+  **Same widget family, second fix: an empty filtered group is a measured zero.**
+  A measure-scoped filter can exclude every row of a group the grid still lists,
+  and the database reports that by omitting the group from the supplementary
+  result — after the merge, indistinguishable from "not measured". For a COUNT or
+  a SUM it _is_ measured: the answer is 0. `emptyGroupValueFor(aggregate)`
+  (`spec/data/aggregation-policy`) states which aggregates have an identity over
+  the empty set, and `queryDataset` fills it in once all supplementary merges are
+  done (a later measure's merge can append rows no earlier query saw). So
+  "0 of 12 paid" now reports `0` instead of blank, and a ratio built on it
+  computes to `0` instead of going null — the difference between a dashboard
+  saying "0% met the SLA" and saying nothing at all. `avg`/`min`/`max` keep their
+  null: there is nothing to average over an empty group, and flattening that to
+  zero would invent a measurement.
+
+### Patch Changes
+
+- 2f05139: fix(service-analytics): `compareTo` applies measure-scoped filters, so `<measure>__compare` is the same measure as the column beside it (#4820)
+
+  A dataset measure declared with its own `filter` is scoped by running a
+  supplementary grouped sub-query — `combineFilters(baseFilter, measureFilters[m])`
+  — and merging it back by dimension key. The `compareTo` pass did not: it issued
+  **one** shifted query over every base measure with only the base filter as its
+  `where`, and never consulted `compiled.measureFilters` at all.
+
+  For a dataset like
+
+  ```ts
+  measures: [
+    { name: "revenue", aggregate: "sum", field: "amount" },
+    { name: "won_count", aggregate: "count", filter: { stage: "closed_won" } },
+  ];
+  ```
+
+  the current-period column was scoped and the comparison column was not — two
+  different measures rendered side by side under one label:
+
+  | #   | measures               | where                    |         |
+  | :-- | :--------------------- | :----------------------- | :------ |
+  | 1   | `revenue`              | —                        | current |
+  | 2   | `won_count`            | `{"stage":"closed_won"}` | current |
+  | 3   | `revenue`, `won_count` | **absent**               | shifted |
+
+  `won_count__compare` was therefore a count of **every** opportunity in the
+  previous window, inflated by exactly the rows the measure exists to exclude.
+  The error runs one way: the comparison period always looks better, so a "won
+  deals vs. last month" tile reads as a collapse when nothing went wrong. Only
+  filter-scoped measures were affected — the unfiltered ones next to them compared
+  correctly, which is what made it survive.
+
+  The comparison window now runs the **same pass** as the current period —
+  unfiltered measures in one shifted query plus one shifted sub-query per
+  filter-scoped measure, merged by dimension key — through a single shared
+  implementation, so the two paths cannot re-diverge at the next change. The
+  dataset filter, the presentation's `runtimeFilter` and the measure's own filter
+  compose identically in both windows; the only difference between them is the
+  shifted `dateRange`.
+
+  Numbers reported by existing dashboards change where a filtered measure was
+  compared: with 3 won deals this month against 1 won of 5 opportunities last
+  month, `won_count__compare` was `5` and is now `1`.
+
+  Cost: one extra query per filter-scoped measure when `compareTo` is set.
+  Selections whose measures carry no filter are untouched and still compare in a
+  single shifted query.
+
+  The empty-group fill (#4708) covers the new seam: a group the measure's filter
+  empties in the _previous_ window now reports `0` for a `count`/`sum` compare
+  column rather than blanking it, exactly as it already did for the current period.
+
+- 9fd9ae7: Init-time service consumption is now declared everywhere, and the declaration is enforced (#4471, ADR-0116). A new CI gate (`check:init-service-contract`) walks every plugin's `init()` call graph — including private helpers, the shape that shipped #4420 — and errors on any init-reachable `getService('X')` of a workspace-provided service that is not covered by `dependencies`, `optionalDependencies`, or `requiresServices`. Eleven previously undeclared init-time consumers (metadata, rest, cli serve plugins, and seven services) now declare `optionalDependencies` on their providers, so the kernel orders them deterministically instead of by registration luck; each still degrades on purpose when the provider is not composed. Plugin authors: a best-effort init-time `getService` must declare its provider in `optionalDependencies` (declared tolerance) — the checker never exempts it.
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

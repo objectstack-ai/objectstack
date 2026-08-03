@@ -1,5 +1,29 @@
 # @objectstack/hono
 
+## 17.0.0-rc.2
+
+### Patch Changes
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [7e7a605]
+- Updated dependencies [2826d1e]
+- Updated dependencies [63b33e6]
+- Updated dependencies [ff17642]
+- Updated dependencies [20bc357]
+- Updated dependencies [ac471a0]
+- Updated dependencies [eb4204b]
+- Updated dependencies [0e96e46]
+- Updated dependencies [b25a116]
+- Updated dependencies [8aacf94]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [5a84d41]
+- Updated dependencies [ea90179]
+- Updated dependencies [dadb43f]
+  - @objectstack/runtime@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+  - @objectstack/plugin-hono-server@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

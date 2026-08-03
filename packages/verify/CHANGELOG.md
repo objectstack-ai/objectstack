@@ -1,5 +1,251 @@
 # @objectstack/verify
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- b25a116: fix(verify): resolve the enterprise organizations package from the HOST APP (#4700)
+
+  `bootStack(app, { multiTenant: true })` — and therefore `objectstack verify
+--multi-tenant` — could never load `@objectstack/organizations`. Node ESM
+  resolves a bare `import()` against the **importer's own realpath**, which for
+  `packages/verify` is inside the framework workspace, while the enterprise
+  package is cloud-private and only ever lives in the verified app's
+  `node_modules`. Every real host app fell into the catch and was told to
+  "Install/link it in this workspace" — about a package it had already installed.
+  Same defect class as cloud#1013, which fixed `objectstack serve`; #4699 fixed
+  that one call site and this issue tracked the two the sweep left behind.
+
+  **New: `@objectstack/types/node`.** The host-app resolver (`createHostRequire` /
+  `createHostImporter`) moved out of `packages/cli/src/utils/import-from-host.ts`
+  — where `@objectstack/verify` and the dogfood suite could not import it without
+  inverting the dependency direction — into a **node-only subpath export** of
+  `@objectstack/types`. One behaviour, one source; the CLI now consumes it and its
+  private copy is deleted.
+
+  It is a subpath and **not** the root export because `@objectstack/types` is a
+  dependency of `@objectstack/hono` ("edge-compatible REST API server for
+  Cloudflare Workers, Deno, Bun, and Node") and of the plugin layer a `LiteKernel`
+  boots on Workers. The root entry reaches zero `node:` builtins, and a Workers
+  bundle breaks on `node:module` even when nothing calls it. `tsup` emits the two
+  entries as separate self-contained bundles (`splitting: false`), and a test
+  walks the root's import graph and fails on the first reachable `node:`
+  specifier, so the isolation is enforced rather than merely intended. Same
+  arrangement `@objectstack/metadata` already ships for its `./node` subpath.
+
+  **New: `BootOptions.hostRoot`** (optional, defaults to `process.cwd()`) names
+  the app whose `node_modules` supplies those optional packages — for a harness
+  booting an app that is not the working directory.
+
+  **The dogfood multi-org gates had never run.** Two suites probed availability
+  with the same bare `import()` and so were **constant-false** — not "false
+  because absent" but false by construction, in every environment including the
+  cloud CI whose comment claimed it ran them. The #1994 cross-tenant RLS proof and
+  the attachments cross-tenant isolation block had therefore never executed while
+  the suite reported green (Prime Directive #10, test-suite edition). They now
+  resolve like the runtime does, and `OS_TEST_MULTI_ORG_ENABLED=1` declares that a
+  run is expected to ship the package — turning a silent skip into a loud failure,
+  so a run can no longer pass by quietly not running the gates it exists for.
+
+- c2a1134: fix(verify): stop the harness pinning `suspendedRunStore: 'memory'` (#4470)
+
+  `bootStack` hardcoded `suspendedRunStore: 'memory'` when it registered
+  `@objectstack/service-automation`. That made the DB-backed suspended-run store
+  **structurally unreachable** from every dogfood/e2e fixture — not under-tested,
+  untestable. The coverage map had a clean seam nothing crossed:
+
+  - unit tests covered ENGINE-side persistence (`suspended-run-store.test.ts`
+    drives suspend → restart → resume against a fake table);
+  - e2e covered the BUSINESS chain (approvals), but single-process and wholly in
+    memory;
+  - the ASSEMBLY between them — is `sys_automation_run` registered, is its table
+    created, is the store actually attached to the engine — was covered by
+    neither.
+
+  #4420 grew in precisely that seam: the store hung off a table that was never
+  created, every write failed into a `warn` nobody read, the pause reported
+  success, and the run died at the next restart. #4460 added assembly unit tests;
+  this makes the e2e half possible.
+
+  The harness now boots the plugin's own `'auto'` default — the same wiring
+  `objectstack dev` / `serve` get — so fixtures exercise the real assembly. Two
+  new knobs:
+
+  - `automation` accepts `{ suspendedRunStore: 'auto' | 'memory' }` as well as
+    `true`, so a fixture that wants the old in-memory behaviour asks for it
+    explicitly rather than getting it by default.
+  - `databaseFile` backs the in-process SQLite database with a file instead of
+    `:memory:`, so state can outlive a kernel.
+
+  Answering the question the issue raised — was `'memory'` pinned for speed or
+  because persistence could not run there? **Speed/simplicity.** The durable path
+  works in this harness: the accompanying dogfood proof boots with it, and the
+  whole existing dogfood suite passes on it unchanged (38 files, 239 tests). Note
+  `databaseFile` does not yet deliver a true cold boot: a second `bootStack` over
+  the same file reads a database whose tables exist but whose rows are gone —
+  ordinary records do not survive it either, so it is a harness/driver persistence
+  gap rather than anything to do with suspended runs, and it is filed as #4518.
+
+### Patch Changes
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [257d97a]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [7e7a605]
+- Updated dependencies [2f05139]
+- Updated dependencies [fa94b2c]
+- Updated dependencies [328ccc5]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [f2eb850]
+- Updated dependencies [8bd437f]
+- Updated dependencies [5046afe]
+- Updated dependencies [203a449]
+- Updated dependencies [6dcbbc3]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [462b713]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [be25f97]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [ff17642]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [4c45be1]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [05d8a54]
+- Updated dependencies [ec975f1]
+- Updated dependencies [68c02c2]
+- Updated dependencies [eb4204b]
+- Updated dependencies [25784cf]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [cb5a75e]
+- Updated dependencies [84b6e58]
+- Updated dependencies [f160ba4]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [127f091]
+- Updated dependencies [9fd9ae7]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [8aacf94]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [0d9a779]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [1ee48bc]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [ba5ff2f]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [304423e]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [26bb053]
+- Updated dependencies [be90dea]
+- Updated dependencies [04f1182]
+- Updated dependencies [c03108c]
+- Updated dependencies [5647006]
+- Updated dependencies [50185a8]
+- Updated dependencies [d6bd5a1]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/runtime@17.0.0-rc.2
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/objectql@17.0.0-rc.2
+  - @objectstack/plugin-auth@17.0.0-rc.2
+  - @objectstack/plugin-security@17.0.0-rc.2
+  - @objectstack/platform-objects@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/service-analytics@17.0.0-rc.2
+  - @objectstack/service-automation@17.0.0-rc.2
+  - @objectstack/rest@17.0.0-rc.2
+  - @objectstack/service-datasource@17.0.0-rc.2
+  - @objectstack/plugin-sharing@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+  - @objectstack/service-settings@17.0.0-rc.2
+  - @objectstack/plugin-hono-server@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Patch Changes

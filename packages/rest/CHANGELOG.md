@@ -1,5 +1,357 @@
 # @objectstack/rest
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- 05d8a54: fix(rest)!: 服务端权威闸门现在也过滤 `areas[].navigation` —— area 内导航项的权限/能力闸门不再只是渲染层的礼貌 (#4722)
+
+  `filterAppForUser` 是 `/meta` 上 app 元数据的**服务端权威可见性闸门**,但它此前只走 app
+  的顶层 `navigation` 树:读到 `item.navigation` 不存在就原样返回,`item.areas` 从头到尾没被
+  读过。后果是,写在 **area 内部**导航项上的 `requiredPermissions` / `requiresService`
+  只有客户端 `NavigationRenderer` 会执行 —— 该条目连同它的 `objectName` / `pageName` /
+  `componentRef` 指向,照常出现在 `/meta` 响应体里。改一次前端状态、或者直接读 `/meta` 的
+  JSON,就能看到本该被 gate 掉的条目。对 areas 型 app 而言,导航项级闸门此前**不是**服务端强制。
+
+  **现在**:同一个 `filterNav` 被复用到每一棵 `areas[].navigation` 上 —— 不是第二份实现,
+  所以两棵树对同一个键的语义不可能漂移。列表 `GET /meta/apps` 与单项 `GET /meta/apps/:name`
+  两条路径都覆盖(两者都经过这个函数;单项读对 app 类型本就绕过缓存)。
+
+  **响应形状收紧(可能影响消费方)**:无权限用户拿到的 app 元数据里,被 gate 掉的 area 内
+  导航项**不再出现**。被闸门滤空的 area 整个剥离 —— 与顶层树对「被滤空的 group」的既有处理
+  同形(空壳标签没有消费价值);作者本就写成空的 area 原样返回(过滤只报告调用方看不到什么,
+  不负责整理元数据)。任何依赖「服务端会把 area 内条目全量下发、由客户端自己藏」的消费方需要
+  改为信任服务端已过滤后的树 —— 这正是本次收紧的目的。
+
+  同一提交修正了 `resolveRegisteredServices` 的探测面:它此前每个节点只取第一个命中的子数组
+  (`navigation` / `children` / `widgets` 三选一),不会下钻 `areas`。若不改,只在 area 内被
+  引用的服务名不会被探测,而未探测的名字在闸门看来等同于「服务不存在」,会把一个本该存活的
+  条目误剥离 —— 探测面必须与过滤面完全一致。
+
+  **明确不做**:`visible`(CEL)在任何层级仍然只在客户端求值 —— 服务端求值需要绑定 `user`
+  上下文,不是这个读路径现有的能力,另立单处理。这个不对称写进了代码注释、`packages/spec/liveness/app.json`
+  的账本 note,以及 `rest.test.ts` 的 characterisation pin。必须永不到达浏览器的东西,写
+  `requiredPermissions`,不要写 `visible`。#4651 退役的 **area 级**键(`areas[].visible` /
+  `areas[].requiredPermissions`)未被复活:本次强制的是 area **里面**的项级闸门。
+
+- 8aacf94: feat(rest,runtime,client): `POST /meta/_migrate-stored` — run the stored-metadata migration without a shell (#4327)
+
+  `os migrate meta --stored` (#4327) gave ADR-0087's stored-metadata chain a finish
+  line, but only for someone who can reach the deployment's database from a
+  terminal. A hosted operator cannot, so on a managed deployment the chain had no
+  finish line at all — just the per-read conversion, running forever, with no way
+  to assert what protocol the rows are on.
+
+  The same pass is now reachable over HTTP:
+
+  ```ts
+  const preview = await client.meta.migrateStored(); // writes nothing
+  const result = await client.meta.migrateStored({ apply: true });
+  const flows = await client.meta.migrateStored({ types: ["flow"] });
+  ```
+
+  It returns the same `StoredMigrationReport` the CLI renders, and takes the same
+  posture:
+
+  - **Preview by default.** `apply` must be literally `true`; an empty body, a
+    missing body, and `"apply": "yes"` all preview. Nothing is inferred.
+  - **Gated on `manage_metadata`.** Unlike the single-item `PUT /meta/:type/:name`
+    next door, this rewrites every eligible row in the deployment, so it demands
+    the ADR-0066 D1 authoring capability rather than just a session, and answers
+    `403` otherwise. The gate runs before the protocol is probed, so an
+    unauthorized caller cannot use `403`-vs-`501` to learn which kernels can be
+    migrated. `/meta`'s anonymous-deny umbrella still closes it to anonymous
+    callers first.
+  - **Attributed to the caller.** The `actor` recorded on the history and audit
+    rows names the user who fired it — that is the question those rows exist to
+    answer.
+
+  **Flows need no extra setup on this path.** The CLI has to boot an inert
+  automation engine to hold the executor registry ADR-0078's conflict guard needs;
+  a server already has a live one, and the protocol resolves it from the services
+  registry itself (#4498), so this route covers flow rows by simply running in the
+  process that owns them.
+
+  Registered on both the REST server and the runtime dispatcher's `/meta` domain,
+  ledgered in both route ledgers, and mounted before `/:type` so the
+  leading-underscore segment is never captured as a metadata type name.
+
+### Patch Changes
+
+- 2826d1e: fix(automation,approvals): an approval decision can no longer succeed while its flow stays parked (#4420)
+
+  A flow paused at an `approval` node, a deploy, then an approver clicking
+  Approve: the request row flipped to `approved`, the UI toasted success — and
+  the flow never moved. No next-stage request, no error, the record's mirrored
+  status frozen mid-workflow. Approval flows pause for days by design, so a
+  restart mid-flight is the normal case: every release could quietly zombify
+  every in-flight approval, with the approvers none the wiser.
+
+  Durable suspended runs (#1518) had shipped and were not the missing piece. Two
+  other things were.
+
+  **The wiring could enable a store over a table nobody had created.** Object
+  registration and store activation resolve different services in different
+  phases — `manifest` at `init()`, `objectql` at `start()` — and the plugin
+  declared no ordering. Composed ahead of ObjectQL, `init()` found no `manifest`,
+  warned, and continued; `start()` then attached the DB-backed store anyway. Every
+  suspend failed with `no such table: sys_automation_run` into a log line nobody
+  read, pauses silently stayed in memory, and the next restart lost them all.
+  Now: `AutomationServicePlugin` declares `optionalDependencies:
+['com.objectstack.engine.objectql']` (order-if-present, per ADR-0116 — an
+  engine-less kernel must still boot); a registration missed at `init()` is
+  retried at `start()`, which still lands before ObjectQL's schema sync; the
+  store is never attached when registration did not happen, and says so at
+  **error** level instead of warning; the table is probed once at boot so a
+  broken setup surfaces there rather than one failed write at a time; and a
+  failed durable write of a paused run is logged at error — it is data loss in
+  waiting, not a warning.
+
+  **A reported resume failure read as success.** `AutomationEngine.resume()`
+  answers a lost run by _returning_ `{ success: false }`, never by throwing.
+  `ApprovalService` discarded that return value, and `decide()` counted only a
+  thrown error as failure — so a decision against a dead run came back
+  `resumed: true`, HTTP 200. Resume failures are now classified
+  (`RUN_NOT_FOUND`, `STORE_UNAVAILABLE`, `RESUME_IN_PROGRESS`, joining
+  `PERMISSION_DENIED` / `INVALID_SIGNAL`), so a run that is gone for good is
+  distinguishable from a store that is merely unreachable, and the raw resume
+  route maps them to 404 / 503 / 409.
+
+  Approvals acts on them. A new `AutomationEngine.hasSuspendedRun(runId)` — which
+  reads the suspension store, unlike `getRun()`, and throws rather than answering
+  `false` when the store is unreadable — pre-flights every flow-advancing
+  operation (`decide`, `sendBack`, `resubmit`) **before its first write**, so the
+  zombie half-state is never created rather than merely reported: the decision
+  fails with `RESUME_TARGET_LOST` (HTTP 409) and the request stays actionable. A
+  resume that fails after the decision is durable can no longer be undone, but it
+  now throws `RESUME_FAILED` (HTTP 500) naming the stranded run instead of
+  reporting success. A concurrent duplicate resume stays benign — the engine's
+  idempotency guard is doing its job — and reports through the new optional
+  `resumeError` field. Recall and revise-window cancellation stay non-fatal by
+  design (they abandon the request), but log at error with the reason instead of
+  swallowing it. Compositions with no automation engine attached are unaffected.
+
+  Existing zombie requests from affected deployments (already `approved`, run
+  stranded) are not repaired by this change — `releaseDeadRunRequests` only
+  sweeps requests that are still `pending`.
+
+- be25f97: fix(rest): dataset queries stop rejecting their own read-time annotation
+
+  Every widget on every dataset-bound dashboard failed with
+
+  ```
+  Dataset query failed: 400 Bad Request — Invalid dataset definition.
+  ```
+
+  The dataset itself was fine. `POST /analytics/dataset/query` resolves a saved
+  `datasetName` through `getMetaItems`, and the metadata READ path stamps the
+  spec-validation verdict `_diagnostics` onto every document it serves. Since
+  #4001 closed the metadata schemas, `DatasetSchema.parse()` rejects unrecognized
+  keys instead of dropping them — so the route handed a served document back to
+  the very schema that produced it and got `unrecognized_keys: ["_diagnostics"]`
+  for its trouble. The 400 blamed the author for a key the server had just added.
+
+  This is the failure mode `stripReadDecorations` exists to prevent, and the one
+  `spec/kernel/metadata-read-decorations.ts` already documents from the cold-boot
+  flow bind (cloud#971): _a served body is not a valid input to the schema that
+  produced it._ The route now strips read decorations before validating.
+
+  Stripped on **both** branches, not only the `datasetName` read: the Studio
+  dataset preview posts its draft inline, and that draft is the document the
+  designer GET-loaded — decorations and all. A hand-authored draft never carries
+  these keys, so the strip is a no-op there. The ADR-0010 provenance envelope
+  (`_packageId`, `_provenance`, `_lock`, …) is deliberately _not_ a read
+  decoration and still survives the round-trip.
+
+  Regression coverage for the saved-dataset path was the gap that let this ship —
+  every existing case passed the dataset inline, so nothing exercised the read.
+  The route's tests now cover resolve-by-name, the inline decorated draft, the
+  404, and a genuinely malformed saved dataset (still a 400).
+
+- 9fd9ae7: Init-time service consumption is now declared everywhere, and the declaration is enforced (#4471, ADR-0116). A new CI gate (`check:init-service-contract`) walks every plugin's `init()` call graph — including private helpers, the shape that shipped #4420 — and errors on any init-reachable `getService('X')` of a workspace-provided service that is not covered by `dependencies`, `optionalDependencies`, or `requiresServices`. Eleven previously undeclared init-time consumers (metadata, rest, cli serve plugins, and seven services) now declare `optionalDependencies` on their providers, so the kernel orders them deterministically instead of by registration luck; each still degrades on purpose when the provider is not composed. Plugin authors: a best-effort init-time `getService` must declare its provider in `optionalDependencies` (declared tolerance) — the checker never exempts it.
+- be90dea: fix(plugin-audit,rest)!: `sys_comment` derives its access from the record its thread names (#4630)
+
+  Attachments derive their visibility from the parent record; comments derived
+  nothing. On the _same_ record, with the _same_ user, the two answered
+  differently:
+
+  ```
+  user: rep2 (does NOT own and cannot read the opportunity)
+  GET  /api/v1/data/crm_opportunity?$filter=["id","=","1A7n…"]      → 200, 0 rows
+  GET  /api/v1/data/sys_attachment?$filter=["parent_id","=","1A7n…"] → 200, 0 rows
+  GET  /api/v1/data/sys_comment?$filter=["thread_id","=","crm_opportunity:1A7n…"]
+                                                                     → 200, 1 row
+  POST /api/v1/data/sys_comment {"thread_id":"crm_opportunity:", …}  → 201 Created
+  ```
+
+  `sys_comment` is public, has no owner column, and hides its parent inside a
+  string (`thread_id` = `{object_name}:{record_id}`), so neither OWD/sharing nor
+  RLS ever narrowed it. Because `enable.feeds` is opt-OUT (spec default `true`),
+  every object in every app carried that org-wide readable, org-wide writable
+  side-channel — a deployment that carefully authored OWD, sharing rules and RLS
+  on its records still leaked their discussion.
+
+  `AuditPlugin` now installs the same two-part kit `service-storage` installs for
+  `sys_attachment`, keyed off `thread_id`'s parent:
+
+  - **read** — a `find`/`findOne`/`count`/`aggregate` middleware intersects every
+    query with the threads whose record the caller can actually read (resolved
+    through the caller-scoped engine, so the parent's own OWD/sharing/RLS/CRUD
+    decide). `count()` is filtered identically to `find()`, so a list `total`
+    cannot leak the hidden rows' existence either.
+  - **write** — `beforeInsert` requires READ on the record the thread names;
+    `beforeUpdate` / `beforeDelete` require the caller to be the comment's AUTHOR
+    or to hold EDIT on that record. `author_id` is server-stamped from the
+    session, so a client-supplied value never wins.
+
+  Everything fails CLOSED: a `thread_id` that names no record — the dangling
+  `"crm_opportunity:"` above, a free-form thread, a thread on `sys_comment`
+  itself — is refused on write and excluded on read, and a filter that cannot be
+  computed denies all rather than falling open. Refusals answer **403
+  `RECORD_NOT_ACCESSIBLE`** (the standard error catalog, per ADR-0112 — a generic
+  permission condition takes a catalogued code rather than a new synonym), with
+  `error.object` naming the record's object.
+
+  **Breaking for deployments that depended on the gap.** Reads that used to
+  return other people's comments now return fewer rows (or none), and writes that
+  used to 201 now 403. Specifically:
+
+  - Listing `sys_comment` without being able to read the parent record → the row
+    is gone, not merely unlabelled. Panels that render a thread must be reached by
+    a principal who can read the record.
+  - Threads whose `thread_id` is not `{object_name}:{record_id}` are no longer
+    usable at all: creating one is refused, and existing rows become invisible to
+    everyone but system context. Migrate free-form threads to a real record
+    reference (or keep them under a system-context surface).
+  - Deleting or editing another user's comment now requires EDIT on the record.
+    Note also that `sys_comment` delete already needed a permission set carrying
+    `allowDelete` — the `member_default` baseline has none (ADR-0090 D5).
+  - Posting a comment no longer requires the client to send `author_id` (it is
+    stamped); a client that sends someone else's is silently corrected rather than
+    believed.
+
+  Orthogonal and unchanged: `enable.feeds` (`FEEDS_DISABLED`) still gates whether
+  an object has comments at all, and anonymous callers are still refused with 401
+  before any of this runs.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [ff17642]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/platform-objects@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/observability@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+  - @objectstack/service-package@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Major Changes
@@ -145,8 +497,8 @@
   being a hand-listed union and a bare `string` respectively and reference the
   catalog, so the three cannot drift apart.
 
-  Lowercase is deliberate, not an oversight against ADR-0112's SCREAMING_SNAKE: a
-  top-level code names the condition the _request_ hit, while a field-level code
+  Lowercase is deliberate, not an oversight against ADR-0112's SCREAMING*SNAKE: a
+  top-level code names the condition the \_request* hit, while a field-level code
   names the _constraint_ the value violated — and constraints are declared in the
   metadata's own snake_case, so `max_length` the code and `max_length: 50` the
   property are the same word on purpose.

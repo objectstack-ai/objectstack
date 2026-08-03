@@ -1,5 +1,257 @@
 # @objectstack/plugin-sharing
 
+## 17.0.0-rc.2
+
+### Major Changes
+
+- 4b6cac7: feat(spec)!: resolve the three cross-form dual-source names — ShareRecipientType, TransformType, suggestFieldType (#4539)
+
+  Three `dual-source-exports.baseline.json` rows where the two declarations
+  sharing a name did not even share a FORM (type vs const, or two unrelated
+  functions), so a wrong import-path pick had no shape overlap to hide behind
+  and failed far from the cause. Each judged against a three-repo import-level
+  scan (framework, cloud, objectui — the latter two contained zero references
+  to all three names). All three rows are deleted from the baseline.
+
+  **Renamed — `./contracts` `ShareRecipientType` → `RecordShareRecipientType`:**
+
+  Two live concepts shared the name. The security zod enum
+  (`user | team | position | unit_and_subordinates | business_unit`) is the
+  authorable sharing-RULE recipient vocabulary and keeps the name. The contracts
+  type describes a different thing — the `recipient_type` a `sys_record_share`
+  ROW may carry — and its claim to "mirror spec/security" had been false since
+  `group`→`team`/`guest` were retired there. Its member set is now aligned to
+  the storage-side gate it actually mirrors, the `SysRecordShare`
+  `recipient_type` select: `role` (never persistable, zero producers) is
+  replaced by `position`. Only `user` is enforced (and written) today;
+  `ISharingService.grant` keeps refusing every other value (ADR-0078).
+  Fix: `import type { ShareRecipientType } from '@objectstack/spec/contracts'`
+  (or from `@objectstack/plugin-sharing`, whose re-export is renamed in
+  lockstep) → `RecordShareRecipientType`; code that named the `'role'` member
+  was describing a value no row could ever hold — use the rule vocabulary
+  (`SharingRuleRecipientType`) if a role recipient was meant.
+
+  **Renamed — `./shared` `TransformTypeSchema` / `TransformType` →
+  `FieldMappingTransformSchema` / `FieldMappingTransform`:**
+
+  `./data`'s `TransformType` (the authorable import-mapping enum
+  `none | constant | lookup | split | join | javascript | map`) is the live
+  declaration and keeps the name. `./shared` exported `TransformType` as the
+  inferred type of `TransformTypeSchema` — a differently-shaped discriminated
+  union of transform CONFIG objects — with zero importers for either name in
+  all three repos. The shared pair is renamed (not just the alias deleted):
+  the docs generator derives `import type { X }` examples by stripping
+  `Schema` from each schema const, so an alias-less `TransformTypeSchema`
+  would have kept generating a reference to an export that no longer exists.
+  Fix: `TransformTypeSchema` → `FieldMappingTransformSchema`,
+  `import type { TransformType } from '@objectstack/spec/shared'` →
+  `FieldMappingTransform` (same shape); importers who meant the import-mapping
+  enum import `TransformType` from `@objectstack/spec/data`.
+
+  **Renamed — `./data` `suggestFieldType` → `suggestFieldTypeForSqlType`:**
+
+  The only function-kind dual-source. The two implementations were never forks
+  of one function — different signatures, semantics and return types:
+  `shared/suggestions.zod.ts` (kept on `.` / `./shared` under the original
+  name) is the typo-suggester for an invalid authored FieldType
+  (`(input: string) => string[]`, alias table + Levenshtein, feeds the zod
+  error map), while `data/type-compat.ts` is the deterministic SQL-column →
+  FieldType mapper for external-datasource drafts
+  (`(rawType, dialect?) => FieldType | undefined`, ADR-0015 §4.6). Same input,
+  divergent outputs — `('varchar(255)')` → `[]` vs `'text'`; `('text_area')` →
+  `['textarea']` vs `undefined`; `('int')` → `['number']` vs `'number'` — and
+  the wrong pick compiled wherever the result was only truthiness-checked
+  (`[]` is truthy). Behavioral divergence is now pinned in
+  `data/type-compat.test.ts`.
+  Fix: `import { suggestFieldType } from '@objectstack/spec/data'` →
+  `suggestFieldTypeForSqlType` (same signature); imports from the root entry
+  or `./shared` are unaffected.
+
+### Minor Changes
+
+- ba5ff2f: fix(plugin-sharing): deactivating or deleting a sharing rule actually withdraws its grants (#4433, #4434)
+
+  An over-granting sharing rule had no withdrawal path on the product's API
+  surface. Deactivating it left every grant it had materialised in place — not on
+  the next record touch, not after a full restart — and the DELETE route answered
+  500 for both address forms it advertises, so the rule could not be removed
+  either. Together that made a too-broad rule unrecoverable short of hand-editing
+  `sys_record_share`, against a v17 release note that advertises the opposite
+  ("switching a rule off actually withdraws access").
+
+  `minor`, not `patch`: this changes an observable runtime behaviour that
+  deployments may have adapted to. A `source: 'rule'` grant whose rule is
+  inactive — or whose rule row is gone — now disappears, on the deactivating
+  write, on the next touch of the record, and on the next boot. Anything relying
+  on those rows surviving deactivation (including data repaired by hand around
+  the old behaviour) will see them revoked on upgrade. `DELETE
+/api/v1/sharing/rules/:idOrName` also starts succeeding where it used to 500,
+  so callers that treated that 500 as "unsupported" will now really delete.
+
+  #4433 — three independent gaps, one per path the report walked:
+
+  - **The deactivating write.** The `sys_sharing_rule` reconcile trigger skipped
+    every `isSystem` write, on the theory that those were boot seeding.
+    `SharingRuleService.defineRule` — the only implementation behind
+    `POST /sharing/rules`, and the documented way to deactivate a rule — writes
+    with SYSTEM_CTX unconditionally, because it must reach a platform table the
+    sharing middleware otherwise gates. So the skip caught 100% of REST
+    authoring: the withdrawal path built by #3821 existed, had tests (against a
+    mocked session the real path never sends), and was unreachable in production.
+    Now gated on boot phase, which is the question the skip actually meant to
+    ask.
+  - **The record touch.** `evaluateAllForRecord` listed only active rules, so a
+    deactivated rule was absent from the loop entirely and its grants were never
+    examined. It now reconciles every rule; an inactive one desires nothing and
+    takes the existing revoke-the-remainder branch.
+  - **The boot pass.** `backfillRuleGrants` was handed an `activeOnly` list,
+    making it structurally incapable of revoking anything. It now walks every
+    rule, and a new `sweepOrphanedRuleGrants` retires grants whose rule row is
+    gone entirely — unreachable by rule iteration, so they need their own sweep.
+
+  #4434 — `deleteRule` purged `sys_record_share` with a predicate-shaped
+  `engine.delete` carrying neither a scalar id nor `multi: true`, the one shape
+  the engine's dispatch refuses; it threw before ever reaching the rule row.
+  Fixed by routing through the same `SharingService.revoke` path every other
+  withdrawal already uses, rather than adding `multi: true` — a rule's grants now
+  retire exactly one way instead of two divergent ones.
+
+  The unit fakes are part of the fix: `makeEngine().delete` accepted any `where`,
+  which is why #4434 shipped green — the pre-existing "deleteRule drops rule and
+  all its grants" test asserted success against a delete the running server
+  always rejected. The fakes now mirror the real engine's dispatch guard.
+
+### Patch Changes
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [257d97a]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [462b713]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [4c45be1]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [cb5a75e]
+- Updated dependencies [84b6e58]
+- Updated dependencies [f160ba4]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [127f091]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [1ee48bc]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [26bb053]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [50185a8]
+- Updated dependencies [d6bd5a1]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/objectql@17.0.0-rc.2
+  - @objectstack/platform-objects@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+  - @objectstack/formula@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

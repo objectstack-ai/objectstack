@@ -1,5 +1,211 @@
 # @objectstack/driver-sqlite-wasm
 
+## 17.0.0-rc.2
+
+### Patch Changes
+
+- 9b43ee2: test(drivers): the filter-logic standard now covers the backend it was counted without (#4405)
+
+  `FILTER_LOGIC_CASES` (#3774) opens by calling itself the standard "the four
+  independent FilterCondition backends are each checked against". Five backends
+  exist. `driver-mongodb`'s `translateFilter` was missed, not excluded — an
+  independent implementation whose `$and`/`$or`/`$not` translation shares no line
+  of code with the SQL compiler or the in-memory matcher, and the only one whose
+  target language cannot spell the standard directly: MongoDB has no
+  document-level `$not` at all (the server answers `unknown top level operator:
+$not`), so a negation has to leave as `$nor`, and a branch's own keys have to
+  stay in one document while `$and`/`$or` clauses are lifted beside them. That
+  route was never checked against the shared cases. Both DEBT rows the #4363 gate
+  recorded are now cleared, and `scripts/check-driver-conformance.mjs` reports
+  `ok` for every cell of the matrix.
+
+  **`driver-mongodb` runs the table twice, and the split is deliberate.**
+  `mongodb-filter-logic-translation.test.ts` drives every shared case through
+  `translateFilter` and evaluates the emitted MongoDB _document_ over the shared
+  fixture — a pure function, no server, so it always runs. That matters here more
+  than anywhere: `mongodb-memory-server` downloads a ~123 MB binary from
+  fastdl.mongodb.org, and a defect only a downloadable binary can catch is a
+  defect nobody catches on a restricted network. Its in-process reader is strict
+  by construction — every shape it does not model throws instead of evaluating to
+  true, a document-level `$not` included — and its own discrimination is pinned by
+  cases that require a widened document to FAIL the case it widens, so "all green"
+  cannot mean "the reader says yes to everything".
+  `mongodb-filter-logic-conformance.test.ts` runs the same table against a real
+  mongod and answers the one question the first half cannot — does MongoDB agree?
+  — skipping cleanly (never silently) when the binary is unreachable.
+
+  **`driver-sqlite-wasm` runs the table through its own engine.** It inherits
+  `SqlDriver`'s filter compiler, so nothing is re-implemented; what the suite pins
+  is that a nested `(… AND …) OR (… AND …)` survives the custom sql.js dialect
+  that compiles, binds and marshals it — the same seam its temporal and pagination
+  suites cover for their clauses. Tracked as DEBT rather than EXEMPT because
+  "inherits, therefore fine" is the assumption those suites exist to disprove; the
+  suite is what disproves it.
+
+  **No divergence was found.** `translateFilter` answers all seventeen shared
+  cases correctly today, `$not`-inside-a-branch and nested `$and`-inside-`$or`
+  included, so no translation change ships here — what changes is that the next
+  edit to it cannot quietly widen a filter. Both suites were verified to be
+  discriminating rather than decorative by reintroducing the #3774 miscompile
+  (propagating `or` into a branch's own contents): 15 of the mongodb translation
+  suite's 26 tests fail, and 13 of the wasm suite's 18.
+
+  `packages/spec`'s `filter-logic-conformance.ts` header now says five and names
+  the fifth — a code comment; no schema, export or generated artifact moved.
+
+- 24915d2: fix(driver-sqlite-wasm): a `RETURNING` write is a write — persist it (#4518)
+
+  A file-backed `sqlite-wasm` database flushed its schema at boot and then
+  recorded nothing else. Every table was on disk; every row written after schema
+  sync lived only in the WASM heap and died with the process. Reopening the file
+  found a complete, empty database.
+
+  **Cause.** The Knex dialect picked its execution branch from _"does this
+  statement return rows"_ — and then marked the database dirty only on the other,
+  row-less branch. `INSERT … RETURNING *` returns rows, so it executed on the
+  row-returning branch and never set the flag. Since the `on-disconnect` flush is
+  gated on the same flag, nothing rescued it afterwards either: **both** persist
+  strategies dropped the write. ObjectQL writes through `RETURNING *` (it hands
+  the stored row back to the caller), so this covered essentially all business
+  data, along with `knex.raw('INSERT …')` and any other mutation arriving without
+  a Knex `method`.
+
+  **Fix.** "Does this statement change the database?" is now one exported
+  predicate — `statementMutatesDatabase(sql, method)` — classifying by Knex method
+  _and_ SQL text, applied at a single funnel after execution. It is independent of
+  which branch executed the statement, so a mutation can no longer slip through by
+  returning rows, by arriving without a method, or by taking a branch that forgot
+  to say so. Transaction control still routes to `noteTransactionControl`, which
+  keeps deferring flushes until the transaction closes (#1494), and mutating
+  `PRAGMA` assignments (`auto_vacuum`, `user_version`) now count as writes too.
+
+  **What changes for you.** Nothing to author. File-backed wasm SQLite now
+  actually persists under `on-write` / `debounced:*`, and `disconnect()` is a real
+  durability boundary: when it returns, committed data is on disk. This is what
+  `bootStack({ databaseFile })` in `@objectstack/verify` needed to make `stop()` →
+  second `bootStack` a genuine cold boot — the suspended-run restart proof
+  ADR-0019 promises is now asserted end to end in the dogfood gate. Expect more
+  disk writes than before on a file-backed dev database, because previously there
+  were almost none.
+
+  **One internal signature moved.** `WasmSqliteConnection.markDirty(method?)` is
+  now `markDirty()`. It used to re-filter the caller's Knex method against its own
+  allowlist, which made "did this mutate?" a decision taken in two places that
+  could — and did — disagree. If you call it directly, drop the argument; the
+  dialect classifies, the connection obeys.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/driver-sql@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Patch Changes

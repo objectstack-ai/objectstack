@@ -1,5 +1,234 @@
 # @objectstack/metadata-core
 
+## 17.0.0-rc.2
+
+### Major Changes
+
+- 65f184b: fix(metadata)!: `sys_metadata_history.recorded_by` stores NULL, not the sentinel string `'system'` (#4556)
+
+  `recorded_by` is declared `Field.lookup('sys_user', { readonly: true })` — a
+  foreign key. The write path filled it with `actor ?? 'system'`, so every
+  metadata write without a caller actor (boot sync, migration, an internal call)
+  stored the **string** `'system'` in a column whose declared type says "the id
+  of a `sys_user` row". No such row exists, and `SystemUserId.SYSTEM`
+  (`'usr_system'`) is not auto-provisioned on the current runtime either, so the
+  value resolved to nothing under any reading. Any consumer that read the field
+  by its declaration — `expand`, an owner column in a report, an audit timeline
+  showing "who changed this" — got an id that could not be dereferenced.
+
+  It had already cost twice. #4441 had to exempt every `readonly` field from the
+  write-path referential-integrity check, because otherwise ordinary metadata
+  authoring (package create / publish / clone) was rejected. #4551's
+  dangling-reference audit had to skip the same set for the same reason. The
+  field ended up the platform's only reference column that is neither enforced
+  nor audited.
+
+  **The fix is on the write path, not the declaration.** `recorded_by` stays a
+  `lookup('sys_user')`; an actor-less write now stores `NULL`, and `NULL` means
+  "system-initiated (boot sync, migration, scheduled job)" — the standard
+  expression of "no link", and already what this column's `set_null` delete
+  behaviour means. No magic system-user account (a row that can never sign in yet
+  holds an identity is a new security surface), and no `actor_kind` companion
+  column.
+
+  **Breaking — the repository contract is now explicitly nullable.**
+
+  | Surface                                   | Before   | After                                 |
+  | :---------------------------------------- | :------- | :------------------------------------ |
+  | `PutOptions.actor`, `DeleteOptions.actor` | `string` | `string \| null` (still **required**) |
+  | `MetadataEvent.actor`                     | `string` | `string \| null`                      |
+  | `MetadataItem.authoredBy`                 | `string` | `string \| null`                      |
+
+  `actor` stays required rather than becoming optional on purpose: every call
+  site must state which of the two it is, so a forgotten actor cannot silently
+  become a fake foreign key. Migrating a caller:
+
+  - **Writers** — passing a real identity: unchanged. Passing `'system'`, `''`,
+    or a label to satisfy the type: pass `null` instead.
+  - **Readers** — `event.actor` and `item.authoredBy` can be `null`. Handle it at
+    the point of display (`actor ?? 'System'` in a UI string is fine — the fix is
+    that the _stored_ value no longer lies, not that no label may ever be shown).
+
+  Two read paths also stopped inventing a value: `SysMetadataRepository.history()`
+  and `getByHash()` rendered an absent actor as the string `'unknown'`, which is
+  indistinguishable from a real user id to anything that resolves the field. They
+  now surface `null`.
+
+  **Existing rows: `os migrate recorded-by`.** The stored `'system'` values are
+  rewritten to `NULL` by a new command, which runs the conversion through the
+  ADR-0119 D2 migration journal (chunk-atomic, resumable via `os migrate resume`).
+  It is a dry run by default and safe to re-run — it selects only rows still
+  holding the sentinel, so a second `--apply` converts nothing.
+
+  The rewrite is **semantically equivalent, not a reinterpretation**: this column
+  has only ever held that one sentinel, written by exactly one expression
+  (`actor ?? 'system'`), and both spellings mean "no actor" — only `NULL` is
+  expressible in the declared type.
+
+  Deliberately unchanged: `sys_metadata_audit.actor` is a `text` column whose
+  declaration already says "user id, system id, or `'system'`", so its `'system'`
+  default is honest and stays. The #4441 `readonly` narrowing and the #4551 audit
+  skip also stay — see the PR for why they are still correct.
+
+- ce92674: feat(spec)!: retire the standalone `validation` metadata kind (#4509, ADR-0088)
+
+  A validation rule authored as its own artifact bound to nothing and gated no
+  write. `ValidationRuleSchema` carries **no object-binding key** — no `object`,
+  no `objectName` — and all six variants are `strictObject`, so an author could
+  not supply one either. No merge step existed. The only code that expected such a
+  key was a reference-tracker row scanning a field the schema would have stripped.
+  Meanwhile the engine evaluates exactly one shape: the object's own
+  `validations[]` array, on insert and on every matched update row.
+
+  So a rule created through the standalone door — a `*.validation.ts` file, or
+  Studio's Validations list — parsed, saved, reported success, and intercepted
+  nothing. Including a `state_machine` rule, which ADR-0020 routes through this
+  same vocabulary: an author could believe they had locked down record state
+  transitions and have changed nothing at all.
+
+  Under ADR-0088 the kind fails the admission test on its first clause: a rule has
+  no independent lifecycle, because it only means something against an object. And
+  unlike the sibling disconnects closed in this batch, it could not be bridged into
+  one — the shape has nowhere to name its object.
+
+  **The rule vocabulary is untouched.** `ValidationRuleSchema` and all six
+  variants are unchanged and fully live; the engine's evaluation path is not
+  modified by this change. It is the _kind_ that was inert, not the schema. The
+  liveness ledger keeps governing it through the gate's `SPEC_ONLY_SCHEMAS`
+  override (alongside `webhook` and `query`), because an ungoverned live schema is
+  exactly how the next drift would hide.
+
+  **Migration.** Move the rule into the owning object's `validations:` array — the
+  rule body is identical, same schema, same six variants:
+
+  ```ts
+  // before — a standalone *.validation.ts, which never ran
+  export default defineValidation({ name: 'amount_positive', type: 'script', … })
+
+  // after — on the object, where rules are evaluated
+  ObjectSchema.create({
+    name: 'invoice',
+    validations: [{ name: 'amount_positive', type: 'script', … }],
+  })
+  ```
+
+  Removed: the registry entry (and its `*.validation.ts` / `*.validation.yml`
+  patterns), the `MetadataTypeSchema` member, the metadata-core lockstep enum
+  member, the schema-map entry, the create seed, Studio's Validations nav item and
+  its hand-crafted form, and the dangling reference-tracker row. Standalone rows
+  already in `sys_metadata` are left alone — they were never evaluated, so nothing
+  changes behaviorally.
+
+### Patch Changes
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

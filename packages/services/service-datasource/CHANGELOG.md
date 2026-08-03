@@ -1,5 +1,274 @@
 # @objectstack/service-external-datasource
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- cdf4d9a: `datasource.config` is now validated against its driver's contract (#4410)
+
+  `config` was the one authorable slot on a datasource with no gate at all. The
+  schema's own comment claimed "the driver's own `configSchema` is what validates
+  it" — nothing did: both bundled driver specs set `configSchema: {}`, no code read
+  the field, and the per-driver zod schemas were not even exported from the
+  package. So `config: { hostname: 'db.internal' }` (the key is `host`) was
+  accepted in silence and the datasource connected to `localhost` while the parse,
+  the save and the connection probe all reported success.
+
+  `DatasourceSchema` now parses `config` against
+  the contract for the declared driver, and `DatasourceAdminService`
+  (create/update/test, the Setup wizard's path) applies the same check. Both read
+  one registry in `@objectstack/spec/data`, which also projects each contract to
+  JSON Schema for `DriverDefinitionSchema.configSchema` and the Studio connection
+  form, so the form offers exactly the fields the validator accepts.
+
+  New exports from `@objectstack/spec/data`: `PostgresConfigSchema`,
+  `MysqlConfigSchema`, `SqliteConfigSchema`, `SqliteWasmConfigSchema`,
+  `MongoConfigSchema`, `MemoryConfigSchema`, plus `resolveDriverId`,
+  `getDriverConfigSchema`, `getDriverConfigJsonSchemaById` and
+  `validateDriverConfig`. A driver the platform ships no contract for (a plugin's
+  `com.vendor.snowflake`) keeps an unvalidated `config`.
+
+  **Migration.** A config that was silently ignored now fails with the correction
+  in the message. The renames:
+
+  | Wrote                        | Write instead | Driver                 |
+  | ---------------------------- | ------------- | ---------------------- |
+  | `user`                       | `username`    | postgres, mysql, mongo |
+  | `connectionString` / `dsn`   | `url`         | postgres, mysql, mongo |
+  | `uri`                        | `url`         | mongo                  |
+  | `file` / `path` / `database` | `filename`    | sqlite, sqlite-wasm    |
+  | `hostname`                   | `host`        | postgres, mysql, mongo |
+  | `searchPath`                 | `schema`      | postgres               |
+
+  And the relocations — keys that were never driver config:
+
+  | Wrote in `config`                                               | Write instead                                                                                                                                                               |
+  | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `min` / `max` / `idleTimeoutMillis` / `connectionTimeoutMillis` | the datasource's own `pool` block                                                                                                                                           |
+  | `schemaMode`                                                    | next to `driver`, on the datasource                                                                                                                                         |
+  | `readOnly`                                                      | `external: { allowWrites: false }` — the enforced write gate. (This row said `capabilities: { readOnly: true }` until #4487's liveness audit found that key has no reader.) |
+  | `ssl: { ca, cert, key, rejectUnauthorized }`                    | the datasource's own `ssl` block — inside `config`, `ssl` is the on/off boolean shorthand                                                                                   |
+
+  Two memory-driver keys are **removed**: `indexes` and `maxRecordsPerObject`.
+  `InMemoryDriverConfig` has no field for either — the driver keeps no indexes and
+  evicts nothing — so both were inert. Drop them; for real indexing use a driver
+  that indexes.
+
+  A postgres, mysql or mongo datasource must now name a connection target
+  (`database`, or a `url` that carries it). An empty `config` used to mean "the
+  client's own localhost default", which is the same defect in its most complete
+  form.
+
+  **Also fixed, because the contract can only be enforced where it is honoured.**
+  These keys were declared and read by nothing; they now reach the driver:
+
+  - `datasource.pool` is honoured by every SQL driver (it was declared, carried
+    into the connection spec, then overwritten with a hardcoded `{ min: 0, max: 5 }`),
+    and maps onto the Mongo client's `minPoolSize` / `maxPoolSize`.
+  - `datasource.schemaMode` reaches the driver. It was dropped between the
+    datasource record and the connection spec, so a `schemaMode: 'external'`
+    database — one ObjectStack must never run DDL against — was constructed as
+    `managed`.
+  - `datasource.ssl` reaches the SQL clients, certificates and all. It stopped at
+    the record — nothing put it on the connection spec — so a TLS block configured
+    nothing, which is exactly what its own schema comment warns about ("a TLS
+    setting that never took effect looked identical to one that did").
+  - postgres `schema` (knex `searchPath`), `applicationName` and `statementTimeout`.
+  - mongo `password`, `authSource` and `options`. A mongo datasource carrying a
+    `config.password` previously composed its URL with an **empty** password.
+
+- aee1806: feat(spec,service-datasource): graduate the driver factory's four legacy `datasource.config` `??` fallbacks into an ADR-0087 conversion (#4456)
+
+  `createDefaultDatasourceDriverFactory` still carried four undeclared read-side
+  `??` fallbacks that predate the #4410 config gate: sqlite `file`/`database`
+  (canonical `filename`), postgres/mysql `connectionString` (canonical `url`),
+  postgres/mysql/mongo `user` (canonical `username`), and mongo `uri` (canonical
+  `url`). They were never part of the contract — no schema, form, doc or example
+  ever named them — and they kept working only because the reader was lenient
+  (AGENTS.md Prime Directive #12 debt).
+
+  **FROM → TO, applied automatically at load** by the new conversion entry
+  `datasource-config-driver-key-aliases` (retired-from-load-path; replayed over
+  stored `sys_metadata` rows by `applyConversionsToStoredItem` and by
+  `os migrate meta`):
+
+  - sqlite / sqlite-wasm: `config.file` / `config.database` → `config.filename`
+  - postgres / mysql: `config.connectionString` → `config.url`, `config.user` → `config.username`
+  - mongo: `config.uri` → `config.url`, `config.user` → `config.username`
+
+  The mapping is driver-aware — `database` renames only under sqlite, where it
+  aliased the file path; for postgres/mysql/mongo it is a canonical key and is
+  untouched. A canonical key already present wins; the legacy alias is left
+  shadowed (the factory's `??` precedence, preserved).
+
+  **Behaviour change (the deletion):** the factory now reads exactly one spelling
+  per key. A `DatasourceConnectionSpec` handed to the factory _directly_ with a
+  legacy spelling is no longer honoured — authored metadata was already rejected
+  by the per-driver zod gate with a rename hint (#4410), and stored runtime
+  datasource rows are canonicalized at every rehydration seam (including the
+  `sys_metadata` restore path in `DatasourceAdminServicePlugin`, which now
+  replays the full conversion chain), so no supported path still produces the
+  legacy shape. One-line fix for hand-built specs: use the canonical key from
+  the table above.
+
+- 63b33e6: A `datasourceMapping` rule is routing, not a hint — an object mapped to an
+  unreachable datasource no longer silently reads and writes the DEFAULT store
+  (#4462).
+
+  **Observable behavior change; read this before upgrading.** Measured on `main`
+  during the v17 verification: map an object to a Postgres datasource with a bad
+  URL and the boot succeeds, `/ready` answers `200`, the datasource name appears in
+  **zero** log lines, `POST /api/v1/data/<mapped object>` returns `201` — and the
+  row is physically in the default store. The operator finds out by opening the
+  database they declared and finding it empty. ADR-0062 D2's phase-1 note called a
+  mapping-only datasource "decorative" to keep an example byte-for-byte unchanged;
+  what that bought was a silent data-placement bug.
+
+  The fix is a pair, and each half is what makes the other correct:
+
+  1. **Routing stops falling through** (`@objectstack/objectql`). `getDriver` step
+     2: a mapping rule that MATCHES and names a datasource with no live driver now
+     throws — `DatasourceUnavailableError` when the connect layer recorded a
+     verdict, otherwise an error naming the object, the datasource and the two
+     remedies. `default` still resolves onward: the default driver keeps its
+     natural name (#3826), so step 5 is how routing to it works.
+  2. **ADR-0062 D2 grows gate (d)** (`@objectstack/service-datasource`,
+     `@objectstack/runtime`). A datasource a mapping rule routes at least one
+     object to is auto-connected at boot, and a boot-time connect failure is
+     **fatal** with an operator-readable reason — the same call gate (b) already
+     makes for an explicit `object.datasource` binding, now correct for (d)
+     because half 1 removed the fallback. `OS_ALLOW_DRIVER_CONNECT_FAILURE` still
+     degrades the boot instead, as for every other fatal connect.
+
+  The mapped-object list is resolved by the boot path from the engine's own
+  matcher (`ObjectQLEngine.resolveMappedDatasource`, newly public) and passed to
+  `connectDeclared({ mappedObjects })`; the connection service never re-derives
+  rule matching. Two matchers drifting by one clause would connect a datasource
+  routing never uses, or route to one nothing connects — the defect again.
+
+  **What to do if this breaks your boot.** It means a `datasourceMapping` rule in
+  your stack points at a datasource that cannot be connected. Either fix the
+  datasource configuration, or delete the rule — the second is what
+  `examples/app-crm` did in this change, and it is what keeps that example's
+  runtime behavior identical: its rules routed everything to an unconnected
+  `:memory:` datasource, i.e. to the default store by fall-through.
+
+### Patch Changes
+
+- 9fd9ae7: Init-time service consumption is now declared everywhere, and the declaration is enforced (#4471, ADR-0116). A new CI gate (`check:init-service-contract`) walks every plugin's `init()` call graph — including private helpers, the shape that shipped #4420 — and errors on any init-reachable `getService('X')` of a workspace-provided service that is not covered by `dependencies`, `optionalDependencies`, or `requiresServices`. Eleven previously undeclared init-time consumers (metadata, rest, cli serve plugins, and seven services) now declare `optionalDependencies` on their providers, so the kernel orders them deterministically instead of by registration luck; each still degrades on purpose when the provider is not composed. Plugin authors: a best-effort init-time `getService` must declare its provider in `optionalDependencies` (declared tolerance) — the checker never exempts it.
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

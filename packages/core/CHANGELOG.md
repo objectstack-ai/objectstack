@@ -1,5 +1,253 @@
 # @objectstack/core
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- 98877c9: feat(core,platform-objects,spec): the ADR-0119 D2 migration-journal runner — a migration killed mid-run is resumable to completion or compensable to clean, with journal rows proving which (#4617)
+
+  **The gap D1 left open.** ADR-0119 D1 made `engine.transaction()` reachable
+  through the contract, which is the right answer for multi-write atomicity that
+  fits in one transaction. Migration-class work does not fit: a million-row
+  backfill cannot hold one write-lock for its duration, `driver-memory`'s
+  `beginTransaction` deep-clones the entire database (O(db) per begin),
+  `ObjectQL.transaction()` binds the **default driver only** so a multi-datasource
+  migration silently commits part of its work outside it, and a process **killed**
+  — as distinct from a thrown error — defeats in-process rollback entirely. So the
+  unit of atomicity is the _chunk_, and durability across chunks is a journal.
+
+  Four consumers had each converged on the same four moves — dry-run preflight,
+  undo journal, LIFO compensation, re-entrant forward recovery (ADR-0105 D13
+  promotion, ADR-0117 D8's ownership backfill, the org lifecycle transitions, and
+  D10 master-data distribution #4585). One copy is engineering; four is platform
+  debt, and the fourth author would have had to rediscover the invariant below
+  from scratch.
+
+  **New: `runMigrationJournal` (`@objectstack/core`).** Preflight runs every
+  step's read-only validator before any step writes, so a plan that would fail at
+  step 3 has not written step 1. Rows are chunked per the `bulk-write.ts`
+  discipline; each chunk's writes run inside `engine.transaction()`. On failure,
+  committed chunks are compensated newest-first, each in its own transaction. On
+  restart, a rediscovered run resumes forward from the first chunk lacking
+  `chunk_done`, or unwinds, per the plan's `onCrash` policy. Forward and
+  compensate callbacks receive an `attempt` counter; `attempt > 1` means the prior
+  outcome is UNKNOWN and the callback must recheck by natural key before
+  re-writing — the same at-least-once contract `bulk-write.ts` already documents,
+  reused rather than re-derived.
+
+  **The invariant that carries the design:** `chunk_done(i)` is written **inside**
+  the chunk's own transaction, so `done ⇔ committed` holds by construction;
+  `chunk_started(i)` is written autonomously **before** it. That asymmetry is what
+  gives `started ∧ ¬done` exactly one meaning — _the outcome is unknown_ — which
+  is the only state a crash can leave and the only state recovery reasons about.
+  Making both writes symmetric would look tidier and would destroy recovery.
+
+  **New: `sys_migration_journal` (`@objectstack/platform-objects`).** Rows keyed
+  `(run_id, seq)` under a unique index, so a resumed run that miscomputes its next
+  sequence fails loudly rather than double-recording an event. Registered
+  unconditionally alongside `sys_migration` because recovery must be discoverable
+  with **zero host wiring** — a journal some kernels compose and others do not is
+  a journal a boot scanner cannot rely on (ADR-0078). Distinct in grain from
+  `sys_migration`, which holds one durable verdict per named migration; this holds
+  many rows per _run_. Read-only over the API; writes go through the runner in
+  system context.
+
+  **The runner refuses rather than degrades**, in four places: the runtime cannot
+  roll back; any preflight fails; the plan declares `onCrash: 'compensate'` but a
+  step cannot compensate; or a resume's plan hash disagrees with the journal
+  (resuming a changed plan would apply chunk boundaries the journal never
+  described). A compensation failure halts and is journalled — never swallowed —
+  and the run ends `failed`, not `compensated`, because a database in a state no
+  clean story covers must not be reported as a tidy rollback.
+
+  **`engineCanRollBack` is now shared.** The two-level probe (engine method AND
+  default-driver `beginTransaction`) was the same condition written twice — here
+  and in `batchData`'s atomic gate. It now lives in `@objectstack/core` and
+  `@objectstack/metadata-protocol` imports it, as a type predicate so callers do
+  not each re-narrow the optional member by hand. Two copies of "can this runtime
+  actually roll back?" drift by one clause and leave one caller believing it has
+  atomicity it does not have.
+
+  Boot reconciliation and `os migrate resume` land separately; `findInterruptedRuns`
+  is the discovery primitive they will consume, and is exported here.
+
+  **Docs:** ADR-0118 (plugin-reachable transactions) is renumbered **ADR-0119**.
+  It merged one day after an unrelated ADR-0118 (非用户 actor 的平台契约) and the
+  earlier merge holds the number; citations of "ADR-0118 D1/D2/D3/D4" written
+  before 2026-08-03 mean the renumbered record.
+
+- 071d0dc: feat(runtime,cli,core): boot reconciliation and `os migrate resume` for the migration journal — an interrupted run can no longer go unnoticed (ADR-0119 D2, #4617)
+
+  Completes ADR-0119 D2. The runner and `sys_migration_journal` landed in #4668; this is the discovery channel that makes an interrupted run findable by someone who does not already know it happened.
+
+  **`MigrationRecoveryPlugin` (`@objectstack/runtime`)** — at `kernel:ready`, scans the journal for runs that started and never concluded, and warns per run: how many chunks committed, which have an **unknown** outcome (`chunk_started` with no `chunk_done`), whether a compensation was left half-finished, and the exact command that will act. It also owns the `migration-plans` registry service.
+
+  **`os migrate resume` (`@objectstack/cli`)** — lists interrupted runs (read-only, the default), or acts on one with `--run <id>`, under confirmation. Exits non-zero when a run ends `failed`, so a scripted recovery cannot move on from a migration that needs a human.
+
+  **`MigrationPlanRegistry` (`@objectstack/core`)** — where a resume finds the plan it has to re-run.
+
+  ## Boot discovers, the CLI acts
+
+  This is the design decision, and it is deliberate rather than incidental.
+
+  Resuming is a large, irreversible, potentially hour-long write against production data. Doing that as an unrequested side effect of a process starting is the kind of behaviour an operator finds out about from a graph. It is also not always possible at boot: a resume needs the plan's live callbacks, and the package that owns them may not be loaded in whichever process happened to restart first.
+
+  So boot surfaces the run and names the command; the command acts, under explicit operator intent. ADR-0119 D2's per-plan `onCrash` policy still decides **what** acting means — resume forward from the first chunk lacking `chunk_done`, or unwind what committed — it just does not decide **when**, and "when" is the part a human should own.
+
+  Deferring is safe precisely because of the runner's re-entrancy: `started ∧ ¬done` is durable, so an interrupted run stays exactly as recoverable an hour later as it was at boot. Nothing decays while the operator decides.
+
+  ## Why a plan registry exists at all
+
+  A journal cannot hold a plan. `forward` and `compensate` are functions and `load()` reads the live database, so none of it crosses a process boundary — which is why the journal records the plan **hash**, not the plan. Recovery therefore needs the plan handed back by the code that owns it, and `migration-plans` is that seam: between "the journal knows a run stopped at chunk 7" and "something in this process knows what chunk 7 was supposed to do".
+
+  A run whose plan no loaded package registers is **reported**, never silently skipped — the operator is told which plan id is missing. "Nothing to resume" and "the code that owns this run is not here" are different facts, and only one of them is safe to ignore.
+
+  ## Degradation
+
+  No engine, or no `sys_migration_journal` registered (a lean kernel that never composed platform-objects) → the scan is skipped in **silence**: such a kernel has no interrupted runs to find, and a warning there would train operators to ignore this plugin's output, which is the one thing it cannot afford. A scan that **fails**, by contrast, is reported — "I could not check" and "there is nothing to find" are different answers.
+
+  11 new tests pin the split (boot writes nothing to the journal), the three states an operator must tell apart (clean / interrupted / half-unwound), and both degradation paths.
+
+### Patch Changes
+
+- 833b512: fix(core): 插件 init/start 的超时守卫定时器在 race 结束时被清除,进程不再空转 `startupTimeout` (#4813)
+
+  `ObjectKernel.initPluginWithTimeout()` / `startPluginWithTimeout()` 各自 `setTimeout` armed
+  一根超时守卫,然后**把它扔了**:插件赢下 race 之后,那根定时器既没 `clearTimeout` 也没
+  `unref()`,带着 ref 一直挂到 `startupTimeout` 走完。于是每个进程在活干完之后还要空转整整
+  一个 `startupTimeout` —— `ObjectQLPlugin` 是 120 秒。
+
+  实测(`examples/app-crm`,同一条 `migrate recorded-by --json`,同一个构建链,唯一差别是本
+  改动):
+
+  |        | 墙钟   |
+  | :----- | :----- |
+  | 修复前 | 122.4s |
+  | 修复后 | 3.1s   |
+
+  JSON 与 `✅ Graceful shutdown complete` 两次都在 ~3 秒出现 —— 后面那 119 秒纯粹是 8 根
+  孤儿定时器(4 个 init + 4 个 start)钉着事件循环。`os serve` 里同样漏,只是那里进程本来
+  就长命,看不出来。
+
+  **为什么是 `clearTimeout` 而不是 `unref()`。** 隔壁 `shutdown()` 的守卫用的是 `unref()`,
+  但那个写法在这里是错的,而且不是风格问题:`unref()` 让定时器不再钉住事件循环,**同时也
+  让它不再是一个守卫** —— 若 hook 永不 settle 且没有别的东西撑着事件循环,Node 会在定时器
+  触发之前直接退出,超时被**静默吞掉**,谁也不会收到那个 error。守卫必须在 race 未决期间
+  保持 ref'd,在 race 落定的那一刻被回收,这正是 `finally { clearTimeout(guard) }` 表达的
+  语义。两个守卫合并为一个私有 helper `raceStartupTimeout()`,措辞与理由写在它的 doc
+  comment 里。
+
+  `startupTimeout` 的取值一个都没动 —— 慢启动的插件需要那个上限,问题从来不在时长,而在
+  没人回收。
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

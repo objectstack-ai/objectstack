@@ -1,5 +1,693 @@
 # @objectstack/lint
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- 430dcc2: fix(runtime,lint): `action.body` binds a handler only for `type: 'script'` (#4352)
+
+  `ActionSchema.body` has always described itself as "Only used when type is
+  `script`", and its JSDoc went further — "Only meaningful when
+  `type === 'script'`. When set, the runtime invokes the body inside the sandbox
+  … and ignores `target`." The runtime read none of it:
+  `actionBodyRunnerFactory` bound a handler the moment `body` parsed, and
+  `collectBundleActions` collected any named action. A `type: 'url'` action
+  carrying a leftover `body` was therefore registered in the action registry and
+  executed in the sandbox — reachable through
+  `POST /api/v1/actions/:object/:action` and through
+  `ql.object(o).execute(name)`, and counted by the governance inventory as a live
+  handler.
+
+  Declared ≠ enforced, in the shape that is hardest to debug: an author flips
+  `type` from `script` to `url`, reasonably concludes the body is now dead code,
+  and it keeps running with nothing anywhere saying so.
+
+  **Behaviour change.** `body` now runs only under `type: 'script'`:
+
+  | Action                                                         | Before    | After                                                  |
+  | :------------------------------------------------------------- | :-------- | :----------------------------------------------------- |
+  | `type: 'script'` + `body`                                      | body runs | unchanged — body runs                                  |
+  | `type` omitted + `body`                                        | body runs | unchanged — body runs (`ActionType.default('script')`) |
+  | `type: 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'` + `body` | body ran  | **no handler is bound**; the refusal is logged         |
+
+  Only an action that **explicitly** declares a non-`script` type _and_ carries a
+  `body` changes behaviour. An omitted `type` still means `script`, because the
+  collectors walk raw bundle objects — a `strict: false` `defineStack` or a legacy
+  `manifest.actions[]` never passes through `ActionSchema`, so the schema's own
+  default has to be applied at the gate rather than assumed to have been applied
+  already.
+
+  **FROM → TO.** If you have an action whose body you want to keep running, set
+  `type: 'script'` and move the navigation/dispatch target elsewhere; if you want
+  the target behaviour, delete the now-inert `body`:
+
+  ```diff
+    {
+      name: 'open_portal',
+  -   type: 'url',
+  +   type: 'script',
+      target: '/portal',
+      body: { language: 'js', source: "await ctx.api.object('lead').update(…)", capabilities: ['api.write'] },
+    }
+  ```
+
+  The refusal is **not** silent — silence would only relocate the invisibility the
+  issue is about. `actionBodyRunnerFactory` logs a warning naming the action, its
+  declared `type`, and both fixes.
+
+  Authoring-time rejection of the same contradiction already shipped in #4438
+  (`ActionSchema` rejects `body` alongside a non-`script` `type`), so what remains
+  reachable here is data at rest published before that gate existed, plus bundles
+  that never parsed. This release closes that half. New tests also pin that the
+  **publish gate resolves to the rejecting schema** — through
+  `getMetadataTypeSchema('action')` and `ObjectSchema.actions` — so a re-point of
+  either registration cannot silently reopen the hole while the schema's own unit
+  tests stay green.
+
+  `@objectstack/lint`'s `validate-action-body-writes` filters by `type` again.
+  #4344 deliberately made that rule type-blind on the grounds that "the runtime
+  binds a handler from `action.body` alone … checking what executes beats checking
+  what the schema says should" — true then, and the comment predicted its own
+  revision. Execution and declaration are the same set again, so a non-`script`
+  body no longer produces write-set advice about writes that provably never
+  happen; the publish gate names that metadata's real defect (`type`) with its own
+  prescription.
+
+  `collectBundleActions` stays deliberately type-blind: it feeds governance
+  surfaces that must enumerate every declared action, bound or not, and the other
+  bind path (`engine.setDefaultActionRunner`, for Studio-authored actions) never
+  walks it. The gate lives at the single point where a `body` becomes an
+  executable handler, so there is no second copy of the rule to drift.
+
+- 0800433: Lint an action nobody placed (ADR-0078 Phase 3, Tier-A `action-locations`).
+
+  New advisory rule `action-no-placement`: an action that declares no
+  `locations` and that no list view places by name renders on **no** surface —
+  it parses, publishes, and appears in Setup, while no user can ever click it.
+  ADR-0078 names this shape in its opening paragraph and Phase 3 asks for
+  exactly this rule; the shared completeness predicate it envisioned was never
+  built, so this lands standalone, one verified shape at a time.
+
+  What made it verifiable now: objectui#3142 collapsed four disagreeing
+  renderers onto one placement predicate. Before that, `action:bar` and the
+  record header rendered an _undeclared_ action anyway, so the shape only looked
+  inert on paper. As of objectui 17.1 it is measurably inert.
+
+  Two things are deliberately **not** flagged:
+
+  - **`locations: []`** — the documented headless action (callable over REST /
+    MCP / AI, no UI surface). ADR-0110 D3 refuses an undeclared handler, so a
+    headless declaration is the only legal way to expose one. The rule therefore
+    distinguishes "nowhere, deliberately" (`[]`) from an unstated placement (key
+    absent) and only reports the latter.
+  - **Actions a view places by name** — `bulkActions`, `bulkActionDefs`
+    (including `execution: 'aggregate'` defs, whose whole point is an action with
+    no single-record home) and `rowActions`, across all three list-view tiers:
+    `views[i].list`, `views[i].listViews.<key>` and the object-embedded
+    `objects[i].listViews.<key>`.
+
+  Advisory, never fatal — a view in another installed package may be the one
+  placing the action, the same reason `validateSemanticRoles` and
+  `lintLivenessProperties` warn rather than gate.
+
+  Also: the action form schema in `@objectstack/metadata-protocol` no longer
+  declares `shortcut` / `bulkEnabled`. Both were retired as `retiredKey()`
+  tombstones in spec 17, and this schema is what the Studio designer renders its
+  fallback form from — so advertising them handed authors two inputs that could
+  only ever produce an unsaveable draft (objectui#3145 removed the matching
+  dedicated controls). And `content/docs/ui/actions.mdx` now says which surface
+  is the exception to location filtering, instead of a blanket claim its own
+  showcase contradicted.
+
+- 85a966f: Nav targets that are not object names (`page` / `report` / `dashboard`) are now checked at author time — closing a hole _inside_ an existing check.
+
+  `defineStack`'s `validateCrossReferences` already validates these three. But each arm is gated on the collection being non-empty:
+
+  ```ts
+  if (nav.type === 'page' && typeof nav.pageName === 'string'
+      && pageNames.size > 0 && !pageNames.has(nav.pageName)) { … }
+  ```
+
+  So a stack that declares **no `pages` at all** has its page-nav check silently switched off, and `{ type: 'page', pageName: 'anything' }` sails through. That is exactly the state a stack is in when the target was never written — the most likely way to reach this bug, not the least.
+
+  Note the asymmetry the guard creates. The `object` arm of the same block has no size gate: it errors unless the item carries `requiresObject`, an **explicit** opt-in to "another package provides this". Objects have to say so out loud; pages, reports and dashboards got an implicit exemption that depends on an unrelated property of the stack.
+
+  `validateNavTargetRefs` joins `REFERENCE_INTEGRITY_RULES` (16 → 17), so it runs on `validate`, `lint` and `compile` with no CLI rewiring. It reports **warning**, not error, and that ceiling is deliberate: `validate-object-references` can say ERROR for an unresolved _object_ because it resolves against the curated `PLATFORM_PROVIDED_OBJECT_NAMES` registry and knows which cross-package names are real. No such registry exists for pages, reports or dashboards, so "unresolved" cannot honestly be distinguished from "provided by a package we cannot see". Fixing the guard by tightening the parse-time throw was the other option and was rejected: a throw has no escape hatch for a legitimately cross-package page, and ADR-0072 D1's rule is that one dead finding costs more than a missed one. When `defineStack`'s check _is_ live it still hard-fails first; this rule is what speaks when that check has switched itself off, and it says so in the message.
+
+  **Three nav types are deliberately NOT covered, each verified rather than assumed:**
+
+  - **`action`** — already owned by `validate-action-name-refs`, which walks app navigation explicitly. Adding it here would double-report.
+  - **`component`** — a verified NON-rule. An unregistered `componentRef` does _not_ fail silently: `ComponentNavView` renders a named diagnostic ("Component not registered … Ensure the plugin that provides this surface is installed and has called `registerAppComponent()`"), and the registry exists precisely so plugin-provided surfaces may legitimately be absent. Flagging it would break valid plugin nav and prescribe a fix for something already reported better at runtime.
+  - **`url`** — external by definition.
+
+  Both NON-rules are pinned by tests, so "completing" the module by adding them fails there first.
+
+  **Scope honesty:** all 35 authored nav page/report/dashboard targets in this repo resolve, so this closes a latent hole rather than a shipped bug. The rule was proven to go red and then green through the real `validateReferenceIntegrity` entry point on a known-bad stack, not only in unit tests — a green check that has never been made to fail is the recurring defect this campaign keeps finding in its own instruments.
+
+- a7163ea: The ADR-0078 completeness gate ships: a Zod-valid metadata instance that silently does nothing now fails at author time, on every authoring surface.
+
+  This closes the hole _between_ the platform's existing gates. An instance can be Zod-valid (gate 1 green), use only _live_ properties (gate 2 green), and a correctly-authored sibling can be proven to run (gate 3 green) — and still be dead, because it omits a config its consumer needs and the consumer silently no-ops. The founding case (cloud#687): an AI authored `{ type: 'summary' }` with no `summaryOperations`; the engine's index builder skips it, the field reads 0 forever, the dependent "occupancy rate" is stuck at 0 — and the agent reported the work done, because every gate it could see was green.
+
+  **Why this is worse than the unknown-key hole #4001 just closed.** There, the author wrote a key we don't know, and the parse now rejects it with a prescription. Here every key is one we know, the schema is satisfied, nothing warns, and the author gets a success. It manufactures false completion without the author mistyping anything — and the review step that catches a human's bare summary (seeing the field render `0`) is exactly the step AI authoring removes.
+
+  **One shared predicate, every surface — the ADR's core decision.** Instance-completeness checks previously existed _only_ in cloud's AI-build graph-lint, so a stack authored with `os` + a coding assistant, an MCP agent, `os validate` in CI, or by hand got none of them (`formula_without_expression` existed nowhere in the framework). The judgement now lives in `@objectstack/spec/kernel`'s `checkFieldCompleteness` / `checkViewCompleteness` — sibling of `isIncoherentAggregate`, the ADR-0019 pattern — consumed by the new `@objectstack/lint` `validate-functional-completeness` and registered as an author-time rule (28 → 29), so `os build` / `os validate` / `os lint` / MCP / hand authoring are all covered. Cloud graph-lint can re-home its duplicate rules onto the same predicate rather than drifting from it.
+
+  **Every rule cites the runtime line that makes it true**, because the completeness audit's scariest candidate — a "sharing rule fails open and shares every record" — collapsed on a three-file read, and #4001's last two batches shipped four confidently wrong prescriptions before learning the same thing:
+
+  | rule                                                          | the silent skip                                                                    | severity |
+  | ------------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------- |
+  | `field/summary-without-operations`                            | `engine.ts` — `if (!d.summaryOperations) continue`                                 | error    |
+  | `field/formula-without-expression`                            | `engine.ts` builds the formula plan only from fields that HAVE one                 | error    |
+  | `field/relationship-without-reference`                        | `$expand` — `if (!referenceObject) continue`                                       | error    |
+  | `field/choice-without-options` (`select`, `radio`)            | `record-validator.ts` — an empty option list disables server-side value validation | error    |
+  | `field/choice-without-options` (`checkboxes`)                 | same branch, but shared with free-form                                             | warning  |
+  | `view/layout-without-binding` (`kanban`, `calendar`, `gantt`) | renderer falls back to literal default field names                                 | warning  |
+
+  **The deliberate NON-rules are pinned as hard as the rules.** `multiselect` without options is _not_ flagged: `record-validator.ts` says verbatim `// free-form (tags without options)`. The runtime blesses it as a mode, which makes it ADR-0078 case (3) "genuinely optional" — flagging it would be another false prescription, and the test is where that attempt fails first. `timeline` / `tree` views are likewise out of v1: they have config schemas, but their renderer behaviour has not had its verification pass.
+
+  **It found a real one on its first run against a real app.** `showcase_field_zoo.f_summary` was a bare `Field.summary({ label: 'Roll-up Summary' })` — one line below an `f_formula` that _is_ complete, in the object whose entire job is to show what each field type looks like. So the canonical example of a roll-up in this repo computed nothing. It could not be fixed by adding `summaryOperations`: a roll-up aggregates a child into its parent, and the zoo is a leaf (`f_master_detail` makes it a child of `showcase_project`, and nothing is a child of the zoo). Removed, with the working examples named — `showcase_invoice.total` for the plain sum, `showcase_expense_report.total_amount` / `approved_amount` for the `summaryOperations.filter` variant. The rule it broke was the file's own: "relationship types point at the other showcase objects so they have REAL targets."
+
+  Tracked in #4544. This is Phase 1; Phase 2 (the cloud authoring-path config-drop fix) is in the `cloud` repo, and Phase 3 lands the Tier-B shapes one verification pass at a time.
+
+- e6e9379: ADR-0078 Phase 3: a webhook with no `triggers` now fails at author time — and the Tier-B candidate list is corrected to what verification actually supports.
+
+  **The rule.** `webhook/without-triggers`, error severity, in the shared `@objectstack/spec/kernel` predicate alongside the Phase 1 rules, walked by `@objectstack/lint`'s `validate-functional-completeness` over `stack.webhooks` in both collection spellings. A webhook that declares no trigger materializes into `sys_webhook`, renders in Setup looking armed, and delivers nothing.
+
+  **Why it needed two sources, and why the first one argued against it.** The runtime skip site reads:
+
+  ```
+  if (triggers.size === 0) {
+      // No dispatchable triggers (or a manual-only webhook with none) —
+      // skip auto-enqueue.
+      return null;
+  ```
+
+  That parenthetical _blesses_ the empty case as a deliberate mode — structurally identical to the `multiselect`-without-options NON-rule, where `record-validator.ts`'s `// free-form (tags without options)` is exactly why we do not flag it. On that evidence alone this candidate stays unenforced.
+
+  The mode it names does not exist. `webhook.zod.ts`'s #3196 note records that the `api` (manual/programmatic fire) trigger was _removed_ because "no manual fire path exists — the only webhook HTTP surface re-queues already-failed deliveries". There is no way to fire a webhook the auto-enqueuer dropped. Inert on every path, so: `error`.
+
+  > **The generalization, now written into the module and pinned by a test:** a runtime comment records what its author believed, and beliefs go stale when a sibling feature is deleted. A blessing has to be corroborated by something showing the blessed mode is still _reachable_ — otherwise it is a comment about a mode that no longer exists. The test asserts the finding carries both citations, so nobody demotes this rule on the strength of the comment alone.
+
+  `triggers: []` is flagged identically to an omitted `triggers`. Unlike an action's `locations: []` — the documented headless spelling — an empty array here carries no "I meant it" signal, because turning a webhook off has its own key (`isActive`). The repo's one real webhook (`showcase_task_changed`) confirms it: shipped inactive via `isActive: false`, with a full trigger list.
+
+  **The corrected Tier-B disposition.** Phase 3 was scoped from the 2026-06 audit's Tier-A/B catalog. Verifying each candidate before writing it — the discipline that caught four false prescriptions in #4001 — found most of the list already closed or misfiled:
+
+  | candidate                                              | disposition                                                                                                                                    |
+  | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+  | A2 action without `locations`                          | **already shipped** — `validate-action-locations.ts`, which already exempts the documented `locations: []`                                     |
+  | B approval empty/unresolvable approvers                | **already shipped** — `validate-approval-approvers.ts`                                                                                         |
+  | B select/multiselect without options                   | shipped in Phase 1                                                                                                                             |
+  | B write-side referential integrity                     | **not an authoring-lint item** — a runtime gap; no metadata omission to detect                                                                 |
+  | B `unique:true` no-op on memory driver                 | **not an authoring-lint item** — a driver gap                                                                                                  |
+  | B composite/repeater sub-field constraints             | **not an authoring-lint item** — a runtime gap                                                                                                 |
+  | B nav targets of type page/report/url/component/action | **genuine gap, different module** — the key is present but dangling, which is reference resolvability (ADR-0072), not completeness (ADR-0078)  |
+  | B dataset with zero measures                           | **unverified — not shipped.** No runtime consumer in this repo; the dataset compiler lives elsewhere                                           |
+  | B webhook without triggers                             | ✅ **this change**                                                                                                                             |
+  | B schedule trigger with invalid cron                   | **unverified — not shipped.** `normalizeSchedule` accepts any non-empty string, but the scheduler's behaviour on an invalid one was not traced |
+
+  Two candidates are deliberately left unshipped rather than written on the audit's stated confidence, and one is left for the module that actually owns it. The audit's own lesson stands: it produces _candidates_, not confirmed bugs — the scariest one collapsed on a three-file read.
+
+  Tracked in #4544.
+
+- 459f925: feat(lint): `has(x)` 不是 null 守卫 —— 发布期直接拒绝未守卫的可空比较 (#4763)
+
+  CEL 的 `has(x)` 问的是**键是否存在**。自 #4649 起,谓词读到的记录对对象声明的每个
+  字段都是**全量**的:一个声明了却存 `NULL` 的列同样"存在",所以
+  `has(record.end_date)` 对声明字段恒为 `true`,什么也没告诉作者。于是这个读起来
+  像守卫的写法根本不是守卫:
+
+  ```text
+  has(record.start_date) && has(record.end_date) && record.end_date < record.start_date
+  ```
+
+  它会走到 `null < null`,CEL 没有对应重载,整个谓词中断。#4761 之前中断被吞掉
+  (规则跳过,一条 WARN),也就是说**这一形状的规则在任何含 null 值的行上从未生效
+  过**——它写在元数据里、读起来完全正确、却什么都没有强制执行。#4761 把运行时改成
+  fail-closed 之后,当场就在我们自己的两个示例对象里抓到了它。
+
+  运行时拒绝是兜底,不是该学到这件事的地方:作者会在真实数据(很可能是生产数据)
+  上收到一个 400,离写下规则可能已经过去几个月。而这个错误**仅凭元数据就可判定**
+  ——谓词的 AST 加上对象声明的字段类型,就足以判断某个操作数是否可能为 null。按
+  AGENTS.md PD #12(在创作期拒绝,不要在消费端容忍),它属于发布闸门。
+
+  **新增闸门(error,直接拒绝,没有降级开关)。** `os build` / `os validate` /
+  `os lint` 与运行时发布闸门共用的 `validateStackExpressions` 现在会拒绝这样的谓词:
+  对**声明为可空**的字段(没有 `required: true`、没有 `defaultValue`、没有默认选项、
+  不是 autonumber)应用**排序**(`< <= > >=`)或**算术**(`+ - * / %`,含一元 `-`)
+  运算符,而该操作数没有被同一布尔分支内支配它的 `!= null` / `== null` / `!isBlank()`
+  显式判空所守卫。`has(x)` **刻意不**计入守卫——这正是本规则存在的理由。错误信息点名
+  规则、操作数与修法,收尾句逐字取自 `rule-validator.ts` 的 `unevaluableRuleError`,
+  两道闸门措辞完全一致。
+
+  覆盖面(有意划定,而不是含糊地覆盖一半):对象**校验规则**(含 `conditional` 规则
+  `then` / `otherwise` 里嵌套的谓词)与**生命周期 hook 的 `condition`** ——即真正由 CEL
+  在全量记录上求值、会 fail-closed 的两类面。共享规则条件(下推成 SQL 过滤,`NULL > x`
+  是三值逻辑,不会 fault)、flow 的扁平作用域条件(裸标识符可能是 flow 变量)与
+  `Field.formula`(有自己的 #3306 `guard ? value : null` 处理)不在此列。
+
+  对**未声明**键的 `has()` 完全不受影响——那才是它的正当用途:区分"这次 PATCH 里
+  根本没提到这个键"与"显式写了 null"。示例应用无需改动即通过新闸门。
+
+- 8e53e5d: feat(lint): 视图 `searchableFields` 按运行时同一套判定做构建期校验 —— 一个 lookup 笔误不再等到 400 才暴露 (#4830)
+
+  视图(list view)的 `searchableFields` 会被客户端逐字回显为 `$searchFields` 覆盖参数,而
+  REST 入口闸(#4254)会用 `resolveSearchFieldResolution`(`@objectstack/spec/data`)判定
+  该对象的可搜索集合 —— 声明一个 lookup 等「不可搜索」字段,运行时会把**整条查询** 400
+  (`INVALID_FIELD`),列表工具栏搜索对全体角色彻底不可用。此前 `compile`/`validate` 只查
+  字段**存在性**,这类笔误全绿放行,只能靠人肉点搜索框发现。
+
+  新增规则 `searchable-field-unsearchable`(error 级,新导出常量同名):对每个视图级
+  narrowing(对象内建 `listViews`、`defineView` 的 `list`/`listViews`、react 页面的
+  `<ListView searchableFields>`)按**运行时同一个函数**(`resolveSearchFieldResolution`,
+  非复制的类型清单,杜绝再度漂移)判定 declared = enforced:
+
+  - 对象未声明 `searchableFields`(auto 源):视图里出现 lookup/json/hidden/审计列等
+    auto-default 拒绝的字段 → 构建期 error,信息含类型与 400 后果,lookup 给出「镜像到本
+    对象 text/formula 字段」的处方;
+  - 对象已声明(declared 源):视图条目超出对象声明集合 → 构建期 error(视图只能收窄、
+    不能放宽,ADR-0061);
+  - 对象自身的 `searchableFields`(canonical)维持**只查存在性**:运行时 declared 分支按
+    存在过滤、不按类型过滤,声明即被引擎执行,构建期拒绝会误伤运行时接受的元数据
+    (ADR-0072 D1);
+  - 注册表注入的系统列在 narrowing 中跳过判定(其运行时元数据对 linter 不可见,宁可漏报
+    不可误报)。
+
+  内部核心 `checkSearchableFieldList` / `indexObjectSearchTargets`(模块级导出,未入包
+  barrel)签名有变:索引值从 `Set<string> | null` 变为 `ObjectSearchTarget | null`,并新增
+  可选 `role: 'canonical' | 'narrowing'`(默认 `'narrowing'`)参数。
+
+- ebb209c: fix(spec,lint): withdraw the `record:*` blocks from the react tier — no renderer read the props it published (#4413)
+
+  The react-tier contract published `objectName` / `recordId` on
+  `<RecordDetails>`, `<RecordHighlights>`, `<RecordRelatedList>` and
+  `<RecordPath>`, and no renderer read either prop. All ten `record:*` renderers
+  take their record from `useRecordContext()`, which only the record route
+  (`RecordDetailView`) and the metadata editor's preview (`PagePreview`) ever
+  mount; the `kind:'react'` page renderer wraps the page in a
+  `SchemaRendererProvider` alone. So the blocks rendered their "bind a record to
+  preview" placeholder — or, for `record:related_list` (the one that does read
+  `schema.objectName`), refused to fetch because the parent id never arrived. A
+  page authored exactly to contract came back EMPTY with nothing reported
+  anywhere, including by `os validate`, which resolved those props' field names
+  against the object they named: lint standing guard over a binding that never
+  ran.
+
+  Withdrawn rather than implemented. The contract was not merely unimplemented,
+  it was the wrong SHAPE: per-block bindings describe four independent fetches of
+  one record, which is exactly the coupling the shared record context exists to
+  prevent (`record:details` drops the fields a mounted `record:highlights`
+  registered; one inline-edit save bar commits them all under a single
+  `ifMatch`). Honoring the props would have fossilized that (Prime Directive
+  #12). The naming of that primitive — a record SCOPE an author wraps around the
+  family, one fetch, shared context — is the open design question, filed as #4444.
+
+  `@objectstack/spec` drops the four blocks from `REACT_BLOCKS` and gains the
+  ledger for why, plus the working replacement per type. The family is derived
+  from `ComponentPropsMap`, so a record component added later is gated the day it
+  lands — including the six that were never in the contract but are just as
+  reachable through the registry-built react scope.
+
+  `@objectstack/lint` gains `react-block-needs-record-context` (error), which
+  rejects them on a react page by tag and through `<Block type="record:…">`
+  alike, quoting the block that does work: `<ListView filters={['<lookup>', '=',
+parentId]}>` for a related list, `<ObjectForm mode="view" recordId={…}>` for a
+  field panel. A locally-declared component of the same name shadows the injected
+  scope and is left alone.
+
+- 4b945fc: Author-time rules now gate the RUNTIME metadata write path, not just the CLI (#4463)
+
+  The 26 author-time rules `os validate` / `os build` / `os lint` share (#4409) ran on
+  those three commands and nowhere else. Every runtime metadata write — Studio's
+  designer, REST `/meta` item CRUD, an MCP/AI agent authoring a flow — reaches
+  `saveMetaItem`, which did a per-type Zod `safeParse` and stopped. For a tenant that
+  was not the weakest of four doors, it was the **only** door: a `sys_metadata`
+  overlay row is not in the CLI's config file, so there was no command they could run
+  instead. An approval flow whose `expression` approver is broken CEL
+  (`record.owner ==`) is Zod-valid, so it saved, registered, and failed at the node's
+  entry the first time it fired — the exact body `os lint` had rejected since #4409.
+
+  **One shared core, one runtime gate.**
+
+  - The rule registry moved from `packages/cli` into `@objectstack/lint`
+    (`AUTHORING_RULES`), and the CLI now calls it there. Five rule modules moved with
+    it (`lintFlowPatterns`, `lintLivenessProperties`, `lintAutonumberFormats`,
+    `lintViewRefs`, `data-model-rules`), unchanged. There is one table; a second one
+    cannot be introduced without failing `authoring-rule-wiring.test.ts`.
+  - New kernel-safe subpath export **`@objectstack/lint/runtime`** — the entry the
+    metadata write path imports. Running the gate loads neither `typescript` nor
+    `sucrase`, pinned by a new `runtime-lazy-deps.test.ts` alongside the existing
+    `lazy-deps.test.ts`, which is unchanged.
+  - Each registry entry now declares `surfaces` (`cli` / `runtime-publish`) plus
+    either the metadata `runtimeTypes` it judges or a written `surfaceReason`. The
+    ratchet fails an entry that answers neither.
+
+  **Behaviour**
+
+  - A `state: 'active'` `saveMetaItem` — and the draft→active promotion in
+    `publishMetaItem` — of a **flow** runs the flow / approval / expression /
+    reference rule families. A gating finding is refused with **422
+    `INVALID_METADATA`**, in the same structured envelope the Zod failure already
+    used, with `rule` / `path` / `where` / `message` / `hint` per issue.
+  - **Draft saves are never gated** — a draft is allowed to be half-finished and
+    cannot execute.
+  - Only the write is judged: the rules run twice (context with and without the
+    submitted item) and only findings the item _added_ can refuse it, so a
+    pre-existing violation in a stored row never blocks an unrelated save. Stored
+    rows keep being read.
+  - Escape hatch **`OS_ALLOW_UNLINTED_METADATA_WRITES=1`** turns the refusal into a
+    loud log for a migration window. Unset it once the metadata is fixed — the
+    runtime executes what it published.
+
+  Only `flow` writes are gated in this pass; every other metadata type carries a
+  recorded reason in the registry.
+
+- 97faca3: feat(spec,lint)!: give `bulkActionDefs` a shape, and lint the aggregate name it references (#4457)
+
+  A selection-bar bulk action was declared as
+  `z.array(z.record(z.string(), z.any()))` — **no shape at all**. The real
+  contract lived in objectui's `BulkActionDef` interface and in the executor that
+  reads it, so every authoring mistake landed as a silent runtime downgrade:
+  `opeartion` parsed and the executor hit `Unknown operation: undefined` per row;
+  `excution: 'aggregate'` parsed and the def stayed per-record, so the endpoint
+  written for ONE `_selectedIds` call got N calls instead — the exact defect
+  objectui#3139 was filed to make expressible. That is ADR-0018's "second
+  vocabulary" smell (an action surface sharing none of `ActionSchema`'s checks)
+  crossed with ADR-0078's silently-inert metadata.
+
+  `ui/bulk-action.zod.ts` types it, with the same treatment `ActionParamSchema`
+  got in #3746/#4001: a **strict** def whose unknown-key error names the offending
+  key and the canonical spelling. Beyond spelling, it refuses the combinations the
+  executor never reads — `patch` outside an `update`, `execution` outside a
+  `custom`, `params` on a `delete`, `batchSize` on an aggregate — and refuses a
+  hand-written `actionDef`, which is attached by the renderer when it resolves the
+  def's `name` and which authored by hand would smuggle an action definition past
+  the action registry.
+
+  **One shape that parsed before is now rejected**: `operation: 'custom'` without
+  `execution: 'aggregate'`. `resolveBulkActions` attaches a dispatcher for exactly
+  one authored shape (the aggregate one); every other custom def falls to
+  `Promise.resolve()` per row — a button that reports success for every selected
+  record and does nothing. The error names both legal forms: `bulkActions:
+['<name>']` for per-record (promoted with the action's own label, params and
+  `visible`), `execution: 'aggregate'` for one call over the whole selection.
+
+  Two things are deliberately left open:
+
+  - **`params[]` is `.passthrough()`.** objectui's `BulkActionParam` declares a
+    `[key: string]: unknown` catch-all — widget config (min/max/step/format)
+    forwarded to the field renderer as-is. Locking it down would reject valid
+    config, so declared keys are typed and the rest rides through, the same call
+    `dashboard.zod.ts` makes for a widget's `config`.
+  - **The bulk-param / action-param spelling divergence** (`help`/`helpText`,
+    `default`/`defaultValue`, `object`/`reference`, plus `labelField`, which
+    `ActionParamSchema` has no counterpart for). objectui already owns a converter
+    for the promoted direction; converging the authored direction is a cross-repo
+    change with its own migration. Typing them as they are is what makes the
+    divergence visible rather than undocumented — the prerequisite for closing it.
+
+  `label` and the param/option labels are `z.string()`, not `I18nLabelSchema`:
+  an authored def reaches the grid verbatim (nothing resolves an `{ en, zh }` map
+  on this path) and the bar renders `def.label` as a React child, so blessing the
+  map form would trade a parse error for a blank screen. Localize by declaring a
+  real action and naming it in `bulkActions` — that path runs through the i18n
+  resolver.
+
+  **Lint**: `validate-action-name-refs` now covers `bulkActionDefs`. Only an
+  `execution: 'aggregate'` entry is a name reference (it is what
+  `resolveBulkActions` looks up); an `update`/`delete` def's `name` is a button id
+  and resolving it would be nonsense. The walk also reaches an **object's own
+  `listViews`** for the first time — an object has no top-level `list`, so that
+  tier had simply never been visited while the view-level ones were covered. And
+  the hint no longer tells a bulk-surface author to add a `locations` entry: the
+  selection bar is the one surface that does not filter on it, so naming the
+  action there is the whole placement.
+
+  Verified zero new findings against `app-showcase` / `app-crm` / `app-todo`.
+
+### Patch Changes
+
+- f3141d8: fix(spec): a node that publishes no descriptor configSchema can now own an expression-ledger entry (#4439)
+
+  `FLOW_NODE_EXPRESSION_PATHS` is the #4027 ledger that tells `registerFlow` and
+  `objectstack validate` which config keys hold expressions, and in which dialect.
+  Its ratchet (`config-expression-ledger.test.ts`) derives what it expects from
+  descriptor `configSchema` `xExpression` markers, and fails in **both**
+  directions — an undeclared marker, or a ledger entry nothing declares.
+
+  `decision` / `script` / `subflow` publish **no** descriptor `configSchema` on
+  purpose: a published partial schema would drop the editors their hand-written
+  Studio forms need (the #4210 incident), so their contract lives in
+  `schemaless-node-config.zod.ts`. Those two rules compose into a hole — an
+  expression slot on a schemaless node is structurally unreachable by the ratchet,
+  and because the reverse direction rejects unclaimed entries, it cannot be
+  entered by hand either.
+
+  `decision.conditions[].expression` sat in that hole. Its own schema says
+  _"Bare CEL predicate deciding this branch"_ and its own comment names `{…}` as
+  the #1491 trap, and no validator walked it — so `{lead_record.status} ==
+'converted'` passed `tsc`, passed `objectstack validate`, passed registration.
+  #4414 made that fail loudly at run time; this makes it fail at build time,
+  which is the delay #4027 exists to remove.
+
+  ## The fix
+
+  The ratchet now reads **both** declaration channels:
+
+  - **descriptor `configSchema`** — unchanged, enumerated from the live registry;
+  - **`schemaless-node-config.zod.ts`** — the marker rides
+    `.meta({ xExpression })` through `z.toJSONSchema`, the same channel
+    `loop.collection` has used since objectui#2670.
+
+  Spec hands the second channel over as JSON Schema
+  (`getSchemalessNodeConfigJsonSchemas()`, memoized, `input` mode — the shape a
+  descriptor's `configSchema` already is), so the ratchet walks both with the
+  _same_ function. No second notion of "a declared expression property", which is
+  the duplication a ledger exists to remove, and no `zod` dependency added to
+  `service-automation`. Each channel is separately asserted non-empty, so a broken
+  derivation on one side cannot hide behind the other's results.
+
+  `SCHEMALESS_NODE_CONFIG_SCHEMAS` is also exported for anything else that needs
+  to reason about all node config contracts. Additive — objectui's
+  `flow-node-config` reconciliation imports each schema by name and is unaffected.
+
+  ## The sweep
+
+  The other schemaless slots were checked and deliberately carry no marker:
+  `script.template` is a template **id**, not a body; `script.inputs` /
+  `script.variables` / `subflow.input` are values that interpolate `{token}` —
+  text-with-holes, the shape essentially every node config string has, already
+  covered generically by `validate-flow-template-paths` and the CLI flow linter.
+  A `flow-template` ledger entry means something narrower: a _reference that must
+  resolve to a value_, like `loop.collection`. So `decision.conditions[]
+.expression` is the only genuinely declared expression slot on the class — now
+  recorded in the ledger's header so it is not re-derived.
+
+  ## Docs corrected
+
+  The flows guide taught the **wrong dialect** for decision predicates in three
+  places (`'{order_amount} > 10000'`), plus a "braces missing in a decision
+  expression" warning that inverted after #4414 — and `FlowNodeSchema`'s own
+  `@example` did the same. All corrected to bare CEL, with the history stated so
+  an author with a braced predicate knows what changed and why their build now
+  fails. The dialect table drops from three dialects to two: predicates never take
+  braces, values always do.
+
+  Verified: 13 new/updated tests across the ratchet, the engine's registration
+  pass and `@objectstack/lint` (including the exact app-crm predicate rejected at
+  both `registerFlow` and `objectstack validate`); `pnpm build`, `pnpm typecheck`
+  (122 tasks), `pnpm lint` and `check:docs` clean.
+
+- fd3013a: feat(spec,automation)!: converge `script` to a function call — retire the `actionType` branches — and parse `script` / `subflow` config at execute time (#4343)
+
+  A `script` node had four ways to name what it ran and only one of them ran anything.
+  Protocol 17 keeps that one and retires the rest.
+
+  - **`config.actionType: 'email' | 'slack'`** were **logger-backed stubs**. They wrote a
+    line, reported success, and delivered nothing — under any configuration, installed
+    messaging service or not. Every bundled example used one; none of them ever sent
+    anything.
+  - **`config.template` / `.recipients` / `.variables`** fed those stubs, so they addressed
+    a message no channel sent. (The examples did not even reach them: they passed the
+    payload in `inputs`, which the built-in branch never read.)
+  - **inline `config.script`** was recognized and **never executed** — the built-in runtime
+    has no server-side JS sandbox, so the node warned and completed as a no-op.
+  - **any other `actionType`** was shorthand for a registered-function name — a second
+    spelling of `config.function` — and `'invoke_function'` was a marker that named nothing
+    on its own.
+
+  What remains is what worked: `config.function` (now **required**) names a registered
+  function, `config.inputs` feeds it, `config.outputVariable` binds its return value.
+
+  **The replacements are three different mechanisms, not one rename.**
+
+  | Retired                                                           | Use instead                                                                                                                                        |
+  | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `actionType: 'email'` (+ `template` / `recipients` / `variables`) | a `notify` node — it delivers through the messaging service: the in-app inbox by default, real email once `@objectstack/plugin-email` is installed |
+  | `actionType: 'slack'`                                             | a `connector_action` node with the Slack connector, or an `http` node posting to an incoming webhook — `notify` has no Slack channel               |
+  | `actionType: 'my_fn'` (shorthand)                                 | `function: 'my_fn'` — the conversion moves it for you                                                                                              |
+  | `script: '…'` (inline JS)                                         | move the logic into a registered function and call it via `config.function`                                                                        |
+
+  **Execute-time parse.** `script` and `subflow` now run their config through the contract
+  before executing, the seam #4277 gave the flat builtins — a violation refuses the node as
+  a **guard** (wrong metadata; no `fault` edge may route it, #3863). `script` could not join
+  that seam while its legal key set depended on `actionType`: a flat parse would either
+  reject valid shapes or wave everything through. Converging the node is what made the
+  contract fit. `subflow`'s hand-written `flowName` check became the same parse, so its
+  message is now `subflow 'n1': config does not satisfy the subflow contract —
+config.flowName: …`. `decision` deliberately stays export-only: its one key is optional,
+  so a parse would check nothing.
+
+  **Migration.** `os migrate meta --from 16` rewrites stored sources; authoring one of these
+  keys in TypeScript is a compile error carrying the same prescription. A shorthand
+  `actionType` **converts into `function`** — that is what it named — unless `function` is
+  already set, in which case it was dead metadata the executor never reached. The other four
+  keys are dropped outright: nothing read them, so there is no value to preserve, and
+  rebuilding the intent is an authoring decision (the table above) rather than something a
+  mechanical rewrite can guess.
+
+  The keys leave the **load path** (`retiredFromLoadPath`) with the rest of the keys retired
+  for _misdescribing themselves_ rather than for being renamed: absorbing
+  `actionType: 'email'` silently would let an author keep believing the flow sends mail. The
+  one seam that still replays it is `registerFlow`, which rehydrates data at rest (#3903) —
+  a row in `sys_metadata` has no author for a tombstone to teach. So a stored email-stub node
+  arrives stripped of the keys nothing read and then **refuses for naming no callable**,
+  where it used to log a line and report success. That flip is the behavior change to expect.
+
+  **A build gap this surfaced, fixed here.** `FlowFunctionEntrySchema` now also accepts a
+  **lowered handler ref** (a non-empty string), the form `objectstack build` produces: the
+  CLI lowers every inline callable to a serialisable ref _before_ the stack is parsed (it
+  must — `z.function()` wraps callables and would break the ref mapping), so a built
+  manifest holds `{ myFn: 'myFn' }`, which neither previous member accepted. The result was
+  that `defineStack({ functions })` — a documented, first-class mechanism — could not
+  survive a build at all. Nothing had noticed because no bundled example used it; #4343
+  turns that from latent into blocking, since `config.function` becomes the only thing a
+  `script` node can run. `Hook.handler` already declared exactly this pair (`z.union([
+z.string(), <function> ])`, "string, post-build / inline function, pre-build"), so this
+  brings `functions` onto the platform's established shape rather than inventing one. A
+  string carries no callable and `normalizeFlowFunctionEntry` still drops it by design — the
+  real functions ride in the sibling ESM module the build emits, merged by name — so
+  hand-authoring one registers nothing and fails loudly at execute ("no function named '…'
+  is registered"), never silently.
+
+  Also in this change: the retired constants `SCRIPT_BUILTIN_ACTION_TYPES`,
+  `SCRIPT_INVOKE_FUNCTION_ACTION_TYPE` and the `ScriptBuiltinActionType` type are removed
+  (they described the dispatch set that no longer exists); `os validate` names a retired key
+  and its replacement instead of reporting a generic missing callable; and the `#3796`
+  alias fixture, which carried `actionType: 'invoke_function'` through both sides, no longer
+  describes an end state protocol 17 can reach — the rename itself is untouched. No liveness
+  ledger row moves: the gate walks `FlowSchema`, whose `nodes[].config` is
+  `z.record(z.unknown())`, so these keys were never governed by one.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/formula@17.0.0-rc.2
+  - @objectstack/sdui-parser@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

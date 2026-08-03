@@ -1,5 +1,258 @@
 # @objectstack/plugin-webhooks
 
+## 17.0.0-rc.2
+
+### Minor Changes
+
+- f2445c9: feat(spec,objectql,client,plugin-webhooks): predicate writes get an honest bulk event contract (#4639)
+
+  A `multi: true` update/delete reaches `IDataDriver.updateMany` / `deleteMany`,
+  which are contracted to resolve an affected row COUNT and nothing else. That
+  satisfies neither `DataEvent.recordId` (required) nor `before` / `after` /
+  `changes`, so before #4626 the engine fabricated a per-record event with
+  `recordId: ''` and `after: <count>` — an event every schema-compliant consumer
+  must reject, and one the webhook enqueuer's `?? 'unknown'` fallback turned into
+  a real delivery naming an unidentifiable record. #4626 removed the fabrication
+  and published nothing instead: honest, but it left webhooks, knowledge sync and
+  `subscribeData` silent for every predicate write.
+
+  Bulk writes now get their **own** contract rather than impersonating a
+  per-record one or going dark:
+
+  - **New `BulkDataEvent`** (`@objectstack/spec/api`): `data.records.updated` /
+    `data.records.deleted` — note the plural — carrying `id`, `type`, `object`,
+    `matched`, `userId?`, `timestamp`. Deliberately a separate schema from
+    `DataEvent`, not a widened one: a consumer that receives
+    `data.records.updated` knows from the type alone that no `recordId` is
+    coming, instead of discovering an empty string at runtime.
+  - **Engine** publishes it from the `multi: true` branches of `update()` /
+    `delete()`, validated with `BulkDataEventSchema.parse` before publish. A
+    predicate that matched **zero** rows publishes nothing (no data changed — this
+    is what keeps an idle background sweep from becoming an hourly "0 records"
+    delivery), and a driver that resolves a non-count publishes nothing and warns
+    rather than asserting a number it cannot verify. Per-record writes are
+    untouched, including a scalar `where.id` with `multi: true`, which is still a
+    single-record target and still emits `data.record.deleted`.
+  - **Webhooks**: two new opt-in triggers, `bulk_update` and `bulk_delete`
+    (`WebhookTriggerType`, and the `sys_webhook.triggers` multi-select). They are
+    **not** extra sources for `create` / `update` / `delete`: the delivered body
+    has no `recordId` and no record, so routing it to existing per-record
+    subscribers would hand them a payload missing every field they read — the
+    same class of breakage as the old `recordId: ''`, from the other direction. A
+    webhook that wants both subscribes to both. Bulk deliveries dedup on the
+    producer's event uuid, since two sweeps in the same millisecond are genuinely
+    different events that a timestamp-based key would collapse.
+  - **Client SDK**: new `client.events.subscribeBulkData(object, cb)`, with the
+    same loud boundary validation as `subscribeData`. Kept a separate method for
+    the same reason — delivering a `BulkDataEvent` to a `(event: DataEvent) =>
+void` callback would recreate exactly the "typed field, `undefined` at
+    runtime" defect #4626 removed. `subscribeData`'s own guard was also tightened
+    from `data.` to `data.record.`, so an aggregate event is ignored rather than
+    rejected as off-contract.
+  - **Knowledge sync** now says out loud that a predicate write leaves its index
+    stale. A knowledge index is a per-record projection and `matched: 40` names no
+    record, so no event shape could drive it — the durable fix is reconciliation,
+    tracked in #4672.
+
+  The event carries no `where` predicate. The only one available at publish time
+  is the middleware-composed AST, whose filter embeds the security layer's
+  injected row scoping (RLS, sharing) — publishing it would ship tenant scoping
+  internals to whatever external URL a webhook points at.
+
+  Also pays off a measurement debt from #4655, which claimed the write-path cost
+  of event publishing had been measured but never published the numbers:
+  `packages/objectql/src/engine-data-events.bench.ts` measures it. Against an
+  in-memory driver, publishing costs ~7–9µs per event (insert 0.021ms vs 0.012ms,
+  single-id update 0.013ms vs 0.007ms). A bulk write pays that **once** regardless
+  of how many rows matched (0.040ms vs 0.034ms over a 100-row match set), so its
+  relative cost shrinks as the match set grows.
+
+### Patch Changes
+
+- 257d97a: ADR-0078 Phase 4, decided rather than deferred: the silent skips stop being silent at runtime. The registry — the one choke point every metadata door goes through — now emits a functional-completeness diagnostic at registration, and the webhook enqueuer's zero-trigger skip warns instead of returning `null` wordlessly.
+
+  **The Phase 4 ruling.** The phase had two halves, and they got opposite verdicts:
+
+  - **Generative rule sweep: rejected — not deferred.** A generator can enumerate candidates ("which optional keys might be load-bearing?") but cannot verify runtime skip sites, and a rule without its skip-site citation is a false prescription — this campaign shipped four of those and every one was caught by the verification pass a generator would skip. The route is structurally wrong; no amount of waiting produces the evidence that would fix it.
+  - **Registration-time diagnostics: built now.** The evidence was already in hand, not pending: #3896 (Setup authoring inserted `sys_sharing_rule` rows directly, bypassing the schema that "required" `criteria`) and cloud's `rowColor.mapping` (an `as never` cast bypassed tsc) prove that doors which skip Zod and lint are real. The author-time gate only protects metadata that passes through `os build` / `validate` / `lint`; `SchemaRegistry.registerObject` is where _every_ door converges — declared stacks, plugin objects, `extend` contributions, `saveMetaItem`, raw `registerObject` calls.
+
+  **Same predicate, same rule ids, different posture.** The registry calls the same `checkFieldCompleteness` that `validate-functional-completeness` uses, so the boot log carries the _same rule ids_ the lint reports (`field/summary-without-operations`, …) — an operator or an AI reading the log greps the id straight into the same docs and suppression story. But the registry **warns and never throws**: ADR-0078 §1's error severity means _the instance is dead_, not _the system is dead_ — an inert field must not kill a boot that thousands of healthy objects share. Errors block at author time; the registry's job is to make sure the silence never survives to runtime unobserved.
+
+  One line per object with every finding aggregated (not per request — the hot path stays free; not per finding — a three-dead-field object is one greppable line). Follows `warnStrippedLegacyApiMethods` (#3543) exactly: module-level once-per-object dedup, injectable `warn`, pure observation that never mutates the schema.
+
+  **The webhook skip now names itself.** `auto-enqueuer.ts`'s `if (triggers.size === 0) return null` sat under a comment blessing the empty case as "a manual-only webhook" — a mode #3196 removed (no manual fire path exists). The skip now warns with the author-time rule id (`webhook/without-triggers`), and the comment tells the truth. Only _active_ rows reach the parse (`where: { active: true }` — verified, not assumed), so a deliberately disabled webhook stays warning-free.
+
+  **Scope honesty:** field rules and the webhook rule get the runtime twin. `view/layout-without-binding` stays author-time-only — views don't register through this choke point and the renderer half of the evidence lives in objectui.
+
+  Tracked in #4544. This closes the ADR-0078 loop end to end: author-time error, runtime warning, one shared predicate deciding both.
+
+- 462b713: fix(objectql,client): `subscribeData` callbacks receive real `DataEvent`s — the producer now fulfils the declared contract (#4626)
+
+  `@objectstack/spec/api`'s `DataEvent` declares top-level `id` (uuid,
+  required), `type`, `object`, `recordId` (required), `changes?`, `before?`,
+  `after?`, `userId?`, `timestamp`. But the producer (the ObjectQL engine)
+  published a raw `RealtimeEventPayload` envelope with `{ recordId, after,
+changes }` nested under `payload` and never generated `id`/`userId`, while the
+  client SDK force-cast that envelope into the callback (`callback(event as any
+as DataEvent)`). Subscribers who wrote `event.recordId` / `event.changes` —
+  exactly what the types promised — compiled green and read `undefined` at
+  runtime. The data-side twin of #4602.
+
+  Producer now fulfils the contract:
+
+  - `ObjectQL.insert()` / `update()` / `delete()` build a true `DataEvent`
+    (generated uuid `id`, flattened top-level fields, `userId` from the
+    execution context when the write names an actor) and validate it with
+    `DataEventSchema.parse` before publishing. The transport envelope is
+    unchanged (`RealtimeEventPayload`, with `payload` carrying the complete
+    `DataEvent`), so subscribers keep receiving `{ type, object, payload,
+timestamp }` on the wire.
+  - A batch insert publishes one event **per record** (as before), each with its
+    own event id.
+  - **A multi-row write (`multi: true` → `updateMany` / `deleteMany`) now
+    publishes nothing.** Those driver methods return only an affected count, so
+    there is no record for a required `recordId` to name; the engine logs a
+    warning naming the gap instead of publishing the previous fabrication
+    (`recordId: ''`, `after: <affected count>`), which every schema-compliant
+    consumer had to reject. **Consequence: webhooks and knowledge sync no longer
+    fire for bulk writes** — they previously fired once with an unusable body. A
+    real bulk event contract is tracked in #4639.
+
+  Consumers validate or read the fulfilled shape instead of guessing:
+
+  - `@objectstack/client`'s `subscribeData` (and therefore
+    `@objectstack/client-react`'s `useDataSubscription` /
+    `useDataSubscriptionCallback` / `useAutoRefresh`, which delegate to it)
+    unwraps the envelope and runs `DataEventSchema.safeParse` at the boundary.
+    An off-contract payload is rejected loudly (handler error, callback never
+    invoked) — never coerced or passed through. The `as any as DataEvent`
+    double-cast is gone, and the `recordId` option now filters on the fulfilled
+    event.
+  - `@objectstack/plugin-webhooks`' auto-enqueuer reads the required
+    `recordId` directly; its `recordId ?? id ?? after?.id ?? before?.id ??
+'unknown'` fallback chain is gone, and an off-contract event is dropped with
+    a warning rather than delivered under the literal id `'unknown'`. Delivered
+    webhook bodies now also carry the event's `id`/`type`/`userId`; the record
+    itself stays nested under `after` and the envelope keys (`object`,
+    `recordId`, `action`, `timestamp`) still win.
+  - `@objectstack/service-knowledge`'s event sync reads the record from `after`
+    (create/update) and the id from `recordId` (delete) for `data.record.*`.
+    It previously indexed the envelope itself as if it were the row, and never
+    resolved an id for deletes.
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [040ecd2]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/service-messaging@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

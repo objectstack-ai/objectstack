@@ -1,5 +1,309 @@
 # @objectstack/plugin-audit
 
+## 17.0.0-rc.2
+
+### Major Changes
+
+- be90dea: fix(plugin-audit,rest)!: `sys_comment` derives its access from the record its thread names (#4630)
+
+  Attachments derive their visibility from the parent record; comments derived
+  nothing. On the _same_ record, with the _same_ user, the two answered
+  differently:
+
+  ```
+  user: rep2 (does NOT own and cannot read the opportunity)
+  GET  /api/v1/data/crm_opportunity?$filter=["id","=","1A7n…"]      → 200, 0 rows
+  GET  /api/v1/data/sys_attachment?$filter=["parent_id","=","1A7n…"] → 200, 0 rows
+  GET  /api/v1/data/sys_comment?$filter=["thread_id","=","crm_opportunity:1A7n…"]
+                                                                     → 200, 1 row
+  POST /api/v1/data/sys_comment {"thread_id":"crm_opportunity:", …}  → 201 Created
+  ```
+
+  `sys_comment` is public, has no owner column, and hides its parent inside a
+  string (`thread_id` = `{object_name}:{record_id}`), so neither OWD/sharing nor
+  RLS ever narrowed it. Because `enable.feeds` is opt-OUT (spec default `true`),
+  every object in every app carried that org-wide readable, org-wide writable
+  side-channel — a deployment that carefully authored OWD, sharing rules and RLS
+  on its records still leaked their discussion.
+
+  `AuditPlugin` now installs the same two-part kit `service-storage` installs for
+  `sys_attachment`, keyed off `thread_id`'s parent:
+
+  - **read** — a `find`/`findOne`/`count`/`aggregate` middleware intersects every
+    query with the threads whose record the caller can actually read (resolved
+    through the caller-scoped engine, so the parent's own OWD/sharing/RLS/CRUD
+    decide). `count()` is filtered identically to `find()`, so a list `total`
+    cannot leak the hidden rows' existence either.
+  - **write** — `beforeInsert` requires READ on the record the thread names;
+    `beforeUpdate` / `beforeDelete` require the caller to be the comment's AUTHOR
+    or to hold EDIT on that record. `author_id` is server-stamped from the
+    session, so a client-supplied value never wins.
+
+  Everything fails CLOSED: a `thread_id` that names no record — the dangling
+  `"crm_opportunity:"` above, a free-form thread, a thread on `sys_comment`
+  itself — is refused on write and excluded on read, and a filter that cannot be
+  computed denies all rather than falling open. Refusals answer **403
+  `RECORD_NOT_ACCESSIBLE`** (the standard error catalog, per ADR-0112 — a generic
+  permission condition takes a catalogued code rather than a new synonym), with
+  `error.object` naming the record's object.
+
+  **Breaking for deployments that depended on the gap.** Reads that used to
+  return other people's comments now return fewer rows (or none), and writes that
+  used to 201 now 403. Specifically:
+
+  - Listing `sys_comment` without being able to read the parent record → the row
+    is gone, not merely unlabelled. Panels that render a thread must be reached by
+    a principal who can read the record.
+  - Threads whose `thread_id` is not `{object_name}:{record_id}` are no longer
+    usable at all: creating one is refused, and existing rows become invisible to
+    everyone but system context. Migrate free-form threads to a real record
+    reference (or keep them under a system-context surface).
+  - Deleting or editing another user's comment now requires EDIT on the record.
+    Note also that `sys_comment` delete already needed a permission set carrying
+    `allowDelete` — the `member_default` baseline has none (ADR-0090 D5).
+  - Posting a comment no longer requires the client to send `author_id` (it is
+    stamped); a client that sends someone else's is silently corrected rather than
+    believed.
+
+  Orthogonal and unchanged: `enable.feeds` (`FEEDS_DISABLED`) still gates whether
+  an object has comments at all, and anonymous callers are still refused with 401
+  before any of this runs.
+
+### Minor Changes
+
+- ce5242c: feat(auth,objectql,audit,security,spec): identity-table writes carry the real actor, so `sys_member` history stops saying "system" (#4586)
+
+  better-auth owns every write to the identity tables (`sys_member`, `sys_user`,
+  `sys_invitation`, …) and its ObjectQL adapter runs them `isSystem: true` **on
+  purpose** — the route already authorized the action under better-auth's own ACL,
+  and ADR-0092 D2 refuses user-context writes to those tables outright. The
+  consequence was that the human who clicked _make admin_ was known exactly once,
+  in the hook layer where the session exists, and then discarded: every
+  `trackHistory` transition on `sys_member` recorded `user_id: null` / "system",
+  and `sys_user_permission_set.granted_by` was written null by the auto-grant.
+  "Who made this person an org admin?" had no answer in the platform's own audit
+  log.
+
+  **What changed**
+
+  A request-scoped attribution seam, general rather than a `sys_member` special
+  case:
+
+  | Layer                        | Before                             | After                                                                                                                          |
+  | :--------------------------- | :--------------------------------- | :----------------------------------------------------------------------------------------------------------------------------- |
+  | `ExecutionContext`           | `userId` / `actor` only            | new optional `attributedUserId` — the human CREDITED for a write the system AUTHORIZED                                         |
+  | `HookContext`                | `session`, `user`                  | new `provenance.attributedUserId`, split off the context beside `session`                                                      |
+  | better-auth ObjectQL adapter | `{ isSystem: true }`               | `{ isSystem: true, attributedUserId }` when a request scope is open                                                            |
+  | audit writer                 | `user_id = session.userId ?? null` | falls back to `provenance.attributedUserId` when the session names nobody                                                      |
+  | `auto-org-admin-grant`       | `granted_by: null`, no `reason`    | the attributed human in `granted_by`, plus a machine-provenance `reason` naming the writer and the triggering `sys_member` row |
+
+  Outside a request scope nothing changes: writes stay bare `{ isSystem: true }`
+  and audit rows keep recording `null`. Absence is still never upgraded into a
+  caller, and never written as a sentinel string (ADR-0118 D1/D2).
+
+  **Hard constraint — attribution is not authority**
+
+  `attributedUserId` is read by exactly one consumer, the audit writer, and by no
+  security middleware. It never becomes `ExecutionContext.userId`, so it is never
+  the subject the engine authorizes as: not RLS `current_user`, not the ownership
+  stamp, not permission resolution. A context carrying only `attributedUserId`
+  authorizes exactly like an empty context (ANONYMOUS), and a context carrying it
+  beside `isSystem: true` authorizes exactly like `isSystem` alone. Re-authorizing
+  identity writes as the human would re-adjudicate a decision better-auth already
+  made — the second adjudication track ADR-0095 D3 closed. The constraint is
+  pinned by tests at three layers: the engine seam
+  (`packages/objectql/src/engine.test.ts`), the better-auth adapter
+  (`packages/plugins/plugin-auth/src/auth-actor-attribution.test.ts`), and the
+  live HTTP route (a plain member still cannot promote themselves).
+
+  **For authors and plugin developers**
+
+  `attributedUserId` is authorable on `ExecutionContext` and readable as
+  `ctx.provenance?.attributedUserId` in hooks. Use it to answer _who is
+  responsible_; keep using `ctx.session` / `ctx.user` to decide _what is
+  permitted_. The two are separate fields precisely so the distinction cannot be
+  blurred by accident.
+
+- 04b9776: feat(plugin-audit)!: retire `sys_comment.visibility` and `sys_comment.reply_count` (#4756, ADR-0049)
+
+  Both fields were modelled with **zero** runtime consumers — nothing in this repo,
+  in `objectui`, or in `cloud` ever read or maintained either one. ADR-0049
+  enforce-or-remove; maintainer decision: remove both. Same disposition, and for
+  the same stated reason, as `sys_attachment.share_type` / `sys_attachment.visibility`
+  in #2755 ("attachment access is derived from the parent record").
+
+  **REMOVED — `sys_comment.visibility`** (`'public' | 'internal' | 'private'`,
+  defaulted `'public'`).
+
+  This one is a **security-looking key with no gate behind it**, which is the
+  primary reason it goes rather than stays. No code path consulted it: not
+  `enforceFeedsCapability`, not the record-level gates added in #4630, not the
+  REST layer, not objectui's discussion panel. A comment an author marked
+  `private` was visible to exactly the same people as a `public` one — an app
+  author (or an AI authoring metadata) reading the field list would reasonably
+  believe otherwise, and get a silent security failure instead of an error. That
+  is the Prime Directive #10 trap in its textbook shape.
+
+  There is **no replacement key**: after #4630, who can see a comment is decided
+  by the record-level permissions of the record its `thread_id` names — one
+  coherent rule. A per-row enum layered on top would be a second source of truth
+  for the same question. The enum's only genuinely missing meaning ("hidden from
+  external/portal principals") depends on external principals existing at all,
+  which waits on ADR-0090 D11's `externalSharingModel`; today there is nobody to
+  hide a comment from. This does not foreclose that design — when portals land,
+  a visibility key can return **enforce-first**, with a real gate and tests.
+
+  **FROM → TO:** stop sending `visibility` on `sys_comment` writes; to restrict
+  who sees a discussion, restrict who can read the record `thread_id` points at.
+
+  **REMOVED — `sys_comment.reply_count`** (`number`, `defaultValue: 0`,
+  `readonly: true`).
+
+  Never incremented anywhere, and `readonly` meant an author could not set it by
+  hand either, so every row read `0` forever — a UI binding an "N replies" badge
+  to it rendered `0` for every thread. Deliberately **not** replaced by an
+  `afterInsert`/`afterDelete` roll-up: the predicate/bulk write-hook gaps tracked
+  by #4770 / #4778 / #4779 (a hook that returns early without a single-record id
+  lets the whole bulk operation through) are exactly where a hook-maintained
+  counter drifts — a bulk delete of replies would never decrement it. A counter
+  that drifts is worse than no counter, because both the UI and an AI reading the
+  record trust it. If a badge needs the number, aggregate `parent_id` children at
+  read time; a designed roll-up can be revisited once #4775's family has settled
+  bulk-hook semantics.
+
+  **FROM → TO:** replace reads of `reply_count` with a count of `sys_comment` rows
+  whose `parent_id` is the comment's id.
+
+  **Stored data.** Existing databases keep both columns as **unmanaged leftovers**
+  — no migration, matching #2755. What changes where:
+
+  - **Reads are loud everywhere.** The read-axis gates (#4134 / #4226) resolve
+    field names from the object schema, not from the table, so a filter, sort,
+    `select` or `expand` naming `visibility` / `reply_count` now answers
+    `400 INVALID_FIELD` on every deployment, leftover column or not. A "0 replies"
+    badge that silently lied becomes an error that names itself.
+  - **Writes are loud on new databases only.** A database provisioned after this
+    change has no such column, so the write fails at the driver and is mapped to
+    the same `400 INVALID_FIELD` envelope. On a pre-existing database the leftover
+    column still accepts a value nothing will ever read — record validation does
+    not reject undeclared keys. Dropping the two columns is an optional manual
+    cleanup, not a requirement.
+
+### Patch Changes
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/platform-objects@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Patch Changes

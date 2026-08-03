@@ -1,5 +1,161 @@
 # @objectstack/service-storage
 
+## 17.0.0-rc.2
+
+### Patch Changes
+
+- 941dec4: fix(service-storage): an UNSCOPED multi-delete of `sys_attachment` is refused instead of authorized (#4757)
+
+  `installAttachmentAccessHooks`'s `beforeDelete` gate resolved the rows a delete
+  matches in two ways — by `input.id`, or by `input.options.where` — and then
+  short-circuited with `if (!rows.length) return`. A delete carrying **neither**
+  an id **nor** a `where` took neither branch, so `rows` stayed empty and the gate
+  returned _allow_. That is not "nothing matched": nothing was ever queried.
+
+  The engine reads the same call as a bulk delete over everything — with no
+  single id it seeds the delete AST as `{ object }` and hands that to
+  `driver.deleteMany` — so `ql.delete('sys_attachment', { multi: true })` emptied
+  the whole attachment table with the record-level gate having authorized exactly
+  zero rows. Neither layer underneath catches it: plugin-sharing composes no
+  row-scoping predicate for an object with no owner field (`sys_attachment`'s
+  provenance column is `uploaded_by`), and plugin-security only refuses callers
+  whose grants lack the delete bit on `sys_attachment` — an app shipping the
+  domain grant the attachments panel requires passes RBAC and lands here.
+
+  The gate now fails **closed** on that shape: no id and no `where` is refused
+  with 403 `ATTACHMENT_DELETE_DENIED` ("Refusing an unscoped multi-delete of
+  attachments — scope the delete to the rows you mean"), the posture #4630 gave
+  `sys_comment` in `resolveTargetRows`. "Nothing to authorize" and "nothing was
+  ever queried" are different verdicts, and reading the second as the first is
+  fail-open.
+
+  Scoped deletes are unchanged: an id-bound delete, a `where`-bound multi-delete,
+  and even `where: {}` (which matches every row but is a real query) still resolve
+  their rows and authorize each one uploader-or-parent-editor as before — a delete
+  that legitimately matches no row still passes. Only the predicate-less call is
+  newly refused. If you were relying on `ql.delete('sys_attachment', { multi:
+true })` to clear the table, pass a predicate (`{ multi: true, where: {} }`
+  authorizes row-by-row) or perform the sweep under a system context, which
+  bypasses the gate as before.
+
+- 9fd9ae7: Init-time service consumption is now declared everywhere, and the declaration is enforced (#4471, ADR-0116). A new CI gate (`check:init-service-contract`) walks every plugin's `init()` call graph — including private helpers, the shape that shipped #4420 — and errors on any init-reachable `getService('X')` of a workspace-provided service that is not covered by `dependencies`, `optionalDependencies`, or `requiresServices`. Eleven previously undeclared init-time consumers (metadata, rest, cli serve plugins, and seven services) now declare `optionalDependencies` on their providers, so the kernel orders them deterministically instead of by registration luck; each still degrades on purpose when the provider is not composed. Plugin authors: a best-effort init-time `getService` must declare its provider in `optionalDependencies` (declared tolerance) — the checker never exempts it.
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [ff17642]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/platform-objects@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/observability@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Minor Changes

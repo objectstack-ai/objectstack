@@ -1,5 +1,321 @@
 # @objectstack/metadata
 
+## 17.0.0-rc.2
+
+### Patch Changes
+
+- c4ab50b: fix(metadata): `sys_metadata` 的 DDL 失败不再被静默吞掉 —— 只有「表已存在」这一种原因可以静音 (#4728)
+
+  `DatabaseLoader.ensureSchema()` 过去用一个空 `catch` 吞掉 **全部** DDL 失败,并且照样把
+  `schemaReady` 置为 `true`:
+
+  ```ts
+  } catch {
+    // If syncSchema fails (e.g. table already exists), mark ready and continue
+    this.schemaReady = true;
+  }
+  ```
+
+  注释里的免责理由只覆盖了失败原因中最良性的一种,却用它为**所有**原因开脱。真实的失败
+  (权限不足、数据源根本没连上、列类型冲突)之后,表或新列压根不存在,而进程的状态与成功
+  路径**逐字节相同**,启动日志里一行痕迹都没有 —— 这正是 #4420 的形态:声称已持久化、实
+  际没落盘、系统看起来完全健康。#4632 把它定成规则(AGENTS.md → "Degradation log levels"),
+  机械检查 `pnpm check:durability-log-level` 已经能发现这一处。
+
+  现在按**错误类型**判别,而不是按注释里的乐观假设:
+
+  - **良性的「已存在」**(SQLite 的 `table … already exists` / `duplicate column name`、
+    Postgres 的 SQLSTATE `42P07`/`42701`/`42710`、MySQL 的 `ER_TABLE_EXISTS_ERROR` 等及其
+    `errno`,并跟随 `cause` 链)—— 表确实已就绪,当作 no-op 静默通过,并照常执行后续的
+    `project_id → environment_id` 迁移与 ADR-0005 索引。
+  - **其余一切失败** —— 以 `console.error` 上报,文案同时说清**后果**(`sys_metadata` 的表/
+    列未创建,后续每一次元数据写入都会报错、或在宽松驱动上悄悄丢列,而服务器仍报告健康)
+    与**修复动作**(修掉下面那条驱动/数据源错误后重启)。只说**一次**,不是每次写入都刷屏。
+  - `schemaReady` **不再**在真实失败后置 `true`。启动依旧不被阻断(该方法不抛),但 loader
+    不再声称一个它并不具备的就绪状态,下一次元数据操作会重试 —— 数据源只是还在连接这类瞬
+    时故障因此可以自愈,恢复时补一条 `info`。
+
+  `ensureHistorySchema()` 按同一规则对齐:良性「已存在」不再每次写入都打一条 `error`(过度
+  使用 `error` 是镜像失败),真实失败则同样只响亮一次并保持重试。
+
+  无 API / schema 变更;新增内部工具 `isSchemaAlreadyExistsError()`(未从包入口导出)。
+  `scripts/durability-degradation.baseline.json` 中指向本单的条目随之删除(该文件 shrink-only)。
+
+- 3c7bcc0: feat(spec)!: converge the 11 contracts-vs-domain dual-source type names (#4538)
+
+  `packages/spec/src/contracts/` hand-wrote parameter/result interfaces whose
+  names collided with same-named zod-derived types in the domains — the #4411
+  trap, tracked as 11 rows of `dual-source-exports.baseline.json`. Each name was
+  judged individually against a three-repo import-level scan (framework, cloud,
+  objectui): which declaration actually flows at runtime decides the direction.
+  All 11 rows are deleted from the baseline; no name below is exported twice
+  anymore.
+
+  **Converged — `./contracts` now re-exports the domain zod type (same
+  declaration on both entries, imports keep compiling from either):**
+
+  - `NotificationChannel` → `system/notification.zod`'s
+    `z.infer<NotificationChannelSchema>` (member sets were identical).
+  - `ValidationResult` → `kernel/plugin-validator.zod` (shapes were identical).
+  - `HealthStatus` → `kernel/startup-orchestrator.zod` (`details` narrows
+    `Record<string, any>` → `Record<string, unknown>`).
+  - `PluginStartupResult` → `kernel/startup-orchestrator.zod`. FROM `plugin:
+Plugin` (live object) and `error?: Error` TO the serializable projection
+    (`plugin: { name, version? }`-passthrough, `error?: { name, message,
+stack?, code? }`). Neither side had any consumer outside spec; the
+    zod-validatable shape wins.
+  - `StartupOptions` → `kernel/startup-orchestrator.zod` — the PARSED tier
+    (defaults applied). `IStartupOrchestrator.orchestrateStartup` now takes
+    `StartupOptionsInput` (the caller-authored all-optional tier, also
+    re-exported from `./contracts`). Fix for callers typed to the old
+    all-optional `StartupOptions`: rename to `StartupOptionsInput`.
+  - `JobExecution` → `system/job.zod`. The system schema's `duration` field is
+    RENAMED `durationMs` — that is what every job adapter produces and what the
+    `sys_job_run.duration_ms` column round-trips; the schema described records
+    nothing ever wrote. Fix: `duration` → `durationMs` when parsing
+    `JobExecutionSchema` payloads.
+  - `AnalyticsQuery` → `data/analytics.zod`. The domain schema aligned to the
+    contract's semantics first: `timezone` LOST its `.default('UTC')` — absence
+    is meaningful (the engine resolves org timezone, #1982/#2018; the
+    `/analytics` entry always refused to apply that default). The schema is now
+    transform-free, so `AnalyticsQuery` ≡ `AnalyticsQueryInput` (both kept
+    exported). Fix for code that relied on `.parse()` injecting `timezone:
+'UTC'`: pass the timezone explicitly or resolve it via the engine chain
+    (`selection.timezone ?? context.timezone ?? 'UTC'`).
+
+  **Renamed — two genuinely different concepts were sharing one name (both
+  flow at runtime):**
+
+  - `./contracts` `DriverCapabilities` → **`AnalyticsDriverCapabilities`**
+    (`{ nativeSql, objectqlAggregate, inMemory }`, the analytics strategy-chain
+    execution-path probe). The `DriverCapabilities` name now belongs solely to
+    the data domain's driver feature-flag record (`DriverCapabilitiesSchema`,
+    what `IDataDriver.supports` declares). Fix: importers of the trio from
+    `@objectstack/spec/contracts` (or `@objectstack/service-analytics`, whose
+    re-export is renamed in lockstep) rename the import; importers who meant
+    the driver flags import `DriverCapabilities` from `@objectstack/spec/data`.
+
+  **Removed — the domain-side declaration was dead (zero import-level consumers
+  in framework/cloud/objectui; the #4411 family's last survivors):**
+
+  - `system` `MetadataExportOptionsSchema` / `MetadataExportOptions` and
+    `MetadataImportOptionsSchema` / `MetadataImportOptions` (the
+    `output`/`source`-directory bags). The names now have ONE declaration each:
+    the `IMetadataService.exportMetadata` / `importMetadata` parameter
+    interfaces on `./contracts` (`types`/`namespaces`/`format` and
+    `conflictResolution`/`validate`/`dryRun`), which `MetadataManager`
+    implements. No tombstone/D2 conversion, deliberately — these are runtime
+    option-bag types, not authorable metadata (same reasoning as #4458).
+    `@objectstack/metadata` re-exports the two names from `./contracts` now
+    (it previously re-exported the dead system-side shapes its own manager
+    did not accept).
+  - `system` `JobSchedule` (the `= Schedule` back-compat alias). The name's one
+    declaration is the `IJobService.schedule` boundary shape on `./contracts`
+    (plain-string cron `expression`); the authored metadata type keeps its real
+    name `Schedule`. Fix: `import type { JobSchedule } from
+'@objectstack/spec/system'` → `Schedule` (authoring tier) or the
+    `./contracts` `JobSchedule` (service boundary), whichever you meant.
+
+- 9fd9ae7: Init-time service consumption is now declared everywhere, and the declaration is enforced (#4471, ADR-0116). A new CI gate (`check:init-service-contract`) walks every plugin's `init()` call graph — including private helpers, the shape that shipped #4420 — and errors on any init-reachable `getService('X')` of a workspace-provided service that is not covered by `dependencies`, `optionalDependencies`, or `requiresServices`. Eleven previously undeclared init-time consumers (metadata, rest, cli serve plugins, and seven services) now declare `optionalDependencies` on their providers, so the kernel orders them deterministically instead of by registration luck; each still degrades on purpose when the provider is not composed. Plugin authors: a best-effort init-time `getService` must declare its provider in `optionalDependencies` (declared tolerance) — the checker never exempts it.
+- f78dd83: fix(metadata,client): `subscribeMetadata` callbacks receive real `MetadataEvent`s — the producer now fulfils the declared contract (#4602)
+
+  `@objectstack/spec/api`'s `MetadataEvent` declares top-level `id` (uuid,
+  required), `metadataType`, `name`, `definition?`, `userId?` — and after
+  #4587's convergence it is the **only** declared contract for realtime
+  metadata-change events. But the producer (`MetadataManager`) published a raw
+  `RealtimeEventPayload` envelope with everything nested under `payload` and no
+  `id`/`userId`, while the client SDK force-cast that envelope into the callback
+  (`callback(event as any as MetadataEvent)`). Subscribers who wrote
+  `event.name` / `event.metadataType` — exactly what the types promised —
+  compiled green and read `undefined` at runtime.
+
+  Producer now fulfils the contract:
+
+  - `MetadataManager.register()` / `unregister()` build a true `MetadataEvent`
+    (generated uuid `id`, flattened top-level fields, `userId` when the write
+    declares an actor) and validate it with `MetadataEventSchema.parse` before
+    publishing. The transport envelope is unchanged (`RealtimeEventPayload`,
+    with `payload` carrying the complete `MetadataEvent`).
+  - A `register()` **overwrite now publishes `metadata.{type}.updated`** instead
+    of a second `.created`, mirroring the existing `added`/`changed` watcher
+    split. Previously `.updated` was declared with no producer at all.
+  - `MetadataEventType` is a closed enum: metadata types outside it (e.g.
+    `translation`) have no declared realtime event, so nothing is published for
+    them (debug-logged) instead of emitting an event every schema-compliant
+    consumer must reject.
+
+  Consumer validates instead of casting:
+
+  - `@objectstack/client`'s `subscribeMetadata` (and therefore
+    `@objectstack/client-react`'s metadata hooks, which delegate to it) unwraps
+    the envelope and runs `MetadataEventSchema.safeParse` at the boundary. An
+    off-contract payload is rejected loudly (handler error, callback never
+    invoked) — never coerced or passed through. The `as any as MetadataEvent`
+    double-cast is gone.
+
+  New seam: `MetadataWriteOptions.userId` (`@objectstack/spec/contracts`) lets
+  write paths that know the acting user carry it into the published event's
+  `userId`. Existing callers are unaffected — the field is optional and absence
+  means "no human actor".
+
+- beefe89: fix(metadata): 历史序号 `event_seq` 不再从一次失败的读里凭空发号 —— 只有「表还没建」可以从 1 开始 (#4825)
+
+  `DatabaseLoader.nextEventSeq()` 过去把读 `sys_metadata_history` 的**全部**失败折成同一个答案:
+
+  ```ts
+  } catch {
+    // Table not provisioned yet or driver error — start at 1.
+    return 1;
+  }
+  ```
+
+  注释同时点名了两种原因,然后用同一个 `return 1` 对待。这是 #4728 刚修掉的同一种形状,但危害是
+  **更贵的那一半**:#4728 是「字节没落盘」,本条是「**落盘的字节是错的**」。历史表里已经有 N 行时,
+  一次瞬时读失败(连接抖动、超时、权限)会让下一条历史拿到 `event_seq = 1`,与既有行**直接撞号**,
+  而 insert **成功**、日志**一行没有**。`event_seq` 正是历史列表排序与 rollback 定位的依据,撞号之后
+  版本顺序就永久不可信 —— 重试不修、重启也不修。
+
+  现在按**错误类型**判别,复用 #4728 落地的那套判别机制(`packages/metadata/src/utils/schema-sync-errors.ts`
+  里新增的 `isMissingTableError()` 与既有 `isSchemaAlreadyExistsError()` 共用同一个 code / errno /
+  message + `cause` 链匹配器,而不是在同一个包里另起一套错误判别):
+
+  - **良性的「表还没建」**(SQLite `no such table: …`、Postgres SQLSTATE `42P01` /
+    `relation "…" does not exist`、MySQL `ER_NO_SUCH_TABLE` / errno `1146`,并跟随 `cause` 链)——
+    没有行,就没有可撞的号,`1` 确实是下一个号,静默返回。
+  - **其余一切读失败** —— `nextEventSeq()` 原样抛出。调用方 `createHistoryRecord()` 以
+    `console.error` 上报**后果**(该条历史记录未写入;元数据写入本身已成功,所以服务器仍报告健康,
+    而变更历史正在悄悄出现空洞,版本时间线与 rollback 目标将不完整)、**为什么是空洞而不是错号**
+    (从 1 发号会与既有行撞号,把「不完整」变成「顺序错误」,后者无人能发现)与**修复动作**,
+    然后**跳过这条历史记录**。
+  - 判别的方向刻意保守:凡是没有被正面识别为「表不存在」的,一律当作真实失败。`does not exist`
+    本身不够 —— `role "…" does not exist`、`database "…" does not exist`、`column "…" does not exist`
+    都是真实失败,对着一张可能满是行的表返回 1 正是要避免的事,所以消息匹配要求 table/relation 与
+    该短语同现。
+
+  两条边界保持不变:元数据写入本身**不**因此失败(记录已经落盘,把它报成失败是比原缺陷更糟的谎),
+  以及本路径已知的并发撞号限制(非事务,canonical producer 仍是 `SysMetadataRepository`)——那是被
+  记录过的限制,与「读失败静默重置到 1」是两回事。报告只说**一次**,恢复时补一条 `info`。
+
+  无 API / schema 变更;新增内部工具 `isMissingTableError()`(未从包入口导出)。
+
+- Updated dependencies [430dcc2]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [80334c7]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [ad047d2]
+- Updated dependencies [2826d1e]
+- Updated dependencies [5a84d41]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [203a449]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [7d21581]
+- Updated dependencies [f2445c9]
+- Updated dependencies [23338c3]
+- Updated dependencies [5b843fb]
+- Updated dependencies [b4487aa]
+- Updated dependencies [65ca83a]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [36030ff]
+- Updated dependencies [6117f7b]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [20bc357]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [d9fa683]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [ce92674]
+- Updated dependencies [9f601e8]
+- Updated dependencies [51c5227]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [07a4e26]
+- Updated dependencies [ec975f1]
+- Updated dependencies [eb4204b]
+- Updated dependencies [4f13be2]
+- Updated dependencies [61cc079]
+- Updated dependencies [0e96e46]
+- Updated dependencies [b25a116]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [ce92674]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [833b512]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0a936ea]
+- Updated dependencies [023c00b]
+- Updated dependencies [155507e]
+- Updated dependencies [7bba90b]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [061406d]
+- Updated dependencies [c1f344b]
+- Updated dependencies [9c93465]
+- Updated dependencies [ebb209c]
+- Updated dependencies [65f184b]
+- Updated dependencies [63b33e6]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [695cfbd]
+- Updated dependencies [7445149]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [21676eb]
+- Updated dependencies [e336549]
+- Updated dependencies [d40f43a]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [04f1182]
+- Updated dependencies [5647006]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [97faca3]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [ea90179]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [48fbacb]
+- Updated dependencies [355e951]
+- Updated dependencies [dadb43f]
+  - @objectstack/spec@17.0.0-rc.2
+  - @objectstack/platform-objects@17.0.0-rc.2
+  - @objectstack/core@17.0.0-rc.2
+  - @objectstack/types@17.0.0-rc.2
+  - @objectstack/metadata-core@17.0.0-rc.2
+  - @objectstack/metadata-fs@17.0.0-rc.2
+
 ## 17.0.0-rc.1
 
 ### Major Changes
