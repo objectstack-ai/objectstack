@@ -1967,6 +1967,58 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * The run named by a recorded outcome cannot be advanced at all, because no
+   * automation engine in THIS process implements the capability it needs
+   * (#4420). Returns the reason, or `undefined` when the capability is there
+   * and the caller should proceed.
+   *
+   * **Why this is not simply "not our problem".** Approvals is legitimately
+   * usable with no engine attached, and {@link assertRunResumable} deliberately
+   * stays out of the way for that reason. But "no engine is attached" and "no
+   * run is waiting" are different facts, and only the second is benign: a
+   * `flow_run_id` on the row is the request's OWN declaration that a run is
+   * parked on this decision. Deciding it in a process that cannot resume it
+   * reproduces #4420's reported half-state exactly — a durable decision, a
+   * mirrored status field frozen mid-workflow, a flow parked forever — while
+   * the caller is answered HTTP 200. The engine-less composition is the one
+   * path the #4420 fix left silent, because every guard it added hangs off an
+   * engine that is not there.
+   *
+   * **So the outcome stands, but it is never silent.** Rolling the decision
+   * back is not on the table (a human really did decide, and the row is
+   * already durable), and refusing every such call would break the standalone
+   * compositions the pre-flight protects. What is owed is the report: `error`
+   * level per AGENTS.md's durability rule — persisted state and runtime state
+   * disagree and nothing looks broken from the outside — plus a `resumeError`
+   * on the response, so `resumed: false` carries its reason instead of leaving
+   * the caller to guess whether a resume was even attempted.
+   *
+   * Reuses the registered `RESUME_FAILED` code (ADR-0112 ledger) and
+   * {@link serviceResume}'s message shape: the fact being reported — an
+   * outcome recorded whose run did not advance — is the same one, and this
+   * needs no new vocabulary of its own.
+   */
+  private missingRunCapability(
+    runId: string,
+    requestId: string,
+    what: string,
+    capability: 'resume' | 'cancelRun',
+  ): string | undefined {
+    const fn = capability === 'resume' ? this.automation?.resume : this.automation?.cancelRun;
+    if (typeof fn === 'function') return undefined;
+    this.logger?.error?.(
+      '[approvals] no automation engine to advance the recorded outcome — the run is stranded',
+      { request: requestId, run: runId, outcome: what, capability },
+    );
+    return (
+      `${capability} of run '${runId}' failed [RESUME_FAILED]: ${what} was recorded on request ${requestId}, ` +
+      `but no automation engine in this process can ${capability} its flow run — the run stays parked and the ` +
+      `record's mirrored status will not advance. Compose the automation service in this host, or recall the ` +
+      `request to release the record.`
+    );
+  }
+
+  /**
    * Resume the run behind an outcome that has ALREADY been written down, and
    * fail loudly when it cannot be (#4420).
    *
@@ -1977,7 +2029,10 @@ export class ApprovalService implements IApprovalService {
    * everything it catches never reaches a write.
    *
    * `RESUME_IN_PROGRESS` is the exception — a concurrent resume is already
-   * advancing the run, so the outcome stands and only `resumed` is false.
+   * advancing the run, so the outcome stands and only `resumed` is false. So
+   * is a composition with no engine at all ({@link missingRunCapability}),
+   * which cannot throw without breaking every standalone deployment — it
+   * reports through `resumeError` instead.
    *
    * @param what - how the recorded outcome reads in the error, e.g.
    *   `"the approve decision"`.
@@ -1988,6 +2043,8 @@ export class ApprovalService implements IApprovalService {
     what: string,
     signal: { output?: Record<string, unknown>; branchLabel?: string },
   ): Promise<{ resumed: boolean; resumeError?: string }> {
+    const missing = this.missingRunCapability(runId, requestId, what, 'resume');
+    if (missing) return { resumed: false, resumeError: missing };
     try {
       await this.serviceResume(runId, signal);
       return { resumed: true };
@@ -2032,7 +2089,11 @@ export class ApprovalService implements IApprovalService {
 
     let resumed = false;
     let resumeError: string | undefined;
-    if (result.finalized && result.runId && typeof this.automation?.resume === 'function') {
+    // No `typeof this.automation?.resume === 'function'` guard here (#4420):
+    // skipping the call when no engine is attached is precisely how a decision
+    // against a parked run returned 200 / `resumed: false` with nothing logged.
+    // `resumeRecordedOutcome` reports that composition gap instead of hiding it.
+    if (result.finalized && result.runId) {
       const branchLabel = result.decision === 'approve'
         ? APPROVAL_BRANCH_LABELS.approve
         : APPROVAL_BRANCH_LABELS.reject;
@@ -2134,28 +2195,34 @@ export class ApprovalService implements IApprovalService {
     if (inReviseWindow) {
       // ADR-0044: the run is paused at the revise wait node, which has no
       // reject out-edge to resume down — terminally cancel it instead.
-      if (runId && typeof this.automation?.cancelRun === 'function') {
+      if (runId) {
+        resumeError = this.missingRunCapability(runId, requestId, 'the recall', 'cancelRun');
+        if (!resumeError) {
+          try {
+            await this.automation!.cancelRun!(runId, `approval request ${requestId} recalled during revision`);
+          } catch (err: any) {
+            resumeError = err?.message ?? String(err);
+            this.logger?.error?.('[approvals] cancelRun after revise-window recall failed — the run may be stranded', {
+              request: requestId, run: runId, error: resumeError,
+            });
+          }
+        }
+      }
+    } else if (runId) {
+      resumeError = this.missingRunCapability(runId, requestId, 'the recall', 'resume');
+      if (!resumeError) {
         try {
-          await this.automation.cancelRun(runId, `approval request ${requestId} recalled during revision`);
+          await this.serviceResume(runId, {
+            branchLabel: APPROVAL_BRANCH_LABELS.reject,
+            output: { decision: 'recall', requestId },
+          });
+          resumed = true;
         } catch (err: any) {
           resumeError = err?.message ?? String(err);
-          this.logger?.error?.('[approvals] cancelRun after revise-window recall failed — the run may be stranded', {
+          this.logger?.error?.('[approvals] resume after recall failed — the run may be stranded', {
             request: requestId, run: runId, error: resumeError,
           });
         }
-      }
-    } else if (runId && typeof this.automation?.resume === 'function') {
-      try {
-        await this.serviceResume(runId, {
-          branchLabel: APPROVAL_BRANCH_LABELS.reject,
-          output: { decision: 'recall', requestId },
-        });
-        resumed = true;
-      } catch (err: any) {
-        resumeError = err?.message ?? String(err);
-        this.logger?.error?.('[approvals] resume after recall failed — the run may be stranded', {
-          request: requestId, run: runId, error: resumeError,
-        });
       }
     }
 
@@ -2240,7 +2307,7 @@ export class ApprovalService implements IApprovalService {
       }
       let resumed = false;
       let resumeError: string | undefined;
-      if (runId && typeof this.automation?.resume === 'function') {
+      if (runId) {
         const outcome = await this.resumeRecordedOutcome(
           runId, requestId, 'the auto-rejection',
           {
@@ -2281,7 +2348,7 @@ export class ApprovalService implements IApprovalService {
 
     let resumed = false;
     let resumeError: string | undefined;
-    if (runId && typeof this.automation?.resume === 'function') {
+    if (runId) {
       const outcome = await this.resumeRecordedOutcome(
         runId, requestId, 'the send-back',
         {
@@ -2370,7 +2437,7 @@ export class ApprovalService implements IApprovalService {
 
     let resumed = false;
     let resumeError: string | undefined;
-    if (runId && typeof this.automation?.resume === 'function') {
+    if (runId) {
       const outcome = await this.resumeRecordedOutcome(
         runId, requestId, 'the resubmit',
         {

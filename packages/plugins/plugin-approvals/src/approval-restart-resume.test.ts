@@ -237,11 +237,25 @@ describe('approval decisions across a process restart (#4420)', () => {
     expect(marks).toEqual(['on_approved']);
   });
 
-  it('leaves a composition with no automation engine exactly as it was', async () => {
-    // Approvals also runs with no engine attached — the request row still
-    // names a run, but there is nothing here that could resume it. The
-    // pre-flight must stay out of the way rather than invent a failure.
-    const standalone = new ApprovalService({ engine: data as any, logger: noopLogger });
+  it('still records the decision with no automation engine attached — but never silently', async () => {
+    // Approvals runs with no engine attached, and the decision must still
+    // stand: a human really decided, the row is durable, and refusing every
+    // such call would break the standalone compositions the pre-flight
+    // deliberately protects. So `finalized` / `resumed` are unchanged.
+    //
+    // What changed is the silence. The request row NAMES a run, which is its
+    // own declaration that a flow is parked on this decision — and every guard
+    // the #4420 fix added hangs off an engine that is not there, so this was
+    // the one path left answering 200 / `resumed: false` with nothing logged:
+    // #4420's exact reported symptom, in the one composition its fix could not
+    // see. The gap is now reported at `error` (persisted state and runtime
+    // state disagree, and nothing looks broken) and carried on `resumeError`.
+    const logs: Array<{ level: string; msg: string }> = [];
+    const capturing = {
+      info() {}, warn() {}, debug() {},
+      error(msg: any) { logs.push({ level: 'error', msg: String(msg) }); },
+    };
+    const standalone = new ApprovalService({ engine: data as any, logger: capturing as any });
     const opened = await standalone.openNodeRequest({
       object: 'crm_deal', recordId: 'd1', runId: 'run_from_another_process',
       nodeId: 'approve_step', config: { approvers: [{ type: 'user', value: 'u1' }] } as any,
@@ -250,5 +264,43 @@ describe('approval decisions across a process restart (#4420)', () => {
     const out = await standalone.decide((opened as any).id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
     expect(out.finalized).toBe(true);
     expect(out.resumed).toBe(false);
+
+    // The divergence is machine-visible, not a bare `resumed: false` the
+    // caller has to guess about, and it names the run that stayed parked.
+    expect(out.resumeError, 'the composition gap must reach the caller').toBeTruthy();
+    expect(out.resumeError).toMatch(/RESUME_FAILED/);
+    expect(out.resumeError).toMatch(/run_from_another_process/);
+
+    // …and it is loud in the log at `error`, per AGENTS.md's durability rule.
+    expect(logs.some(l => /no automation engine to advance/.test(l.msg)),
+      `expected a loud error log, got: ${JSON.stringify(logs)}`).toBe(true);
+  });
+
+  it('reports the same gap on a request that names no run — by staying quiet', async () => {
+    // The counterpart that keeps the rule honest: a standalone approvals
+    // request with NO `flow_run_id` has nothing parked on it, so there is no
+    // divergence to report. Reporting one here would be the mirror-image
+    // failure — training operators to skim `error`, which is what made #4420's
+    // original `warn` unreadable in the first place.
+    const logs: string[] = [];
+    const capturing = {
+      info() {}, warn() {}, debug() {}, error(msg: any) { logs.push(String(msg)); },
+    };
+    const standalone = new ApprovalService({ engine: data as any, logger: capturing as any });
+    const opened = await standalone.openNodeRequest({
+      object: 'crm_deal', recordId: 'd1', runId: 'run_x',
+      nodeId: 'approve_step', config: { approvers: [{ type: 'user', value: 'u1' }] } as any,
+    }, SYSTEM_CTX);
+    // `openNodeRequest` requires a run, so the only way a stored row names none
+    // is the one the `if (!runId)` guards are written for: a legacy or
+    // externally-created request that no flow node ever owned. Model it here.
+    data.tables.get('sys_approval_request')!
+      .find((r: any) => r.id === (opened as any).id).flow_run_id = null;
+
+    const out = await standalone.decide((opened as any).id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
+    expect(out.finalized).toBe(true);
+    expect(out.resumed).toBe(false);
+    expect(out.resumeError, 'nothing was parked — nothing to report').toBeUndefined();
+    expect(logs, `no run named, so no degradation: ${JSON.stringify(logs)}`).toEqual([]);
   });
 });
