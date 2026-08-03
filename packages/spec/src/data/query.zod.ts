@@ -9,41 +9,47 @@ import { strictObject } from '../shared/strict-object';
 
 /**
  * Sort Node
- * Represents "Order By" — one `{ field, order }` pair.
- *
- * **Closed against unknown keys (#4721, #4001).** This is the one site in
- * `query.zod.ts` carved out of the file's blanket `open` classification, and the
- * carve-out is what the shape earns: the rest of the file is the query DIALECT,
- * where user data flows through predicate values, while a sort node is a closed
- * two-key tuple with no user-data face at all. Classing the whole file was the
- * imprecise thing, not closing this schema.
- *
- * What it stops, measured on `main` before the change:
- *
- * ```
- * SortNodeSchema.parse({ field: 'updated_at', direction: 'desc' })
- *   →  { field: 'updated_at', order: 'asc' }
- * ```
- *
- * `direction` was stripped, `order` fell back to its `asc` default, and the sort
- * ran in the OPPOSITE direction under an ordinary success. Paired with `limit` —
- * which is how a caller asks for "the latest N" — that is not a reordered page
- * but a DIFFERENT SET OF ROWS, with no signal anywhere in the response.
- *
- * `direction` gets a named alias rather than a distance-based suggestion because
- * it is not a typo: it is `IReportService.orderBy`'s live vocabulary
- * (`contracts/report-service.ts`), a genuinely different contract that
- * `plugin-auth/objectql-adapter.ts` already translates by hand. Edit distance
- * can never reach a different WORD for the same intent — the `visibleWhen →
- * visible` class (see `shared/strict-object.ts`) — so only a hand-written entry
- * puts the prescription in the author's hands.
- *
- * The wire-facing half of the same door is `normalizeSortNodes`
- * (`metadata-protocol/src/protocol.ts`), which rejects `direction` by name with
- * `400 INVALID_SORT` before a request ever reaches this schema. Both were closed
- * in one change deliberately: closing only the schema is the door asymmetry
- * #1535 shipped and #4522 had to come back for.
+ * Represents "Order By" — one `{ field, order }` pair. Unknown keys are
+ * REJECTED (#4721); spell the direction `order`, never `direction`.
  */
+// ⚠️ Keep the block above short: `build-docs.ts` takes the FIRST JSDoc block in
+// the file as this page's description, so the rationale below is line comments.
+//
+// ─── Why this one schema is strict while the rest of the file is not (#4721) ──
+//
+// `query.zod.ts` is classed `open` in the #4001 strictness ledger, and
+// `SortNodeSchema` is carved out of that blanket. The carve-out is what the
+// shape earns: the rest of the file is the query DIALECT, where user data flows
+// through predicate values, while a sort node is a closed two-key tuple with no
+// user-data face at all. Classing by FILE was the imprecise instrument here, not
+// closing this schema.
+//
+// What the closure stops, measured on `main` before the change:
+//
+//     SortNodeSchema.parse({ field: 'updated_at', direction: 'desc' })
+//       →  { field: 'updated_at', order: 'asc' }
+//
+// `direction` was stripped, `order` fell back to its `asc` default, and the sort
+// ran in the OPPOSITE direction under an ordinary success. Paired with `limit` —
+// which is how a caller asks for "the latest N" — that is not a reordered page
+// but a DIFFERENT SET OF ROWS, with no signal anywhere in the response.
+//
+// `direction` gets a named alias rather than a distance-based suggestion because
+// it is not a typo: it is `IReportService.orderBy`'s live vocabulary
+// (`contracts/report-service.ts`), a genuinely different contract that
+// `plugin-auth/objectql-adapter.ts` already translates by hand. Edit distance
+// can never reach a different WORD for the same intent — the `visibleWhen →
+// visible` class (see `shared/strict-object.ts`) — so only a hand-written entry
+// puts the prescription in the author's hands.
+//
+// The wire-facing half of the same door is `normalizeSortNodes`
+// (`metadata-protocol/src/protocol.ts`), which rejects `direction` by name with
+// `400 INVALID_SORT` before a request ever reaches this schema. Both were closed
+// in one change deliberately: closing only the schema is the door asymmetry
+// #1535 shipped and #4522 had to come back for.
+//
+// Deliberately NOT taken here: `BaseQuerySchema`'s own top level stays
+// non-strict. That is #4001's to schedule.
 export const SortNodeSchema = lazySchema(() => strictObject(
   {
     surface: 'this sort node',
