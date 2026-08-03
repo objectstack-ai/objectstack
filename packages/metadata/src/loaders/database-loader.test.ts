@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DatabaseLoader, type DatabaseLoaderOptions } from './database-loader';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { MetadataManager } from '../metadata-manager';
@@ -429,6 +429,214 @@ describe('DatabaseLoader', () => {
       await expect(
         failLoader.save('object', 'account', { name: 'account' })
       ).rejects.toThrow('DatabaseLoader save failed for object/account: Insert failed');
+    });
+  });
+});
+
+// ---------- DDL failure is loud, and only "already exists" is silent ----------
+
+/**
+ * #4728 (rule: #4632, accident: #4420).
+ *
+ * `ensureSchema()` used to `catch {}` every DDL failure and set
+ * `schemaReady = true` regardless — a total durability failure was byte-for-byte
+ * indistinguishable from success, with no log line at all. The comment excused
+ * *all* failure reasons with the most benign one ("e.g. table already exists").
+ *
+ * Both directions are pinned here on purpose: proving the real failure is loud
+ * is not enough, because "always log error" would pass that alone while making
+ * the benign case unreadable noise. The point is that the two are DISTINGUISHED.
+ */
+describe('DatabaseLoader schema-sync failure reporting (#4728)', () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let infoSpy: ReturnType<typeof vi.spyOn>;
+
+  /** A real DDL failure: the table does NOT exist afterwards. */
+  const permissionDenied = () =>
+    Object.assign(new Error('permission denied for schema public'), { code: '42501' });
+
+  /** The one benign reason: the table IS already provisioned. */
+  const alreadyExists = () =>
+    Object.assign(new Error('table sys_metadata already exists'), { code: 'SQLITE_ERROR' });
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+    infoSpy.mockRestore();
+  });
+
+  describe('a REAL DDL failure', () => {
+    it('reports at error, naming the consequence and the fix', async () => {
+      const driver = createMockDriver();
+      driver.syncSchema = vi.fn().mockRejectedValue(permissionDenied());
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.list('object');
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const [message, cause] = errorSpy.mock.calls[0] as [string, unknown];
+      // consequence
+      expect(message).toContain('sys_metadata');
+      expect(message).toContain('FAILED');
+      expect(message).toContain('NOT created');
+      // the system keeps looking healthy — that is the whole point of the level
+      expect(message).toMatch(/reporting healthy/i);
+      // fix
+      expect(message).toMatch(/fix it and restart/i);
+      // and the underlying driver error is carried, not discarded
+      expect((cause as Error).message).toBe('permission denied for schema public');
+    });
+
+    it('does NOT mark the schema ready — the next operation retries the DDL', async () => {
+      const driver = createMockDriver();
+      driver.syncSchema = vi.fn().mockRejectedValue(permissionDenied());
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.list('object');
+      await loader.list('view');
+      await loader.exists('object', 'account');
+
+      // Before #4728 this was 1: the failure set `schemaReady = true` and every
+      // later write proceeded against a table that was never created.
+      expect(driver.syncSchema).toHaveBeenCalledTimes(3);
+    });
+
+    it('says it once, not once per operation', async () => {
+      const driver = createMockDriver();
+      driver.syncSchema = vi.fn().mockRejectedValue(permissionDenied());
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.list('object');
+      await loader.list('view');
+      await loader.list('flow');
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('recovers silently-loudly: a transient failure that heals reports the recovery', async () => {
+      const driver = createMockDriver();
+      driver.syncSchema = vi
+        .fn()
+        .mockRejectedValueOnce(
+          Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), {
+            code: 'ECONNREFUSED',
+          }),
+        )
+        .mockResolvedValue(undefined);
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.list('object'); // datasource still connecting → loud
+      await loader.list('view'); // retried → succeeds
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect((infoSpy.mock.calls[0] as [string])[0]).toMatch(/succeeded on retry/i);
+
+      // Ready now, so a third operation does not re-run the DDL.
+      await loader.list('flow');
+      expect(driver.syncSchema).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('the benign "already exists" failure', () => {
+    it('is silent — no error, no info', async () => {
+      const driver = createMockDriver();
+      driver.syncSchema = vi.fn().mockRejectedValue(alreadyExists());
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.list('object');
+
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(infoSpy).not.toHaveBeenCalled();
+    });
+
+    it('marks the schema ready — the table is provisioned, so no retry', async () => {
+      const driver = createMockDriver();
+      driver.syncSchema = vi.fn().mockRejectedValue(alreadyExists());
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.list('object');
+      await loader.list('view');
+
+      expect(driver.syncSchema).toHaveBeenCalledTimes(1);
+    });
+
+    it('still runs the post-sync migrations (the table exists, so they apply)', async () => {
+      const driver = createMockDriver();
+      driver.syncSchema = vi.fn().mockRejectedValue(alreadyExists());
+      const raw = vi.fn().mockResolvedValue(undefined);
+      (driver as unknown as { raw: unknown }).raw = raw;
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.list('object');
+
+      expect(raw).toHaveBeenCalled();
+      expect(raw.mock.calls.some(([sql]) => String(sql).includes('idx_sys_metadata_overlay_active'))).toBe(
+        true,
+      );
+    });
+  });
+
+  it('DISTINGUISHES the two: same call site, opposite verdicts', async () => {
+    const benignDriver = createMockDriver();
+    benignDriver.syncSchema = vi.fn().mockRejectedValue(alreadyExists());
+    const realDriver = createMockDriver();
+    realDriver.syncSchema = vi.fn().mockRejectedValue(permissionDenied());
+
+    await new DatabaseLoader({ driver: benignDriver }).list('object');
+    const afterBenign = errorSpy.mock.calls.length;
+
+    await new DatabaseLoader({ driver: realDriver }).list('object');
+    const afterReal = errorSpy.mock.calls.length;
+
+    expect(afterBenign).toBe(0);
+    expect(afterReal).toBe(1);
+  });
+
+  describe('the history table follows the same rule', () => {
+    /** sys_metadata syncs fine; only the history table's DDL fails. */
+    function driverWithFailingHistoryDdl(error: unknown): IDataDriver {
+      const driver = createMockDriver();
+      driver.syncSchema = vi.fn().mockImplementation((table: string) => {
+        if (table === 'sys_metadata_history') return Promise.reject(error);
+        return Promise.resolve(undefined);
+      });
+      return driver;
+    }
+
+    it('reports a real failure at error, naming the lost audit trail and the fix', async () => {
+      const driver = driverWithFailingHistoryDdl(permissionDenied());
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.save('object', 'account', { name: 'account' });
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const message = (errorSpy.mock.calls[0] as [string])[0];
+      expect(message).toContain('sys_metadata_history');
+      expect(message).toMatch(/will NOT be persisted/);
+      expect(message).toMatch(/restart/i);
+    });
+
+    it('is silent on "already exists" and stops retrying', async () => {
+      const driver = driverWithFailingHistoryDdl(
+        Object.assign(new Error("Table 'sys_metadata_history' already exists"), {
+          code: 'ER_TABLE_EXISTS_ERROR',
+        }),
+      );
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.save('object', 'account', { name: 'account' });
+      await loader.save('object', 'contact', { name: 'contact' });
+
+      expect(errorSpy).not.toHaveBeenCalled();
+      const historySyncs = (driver.syncSchema as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([table]) => table === 'sys_metadata_history',
+      );
+      expect(historySyncs).toHaveLength(1);
     });
   });
 });

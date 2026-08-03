@@ -122,7 +122,7 @@ export interface ObjectQLPluginOptions {
     enabled?: boolean;
     sweepIntervalMs?: number;
     initialDelayMs?: number;
-    referenceAudit?: DanglingReferenceAuditOptions & { enabled?: boolean };
+    referenceAudit?: Omit<DanglingReferenceAuditOptions, 'signal'> & { enabled?: boolean };
   };
 }
 
@@ -574,15 +574,30 @@ export class ObjectQLPlugin implements Plugin {
     this.lifecycleService?.start();
   }
 
-  stop = async (ctx: PluginContext) => {
-    // ADR-0057: disarm the lifecycle sweep timers.
+  /**
+   * Kernel teardown.
+   *
+   * **This used to be `stop()`, which the kernel never calls** (#4747). The
+   * Plugin contract is `init` / `start` / `destroy` — `packages/core/src/
+   * types.ts`, and `DefaultDatasourcePlugin.destroy` says so in as many words
+   * ("`stop()` exists nowhere in the Plugin contract and is never called").
+   * So the one line that disarmed the ADR-0057 sweep never ran, on any host:
+   * the timers outlived the engine, and 60s after a one-shot `os migrate`
+   * boot the sweep woke up and queried a datasource its own host had already
+   * disconnected — an `ERROR Find operation failed` on a SUCCESSFUL command,
+   * and two objects filed as `unreadableObjects` by the #4551 audit on every
+   * healthy run. A hook nobody calls is not defence in depth; it is the
+   * absence of defence, spelled like its presence.
+   */
+  destroy = async () => {
+    // ADR-0057: disarm the sweep timers AND call off a sweep in flight, before
+    // the datasource plugin (destroyed after us — reverse registration order)
+    // closes the pool underneath it.
     this.lifecycleService?.stop();
-    // ADR-0008 PR-7: tear down metadata subscriptions on plugin stop so
-    // tests don't leak watchers and reloaded plugins don't double-subscribe.
+    // ADR-0008 PR-7: tear down metadata subscriptions on teardown so tests
+    // don't leak watchers and reloaded plugins don't double-subscribe.
     for (const unsub of this.metadataUnsubscribes) {
-      try { unsub(); } catch (e: any) {
-        ctx.logger.debug('[ObjectQLPlugin] metadata-event unsubscribe failed', { error: e?.message });
-      }
+      try { unsub(); } catch { /* teardown is best-effort — the kernel is going away */ }
     }
     this.metadataUnsubscribes = [];
   }

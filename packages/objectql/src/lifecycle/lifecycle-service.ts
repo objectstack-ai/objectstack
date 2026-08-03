@@ -134,8 +134,13 @@ export interface LifecycleServiceOptions {
    * [#4551] Referential-integrity audit tuning. The audit rides this sweep's
    * clock deliberately (see {@link LifecycleService.sweep}); `enabled: false`
    * drops that leg while leaving lifecycle enforcement alone.
+   *
+   * `signal` is deliberately NOT configurable (#4747): the audit's lifetime is
+   * this service's lifetime, so the abort bit comes from {@link
+   * LifecycleService.stop} and nowhere else. A second, caller-owned signal
+   * would be a second answer to "may this still read?".
    */
-  referenceAudit?: DanglingReferenceAuditOptions & { enabled?: boolean };
+  referenceAudit?: Omit<DanglingReferenceAuditOptions, 'signal'> & { enabled?: boolean };
 }
 
 /** Per-sweep governance snapshot resolved from the `lifecycle` namespace. */
@@ -257,6 +262,14 @@ export class LifecycleService {
   private governance: GovernanceSnapshot = DEFAULT_GOVERNANCE;
   /** Per-object reap guards ({@link LifecycleReapGuard}). */
   private readonly reapGuards = new Map<string, LifecycleReapGuard>();
+  /**
+   * [#4747] The "the engine is going away" bit, handed to the work in flight.
+   *
+   * Replaced (never mutated back) by {@link start}, so a sweep that is still
+   * running when {@link stop} is called keeps the object it was given and sees
+   * the abort even if the service is re-armed afterwards.
+   */
+  private abort: { aborted: boolean } = { aborted: false };
 
   constructor(private readonly opts: LifecycleServiceOptions) {
     this.now = opts.now ?? (() => Date.now());
@@ -267,10 +280,22 @@ export class LifecycleService {
     return this.opts.enabled !== false;
   }
 
+  /**
+   * [#4747] `true` between {@link stop} and the next {@link start}: the service
+   * has been torn down and will neither begin a sweep nor let one in flight
+   * carry on.
+   */
+  get stopped(): boolean {
+    return this.abort.aborted;
+  }
+
   /** Arm the periodic sweep. Idempotent; timers are unref'ed so a kernel
    * shutdown is never held open by the lifecycle schedule. */
   start(): void {
     if (!this.enabled || this.timer || this.initialTimer) return;
+    // A fresh bit per armed run — the one a previous sweep captured stays
+    // aborted forever, which is what makes stop() irreversible for that sweep.
+    this.abort = { aborted: false };
     const interval = this.opts.sweepIntervalMs ?? DEFAULT_LIFECYCLE_SWEEP_MS;
     const initial = this.opts.initialDelayMs ?? DEFAULT_LIFECYCLE_INITIAL_DELAY_MS;
     this.initialTimer = setTimeout(() => {
@@ -282,11 +307,27 @@ export class LifecycleService {
     this.initialTimer.unref?.();
   }
 
+  /**
+   * Disarm the schedule AND call off the work.
+   *
+   * [#4747] Clearing the timers is only half of it: the sweep is async, so one
+   * already in flight would otherwise keep reading and deleting through an
+   * engine whose datasource the host is closing underneath it — the reads fail
+   * as `Unable to acquire a connection` and the audit files the objects it
+   * could not read as findings, on every single healthy run.
+   *
+   * So `stop()` raises the abort bit the running sweep captured, and the sweep
+   * checks it at each leg boundary. That makes teardown a fact the work can
+   * see, rather than a race it loses. Synchronous by contract (the kernel's
+   * `destroy()` awaits the caller, not this) — it does not wait for the sweep
+   * to unwind, it only guarantees no FURTHER work is issued.
+   */
   stop(): void {
     if (this.initialTimer) clearTimeout(this.initialTimer);
     if (this.timer) clearInterval(this.timer);
     this.initialTimer = undefined;
     this.timer = undefined;
+    this.abort.aborted = true;
   }
 
   /**
@@ -315,6 +356,10 @@ export class LifecycleService {
       alerts: [],
     };
     if (this.sweeping || !this.enabled) return report;
+    // [#4747] Torn down ⇒ there is no engine to sweep through, whatever the
+    // timer that woke us thinks. A one-shot host (`os migrate`) disconnects its
+    // datasource on the way out; work started after that reads a closed pool.
+    if (this.stopped) return report;
     const engine = this.opts.getEngine();
     if (!engine || typeof engine.delete !== 'function' || !engine.registry) {
       this.opts.logger.debug?.('[lifecycle] no data engine available; sweep skipped');
@@ -339,6 +384,9 @@ export class LifecycleService {
       const reclaimable = new Set<ReclaimCapableDriver>();
 
       for (const obj of declared) {
+        // [#4747] Leg boundary: stop() during the sweep ends it here rather
+        // than pushing more deletes at a datasource that is being closed.
+        if (this.stopped) return report;
         const lc = obj.lifecycle as Lifecycle;
         try {
           const outcomes = await this.reapObject(engine, obj, lc, report);
@@ -414,9 +462,18 @@ export class LifecycleService {
     const cfg = this.opts.referenceAudit;
     if (cfg?.enabled === false) return;
     if (typeof engine.inspectDanglingReferences !== 'function') return;
+    // [#4747] Not a config switch keyed on "is this a one-shot process" — the
+    // audit stays wired on every host, exactly as #4551 intends. What it gets
+    // is the teardown bit: it reads while the engine is live and stops when the
+    // engine is going away, so `unreadableObjects` keeps meaning "the
+    // datasource refused" and nothing else.
+    if (this.stopped) return;
     try {
       const { enabled: _enabled, ...auditOptions } = cfg ?? {};
-      report.danglingReferences = await engine.inspectDanglingReferences(auditOptions);
+      report.danglingReferences = await engine.inspectDanglingReferences({
+        ...auditOptions,
+        signal: this.abort,
+      });
     } catch (err) {
       this.opts.logger.warn(
         `[lifecycle] reference audit failed (${(err as Error)?.message ?? err})`,
