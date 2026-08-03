@@ -270,12 +270,11 @@ export class HotReloadManager {
       if (plugin.destroy) {
         this.logger.debug('Destroying plugin', { plugin: pluginName });
         
-        const shutdownPromise = plugin.destroy();
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Shutdown timeout')), config.shutdownTimeout);
-        });
-
-        await Promise.race([shutdownPromise, timeoutPromise]);
+        await this.raceShutdownTimeout(
+          plugin.destroy(),
+          config.shutdownTimeout,
+          'Shutdown timeout'
+        );
         this.logger.debug('Plugin destroyed successfully', { plugin: pluginName });
       }
 
@@ -309,6 +308,48 @@ export class HotReloadManager {
         error 
       });
       return false;
+    }
+  }
+
+  /**
+   * Race a plugin's `destroy()` against its shutdown-timeout guard, and
+   * reclaim the guard the moment the race settles (#4952).
+   *
+   * The guard used to be armed and then abandoned — byte-for-byte the leak
+   * #4813 fixed in the kernel's startup guards (PR #4874) and #4875 fixed in
+   * the periodic health checks (PR #4950): when `destroy()` won the race, its
+   * `setTimeout` stayed ref'd in the event loop for the full
+   * `shutdownTimeout`, so a hot reload that finished in milliseconds still
+   * pinned the loop for the whole budget — once per reload, per plugin.
+   *
+   * Clearing on settle rather than `unref()`-ing at arm time is deliberate.
+   * An unref'd guard also stops pinning the loop, but it stops being a guard
+   * as well: if `destroy()` never settles and nothing else keeps the loop
+   * alive, Node exits before the timer can fire and the timeout is never
+   * reported. The guard has to stay ref'd exactly as long as the race is
+   * undecided, which is what `clearTimeout` in a `finally` expresses.
+   *
+   * `shutdown` is widened to `T | PromiseLike<T>` because the Plugin contract
+   * permits a synchronous `destroy()` (`Promise<void> | void`); such a hook
+   * wins the race immediately and the guard is reclaimed on the same turn.
+   */
+  private async raceShutdownTimeout<T>(
+    shutdown: T | PromiseLike<T>,
+    timeout: number,
+    message: string
+  ): Promise<T> {
+    let guard: ReturnType<typeof setTimeout> | undefined;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      guard = setTimeout(() => {
+        reject(new Error(message));
+      }, timeout);
+    });
+
+    try {
+      return await Promise.race([shutdown, timeoutPromise]);
+    } finally {
+      clearTimeout(guard);
     }
   }
 
