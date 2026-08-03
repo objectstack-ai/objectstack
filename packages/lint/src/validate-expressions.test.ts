@@ -463,12 +463,19 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues.some(i => i.where.includes('requiredWhen') && /bare reference `status`/.test(i.message))).toBe(true);
     });
 
+    // `qty` carries `required` + `defaultValue` so it can never be null. That
+    // is not decoration: it mirrors the real `showcase_invoice_line.quantity`,
+    // and without it `record.qty >= 100` is a genuine #4811 finding — `>=` on a
+    // nullable declared field, which faults at runtime and makes the
+    // `requiredWhen` silently unenforced. This case is about bare-vs-qualified
+    // references (#1928) and the `parent` namespace, so the fixture is pinned
+    // to the non-null shape rather than the gate being loosened around it.
     it('accepts record-qualified field rules and the master-detail `parent` namespace', () => {
       const issues = validateStackExpressions({
         objects: [{
           name: 'inv_line',
           fields: {
-            qty: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
+            qty: { type: 'number', required: true, defaultValue: 1, readonlyWhen: "parent.status == 'paid'" },
             note: { type: 'text', requiredWhen: 'record.qty >= 100' },
           },
         }],
@@ -919,6 +926,103 @@ describe('null-guard gate (#4763)', () => {
     });
   });
 
+  // #4811 — the one surface the coverage review found to MEET the gate's
+  // totality criterion: `evaluateValidationRules` evaluates a field's
+  // `requiredWhen` against the same `materializeDeclaredFields`-merged record
+  // the object's validation rules see. It is also the quietest failure of the
+  // three covered surfaces: a faulting `requiredWhen` is fail-OPEN (logged and
+  // skipped), so the field is simply never required and the write sails through.
+  describe('field `requiredWhen` — covered since #4811', () => {
+    const withField = (requiredWhen: string) =>
+      validateStackExpressions({
+        objects: [{ ...project, fields: { ...project.fields, note: { type: 'text', requiredWhen } } }],
+      });
+
+    it('REJECTS the `has(a) && has(b) && a < b` shape on a requiredWhen predicate', () => {
+      const issues = withField(
+        'has(record.start_date) && has(record.end_date) && record.end_date < record.start_date',
+      );
+      expect(issues.length).toBeGreaterThan(0);
+      expect(issues.every((i) => (i.severity ?? 'error') === 'error')).toBe(true);
+      const joined = issues.map((i) => i.message).join('\n');
+      // names the slot …
+      expect(joined).toContain("field 'note' requiredWhen");
+      // … the operands …
+      expect(joined).toContain('record.end_date');
+      expect(joined).toContain('record.start_date');
+      // … and the fix, in the runtime's own words (identical to every other
+      // surface this gate covers — one voice, #4763).
+      expect(joined).toContain("Guard it with '!= null'");
+      expect(joined).toContain('has(x)');
+      expect(issues[0].where).toContain("object 'showcase_project' · field 'note' requiredWhen");
+    });
+
+    it('names `has()` explicitly as a non-guard when that is all the author wrote', () => {
+      const issues = withField('has(record.budget) && record.budget > 100');
+      expect(issues).toHaveLength(1);
+      expect(issues[0].message).toContain('`has(record.budget)` does not guard it');
+    });
+
+    // The consequence clause is per-surface, and getting it wrong sends the
+    // author to the wrong place. `requiredWhen` is fail-OPEN — `rule-validator`
+    // logs and skips — so it must NOT borrow the validation rules' "the write
+    // is rejected fail-closed" wording.
+    it('reports the fail-OPEN consequence, not the validation rules’ fail-closed one', () => {
+      const [issue] = withField('has(record.budget) && record.budget > 100');
+      expect(issue.message).toContain('SKIPPED fail-open');
+      expect(issue.message).toContain('the field is never actually required');
+      expect(issue.message).not.toContain('rejected fail-closed');
+    });
+
+    it('leaves the fail-closed wording on the surfaces that really fail closed', () => {
+      const [issue] = validateStackExpressions({
+        objects: [{ ...project, validations: [{ type: 'script', name: 'r', condition: 'record.budget > 1' }] }],
+      });
+      expect(issue.message).toContain('rejected fail-closed');
+      expect(issue.message).not.toContain('SKIPPED fail-open');
+    });
+
+    it('ACCEPTS the `!= null` form', () => {
+      expect(
+        withField('record.start_date != null && record.end_date != null && record.end_date < record.start_date'),
+      ).toHaveLength(0);
+    });
+
+    it('never flags a required field or one carrying a default', () => {
+      expect(withField('record.spent > 0')).toHaveLength(0);
+    });
+
+    // `has()` over a key the object does not declare is the macro's LEGITIMATE
+    // use ("was this key in the PATCH?") and must never draw a null-guard
+    // verdict — a false positive here is worse than a miss. Asserted on the
+    // null-guard verdict specifically: the independent #1928 field-existence
+    // pass has its own (pre-existing, correct) opinion about an undeclared
+    // name on a record-scoped slot, and that is not what this pins.
+    it('leaves `has()` on an UNDECLARED key alone — its legitimate use', () => {
+      const nullGuardIssues = withField('has(record.some_transient_key)')
+        .filter((i) => i.message.includes("Guard it with '!= null'"));
+      expect(nullGuardIssues).toHaveLength(0);
+    });
+
+    // Live-metadata pin: `showcase_invoice_line.description` really does carry
+    // `requiredWhen: record.quantity >= 100`, and `quantity` is `required: true`
+    // WITH `defaultValue: 1`, so it can never be null. This predicate must stay
+    // green — flagging it would be the false positive that is worse than a miss.
+    it('leaves the real `showcase_invoice_line` requiredWhen alone', () => {
+      expect(
+        validateStackExpressions({
+          objects: [{
+            name: 'showcase_invoice_line',
+            fields: {
+              quantity: { type: 'number', required: true, defaultValue: 1 },
+              description: { type: 'text', requiredWhen: 'record.quantity >= 100' },
+            },
+          }],
+        }),
+      ).toHaveLength(0);
+    });
+  });
+
   describe('surfaces deliberately NOT covered', () => {
     it('leaves sharing-rule conditions alone (compiled to a SQL filter, never faults)', () => {
       expect(
@@ -933,7 +1037,15 @@ describe('null-guard gate (#4763)', () => {
       ).toHaveLength(0);
     });
 
-    it('leaves flattened flow conditions alone (a bare id may be a flow variable)', () => {
+    // #4811 re-measured the reason this one is excluded. It is NOT the
+    // flattened scope (this gate never resolves a bare identifier — only
+    // `record.<f>`/`previous.<f>`, and the engine binds both roots
+    // unconditionally). It is that `record-change-trigger.ts` seeds the flow's
+    // record as `{ ...inputDoc, ...after }` with no `materializeDeclaredFields`,
+    // so a declared column the write never mentioned is an ABSENT key — and on
+    // an absent key the `!= null` this gate prescribes faults exactly like the
+    // comparison it was meant to guard.
+    it('leaves flow conditions alone (trigger record is not total over declared fields)', () => {
       expect(
         validateStackExpressions({
           objects: [project],
@@ -943,7 +1055,41 @@ describe('null-guard gate (#4763)', () => {
               { id: 'start', type: 'start', config: { objectName: 'showcase_project' } },
               { id: 'd', type: 'decision', config: { condition: 'record.budget > 100000' } },
             ],
-            edges: [],
+            edges: [{ id: 'e1', source: 'd', target: 'end', condition: 'record.spent > record.budget' }],
+          }],
+        }),
+      ).toHaveLength(0);
+    });
+
+    // Action predicates reach real CEL and fail closed, so the trap bites here
+    // too — but the record bound is whatever the client fetched (a list row
+    // carries only the view's projected columns) and nothing materializes it,
+    // so `!= null` would be the wrong prescription. Excluded until that binding
+    // is made total; see the ledger in `validate-null-guards.ts`.
+    it('leaves action `visible` / `disabled` alone (client record is not total)', () => {
+      expect(
+        validateStackExpressions({
+          objects: [{
+            ...project,
+            actions: [{
+              name: 'escalate',
+              visible: 'has(record.budget) && has(record.spent) && record.spent > record.budget',
+              disabled: 'record.budget < 1000',
+            }],
+          }],
+        }),
+      ).toHaveLength(0);
+    });
+
+    // Same field as the covered `requiredWhen`, opposite verdict — the split is
+    // the point. `readonlyWhen` is evaluated by `stripReadonlyWhenFields`, which
+    // merges `{ ...previous, ...data }` and never materializes.
+    it('leaves field `readonlyWhen` alone (strip path merges without materializing)', () => {
+      expect(
+        validateStackExpressions({
+          objects: [{
+            ...project,
+            fields: { ...project.fields, note: { type: 'text', readonlyWhen: 'record.budget > 100' } },
           }],
         }),
       ).toHaveLength(0);

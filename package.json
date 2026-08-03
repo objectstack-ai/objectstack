@@ -54,7 +54,8 @@
     "check:node-version": "node scripts/check-node-version.mjs",
     "check:published-files": "node scripts/check-published-files.mjs --self-test && node scripts/check-published-files.mjs",
     "check:type-check-coverage": "node scripts/check-type-check-coverage.mjs --self-test && node scripts/check-type-check-coverage.mjs",
-    "check:driver-conformance": "node scripts/check-driver-conformance.mjs --self-test && node scripts/check-driver-conformance.mjs"
+    "check:driver-conformance": "node scripts/check-driver-conformance.mjs --self-test && node scripts/check-driver-conformance.mjs",
+    "check:engine-double-contract": "node scripts/check-engine-double-contract.mjs --self-test && node scripts/check-engine-double-contract.mjs"
   },
   "keywords": [
     "objectstack",

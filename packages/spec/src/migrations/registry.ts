@@ -783,7 +783,23 @@ const step17: MigrationStep = {
     + '`body.capabilities` on hooks and actions; it deliberately does NOT touch the '
     + '`ctx.crypto.hash(...)` call the body made under it, which never returned a value and '
     + 'which the author must delete. Hashing returns only WITH an implementation, through the '
-    + 'capability admission process.',
+    + 'capability admission process.\n\n'
+    + "It also removes `connector.rateLimitConfig` and its whole shape (#4911). This one is not "
+    + '"declared but unread" — it is declared but UNIMPLEMENTED, one step worse. The only token '
+    + "bucket the platform owns (runtime `security/rate-limit.ts`) is INBOUND: the dispatcher "
+    + 'calls `consume(key)` on a request fingerprint and answers 429. Nothing anywhere throttles '
+    + 'the calls a connector makes OUT, and no provider — `connector-rest`, `connector-openapi`, '
+    + '`connector-mcp`, `connector-slack` — reads the key or has a seam that could. So '
+    + '`strategy`, `maxRequests`, `windowSeconds`, `burstCapacity`, `respectUpstreamLimits` and '
+    + '`rateLimitHeaders` parsed cleanly and capped nothing, on a surface where the author '
+    + "believed they had bounded their spend against a third party's quota. `ConnectorRateLimit"
+    + 'Config` and the `RateLimitStrategy` enum it embedded had no other consumer and are removed '
+    + 'with the key, so importing either is TS2305 in v17 — the #4834 shape, and the same '
+    + 'implementation-first ruling: the vocabulary comes back WITH the engine, in one change. '
+    + 'It is deliberately NOT converted to `shared` `RateLimitConfig`, which limits the calls '
+    + 'others make to US; #4684 split their names for precisely this confusion, and rewriting an '
+    + 'outbound cap into an inbound one would throttle the wrong direction. Delete the key and '
+    + 'rate-limit where the calls are actually made — the connector provider or upstream gateway.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -822,6 +838,7 @@ const step17: MigrationStep = {
     'retry-policy-converged',
     'object-enable-trash-mru-removed',
     'hook-body-crypto-hash-removed',
+    'connector-rate-limit-config-removed',
   ],
   semantic: [
     {

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { TeamGraphService, expandPrincipal } from './team-graph.js';
@@ -59,30 +60,28 @@ function makeEngine() {
       return t[i];
     },
     async delete(o: string, opts?: any) {
-      assertDeletable(opts);
+      // Pinned to `ObjectQLEngine.delete`'s OWN dispatch predicate
+      // (objectstack#4434, objectstack#4550).
+      //
+      // The real engine routes a delete by SCALAR `where.id` to `driver.delete`
+      // and anything else to `driver.deleteMany` — but only when
+      // `options.multi` is set; otherwise it throws. This fake used to accept
+      // any `where`, so `deleteRule`'s predicate-shaped purge of
+      // `sys_record_share` passed here while the running server answered 500 to
+      // every `DELETE /sharing/rules/:idOrName`. A fake looser than the
+      // contract it stands in for is how a green suite ships a dead route.
+      //
+      // #4434 closed that by MIRRORING the guard here. A mirror is a second
+      // copy of the contract and drifts the moment either side is edited, so it
+      // now calls the producer's exported decision instead — the same function
+      // `ObjectQL.delete` dispatches on. `pnpm check:engine-double-contract`
+      // holds every fake engine to this.
+      assertEngineDeleteDispatch(opts);
       const t = ensure(o); const where = opts?.where ?? {};
       for (let i = t.length - 1; i >= 0; i--) if (matches(t[i], where)) t.splice(i, 1);
       return { ok: true };
     },
   };
-}
-
-/**
- * Mirror `ObjectQLEngine.delete`'s dispatch guard (objectstack#4434).
- *
- * The real engine routes a delete by SCALAR `where.id` to `driver.delete` and
- * anything else to `driver.deleteMany` — but only when `options.multi` is set;
- * otherwise it throws `'Delete requires an ID or options.multi=true'`. The fake
- * used to accept any `where`, so `deleteRule`'s predicate-shaped purge of
- * `sys_record_share` passed here while the running server answered 500 to every
- * `DELETE /sharing/rules/:idOrName`. A fake looser than the contract it stands
- * in for is how a green suite ships a dead route.
- */
-function assertDeletable(opts?: any): void {
-  const whereId = opts?.where && typeof opts.where === 'object' ? (opts.where as any).id : undefined;
-  const t = typeof whereId;
-  const scalarId = whereId != null && (t === 'string' || t === 'number' || t === 'bigint');
-  if (!scalarId && !opts?.multi) throw new Error('Delete requires an ID or options.multi=true');
 }
 
 describe('TeamGraphService (flat — better-auth sys_team)', () => {

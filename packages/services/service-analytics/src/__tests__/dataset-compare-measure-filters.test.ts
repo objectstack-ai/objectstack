@@ -107,10 +107,11 @@ function runQuery(q: AnalyticsQuery): AnalyticsResult {
   for (const opp of OPPS) {
     if (range && (opp.close_date < range[0] || opp.close_date > range[1])) continue;
     if (!matches(opp, q.where)) continue;
-    // Keyed unambiguously on purpose: `mergeByDimensions` concatenates its own
-    // key with no delimiter (#4821, filed separately and deliberately NOT
-    // touched here), and this fake must not import that ambiguity — a test that
-    // measured two defects at once could not tell which one it caught.
+    // Keyed unambiguously on purpose, and independently of the executor's own
+    // key (#4821 — which turned out to be a null-vs-empty conflation rather
+    // than the missing delimiter it was reported as; the delimiter was a raw
+    // U+0001 byte, invisible in the issue body). A fake that imported the
+    // production key could not tell which defect a failure caught.
     const key = dims
       .map((d) => JSON.stringify((opp as unknown as Record<string, unknown>)[d] ?? null))
       .join('|');

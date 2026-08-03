@@ -289,6 +289,23 @@ jobs:
       - name: Published-files whitelist guard
         run: pnpm check:published-files
 
+      # Engine test-double contract gate (#4550, from #4434). A test double
+      # LOOSER than the implementation it replaces turns a green suite into no
+      # suite at all, silently, on exactly the paths a double was introduced
+      # for. #4434 is the worked example: DELETE /sharing/rules/:idOrName
+      # answered 500 for every rule and both address forms from the day it was
+      # written, while `deleteRule drops rule + all its grants` asserted success
+      # against a fake engine that accepted the one call shape ObjectQL.delete
+      # refuses. This holds every fake ObjectQL engine's `delete` to the real
+      # dispatch predicate — imported from @objectstack/objectql, not
+      # hand-mirrored, so it cannot drift — with the pre-existing fakes in a
+      # shrink-only, measured baseline. Static AST only, so it needs no build
+      # and belongs in this job. Runs its own --self-test first: the detector
+      # can be broken while every fake is fine, and a scan that quietly stops
+      # matching would report OK while reading nothing (#4868's family).
+      - name: Engine test-double contract gate
+        run: pnpm check:engine-double-contract
+
   typecheck:
     name: TypeScript Type Check
     runs-on: ubuntu-latest

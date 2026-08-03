@@ -54,9 +54,23 @@
  * only when the old name has aged out — same discipline as a tombstone.
  */
 export const RENAMED_DEFS: Readonly<Record<string, string>> = {
-  // #4684 / ADR-0112 D9a — the connector-side (outbound throttling) config no
-  // longer shares a name with `shared/RateLimitConfig` (inbound API limiting).
-  'integration/RateLimitConfig': 'integration/ConnectorRateLimitConfig',
+  // ─── ABSORBED, do not re-add: `integration/RateLimitConfig` ────────────
+  //
+  // #4684 / ADR-0112 D9a renamed the connector-side (outbound throttling) def
+  // to `integration/ConnectorRateLimitConfig` so it no longer shared a name
+  // with `shared/RateLimitConfig` (inbound API limiting). #4911 then RETIRED
+  // that def outright — no outbound rate-limiting engine ever existed
+  // (ADR-0049) — inside the SAME unreleased major.
+  //
+  // Composed, rename-then-delete is just a delete, and the entry could not
+  // survive either way: `checkRenameTable` rejects a target this build no
+  // longer emits, which is precisely the decay guard that made this table
+  // trustworthy. The removal is carried by the real retirement kit instead —
+  // a `retiredKey()` tombstone on `ConnectorSchema.rateLimitConfig`, the
+  // `connector-rate-limit-config-removed` D2 conversion, and the deliberate
+  // manifest deletion of both `integration/ConnectorRateLimitConfig` and
+  // `integration/RateLimitStrategy`. A retirement must never ride this table
+  // (same ruling as `automation/ConflictResolution` below).
 
   // #4703 / ADR-0112 D9a — `FieldMapping` was published by THREE defs at once.
   // The two domain-specific sides take a domain prefix; `shared/FieldMapping`

@@ -13,8 +13,7 @@ import {
   WebhookConfigSchema,
   WebhookEventSchema,
   
-  // Rate Limiting & Retry
-  ConnectorRateLimitConfigSchema,
+  // Retry (rate limiting retired in #4911 — see the pin block at the bottom)
   RetryConfigSchema,
   
   // Base Connector
@@ -278,33 +277,11 @@ describe('WebhookConfigSchema', () => {
 });
 
 // ============================================================================
-// Rate Limiting & Retry Tests
+// Retry Tests
 // ============================================================================
-
-describe('ConnectorRateLimitConfigSchema', () => {
-  it('should accept valid rate limit configuration', () => {
-    const config = {
-      strategy: 'token_bucket',
-      maxRequests: 100,
-      windowSeconds: 60,
-      burstCapacity: 150,
-      respectUpstreamLimits: true,
-    };
-    
-    expect(() => ConnectorRateLimitConfigSchema.parse(config)).not.toThrow();
-  });
-  
-  it('should use default values', () => {
-    const config = {
-      maxRequests: 100,
-      windowSeconds: 60,
-    };
-    
-    const parsed = ConnectorRateLimitConfigSchema.parse(config);
-    expect(parsed.strategy).toBe('token_bucket');
-    expect(parsed.respectUpstreamLimits).toBe(true);
-  });
-});
+// (`ConnectorRateLimitConfigSchema` tests lived here until #4911 retired the
+// whole shape — no outbound rate-limiting engine ever existed. The retirement
+// is pinned in the "[#4911]" block at the bottom of this file.)
 
 describe('RetryConfigSchema', () => {
   it('should accept valid retry configuration', () => {
@@ -411,10 +388,7 @@ describe('ConnectorSchema', () => {
           events: ['record.created'],
         },
       ],
-      rateLimitConfig: {
-        maxRequests: 100,
-        windowSeconds: 60,
-      },
+      // `rateLimitConfig` was authored here until #4911 retired it.
       retryConfig: {
         maxAttempts: 3,
       },
@@ -667,69 +641,124 @@ describe('ConnectorHealthSchema', () => {
   });
 });
 
-// ─── [#4684] Dual-source regression pin ──────────────────────────────
+// ─── [#4911] Outbound rate limiting retired — with the [#4684] pin folded in ──
 //
 // RUNTIME + compiler-API assertions, deliberately. #4642 established that a
 // compile-time pin in `packages/spec` is a no-op: `tsconfig.json` excludes
 // `**/*.test.ts` and `vitest.config.ts` never enables `typecheck`, so an
-// `Assert< Equal< … > >` here would be dead text. The third test below is the
-// only shape in this repo that actually pins a TYPE.
+// `Assert< Equal< … > >` here would be dead text. The last test below is the
+// only shape in this repo that actually pins a TYPE — which is what makes it the
+// load-bearing one here: `ConnectorRateLimitConfig` is a TYPE, erased before any
+// runtime assertion can see it, so re-adding `export type ConnectorRateLimitConfig`
+// would slip past every `in`-check.
 //
-// What these defend: `RateLimitConfig` naming exactly ONE declaration across
-// the published entries. `./shared` limits INBOUND API traffic (`enabled` /
-// `windowMs` / `maxRequests`, every key defaulted); `./integration` throttles
-// OUTBOUND connector calls (`strategy` / `maxRequests` / `windowSeconds`
-// required, plus the upstream `X-RateLimit-*` header names). Neither is a
-// superset of the other and neither schema is `.strict()`, so before #4684 a
-// snippet copied from one side to the other PARSED CLEAN with its foreign keys
-// silently stripped — ADR-0104's silent-strip class, in the export surface
-// rather than in stored metadata. ADR-0112 D9a's remedy applies: the
-// connector-side name gets a `Connector` prefix so one name means one thing.
-describe('[#4684] RateLimitConfig no longer names two declarations', () => {
-  it('./integration exposes the connector shape only under its prefixed name', async () => {
+// History, because it explains what these now defend. #4684 found `RateLimitConfig`
+// naming TWO declarations: `./shared` limits INBOUND API traffic (`enabled` /
+// `windowMs` / `maxRequests`, every key defaulted) while `./integration` claimed to
+// throttle OUTBOUND connector calls (`strategy` / `maxRequests` / `windowSeconds`,
+// plus upstream `X-RateLimit-*` header names). Neither schema is `.strict()`, so a
+// snippet copied across parsed clean with its foreign keys silently stripped
+// (ADR-0104). #4684's remedy was ADR-0112 D9a's prefix.
+//
+// #4911 then found the deeper defect: the outbound side had no ENGINE. The only
+// token bucket in the platform is `runtime/src/security/rate-limit.ts`, and it
+// serves the INBOUND dispatcher. So the connector-side shape is gone entirely
+// (ADR-0049 enforce-or-remove), the key is tombstoned, and what these tests pin
+// is now an ASYMMETRY that must not be "tidied up": one direction has a real
+// implementation and keeps its schema, the other does not and has none. The
+// tempting wrong fix — pointing `connector.rateLimitConfig` at the shared inbound
+// schema — would throttle the opposite direction, so the absence assertions below
+// are as load-bearing as the presence ones.
+describe('[#4911] `./integration` no longer publishes an outbound rate-limit shape', () => {
+  it('every retired name is absent from the entry — no alias, no re-export', async () => {
     const integrationEntry = await import('./index');
 
-    expect(integrationEntry.ConnectorRateLimitConfigSchema).toBeDefined();
-    // The bare name must be gone from this entry — an alias re-export kept "for
-    // compatibility" would be a THIRD declaration of the same name and would
-    // re-open the trap this issue closed.
+    // The retired shape and its orphaned enum. `in` (not `=== undefined`) so an
+    // explicitly-`undefined` re-export would still fail.
+    expect('ConnectorRateLimitConfigSchema' in integrationEntry).toBe(false);
+    expect('RateLimitStrategySchema' in integrationEntry).toBe(false);
+    // And the pre-#4684 bare name stays gone: re-adding it would re-open the
+    // dual-source trap on top of un-retiring the shape.
     expect('RateLimitConfigSchema' in integrationEntry).toBe(false);
+
+    // Guard against a vacuous pass — if `./index` ever stopped resolving, every
+    // `in` above would be false for the wrong reason (#4642).
+    expect(integrationEntry.ConnectorSchema).toBeDefined();
+    expect(integrationEntry.RetryConfigSchema).toBeDefined();
   });
 
-  it('./shared keeps the inbound declaration untouched', async () => {
+  it('authoring `rateLimitConfig` is rejected with the prescription, not silently stripped', async () => {
+    const { ConnectorSchema: Connector } = await import('./index');
+
+    const authored = {
+      name: 'billing_api',
+      label: 'Billing API',
+      type: 'api',
+      rateLimitConfig: { maxRequests: 100, windowSeconds: 60 },
+    };
+
+    // `ConnectorSchema` is NOT `.strict()`, so a plain delete would have parsed
+    // clean and dropped the key — the exact ADR-0104 failure the tombstone exists
+    // to prevent. The message must carry the fix, not just "invalid".
+    expect(() => Connector.parse(authored)).toThrow(/rateLimitConfig.*removed.*Delete the key/s);
+    const failed = Connector.safeParse(authored);
+    expect(failed.success).toBe(false);
+    // It must not point authors at the INBOUND limiter as a replacement.
+    expect(JSON.stringify(failed.error)).toMatch(/wrong direction/);
+
+    // A connector without the key is untouched: the tombstone rejects a VALUE,
+    // it does not make the key required.
+    const clean = Connector.parse({ name: 'billing_api', label: 'Billing API', type: 'api' });
+    expect(clean).not.toHaveProperty('rateLimitConfig');
+  });
+
+  it('the same rejection reaches `connectors[]` in a stack — the real authoring path', async () => {
+    const { ObjectStackSchema } = await import('../stack.zod');
+
+    const connector = { name: 'billing_api', label: 'Billing API', type: 'api' } as const;
+
+    // Reachability, demonstrated rather than asserted from prose: the tombstone
+    // is only worth anything if it fires through `stack.connectors[]`, which is
+    // the surface an author actually writes (`DeclarativeConnectorEntrySchema`
+    // is `ConnectorSchema.superRefine(…)`, so it inherits the tombstone).
+    const rejected = ObjectStackSchema.safeParse({
+      name: 'acme',
+      connectors: [{ ...connector, rateLimitConfig: { maxRequests: 1 } }],
+    });
+    expect(rejected.success).toBe(false);
+    expect(JSON.stringify(rejected.error)).toMatch(/rateLimitConfig.*was removed/);
+
+    // Positive control: the identical stack minus the retired key parses, so the
+    // failure above is attributable to `rateLimitConfig` and nothing else.
+    expect(ObjectStackSchema.safeParse({ name: 'acme', connectors: [connector] }).success)
+      .toBe(true);
+  });
+
+  it('./shared keeps the INBOUND declaration untouched — a real engine backs it', async () => {
     const sharedEntry = await import('../shared/index');
 
-    // Same object identity as before the rename, same three defaulted keys.
+    // Same object identity and same three defaulted keys as before #4684/#4911.
+    // The asymmetry is the point: this one is enforced by the dispatcher's token
+    // bucket, so it stays while the outbound side goes.
     expect(sharedEntry.RateLimitConfigSchema.parse({})).toEqual({
       enabled: false,
       windowMs: 60000,
       maxRequests: 100,
     });
-  });
-
-  it('the two schemas remain distinct declarations that reject each other’s shape', async () => {
-    const integrationEntry = await import('./index');
-    const sharedEntry = await import('../shared/index');
-
-    expect(integrationEntry.ConnectorRateLimitConfigSchema).not.toBe(
-      sharedEntry.RateLimitConfigSchema,
-    );
-
-    // The outbound shape demands what the inbound shape defaults away.
-    expect(integrationEntry.ConnectorRateLimitConfigSchema.safeParse({}).success).toBe(false);
-    // And the inbound shape still strips outbound keys — which is exactly why
-    // the two must not answer to one name. Pinned, not fixed: it is correct
-    // behaviour for a non-strict schema; the defect was the shared NAME.
+    // It still strips outbound-shaped keys — pinned, not fixed: correct
+    // behaviour for a non-strict schema, and the reason it is NOT the
+    // replacement for the retired key.
     expect(sharedEntry.RateLimitConfigSchema.parse({ windowSeconds: 60, strategy: 'token_bucket' }))
       .toEqual({ enabled: false, windowMs: 60000, maxRequests: 100 });
   });
 
-  // The load-bearing one. `RateLimitConfig` / `ConnectorRateLimitConfig` are
-  // TYPES — erased before any runtime assertion can see them — so every test
-  // above would stay green if `./integration` re-added `export type
-  // RateLimitConfig = z.infer<…>`, which is precisely the defect. This resolves
-  // each entry's exports through their alias chains to the ORIGINAL
-  // declaration: the same symbol-identity measurement
+  // The load-bearing one. `RateLimitConfig` / `ConnectorRateLimitConfig` /
+  // `RateLimitStrategy` are TYPES — erased before any runtime assertion can see
+  // them — so every test above would stay green if `./integration` re-added
+  // `export type ConnectorRateLimitConfig = z.infer<…>`, which un-retires the
+  // shape for every TypeScript author while the runtime namespace looks clean.
+  // This resolves each entry's exports through their alias chains to the
+  // ORIGINAL declaration: the same symbol-identity measurement
   // `check:dual-source-exports` makes, but over `src/` so it runs in `pnpm test`
   // without a build.
   it('no name resolves to two declarations across ./shared and ./integration (types included)', async () => {
@@ -781,16 +810,20 @@ describe('[#4684] RateLimitConfig no longer names two declarations', () => {
     const shared = originsByEntry.get('./shared')!;
     const integration = originsByEntry.get('./integration')!;
 
-    // The names this issue is about: present on the right entry, absent from
-    // the wrong one, and each resolving to its own file.
-    expect(integration.get('ConnectorRateLimitConfig')).toMatch(
-      /^src\/integration\/connector\.zod\.ts:\d+$/,
-    );
-    expect(integration.get('ConnectorRateLimitConfigSchema')).toMatch(
-      /^src\/integration\/connector\.zod\.ts:\d+$/,
-    );
+    // The names this issue is about. TYPE-level absence of the retired shape —
+    // the assertion the runtime `in`-checks above structurally cannot make.
+    expect(integration.get('ConnectorRateLimitConfig')).toBeUndefined();
+    expect(integration.get('ConnectorRateLimitConfigSchema')).toBeUndefined();
+    expect(integration.get('RateLimitStrategy')).toBeUndefined();
+    expect(integration.get('RateLimitStrategySchema')).toBeUndefined();
+    // …and the pre-#4684 bare names stay off this entry too.
     expect(integration.get('RateLimitConfig')).toBeUndefined();
     expect(integration.get('RateLimitConfigSchema')).toBeUndefined();
+    // Positive control for the four `toBeUndefined()`s above: a live neighbour
+    // in the same file must still resolve, or they would pass vacuously.
+    expect(integration.get('RetryConfigSchema')).toMatch(
+      /^src\/integration\/connector\.zod\.ts:\d+$/,
+    );
     expect(shared.get('RateLimitConfig')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
     expect(shared.get('RateLimitConfigSchema')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
 

@@ -911,9 +911,90 @@ export class DatasetExecutor {
 }
 
 /**
+ * Key segment for a dimension whose value is null/undefined (#4821).
+ *
+ * Every other segment {@link dimensionKeyOf} emits begins with a decimal digit
+ * (its length prefix), so a segment beginning with anything else cannot be
+ * produced by any real value — which is the entire requirement for a sentinel.
+ *
+ * `undefined` keys the same as `null` deliberately: a row that OMITS the column
+ * and a row carrying an explicit null both mean "no value here", and drivers do
+ * omit null columns from row objects. Splitting on that would re-introduce, one
+ * level down, exactly the cross-query split this key exists to prevent.
+ */
+const NULL_DIMENSION_SEGMENT = '~';
+
+/**
+ * The composite index key for one row's dimension tuple — **length-prefixed**,
+ * so no two distinct tuples can share a key and no character is reserved
+ * (#4821).
+ *
+ * ## What was actually wrong
+ *
+ * The previous key was `dimensions.map((d) => String(row[d] ?? '')).join(SOH)`,
+ * where SOH was a **raw U+0001 byte written literally into the source**. #4821
+ * was filed against it reading `join('')`, because a raw control byte renders as
+ * nothing — in a terminal, in a GitHub issue body, and in this file. So the
+ * headline defect it reports (`['ab','c']` and `['a','bc']` both keying `"abc"`)
+ * did not in fact reproduce: the separator was present, merely invisible. Two
+ * things did:
+ *
+ *  1. `?? ''` keys a genuinely NULL dimension identically to an empty-string
+ *     one, so "unassigned" merges into "blank" — one real group absorbing
+ *     another's measures, silently, which is the outcome #4821 describes,
+ *     reached through its second mechanism rather than its first.
+ *  2. A single-character separator is unambiguous only while no dimension VALUE
+ *     contains that character. Dimension values are user data (text fields,
+ *     imported records), so that is an assumption, not a guarantee — and it
+ *     fails exactly as silently as the issue predicted.
+ *
+ * A length prefix settles (2) by construction — `2:ab1:c` and `1:a2:bc` differ
+ * for every possible input, nothing is reserved, and no invisible byte is left
+ * in the source for the next reader to misread (this comment's own issue was
+ * filed because of one). (1) is settled separately and explicitly, by
+ * {@link NULL_DIMENSION_SEGMENT}.
+ *
+ * ## Why each segment is still `String()`-coerced
+ *
+ * Deliberately — and it is NOT the trade-off {@link rebucketCrossObject} makes
+ * one file over, whose key JSON-encodes each part. That function re-buckets the
+ * rows of ONE aggregate result: every value in a column came back from a single
+ * query and so carries a single JS type, which makes JSON free there and buys a
+ * real distinction (the empty bucket `null` vs. the literal string `"null"`).
+ *
+ * This key does the opposite job — it ALIGNS rows across **different queries**:
+ * the primary pass against each measure-scoped supplementary pass, and (since
+ * #4870) the current window against the shifted `compareTo` window, which now
+ * fans out per measure the same way. Nothing guarantees two queries type the
+ * same group identically, and {@link compareValues} records this executor's own
+ * encounter with it: "numeric strings, which is how some drivers return SUM
+ * results". `String()` per segment is what keys numeric `1` and string `'1'` the
+ * same, so such rows keep merging. A `JSON.stringify` key renders them `1` vs
+ * `"1"` and would split a group that merges correctly today — trading one silent
+ * defect for a new one. Pinned by test; do not "simplify" it away.
+ */
+function dimensionKeyOf(row: Record<string, unknown>, dimensions: string[]): string {
+  let key = '';
+  for (const d of dimensions) {
+    const value = row[d];
+    if (value == null) {
+      key += NULL_DIMENSION_SEGMENT;
+      continue;
+    }
+    const s = String(value);
+    key += `${s.length}:${s}`;
+  }
+  return key;
+}
+
+/**
  * Left-merge `extra` rows onto `base` rows by their dimension-key tuple,
  * copying the listed value columns. Rows in `extra` with no base match are
  * appended (outer-ish merge so comparison-only buckets still surface).
+ *
+ * Rows are matched by {@link dimensionKeyOf} — read its notes before changing
+ * how the key is built. Both the ambiguity it removes and the type coercion it
+ * keeps are load-bearing, and both fail silently when got wrong.
  */
 export function mergeByDimensions(
   base: Record<string, unknown>[],
@@ -921,7 +1002,7 @@ export function mergeByDimensions(
   dimensions: string[],
   valueColumns: string[],
 ): Record<string, unknown>[] {
-  const keyOf = (row: Record<string, unknown>) => dimensions.map((d) => String(row[d] ?? '')).join('');
+  const keyOf = (row: Record<string, unknown>) => dimensionKeyOf(row, dimensions);
   const index = new Map<string, Record<string, unknown>>();
   for (const row of base) index.set(keyOf(row), row);
 
