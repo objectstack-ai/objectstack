@@ -33,14 +33,16 @@ import { runRlsProofs, formatRlsReport, type RlsReport } from '@objectstack/veri
 // The multi-org runtime moved to the ENTERPRISE `@objectstack/organizations`
 // package (ADR-0081 D2) — not part of this open workspace. Skip (loudly) when
 // it isn't linked in; enterprise/cloud CI, which ships the package, runs this.
-const organizationsPkg = '@objectstack/organizations';
-const organizationsAvailable = await import(/* webpackIgnore: true */ organizationsPkg)
-  .then(() => true)
-  .catch(() => false);
-if (!organizationsAvailable) {
-  // eslint-disable-next-line no-console
-  console.warn('[dogfood] @objectstack/organizations (enterprise) not installed — skipping the multi-org RLS gate');
-}
+//
+// #4700: the probe used to be a bare `import()`, which Node ESM resolves against
+// this file's own realpath in the framework workspace — so it answered "not
+// installed" unconditionally, everywhere, and this gate had never once run while
+// the suite reported green. It now resolves from the host app like the runtime
+// does, and `OS_TEST_MULTI_ORG_ENABLED=1` turns an unexpected skip into a
+// failure.
+import { organizationsAvailable, warnIfUnavailable } from './enterprise-organizations.js';
+
+warnIfUnavailable('multi-org RLS gate');
 
 describe.skipIf(!organizationsAvailable)('objectstack verify RLS: CRM multi-tenant (#1994 org-scoped)', () => {
   let stack: VerifyStack;

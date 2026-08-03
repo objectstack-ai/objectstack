@@ -18,7 +18,9 @@ import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
-import { createHostRequire, createHostImporter } from '../utils/import-from-host.js';
+// Shared with @objectstack/verify and the dogfood multi-org probes (#4700) —
+// node-only, hence the `/node` subpath rather than the edge-safe root export.
+import { createHostRequire, createHostImporter } from '@objectstack/types/node';
 import {
   printHeader,
   printKV,

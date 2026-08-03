@@ -30,6 +30,10 @@ import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { SettingsServicePlugin, LocalCryptoProvider } from '@objectstack/service-settings';
 import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
+// Node-only subpath (#4700). Optional packages supplied by the app under
+// verification — `@objectstack/organizations` above all — must be resolved from
+// THAT app, not from `packages/verify`'s own realpath inside this workspace.
+import { createHostImporter, createHostRequire } from '@objectstack/types/node';
 
 /** A Hono app exposes `.request(path, init)` returning a standard `Response`. */
 interface InjectableApp {
@@ -100,6 +104,22 @@ export interface BootOptions {
    * entitles a walled posture but no longer activates one by itself.
    */
   multiTenant?: boolean;
+  /**
+   * Root directory of the **host app** being verified — the one whose
+   * `node_modules` carries the optional packages it declares (currently the
+   * enterprise `@objectstack/organizations` that `multiTenant` needs).
+   *
+   * Defaults to `process.cwd()`, which is where `objectstack verify` already
+   * reads `objectstack.config.ts` from. Set it when booting an app that is not
+   * the current working directory — a programmatic harness verifying several
+   * apps in one process, or a test fixture on a temp path.
+   *
+   * Exists because Node ESM resolves a bare `import()` against the importer's
+   * own realpath: without a host anchor, `packages/verify` can only ever see the
+   * framework's own `node_modules`, so an app-installed package was invisible no
+   * matter what the app declared (#4700, same defect class as cloud#1013).
+   */
+  hostRoot?: string;
   /**
    * Register `@objectstack/service-automation` so authored flows execute against
    * the real stack. The plugin seeds the built-in node executors and, at start(),
@@ -267,15 +287,23 @@ export async function bootStack(
   // so a missing package is a hard, actionable error — not a silent
   // single-org downgrade that would flip the fixture's RLS posture.
   if (opts.multiTenant) {
+    // #4700: this used a bare `import()`, which Node ESM resolves against the
+    // IMPORTER's realpath — `packages/verify`, inside the framework workspace.
+    // `@objectstack/organizations` is cloud-private and only ever lives in the
+    // host app's `node_modules`, so the import could never succeed and the
+    // message below fired at apps that had already installed the package,
+    // telling them to install it again. Resolve from the host app (the project
+    // `objectstack verify` runs in) and fall back to this package's own
+    // resolution — the same helper `objectstack serve` uses (cloud#1013).
     const organizationsPkg = '@objectstack/organizations';
     let mod: any;
     try {
-      mod = await import(/* webpackIgnore: true */ organizationsPkg);
+      mod = await createHostImporter(createHostRequire(opts.hostRoot))(organizationsPkg);
     } catch (e) {
       restoreTenancyPosture();
       throw new Error(
         'verify: multiTenant=true requires the enterprise @objectstack/organizations package (migrated from plugin-org-scoping, ADR-0081 D2). ' +
-          `Install/link it in this workspace to run multi-org fixtures. (${(e as Error).message})`,
+          `Install/link it in THIS APP (${opts.hostRoot ?? process.cwd()}) to run multi-org fixtures. (${(e as Error).message})`,
       );
     }
     await kernel.use(new mod.OrganizationsPlugin());
