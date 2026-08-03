@@ -68,6 +68,58 @@ gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Lands 
 (Use the GitHub MCP tools instead of `gh` when the CLI is unavailable — the
 protocol is identical.)
 
+## Operational notes(实测坑位)
+
+队列与平台层的四条实测结论。共同点:**判据取命令的输出,不取 API 字段的字面值,
+也不取本地工作树的现状** —— 每一条都是在这一步上咬过人之后写下来的。
+
+**1. 判断 PR 是否在合并队列,看 `gh-readonly-queue/*` 分支,不看 `auto_merge`
+字段。** 本仓 PR 入队后,REST 返回的 `auto_merge` 回落为 off(队列条目取代了挂起的
+auto-merge),该字段对「在不在队列里」零信息量,据它反推会得出「没入队,再入一次」
+的错误结论。唯一判据:
+
+```bash
+git ls-remote --heads origin 'refs/heads/gh-readonly-queue/*'
+```
+
+分支名里带着这一批被打包的 PR 号;没有匹配分支才是真的没入队。
+
+**2. 队列踢出:先认签名,再决定重投。** 被踢出不等于 PR 有问题。今天 #4796 那条已知
+flaky 连踢五个互不相关的 PR,核对失败签名一致后原样重投,五个全部一次通过 —— 认签名
+的成本远低于逐个改 PR。但反过来是同等硬度的规则:止血 PR(#4856)合入后,**同一签名再次
+出现就不再是那条 flaky**,已修签名的再现是新问题,必须重新诊断,禁止条件反射式重投。
+给 flaky issue 追记命中次数,只在新信息改变修法作用域时才值得(第 3/4 次命中把靶面从
+一条用例扩到整个模板,值得记;纯计数不值得占用 issue 时间线)。
+
+**3. GitHub MCP 的 GraphQL 配额(5000/时)极易打满,读操作与评论一律走 REST。**
+今天三次归零(峰值 10402/5000),每次卡死的都是 `enable_pr_auto_merge`、draft 状态
+切换、`list_issues` 这几个 GraphQL-only 操作 —— 配额一空,整个循环停在复核与入队上。
+规程三条:
+
+- 读与评论优先 `curl` / `gh api` 走 REST(core 配额 15000/时,与 GraphQL **独立计**),
+  只有确实没有 REST 对应物的写操作才花 GraphQL 配额;
+- 配额打满时把 GraphQL 写操作**排队而不是重试**,后台轮询 `rate_limit` 的
+  `resources.graphql.remaining`,恢复即执行:
+
+  ```bash
+  gh api rate_limit --jq '.resources.graphql'   # 或 curl https://api.github.com/rate_limit
+  ```
+
+- 复核意见不等配额 —— 先用 REST 评论把结论发出去,入队、切 ready 这类 GraphQL 动作
+  事后补;维护者拿到的信息不该被配额延迟。
+
+**4. 核验 main 的事实用 `origin/main`,不用共享检出的工作树。** 共享检出的 HEAD 由
+别的 agent 摆布,可能落后 origin/main 数十提交(今天 PM 与一名 dev 都在落后 63 提交的
+树上 grep 出假阴性,据此差点判了错误的结论)。一律先 `git fetch origin main`,再:
+
+```bash
+git grep <pattern> origin/main -- <paths>    # 而不是在工作树里 grep
+git show origin/main:<path>                  # 看某个文件在 main 上的现状
+```
+
+这条也写进派发词(step 5):dev 在自己的 worktree 里同样会踩,而 worktree 是从
+`origin/main` 切的、后续不会自己更新。
+
 ## Multi-repo coordination (backend / frontend / cloud)
 
 The product spans three repos with a fixed dependency direction:
@@ -333,6 +385,18 @@ routing isn't already decided:
   branch, no PR is invisible — that is what the claim-first rule (step 4)
   exists to shrink.
 
+**Recognize the "no producer" shape —「生产者在哪?」is a standing triage
+question.** One issue class is invisible to every automated check: a field is
+declared, consumers read it, types and gates are fully green — and **no code
+path ever writes it**. Five hits in one day: #4704 (`Seed.env`, six call sites
+drop it), #4837 (the liveness ledger's own criterion), #4839 (`session.roles`
+written nowhere in the repo), #4862 (flow triggers bulk-set `previous` without
+binding it), #4867. Type systems and lint validate the **consumer** side only,
+so a missing 生产者 survives indefinitely under a green tree. On any issue
+shaped `declared ≠ enforced`, ask where the producer is before routing it —
+the answer is usually the root cause, and it changes the issue's scope (and
+often its `domain:*` label) *before* dispatch rather than in the dev's report.
+
 ### 3. Select the batch
 
 Pick up to `batch` issues that are **mutually independent**: no two issues in
@@ -342,6 +406,17 @@ costs more than serializing. When in doubt, serialize — put the second issue i
 the next round. Prefer small, well-specified issues; an issue with no acceptance
 criteria you can state in one sentence is a candidate for escalation (step 8),
 not dispatch.
+
+**Same-file issues serialize strictly across rounds — and deferring is not
+shelving.** Two issues on one file ride in different rounds, no exception
+(#4820/#4821). The part that is easy to miss: while #4820 was in flight its dev
+established that the fix #4821's body proposes (a `JSON.stringify` key) would
+change type-coercion semantics and introduce a fresh silent defect. That
+warning **and** the `Blocked-by:` line were written onto #4821 in the same round
+#4820's review closed — not the next one. A deferred issue sits in the queue
+looking dispatchable to every sweep, including another PM's; whatever you
+learned about it is worthless until it is on the issue. Rule: when step 3 pushes
+an issue to a later round, record the known trap on it before the round ends.
 
 ### 4. Claim
 
@@ -428,6 +503,42 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
 Return ONLY the JSON report defined in your agent definition.
 ```
 
+**Same-day churn on the issue's files goes INTO the prompt.** Step 1's
+stale-premise check protects against issues that aged; the same-day variant is
+main moving between filing and dispatch on the very file the issue quotes —
+#4808 was dispatched right after #4806 rewrote the same guard, #4820 right
+after #4822 touched the same file. Both prompts carried an explicit line
+(「基于合并后的代码工作,issue 引用的片段可能已变,先核对当前 main」), and both
+devs avoided rework that the issue's own snippets would have caused. Add that
+line whenever `git log origin/main --oneline -20 -- <paths>` shows a merge on
+the issue's files today, and tell the dev to verify against `origin/main`
+rather than any working tree (Operational notes 4) — the dev's worktree is cut
+from `origin/main` once and never refreshes itself.
+
+#### Handing off an interrupted dev(worktree 接手协议)
+
+`/compact`, and any host-level interruption of the PM session, kills running
+subagents together with their pending tool calls — #4700 and #4775 both died on
+the same second. **The agent is not resumable; its worktree, branch and commits
+are intact.** Never re-run the original dispatch prompt over that state: a fresh
+agent that follows it will try to create the worktree that already exists, or
+redo work already committed. Dispatch a **new** agent with these four additions
+instead:
+
+- 「worktree `<repo>-issue-<n>` 已存在,⛔ 不要新建,`cd` 进去接着做」— the
+  worktree-first rule is already satisfied; creating a second one splits the work;
+- read every existing commit **and** uncommitted change there **first**, then
+  decide per hunk to keep or amend it — neither restart from scratch nor trust
+  it blindly (the dead agent never reported, so nothing about it is verified);
+- re-run the verification the dead agent never reached, in full, and report its
+  real output — an interrupted run leaves no test evidence at all;
+- the assignee, claim comment and branch stay untouched: this is a continuation
+  of the existing claim, not a new one, and the claim comment records the
+  handoff rather than being replaced.
+
+Both #4700 and #4775 passed review on the first try after being handed off this
+way.
+
 #### Resource limits — parallel agents share ONE container
 
 Memory peaks come from **build + test**, not editing, so the fix is not less
@@ -493,6 +604,29 @@ against the report's own claims:
 - Test evidence in the report shows the actual commands and passing output,
   not a bare "tests pass".
 - The diff plausibly satisfies the issue's acceptance criteria.
+- **Did the dev verify the issue's premise?** A report that falsifies the
+  issue — or your own dispatch prompt — is a sign of a *good* run; a report
+  that accepts every stated cause at face value is the one to read twice. Four
+  same-day cases: #4808 (the issue was half right — the real truncation was in
+  pruning, not the TTL), #4813 (the technical rationale the PM supplied was
+  disproved by measurement and the dev's was harder; the issue body's wrong
+  attribution became #4873), #4825 (the issue's option 2 was killed by
+  call-site evidence), #4790 (previous day, a fixed-window conversion
+  rejected). When a dev corrects the PM, **acknowledge it in the open** — the
+  correction belongs in the PR/issue comments so the next reader inherits the
+  corrected premise, and a wrong premise still sitting in an issue body gets
+  its own follow-up issue rather than being silently dropped.
+- **`+0/-0` in a PR diff is not proof of an empty file.** git renders a file
+  as binary — zero added, zero removed — as soon as it contains a NUL byte.
+  #4870's 347-line test file showed `+0/-0` and was briefly misread as an
+  unfinished placeholder; it was one bare `0x00` in the body, which
+  `pnpm check:nul-bytes` rejects by design. On any `+0/-0` entry suspect NUL
+  first and an empty file second, and settle it on the blob rather than the
+  diff (`git show <sha>:<path> | wc -l`). The fix always belongs in the
+  source: write the escape sequence `\u0000`, which is byte-identical at
+  runtime and is the convention `scripts/check-nul-bytes.mjs` enforces. A
+  raw NUL is never the right authoring choice: it also makes the whole file
+  invisible to grep, which is how the defect hides in the first place.
 
 Verdict per issue:
 
