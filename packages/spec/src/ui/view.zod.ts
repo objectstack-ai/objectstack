@@ -54,6 +54,34 @@ export { HttpMethodSchema, HttpRequestSchema };
 export type { HttpRequest } from '../shared/http.zod';
 
 /**
+ * [#4691] The type of `HttpMethodSchema` is `HttpMethodType`, RE-EXPORTED from
+ * its one declaration in `shared/http.zod.ts`.
+ *
+ * `./ui` used to export that same 5-value type under the name `HttpMethod`
+ * (`export type HttpMethod = z.infer< typeof HttpMethodSchema >`, in the alias
+ * block at the bottom of this file). That name is already taken across the
+ * package by a DIFFERENT declaration — `shared/http.zod.ts`'s 7-value
+ * `z.enum([… 'HEAD', 'OPTIONS'])`, exported by `./shared` and `./api` — so one
+ * name resolved to two incompatible types depending on the import path (the
+ * #4411 trap; the last row of `dual-source-exports.baseline.json`).
+ *
+ * Converging by re-exporting `./shared`'s `HttpMethod` here — the fix #4688
+ * used for `HttpRequest` — would have been WRONG: it silently widens `./ui`'s
+ * type from 5 values to 7 while `HttpRequestSchema.method` still validates
+ * against the 5-value `HttpMethodSchema`. `method: 'HEAD'` would type-check and
+ * then throw at `.parse()` — the type would start lying about the runtime. So
+ * the NAME is dropped from `./ui` instead, and the honest 5-value type keeps
+ * the name it already carries in `./shared`.
+ *
+ * Re-exported here (rather than only left in `./shared`) so the shortest fix
+ * for `import type { HttpMethod } from '@objectstack/spec/ui'` is also the
+ * CORRECT one: TypeScript's "did you mean" points at `HttpMethodType` in the
+ * same entry point, instead of tempting a path swap to `./shared`, where the
+ * name `HttpMethod` does still exist and means the wider 7-value enum.
+ */
+export type { HttpMethodType } from '../shared/http.zod';
+
+/**
  * View Data Source Configuration
  * Supports three modes:
  * 1. 'object': Standard Protocol - Auto-connects to ObjectStack Metadata and Data APIs
@@ -2058,7 +2086,14 @@ export type ViewData = z.infer<typeof ViewDataSchema>;
 // this file (#4688). Re-adding `= z.infer<typeof HttpRequestSchema>` below would
 // re-create the dual-source row this change removed, even though the inferred
 // shape is identical.
-export type HttpMethod = z.infer<typeof HttpMethodSchema>;
+//
+// `HttpMethod` is not declared here either — and is no longer exported from
+// `./ui` at all (#4691). It used to be `= z.infer<typeof HttpMethodSchema>`,
+// the 5-value UI subset, while `./shared` and `./api` export a DIFFERENT,
+// 7-value declaration under that same name. Re-exporting theirs would widen
+// this entry's type past what `HttpRequestSchema.method` actually validates, so
+// the name was dropped instead; the 5-value type is re-exported as
+// `HttpMethodType` at the top of this file, where the full rationale lives.
 export type ColumnSummary = z.infer<typeof ColumnSummarySchema>;
 export type ColumnSummaryConfig = z.infer<typeof ColumnSummaryConfigSchema>;
 export type ColumnPrefix = z.infer<typeof ColumnPrefixSchema>;

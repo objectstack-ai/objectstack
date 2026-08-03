@@ -123,6 +123,7 @@
     "ui/GanttConfig — no type export",
     "ui/GanttQuickFilter — no type export",
     "ui/GroupingField — no type export",
+    "ui/HttpMethod — no type export",
     "ui/KanbanConfig — no type export",
     "ui/NavigationMode — no type export",
     "ui/ObjectListView — no type export",

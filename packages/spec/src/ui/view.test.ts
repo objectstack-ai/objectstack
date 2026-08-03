@@ -2736,6 +2736,126 @@ describe('[#4688] HttpRequest is single-source across ./shared and ./ui', () => 
   });
 });
 
+// ─── [#4691] `HttpMethod` is gone from ./ui — the LAST dual-source row ───────
+//
+// The sibling of the #4688 pin above, and deliberately NOT the same fix. There,
+// `./shared` and `./ui` named two declarations of the *same* shape and the cure
+// was a re-export. Here the two declarations are genuinely different types:
+//
+//   shared/http.zod.ts  `export const/type HttpMethod`  → 7 values (+HEAD/OPTIONS)
+//   shared/http.zod.ts  `HttpMethodSchema`/`HttpMethodType` → 5 values (UI subset)
+//   ui/view.zod.ts      `export type HttpMethod` (removed) → the 5-value one
+//
+// So re-exporting `./shared`'s into `./ui` would have widened the UI type to 7
+// while `HttpRequestSchema.method` still accepts only 5 — a type that lies about
+// its own runtime. The name was removed from `./ui` instead.
+//
+// Same reasoning as #4688 on the mechanism: `HttpMethod` is a TYPE, erased
+// before any runtime assertion can see it, and #4642 established that a
+// compile-time pin in this package is a no-op (`tsconfig.json` excludes
+// `**/*.test.ts`; vitest never enables `typecheck`). The compiler-API test is
+// therefore the load-bearing one; the runtime tests below it guard the value
+// ranges the whole argument rests on.
+describe('[#4691] `HttpMethod` is not exported from ./ui', () => {
+  it('resolves the export surface: ./ui has no `HttpMethod`, ./shared and ./api share one', async () => {
+    const ts = (await import('typescript')).default;
+    const { resolve, relative, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+
+    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    const entries = {
+      './shared': resolve(specDir, 'src/shared/index.ts'),
+      './ui': resolve(specDir, 'src/ui/index.ts'),
+      './api': resolve(specDir, 'src/api/index.ts'),
+    };
+    const program = ts.createProgram(Object.values(entries), {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      skipLibCheck: true,
+      noEmit: true,
+    });
+    const checker = program.getTypeChecker();
+    const unalias = (s: import('typescript').Symbol) =>
+      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
+
+    const exportsOf = (sub: keyof typeof entries) => {
+      const sf = program.getSourceFile(entries[sub]);
+      const moduleSym = sf && checker.getSymbolAtLocation(sf);
+      // Without this guard a resolution failure would make every assertion
+      // below pass vacuously — the exact way a gate goes dormant (#4642).
+      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
+      return checker.getExportsOfModule(moduleSym!);
+    };
+
+    // A sanity anchor: if this entry resolved to nothing, `find` returning
+    // undefined for `HttpMethod` below would prove nothing at all.
+    const uiExports = exportsOf('./ui');
+    expect(uiExports.length, './ui must export a non-trivial surface').toBeGreaterThan(50);
+
+    // 1. The row this change removes: `./ui` no longer names `HttpMethod`.
+    expect(uiExports.map((e) => e.getName())).not.toContain('HttpMethod');
+
+    // 2. …but it still offers the 5-value type under its honest name, so the
+    //    migration stays inside this entry point.
+    const uiMethodType = uiExports.find((e) => e.getName() === 'HttpMethodType');
+    expect(uiMethodType, './ui must export `HttpMethodType`').toBeTruthy();
+
+    const originOf = (sym: import('typescript').Symbol, label: string) => {
+      const decl = unalias(sym).declarations?.[0];
+      expect(decl, `${label} must have a declaration`).toBeTruthy();
+      const declFile = decl!.getSourceFile();
+      return `${relative(specDir, declFile.fileName)}:${
+        declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
+      }`;
+    };
+
+    expect(originOf(uiMethodType!, './ui HttpMethodType'))
+      .toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
+
+    // 3. `./shared` and `./api` keep naming ONE declaration `HttpMethod` — the
+    //    7-value one. This change must not have disturbed that side.
+    const origins = new Map<string, string>();
+    for (const sub of ['./shared', './api'] as const) {
+      const exported = exportsOf(sub).find((e) => e.getName() === 'HttpMethod');
+      expect(exported, `${sub} must still export \`HttpMethod\``).toBeTruthy();
+      origins.set(sub, originOf(exported!, `${sub} HttpMethod`));
+    }
+    expect(origins.get('./api')).toBe(origins.get('./shared'));
+    expect(origins.get('./shared')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
+  });
+
+  it('keeps the two value ranges distinct: 7 for `HttpMethod`, 5 for `HttpMethodSchema`', async () => {
+    const sharedEntry = await import('../shared/index');
+    const apiEntry = await import('../api/index');
+
+    // `./api` re-exports the const, so this is one object seen twice.
+    expect(apiEntry.HttpMethod).toBe(sharedEntry.HttpMethod);
+
+    expect([...sharedEntry.HttpMethod.options].sort()).toEqual(
+      ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'],
+    );
+    expect([...sharedEntry.HttpMethodSchema.options].sort()).toEqual(
+      ['DELETE', 'GET', 'PATCH', 'POST', 'PUT'],
+    );
+
+    // The subset relation is the whole reason the two names cannot merge.
+    expect(sharedEntry.HttpMethod.options).toContain('HEAD');
+    expect(sharedEntry.HttpMethodSchema.options).not.toContain('HEAD');
+  });
+
+  it('rejects `HEAD` at the parse layer — the runtime the ./ui type must not out-promise', async () => {
+    const uiEntry = await import('../ui/index');
+
+    expect(() => uiEntry.HttpMethodSchema.parse('HEAD')).toThrow();
+    expect(() => uiEntry.HttpMethodSchema.parse('OPTIONS')).toThrow();
+    expect(() => uiEntry.HttpRequestSchema.parse({ url: '/api/data', method: 'HEAD' })).toThrow();
+    // …while the 5 it does accept still round-trip, so the guard above is not
+    // passing because the schema rejects everything.
+    expect(uiEntry.HttpRequestSchema.parse({ url: '/api/data', method: 'PATCH' }).method)
+      .toBe('PATCH');
+  });
+});
+
 describe('ADR-0089 — visibleWhen unification (view form)', () => {
   it('normalizes a deprecated `visibleOn` alias to `visibleWhen` on a form field', () => {
     const parsed = FormFieldSchema.parse({ field: 'state', visibleOn: "record.country == 'US'" });
