@@ -324,8 +324,14 @@ const DELETED_GONE_DEF = ['identity/Session:userId', 'identity/Session:token'];
  *  ≥ 2 majors behind any current major, so this fixture never goes stale. */
 const DELETED_AGED_LEAF = 'compactLayout';
 const DELETED_AGED = `data/Object:${DELETED_AGED_LEAF} [RETIRED]`;
-/** Base key under a def RENAMED_DEFS moved: carried, so never a deletion. */
-const DELETED_BY_RENAME = 'integration/RateLimitConfig:maxRequests';
+/** Base key under a def RENAMED_DEFS moved: carried, so never a deletion.
+ *  Was `integration/RateLimitConfig:maxRequests` until #4911 retired that def
+ *  outright and its rename entry was absorbed (a rename whose target stops
+ *  being emitted cannot stay in the table). Re-pointed at the #4703 rename,
+ *  which carries 7 keys — an ENUM rename (0 keys carried) would make this
+ *  fixture vacuous. */
+const DELETED_BY_RENAME_SOURCE_DEF = 'integration/FieldMapping';
+const DELETED_BY_RENAME = `${DELETED_BY_RENAME_SOURCE_DEF}:source`;
 
 describe('build-schemas.ts — deleted baseline lines must prove themselves (#4650)', () => {
   beforeAll(() => {
@@ -501,7 +507,12 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
     'a declared def rename is not a deletion: base keys are carried through RENAMED_DEFS before comparing',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      expect(Object.keys(RENAMED_DEFS)).toContain('integration/RateLimitConfig');
+      expect(Object.keys(RENAMED_DEFS)).toContain(DELETED_BY_RENAME_SOURCE_DEF);
+      // The carried key must actually land under the NEW def, or this asserts
+      // nothing — a rename entry whose target lost the key is check (a0)'s case.
+      expect((JSON.parse(pristineSurface) as { keys: string[] }).keys).toContain(
+        `${RENAMED_DEFS[DELETED_BY_RENAME_SOURCE_DEF]}:source`,
+      );
       seedBase((s) => [...s, DELETED_BY_RENAME].sort());
       seedSurface((s) => s);
 

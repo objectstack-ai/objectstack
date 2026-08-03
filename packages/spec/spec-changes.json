@@ -289,6 +289,12 @@
         "to": "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)",
         "conversionId": "hook-body-crypto-hash-removed",
         "toMajor": 17
+      },
+      {
+        "surface": "connector.rateLimitConfig",
+        "to": "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; the runtime's only token bucket limits INBOUND requests, so every knob here was inert while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)",
+        "conversionId": "connector-rate-limit-config-removed",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -918,6 +924,12 @@
           "surface": "hook.body.capabilities / action.body.capabilities",
           "to": "script-body capability token 'crypto.hash' removed (#4391 — the sandbox never installed ctx.crypto.hash, so the token granted a call that always threw; the CLI inferred it too)",
           "conversionId": "hook-body-crypto-hash-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "connector.rateLimitConfig",
+          "to": "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; the runtime's only token bucket limits INBOUND requests, so every knob here was inert while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)",
+          "conversionId": "connector-rate-limit-config-removed",
           "toMajor": 17
         }
       ],
