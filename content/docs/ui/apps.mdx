@@ -284,8 +284,9 @@ const projectApp = {
 
   requiredPermissions: ['pm_access'],
   // No `homePageId`: the landing page IS the first navigation item (by `order`),
-  // and the ROOT landing follows `isDefault`. The key was removed in 17.0.0 (#4667)
-  // because nothing ever read it.
+  // and the ROOT landing follows `isDefault`. The key was removed in 17.0.0
+  // (#4667, #4709) — it did have a consumer, but it pointed at a navigation item
+  // by id and fell back silently when that id dangled.
 };
 ```
 

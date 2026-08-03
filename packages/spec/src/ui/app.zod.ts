@@ -973,19 +973,39 @@ const APP_KEYS = [
 ] as const;
 
 /**
- * `app.homePageId`, retired in 17.0.0 (#4667, ADR-0049).
+ * `app.homePageId`, retired in 17.0.0 (#4667, ADR-0049) — **premise corrected in
+ * #4709**, retirement itself upheld.
  *
- * The schema's own hedge gave it away — "if not set, usually defaults to the
- * first navigation item" describes the ONLY behaviour that exists. No shell
- * reads the key: an app's landing page is its first navigation item in `order`,
- * and the ROOT landing follows `isDefault` routing (objectui's
- * `RootLandingRedirect`). So an author pinning a home page got the first nav
- * item anyway, and "usually" was doing the work of "always".
+ * #4667 retired the key saying "no shell ever read it". That was FALSE, and this
+ * repo's own record already said so: the 2026-06 AppSchema liveness audit
+ * (`docs/audits/2026-06-appschema-property-liveness.md`) listed `homePageId` on
+ * the LIVE side, because objectui's console read it —
+ * `resolveLandingRoute()`, `packages/app-shell/src/console/AppContent.tsx`
+ * (objectui @785b8a5d) — and it was the only thing deciding where an app opened.
+ * A tombstone is what the next reader reasons from, so a false reason in one is
+ * not cosmetic: #4709 was opened by someone who believed this sentence and only
+ * then checked the renderer.
+ *
+ * What actually condemns the key is its SHAPE, not disuse. It encoded the
+ * landing page as an ID cross-reference into `navigation` with no referential
+ * integrity — a dangling id fell back to the first item *silently* (that is
+ * literally what `resolveLandingRoute` did) — so one fact had two sources and
+ * the wrong one failed quietly. If "land somewhere other than first" is ever
+ * wanted again, it belongs on the navigation item itself (a
+ * `navigation[].landing`-shaped marker: single source, cannot dangle), designed
+ * enforce-first — renderer and tests before schema. Until then an app's landing
+ * page IS its first navigation item in `order`, and the ROOT landing follows
+ * `isDefault` routing (objectui's `RootLandingRedirect`, which was always
+ * correct here). Retiring the key left a dead `if (homePageId)` branch in
+ * objectui, tracked for removal in objectstack-ai/objectui#3264.
  */
 const HOME_PAGE_ID_RETIRED =
-  '`app.homePageId` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no shell '
-  + 'ever read it. An app\'s landing page IS its first navigation item (by `order`), and the '
-  + 'root landing follows `isDefault` routing. Delete the key; to change where an app opens, '
+  '`app.homePageId` was removed in @objectstack/spec 17.0.0 (#4667, #4709, ADR-0049). '
+  + 'objectui\'s console did read it before v17 (`resolveLandingRoute`), so this key had a '
+  + 'consumer — it was retired because the capability is better expressed on the navigation '
+  + 'item itself than as an ID cross-reference that silently falls back when it dangles. An '
+  + 'app\'s landing page IS its first navigation item (by `order`), and the root landing '
+  + 'follows `isDefault` routing. Delete the key; to change where an app opens, '
   + 'reorder `navigation` so the intended entry is first, and set `isDefault` on the app that '
   + 'should own the root landing. Run `os migrate meta --from 16` to rewrite existing sources '
   + 'automatically.';

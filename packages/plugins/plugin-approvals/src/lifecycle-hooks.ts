@@ -12,12 +12,42 @@
  * of an approval node is only known at flow-run time). For each update it:
  *
  *   1. Skips engine self-writes (status mirror) and `sys_approval_*` bookkeeping.
- *   2. Looks up a pending request for `(object, recordId)`.
- *   3. Reads the lock policy from that request's `node_config_json` snapshot:
+ *   2. Resolves **which records the write would touch** and looks up the pending
+ *      requests gating them.
+ *   3. Reads the lock policy from each request's `node_config_json` snapshot:
  *      - `lockRecord === false` → allow.
  *      - otherwise block, EXCEPT when the only changed field is the configured
- *        `approvalStatusField` (so the status mirror is never blocked) or the
- *        caller is an `admin`.
+ *        `approvalStatusField` (so the status mirror is never blocked), the
+ *        caller is an `admin`, or the writer is the run that opened the request
+ *        (`flowRunId`, #3456 / #3712).
+ *
+ * ## Step 2 is per-row, and it covers PREDICATE writes (#4778)
+ *
+ * The engine extracts `input.id` only from a **scalar** `where.id`; an operator
+ * object (`{ $in: [...] }`) or any other predicate is a multi-row write that
+ * routes to `updateMany`, and reaches this hook with **no** `input.id`. The
+ * hook used to open with `if (!id) return`, i.e. it read *"no row was
+ * resolved"* as *"there is nothing to authorize"* when the truth was *"nothing
+ * was ever queried"* — the same fail-open reasoning as #4757 (`sys_attachment`)
+ * and #4630 (`sys_comment`). Rewriting the very same edit as `multi: true` then
+ * bypassed the lock with **no privilege at all**: no admin role, no `isSystem`,
+ * no `lockRecord: false`, no whitelisted field.
+ *
+ * So the hook now resolves the row set the way the attachment/comment guards
+ * do, with one difference the record lock forces: it is a **per-row** guard
+ * ("does THIS record have a pending approval"), not a "should this whole-table
+ * write be refused" guard — so an unscoped bulk update is *not* refused
+ * outright. Instead the resolution is inverted, which is what keeps it cheap:
+ * the bound is on the **pending requests for the object** (of which there are
+ * normally none, and the hook returns after one query), never on the update's
+ * match set. Only when some record of the object *is* locked does the hook ask
+ * the engine which of those locked rows the caller's predicate actually
+ * matches. Past {@link PENDING_LOCK_LIMIT} locked records — or if that
+ * intersection query fails — the write fails **CLOSED**.
+ *
+ * Every exemption above is evaluated on the multi-row path exactly as on the
+ * by-id path: extending a guard to more rows must move the *allow* rules with
+ * the *deny* rules, or fail-open merely becomes false-positive.
  *
  * Registered under `packageId: 'plugin-approvals:lock'` so it can be cleanly
  * unbound on plugin stop.
@@ -50,6 +80,52 @@ function parseJson<T = any>(raw: unknown, fallback: T): T {
   return raw as T;
 }
 
+/**
+ * Bound on the records one write may be authorized against — the sibling of
+ * `sys_attachment`'s `MULTI_DELETE_AUTH_LIMIT` and `sys_comment`'s
+ * `MULTI_WRITE_AUTH_LIMIT` (#4757 / #4630).
+ *
+ * It bounds LOCKED records (pending requests on the object) and ids the caller
+ * names, never the update's match set: a mass update of 50 000 unlocked rows
+ * costs one query and is allowed, while an object carrying more pending
+ * approvals than this cannot be decided row by row and fails CLOSED.
+ */
+const PENDING_LOCK_LIMIT = 1_000;
+
+/**
+ * The approvals bookkeeping — and the row set a predicate write would touch —
+ * are read as SYSTEM. A guard's own input must never be narrowed by the
+ * caller's visibility: a locked row the caller cannot READ is still a locked
+ * row they must not WRITE (the #4630 rule).
+ */
+const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+
+function lockedError(message: string): never {
+  const err: any = new Error(`RECORD_LOCKED: ${message}`);
+  err.code = 'RECORD_LOCKED';
+  err.statusCode = 409;
+  throw err;
+}
+
+/**
+ * The record ids a write names outright — a scalar id or an `{ $in: [...] }` —
+ * or `null` when the ids cannot be read off it (any other predicate, or an
+ * `$in` carrying a non-scalar, which we refuse to guess at).
+ *
+ * Mirrors `asIdList` in the attachment/comment kits. An empty `$in` legitimately
+ * names *no* record, so it returns `[]` (nothing to gate), not `null`.
+ */
+function asIdList(id: unknown): Array<string | number> | null {
+  if (typeof id === 'number') return [id];
+  if (typeof id === 'string') return id === '' ? null : [id];
+  if (id && typeof id === 'object' && Array.isArray((id as any).$in)) {
+    const raw = (id as any).$in as unknown[];
+    const scalars = raw.filter((v): v is string | number => typeof v === 'string' || typeof v === 'number');
+    return scalars.length === raw.length ? scalars : null;
+  }
+  return null;
+}
+
 /** The pending request gating a record, plus its snapshotted node config. */
 async function pendingRequestFor(
   engine: MinimalEngine,
@@ -60,11 +136,151 @@ async function pendingRequestFor(
     const rows = await engine.find('sys_approval_request', {
       where: { object_name: objectName, record_id: String(recordId), status: 'pending' },
       limit: 1,
+      context: { ...SYSTEM_CTX },
     } as any);
     return Array.isArray(rows) && rows[0] ? rows[0] : null;
   } catch {
     return null;
   }
+}
+
+/** Pending requests gating any of the records a write names by id. */
+async function pendingRequestsForRecords(
+  engine: MinimalEngine,
+  objectName: string,
+  recordIds: ReadonlyArray<string | number>,
+): Promise<any[]> {
+  if (recordIds.length === 0) return [];
+  if (recordIds.length > PENDING_LOCK_LIMIT) {
+    lockedError(
+      `refusing to authorize an update naming more than ${PENDING_LOCK_LIMIT} records of '${objectName}' — ` +
+      'the approval lock cannot check them row by row; scope the write',
+    );
+  }
+  if (recordIds.length === 1) {
+    const one = await pendingRequestFor(engine, objectName, String(recordIds[0]));
+    return one ? [one] : [];
+  }
+  try {
+    const rows = await engine.find('sys_approval_request', {
+      where: { object_name: objectName, record_id: { $in: recordIds.map(String) }, status: 'pending' },
+      limit: PENDING_LOCK_LIMIT + 1,
+      context: { ...SYSTEM_CTX },
+    } as any);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Every record of `objectName` currently held by a pending approval, capped one
+ * past the bound so the caller can tell "at the cap" from "over it".
+ *
+ * `null` means the bookkeeping could not be read at all. That reads as "no
+ * lock" — deliberately the ONE fail-open left, and the pre-existing behaviour
+ * of {@link pendingRequestFor}: this hook is GLOBAL over every object, so a
+ * kernel where `sys_approval_request` is absent or momentarily unreadable would
+ * otherwise refuse every update in the deployment. The fail-closed decisions
+ * below are the ones an attacker can actually steer (a predicate they choose);
+ * "is the approvals table readable" is not one of them.
+ */
+async function pendingRequestsForObject(
+  engine: MinimalEngine,
+  objectName: string,
+): Promise<any[] | null> {
+  try {
+    const rows = await engine.find('sys_approval_request', {
+      where: { object_name: objectName, status: 'pending' },
+      limit: PENDING_LOCK_LIMIT + 1,
+      context: { ...SYSTEM_CTX },
+    } as any);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Narrow `candidates` (pending requests) to the ones whose record the caller's
+ * predicate actually matches — asked of the engine as an intersection, so the
+ * query is bounded by the number of LOCKED rows, not by the update's match set.
+ *
+ * A failure here fails CLOSED: we know some record of this object is locked and
+ * we could not prove the write misses it.
+ */
+async function narrowToMatchedRecords(
+  engine: MinimalEngine,
+  objectName: string,
+  where: unknown,
+  candidates: any[],
+): Promise<any[]> {
+  const lockedIds = candidates.map((c) => String(c?.record_id ?? ''));
+  let rows: any[];
+  try {
+    rows = await engine.find(objectName, {
+      where: { $and: [where, { id: { $in: lockedIds } }] },
+      fields: ['id'],
+      limit: lockedIds.length,
+      context: { ...SYSTEM_CTX },
+    } as any);
+  } catch (err) {
+    lockedError(
+      `cannot determine which rows a predicate update on '${objectName}' would touch ` +
+      `(${(err as Error)?.message ?? String(err)}); ${candidates.length} record(s) of it carry a pending ` +
+      'approval, so the write is refused',
+    );
+  }
+  const matched = new Set((Array.isArray(rows) ? rows : []).map((r: any) => String(r?.id)));
+  return candidates.filter((c) => matched.has(String(c?.record_id ?? '')));
+}
+
+/**
+ * The pending requests gating the rows THIS write would touch.
+ *
+ * Four shapes, cheapest first:
+ *   - `input.id` (engine's scalar by-id fast path) → that record only. The
+ *     driver updates by primary key, so the rest of `where` never narrows it —
+ *     narrowing here would be a fail-open.
+ *   - predicate naming ids only (`{ id: { $in: [...] } }`) → those records.
+ *   - predicate with other keys → the object's locked records, intersected with
+ *     the predicate.
+ *   - no predicate at all (`updateMany` over the whole table) → every locked
+ *     record of the object.
+ */
+async function gatingRequests(
+  engine: MinimalEngine,
+  ctx: any,
+  objectName: string,
+): Promise<any[]> {
+  const byId = asIdList(ctx?.input?.id);
+  if (byId) return pendingRequestsForRecords(engine, objectName, byId);
+
+  // Predicate write. `where` is canonical here: the engine folds the `filter`
+  // alias into it before hooks run (PD #12 — no consumer-side `?? filter`).
+  const rawWhere = (ctx?.input?.options as any)?.where;
+  const hasWhere = rawWhere !== undefined && rawWhere !== null;
+  const whereObj = hasWhere && typeof rawWhere === 'object' && !Array.isArray(rawWhere)
+    ? rawWhere as Record<string, unknown>
+    : null;
+
+  const namedIds = whereObj ? asIdList(whereObj.id) : null;
+  const candidates = namedIds
+    ? await pendingRequestsForRecords(engine, objectName, namedIds)
+    : await pendingRequestsForObject(engine, objectName);
+  if (candidates === null) return [];          // bookkeeping unreadable — see the note above
+  if (candidates.length === 0) return [];      // nothing locked in reach
+  if (candidates.length > PENDING_LOCK_LIMIT) {
+    lockedError(
+      `refusing a predicate update on '${objectName}': more than ${PENDING_LOCK_LIMIT} of its records carry a ` +
+      'pending approval, so the lock cannot decide row by row; scope the write to the rows you mean',
+    );
+  }
+  // No predicate → the write touches every row, so every locked row is in reach.
+  if (!hasWhere) return candidates;
+  // The predicate was exactly the id list we already resolved against.
+  if (namedIds && whereObj && Object.keys(whereObj).every((k) => k === 'id')) return candidates;
+  return narrowToMatchedRecords(engine, objectName, rawWhere, candidates);
 }
 
 /**
@@ -73,8 +289,6 @@ async function pendingRequestFor(
  */
 export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogger): void {
   engine.registerHook('beforeUpdate', async (ctx: any) => {
-    const id = String((ctx?.input?.id ?? '') as string);
-    if (!id) return;
     const object = (ctx?.object ?? ctx?.objectName) as string | undefined;
     // No object name (shouldn't happen) or our own bookkeeping objects → skip.
     if (!object || String(object).startsWith('sys_approval')) return;
@@ -83,6 +297,11 @@ export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogg
     const changedFields = Object.keys(data).filter((k) => k !== 'id' && k !== 'updated_at');
     if (changedFields.length === 0) return;
 
+    // ── Caller-level exemptions. Row-independent, so they are decided once,
+    // before any row is resolved — and they hold identically for a by-id and a
+    // predicate write (#4778: an exemption that only survives on one path turns
+    // a fail-open into a false-positive).
+
     // Allow engine self-writes (status mirror from the approvals service, etc).
     if ((ctx?.session as any)?.isSystem) return;
 
@@ -90,8 +309,9 @@ export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogg
     const roles = (ctx?.session?.roles ?? []) as string[];
     if (Array.isArray(roles) && roles.includes('admin')) return;
 
-    const pending = await pendingRequestFor(engine, object, id);
-    if (!pending) return;
+    // ── Which rows does this write touch, and which of them are locked?
+    const gating = await gatingRequests(engine, ctx, object);
+    if (gating.length === 0) return;
 
     // The run that OPENED this approval may still write its own target record
     // (#3456). Without this the lock cannot tell "the run that owns this pending
@@ -113,19 +333,24 @@ export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogg
     // session, and that shape is the one that used to die on its own lock
     // (#3712).
     const writerRun = (ctx?.provenance as any)?.flowRunId;
-    if (writerRun && pending.flow_run_id && String(writerRun) === String(pending.flow_run_id)) return;
 
-    const config = parseJson<any>(pending.node_config_json, {});
-    if (config?.lockRecord === false) return;
+    // Per-row verdict: the write is refused as soon as ONE touched record is
+    // locked against it. Each request carries its own snapshotted policy, so a
+    // multi-row write spanning two approvals is judged by each of them.
+    for (const pending of gating) {
+      if (writerRun && pending?.flow_run_id && String(writerRun) === String(pending.flow_run_id)) continue;
 
-    // Allow when every changed field is the approval status mirror.
-    const mirror = config?.approvalStatusField;
-    if (typeof mirror === 'string' && mirror && changedFields.every((f) => f === mirror)) return;
+      const config = parseJson<any>(pending?.node_config_json, {});
+      if (config?.lockRecord === false) continue;
 
-    const err: any = new Error('RECORD_LOCKED: record is locked while an approval is in progress');
-    err.code = 'RECORD_LOCKED';
-    err.statusCode = 409;
-    throw err;
+      // Allow when every changed field is the approval status mirror.
+      const mirror = config?.approvalStatusField;
+      if (typeof mirror === 'string' && mirror && changedFields.every((f) => f === mirror)) continue;
+
+      lockedError(
+        `record '${String(pending?.record_id ?? '')}' of '${object}' is locked while an approval is in progress`,
+      );
+    }
   }, { packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
 
   logger?.info?.('[approvals] record-lock hook bound');

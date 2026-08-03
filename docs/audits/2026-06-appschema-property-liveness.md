@@ -18,5 +18,17 @@ These are the highest-priority fixes (authoring them per spec fails; they only w
 `name`, `label`, `description`, `icon`, `active`, `isDefault`, `hidden`, `navigation` (whole tree), `areas` (precedence over navigation), `contextSelectors` (all sub-fields), `homePageId`, `defaultAgent` (dual consumer: framework `agent-runtime.ts:341` + objectui chatbot), `branding.{primaryColor,favicon}`, `protection`. Nav-item union fully live: `id/label/icon/order/badge/visible(CEL)/requiredPermissions/requiresObject/requiresService` + per-type payloads (`objectName/viewName/recordId/recordMode/dashboardName/pageName/url/target/reportName/componentRef/params/children/expanded`). NavigationContribution (ADR-0029) live via `objectql/engine.ts:912`.
 - PARTIAL: `App.requiredPermissions` (app-entry gate not observed; only nav-item perms enforced), nav `type:'action'` `actionDef` (fires `onAction(item)`; `actionDef.{actionName,params}` shape read loosely in the action runtime, 0 direct grep in shell).
 
+> **Later (2026-08-03, #4709) — `homePageId` is retired; this row's LIVE verdict was right.**
+> #4667 removed `app.homePageId` in spec 17.0.0 justifying it with "no shell ever read it" — which
+> **contradicted this audit** and was false: objectui's console read it in `resolveLandingRoute()`
+> (`packages/app-shell/src/console/AppContent.tsx`, @785b8a5d), exactly as recorded above. #4709
+> **upheld the removal on a different reason** and corrected the copy everywhere it appeared: the key
+> encoded the landing page as an ID cross-reference into `navigation` with no referential integrity,
+> silently falling back to the first item when it dangled. Post-v17 the landing page is the first
+> navigation item; if the capability returns it belongs on the navigation item itself
+> (`navigation[].landing`), enforce-first. Nothing above is amended — it is kept as written, because
+> the failure it exposes is procedural: **a retirement citing liveness must reconcile against the
+> existing audit record**, and for two months nobody noticed these two documents disagreed.
+
 ## Recommendation
 Add the 3 drift fields to the spec (`accentColor`, `badgeVariant`, `separator`) **or** stop the renderer reading them. Prune the aspirational block; `App.sharing`/`App.embed`/`apiEnabled`-style props create a false security/feature impression.
