@@ -1,0 +1,406 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import { readdirSync, readFileSync } from 'node:fs';
+import { describe, it, expect } from 'vitest';
+import stack from '../objectstack.config.js';
+import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
+import { FILE_REFERENCE_TYPES, valueSchemaFor } from '@objectstack/spec/data';
+import { healthFor, sweepProjectHealth, bindShowcaseJobRuntime } from '../src/automation/jobs/index.js';
+
+/**
+ * #4774 / #4888 / #4891 — the showcase's DECLARED-BUT-INERT wirings.
+ *
+ * Each guard below pins one declaration the runtime was accepting at authoring
+ * time and then quietly not honouring, announced only by a line in the boot
+ * warning block. They are the same bug class as `no-startup-warnings.test.ts`
+ * (#3420) — the reference app must not train anyone to skim warnings — but here
+ * the warning was the *symptom*: a nightly job that never ran, a permission set
+ * granting a capability that never materialized, a retry key scheduled for
+ * removal, and seed values the platform's own migration gate rejects.
+ */
+
+/** Package root — vitest runs with the example as cwd (same as coverage.test.ts). */
+const SRC_ROOT = `${process.cwd()}/src`;
+
+/** Every authored `.ts` under `src/` — the surface a source-text guard scans. */
+function sourceFiles(dir: string = SRC_ROOT): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...sourceFiles(full));
+    else if (entry.name.endsWith('.ts')) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * Source text with comments removed, so a source-scan guard judges CODE.
+ * Documentation must stay free to name a retired key (this file's own comments
+ * do, and so do the ones explaining the rename) without tripping the guard that
+ * bans authoring it. Block comments go first; then whole-line `//` comments —
+ * never a trailing `//`, which would eat the `//` in a URL inside a string.
+ */
+function codeOf(file: string): string {
+  return readFileSync(file, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((line: string) => !line.trimStart().startsWith('//'))
+    .join('\n');
+}
+
+/** Every `functions` entry, whichever spelling it was authored in. */
+function functionNames(): string[] {
+  const fns = (stack as { functions?: unknown }).functions;
+  if (Array.isArray(fns)) {
+    return fns.map((f: { name?: string }) => f?.name).filter((n): n is string => typeof n === 'string');
+  }
+  if (fns && typeof fns === 'object') return Object.keys(fns as Record<string, unknown>);
+  return [];
+}
+
+function functionEntry(name: string): unknown {
+  const fns = (stack as { functions?: Record<string, unknown> }).functions;
+  return fns && !Array.isArray(fns) ? fns[name] : undefined;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// 1. Scheduled job — the handler has to EXIST
+// ───────────────────────────────────────────────────────────────────────────
+describe('declarative jobs resolve their handler (#4774 ①)', () => {
+  const jobs = ((stack as { jobs?: unknown[] }).jobs ?? []) as Array<{
+    name: string;
+    handler: string;
+    enabled?: boolean;
+  }>;
+
+  it('declares at least one job (the coverage claim)', () => {
+    expect(jobs.length).toBeGreaterThan(0);
+  });
+
+  for (const job of jobs) {
+    it(`${job.name}: handler '${job.handler}' is a key of defineStack({ functions })`, () => {
+      // This is the exact lookup `AppPlugin` performs on `kernel:ready`
+      // (`collectBundleFunctions(bundle)[job.handler]`). A miss there is the
+      // "job handler not found in bundle.functions — skipping" WARN, and the
+      // job is registered but NEVER RUNS.
+      expect(
+        functionNames(),
+        `job '${job.name}' names handler '${job.handler}', which no functions entry provides`,
+      ).toContain(job.handler);
+    });
+
+    it(`${job.name}: handler '${job.handler}' is callable`, () => {
+      const entry = functionEntry(job.handler) as { handler?: unknown } | ((...a: never[]) => unknown);
+      const callable = typeof entry === 'function' ? entry : entry?.handler;
+      expect(typeof callable).toBe('function');
+    });
+  }
+
+  it('every functions entry is authored in a form `objectstack build` can carry', () => {
+    // `objectstack build` LOWERS each inline callable to a serialisable string
+    // ref before the stack is parsed, and `FlowFunctionEntrySchema` accepts a
+    // bare callable, a declaration whose `handler` is a CALLABLE, or a bare
+    // string ref — but NOT a declaration whose handler has been lowered to a
+    // string, which is exactly what the CLI emits for the declared form
+    // (`{ handler: fn, effect: 'writes' }`, #4396). So authoring the declared
+    // form here builds green from source and fails `pnpm build` with
+    // `functions: invalid_union`. Filed as #4976.
+    //
+    // Pinning the bare form keeps that failure out of the reference app until
+    // the schema accepts the lowered declaration. Delete this guard — don't
+    // work around it — when #4976 lands.
+    const declared = functionNames().filter((name) => typeof functionEntry(name) !== 'function');
+    expect(
+      declared,
+      `declared-form functions entry/entries cannot survive \`objectstack build\` (#4976): ${declared.join(', ')}`,
+    ).toEqual([]);
+  });
+});
+
+describe('sweepProjectHealth computes health from burn vs progress (#4774 ①)', () => {
+  it('is green when spending tracks delivery', () => {
+    expect(healthFor({ budget: 150_000, spent: 60_000, taskProgress: [100, 80, 45, 0, 0] })).toBe('green');
+  });
+
+  it('is yellow when spending drifts ahead of delivery', () => {
+    // burn 0.60, done 0.40 → drift 0.20
+    expect(healthFor({ budget: 100_000, spent: 60_000, taskProgress: [40] })).toBe('yellow');
+  });
+
+  it('is red when spending runs far ahead of delivery', () => {
+    // burn 0.978, no delivered progress → drift 0.978
+    expect(healthFor({ budget: 90_000, spent: 88_000, taskProgress: [0, 0] })).toBe('red');
+  });
+
+  it('is red when over budget regardless of progress', () => {
+    expect(healthFor({ budget: 10_000, spent: 12_000, taskProgress: [100] })).toBe('red');
+  });
+
+  it('treats a missing budget as no burn rather than a divide-by-zero', () => {
+    expect(healthFor({ budget: undefined, spent: 5_000, taskProgress: [] })).toBe('green');
+  });
+
+  it('reads numeric columns that arrive as strings', () => {
+    expect(healthFor({ budget: '100000', spent: '90000', taskProgress: [10] })).toBe('red');
+  });
+
+  it('sweeps only in-play projects and writes only what changed', async () => {
+    const projects = [
+      { id: 'p_active', status: 'active', health: 'green', budget: 90_000, spent: 88_000 },
+      { id: 'p_hold', status: 'on_hold', health: 'red', budget: 100_000, spent: 10_000 },
+    ];
+    const tasks = [
+      { project: 'p_active', progress: 0 },
+      { project: 'p_active', progress: 0 },
+      { project: 'p_hold', progress: 90 },
+    ];
+    const reads: Array<{ object: string; query: any }> = [];
+    const writes: Array<Record<string, unknown>> = [];
+
+    bindShowcaseJobRuntime({
+      ql: {
+        find: async (object: string, query: any) => {
+          reads.push({ object, query });
+          if (object === 'showcase_project') return projects;
+          if (object === 'showcase_task') return tasks;
+          return [];
+        },
+        update: async (_object: string, data: Record<string, unknown>) => {
+          writes.push(data);
+          return data;
+        },
+      },
+    });
+
+    await sweepProjectHealth({ jobId: 'showcase_health_sweep' });
+
+    // Only `active` / `on_hold` are read — settled projects are not relitigated.
+    expect(reads[0]?.object).toBe('showcase_project');
+    expect(reads[0]?.query?.where?.status?.$in).toEqual(['active', 'on_hold']);
+    // p_active: burn 0.978 vs done 0 → red (changed from green).
+    // p_hold:   burn 0.10  vs done 0.90 → green (changed from red).
+    expect(writes).toEqual([
+      { id: 'p_active', health: 'red' },
+      { id: 'p_hold', health: 'green' },
+    ]);
+  });
+
+  it('is a no-op when nothing changed', async () => {
+    const writes: unknown[] = [];
+    bindShowcaseJobRuntime({
+      ql: {
+        find: async (object: string) =>
+          object === 'showcase_project'
+            ? [{ id: 'p1', status: 'active', health: 'green', budget: 100, spent: 10 }]
+            : [{ project: 'p1', progress: 100 }],
+        update: async (_o: string, d: Record<string, unknown>) => {
+          writes.push(d);
+          return d;
+        },
+      },
+    });
+    await sweepProjectHealth({ jobId: 'showcase_health_sweep' });
+    expect(writes).toEqual([]);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 2. Capabilities — declared, granted, and MATERIALIZABLE
+// ───────────────────────────────────────────────────────────────────────────
+describe('declared capabilities carry an owning package (#4774 ②)', () => {
+  const capabilities = ((stack as { capabilities?: unknown[] }).capabilities ?? []) as Array<{
+    name: string;
+    packageId?: string;
+  }>;
+
+  it('declares at least one package capability', () => {
+    expect(capabilities.length).toBeGreaterThan(0);
+  });
+
+  for (const cap of capabilities) {
+    it(`${cap.name}: resolves an owning package`, () => {
+      // `bootstrapDeclaredCapabilities` reads `cap._packageId ?? cap.packageId`
+      // and REFUSES to materialize a capability with neither (a
+      // `managed_by:'package'` row with no `package_id` makes uninstall
+      // undefined — ADR-0086 D3). The registry stamp never reaches an
+      // app-declared capability today, so the author-declared fallback is what
+      // has to be present.
+      const owner = (cap as { _packageId?: string })._packageId ?? cap.packageId;
+      expect(
+        owner,
+        `capability '${cap.name}' has no owning package — it would not be materialized into sys_capability`,
+      ).toBeTruthy();
+    });
+
+    it(`${cap.name}: is owned by this app`, () => {
+      const owner = (cap as { _packageId?: string })._packageId ?? cap.packageId;
+      expect(owner).toBe((stack as { manifest?: { id?: string } }).manifest?.id);
+    });
+  }
+
+  it('every granted system permission is a capability that will exist', () => {
+    const declared = new Set(capabilities.map((c) => c.name));
+    const dangling: string[] = [];
+    for (const set of ((stack as { permissions?: unknown[] }).permissions ?? []) as Array<{
+      name: string;
+      systemPermissions?: string[];
+    }>) {
+      for (const perm of set.systemPermissions ?? []) {
+        if (PLATFORM_CAPABILITY_NAMES.has(perm)) continue;
+        if (declared.has(perm)) continue;
+        dangling.push(`${set.name} → ${perm}`);
+      }
+    }
+    // A permission set that grants a capability nothing declares reads as
+    // enforcement and grants nothing — a security declaration that is inert.
+    expect(dangling, `permission set(s) grant undeclared capabilities: ${dangling.join(', ')}`).toEqual([]);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 3. Retry policy — canonical spelling only
+// ───────────────────────────────────────────────────────────────────────────
+describe('retry policies use the canonical key (#4774 ③)', () => {
+  /** Every `retry` / `retryPolicy` block reachable from the stack, with a path. */
+  function retryBlocks(): Array<{ path: string; block: Record<string, unknown> }> {
+    const out: Array<{ path: string; block: Record<string, unknown> }> = [];
+    const walk = (value: unknown, path: string): void => {
+      if (Array.isArray(value)) {
+        value.forEach((v, i) => walk(v, `${path}[${i}]`));
+        return;
+      }
+      if (!value || typeof value !== 'object') return;
+      for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+        const childPath = `${path}.${key}`;
+        if ((key === 'retry' || key === 'retryPolicy') && child && typeof child === 'object' && !Array.isArray(child)) {
+          out.push({ path: childPath, block: child as Record<string, unknown> });
+        }
+        walk(child, childPath);
+      }
+    };
+    walk((stack as { flows?: unknown }).flows, 'flows');
+    walk((stack as { jobs?: unknown }).jobs, 'jobs');
+    walk((stack as { hooks?: unknown }).hooks, 'hooks');
+    return out;
+  }
+
+  it('the stack actually declares retry policies (guard is not vacuous)', () => {
+    expect(retryBlocks().length).toBeGreaterThan(0);
+  });
+
+  it("no SOURCE file still spells the base delay 'retryDelayMs'", () => {
+    // Deliberately reads the source text, not `stack` — the parsed stack CANNOT
+    // answer this question. `retryDelayMs` is tombstoned in `RetryPolicySchema`
+    // (17.0.0, #4661) and only keeps working because the
+    // `retry-policy-converged` conversion rewrites it during `defineStack`, so
+    // by the time a test can inspect the object the retired spelling is already
+    // gone and every assertion over it passes vacuously. The thing that has to
+    // change — and that stops loading when the conversion retires in protocol
+    // 18 — is what the author wrote.
+    const offenders = sourceFiles()
+      .filter((file) => /\bretryDelayMs\s*:/.test(codeOf(file)))
+      .map((file) => file.slice(SRC_ROOT.length + 1));
+    expect(
+      offenders,
+      `retired 'retryDelayMs' (rename to 'backoffMs') in: ${offenders.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it("every block states its base delay as 'backoffMs'", () => {
+    for (const { path, block } of retryBlocks()) {
+      expect(typeof block.backoffMs, `${path} has no backoffMs`).toBe('number');
+    }
+  });
+
+  it("keeps 'maxRetryDelayMs', which the convergence did NOT rename", () => {
+    // Guards the other direction: `maxRetryDelayMs` is a canonical key of
+    // `RetryPolicySchema` (the ceiling for one backoff delay), not a casualty
+    // of `retry-policy-converged`. Dropping it "for symmetry" would be a
+    // behaviour change, so the showcase keeps demonstrating it.
+    const withCeiling = retryBlocks().filter(({ block }) => 'maxRetryDelayMs' in block);
+    expect(withCeiling.length).toBeGreaterThan(0);
+    for (const { path, block } of withCeiling) {
+      expect(typeof block.maxRetryDelayMs, `${path}.maxRetryDelayMs`).toBe('number');
+    }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 4. Seed values — ADR-0104 value shapes
+// ───────────────────────────────────────────────────────────────────────────
+describe('seed values satisfy the ADR-0104 stored contract (#4774 ④ / #4891)', () => {
+  const objects = ((stack as { objects?: unknown[] }).objects ?? []) as Array<{
+    name: string;
+    fields?: Record<string, { type?: string }>;
+  }>;
+  const seeds = ((stack as { data?: unknown[] }).data ?? []) as Array<{
+    object: string;
+    externalId?: string;
+    records?: Array<Record<string, unknown>>;
+  }>;
+
+  it('seeds at least one dataset (guard is not vacuous)', () => {
+    expect(seeds.length).toBeGreaterThan(0);
+  });
+
+  it('no seeded file-class value is off-shape', () => {
+    // The engine tallies every off-shape value it admits, and
+    // `attestFreshDatastore` (#4769) refuses to certify a migration the SAME
+    // BOOT has already contradicted. One bad `cover` therefore costs a brand
+    // new datastore the `adr-0104-file-references` attestation permanently —
+    // the gate stays open on day one of a fresh install of the reference app.
+    const offenders: string[] = [];
+    for (const seed of seeds) {
+      const object = objects.find((o) => o.name === seed.object);
+      if (!object?.fields) continue;
+      const fileFields = Object.entries(object.fields)
+        .filter(([, def]) => def?.type && FILE_REFERENCE_TYPES.has(def.type))
+        .map(([name, def]) => [name, def] as const);
+      if (fileFields.length === 0) continue;
+      for (const record of seed.records ?? []) {
+        for (const [fieldName, def] of fileFields) {
+          const value = record[fieldName];
+          if (value === undefined || value === null) continue;
+          const parsed = valueSchemaFor(def as { type: string }, 'stored').safeParse(value);
+          if (!parsed.success) {
+            const key = String(record[seed.externalId ?? 'name'] ?? '?');
+            offenders.push(`${seed.object}.${fieldName} ('${key}')`);
+          }
+        }
+      }
+    }
+    expect(
+      offenders,
+      `seeded file-class value(s) are not an opaque sys_file id: ${offenders.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('no seed smuggles an inline data: / http(s): image', () => {
+    // The narrower, more legible half of the rule above: whatever the field
+    // type, a seed must never carry image BYTES or an external link where the
+    // platform expects a managed file (ADR-0104 R7).
+    const offenders: string[] = [];
+    for (const seed of seeds) {
+      for (const record of seed.records ?? []) {
+        for (const [field, value] of Object.entries(record)) {
+          if (typeof value !== 'string') continue;
+          if (/^data:image\//i.test(value) || /^https?:\/\/[^ ]*(picsum|placehold)/i.test(value)) {
+            offenders.push(`${seed.object}.${field}`);
+          }
+        }
+      }
+    }
+    expect(offenders, `inline/remote image value(s) in seed data: ${offenders.join(', ')}`).toEqual([]);
+  });
+
+  it('still DECLARES the image field and its gallery binding', () => {
+    // Dropping the bad data must not quietly drop the coverage: `cover` is
+    // still an image field and the task gallery still binds to it, so the
+    // capability is demonstrated — it is populated by uploading a cover, which
+    // is how a managed file is meant to come into existence.
+    const task = objects.find((o) => o.name === 'showcase_task');
+    expect(task?.fields?.cover?.type).toBe('image');
+    const bound = JSON.stringify((stack as { views?: unknown }).views ?? []).includes('"coverField":"cover"');
+    expect(bound, 'no task view binds gallery.coverField to `cover`').toBe(true);
+  });
+});

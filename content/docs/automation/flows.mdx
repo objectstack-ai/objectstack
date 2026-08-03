@@ -144,7 +144,7 @@ Each node performs a specific action in the flow.
 | `position` | `{ x, y }` | optional | Visual position on canvas |
 | `timeoutMs` | `number` | optional | Per-node execution timeout |
 | `inputSchema` | `object` | optional | Declared input parameter types, for Studio form generation and runtime validation |
-| `waitEventConfig` | `object` | optional | `wait`-node event descriptor (`eventType`, `timerDuration`, `signalName`, `timeoutMs`, `onTimeout`) |
+| `waitEventConfig` | `object` | optional | `wait`-node event descriptor (`eventType`, `timerDuration`, `signalName`). `timeoutMs` / `onTimeout` were removed in 17 (#4158) — `wait` has no timeout; `timerDuration` accepts a bare number as milliseconds |
 | `boundaryConfig` | `object` | optional | BPMN boundary-event descriptor (interop) |
 
 <Callout type="info">

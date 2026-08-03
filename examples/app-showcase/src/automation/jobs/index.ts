@@ -2,7 +2,17 @@
 
 import { defineJob } from '@objectstack/spec';
 
-/** Nightly job — recompute project health. Handler is registered in defineStack({ functions }). */
+export { sweepProjectHealth, bindShowcaseJobRuntime, healthFor } from './sweep-project-health.js';
+
+/**
+ * Nightly job — recompute project health.
+ *
+ * `handler` names a key of `defineStack({ functions })` (the only form
+ * `JobSchema.handler` accepts); `sweepProjectHealth` is registered there with
+ * `effect: 'writes'`. It was declared here for a long time with no function of
+ * that name anywhere in the example, so the AppPlugin skipped it at every boot
+ * and the sweep never ran (#4774 / #4888) — see `./sweep-project-health.ts`.
+ */
 export const HealthSweepJob = defineJob({
   name: 'showcase_health_sweep',
   label: 'Nightly Project Health Sweep',

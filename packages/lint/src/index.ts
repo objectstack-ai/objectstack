@@ -195,6 +195,20 @@ export {
 } from './validate-org-axis-red-lines.js';
 export type { OrgAxisFinding, OrgAxisSeverity } from './validate-org-axis-red-lines.js';
 
+// #4698 — "a key that nothing reads should not validate clean", for the one
+// surface where "is it read?" is decidable: a sharing rule's `condition` is
+// read ONLY through `compileCelToFilter`, so the lint calls that same compiler
+// rather than modelling the consumer.
+export {
+  validateSharingRuleEnforceability,
+  SHARING_RULE_UNLOWERABLE_CONDITION,
+  SHARING_RULE_RUNTIME_VARIABLE_CONDITION,
+} from './validate-sharing-rule-enforceability.js';
+export type {
+  SharingRuleEnforceabilityFinding,
+  SharingRuleEnforceabilitySeverity,
+} from './validate-sharing-rule-enforceability.js';
+
 export {
   validateDashboardActionRefs,
   DASHBOARD_ACTION_TARGET_UNDEFINED,

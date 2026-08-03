@@ -23,15 +23,40 @@ import { Announcement } from '../objects/announcement.object.js';
  */
 
 /**
- * Local, offline-safe placeholder cover image. Task `cover` seeds used to
- * point at picsum.photos, which renders as a wall of broken images in
- * offline/restricted-network environments (Gallery, All Views). A data: URI
- * needs no network at all and still gives each card a distinct color + number.
+ * ## Why `showcase_task.cover` is declared but NOT seeded (#4891, ADR-0104)
+ *
+ * `cover` is `Field.image()`, and since ADR-0104 D3 wave 2 the STORED value of
+ * every file-class field (`file`/`image`/`avatar`/`video`/`audio`) is an opaque
+ * `sys_file` id — a managed file, resolved to a URL by `/files/:fileId` on
+ * read. It is deliberately id-shaped rather than "any non-empty string", so the
+ * two legacy forms are both rejected: an inline metadata blob (that is now the
+ * EXPANDED read form, derived not stored) and an external/`data:` URL (ADR-0104
+ * R7 — "an external URL was never a managed file").
+ *
+ * This seed used to write `data:image/svg+xml,…` here. Two lineages produced
+ * that: first picsum.photos URLs (a wall of broken images offline), then an
+ * inline SVG to remove the network dependency. Both are the same category
+ * error — a picture inlined into a slot that means "a file the platform
+ * manages". The cost was not cosmetic: every fresh datastore admitted 10
+ * off-shape values during its own first boot, and `attestFreshDatastore`
+ * (#4769) will not certify a contract the boot has already broken — so
+ * `adr-0104-file-references` could NEVER auto-attest on a new install of the
+ * reference app, and the gate stayed open on day one.
+ *
+ * Nor can a seed honestly mint the right value. A conforming `cover` needs a
+ * real committed `sys_file` row (bytes in the storage backend, ownership
+ * recorded in `ref_object`/`ref_id`/`ref_field`); a shape-valid id with no row
+ * behind it is worse than the data URI, because ADR-0104's own reconciliation
+ * (`os migrate files-to-references`) classes it `unowned_reference` — a
+ * BLOCKING discrepancy — and because "fabricate an id that looks right" is
+ * exactly the pattern the reference app must not teach.
+ *
+ * So `cover` stays DECLARED (the image field, and `gallery.coverField: 'cover'`
+ * on the task views) and unseeded: it is populated by uploading a cover, which
+ * is how a managed file is meant to come into existence. The Gallery collapses
+ * its cover area when no record carries one, so the cards render as a clean,
+ * information-dense empty state rather than broken images.
  */
-function placeholderCover(seed: number, color: string): string {
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='480' height='300'><rect width='480' height='300' fill='${color}'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-family='system-ui,sans-serif' font-size='96' font-weight='700' fill='#ffffff' fill-opacity='0.35'>${seed}</text></svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
 
 const accounts = defineSeed(Account, {
   mode: 'upsert',
@@ -131,16 +156,16 @@ const tasks = defineSeed(Task, {
   mode: 'upsert',
   externalId: 'title',
   records: [
-    { cover: placeholderCover(1, '#10B981'), title: 'Audit current IA', project: 'Website Relaunch', assignee: 'ada@example.com', status: 'done', priority: 'medium', estimate_hours: 8, progress: 100, done: true, created_at: cel`daysAgo(20)`, start_date: cel`daysAgo(20)`, end_date: cel`daysAgo(18)`, due_date: cel`daysAgo(18)`, location: { lat: 47.6062, lng: -122.3321 } },
-    { cover: placeholderCover(2, '#8B5CF6'), title: 'Design system', project: 'Website Relaunch', assignee: 'ada@example.com', status: 'in_review', priority: 'high', estimate_hours: 24, progress: 80, done: false, created_at: cel`daysAgo(14)`, start_date: cel`daysAgo(12)`, end_date: cel`daysFromNow(2)`, due_date: cel`daysFromNow(2)`, location: { lat: 37.7749, lng: -122.4194 } },
-    { cover: placeholderCover(3, '#F59E0B'), title: 'Build homepage', project: 'Website Relaunch', assignee: 'sam@example.com', status: 'in_progress', priority: 'high', estimate_hours: 40, progress: 45, done: false, created_at: cel`daysAgo(8)`, start_date: cel`daysAgo(6)`, end_date: cel`daysFromNow(10)`, due_date: cel`daysFromNow(10)`, location: { lat: 40.7128, lng: -74.0060 } },
-    { cover: placeholderCover(4, '#3B82F6'), title: 'SEO migration plan', project: 'Website Relaunch', assignee: 'sam@example.com', status: 'todo', priority: 'medium', estimate_hours: 16, progress: 0, done: false, created_at: cel`daysAgo(3)`, start_date: cel`daysFromNow(5)`, end_date: cel`daysFromNow(15)`, due_date: cel`daysFromNow(15)`, location: { lat: 30.2672, lng: -97.7431 } },
-    { cover: placeholderCover(5, '#94A3B8'), title: 'Content backlog', project: 'Website Relaunch', assignee: 'grace@example.com', status: 'backlog', priority: 'low', estimate_hours: 12, progress: 0, done: false, created_at: cel`daysAgo(2)`, due_date: cel`daysFromNow(30)`, location: { lat: 41.8781, lng: -87.6298 } },
-    { cover: placeholderCover(6, '#F59E0B'), title: 'Ingest pipeline', project: 'Data Platform', assignee: 'linus@example.com', status: 'in_progress', priority: 'urgent', estimate_hours: 60, progress: 55, done: false, created_at: cel`daysAgo(40)`, start_date: cel`daysAgo(35)`, end_date: cel`daysFromNow(20)`, due_date: cel`daysFromNow(20)`, location: { lat: 39.7392, lng: -104.9903 } },
-    { cover: placeholderCover(7, '#8B5CF6'), title: 'Warehouse schema', project: 'Data Platform', assignee: 'linus@example.com', status: 'in_review', priority: 'high', estimate_hours: 30, progress: 90, done: false, created_at: cel`daysAgo(25)`, start_date: cel`daysAgo(22)`, end_date: cel`daysFromNow(3)`, due_date: cel`daysFromNow(3)`, location: { lat: 42.3601, lng: -71.0589 } },
-    { cover: placeholderCover(8, '#3B82F6'), title: 'PII access review', project: 'Compliance Audit', assignee: 'grace@example.com', status: 'todo', priority: 'urgent', estimate_hours: 20, progress: 0, done: false, created_at: cel`daysAgo(5)`, start_date: cel`daysFromNow(2)`, end_date: cel`daysFromNow(12)`, due_date: cel`daysFromNow(12)`, location: { lat: 38.9072, lng: -77.0369 } },
-    { cover: placeholderCover(9, '#94A3B8'), title: 'Evidence collection', project: 'Compliance Audit', assignee: 'grace@example.com', status: 'backlog', priority: 'medium', estimate_hours: 18, progress: 0, done: false, created_at: cel`daysAgo(1)`, due_date: cel`daysFromNow(25)`, location: { lat: 34.0522, lng: -118.2437 } },
-    { cover: placeholderCover(10, '#10B981'), title: 'App wireframes', project: 'Mobile App', assignee: 'ada@example.com', status: 'done', priority: 'medium', estimate_hours: 16, progress: 100, done: true, created_at: cel`daysAgo(10)`, start_date: cel`daysAgo(10)`, end_date: cel`daysAgo(6)`, due_date: cel`daysAgo(6)`, location: { lat: 45.5152, lng: -122.6784 } },
+    { title: 'Audit current IA', project: 'Website Relaunch', assignee: 'ada@example.com', status: 'done', priority: 'medium', estimate_hours: 8, progress: 100, done: true, created_at: cel`daysAgo(20)`, start_date: cel`daysAgo(20)`, end_date: cel`daysAgo(18)`, due_date: cel`daysAgo(18)`, location: { lat: 47.6062, lng: -122.3321 } },
+    { title: 'Design system', project: 'Website Relaunch', assignee: 'ada@example.com', status: 'in_review', priority: 'high', estimate_hours: 24, progress: 80, done: false, created_at: cel`daysAgo(14)`, start_date: cel`daysAgo(12)`, end_date: cel`daysFromNow(2)`, due_date: cel`daysFromNow(2)`, location: { lat: 37.7749, lng: -122.4194 } },
+    { title: 'Build homepage', project: 'Website Relaunch', assignee: 'sam@example.com', status: 'in_progress', priority: 'high', estimate_hours: 40, progress: 45, done: false, created_at: cel`daysAgo(8)`, start_date: cel`daysAgo(6)`, end_date: cel`daysFromNow(10)`, due_date: cel`daysFromNow(10)`, location: { lat: 40.7128, lng: -74.0060 } },
+    { title: 'SEO migration plan', project: 'Website Relaunch', assignee: 'sam@example.com', status: 'todo', priority: 'medium', estimate_hours: 16, progress: 0, done: false, created_at: cel`daysAgo(3)`, start_date: cel`daysFromNow(5)`, end_date: cel`daysFromNow(15)`, due_date: cel`daysFromNow(15)`, location: { lat: 30.2672, lng: -97.7431 } },
+    { title: 'Content backlog', project: 'Website Relaunch', assignee: 'grace@example.com', status: 'backlog', priority: 'low', estimate_hours: 12, progress: 0, done: false, created_at: cel`daysAgo(2)`, due_date: cel`daysFromNow(30)`, location: { lat: 41.8781, lng: -87.6298 } },
+    { title: 'Ingest pipeline', project: 'Data Platform', assignee: 'linus@example.com', status: 'in_progress', priority: 'urgent', estimate_hours: 60, progress: 55, done: false, created_at: cel`daysAgo(40)`, start_date: cel`daysAgo(35)`, end_date: cel`daysFromNow(20)`, due_date: cel`daysFromNow(20)`, location: { lat: 39.7392, lng: -104.9903 } },
+    { title: 'Warehouse schema', project: 'Data Platform', assignee: 'linus@example.com', status: 'in_review', priority: 'high', estimate_hours: 30, progress: 90, done: false, created_at: cel`daysAgo(25)`, start_date: cel`daysAgo(22)`, end_date: cel`daysFromNow(3)`, due_date: cel`daysFromNow(3)`, location: { lat: 42.3601, lng: -71.0589 } },
+    { title: 'PII access review', project: 'Compliance Audit', assignee: 'grace@example.com', status: 'todo', priority: 'urgent', estimate_hours: 20, progress: 0, done: false, created_at: cel`daysAgo(5)`, start_date: cel`daysFromNow(2)`, end_date: cel`daysFromNow(12)`, due_date: cel`daysFromNow(12)`, location: { lat: 38.9072, lng: -77.0369 } },
+    { title: 'Evidence collection', project: 'Compliance Audit', assignee: 'grace@example.com', status: 'backlog', priority: 'medium', estimate_hours: 18, progress: 0, done: false, created_at: cel`daysAgo(1)`, due_date: cel`daysFromNow(25)`, location: { lat: 34.0522, lng: -118.2437 } },
+    { title: 'App wireframes', project: 'Mobile App', assignee: 'ada@example.com', status: 'done', priority: 'medium', estimate_hours: 16, progress: 100, done: true, created_at: cel`daysAgo(10)`, start_date: cel`daysAgo(10)`, end_date: cel`daysAgo(6)`, due_date: cel`daysAgo(6)`, location: { lat: 45.5152, lng: -122.6784 } },
   ],
 });
 

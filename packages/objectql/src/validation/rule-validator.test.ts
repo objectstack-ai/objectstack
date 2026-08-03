@@ -8,6 +8,7 @@ import {
   stripReadonlyWhenFields,
   stripReadonlyWhenFieldsMulti,
   hasReadonlyWhenInPayload,
+  hasParentScopedReadonlyWhenInPayload,
   stripReadonlyFields,
 } from './rule-validator.js';
 import { ValidationError } from './record-validator.js';
@@ -143,6 +144,134 @@ describe('stripReadonlyWhenFieldsMulti (#3042)', () => {
   it('returns the same object when no readonlyWhen field is in the payload', () => {
     const d = { status: 'draft' };
     expect(stripReadonlyWhenFieldsMulti(invoiceFields, d, [{ status: 'paid' }])).toBe(d);
+  });
+});
+
+// #4889 — PARENT-scoped `readonlyWhen`. The showcase's invoice-line shape:
+// `readonlyWhen: parent.status == 'paid'` on a detail whose master is the
+// invoice header. Until #4889 the server bound only `record`/`previous`, so
+// every one of these predicates faulted and the fail-open branch wrote the
+// field anyway — the client grid was the only thing enforcing the lock.
+const invoiceLineFields = {
+  fields: {
+    invoice: { type: 'master_detail', reference: 'showcase_invoice', required: true },
+    // Row-scoped — unaffected by the parent binding, and here to prove it.
+    description: { type: 'text', requiredWhen: 'record.quantity >= 100' },
+    quantity: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
+    unit_price: { type: 'currency', readonlyWhen: "parent.status == 'paid'" },
+  },
+};
+
+describe('parent-scoped readonlyWhen (#4889)', () => {
+  const line = { id: 'l1', invoice: 'inv1', quantity: 6, unit_price: 49.99 };
+
+  it('drops the field when the master-detail header locks it', () => {
+    const out = stripReadonlyWhenFields(
+      invoiceLineFields,
+      { quantity: 9999, unit_price: 0.01 },
+      line,
+      undefined,
+      { id: 'inv1', status: 'paid' },
+    );
+    expect(out).toEqual({});
+  });
+
+  it('KEEPS the field when the header is not locked', () => {
+    const out = stripReadonlyWhenFields(
+      invoiceLineFields,
+      { quantity: 9999 },
+      line,
+      undefined,
+      { id: 'inv1', status: 'draft' },
+    );
+    expect(out).toEqual({ quantity: 9999 });
+  });
+
+  it('treats the field as LOCKED when `parent` could not be bound (fail-CLOSED)', () => {
+    // The pre-#4889 behaviour, and the bug: no `parent` binding ⇒ the predicate
+    // faults ⇒ the write used to go through. It must now be dropped.
+    const warnings: string[] = [];
+    const out = stripReadonlyWhenFields(invoiceLineFields, { quantity: 9999 }, line, {
+      warn: (m: string) => warnings.push(m),
+    } as never);
+    expect(out).toEqual({});
+    expect(warnings.some((w) => w.includes("reads 'parent'") && w.includes('LOCKED'))).toBe(true);
+  });
+
+  it('keeps fail-OPEN for a predicate that is simply broken (undeclared key)', () => {
+    // Not an unbound root — `record` IS bound, the key under it is not declared.
+    // #4649 deliberately left this fail-open for field predicates; #4889 must
+    // not have widened itself into that case.
+    const warnings: string[] = [];
+    const out = stripReadonlyWhenFields(
+      { fields: { amount: { type: 'currency', readonlyWhen: "record.no_such_field == 'paid'" } } },
+      { amount: 999 },
+      { amount: 1 },
+      { warn: (m: string) => warnings.push(m) } as never,
+    );
+    expect(out).toEqual({ amount: 999 });
+    expect(warnings.some((w) => w.includes('change allowed through'))).toBe(true);
+  });
+
+  it('leaves a RECORD-scoped lock on the same object working unchanged', () => {
+    // The contrast the issue drew: `record.status == 'paid'` was correct all
+    // along, and stays correct with a parent bound alongside it.
+    const headerFields = { fields: { status: { type: 'select' }, tax_rate: { type: 'number', readonlyWhen: "record.status == 'paid'" } } };
+    expect(stripReadonlyWhenFields(headerFields, { tax_rate: 99 }, { status: 'paid', tax_rate: 8 })).toEqual({});
+    expect(stripReadonlyWhenFields(headerFields, { tax_rate: 99 }, { status: 'draft', tax_rate: 8 })).toEqual({ tax_rate: 99 });
+  });
+
+  it('binds a DIFFERENT parent per matched row on the bulk path', () => {
+    const rows = [
+      { id: 'l1', invoice: 'paid_inv', quantity: 1 },
+      { id: 'l2', invoice: 'draft_inv', quantity: 2 },
+    ];
+    const headers: Record<string, Record<string, unknown>> = {
+      paid_inv: { id: 'paid_inv', status: 'paid' },
+      draft_inv: { id: 'draft_inv', status: 'draft' },
+    };
+    // Locked in ≥1 matched row ⇒ dropped for the whole batch (#3042 rule).
+    expect(
+      stripReadonlyWhenFieldsMulti(invoiceLineFields, { quantity: 9999 }, rows, undefined,
+        (row) => headers[String(row?.invoice)] ?? null),
+    ).toEqual({});
+    // No matched row locked ⇒ a legitimate bulk edit still lands.
+    expect(
+      stripReadonlyWhenFieldsMulti(invoiceLineFields, { quantity: 9999 }, [rows[1]!], undefined,
+        (row) => headers[String(row?.invoice)] ?? null),
+    ).toEqual({ quantity: 9999 });
+  });
+
+  it('is fail-CLOSED on the bulk path too when a row has no resolvable parent', () => {
+    const out = stripReadonlyWhenFieldsMulti(
+      invoiceLineFields,
+      { quantity: 9999 },
+      [{ id: 'l1', invoice: 'gone', quantity: 1 }],
+      undefined,
+      () => null,
+    );
+    expect(out).toEqual({});
+  });
+});
+
+describe('hasParentScopedReadonlyWhenInPayload (#4889 gate)', () => {
+  it('is TRUE when the payload writes a parent-scoped readonlyWhen field', () => {
+    expect(hasParentScopedReadonlyWhenInPayload(invoiceLineFields, { quantity: 1 })).toBe(true);
+  });
+  it('is FALSE when the payload only writes fields with no parent-scoped lock', () => {
+    expect(hasParentScopedReadonlyWhenInPayload(invoiceLineFields, { description: 'x' })).toBe(false);
+  });
+  it('is FALSE for a record-scoped readonlyWhen (no needless header read)', () => {
+    expect(hasParentScopedReadonlyWhenInPayload(invoiceFields, { amount: 1 })).toBe(false);
+  });
+  it('does not mistake a field NAMED parent_id, or a string literal, for the binding', () => {
+    const decoys = {
+      fields: {
+        a: { type: 'text', readonlyWhen: "record.parent_id != ''" },
+        b: { type: 'text', readonlyWhen: "record.kind == 'parent'" },
+      },
+    };
+    expect(hasParentScopedReadonlyWhenInPayload(decoys, { a: 'x', b: 'y' })).toBe(false);
   });
 });
 

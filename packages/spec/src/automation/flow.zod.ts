@@ -21,6 +21,7 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
+import { strictObject } from '../shared/strict-object';
 export const FlowNodeAction = z.enum([
   'start',              // Trigger
   'end',                // Return/Stop
@@ -78,6 +79,32 @@ export const FLOW_STRUCTURAL_NODE_TYPES: readonly string[] = ['start', 'end'];
  *
  * Key lists are kept beside the schemas rather than derived from `.shape`
  * (bodies are allocated lazily; `flow.test.ts` drift-guards every entry).
+ *
+ * **Batch 11 closed the INNER blocks too.** Closing the four outer shells left
+ * six nested authoring blocks on default `.strip` — `FlowNode.connectorConfig`
+ * / `.position` / `.inputSchema` / `.waitEventConfig` / `.boundaryConfig` and
+ * `Flow.errorHandling`. That is the shape this campaign keeps re-finding: a
+ * guard put where the author who wrote it was standing. The outer gate rejected
+ * `nodee:` at the node level while `connectorConfig: { connectorId, actionId,
+ * params: {…} }` parsed clean and dispatched the action with **no inputs at
+ * all** — the executor reads `input ?? {}`, so the whole mapped payload became
+ * an empty object and the call succeeded against nothing.
+ *
+ * Note which cases those six were, and were not, hiding: a slip on a REQUIRED
+ * key (`connectorID` for `connectorId`, `attachedToRef` for `attachedToNodeId`)
+ * was always loud, because the required key then reads as missing. What
+ * `.strip` swallowed is the OPTIONAL half — the input map, the retry budget,
+ * `interrupting: false`, `required: true` — i.e. exactly the keys an author adds
+ * to CONSTRAIN behaviour, dropped back to a permissive default without a word.
+ *
+ * They use {@link strictObject}, whose candidate list is read from the shape
+ * itself, so these six need no drift-guard entry (and adding one would be the
+ * second copy of the truth the helper exists to delete).
+ *
+ * Deliberately still open, both re-confirmed here rather than left to be
+ * rediscovered: the node `config` slot (above), and
+ * {@link FlowVersionHistorySchema} at the foot of this file (wire — see its own
+ * note).
  */
 
 /** Keys {@link FlowVariableSchema} declares (drift-guarded by flow.test.ts). */
@@ -174,24 +201,82 @@ export const FlowNodeSchema = lazySchema(() => z.object({
    * declared here turned a no-input action into a load failure nothing
    * downstream asked for.
    */
-  connectorConfig: z.object({
-    connectorId: z.string().describe('Registered connector name'),
-    actionId: z.string().describe('Action key declared by the connector'),
-    input: z.record(z.string(), z.unknown()).optional().describe('Mapped inputs for the action'),
-  }).optional(),
+  connectorConfig: strictObject(
+    {
+      surface: "this connector_action node's `connectorConfig`",
+      // The aliases are the four words the neighbouring surfaces use for the
+      // same thing: `config.inputs` on a script node, `input` on the connector
+      // ACTION descriptor, `params`/`parameters` in every integration product
+      // an author (or an AI) imports vocabulary from. `inputs` is left to the
+      // distance fallback — it is one edit away and gets there for free.
+      aliases: {
+        params: 'input',
+        parameters: 'input',
+        arguments: 'input',
+        payload: 'input',
+      },
+      history:
+        'Until #4001 these were dropped silently — the block still parsed, so a whole ' +
+        'mapped input map written under another word vanished and the executor ' +
+        'dispatched the action with `input ?? {}`: a successful call carrying nothing.',
+    },
+    {
+      connectorId: z.string().describe('Registered connector name'),
+      actionId: z.string().describe('Action key declared by the connector'),
+      input: z.record(z.string(), z.unknown()).optional().describe('Mapped inputs for the action'),
+    },
+  ).optional(),
 
-  /** UI Position (for the canvas) */
-  position: z.object({ x: z.number(), y: z.number() }).optional(),
+  /**
+   * UI Position (for the canvas).
+   *
+   * No alias table on purpose: `{ x, y }` is the same two keys React Flow (the
+   * Studio canvas) and BPMN DI both use, so there is no neighbouring vocabulary
+   * to import from — and the campaign's rule is that an alias entry is an
+   * empirical claim, not a precaution. The distance fallback covers `X` / `Y`.
+   */
+  position: strictObject(
+    {
+      surface: "this node's canvas `position`",
+      history:
+        'Until #4001 these were dropped silently — the block still parsed, so a canvas ' +
+        'hint written beside x/y (a size, a third coordinate, a designer marker) was ' +
+        'discarded, and the round-trip back through the designer could not tell it had ' +
+        'ever been written.',
+    },
+    { x: z.number(), y: z.number() },
+  ).optional(),
 
   /** Node-level execution timeout */
   timeoutMs: z.number().int().min(0).optional().describe('Maximum execution time for this node in milliseconds'),
 
   /** Node input schema declaration for Studio form generation and runtime validation */
-  inputSchema: z.record(z.string(), z.object({
-    type: z.enum(['string', 'number', 'boolean', 'object', 'array']).describe('Parameter type'),
-    required: z.boolean().default(false).describe('Whether the parameter is required'),
-    description: z.string().optional().describe('Parameter description'),
-  })).optional().describe('Input parameter schema for this node'),
+  inputSchema: z.record(z.string(), strictObject(
+    {
+      surface: "this node input parameter's declaration",
+      guidance: {
+        // A rename would be actively wrong here: `optional: true` and
+        // `required: true` are opposite claims, so pointing an author at
+        // `required` without saying to flip the value is the "confidently
+        // wrong prescription" this campaign has shipped before. Say the flip.
+        optional:
+          'There is no `optional` on an input parameter — the polarity is the other way ' +
+          'round. Write `required: false` (which is also the default, so the key can just ' +
+          'be dropped); `optional: true` is `required: false`, and `optional: false` is ' +
+          '`required: true`.',
+      },
+      history:
+        'Until #4001 these were dropped silently — the declaration still parsed, so a ' +
+        'parameter constrained under a word we do not declare (`optional: false`) came ' +
+        'back UNconstrained: `required` fell to its `false` default, and the engine\'s ' +
+        'pre-execution check (`validateNodeInputSchemas`) then had nothing to require.',
+    },
+    {
+      type: z.enum(['string', 'number', 'boolean', 'object', 'array']).describe('Parameter type'),
+      required: z.boolean().default(false).describe('Whether the parameter is required'),
+      description: z.string().optional().describe('Parameter description'),
+    },
+  )).optional().describe('Input parameter schema for this node'),
 
   // `outputSchema` REMOVED (#3896 audit close-out): declared, never validated —
   // no engine path checked node outputs against it (ledger: dead).
@@ -207,7 +292,30 @@ export const FlowNodeSchema = lazySchema(() => z.object({
    * Defines what external event or condition should resume the paused execution.
    * Industry alignment: BPMN Intermediate Catch Events, Temporal Signals.
    */
-  waitEventConfig: z.object({
+  waitEventConfig: strictObject({
+    surface: "this wait node's `waitEventConfig`",
+    aliases: {
+      // Different WORD, same intent — none of these is within edit distance of
+      // the key it means. `duration`/`delay` are what the two neighbouring
+      // retry/timer shapes in this repo call a millisecond span.
+      event: 'eventType',
+      signal: 'signalName',
+      duration: 'timerDuration',
+      delay: 'timerDuration',
+    },
+    guidance: {
+      // Deliberately NOT an alias to `timeoutMs`: that key is a tombstone
+      // (below) and pointing a typo at a removed key is how the campaign's own
+      // helper once told an author to write something that gets rejected next.
+      timeout:
+        '`wait` has no timeout — nothing has ever failed or resumed a wait on a deadline ' +
+        '(#4158 retired the two keys that claimed one). Use `timerDuration`: it accepts a ' +
+        'bare number as milliseconds, so `timerDuration: 60000` is a 60s wait.',
+    },
+    history:
+      'Until #4001 these were dropped silently — the block still parsed, so a wait node ' +
+      'whose resume condition the author spelled slightly wrong waited on nothing.',
+  }, {
     /** Type of event to wait for */
     eventType: z.enum(['timer', 'signal', 'webhook', 'manual', 'condition'])
       .describe('What kind of event resumes the execution'),
@@ -256,7 +364,28 @@ export const FlowNodeSchema = lazySchema(() => z.object({
    * Attaches an event handler to a host activity node (BPMN Boundary Event pattern).
    * Industry alignment: BPMN Boundary Error/Timer/Signal Events.
    */
-  boundaryConfig: z.object({
+  boundaryConfig: strictObject({
+    surface: "this boundary event's `boundaryConfig`",
+    aliases: {
+      // This block's own doc claims BPMN alignment, and `bpmn-interop.zod.ts`
+      // exists so a third-party definition can be imported — so BPMN's OWN
+      // attribute names are exactly the words an author arrives with.
+      // `attachedToRef` and `cancelActivity` are verbatim BPMN 2.0 spellings
+      // of the two keys below, and neither is within edit distance of it.
+      attachedToRef: 'attachedToNodeId',
+      attachedTo: 'attachedToNodeId',
+      hostNodeId: 'attachedToNodeId',
+      cancelActivity: 'interrupting',
+      event: 'eventType',
+      signal: 'signalName',
+      duration: 'timerDuration',
+    },
+    history:
+      'Until #4001 these were dropped silently — the block still parsed, so BPMN\'s ' +
+      '`cancelActivity: false` was discarded and `interrupting` fell to its `true` ' +
+      'default: an event the author declared NON-interrupting cancelled the host ' +
+      'activity anyway.',
+  }, {
     /** ID of the host node this boundary event is attached to */
     attachedToNodeId: z.string().describe('Host node ID this boundary event monitors'),
     /** Type of boundary event */
@@ -490,7 +619,50 @@ export const FlowSchema = lazySchema(() => z.object({
    * `'continue'` ignore them (a fully spelled-out block under `'fail'` is
    * common and stays legal).
    */
-  errorHandling: z.object({
+  errorHandling: strictObject({
+    surface: "this flow's `errorHandling` block",
+    aliases: {
+      // Every one of these is a real, in-repo spelling of the same knob on a
+      // NEIGHBOURING retry surface — which is what makes this table an
+      // empirical claim rather than a guess about typos:
+      //   `shared/retry-policy.zod.ts` (#4661, job.retryPolicy + a try_catch
+      //     node's `retry`) → `backoffMs`, and it TOMBSTONED `retryDelayMs`
+      //     as "the automation-side spelling", so an author who learned the
+      //     converged word and brings it here is being punished for reading
+      //     the newer file.
+      //   `integration/connector.zod.ts` RetryConfig → `initialDelayMs`,
+      //     `maxDelayMs`.
+      // `retries`/`attempts` are the plain-English forms; `onError` is n8n's
+      // word for the strategy switch.
+      backoffMs: 'retryDelayMs',
+      initialDelayMs: 'retryDelayMs',
+      maxDelayMs: 'maxRetryDelayMs',
+      retries: 'maxRetries',
+      attempts: 'maxRetries',
+      onError: 'strategy',
+    },
+    guidance: {
+      // NOT an alias. `maxAttempts` (connector RetryConfig) counts the FIRST
+      // attempt; `maxRetries` counts the ones after it. A bare rename would
+      // silently change the number's meaning by one — the exact shape of the
+      // four wrong prescriptions this campaign shipped and had to withdraw.
+      maxAttempts:
+        '`maxAttempts` is the connector/RetryConfig spelling and INCLUDES the first attempt; ' +
+        'flow `errorHandling` counts retries AFTER it. Write `maxRetries: <maxAttempts - 1>` ' +
+        '— renaming the key alone would quietly run one attempt fewer than you asked for.',
+      fallback:
+        'There is no fallback node on `errorHandling` (`fallbackNodeId` was removed in 17, ' +
+        '#3896 — the engine never read it). Draw a per-node FAULT EDGE from the failing node ' +
+        'to the handler node instead.',
+      fallbackNode:
+        'There is no fallback node on `errorHandling` (`fallbackNodeId` was removed in 17, ' +
+        '#3896 — the engine never read it). Draw a per-node FAULT EDGE from the failing node ' +
+        'to the handler node instead.',
+    },
+    history:
+      'Until #4001 these were dropped silently — the block still parsed, so a retry budget ' +
+      'or backoff the author configured was replaced by this block\'s defaults without a word.',
+  }, {
     strategy: z.enum(['fail', 'retry', 'continue']).default('fail').describe('How to handle node execution errors'),
     // Default 0 = "no retries", which is the right reading for the two
     // strategies that never retry. Under `strategy: 'retry'` it would instead
@@ -584,6 +756,27 @@ export type FlowEdgeParsed = z.infer<typeof FlowEdgeSchema>;
  * Tracks historical versions of flow definitions for rollback support.
  *
  * Industry alignment: Salesforce Flow Versions, n8n Workflow History.
+ *
+ * ## Deliberately NOT `.strict()` — stop here (#4001 batch 11)
+ *
+ * Every other object site in this module is closed, so the next sweep will read
+ * this one as the last hold-out and reach for `strictObject`. It is not a
+ * hold-out: it is the only WIRE shape in the file, and the strictness ledger's
+ * `automation/flow.zod.ts` row has exempted it since the row was written.
+ *
+ * Nobody authors a version-history record. The engine/Studio EMIT one when a
+ * flow is published — `flowName` / `version` / `createdAt` / `createdBy` are
+ * stamped by the writer, not typed by a person — so the asymmetry that makes
+ * strictness right everywhere else (author writes it, a dropped key is a silent
+ * defect they own) does not hold: here an added field is *our* enrichment, and
+ * closing this shape would turn a future emitter-side addition into a parse
+ * failure for anyone reading history they were handed. Same reasoning, and the
+ * same verdict, as `HookContextSchema` and the `execution.zod.ts` run-state
+ * envelopes.
+ *
+ * `definition` is the authored half, and it is already strict — it references
+ * {@link FlowSchema}, so the flow inside a history record is validated by the
+ * gate above, exactly where the author's keys are.
  */
 export const FlowVersionHistorySchema = lazySchema(() => z.object({
   flowName: z.string().describe('Flow machine name'),
