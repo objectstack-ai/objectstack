@@ -15,8 +15,11 @@ jobs:
       contents: write
       pull-requests: write
     outputs:
-      published: ${{ steps.changesets.outputs.published }}
-      cli-version: ${{ steps.cli-version.outputs.version }}
+      # Either publish path counts (see the recovery step below) — the Docker
+      # image must ship for a release the fallback rescued just as much as for
+      # one the Changesets action published itself.
+      published: ${{ steps.changesets.outputs.published == 'true' || steps.recover-publish.outputs.published == 'true' }}
+      cli-version: ${{ steps.cli-version.outputs.version || steps.recover-publish.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -158,6 +161,52 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish a release the Changesets action left behind
+        id: recover-publish
+        if: steps.changesets.outputs.published != 'true'
+        # changesets/action reaches its publish branch ONLY when there are zero
+        # pending changesets. An EMPTY changeset still counts as pending, so a
+        # `main` carrying only empty ones lands in
+        #     All changesets are empty; not creating PR
+        # and returns: no version PR, no publish, `published=false`, and a GREEN
+        # run. The version bump is already committed by then, so the release
+        # simply evaporates — 17.0.0-rc.2 sat versioned-in-repo and absent from
+        # npm with Release reporting success, and `docker` skipped with it
+        # (#4898). This is not an exotic state: `Check Changeset` sanctions the
+        # empty changeset as the "this PR releases nothing" declaration, so any
+        # ordinary docs/ci PR landing during the version-PR window produces it.
+        #
+        # Detect it by the only fact that matters — the version in the repo is
+        # not on the registry — and repair it. `changeset publish` skips every
+        # version already published, so this is a no-op on the normal path
+        # (where main's version IS the last released one) and a repair on this
+        # one. Never a silent success: if the version is still missing after
+        # publishing, the job fails.
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          version=$(node -p "require('./packages/cli/package.json').version")
+          if npm view "@objectstack/cli@$version" version >/dev/null 2>&1; then
+            echo "@objectstack/cli@$version is already on npm — nothing left to publish."
+            exit 0
+          fi
+
+          echo "::warning::@objectstack/cli@$version is versioned in main but absent from npm and the Changesets action did not publish it (#4898) — publishing it now."
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          pnpm run release
+
+          if ! npm view "@objectstack/cli@$version" version >/dev/null 2>&1; then
+            echo "::error::publish ran but @objectstack/cli@$version is still not on npm"
+            exit 1
+          fi
+          {
+            echo "published=true"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+          echo "::warning::Recovered by the fallback path — npm packages and git tags are published, but the GitHub Releases and the ADR-0087 D4 spec-changes attachment were NOT created (those only exist on the Changesets action's own publish path). Create them by hand if this release needs them."
 
       - name: Attach spec-changes.json to the GitHub Release (ADR-0087 D4)
         # Rebuilds the change manifest with the api-surface diff against the
