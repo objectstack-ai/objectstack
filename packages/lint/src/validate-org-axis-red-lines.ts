@@ -29,7 +29,10 @@
  * business-unit sharing rule on a PLATFORM-GLOBAL object (`tenancy.enabled:
  * false`) has no organization column to scope against, so the grant spans every
  * organization in the database — a cross-org BU grant by construction, and the
- * "cross-org BU mega-tree" the ADR rejected, arrived at by accident.
+ * "cross-org BU mega-tree" the ADR rejected, arrived at by accident. It covers
+ * BOTH business-unit recipients, `business_unit` and `unit_and_subordinates`
+ * — see {@link BU_TREE_RECIPIENT_TYPES} for the word list and its deliberate
+ * complement.
  *
  * Both are `error`, per ADR-0049 discipline: each mirrors a real enforcement
  * property (the Layer 0 wall's independence; the org-predicated BU resolver),
@@ -61,6 +64,41 @@ type AnyRec = Record<string, unknown>;
 
 /** The org-axis grouping reference. Reporting only — never an authorization input. */
 const ORG_PARENT_FIELD = 'parent_organization_id';
+
+/**
+ * The sharing-rule recipients rule ② intercepts: the ones whose runtime
+ * expansion IS the business-unit tree.
+ *
+ * Cross-checked word-for-word against the authoring enum `ShareRecipientType`
+ * (`@objectstack/spec/security`, `sharing.zod.ts`) — the only vocabulary an
+ * author can write, since `sharedWith` is `.strict()` and rejects everything
+ * else by name. That enum has FIVE members; this list intercepts two, and the
+ * difference is deliberate, not an oversight (it is exactly the oversight
+ * #4991 was filed for — ② shipped naming only `business_unit` while ADR-0105
+ * D6 ②'s own text names `unit_and_subordinates`):
+ *
+ * | `ShareRecipientType`    | ② | Why                                        |
+ * |-------------------------|---|--------------------------------------------|
+ * | `business_unit`         | ✅ | Members of exactly one BU — `BusinessUnitGraphService`, org-predicated. |
+ * | `unit_and_subordinates` | ✅ | That BU **plus every descendant unit** (ADR-0057 D5 subtree widening) — same resolver, strictly WIDER grant. |
+ * | `user`                  | — | A literal user id, no expansion at all. No tree to resolve, so no org to resolve it in. |
+ * | `team`                  | — | `sys_team` is a FLAT collaboration grouping (ADR-0090 D3 renamed `group` → `team`); `TeamGraphService`, not the BU graph. |
+ * | `position`              | — | Flat holder expansion (ADR-0090 D3 finalized the retirement of the position hierarchy); `PositionGraphService`, not the BU graph. The BU *depth scopes* D6 ② also names are a SCOPE mechanism, not a sharing-rule recipient. |
+ *
+ * The three allowed recipients are the sanctioned way to share a
+ * platform-global object (ADR-0066): naming a user, a flat team, or a flat
+ * position audience grants those people the catalog, which is the entire point
+ * of `tenancy.enabled: false`. What ② forbids is not "sharing a global object"
+ * but "resolving a BU SUBTREE with no organization to resolve it within".
+ *
+ * The runtime contract `SharingRuleRecipientType`
+ * (`spec/contracts/sharing-service.ts`) additionally carries `queue`; it is
+ * deliberately NOT authorable ("no `sys_queue` yet") and `expandRecipient`
+ * returns `[]` for it, so no author can reach it and it grants nothing. If it
+ * ever becomes authorable it is a work-distribution list, not a BU node — but
+ * this table is the place to re-decide that, in `ShareRecipientType` order.
+ */
+const BU_TREE_RECIPIENT_TYPES = new Set(['business_unit', 'unit_and_subordinates']);
 
 /** Coerce a collection (array or name-keyed map) to an array of records. */
 function asArray(v: unknown): AnyRec[] {
@@ -199,8 +237,10 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
 
   // ── ② Business-unit trees remain org-internal ─────────────────────────────
   //
-  // A `business_unit` recipient on a platform-global object has no organization
+  // A business-unit recipient on a platform-global object has no organization
   // column to scope against, so the grant reaches every organization's rows.
+  // Both BU recipients count — see `BU_TREE_RECIPIENT_TYPES` for why that word
+  // list is two long and which three of `ShareRecipientType` it lets past.
   const tenancyDisabledObjects = new Set(
     objects.filter((o) => isTenancyDisabled(o)).map((o) => str(o.name)).filter(Boolean),
   );
@@ -211,21 +251,29 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
     // spelt out only in the schema's rejection message (#4984).
     const sharedWith = rule.sharedWith as AnyRec | undefined;
     const recipientType = str(sharedWith?.type);
-    if (recipientType !== 'business_unit') return;
+    if (!BU_TREE_RECIPIENT_TYPES.has(recipientType)) return;
+    // `unit_and_subordinates` is the strictly wider of the two — it is the BU
+    // named plus every descendant unit — so say which one was written rather
+    // than a generic "business-unit rule" the author has to go look up.
+    const reach =
+      recipientType === 'unit_and_subordinates'
+        ? 'a business unit AND every descendant unit'
+        : 'a business unit';
     findings.push({
       severity: 'error',
       rule: ORG_AXIS_CROSS_ORG_BU_GRANT,
       where: `sharing rule "${str(rule.name) || rIndex}" on object "${target}"`,
       path: `sharingRules[${rIndex}].sharedWith`,
       message:
-        `A business-unit sharing rule targets "${target}", which opted out of tenancy ` +
-        `(\`tenancy.enabled: false\`). Platform-global objects carry no organization column, so this ` +
-        `grant spans EVERY organization — a cross-organization business-unit grant, which ADR-0105 D6 ` +
-        `forbids (BU trees are org-internal).`,
+        `Sharing rule recipient \`${recipientType}\` (${reach}) targets "${target}", which opted out of ` +
+        `tenancy (\`tenancy.enabled: false\`). Platform-global objects carry no organization column, so ` +
+        `this grant spans EVERY organization — a cross-organization business-unit grant, which ADR-0105 ` +
+        `D6 forbids (BU trees are org-internal).`,
       hint:
         `Either scope the object to organizations (drop \`tenancy.enabled: false\` so Layer 0 walls it), ` +
-        `or share it to a position / permission-set audience instead of a business unit. A ` +
-        `platform-global catalog that everyone should read wants an OWD of \`public_read\`, not a BU grant.`,
+        `or share it to a \`user\` / \`team\` / \`position\` audience instead — those expand flat, with no ` +
+        `business-unit tree to resolve. A platform-global catalog that everyone should read wants an OWD ` +
+        `of \`public_read\`, not a BU grant.`,
     });
   });
 
