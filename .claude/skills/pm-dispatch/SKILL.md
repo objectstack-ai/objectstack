@@ -102,11 +102,13 @@ known case: accepting a `repo:objectui` PR ⇒ file a `pm:queue` issue in
 `objectstack` — "run `pnpm objectui:refresh` and land the console bump",
 referencing the merged PR, blocked-by it until it actually merges.
 
-**4. Multiple PM sessions shard by repo — never share one queue.** The
-claim protocol makes concurrent PMs *safe*, not *useful*: batch
-independence (file-disjointness) is only checked within one PM's view, so
-two PMs on the same queue can claim different issues that collide on
-shared files, and the merge queue is one lane regardless. Scaling order:
+**4. Multiple PM sessions shard by repo; one shared queue only under
+domain lanes.** The claim protocol makes concurrent PMs *safe*, not
+*useful* on its own: batch independence (file-disjointness) is only checked
+within one PM's view, so two PMs on the same queue can claim different
+issues that collide on shared files, and the merge queue is one lane
+regardless. Making that check **global** is exactly what the next section
+does. Scaling order:
 
 1. One PM, bigger batch (`batch:5` is the maintainer's chosen operating
    point, riding on the resource discipline above), heavy tasks via
@@ -115,7 +117,13 @@ shared files, and the merge queue is one lane regardless. Scaling order:
    repo** as its shard (`/pm-dispatch repo:objectstack-ai/objectui`) —
    file universes are disjoint by construction. A sharded PM states its
    shard in every claim comment and **never claims outside it**.
-3. Multiple PMs on the SAME queue: prohibited — all cost, no throughput.
+3. Multiple PMs on the SAME queue: **prohibited unless the Domain-lanes
+   protocol (next section) is active** — every PM in its own session and
+   its own container, domain sets registered in the registry issue, label
+   discipline observed, and the global in-flight check run at every batch
+   selection. Without that protocol the ban stands as written: all cost,
+   no throughput, and the collision stays invisible to both PMs until the
+   merge.
 
 **Shard ownership is registered, never assumed.** A registry issue in the
 main backlog (`[PM] 分片分工登记表`) records which session owns which
@@ -158,6 +166,81 @@ machine; an org-level GitHub Project pulling issues/PRs from all three repos
 gives the maintainer a single view (filter by `repo:*` and `pm:*`). The PM
 maintains no tracking state outside GitHub — that invariant is what keeps
 the loop resumable and the board honest.
+
+## Domain lanes(同仓多 PM 并发)
+
+Rule 4's ladder ran out at one PM per repo because file-disjointness is only
+ever checked inside one PM's own view. Domain lanes are the **third rung**:
+one PM's triage verdict is cached as a `domain:*` label every other PM can
+read, so batch selection filters at the label layer instead of at the merge.
+Premise: each PM is its **own session in its own container** — adding a PM
+adds compute, not contention — and collisions are prevented by the
+domain→package mapping, not by hoping two PMs pick different work.
+
+**Anchoring rule.** The whole scheme rests on this one sentence:
+
+> Every package belongs to exactly **one** domain; an issue's `domain:*`
+> label is the domain of **the package the fix lands in**, decided at triage
+> by reading the code — **never guessed from the issue's title vocabulary**.
+
+The counter-example that makes it a rule: #4775 is a hook `condition`, which
+reads as automation, but the fix lands in
+`packages/objectql/src/hook-wrappers.ts` ⇒ `domain:engine`. Labeling by topic
+would have routed it to a different PM than the one already inside that
+package — the exact collision lanes exist to prevent. If you cannot say which
+file the fix touches, you have not triaged it yet, and it is not labelable.
+
+| 标签 | 包家族 |
+|:--|:--|
+| `domain:engine` | `packages/objectql`、`packages/metadata*`、`packages/platform-objects`、`packages/core`、`packages/plugins/driver-*` |
+| `domain:services` | `packages/services/*`、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`packages/connectors/*` |
+| `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
+| `domain:devx` | `packages/lint`、`skills/**`、`content/docs/**`、`scripts/`(门禁类) |
+| `domain:spec` | `packages/spec` 及其生成物(现 spec 车道不变) |
+| `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types` |
+
+`examples/**` belongs to the subsystem it exercises; anything that fits
+nowhere is judged at triage by its principal landing site. A package missing
+from the table is classified the first time it is triaged and the table
+updated **by PR** — the taxonomy evolves deliberately, never per-claim.
+
+**Label discipline.** `domain:*` is applied during the backlog sweep (round
+loop step 0) by whichever PM triages the issue. **Labeling ≠ claiming**: any
+PM may label any issue, including ones it will never claim — the label is
+shared routing, not a reservation. An **unlabeled issue may not be claimed by
+anyone**: triage and label it first, or selection has silently gone back to
+happening inside one PM's private view.
+
+**Claim scope.** Each PM session registers its **domain set** in the registry
+issue (`[PM] 分片分工登记表`, #4604 — the same registry that records repo
+shards) and claims only issues whose label falls inside that set. A set, not
+a single domain: lanes are a routing table, not a job title.
+
+**Cross-domain issues.** Prefer the contract-first split of rule 2 — one
+sub-issue per domain, each carrying its own `domain:*` label, ordered with
+`Blocked-by:`. When a split costs more than it buys, a single PM claims the
+whole issue and **declares the full file surface** in its claim comment, so
+every other PM's in-flight check can see all of it.
+
+**Borrowing.** An idle PM may claim outside its registered set when all three
+hold: (a) that domain's PM has not claimed the issue, (b) the claim comment
+declares the file surface, (c) the global in-flight check below passes.
+Borrowing is a one-issue exception, not a lane transfer — the registry entry
+does not change, so nobody has to guess who owns the domain afterwards.
+
+**Global in-flight check — run it at batch selection (step 3).** List every
+`pm:dispatched` issue across the repo, read the file-surface declaration on
+each one's latest claim comment, and require your candidates to be disjoint
+from all of them. This is step 3's independence test raised from your batch
+to the whole repo; skip it and two individually-independent batches are
+jointly dependent, which is precisely the failure the same-queue ban was
+protecting against.
+
+**The merge queue is still one shared serial resource.** Lanes buy parallel
+authorship, not parallel landing: the flaky-test tax (#4796) scales linearly
+with the number of PMs, and a red queue blocks every lane at once. Queue
+health is therefore a shared duty — a PM that notices a flake fixes or files
+it rather than re-queuing past it, whichever lane it came from.
 
 ## The round loop
 
@@ -280,6 +363,12 @@ execute atomically, in order:
    > 会话:`session_<id>`
    > 分支:`claude/issue-<n>-<slug>`
    > Worktree:`<repo>-issue-<n>`
+   > 域:`domain:<x>`
+   > 文件面:`<预计触碰的目录列表>`(越界即停,报告说明)
+
+   「文件面」is **required** for cross-domain and borrowed claims and
+   **recommended** for ordinary same-domain ones — it is the only input
+   another PM's global in-flight check has to read.
 3. **Race check**: assignment is idempotent, so two agents can both
    "succeed". Re-read the comments; if an earlier claim comment with a
    *different* session ID or branch name exists, you lost — touch nothing of
