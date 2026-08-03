@@ -120,6 +120,28 @@ ADR-0068 — spec field docs write predicates like `current_user.positions`.
 `null`. To check for "value present and non-blank" use the stdlib helper
 `isBlank()` or compare to `null` explicitly.
 
+Every predicate reads a record that is **total over the object's declared
+fields** (#4649), so `has(record.<declared_field>)` is uniformly `true` and
+tells you nothing at all. The idiom that reads like a guard is not one:
+
+```text
+# WRONG — both has() calls are true on a NULL row, so this reaches `null < null`,
+# CEL has no overload, the predicate aborts and the write is rejected.
+has(record.start_date) && has(record.end_date) && record.end_date < record.start_date
+
+# RIGHT
+record.start_date != null && record.end_date != null && record.end_date < record.start_date
+```
+
+**This is a publish-time rejection, not advice (#4763).** `os build` /
+`os validate` / `os lint` and the runtime publish gate reject any validation-rule
+or hook predicate that applies an ordering (`< <= > >=`) or arithmetic
+(`+ - * / %`) operator to a **declared nullable** field — no `required: true`,
+no `defaultValue`, no default option — unless an explicit `!= null` / `== null` /
+`!isBlank()` test dominates it in the same boolean branch. `has()` deliberately
+does not satisfy that gate. `has()` over an **undeclared** key stays legal: that
+is its real use — telling "absent from this PATCH" apart from "explicitly null".
+
 ### Null + string throws
 
 CEL has no implicit `null` coercion. `null + 'foo'` throws

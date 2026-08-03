@@ -147,6 +147,9 @@ export type {
   DanglingReferenceAuditOptions,
   DanglingReferenceAuditPort,
   AuditableObject,
+  // [#4747] The teardown bit the audit reads — exported alongside the options
+  // type that names it, so a caller can spell the parameter it passes.
+  AuditAbortSignal,
 } from './integrity/dangling-reference-audit.js';
 
 // Export MetadataFacade

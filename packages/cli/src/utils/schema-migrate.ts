@@ -209,8 +209,28 @@ export async function bootSchemaStack(
     flushSchemaDdl: async () => (defer && driver?.flushDeferredSchemaDdl
       ? await driver.flushDeferredSchemaDdl()
       : []),
+    /**
+     * Tear the one-shot stack down through the kernel's own teardown — the
+     * same `kernel.shutdown()` `os serve` runs on SIGTERM, so a one-shot
+     * command and a server take ONE path out (#4747).
+     *
+     * It used to call `(runtime as any).stop?.()`. `Runtime` has no `stop` —
+     * the optional-call swallowed that fact, so every `os migrate` subcommand
+     * closed its driver while leaving the kernel fully "running": no plugin
+     * ever got `destroy()`, and the ADR-0057 lifecycle sweep stayed armed. 60s
+     * later it woke inside the still-alive process and read through the pool
+     * this line had already closed, which is why a successful command ended in
+     * `ERROR Find operation failed` and a #4551 report naming `sys_metadata` /
+     * `sys_view_definition` as unreadable. A cast plus `?.` is how a missing
+     * teardown looks exactly like a performed one; there is no version of that
+     * call that could ever have worked.
+     *
+     * The explicit `disconnect()` stays as the backstop for a driver this
+     * kernel did not register through `DefaultDatasourcePlugin` (whose own
+     * `destroy()` closes the ones it owns); a second disconnect is a no-op.
+     */
     shutdown: async () => {
-      try { await (runtime as any).stop?.(); } catch { /* ignore */ }
+      try { await kernel.shutdown(); } catch { /* teardown is best-effort */ }
       try { await driver?.disconnect?.(); } catch { /* ignore */ }
     },
   };
