@@ -82,51 +82,17 @@ export class MongoDBDriver implements IDataDriver {
   public readonly name: string = 'com.objectstack.driver.mongodb';
   public readonly version: string = '1.0.0';
 
+  /**
+   * Capability advertisement (#4634, ADR-0049): only the bits with an engine
+   * reader survive. This driver batches its schema DDL round-trips
+   * ({@link syncSchemasBatch}), so it opts in via the one bit the engine ANDs
+   * with method presence. It owns neither persistent autonumber sequences nor
+   * native date bucketing here, so `autonumber`/`queryDateGranularity` stay
+   * absent and the engine keeps its fallbacks. Everything the old 30-bit
+   * literal declared is expressed by the methods this class implements.
+   */
   public readonly supports = {
-    // Basic CRUD Operations
-    create: true,
-    read: true,
-    update: true,
-    delete: true,
-
-    // Bulk Operations
-    bulkCreate: true,
-    bulkUpdate: true,
-    bulkDelete: true,
-
-    // Transaction & Connection Management
-    transactions: true,
-    savepoints: false,
-
-    // Query Operations
-    queryFilters: true,
-    queryAggregations: true,
-    querySorting: true,
-    queryPagination: true,
-    queryWindowFunctions: false,
-    querySubqueries: false,
-    queryCTE: false,
-    joins: false,
-
-    // Advanced Features
-    fullTextSearch: true,
-    jsonQuery: true,
-    geospatialQuery: true,
-    streaming: true,
-    jsonFields: true,
-    arrayFields: true,
-    vectorSearch: false,
-
-    // Schema Management
-    schemaSync: true,
     batchSchemaSync: true,
-    migrations: false,
-    indexes: true,
-
-    // Performance & Optimization
-    connectionPooling: true,
-    preparedStatements: false,
-    queryCache: false,
   };
 
   private client: MongoClient;

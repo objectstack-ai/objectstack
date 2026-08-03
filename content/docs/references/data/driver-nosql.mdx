@@ -123,7 +123,7 @@ const result = AggregationPipelineSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Driver instance name |
 | **type** | `'nosql'` | ✅ | Driver type must be "nosql" |
-| **capabilities** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | ✅ | Driver capability flags |
+| **capabilities** | `{ queryDateGranularity?: Record<string, boolean>; autonumber?: boolean; batchSchemaSync?: boolean; create?: any; … }` | ✅ | Driver capability flags |
 | **connectionString** | `string` | optional | Database connection string (driver-specific format) |
 | **poolConfig** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool configuration |
 | **databaseType** | `Enum<'mongodb' \| 'couchdb' \| 'dynamodb' \| 'cassandra' \| 'redis' \| 'elasticsearch' \| 'neo4j' \| 'orientdb'>` | ✅ | Specific NoSQL database type |

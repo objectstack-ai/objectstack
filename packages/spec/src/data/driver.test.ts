@@ -6,61 +6,203 @@ import {
   type DriverInterface,
 } from './driver.zod';
 
+/**
+ * The 31 capability bits retired in 17.0.0 (#4634, ADR-0049 enforce-or-remove).
+ * Kept as a literal list so the pins below cannot drift from the PR's audit
+ * table silently — adding a 32nd tombstone (or resurrecting one of these)
+ * must touch this file.
+ */
+const RETIRED_BITS = [
+  'create',
+  'read',
+  'update',
+  'delete',
+  'bulkCreate',
+  'bulkUpdate',
+  'bulkDelete',
+  'transactions',
+  'savepoints',
+  'isolationLevels',
+  'queryFilters',
+  'queryAggregations',
+  'querySorting',
+  'queryPagination',
+  'queryWindowFunctions',
+  'querySubqueries',
+  'queryCTE',
+  'joins',
+  'fullTextSearch',
+  'jsonQuery',
+  'geospatialQuery',
+  'streaming',
+  'jsonFields',
+  'arrayFields',
+  'vectorSearch',
+  'schemaSync',
+  'migrations',
+  'indexes',
+  'connectionPooling',
+  'preparedStatements',
+  'queryCache',
+] as const;
+
+/** The bits that survive — each with a named engine reader. */
+const LIVE_BITS = ['queryDateGranularity', 'autonumber', 'batchSchemaSync'] as const;
+
 describe('DriverCapabilitiesSchema', () => {
-  it('should accept valid capabilities', () => {
+  it('accepts the live capability bits', () => {
     const capabilities: DriverCapabilities = {
-      transactions: true,
-      queryFilters: true,
-      queryAggregations: true,
-      querySorting: true,
-      queryPagination: true,
-      queryWindowFunctions: true,
-      querySubqueries: true,
-      joins: true,
-      fullTextSearch: true,
-      jsonFields: true,
-      arrayFields: true,
+      queryDateGranularity: { day: true, week: false, month: true, quarter: true, year: true },
+      autonumber: true,
+      batchSchemaSync: true,
     };
 
     expect(() => DriverCapabilitiesSchema.parse(capabilities)).not.toThrow();
   });
 
-  it('should accept minimal capabilities', () => {
-    const capabilities: DriverCapabilities = {
-      transactions: false,
-      queryFilters: false,
-      queryAggregations: false,
-      querySorting: false,
-      queryPagination: false,
-      queryWindowFunctions: false,
-      querySubqueries: false,
-      joins: false,
-      fullTextSearch: false,
-      jsonFields: false,
-      arrayFields: false,
-    };
-
-    expect(() => DriverCapabilitiesSchema.parse(capabilities)).not.toThrow();
+  it('accepts an empty capabilities object — every live bit is opt-in (absence = false)', () => {
+    const parsed = DriverCapabilitiesSchema.parse({});
+    // `batchSchemaSync` dropped its `.default(false)` in #4634: absence already
+    // meant false at both readers (`supports?.batchSchemaSync` truthiness), and
+    // the default forced every capability object to spell out dead weight.
+    expect(parsed).not.toHaveProperty('batchSchemaSync');
+    expect(parsed).not.toHaveProperty('autonumber');
   });
 
-  it('should accept capabilities with defaults', () => {
-    const incomplete = {
-      transactions: true,
-      joins: true,
-      queryFilters: true,
-      // missing other fields - they should use defaults
-    };
+  it('declares exactly the audited shape: 3 live bits + 31 tombstones', () => {
+    const shape = (DriverCapabilitiesSchema as unknown as { shape: Record<string, unknown> }).shape;
+    const keys = Object.keys(shape).sort();
+    expect(keys).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
+  });
+});
 
-    const result = DriverCapabilitiesSchema.safeParse(incomplete);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      // Check that defaults are applied
-      expect(result.data.create).toBe(true); // default
-      expect(result.data.bulkCreate).toBe(false); // default
-      expect(result.data.queryAggregations).toBe(false); // default
+// ===========================================================================
+// Retired capability bits (#4634, ADR-0049 enforce-or-remove)
+// ===========================================================================
+
+describe('[#4634] the 31 inert capability bits are tombstoned, not stripped', () => {
+  it.each(RETIRED_BITS)('REJECTS an authored `%s`, with the prescription in the message', (bit) => {
+    const value = bit === 'isolationLevels' ? ['read-committed'] : true;
+    expect(() => DriverCapabilitiesSchema.parse({ [bit]: value })).toThrow(
+      new RegExp(`DriverCapabilities\\.${bit}.*removed.*Delete the key`, 's'),
+    );
+  });
+
+  it('the streaming prescription carries the #4484 findStream story and the paged-find fix', () => {
+    expect(() => DriverCapabilitiesSchema.parse({ streaming: true })).toThrow(
+      /DriverCapabilities\.streaming.*removed.*findStream.*#4484.*`find\(\)` with `limit`\/`offset`.*Delete the key/s,
+    );
+  });
+
+  it('the queryFilters prescription names the real mechanism — find() executes the full QueryAST', () => {
+    expect(() => DriverCapabilitiesSchema.parse({ queryFilters: false })).toThrow(
+      /DriverCapabilities\.queryFilters.*removed.*full QueryAST.*never built.*Delete the key/s,
+    );
+  });
+
+  it('the transactions prescription points at method presence, not a replacement bit', () => {
+    expect(() => DriverCapabilitiesSchema.parse({ transactions: true })).toThrow(
+      /DriverCapabilities\.transactions.*removed.*METHOD PRESENCE.*beginTransaction.*Delete the key/s,
+    );
+  });
+
+  it('still parses the live bits cleanly — the tombstones reject a key, not the record', () => {
+    const parsed = DriverCapabilitiesSchema.parse({
+      // z.record over the DateGranularity enum parses exhaustively — a partial
+      // advertisement is expressed with explicit `false`, as SqlDriver does.
+      queryDateGranularity: { day: true, week: false, month: true, quarter: true, year: true },
+      autonumber: true,
+      batchSchemaSync: false,
+    });
+    expect(parsed.autonumber).toBe(true);
+    expect(parsed.batchSchemaSync).toBe(false);
+    for (const bit of RETIRED_BITS) {
+      expect(parsed).not.toHaveProperty(bit);
     }
   });
 });
+
+// #4642 established that a compile-time conditional-type pin in this package is
+// a no-op (tsconfig excludes `**/*.test.ts`; vitest never enables `typecheck`),
+// so the load-bearing tsc-channel proof is the compiler-API test below, with
+// anti-vacuity guards; sabotage-verified in the PR (S1: re-adding a live
+// `streaming: z.boolean()` turns it red).
+describe('[#4634] tsc channel: the retired bits are unwritable in DriverCapabilities', () => {
+  it('types every retired bit as authored-unwritable and every live bit as writable', async () => {
+    const ts = (await import('typescript')).default;
+    const { resolve, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+
+    const dataEntry = resolve(dirname(fileURLToPath(import.meta.url)), './index.ts');
+    const program = ts.createProgram([dataEntry], {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      skipLibCheck: true,
+      noEmit: true,
+      strict: true,
+    });
+    const checker = program.getTypeChecker();
+    const sf = program.getSourceFile(dataEntry);
+    const moduleSym = sf && checker.getSymbolAtLocation(sf);
+    // Anti-vacuity: a resolution failure must fail loudly, not pass everything.
+    expect(moduleSym, './data module symbol must resolve').toBeTruthy();
+
+    const exports = checker.getExportsOfModule(moduleSym!);
+    const capsAlias = exports.find((e) => e.getName() === 'DriverCapabilities');
+    expect(capsAlias, 'DriverCapabilities must stay exported from ./data').toBeTruthy();
+
+    const capsType = checker.getDeclaredTypeOfSymbol(capsAlias!);
+    const props = new Map(capsType.getProperties().map((p) => [p.getName(), p]));
+
+    // Anti-vacuity: the walked shape is the audited 34-key shape.
+    expect([...props.keys()].sort()).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
+
+    const decl = capsAlias!.declarations?.[0];
+    expect(decl, 'DriverCapabilities alias declaration must exist').toBeTruthy();
+    const typeAt = (name: string) =>
+      checker.typeToString(checker.getTypeOfSymbolAtLocation(props.get(name)!, decl!));
+
+    for (const bit of RETIRED_BITS) {
+      // `retiredKey()` is `z.never().optional()`: the property type collapses
+      // to `undefined` — there is no value an author can write. A resurrected
+      // live bit reads `boolean` (or wider) here and turns this red.
+      expect(typeAt(bit), `retired bit ${bit} must be unwritable`).toBe('undefined');
+    }
+    for (const bit of LIVE_BITS) {
+      expect(typeAt(bit), `live bit ${bit} must stay writable`).not.toBe('undefined');
+    }
+  });
+});
+
+// ===========================================================================
+// DriverInterfaceSchema — the structural contract
+// ===========================================================================
+
+/** A minimal, contract-complete driver object for the structural tests. */
+const baseDriver = {
+  name: 'test-driver',
+  version: '1.0.0',
+  connect: async () => {},
+  disconnect: async () => {},
+  checkHealth: async () => true,
+  execute: async () => ({}),
+  find: async () => [],
+  findOne: async () => null,
+  create: async () => ({}),
+  update: async () => ({}),
+  upsert: async () => ({}),
+  delete: async () => true,
+  count: async () => 0,
+  bulkCreate: async () => [],
+  bulkUpdate: async () => [],
+  bulkDelete: async () => {},
+  beginTransaction: async () => ({}),
+  commit: async () => {},
+  rollback: async () => {},
+  syncSchema: async () => {},
+  dropTable: async () => {},
+  supports: {},
+};
 
 describe('DriverInterfaceSchema', () => {
   describe('Basic Properties', () => {
@@ -74,90 +216,12 @@ describe('DriverInterfaceSchema', () => {
       expect(result.success).toBe(false);
     });
 
-    it('should accept name and version', () => {
-      const driver = {
-        name: 'postgresql',
-        version: '1.0.0',
-        connect: async () => {},
-        disconnect: async () => {},
-        checkHealth: async () => true,
-        execute: async () => ({}),
-        find: async () => [],
-        findOne: async () => null,
-        create: async () => ({}),
-        update: async () => ({}),
-        upsert: async () => ({}),
-        delete: async () => true,
-        count: async () => 0,
-        bulkCreate: async () => [],
-        bulkUpdate: async () => [],
-        bulkDelete: async () => {},
-        beginTransaction: async () => ({}),
-        commit: async () => {},
-        rollback: async () => {},
-        syncSchema: async () => {},
-        dropTable: async () => {},
-        supports: {
-          transactions: true,
-          queryFilters: true,
-          queryAggregations: true,
-          querySorting: true,
-          queryPagination: true,
-          queryWindowFunctions: true,
-          querySubqueries: true,
-          joins: true,
-          fullTextSearch: true,
-          jsonFields: true,
-          arrayFields: true,
-        },
-      };
-
-      expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
+    it('should accept a contract-complete driver', () => {
+      expect(() => DriverInterfaceSchema.parse(baseDriver)).not.toThrow();
     });
   });
 
   describe('CRUD Operations', () => {
-    const baseDriver = {
-      name: 'test-driver',
-      version: '1.0.0',
-      connect: async () => {},
-      disconnect: async () => {},
-      checkHealth: async () => true,
-      execute: async () => ({}),
-      find: async (object: string, query: any) => [],
-      findOne: async (object: string, query: any) => null,
-      create: async (object: string, data: any) => data,
-      update: async (object: string, id: any, data: any) => data,
-      upsert: async (object: string, data: any) => data,
-      delete: async (object: string, id: any) => true,
-      count: async () => 0,
-      bulkCreate: async (object: string, data: any[]) => data,
-      bulkUpdate: async (object: string, updates: any[]) => updates,
-      bulkDelete: async (object: string, ids: any[]) => {},
-      beginTransaction: async () => ({}),
-      commit: async () => {},
-      rollback: async () => {},
-      syncSchema: async (object: string, schema: any) => {},
-      dropTable: async (object: string) => {},
-      supports: {
-        transactions: false,
-        queryFilters: false,
-        queryAggregations: false,
-        querySorting: false,
-        queryPagination: false,
-        queryWindowFunctions: false,
-        querySubqueries: false,
-        joins: false,
-        fullTextSearch: false,
-        jsonFields: false,
-        arrayFields: false,
-      },
-    };
-
-    it('should accept driver with CRUD operations', () => {
-      expect(() => DriverInterfaceSchema.parse(baseDriver)).not.toThrow();
-    });
-
     it('should validate find method signature', () => {
       const driver = {
         ...baseDriver,
@@ -165,18 +229,6 @@ describe('DriverInterfaceSchema', () => {
           { id: '1', name: 'Record 1' },
           { id: '2', name: 'Record 2' },
         ],
-      };
-
-      expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
-    });
-
-    it('should validate findOne method signature', () => {
-      const driver = {
-        ...baseDriver,
-        findOne: async (object: string, id: any) => ({
-          id: '1',
-          name: 'Record 1',
-        }),
       };
 
       expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
@@ -207,94 +259,17 @@ describe('DriverInterfaceSchema', () => {
 
       expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
     });
-
-    it('should validate delete method signature', () => {
-      const driver = {
-        ...baseDriver,
-        delete: async (object: string, id: any) => ({
-          id,
-          deleted: true,
-        }),
-      };
-
-      expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
-    });
   });
 
   describe('Bulk Operations', () => {
-    const baseDriver = {
-      name: 'test-driver',
-      version: '1.0.0',
-      connect: async () => {},
-      disconnect: async () => {},
-      checkHealth: async () => true,
-      execute: async () => ({}),
-      find: async () => [],
-      findOne: async () => null,
-      create: async () => ({}),
-      update: async () => ({}),
-      upsert: async () => ({}),
-      delete: async () => true,
-      count: async () => 0,
-      bulkCreate: async () => [],
-      bulkUpdate: async () => [],
-      bulkDelete: async () => {},
-      beginTransaction: async () => ({}),
-      commit: async () => {},
-      rollback: async () => {},
-      syncSchema: async () => {},
-      dropTable: async () => {},
-      supports: {
-        transactions: false,
-        queryFilters: false,
-        queryAggregations: false,
-        querySorting: false,
-        queryPagination: false,
-        queryWindowFunctions: false,
-        querySubqueries: false,
-        joins: false,
-        fullTextSearch: false,
-        jsonFields: false,
-        arrayFields: false,
-      },
-    };
-
-    it('should validate bulkCreate method', () => {
+    it('should validate bulk method signatures', () => {
       const driver = {
         ...baseDriver,
-        bulkCreate: async (object: string, data: any[]) => {
-          return data.map((item, i) => ({
-            ...item,
-            id: `generated-${i}`,
-          }));
-        },
-      };
-
-      expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
-    });
-
-    it('should validate bulkUpdate method', () => {
-      const driver = {
-        ...baseDriver,
-        bulkUpdate: async (object: string, updates: any[]) => {
-          return updates.map(u => ({
-            ...u.data,
-            id: u.id,
-            updated_at: new Date(),
-          }));
-        },
-      };
-
-      expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
-    });
-
-    it('should validate bulkDelete method', () => {
-      const driver = {
-        ...baseDriver,
-        bulkDelete: async (object: string, ids: any[]) => ({
-          deleted: ids.length,
-          ids,
-        }),
+        bulkCreate: async (object: string, data: any[]) =>
+          data.map((item, i) => ({ ...item, id: `generated-${i}` })),
+        bulkUpdate: async (object: string, updates: any[]) =>
+          updates.map((u) => ({ ...u.data, id: u.id, updated_at: new Date() })),
+        bulkDelete: async (object: string, ids: any[]) => {},
       };
 
       expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
@@ -302,355 +277,46 @@ describe('DriverInterfaceSchema', () => {
   });
 
   describe('DDL Operations', () => {
-    const baseDriver = {
-      name: 'test-driver',
-      version: '1.0.0',
-      connect: async () => {},
-      disconnect: async () => {},
-      checkHealth: async () => true,
-      execute: async () => ({}),
-      find: async () => [],
-      findOne: async () => null,
-      create: async () => ({}),
-      update: async () => ({}),
-      upsert: async () => ({}),
-      delete: async () => true,
-      count: async () => 0,
-      bulkCreate: async () => [],
-      bulkUpdate: async () => [],
-      bulkDelete: async () => {},
-      beginTransaction: async () => ({}),
-      commit: async () => {},
-      rollback: async () => {},
-      syncSchema: async () => {},
-      dropTable: async () => {},
-      supports: {
-        transactions: false,
-        queryFilters: false,
-        queryAggregations: false,
-        querySorting: false,
-        queryPagination: false,
-        queryWindowFunctions: false,
-        querySubqueries: false,
-        joins: false,
-        fullTextSearch: false,
-        jsonFields: false,
-        arrayFields: false,
-      },
-    };
-
-    it('should validate syncSchema method', () => {
+    it('should validate syncSchema and dropTable methods', () => {
       const driver = {
         ...baseDriver,
-        syncSchema: async (object: string, schema: any) => {
-          // Create table if not exists
-          // Alter table to match schema
-        },
-      };
-
-      expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
-    });
-
-    it('should validate dropTable method', () => {
-      const driver = {
-        ...baseDriver,
-        dropTable: async (object: string) => {
-          // DROP TABLE IF EXISTS
-        },
+        syncSchema: async (object: string, schema: any) => {},
+        dropTable: async (object: string) => {},
       };
 
       expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
     });
   });
 
-  describe('Transaction Support', () => {
-    it('should accept driver without transaction support', () => {
-      const driver = {
-        name: 'simple-driver',
-        version: '1.0.0',
-        connect: async () => {},
-        disconnect: async () => {},
-        checkHealth: async () => true,
-        execute: async () => ({}),
-        find: async () => [],
-        findOne: async () => null,
-        create: async () => ({}),
-        update: async () => ({}),
-        upsert: async () => ({}),
-        delete: async () => true,
-        count: async () => 0,
-        bulkCreate: async () => [],
-        bulkUpdate: async () => [],
-        bulkDelete: async () => {},
-        beginTransaction: async () => ({}),
-        commit: async () => {},
-        rollback: async () => {},
-        syncSchema: async () => {},
-        dropTable: async () => {},
+  describe('Capability advertisement', () => {
+    it('accepts a driver that advertises the live bits', () => {
+      // The shape SqlDriver actually returns after #4634: native date buckets,
+      // driver-owned autonumber, no batched DDL.
+      const sqlLike: DriverInterface = {
+        ...baseDriver,
+        name: 'sql-like',
         supports: {
-          transactions: false,
-          queryFilters: false,
-          queryAggregations: false,
-          querySorting: false,
-          queryPagination: false,
-          queryWindowFunctions: false,
-          querySubqueries: false,
-          joins: false,
-          fullTextSearch: false,
-          jsonFields: false,
-          arrayFields: false,
+          queryDateGranularity: { day: true, week: true, month: true, quarter: true, year: true },
+          autonumber: true,
+          batchSchemaSync: false,
         },
       };
-
-      expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
+      expect(() => DriverInterfaceSchema.parse(sqlLike)).not.toThrow();
     });
 
-    it('should accept driver with transaction support', () => {
-      const driver = {
-        name: 'transactional-driver',
-        version: '1.0.0',
-        connect: async () => {},
-        disconnect: async () => {},
-        checkHealth: async () => true,
-        execute: async () => ({}),
-        find: async () => [],
-        findOne: async () => null,
-        create: async () => ({}),
-        update: async () => ({}),
-        upsert: async () => ({}),
-        delete: async () => true,
-        count: async () => 0,
-        bulkCreate: async () => [],
-        bulkUpdate: async () => [],
-        bulkDelete: async () => {},
-        beginTransaction: async () => ({ id: 'tx-123' }),
-        commit: async (tx: any) => {},
-        rollback: async (tx: any) => {},
-        syncSchema: async () => {},
-        dropTable: async () => {},
-        supports: {
-          transactions: true,
-          queryFilters: true,
-          queryAggregations: true,
-          querySorting: true,
-          queryPagination: true,
-          queryWindowFunctions: false,
-          querySubqueries: true,
-          joins: true,
-          fullTextSearch: false,
-          jsonFields: true,
-          arrayFields: false,
-        },
-      };
-
-      expect(() => DriverInterfaceSchema.parse(driver)).not.toThrow();
-    });
-  });
-
-  describe('Real-World Driver Examples', () => {
-    it('should accept PostgreSQL-like driver', () => {
-      const postgresDriver: DriverInterface = {
-        name: 'postgresql',
-        version: '1.0.0',
-        connect: async () => {},
-        disconnect: async () => {},
-        checkHealth: async () => true,
-        execute: async () => ({}),
-        find: async (object, query) => [],
-        findOne: async (object, query) => null,
-        create: async (object, data) => data,
-        update: async (object, id, data) => data,
-        upsert: async (object, data) => data,
-        delete: async (object, id) => true,
-        count: async () => 0,
-        bulkCreate: async (object, data) => data,
-        bulkUpdate: async (object, updates) => updates,
-        bulkDelete: async (object, ids) => {},
-        beginTransaction: async () => ({}),
-        commit: async (tx) => {},
-        rollback: async (tx) => {},
-        syncSchema: async (object, schema) => {},
-        dropTable: async (object) => {},
-        supports: {
-          transactions: true,
-          queryFilters: true,
-          queryAggregations: true,
-          querySorting: true,
-          queryPagination: true,
-          queryWindowFunctions: true,
-          querySubqueries: true,
-          joins: true,
-          fullTextSearch: true,
-          jsonFields: true,
-          arrayFields: true,
-        },
-      };
-
-      expect(() => DriverInterfaceSchema.parse(postgresDriver)).not.toThrow();
+    it('accepts a driver that advertises nothing — capability bits are opt-in', () => {
+      // The shape InMemoryDriver returns after #4634. "Supports transactions"
+      // etc. is expressed by the methods it implements, not by booleans.
+      const memoryLike: DriverInterface = { ...baseDriver, name: 'memory-like', supports: {} };
+      expect(() => DriverInterfaceSchema.parse(memoryLike)).not.toThrow();
     });
 
-    it('should accept MongoDB-like driver', () => {
-      const mongoDriver: DriverInterface = {
-        name: 'mongodb',
-        version: '1.0.0',
-        connect: async () => {},
-        disconnect: async () => {},
-        checkHealth: async () => true,
-        execute: async () => ({}),
-        find: async (object, query) => [],
-        findOne: async (object, query) => null,
-        create: async (object, data) => data,
-        update: async (object, id, data) => data,
-        upsert: async (object, data) => data,
-        delete: async (object, id) => true,
-        count: async () => 0,
-        bulkCreate: async (object, data) => data,
-        bulkUpdate: async (object, updates) => updates,
-        bulkDelete: async (object, ids) => {},
-        beginTransaction: async () => ({}),
-        commit: async (tx) => {},
-        rollback: async (tx) => {},
-        syncSchema: async (object, schema) => {},
-        dropTable: async (object) => {},
-        supports: {
-          transactions: true,
-          queryFilters: true,
-          queryAggregations: true,
-          querySorting: true,
-          queryPagination: true,
-          queryWindowFunctions: false, // MongoDB has limited window function support
-          querySubqueries: true,
-          joins: false, // MongoDB has limited join support
-          fullTextSearch: true,
-          jsonFields: true, // Native JSON support
-          arrayFields: true, // Native array support
-        },
+    it('REJECTS a driver whose supports still authors a retired bit', () => {
+      const legacy = {
+        ...baseDriver,
+        supports: { transactions: true, streaming: true },
       };
-
-      expect(() => DriverInterfaceSchema.parse(mongoDriver)).not.toThrow();
-    });
-
-    it('should accept Salesforce-like driver', () => {
-      const salesforceDriver: DriverInterface = {
-        name: 'salesforce',
-        version: '1.0.0',
-        connect: async () => {},
-        disconnect: async () => {},
-        checkHealth: async () => true,
-        execute: async () => ({}),
-        find: async (object, query) => [],
-        findOne: async (object, query) => null,
-        create: async (object, data) => data,
-        update: async (object, id, data) => data,
-        upsert: async (object, data) => data,
-        delete: async (object, id) => true,
-        count: async () => 0,
-        bulkCreate: async (object, data) => data,
-        bulkUpdate: async (object, updates) => updates,
-        bulkDelete: async (object, ids) => {},
-        beginTransaction: async () => ({}),
-        commit: async (tx) => {},
-        rollback: async (tx) => {},
-        syncSchema: async (object, schema) => {},
-        dropTable: async (object) => {},
-        supports: {
-          transactions: false, // Salesforce doesn't support transactions
-          queryFilters: true, // SOQL WHERE clause
-          queryAggregations: true, // SOQL GROUP BY
-          querySorting: true, // SOQL ORDER BY
-          queryPagination: true, // SOQL LIMIT/OFFSET
-          queryWindowFunctions: false, // No window functions
-          querySubqueries: true, // SOQL supports subqueries
-          joins: true, // SOQL supports relationships
-          fullTextSearch: true, // SOSL
-          jsonFields: false, // No native JSON type
-          arrayFields: false, // No native array type
-        },
-      };
-
-      expect(() => DriverInterfaceSchema.parse(salesforceDriver)).not.toThrow();
-    });
-
-    it('should accept Redis-like driver', () => {
-      const redisDriver: DriverInterface = {
-        name: 'redis',
-        version: '1.0.0',
-        connect: async () => {},
-        disconnect: async () => {},
-        checkHealth: async () => true,
-        execute: async () => ({}),
-        find: async (object, query) => [],
-        findOne: async (object, query) => null,
-        create: async (object, data) => data,
-        update: async (object, id, data) => data,
-        upsert: async (object, data) => data,
-        delete: async (object, id) => true,
-        count: async () => 0,
-        bulkCreate: async (object, data) => data,
-        bulkUpdate: async (object, updates) => updates,
-        bulkDelete: async (object, ids) => {},
-        beginTransaction: async () => ({}),
-        commit: async (tx) => {},
-        rollback: async (tx) => {},
-        syncSchema: async (object, schema) => {},
-        dropTable: async (object) => {},
-        supports: {
-          transactions: true, // Redis supports transactions
-          queryFilters: false, // Limited query support - key-based lookup
-          queryAggregations: false, // No aggregation support
-          querySorting: false, // No native sorting
-          queryPagination: false, // No pagination support
-          queryWindowFunctions: false, // No window functions
-          querySubqueries: false, // No subqueries
-          joins: false, // No join support
-          fullTextSearch: false, // No native full-text search
-          jsonFields: true, // RedisJSON module
-          arrayFields: true, // Redis lists
-        },
-      };
-
-      expect(() => DriverInterfaceSchema.parse(redisDriver)).not.toThrow();
-    });
-
-    it('should accept memory-like driver with limited query support', () => {
-      const memoryDriver: DriverInterface = {
-        name: 'memory',
-        version: '1.0.0',
-        connect: async () => {},
-        disconnect: async () => {},
-        checkHealth: async () => true,
-        execute: async () => ({}),
-        find: async (object, query) => [],
-        findOne: async (object, query) => null,
-        create: async (object, data) => data,
-        update: async (object, id, data) => data,
-        upsert: async (object, data) => data,
-        delete: async (object, id) => true,
-        count: async () => 0,
-        bulkCreate: async (object, data) => data,
-        bulkUpdate: async (object, updates) => updates,
-        bulkDelete: async (object, ids) => {},
-        beginTransaction: async () => ({}),
-        commit: async (tx) => {},
-        rollback: async (tx) => {},
-        syncSchema: async (object, schema) => {},
-        dropTable: async (object) => {},
-        supports: {
-          transactions: false, // No transactions in memory
-          queryFilters: false, // Memory driver doesn't support query conditions - all filtering done in memory
-          queryAggregations: false, // No aggregation support
-          querySorting: false, // No native sorting
-          queryPagination: false, // No pagination support
-          queryWindowFunctions: false, // No window functions
-          querySubqueries: false, // No subqueries
-          joins: false, // No join support - joins done in memory
-          fullTextSearch: false, // No full-text search
-          jsonFields: true, // Memory can store any type
-          arrayFields: true, // Memory can store any type
-        },
-      };
-
-      expect(() => DriverInterfaceSchema.parse(memoryDriver)).not.toThrow();
+      expect(() => DriverInterfaceSchema.parse(legacy)).toThrow(/removed.*Delete the key/s);
     });
   });
 
@@ -672,42 +338,12 @@ describe('DriverInterfaceSchema', () => {
       // (see contracts/data-driver.test.ts), which breaks callers, and there were
       // none. A stray `findStream` on a driver object therefore just parses and
       // is dropped, exactly as any other non-contract method on it always has.
+      // (Contrast `DriverCapabilities`, whose keys ARE tombstoned: capability
+      // records DO get parsed, via DriverConfigSchema.capabilities.)
       const withLegacyMethod = {
+        ...baseDriver,
         name: 'legacy',
-        version: '1.0.0',
-        connect: async () => {},
-        disconnect: async () => {},
-        checkHealth: async () => true,
-        execute: async () => ({}),
-        find: async () => [],
         findStream: async function* () {},
-        findOne: async () => null,
-        create: async () => ({}),
-        update: async () => ({}),
-        upsert: async () => ({}),
-        delete: async () => true,
-        count: async () => 0,
-        bulkCreate: async () => [],
-        bulkUpdate: async () => [],
-        bulkDelete: async () => {},
-        beginTransaction: async () => ({}),
-        commit: async () => {},
-        rollback: async () => {},
-        syncSchema: async () => {},
-        dropTable: async () => {},
-        supports: {
-          transactions: true,
-          queryFilters: true,
-          queryAggregations: true,
-          querySorting: true,
-          queryPagination: true,
-          queryWindowFunctions: false,
-          querySubqueries: false,
-          joins: false,
-          fullTextSearch: false,
-          jsonFields: true,
-          arrayFields: true,
-        },
       };
 
       const parsed = DriverInterfaceSchema.parse(withLegacyMethod);

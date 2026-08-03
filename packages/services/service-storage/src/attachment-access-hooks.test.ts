@@ -198,4 +198,73 @@ describe('attachment access — beforeDelete (uploader or parent editor)', () =>
     await expect(beforeDelete(deleteCtx({ id: 'a1' }, { isSystem: true, userId: 'x' }))).resolves.toBeUndefined();
     await expect(beforeDelete(deleteCtx({ id: 'missing' }, { userId: 'x' }))).resolves.toBeUndefined();
   });
+
+  // #4757 — no id AND no `where` is not "nothing matched", it is "nothing was
+  // ever queried": the engine seeds `{ object }` as the delete AST and hands
+  // it to `driver.deleteMany`, which empties the table. The gate must refuse
+  // rather than fall through the empty-`rows` short-circuit.
+  describe('unscoped multi-delete (no id, no where) — #4757', () => {
+    const unscopedShapes: Array<[string, any]> = [
+      ['options.multi with no where', { options: { multi: true } }],
+      ['no id and no options at all', {}],
+      ['an explicitly null where', { options: { multi: true, where: null } }],
+      ['an explicitly undefined where', { options: { multi: true, where: undefined } }],
+    ];
+
+    for (const [label, input] of unscopedShapes) {
+      it(`refuses ${label} (403 ATTACHMENT_DELETE_DENIED)`, async () => {
+        const { beforeDelete } = install({ attachments: [row], sharing: { canEdit: async () => true } });
+        await expect(beforeDelete(deleteCtx(input, { userId: 'uploader' }))).rejects.toMatchObject({
+          code: 'ATTACHMENT_DELETE_DENIED',
+          status: 403,
+        });
+      });
+    }
+
+    it('refuses even the uploader of every matched row — the AST is unscoped, not row-scoped', async () => {
+      // The uploader shortcut is per RESOLVED row; with nothing resolved there
+      // is no row whose ownership could license emptying the table.
+      const canEdit = vi.fn(async () => true);
+      const { beforeDelete } = install({
+        attachments: [{ ...row, uploaded_by: 'uploader' }],
+        sharing: { canEdit },
+      });
+      await expect(
+        beforeDelete(deleteCtx({ options: { multi: true } }, { userId: 'uploader' })),
+      ).rejects.toMatchObject({ code: 'ATTACHMENT_DELETE_DENIED' });
+      expect(canEdit).not.toHaveBeenCalled();
+    });
+
+    it('still bypasses for system context and context-less calls', async () => {
+      const { beforeDelete } = install({ attachments: [row], sharing: { canEdit: async () => false } });
+      await expect(
+        beforeDelete(deleteCtx({ options: { multi: true } }, { isSystem: true, userId: 'x' })),
+      ).resolves.toBeUndefined();
+      await expect(beforeDelete(deleteCtx({ options: { multi: true } }, {}))).resolves.toBeUndefined();
+    });
+
+    // The scoped paths must be untouched by the fix: an id-bound delete and a
+    // `where`-bound one still authorize row-by-row and still ALLOW when they
+    // pass. `where: {}` matches every row but is a real query — every matched
+    // row is authorized, so it stays on the authorize path, not the refuse one.
+    it('leaves the legitimate scoped paths alone', async () => {
+      const { beforeDelete } = install({ attachments: [row], sharing: { canEdit: async () => true } });
+      await expect(beforeDelete(deleteCtx({ id: 'a1' }, { userId: 'stranger' }))).resolves.toBeUndefined();
+      await expect(
+        beforeDelete(
+          deleteCtx({ options: { where: { parent_object: 'att_secret' }, multi: true } }, { userId: 'stranger' }),
+        ),
+      ).resolves.toBeUndefined();
+      await expect(
+        beforeDelete(deleteCtx({ options: { where: {}, multi: true } }, { userId: 'stranger' })),
+      ).resolves.toBeUndefined();
+    });
+
+    it('an empty `where` still authorizes every matched row (one failing row denies)', async () => {
+      const { beforeDelete } = install({ attachments: [row], sharing: { canEdit: async () => false } });
+      await expect(
+        beforeDelete(deleteCtx({ options: { where: {}, multi: true } }, { userId: 'stranger' })),
+      ).rejects.toMatchObject({ code: 'ATTACHMENT_DELETE_DENIED' });
+    });
+  });
 });

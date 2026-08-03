@@ -43,8 +43,11 @@ describe('SqlDriver (QueryAST Format)', () => {
       expect(driver.name).toBe('com.objectstack.driver.sql');
       expect(driver.version).toBeDefined();
       expect(driver.supports).toBeDefined();
-      expect(driver.supports.transactions).toBe(true);
-      expect(driver.supports.joins).toBe(true);
+      // #4634: only the live capability bits remain — transactions/joins are
+      // expressed by the methods this driver implements.
+      expect(driver.supports.autonumber).toBe(true);
+      expect(driver.supports.batchSchemaSync).toBe(false);
+      expect(driver.supports).not.toHaveProperty('transactions');
     });
   });
 

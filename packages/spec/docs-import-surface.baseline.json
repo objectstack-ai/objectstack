@@ -84,7 +84,6 @@
     "shared/IsolationLevelEnum \u2014 no type export",
     "shared/MutationEventEnum \u2014 no type export",
     "shared/SortDirectionEnum \u2014 no type export",
-    "studio/ActionLocation \u2014 no type export",
     "studio/PanelLocation \u2014 no type export",
     "system/AddFieldOperation \u2014 no type export",
     "system/CreateObjectOperation \u2014 no type export",

@@ -1143,7 +1143,7 @@
     "shared/TemplateExpressionInput",
     "shared/ViewName",
     "studio/ActionContribution",
-    "studio/ActionLocation",
+    "studio/ActionContributionLocation",
     "studio/ActivationEvent",
     "studio/CommandContribution",
     "studio/ERDiagramConfig",

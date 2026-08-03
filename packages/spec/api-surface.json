@@ -4000,8 +4000,9 @@
   ],
   "./studio": [
     "ActionContribution (type)",
+    "ActionContributionLocation (type)",
+    "ActionContributionLocationSchema (const)",
     "ActionContributionSchema (const)",
-    "ActionLocationSchema (const)",
     "ActivationEvent (type)",
     "ActivationEventSchema (const)",
     "BUILT_IN_NODE_DESCRIPTORS (const)",
