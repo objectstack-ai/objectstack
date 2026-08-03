@@ -233,6 +233,9 @@ jobs:
       # throwaway git repos carrying those exact shapes, runs the real scripts
       # over them, and asserts the emitted changeset — including that a cap which
       # fires announces itself and that an unwalkable range degrades loudly.
+      # #4843 folded `scripts/objectui-range.mjs` — the release page's Console
+      # section — onto that same `classifyRange()` criterion, so both self-tests
+      # run here: one criterion, two consumers, no room to drift apart.
       - name: objectui pin-changeset digest guard
         run: pnpm check:objectui-changeset
 

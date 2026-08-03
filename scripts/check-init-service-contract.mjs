@@ -30,15 +30,20 @@
  *     into a warn → every restart lost all in-flight approvals. The symptom
  *     surfaced a release after the cause.
  *
- * This scan closes the loop: every init()-reachable `getService('X')` whose
- * service a workspace plugin declares in `providesServices` MUST be covered by
- * one of the three declarations above. Undeclared consumption is an ERROR at
- * CI time, deterministically — not a probabilistic boot failure in whichever
- * composition happens to order the plugins badly.
+ * This scan closes the loop: every init()-reachable service lookup —
+ * `getService('X')` and every sibling accessor in `SERVICE_LOOKUP_CALLEES` —
+ * whose service a workspace plugin declares in `providesServices` MUST be
+ * covered by one of the three declarations above. Undeclared consumption is an
+ * ERROR at CI time, deterministically — not a probabilistic boot failure in
+ * whichever composition happens to order the plugins badly.
+ *
+ * The accessor vocabulary is load-bearing and was once one name short: #4772
+ * shipped an undeclared init-time `getServiceAsync('cache')` straight through a
+ * green run of this guard. See `SERVICE_LOOKUP_CALLEES` below.
  *
  * ## What it deliberately does NOT flag
  *
- *   - `getService` in `start()` (or hooks registered during init). By start(),
+ *   - Any of those accessors in `start()` (or hooks registered during init). By start(),
  *     every init() has completed — that is the sanctioned pattern for
  *     best-effort consumption, and the one `apps/setup` / `studio` / `account`
  *     use on purpose (they register app/nav in start(); a miss is a missing
@@ -257,14 +262,71 @@ function objectUnit(file, src, obj, fileFunctions) {
   };
 }
 
-// ── Init-reachable getService analysis ───────────────────────────────────────
+// ── Init-reachable service-lookup analysis ───────────────────────────────────
 
 /**
- * Every `<expr>.getService('X')` with a literal service name that runs
+ * Every accessor that RESOLVES A NAMED SERVICE out of the kernel registry.
+ *
+ * The ordering hazard ADR-0116 exists for is a property of the registry, not of
+ * one method name: whichever accessor you reach for, the answer depends on
+ * whether the provider's init() has already run. So the guard must know the
+ * whole vocabulary — a name missing from this set is a silent hole, and the
+ * guard reports a confident green through it.
+ *
+ * That is not hypothetical. #4772 shipped through exactly this gap: pre-fix
+ * `AuthPlugin.init()` resolved the workspace-provided `cache` service via
+ * `getServiceAsync` and declared nothing, which is precisely the verdict this
+ * guard exists to print — but `getServiceAsync` was not in the vocabulary, so
+ * the edge was never even constructed. Cost: `undefined` frozen into the
+ * better-auth config, rate-limit counters that never reached the shared store,
+ * and ADR-0069 D2 advertising a capability the runtime did not deliver.
+ *
+ * Membership is decided by reading `packages/core` — an accessor is in here
+ * when a plugin can reach it AND it resolves a named service:
+ *
+ *   - `getService(name)`               — `PluginContext.getService`
+ *                                        (`core/src/types.ts`), sync registry read.
+ *   - `getServiceAsync(name, scope?)`  — `ObjectKernel.getServiceAsync`
+ *                                        (`core/src/kernel.ts`), reachable from a
+ *                                        plugin via `ctx.getKernel()` and, as in
+ *                                        #4772, by duck-typing `ctx` itself.
+ *   - `getServiceScoped(name, scope)`  — `PluginContext.getServiceScoped`
+ *                                        (`core/src/types.ts`); its kernel
+ *                                        implementation is byte-for-byte the same
+ *                                        `pluginLoader.getService(name, scopeId)`
+ *                                        call `getServiceAsync` makes.
+ *
+ * Deliberately NOT in the vocabulary, each for a reason that is about the
+ * accessor and not about convenience:
+ *
+ *   - `hasService` — not on the plugin-facing surface at all.
+ *     `ObjectKernel.hasAnyService` is `private` and `PluginLoader.hasService`
+ *     is reachable only from a loader instance the kernel never hands out.
+ *     Adding it would flag any unrelated object's `hasService(...)` while
+ *     covering no real edge.
+ *   - `getServices()` — enumerates the whole map and takes no service name, so
+ *     there is no literal to judge (same limit as a dynamic name, below).
+ *   - `replaceService(name, impl)` — a mutation, not a lookup. It carries its
+ *     own ordering requirement, but a different verdict and a different remedy;
+ *     folding it in here would make one message answer two questions.
+ */
+const SERVICE_LOOKUP_CALLEES = new Set(['getService', 'getServiceAsync', 'getServiceScoped']);
+
+/** Tokens whose absence proves a file can contribute no edge — see `scan()`. */
+const PREFILTER_TOKENS = [...SERVICE_LOOKUP_CALLEES, 'providesServices'];
+
+/**
+ * Every `<expr>.getService('X')` (or any other accessor in
+ * `SERVICE_LOOKUP_CALLEES`) with a literal service name that runs
  * SYNCHRONOUSLY when `unit.init()` runs: the init body itself, plus — followed
  * transitively — same-class `this.m(...)` calls and same-file free-function
  * calls. Nested function expressions are NOT entered (a hook callback runs
  * later, outside the init ordering window).
+ *
+ * Each recorded call carries the accessor it was made through, so every message
+ * this script prints can quote the call site as written rather than normalising
+ * it to `getService` — a `--list` line that renames the reader is a machine
+ * surface that lies (Route & surface ownership §4).
  */
 function initServiceCalls(unit, src) {
   const calls = [];
@@ -282,12 +344,15 @@ function initServiceCalls(unit, src) {
 
       if (ts.isCallExpression(node)) {
         const callee = node.expression;
-        // `<anything>.getService('X')`
-        if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'getService') {
+        // `<anything>.getService('X')` / `.getServiceAsync('X')` / `.getServiceScoped('X', s)`
+        // — including the optional-call form `<anything>.getServiceAsync?.('X')`,
+        // which is a PropertyAccessExpression callee like any other (#4772's shape).
+        if (ts.isPropertyAccessExpression(callee) && SERVICE_LOOKUP_CALLEES.has(callee.name.text)) {
           const arg = node.arguments[0];
           if (arg && ts.isStringLiteralLike(arg)) {
             calls.push({
               service: arg.text,
+              accessor: callee.name.text,
               line: src.getLineAndCharacterOfPosition(node.getStart(src)).line + 1,
             });
           }
@@ -321,9 +386,13 @@ function scan(files = discoverFiles()) {
   const units = [];
   for (const file of files) {
     const text = readFileSync(join(ROOT, file), 'utf8');
-    // Cheap pre-filter: a file with neither token can contribute neither a
-    // provider declaration nor an init-time consumption edge.
-    if (!text.includes('getService') && !text.includes('providesServices')) continue;
+    // Cheap pre-filter: a file carrying none of these tokens can contribute
+    // neither a provider declaration nor an init-time consumption edge.
+    // Derived from the vocabulary on purpose — a hardcoded 'getService' happens
+    // to be a substring of today's three accessors, but the next one added
+    // would be filtered out here before the AST ever saw it, which is the same
+    // silent-hole failure this file's #4772 note is about.
+    if (!PREFILTER_TOKENS.some((token) => text.includes(token))) continue;
     const src = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
     for (const unit of collectPluginUnits(file, src)) {
       units.push({ ...unit, initCalls: initServiceCalls(unit, src) });
@@ -380,7 +449,7 @@ function auditUnits(units) {
       const providerNames = judged.providers.map((p) => `'${p.pluginName}'`).join(', ');
       problems.push(
         `${unit.file}:${call.line} — ${unit.anchor}\n` +
-        `    init() resolves getService('${call.service}') (directly or via a helper init() calls),\n` +
+        `    init() resolves ${call.accessor}('${call.service}') (directly or via a helper init() calls),\n` +
         `    '${call.service}' is provided by ${providerNames}, and NOTHING declares that ordering.\n` +
         `    This is the #4085/#4420 failure class: it works only under lucky composition order,\n` +
         `    and the miss hides inside best-effort logging. Declare it (ADR-0116):\n` +
@@ -421,9 +490,9 @@ function list() {
   const { edges } = auditUnits(units);
   for (const e of edges) {
     const via = e.via ? `  [${e.via}]` : '';
-    console.log(`${e.verdict.padEnd(11)}  ${e.unit.file}:${e.call.line}  ${e.unit.anchor} → getService('${e.call.service}')${via}`);
+    console.log(`${e.verdict.padEnd(11)}  ${e.unit.file}:${e.call.line}  ${e.unit.anchor} → ${e.call.accessor}('${e.call.service}')${via}`);
   }
-  if (edges.length === 0) console.log('(no init-time getService edges found)');
+  if (edges.length === 0) console.log('(no init-time service-lookup edges found)');
 }
 
 // ── Self-test ────────────────────────────────────────────────────────────────
@@ -619,7 +688,155 @@ function selfTest() {
     assert(problems.length === 1, 'mutually recursive helpers terminate and still report');
   }
 
-  console.log('✓ self-test: 12 cases');
+  // ── The #4772 vocabulary hole (issue #4835) ────────────────────────────────
+  //
+  // Cases 13-17 are the regression the vocabulary exists for. They are written
+  // against the accessor NAMES, not against `getService`, because a guard that
+  // is only ever observed green is indistinguishable from a guard that matches
+  // nothing. If `SERVICE_LOOKUP_CALLEES` loses an entry, 13/14/16 go from
+  // "1 problem" to "0 problems" and this self-test is what says so.
+
+  /** The real provider of `cache`: `packages/services/service-cache`. */
+  const CACHE_PROVIDER = `
+    export class CacheServicePlugin implements Plugin {
+      name = 'com.objectstack.service.cache';
+      providesServices = ['cache'];
+      async init(ctx: PluginContext) { ctx.registerServiceFactory('cache', async () => ({})); }
+    }
+  `;
+
+  // 13. #4772 VERBATIM, pre-fix (`f2eb85007^`, packages/plugins/plugin-auth/src/auth-plugin.ts:346):
+  //     init() resolves the workspace-provided `cache` through `getServiceAsync`,
+  //     via an optional call on a cast `ctx`, inside a best-effort try/catch, and
+  //     the plugin's declarations cover `data`/`manifest`/objectql — never `cache`.
+  //     Before `getServiceAsync` joined the vocabulary this audited GREEN.
+  {
+    const code = CACHE_PROVIDER + `
+      export class AuthPlugin implements Plugin {
+        name = 'com.objectstack.auth';
+        providesServices = ['auth', 'tenancy'];
+        dependencies: string[] = ['com.objectstack.engine.objectql'];
+        requiresServices = ['data', 'manifest'];
+        async init(ctx: PluginContext): Promise<void> {
+          const authConfig: AuthManagerOptions = { ...this.options, logger: ctx.logger };
+          if (!authConfig.secondaryStorage) {
+            let cache: any;
+            try {
+              cache = await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> }).getServiceAsync?.('cache');
+            } catch {
+              cache = undefined;
+            }
+            if (cache) {
+              authConfig.secondaryStorage = cacheSecondaryStorage(cache);
+            } else {
+              ctx.logger.warn('[auth] no cache service registered — rate-limit counters use a per-process store');
+            }
+          }
+          this.authManager = new AuthManager(authConfig);
+        }
+      }
+    `;
+    const { problems } = auditSource(code);
+    assert(problems.length === 1, `#4772 pre-fix getServiceAsync shape is caught (got ${problems.length} problems)`);
+    assert(problems[0].includes('AuthPlugin'), '#4772 problem names the consuming plugin');
+    assert(problems[0].includes("getServiceAsync('cache')"), '#4772 problem quotes the accessor as written');
+    assert(problems[0].includes('com.objectstack.service.cache'), '#4772 problem names the provider');
+    // The reported line must be the CALL's line, not the class's — that is what
+    // makes the message actionable in a 1300-line plugin file.
+    const callLine = code.split('\n').findIndex((l) => l.includes("getServiceAsync?.('cache')")) + 1;
+    assert(
+      problems[0].startsWith(`fixture.ts:${callLine} —`),
+      `#4772 problem points at the call line ${callLine} (got: ${problems[0].split('\n')[0]})`,
+    );
+  }
+
+  // 14. The same call without the optional-call / cast noise — a plain
+  //     `await ctx.getServiceAsync('cache')` is the same undeclared edge.
+  {
+    const { problems } = auditSource(CACHE_PROVIDER + `
+      export class PlainAsyncPlugin implements Plugin {
+        name = 'plugin.plain-async';
+        async init(ctx: PluginContext) { const c = await ctx.getServiceAsync('cache'); }
+      }
+    `);
+    assert(problems.length === 1, `a plain await getServiceAsync('cache') is caught (got ${problems.length})`);
+  }
+
+  // 15. Declaring it discharges the obligation — the remedy the message prints
+  //     works for the async accessor exactly as it does for the sync one.
+  {
+    const { problems } = auditSource(CACHE_PROVIDER + `
+      export class DeclaredAsyncPlugin implements Plugin {
+        name = 'plugin.declared-async';
+        optionalDependencies = ['com.objectstack.service.cache'];
+        async init(ctx: PluginContext) { const c = await ctx.getServiceAsync('cache'); }
+      }
+    `);
+    assert(problems.length === 0, 'optionalDependencies on the cache provider discharges a getServiceAsync edge');
+  }
+
+  // 16. `getServiceScoped` resolves through the very same
+  //     `pluginLoader.getService(name, scopeId)` as `getServiceAsync`, so it
+  //     carries the identical hazard and the identical verdict.
+  {
+    const { problems } = auditSource(CACHE_PROVIDER + `
+      export class ScopedPlugin implements Plugin {
+        name = 'plugin.scoped';
+        async init(ctx: PluginContext) { const c = await ctx.getServiceScoped('cache', this.envId); }
+      }
+    `);
+    assert(problems.length === 1, `an undeclared init-time getServiceScoped edge is caught (got ${problems.length})`);
+    assert(problems[0].includes("getServiceScoped('cache')"), 'the getServiceScoped problem quotes the accessor as written');
+  }
+
+  // 17. Every exemption is decided by WHEN the call runs, not by which accessor
+  //     made it: start() is still the sanctioned best-effort seam.
+  {
+    const { problems } = auditSource(CACHE_PROVIDER + `
+      export class LateAsyncPlugin implements Plugin {
+        name = 'plugin.late-async';
+        async init(ctx: PluginContext) { /* nothing */ }
+        async start(ctx: PluginContext) { const c = await ctx.getServiceAsync('cache'); }
+      }
+    `);
+    assert(problems.length === 0, 'a getServiceAsync in start() is not an init-ordering edge');
+  }
+
+  // 18. `--list` and the problem text must quote the accessor actually called.
+  //     Hardcoding `getService('X')` made the edge list rename every reader —
+  //     a machine-readable surface that lies about the code it describes.
+  {
+    const { edges } = auditSource(CACHE_PROVIDER + `
+      export class MixedPlugin implements Plugin {
+        name = 'plugin.mixed';
+        requiresServices = ['cache'];
+        async init(ctx: PluginContext) {
+          ctx.getService('cache');
+          await ctx.getServiceAsync('cache-2');
+          await ctx.getServiceScoped('cache-3', 's');
+        }
+      }
+    `);
+    const accessors = edges.filter((e) => e.unit.anchor === 'MixedPlugin').map((e) => e.call.accessor);
+    assert(
+      accessors.join(',') === 'getService,getServiceAsync,getServiceScoped',
+      `each edge records the accessor it was made through (got: ${accessors.join(',') || '(none)'})`,
+    );
+  }
+
+  // 19. Nothing outside the vocabulary is invented: a lookup-shaped call on a
+  //     name `packages/core` does not expose to plugins stays unjudged.
+  {
+    const { problems } = auditSource(CACHE_PROVIDER + `
+      export class ProbePlugin implements Plugin {
+        name = 'plugin.probe';
+        async init(ctx: PluginContext) { if (this.registry.hasService('cache')) this.enable(); }
+      }
+    `);
+    assert(problems.length === 0, 'hasService is not in the vocabulary (not plugin-reachable in packages/core)');
+  }
+
+  console.log('✓ self-test: 19 cases');
 }
 
 if (process.argv.includes('--self-test')) selfTest();
