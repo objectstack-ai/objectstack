@@ -2897,16 +2897,23 @@ describe('filterAppForUser — ADR-0045 hidden-app gate', () => {
 //
 // `app.areas[].visible` / `app.areas[].requiredPermissions` left the spec in
 // 17.0.0 because nothing evaluated them: this function reads the APP's
-// `requiredPermissions` and then walks ONLY `item.navigation`. Removing a gate
+// `requiredPermissions` and then walks the navigation trees. Removing a gate
 // that never gated is safe exactly and only while the gates that DO exist keep
 // working — otherwise the change trades "a gate that fails open" for "nobody
-// checks whether the real gates are still there". Both surviving layers are
+// checks whether the real gates are still there". Every surviving layer is
 // pinned here, at the server that is the authority for them.
+//
+// #4722 closed the real gap that #4651 left behind: the walk covered the
+// top-level `navigation` tree ONLY, so an item gate written inside an
+// `areas[]` tree was enforced by the shell alone and the entry still shipped
+// in the `/meta` body. The area-LEVEL keys stay retired — what is enforced is
+// the item gate, through the one `filterNav` both trees share.
 // ---------------------------------------------------------------------------
 
-describe('filterAppForUser — the enforced permission layers (#4651)', () => {
+describe('filterAppForUser — the enforced permission layers (#4651, #4722)', () => {
   const make = () => new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
   const ids = (a: any): string[] => (a?.navigation ?? []).map((e: any) => e.id);
+  const areaIds = (a: any, i: number): string[] => (a?.areas?.[i]?.navigation ?? []).map((e: any) => e.id);
 
   it('APP level: an app whose requiredPermissions the caller lacks is dropped entirely', () => {
     const rest: any = make();
@@ -2960,27 +2967,156 @@ describe('filterAppForUser — the enforced permission layers (#4651)', () => {
     expect(ids(rest.filterAppForUser(app, new Set(['admin.access'])))).toEqual(['grp_admin']);
   });
 
-  it('characterises the boundary the #4651 prescription warns about: `areas` is not walked', () => {
-    // NOT an endorsement — a characterisation. The server filters the top-level
-    // `navigation` tree only, so an item gate nested under `areas[]` is enforced
-    // by the shell alone. That is exactly why the retirement's guidance tells an
-    // author to put anything that must never reach the browser in the top-level
-    // tree or its own app, and why route A (enforce area gates server-side) is a
-    // separate decision with its own semantics to settle. Whoever makes this
-    // walk areas should see THIS expectation fail and rewrite it deliberately,
-    // updating the `areas.navigation` ledger note in the same change.
+  it('AREA level: the item gate applies inside `areas[]` too, not just the top-level tree', () => {
+    // Rewritten in #4722 — this used to be a characterisation pinning the
+    // opposite ("`areas` is not walked"), with a note telling whoever made the
+    // server walk areas to rewrite it deliberately and update the
+    // `areas.navigation` liveness note in the same change. This is that
+    // rewrite: an item gate nested under an area is now enforced by the SERVER,
+    // so the gated entry — and its `objectName` / `pageName` / `componentRef`
+    // target with it — never reaches the browser at all.
+    const rest: any = make();
+    const app = () => ({
+      name: 'crm',
+      navigation: [{ id: 'nav_home', type: 'object' }],
+      areas: [{
+        id: 'area_sales', label: 'Sales',
+        navigation: [
+          { id: 'nav_leads', type: 'object', objectName: 'lead' },
+          { id: 'nav_forecast', type: 'object', objectName: 'forecast', requiredPermissions: ['sales.admin'] },
+        ],
+      }, {
+        id: 'area_admin', label: 'Admin',
+        navigation: [{ id: 'nav_users', type: 'object', objectName: 'sys_user', requiredPermissions: ['admin.access'] }],
+      }],
+    });
+
+    const out = rest.filterAppForUser(app(), new Set<string>());
+    expect(ids(out)).toEqual(['nav_home']);
+    // area_sales keeps only the ungated item; area_admin was emptied by the
+    // gate and is dropped whole — see the group-collapse pin below.
+    expect(out.areas.map((a: any) => a.id)).toEqual(['area_sales']);
+    expect(areaIds(out, 0)).toEqual(['nav_leads']);
+    // The gated targets are gone from the body, not merely marked.
+    expect(JSON.stringify(out)).not.toContain('forecast');
+    expect(JSON.stringify(out)).not.toContain('sys_user');
+
+    const admin = rest.filterAppForUser(app(), new Set(['sales.admin', 'admin.access']));
+    expect(admin.areas.map((a: any) => a.id)).toEqual(['area_sales', 'area_admin']);
+    expect(areaIds(admin, 0)).toEqual(['nav_leads', 'nav_forecast']);
+    expect(areaIds(admin, 1)).toEqual(['nav_users']);
+  });
+
+  it('AREA level: one implementation — nested groups inside an area collapse exactly as at top level', () => {
+    const rest: any = make();
+    const app = () => ({
+      name: 'crm',
+      areas: [{
+        id: 'area_ops', label: 'Ops',
+        navigation: [
+          { id: 'nav_tasks', type: 'object' },
+          {
+            id: 'grp_admin', type: 'group', children: [
+              { id: 'nav_users', type: 'object', requiredPermissions: ['admin.access'] },
+            ],
+          },
+          {
+            id: 'grp_mixed', type: 'group', children: [
+              { id: 'nav_audit', type: 'object', requiredPermissions: ['admin.access'] },
+              { id: 'nav_about', type: 'url' },
+            ],
+          },
+        ],
+      }],
+    });
+    const out = rest.filterAppForUser(app(), new Set<string>());
+    // grp_admin emptied → dropped; grp_mixed keeps its ungated child.
+    expect(areaIds(out, 0)).toEqual(['nav_tasks', 'grp_mixed']);
+    expect(out.areas[0].navigation[1].children.map((c: any) => c.id)).toEqual(['nav_about']);
+
+    const admin = rest.filterAppForUser(app(), new Set(['admin.access']));
+    expect(areaIds(admin, 0)).toEqual(['nav_tasks', 'grp_admin', 'grp_mixed']);
+  });
+
+  it('AREA level: an area emptied BY the gate is dropped; an area authored empty is passed through', () => {
+    // Same shape as the top-level group-collapse rule pinned above: collapse is
+    // a consequence of filtering, never a tidy-up of what the author wrote.
+    const rest: any = make();
+    const gatedEmpty = {
+      name: 'crm',
+      areas: [{
+        id: 'area_admin', label: 'Admin',
+        navigation: [{ id: 'nav_users', type: 'object', requiredPermissions: ['admin.access'] }],
+      }],
+    };
+    expect(rest.filterAppForUser(gatedEmpty, new Set<string>()).areas).toEqual([]);
+    expect(
+      rest.filterAppForUser(gatedEmpty, new Set(['admin.access'])).areas.map((a: any) => a.id),
+    ).toEqual(['area_admin']);
+
+    const authoredEmpty = { name: 'crm', areas: [{ id: 'area_soon', label: 'Soon', navigation: [] }] };
+    expect(rest.filterAppForUser(authoredEmpty, new Set<string>()).areas.map((a: any) => a.id))
+      .toEqual(['area_soon']);
+  });
+
+  it('AREA level: an app with areas but no top-level navigation is still filtered', () => {
+    // The pre-#4722 early return (`if (!nav) return item`) handed this shape
+    // back untouched — which is precisely the areas-only app the bug hurt most.
+    const rest: any = make();
+    const app = {
+      name: 'crm',
+      areas: [{
+        id: 'area_sales', label: 'Sales',
+        navigation: [
+          { id: 'nav_leads', type: 'object' },
+          { id: 'nav_forecast', type: 'object', requiredPermissions: ['sales.admin'] },
+        ],
+      }],
+    };
+    const out = rest.filterAppForUser(app, new Set<string>());
+    expect(out.navigation).toBeUndefined();
+    expect(areaIds(out, 0)).toEqual(['nav_leads']);
+  });
+
+  it('does not mutate the app it filters (cached metadata stays whole)', () => {
     const rest: any = make();
     const app = {
       name: 'crm',
       navigation: [{ id: 'nav_home', type: 'object' }],
       areas: [{
         id: 'area_admin', label: 'Admin',
-        navigation: [{ id: 'nav_users', type: 'object', requiredPermissions: ['admin.access'] }],
+        navigation: [
+          { id: 'nav_users', type: 'object', requiredPermissions: ['admin.access'] },
+          { id: 'nav_docs', type: 'url' },
+        ],
+      }],
+    };
+    const before = JSON.stringify(app);
+    rest.filterAppForUser(app, new Set<string>());
+    expect(JSON.stringify(app)).toBe(before);
+  });
+
+  it('characterises what the server still does NOT evaluate: `visible` CEL, at any level', () => {
+    // NOT an endorsement — a characterisation, and a deliberate #4722
+    // non-goal. `visible` is a CEL expression that needs a bound `user`
+    // context the REST read layer does not have, so it stays a client-side
+    // gate at BOTH levels while `requiredPermissions` / `requiresService` are
+    // enforced at both. Anything that must never reach the browser goes in
+    // `requiredPermissions`, not `visible`. Whoever binds CEL server-side
+    // should see this expectation fail and rewrite it, updating the
+    // `navigation.visible` liveness note in the same change.
+    const rest: any = make();
+    const app = {
+      name: 'crm',
+      navigation: [{ id: 'nav_secret_top', type: 'object', visible: 'false' }],
+      areas: [{
+        id: 'area_admin', label: 'Admin',
+        navigation: [{ id: 'nav_secret_area', type: 'object', visible: 'false' }],
       }],
     };
     const out = rest.filterAppForUser(app, new Set<string>());
-    expect(ids(out)).toEqual(['nav_home']);
-    expect(out.areas[0].navigation.map((e: any) => e.id)).toEqual(['nav_users']);
+    expect(ids(out)).toEqual(['nav_secret_top']);
+    expect(areaIds(out, 0)).toEqual(['nav_secret_area']);
   });
 });
 
@@ -3032,6 +3168,54 @@ describe('filterAppForUser — ADR-0057 D10 requiresService gate', () => {
     const reg = await rest.resolveRegisteredServices(kernel, [app()]);
     expect(reg.has('org-scoping')).toBe(true);
     expect(reg.size).toBe(1);
+  });
+
+  it('[#4722] the gate strips requiresService entries inside `areas[]` as well', () => {
+    const rest: any = make();
+    const areaApp = () => ({
+      name: 'setup',
+      areas: [{
+        id: 'area_admin', label: 'Admin',
+        navigation: [
+          { id: 'nav_users', type: 'object' },
+          { id: 'nav_organizations', type: 'object', objectName: 'sys_organization', requiresService: 'org-scoping' },
+        ],
+      }],
+    });
+    const nav = (a: any): string[] => (a?.areas?.[0]?.navigation ?? []).map((e: any) => e.id);
+    expect(nav(rest.filterAppForUser(areaApp(), new Set<string>(), (n: string) => n !== 'org-scoping')))
+      .toEqual(['nav_users']);
+    expect(nav(rest.filterAppForUser(areaApp(), new Set<string>(), () => true)))
+      .toEqual(['nav_users', 'nav_organizations']);
+    // Fail-open when the gate cannot be probed at all, as at top level.
+    expect(nav(rest.filterAppForUser(areaApp(), new Set<string>())))
+      .toEqual(['nav_users', 'nav_organizations']);
+  });
+
+  it('[#4722] resolveRegisteredServices probes services named only inside `areas[]`', async () => {
+    // Without this the area gate would fail CLOSED by omission: an unprobed
+    // name is missing from `registered`, which the gate reads as "absent" and
+    // strips a live entry. The probe set must cover what the filter walks.
+    const rest: any = make();
+    const kernel = { getServiceAsync: async (n: string) => (n === 'org-scoping' ? {} : null) };
+    const areaApp = {
+      name: 'setup',
+      navigation: [{ id: 'nav_home', type: 'object' }],
+      areas: [{
+        id: 'area_admin', label: 'Admin',
+        navigation: [
+          { id: 'nav_organizations', type: 'object', requiresService: 'org-scoping' },
+          { id: 'grp', type: 'group', children: [{ id: 'nav_x', type: 'object', requiresService: 'nope' }] },
+        ],
+      }],
+    };
+    const reg = await rest.resolveRegisteredServices(kernel, [areaApp]);
+    expect(reg.has('org-scoping')).toBe(true);
+    expect(reg.has('nope')).toBe(false);
+
+    // End-to-end: probe + gate keeps the registered one, drops the absent one.
+    const gated = rest.filterAppForUser(areaApp, new Set<string>(), (n: string) => reg.has(n));
+    expect(gated.areas[0].navigation.map((e: any) => e.id)).toEqual(['nav_organizations']);
   });
 
   it('unwraps the getMetaItem envelope and gates the inner app (regression)', () => {

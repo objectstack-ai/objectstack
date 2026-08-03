@@ -1788,9 +1788,21 @@ export class RestServer {
      * - Recursively strips child navigation entries (groups, items) whose
      *   `requiredPermissions` are not satisfied. Empty groups collapse so
      *   the sidebar doesn't render a label with no children.
+     * - [#4722] Applies the SAME item gate to every `areas[].navigation` tree.
+     *   Both trees are the same shape and the keys mean the same thing in both,
+     *   so `filterNav` is reused — there is deliberately no second
+     *   implementation to drift. Before this, an item gated inside an area was
+     *   enforced by the shell alone: the entry (with its `objectName` /
+     *   `pageName` / `componentRef` target) still shipped in the `/meta` body,
+     *   so reading the JSON defeated it.
+     *
+     * NOT gated here: `visible` (CEL) at any level, and `requiresObject` — both
+     * are still evaluated client-side only. That asymmetry is deliberate and
+     * pinned in `rest.test.ts`: server-side CEL needs a bound `user` context
+     * that this layer does not have, and is its own change.
      *
      * Returns `null` when the app should be hidden from the user. Returns a
-     * shallow copy with a filtered `navigation` tree otherwise — the original
+     * shallow copy with filtered `navigation` / `areas` otherwise — the original
      * is never mutated so cached metadata stays clean.
      */
     private filterAppForUser(item: any, sysPerms: Set<string>, serviceGate?: (name: string) => boolean): any | null {
@@ -1821,7 +1833,8 @@ export class RestServer {
             return null;
         }
         const nav = Array.isArray(item.navigation) ? item.navigation : null;
-        if (!nav) return item;
+        const areas = Array.isArray(item.areas) ? item.areas : null;
+        if (!nav && !areas) return item;
 
         const filterNav = (entries: any[]): any[] => {
             const out: any[] = [];
@@ -1843,7 +1856,35 @@ export class RestServer {
             return out;
         };
 
-        return { ...item, navigation: filterNav(nav) };
+        // [#4722] `areas[]` carries no gate of its own — the area-level `visible`
+        // / `requiredPermissions` keys were retired in 17.0.0 (#4651, ADR-0049)
+        // and are NOT revived here. What is enforced is the gate on the items
+        // INSIDE an area, through the very same `filterNav` the top-level tree
+        // uses, so the two trees can never disagree about what a key means.
+        //
+        // Collapse rule, taken from what `filterNav` already does to a `group`:
+        // an area whose authored tree is emptied BY the gate is dropped (a bare
+        // area label with nothing reachable under it is not a useful response),
+        // while an area authored empty is passed through untouched — filtering
+        // reports what the caller may not see, it does not tidy the metadata.
+        const filterAreas = (list: any[]): any[] => {
+            const out: any[] = [];
+            for (const a of list) {
+                if (!a || typeof a !== 'object') continue;
+                const anav = Array.isArray(a.navigation) ? a.navigation : null;
+                if (!anav || anav.length === 0) { out.push(a); continue; }
+                const kids = filterNav(anav);
+                if (kids.length === 0) continue;
+                out.push({ ...a, navigation: kids });
+            }
+            return out;
+        };
+
+        return {
+            ...item,
+            ...(nav ? { navigation: filterNav(nav) } : {}),
+            ...(areas ? { areas: filterAreas(areas) } : {}),
+        };
     }
 
     /**
@@ -1896,11 +1937,17 @@ export class RestServer {
             if (!e || typeof e !== 'object') return;
             if (isMetaEnvelope(e)) { walk((e as any).item); return; }
             if (typeof e.requiresService === 'string') wanted.add(e.requiresService);
-            const kids = Array.isArray(e.navigation) ? e.navigation
-                : Array.isArray(e.children) ? e.children
-                // Dashboard widgets carry their own `requiresService` gate.
-                : Array.isArray(e.widgets) ? e.widgets : null;
-            if (kids) for (const k of kids) walk(k);
+            // [#4722] EVERY child list, not the first one that happens to be an
+            // array. An app may carry `navigation` AND `areas` at once, and now
+            // that `filterAppForUser` gates the trees under `areas[]` too, a
+            // service named only in there must be probed — an unprobed name is
+            // absent from `registered`, and the gate would read that as "service
+            // missing" and strip a live entry. Fail-closed by omission is still
+            // wrong; the probe set must cover exactly what the gate walks.
+            for (const key of ['navigation', 'areas', 'children', 'widgets'] as const) {
+                const kids = (e as any)[key];
+                if (Array.isArray(kids)) for (const k of kids) walk(k);
+            }
         };
         for (const it of items) walk(it);
         if (wanted.size === 0) return new Set();
