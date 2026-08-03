@@ -65,7 +65,7 @@ const result = DataTypeMappingSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Driver instance name |
 | **type** | `'sql'` | ✅ | Driver type must be "sql" |
-| **capabilities** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | ✅ | Driver capability flags |
+| **capabilities** | `{ queryDateGranularity?: Record<string, boolean>; autonumber?: boolean; batchSchemaSync?: boolean; create?: any; … }` | ✅ | Driver capability flags |
 | **connectionString** | `string` | optional | Database connection string (driver-specific format) |
 | **poolConfig** | `{ min: number; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number }` | optional | Connection pool configuration |
 | **dialect** | `Enum<'postgresql' \| 'mysql' \| 'sqlite' \| 'mssql' \| 'oracle' \| 'mariadb'>` | ✅ | SQL database dialect |

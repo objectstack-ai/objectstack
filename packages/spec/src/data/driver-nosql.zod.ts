@@ -196,39 +196,14 @@ export type NoSQLDataTypeMapping = z.infer<typeof NoSQLDataTypeMappingSchema>;
  *     numShards: 4
  *   },
  *   capabilities: {
- *     create: true,
- *     read: true,
- *     update: true,
- *     delete: true,
- *     bulkCreate: true,
- *     bulkUpdate: true,
- *     bulkDelete: true,
- *     transactions: true,
- *     savepoints: false,
- *     queryFilters: true,
- *     queryAggregations: true,
- *     querySorting: true,
- *     queryPagination: true,
- *     queryWindowFunctions: false,
- *     querySubqueries: false,
- *     queryCTE: false,
- *     joins: false,
- *     fullTextSearch: true,
- *     jsonQuery: true,
- *     geospatialQuery: true,
- *     streaming: true,
- *     jsonFields: true,
- *     arrayFields: true,
- *     vectorSearch: false,
- *     schemaSync: true,
- *     migrations: false,
- *     indexes: true,
- *     connectionPooling: true,
- *     preparedStatements: false,
- *     queryCache: false
+ *     // Only the live bits remain authorable (#4634, ADR-0049): MongoDB batches
+ *     // its DDL round-trips, owns neither autonumber sequences nor native date
+ *     // bucketing here. Everything else a driver "supports" is expressed by
+ *     // implementing the corresponding IDataDriver method.
+ *     batchSchemaSync: true
  *   }
  * }
- * 
+ *
  * @example DynamoDB driver configuration
  * {
  *   name: 'dynamodb-main',
@@ -238,23 +213,7 @@ export type NoSQLDataTypeMapping = z.infer<typeof NoSQLDataTypeMappingSchema>;
  *   accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
  *   secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
  *   consistency: 'eventual',
- *   capabilities: {
- *     create: true,
- *     read: true,
- *     update: true,
- *     delete: true,
- *     bulkCreate: true,
- *     bulkUpdate: false,
- *     bulkDelete: false,
- *     transactions: true,
- *     queryFilters: true,
- *     queryAggregations: false,
- *     querySorting: true,
- *     queryPagination: true,
- *     fullTextSearch: false,
- *     jsonQuery: true,
- *     indexes: true
- *   }
+ *   capabilities: {}
  * }
  */
 export const NoSQLDriverConfigSchema = lazySchema(() => DriverConfigSchema.extend({

@@ -468,8 +468,10 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     expect(warnings.some((w) => w.includes('total'))).toBe(true);
   });
 
-  it('reports indexes capability as supported', () => {
-    expect((driver as any).supports.indexes).toBe(true);
+  it('no longer advertises an `indexes` capability bit (#4634) — syncDeclaredIndexes IS the capability', () => {
+    // The bit had zero readers; the declared-index materialisation above is the
+    // enforced mechanism, and this suite already proves it end to end.
+    expect((driver as any).supports).not.toHaveProperty('indexes');
   });
 
   it('should use short object name as physical table name in initObjects', async () => {

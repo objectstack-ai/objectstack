@@ -749,8 +749,9 @@ form.
 The `search` parameter does **not** reach a full-text index. The engine expands it into
 an `$or` of `$contains` predicates across the object's server-resolved searchable fields
 (ADR-0061) and deletes `search` from the AST before the driver sees it — every driver
-already runs `$or`/`$contains`, so no driver support is needed (`SqlDriver` reports
-`supports.fullTextSearch: false`).
+already runs `$or`/`$contains`, so no driver support is needed (which is also why the
+old `supports.fullTextSearch` capability bit had no reader and was retired in 17.0.0,
+#4634).
 
 `search` takes the **query text itself** — that is the canonical spelling (ADR-0061 D1:
 the client says *what* to search for, the server decides *which fields*), and it is what

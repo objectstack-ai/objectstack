@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { QuerySchema, DateGranularity } from '../data/query.zod';
 import { IsolationLevelEnum } from '../shared/enums.zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Common Driver Options
@@ -99,93 +100,58 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Shared builder for the 31 capability-bit tombstones below (#4634).
+ *
+ * Kept per-key so each prescription can name the mechanism that ACTUALLY
+ * decides the behaviour — a prescription naming the wrong mechanism is worse
+ * than none (the #4001 lesson, restated by the datasource `capabilities`
+ * tombstones in `datasource.zod.ts`). No `os migrate meta` line on any of
+ * them: a driver is CODE, never stack metadata, so there is no source for the
+ * conversion chain to rewrite (the #4484 `findStream` precedent) — the D3
+ * record is the semantic migration `driver-capabilities-inert-bits-removed`.
+ */
+const capRemoved = (key: string, mechanism: string) =>
+  `\`DriverCapabilities.${key}\` was removed in @objectstack/spec 17.0.0 (#4634, ADR-0049 ` +
+  `enforce-or-remove) — no code in any repository ever read it, so its value never changed ` +
+  `which code path ran. ${mechanism} Delete the key.`;
+
+/**
  * Driver Capabilities Schema
- * 
- * Defines what features a database driver supports.
- * This allows ObjectQL to adapt its behavior based on underlying database capabilities.
- * Enhanced with granular capability flags for better feature detection.
+ *
+ * Feature flags a driver ADVERTISES so the ObjectQL engine can pick a code
+ * path it cannot infer from the driver contract itself.
+ *
+ * [#4634, ADR-0049 / ADR-0078] This record once declared 34 bits; a two-repo
+ * liveness audit (objectstack + cloud, with objectui confirmed clean) found
+ * THREE with a decision-making reader and thirty-one that no engine, planner,
+ * REST layer or renderer ever consulted — self-description whose `.describe()`
+ * strings promised engine adaptation ("if false, ObjectQL will …") that never
+ * existed: the ADR-0078 false-affordance shape. The thirty-one are tombstoned
+ * below; each prescription names the mechanism that really decides the
+ * behaviour.
+ *
+ * The surviving contract — a capability bit exists here ONLY where method
+ * presence on the driver cannot carry the signal:
+ *
+ * - `queryDateGranularity` — modulates HOW `aggregate()` is planned, per
+ *   granularity (engine aggregate dispatch; `checkDateBucketParity`).
+ * - `autonumber` — modulates `create()`/`bulkCreate()`: the engine defers
+ *   autonumber generation to the driver when set.
+ * - `batchSchemaSync` — opt-in for `syncSchemasBatch()` even where a base
+ *   class inherits the method; the engine ANDs it with method presence.
+ *
+ * Everything else IS the method: transactions gate on
+ * `driver.beginTransaction`, aggregate pushdown on
+ * `typeof driver.aggregate === 'function'`, schema sync on
+ * `typeof driver.syncSchema === 'function'`, and the REQUIRED CRUD/bulk
+ * methods are called unconditionally. Do not add a boolean here for behaviour
+ * that a method's presence — or a caller that does not exist yet — already
+ * decides; that is how thirty-one dead bits accumulated.
  */
 export const DriverCapabilitiesSchema = lazySchema(() => z.object({
   // ============================================================================
-  // Basic CRUD Operations
+  // Live capability bits — each one has a named reader (see the TSDoc above)
   // ============================================================================
-  
-  /**
-   * Whether the driver supports create operations.
-   */
-  create: z.boolean().default(true).describe('Supports CREATE operations'),
-  
-  /**
-   * Whether the driver supports read operations.
-   */
-  read: z.boolean().default(true).describe('Supports READ operations'),
-  
-  /**
-   * Whether the driver supports update operations.
-   */
-  update: z.boolean().default(true).describe('Supports UPDATE operations'),
-  
-  /**
-   * Whether the driver supports delete operations.
-   */
-  delete: z.boolean().default(true).describe('Supports DELETE operations'),
-
-  // ============================================================================
-  // Bulk Operations
-  // ============================================================================
-  
-  /**
-   * Whether the driver supports bulk create operations.
-   */
-  bulkCreate: z.boolean().default(false).describe('Supports bulk CREATE operations'),
-  
-  /**
-   * Whether the driver supports bulk update operations.
-   */
-  bulkUpdate: z.boolean().default(false).describe('Supports bulk UPDATE operations'),
-  
-  /**
-   * Whether the driver supports bulk delete operations.
-   */
-  bulkDelete: z.boolean().default(false).describe('Supports bulk DELETE operations'),
-
-  // ============================================================================
-  // Transaction & Connection Management
-  // ============================================================================
-  
-  /**
-   * Whether the driver supports database transactions.
-   * If true, beginTransaction, commit, and rollback must be implemented.
-   */
-  transactions: z.boolean().default(false).describe('Supports ACID transactions'),
-  
-  /**
-   * Whether the driver supports savepoints within transactions.
-   */
-  savepoints: z.boolean().default(false).describe('Supports transaction savepoints'),
-  
-  /**
-   * Supported transaction isolation levels.
-   */
-  isolationLevels: z.array(IsolationLevelEnum).optional().describe('Supported isolation levels'),
-
-  // ============================================================================
-  // Query Operations
-  // ============================================================================
-  
-  /**
-   * Whether the driver supports WHERE clause filters.
-   * If false, ObjectQL will fetch all records and filter in memory.
-   * 
-   * Example: Memory driver might not support complex filter conditions.
-   */
-  queryFilters: z.boolean().default(true).describe('Supports WHERE clause filtering'),
-
-  /**
-   * Whether the driver supports aggregation functions (COUNT, SUM, AVG, etc.).
-   * If false, ObjectQL will compute aggregations in memory.
-   */
-  queryAggregations: z.boolean().default(false).describe('Supports GROUP BY and aggregation functions'),
 
   /**
    * Per-granularity native SQL date bucketing support.
@@ -216,84 +182,6 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
     .describe('Per-granularity native date bucketing (day/week/month/quarter/year). Missing keys fall back to in-memory bucketing.'),
 
   /**
-   * Whether the driver supports ORDER BY sorting.
-   * If false, ObjectQL will sort results in memory.
-   */
-  querySorting: z.boolean().default(true).describe('Supports ORDER BY sorting'),
-
-  /**
-   * Whether the driver supports LIMIT/OFFSET pagination.
-   * If false, ObjectQL will fetch all records and paginate in memory.
-   */
-  queryPagination: z.boolean().default(true).describe('Supports LIMIT/OFFSET pagination'),
-
-  /**
-   * Whether the driver supports window functions (ROW_NUMBER, RANK, LAG, LEAD, etc.).
-   * If false, ObjectQL will compute window functions in memory.
-   */
-  queryWindowFunctions: z.boolean().default(false).describe('Supports window functions with OVER clause'),
-
-  /**
-   * Whether the driver supports subqueries (nested SELECT statements).
-   * If false, ObjectQL will execute queries separately and combine results.
-   */
-  querySubqueries: z.boolean().default(false).describe('Supports subqueries'),
-  
-  /**
-   * Whether the driver supports Common Table Expressions (WITH clause).
-   */
-  queryCTE: z.boolean().default(false).describe('Supports Common Table Expressions (WITH clause)'),
-
-  /**
-   * Whether the driver supports SQL-style joins.
-   * If false, ObjectQL will fetch related data separately and join in memory.
-   */
-  joins: z.boolean().default(false).describe('Supports SQL joins'),
-
-  // ============================================================================
-  // Advanced Features
-  // ============================================================================
-  
-  /**
-   * Whether the driver supports full-text search.
-   * If true, text search queries can be pushed to the database.
-   */
-  fullTextSearch: z.boolean().default(false).describe('Supports full-text search'),
-  
-  /**
-   * Whether the driver supports JSON querying capabilities.
-   */
-  jsonQuery: z.boolean().default(false).describe('Supports JSON field querying'),
-  
-  /**
-   * Whether the driver supports geospatial queries.
-   */
-  geospatialQuery: z.boolean().default(false).describe('Supports geospatial queries'),
-  
-  /**
-   * Whether the driver supports streaming large result sets.
-   */
-  streaming: z.boolean().default(false).describe('Supports result streaming (cursors/iterators)'),
-
-  /**
-   * Whether the driver supports JSON field types.
-   * If false, JSON data will be serialized as strings.
-   */
-  jsonFields: z.boolean().default(false).describe('Supports JSON field types'),
-
-  /**
-   * Whether the driver supports array field types.
-   * If false, arrays will be stored as JSON strings or in separate tables.
-   */
-  arrayFields: z.boolean().default(false).describe('Supports array field types'),
-
-  /**
-   * Whether the driver supports vector embeddings and similarity search.
-   * Required for RAG (Retrieval-Augmented Generation) and AI features.
-   */
-  vectorSearch: z.boolean().default(false).describe('Supports vector embeddings and similarity search'),
-
-  /**
    * Whether the driver natively generates persistent autonumber / sequence
    * values inside `create()` / `bulkCreate()` / `upsert()` (e.g. a DB-backed
    * `_objectstack_sequences` table that survives restarts and is atomic across
@@ -309,51 +197,150 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    */
   autonumber: z.boolean().optional().describe('Driver natively generates persistent autonumber/sequence values'),
 
-  // ============================================================================
-  // Schema Management
-  // ============================================================================
-  
-  /**
-   * Whether the driver supports automatic schema synchronization.
-   */
-  schemaSync: z.boolean().default(false).describe('Supports automatic schema synchronization'),
-
   /**
    * Whether the driver supports batching multiple schema sync operations
    * into a single (or fewer) round-trips for the DDL phase. When true,
    * the engine may call `syncSchemasBatch()` instead of calling
    * `syncSchema()` per object, reducing network round-trips for remote drivers.
+   *
+   * This is the one bit the engine ANDs with method presence
+   * (`typeof driver.syncSchemasBatch === 'function' && supports.batchSchemaSync`):
+   * a base class can inherit the METHOD while a transport genuinely cannot
+   * batch, so presence alone cannot carry the signal.
+   *
+   * Optional since 17.0.0 (#4634): absence means `false`, exactly as both
+   * readers (`engine.ts` / `plugin.ts`) already treated it — the previous
+   * `.default(false)` forced every capability object to spell out a bit whose
+   * absence says the same thing.
    */
-  batchSchemaSync: z.boolean().default(false).describe('Supports batched schema sync to reduce schema DDL round-trips'),
-  
-  /**
-   * Whether the driver supports database migrations.
-   */
-  migrations: z.boolean().default(false).describe('Supports database migrations'),
-  
-  /**
-   * Whether the driver supports index management.
-   */
-  indexes: z.boolean().default(false).describe('Supports index creation and management'),
+  batchSchemaSync: z.boolean().optional().describe('Supports batched schema sync to reduce schema DDL round-trips (absence = false)'),
 
   // ============================================================================
-  // Performance & Optimization
+  // Retired capability bits (#4634, ADR-0049 enforce-or-remove) — 17.0.0
   // ============================================================================
-  
-  /**
-   * Whether the driver supports connection pooling.
-   */
-  connectionPooling: z.boolean().default(false).describe('Supports connection pooling'),
-  
-  /**
-   * Whether the driver supports prepared statements.
-   */
-  preparedStatements: z.boolean().default(false).describe('Supports prepared statements (SQL injection prevention)'),
-  
-  /**
-   * Whether the driver supports query result caching.
-   */
-  queryCache: z.boolean().default(false).describe('Supports query result caching'),
+  //
+  // Tombstoned, not deleted: this schema is not `.strict()`, so a plain delete
+  // would let Zod silently STRIP the key — an author (or driver vendor) who
+  // kept writing it would get a clean parse and a bit that never existed,
+  // which is the very defect the removal closes. `retiredKey()` keeps each
+  // key authored-unwritable: tsc rejects it at the authoring site (the class
+  // literal of every driver that `implements IDataDriver`), and a parse
+  // rejects it with the prescription below. Tombstones age out ~two majors
+  // after 17 (see shared/retired-key.ts).
+
+  create: retiredKey(capRemoved('create',
+    'CRUD is not optional for a driver: `create`/`find`/`findOne`/`update`/`delete` are '
+    + 'REQUIRED `IDataDriver` methods and the engine calls them unconditionally.')),
+  read: retiredKey(capRemoved('read',
+    'CRUD is not optional for a driver: reads go through the REQUIRED `find`/`findOne`/`count` '
+    + 'methods, called unconditionally.')),
+  update: retiredKey(capRemoved('update',
+    'CRUD is not optional for a driver: `update`/`upsert` are REQUIRED `IDataDriver` methods, '
+    + 'called unconditionally.')),
+  delete: retiredKey(capRemoved('delete',
+    'CRUD is not optional for a driver: `delete` is a REQUIRED `IDataDriver` method, called '
+    + 'unconditionally.')),
+
+  bulkCreate: retiredKey(capRemoved('bulkCreate',
+    'The bulk methods (`bulkCreate`/`bulkUpdate`/`bulkDelete`) are REQUIRED `IDataDriver` '
+    + 'methods and the engine calls them directly; wire-level batch capability is advertised '
+    + 'by REST discovery from the live composition (#3298), never from this record.')),
+  bulkUpdate: retiredKey(capRemoved('bulkUpdate',
+    'The bulk methods are REQUIRED `IDataDriver` methods and the engine calls them directly; '
+    + 'wire-level batch capability is advertised by REST discovery from the live composition '
+    + '(#3298), never from this record.')),
+  bulkDelete: retiredKey(capRemoved('bulkDelete',
+    'The bulk methods are REQUIRED `IDataDriver` methods and the engine calls them directly; '
+    + 'wire-level batch capability is advertised by REST discovery from the live composition '
+    + '(#3298), never from this record.')),
+
+  transactions: retiredKey(capRemoved('transactions',
+    'Transaction use is gated on METHOD PRESENCE — `driver.beginTransaction` '
+    + '(`engine.transaction()`, ADR-0034 ambient transactions): a driver without the method '
+    + 'gets the non-transactional fallback, whatever this bit claimed. Discovery\'s '
+    + '`transactionalBatch` capability is likewise derived from `engine.transaction` plus the '
+    + 'mounted batch route, never from this bit.')),
+  savepoints: retiredKey(capRemoved('savepoints',
+    'No savepoint code path exists in the engine — a capability bit for a feature the '
+    + 'platform does not call is a false affordance, not documentation.')),
+  isolationLevels: retiredKey(capRemoved('isolationLevels',
+    'Isolation is requested per transaction via `beginTransaction({ isolationLevel })`; no '
+    + 'planner ever consulted this list to decide anything.')),
+
+  queryFilters: retiredKey(capRemoved('queryFilters',
+    '`find()` receives the full QueryAST (`where`/`orderBy`/`limit`/`offset`) and MUST '
+    + 'execute all of it — the "ObjectQL will filter in memory" fallback this bit\'s '
+    + 'description promised was never built.')),
+  querySorting: retiredKey(capRemoved('querySorting',
+    '`find()` receives the full QueryAST and MUST execute all of it — the "ObjectQL will '
+    + 'sort in memory" fallback this bit\'s description promised was never built.')),
+  queryPagination: retiredKey(capRemoved('queryPagination',
+    '`find()` receives the full QueryAST and MUST execute all of it — the "ObjectQL will '
+    + 'paginate in memory" fallback this bit\'s description promised was never built.')),
+  queryAggregations: retiredKey(capRemoved('queryAggregations',
+    'Aggregate pushdown is decided by `typeof driver.aggregate === \'function\'` plus '
+    + '`queryDateGranularity` (engine aggregate dispatch) — never by this bit.')),
+  queryWindowFunctions: retiredKey(capRemoved('queryWindowFunctions',
+    'ObjectQL never plans window functions through a driver, so there was nothing for the '
+    + 'bit to switch on.')),
+  querySubqueries: retiredKey(capRemoved('querySubqueries',
+    'ObjectQL never plans subqueries through a driver, so there was nothing for the bit to '
+    + 'switch on.')),
+  queryCTE: retiredKey(capRemoved('queryCTE',
+    'ObjectQL never plans Common Table Expressions through a driver, so there was nothing '
+    + 'for the bit to switch on.')),
+  joins: retiredKey(capRemoved('joins',
+    'Related data is resolved by the engine (lookup expansion over `find()`), not by '
+    + 'driver-side JOIN planning — no code consulted the bit.')),
+
+  fullTextSearch: retiredKey(capRemoved('fullTextSearch',
+    '`$search` is compiled by the engine into an `$or` of `$contains` predicates over the '
+    + 'searchable fields (ADR-0061) and removed from the AST before the driver sees it — no '
+    + 'driver-side full-text path exists.')),
+  jsonQuery: retiredKey(capRemoved('jsonQuery',
+    'No engine path ever branched on driver-side JSON querying.')),
+  geospatialQuery: retiredKey(capRemoved('geospatialQuery',
+    'No geospatial query path exists in the platform — declaring the bit advertised a '
+    + 'capability nothing delivers.')),
+  streaming: retiredKey(
+    '`DriverCapabilities.streaming` was removed in @objectstack/spec 17.0.0 (#4634, ADR-0049 '
+    + 'enforce-or-remove) — no code in any repository ever read it, and `findStream`, the only '
+    + 'read this bit could describe, was itself removed in 17.0.0 (#4484): nothing ever called '
+    + 'it, and two of its three implementations materialised the entire result set before '
+    + 'yielding. The bit carried the same defect one level up (`SqlDriver` implemented '
+    + '`findStream` yet declared `streaming: false`; `InMemoryDriver` declared `true` over a '
+    + 'full-table read) — which is what zero readers makes inevitable. Page large reads '
+    + 'through `find()` with `limit`/`offset`. Delete the key.'),
+  jsonFields: retiredKey(capRemoved('jsonFields',
+    'Field-type handling is negotiated per object at `syncSchema` time by the driver itself '
+    + '(e.g. `SqlDriver`\'s per-object JSON/date column tracking); no engine path consulted '
+    + 'the bit.')),
+  arrayFields: retiredKey(capRemoved('arrayFields',
+    'Field-type handling is negotiated per object at `syncSchema` time by the driver itself; '
+    + 'no engine path consulted the bit.')),
+  vectorSearch: retiredKey(capRemoved('vectorSearch',
+    'No vector read path routes through `IDataDriver`. When one exists it should arrive '
+    + 'WITH its caller and its capability bit together (the honest order under '
+    + 'enforce-or-remove), not as a dangling boolean.')),
+
+  schemaSync: retiredKey(capRemoved('schemaSync',
+    'Schema sync is gated on METHOD PRESENCE — `typeof driver.syncSchema === \'function\'` '
+    + '(engine and ObjectQL plugin init).')),
+  migrations: retiredKey(capRemoved('migrations',
+    'No migration engine ever consulted it.')),
+  indexes: retiredKey(capRemoved('indexes',
+    'Declared indexes are materialised by the driver itself during schema sync '
+    + '(`SqlDriver.syncDeclaredIndexes`); no engine path consulted the bit.')),
+
+  connectionPooling: retiredKey(capRemoved('connectionPooling',
+    'Pooling is configured via `poolConfig` and owned by the driver; `getPoolStats` is '
+    + 'duck-typed where monitoring wants it. Nothing consulted the bit.')),
+  preparedStatements: retiredKey(capRemoved('preparedStatements',
+    'Parameterised execution is an implementation detail of the driver '
+    + '(`execute(command, parameters)`); nothing consulted the bit.')),
+  queryCache: retiredKey(capRemoved('queryCache',
+    'No query-cache layer keyed off it exists; `DriverOptions.skipCache` is a per-call hint '
+    + 'to the driver, not a switch on this bit.')),
 }));
 
 /**

@@ -512,64 +512,29 @@ export class SqlDriver implements IDataDriver {
   // IDataDriver metadata
   public readonly name: string = 'com.objectstack.driver.sql';
   public readonly version: string = '1.0.0';
+  /**
+   * Capability advertisement (#4634, ADR-0049): only the bits with an engine
+   * reader survive — everything the old 30-bit literal declared (transactions,
+   * joins, filters, …) is expressed by the methods this class implements, and
+   * subclasses (`SqliteWasmDriver`, cloud's `TursoDriver`) inherit or spread
+   * this getter, so keep it truthful per instance.
+   */
   public get supports() {
     return {
-      // Basic CRUD Operations
-      create: true,
-      read: true,
-      update: true,
-      delete: true,
-
-      // Bulk Operations
-      bulkCreate: true,
-      bulkUpdate: true,
-      bulkDelete: true,
-
-      // Transaction & Connection Management
-      transactions: true,
-      savepoints: false,
-
-      // Query Operations
-      queryFilters: true,
-      queryAggregations: true,
       /**
        * Per-granularity native date bucket support. Granularities marked
        * `false` (or absent) fall back to in-memory `bucketDateValue()` via
        * `engine.findData` — see `buildDateBucketExpr()` for the SQL emitted.
        */
       queryDateGranularity: this.dateGranularityCapabilities,
-      querySorting: true,
-      queryPagination: true,
-      queryWindowFunctions: true,
-      querySubqueries: true,
-      queryCTE: false,
-      joins: true,
-
-      // Advanced Features
-      fullTextSearch: false,
-      jsonQuery: false,
-      geospatialQuery: false,
-      streaming: false,
-      jsonFields: true,
-      arrayFields: true,
-      vectorSearch: false,
       // Persistent, atomic autonumber sequences via `_objectstack_sequences`
       // (see fillAutoNumberFields / getNextSequenceValue). The engine defers
       // autonumber generation to this driver — it is the single source of truth.
       autonumber: true,
-
-      // Schema Management
-      schemaSync: true,
+      // No syncSchemasBatch() here: the engine calls syncSchema() per object.
+      // Subclasses whose transport batches (Turso) implement the method AND
+      // flip this bit — the engine requires both.
       batchSchemaSync: false,
-      migrations: false,
-      // Object-level declared `indexes` (incl. multi-column UNIQUE) are
-      // materialized during `initObjects` — see `syncDeclaredIndexes`.
-      indexes: true,
-
-      // Performance & Optimization
-      connectionPooling: true,
-      preparedStatements: true,
-      queryCache: false,
     };
   }
 

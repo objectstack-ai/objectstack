@@ -39,8 +39,9 @@ describe('SqliteWasmDriver (QueryAST Format)', () => {
       expect(driver.name).toBe('com.objectstack.driver.sqlite-wasm');
       expect(driver.version).toBeDefined();
       expect(driver.supports).toBeDefined();
-      expect(driver.supports.transactions).toBe(true);
-      expect(driver.supports.joins).toBe(true);
+      // #4634: only the live capability bits remain (inherited from SqlDriver).
+      expect(driver.supports.autonumber).toBe(true);
+      expect(driver.supports).not.toHaveProperty('transactions');
     });
   });
 

@@ -169,52 +169,17 @@ export class InMemoryDriver implements IDataDriver {
     }
   }
   
-  readonly supports = {
-    // Basic CRUD Operations
-    create: true,
-    read: true,
-    update: true,
-    delete: true,
-
-    // Bulk Operations
-    bulkCreate: true,
-    bulkUpdate: true,
-    bulkDelete: true,
-
-    // Transaction & Connection Management
-    transactions: true,          // Snapshot-based transactions
-    savepoints: false,
-    
-    // Query Operations
-    queryFilters: true,          // Implemented via memory-matcher
-    queryAggregations: true,     // Implemented
-    querySorting: true,          // Implemented via JS sort
-    queryPagination: true,       // Implemented
-    queryWindowFunctions: false, // @planned: Window functions (ROW_NUMBER, RANK, etc.)
-    querySubqueries: false,      // @planned: Subquery execution
-    queryCTE: false,
-    joins: false,                // @planned: In-memory join operations
-    
-    // Advanced Features
-    fullTextSearch: false,       // @planned: Text tokenization + matching
-    jsonQuery: false,
-    geospatialQuery: false,
-    streaming: true,             // Unread by anything; described findStream(), retired in #4484 — see #4634
-    jsonFields: true,            // Native JS object support
-    arrayFields: true,           // Native JS array support
-    vectorSearch: false,         // @planned: Cosine similarity search
-
-    // Schema Management
-    schemaSync: true,            // Implemented via syncSchema()
-    batchSchemaSync: false,
-    migrations: false,
-    indexes: false,
-
-    // Performance & Optimization
-    connectionPooling: false,
-    preparedStatements: false,
-    queryCache: false,
-  };
+  /**
+   * Capability advertisement (#4634, ADR-0049): only the bits with an engine
+   * reader survive, and this driver truthfully claims none of them — the
+   * engine's in-memory autonumber counter, in-memory date bucketing and
+   * per-object `syncSchema()` calls are exactly what it needs. Everything the
+   * old 30-bit literal declared (transactions, filters, sorting, …) is
+   * expressed by the methods this class implements; the bits were read by
+   * nothing and two of them were WRONG for years (`streaming: true` over a
+   * full-table read — see #4484/#4634).
+   */
+  readonly supports = {};
 
   /**
    * The "Database": A map of TableName -> Array of Records

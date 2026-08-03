@@ -4,39 +4,13 @@ import type { IDataDriver } from './data-driver';
 
 /**
  * Minimal DriverCapabilities object for tests.
+ *
+ * #4634: capability bits are opt-in advertisements — the 31 inert bits the old
+ * literal spelled out are tombstoned (`never`), and `batchSchemaSync` is the
+ * one live bit a batching driver would flip. Minimal = advertise nothing.
  */
 const minimalCapabilities = {
-  create: true,
-  read: true,
-  update: true,
-  delete: true,
-  bulkCreate: false,
-  bulkUpdate: false,
-  bulkDelete: false,
-  transactions: false,
-  savepoints: false,
-  queryFilters: true,
-  queryAggregations: false,
-  querySorting: true,
-  queryPagination: true,
-  queryWindowFunctions: false,
-  querySubqueries: false,
-  queryCTE: false,
-  joins: false,
-  fullTextSearch: false,
-  jsonQuery: false,
-  geospatialQuery: false,
-  streaming: false,
-  jsonFields: false,
-  arrayFields: false,
-  vectorSearch: false,
-  schemaSync: false,
   batchSchemaSync: false,
-  migrations: false,
-  indexes: false,
-  connectionPooling: false,
-  preparedStatements: false,
-  queryCache: false,
 };
 
 describe('Data Engine Contract', () => {
@@ -223,7 +197,7 @@ describe('Data Engine Contract', () => {
       expect(typeof driverAsInterface.connect).toBe('function');
       expect(typeof driverAsInterface.disconnect).toBe('function');
       expect(typeof driverAsInterface.checkHealth).toBe('function');
-      expect(driverAsInterface.supports.queryFilters).toBe(true);
+      expect(driverAsInterface.supports.batchSchemaSync).toBe(false);
     });
 
     it('should support full IDataDriver lifecycle and CRUD', async () => {
@@ -265,7 +239,9 @@ describe('Data Engine Contract', () => {
       const driver: IDataDriver = {
         name: 'postgres',
         version: '1.0.0',
-        supports: { ...minimalCapabilities, transactions: true, bulkCreate: true },
+        // #4634: transactions/bulk are expressed by the methods below, not by
+        // capability bits — those two bits are tombstoned.
+        supports: { ...minimalCapabilities, autonumber: true },
         connect: async () => {},
         disconnect: async () => {},
         checkHealth: async () => true,

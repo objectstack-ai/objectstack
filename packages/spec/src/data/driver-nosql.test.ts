@@ -145,17 +145,9 @@ describe('NoSQL Driver Protocol', () => {
           date: 'date',
           datetime: 'date',
         },
+        // #4634: only the live bits are authorable; MongoDB batches its DDL.
         capabilities: {
-          create: true,
-          read: true,
-          update: true,
-          delete: true,
-          queryFilters: true,
-          queryAggregations: true,
-          querySorting: true,
-          queryPagination: true,
-          queryWindowFunctions: false,
-          querySubqueries: false,
+          batchSchemaSync: true,
         },
         consistency: 'quorum' as const,
         replication: {
@@ -196,18 +188,8 @@ describe('NoSQL Driver Protocol', () => {
           date: 'S',
           datetime: 'S',
         },
-        capabilities: {
-          create: true,
-          read: true,
-          update: true,
-          delete: true,
-          queryFilters: true,
-          queryAggregations: false,
-          querySorting: true,
-          queryPagination: true,
-          queryWindowFunctions: false,
-          querySubqueries: false,
-        },
+        // #4634: an empty advertisement is a valid one — every live bit is opt-in.
+        capabilities: {},
         consistency: 'eventual' as const,
       };
       

@@ -108,37 +108,12 @@ export type SSLConfig = z.infer<typeof SSLConfigSchema>;
  *     connectionTimeoutMillis: 5000
  *   },
  *   capabilities: {
- *     create: true,
- *     read: true,
- *     update: true,
- *     delete: true,
- *     bulkCreate: true,
- *     bulkUpdate: true,
- *     bulkDelete: true,
- *     transactions: true,
- *     savepoints: true,
- *     isolationLevels: ['read-committed', 'repeatable-read', 'serializable'],
- *     queryFilters: true,
- *     queryAggregations: true,
- *     querySorting: true,
- *     queryPagination: true,
- *     queryWindowFunctions: true,
- *     querySubqueries: true,
- *     queryCTE: true,
- *     joins: true,
- *     fullTextSearch: true,
- *     jsonQuery: true,
- *     geospatialQuery: false,
- *     streaming: true,
- *     jsonFields: true,
- *     arrayFields: true,
- *     vectorSearch: true,
- *     schemaSync: true,
- *     migrations: true,
- *     indexes: true,
- *     connectionPooling: true,
- *     preparedStatements: true,
- *     queryCache: false
+ *     // Only the live bits remain authorable (#4634, ADR-0049) — everything a
+ *     // driver "supports" beyond these is expressed by implementing the
+ *     // corresponding IDataDriver method, not by declaring a boolean.
+ *     queryDateGranularity: { day: true, week: true, month: true, quarter: true, year: true },
+ *     autonumber: true,
+ *     batchSchemaSync: false
  *   }
  * }
  */

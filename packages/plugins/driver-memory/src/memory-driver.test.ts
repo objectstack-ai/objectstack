@@ -260,8 +260,11 @@ describe('InMemoryDriver', () => {
       expect(results[0].name).toBe('Alice');
     });
 
-    it('should support capabilities.transactions = true', () => {
-      expect(driver.supports.transactions).toBe(true);
+    it('advertises no capability bits — transactions are expressed by the methods (#4634)', () => {
+      // `supports.transactions` was one of the 31 inert bits retired in #4634:
+      // the engine gates transaction use on `driver.beginTransaction` presence
+      // (proven by the rollback test above), never on a boolean.
+      expect(driver.supports).toEqual({});
     });
   });
 
