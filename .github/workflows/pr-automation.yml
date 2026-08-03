@@ -49,7 +49,20 @@ jobs:
   changeset-check:
     name: Check Changeset
     runs-on: ubuntu-latest
-    if: "!contains(github.event.pull_request.labels.*.name, 'skip-changeset')"
+    # Two exemptions, both meaning "this PR declares no release of its own":
+    #   - the `skip-changeset` label — the author's explicit opt-out;
+    #   - the Changesets release PR (`changeset-release/main`, pushed by
+    #     changesets/action). That PR is the CONSUMING side: it applies pending
+    #     changesets into versions and CHANGELOGs and adds none, so the gate
+    #     below can only ever fail it. It did, on every `chore: version
+    #     packages` PR (#4422 / #4894), leaving the release blocked on a check
+    #     that was structurally unsatisfiable.
+    # Pin the author as well as the branch name, so a hand-pushed branch of
+    # that name cannot borrow the exemption as an escape hatch.
+    if: >-
+      !contains(github.event.pull_request.labels.*.name, 'skip-changeset')
+      && !(github.head_ref == 'changeset-release/main'
+      && github.event.pull_request.user.login == 'github-actions[bot]')
     permissions:
       contents: read
       pull-requests: write

@@ -90,6 +90,47 @@ jobs:
               fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
             '
             npm install --no-fund --no-audit
+            # The fallback just swapped the repo's unpublished version for
+            # whatever `latest` points at — which during an RC window is the
+            # PREVIOUS major (17.0.0-rc.N unpublished → latest is 16.x). The
+            # template's manifest still stamps the repo's protocol major
+            # (`engines: { protocol: '^17' }`, written by
+            # scripts/sync-template-versions.mjs), so the ADR-0087 D1 handshake
+            # in `os start` correctly refuses to boot the artifact:
+            #   ✗ package 'e2e-app' targets protocol ^17 (engines.protocol)
+            #     but this runtime is protocol 16.0.0
+            # That is the gate working, on a skew this step introduced (#4894).
+            # Re-stamp the manifest to the protocol major actually installed so
+            # the rest of the job exercises the template against a coherent
+            # runtime. Same alignment the Docker step below already does by
+            # reading the resolved CLI version; done here BEFORE `npm run
+            # build`, so the artifact carries the corrected range too.
+            #
+            # The major is read off the installed @objectstack/spec package:
+            # PROTOCOL_VERSION is kept in lockstep with that package's own major
+            # (packages/spec/src/kernel/protocol-version.ts, asserted by
+            # protocol-version.test.ts), so the two cannot drift.
+            #
+            # Deliberately confined to the fallback branch: on the normal path
+            # the project installs the repo's own version and the majors agree
+            # by construction — a template that stamped the wrong major would
+            # still fail, which is what template-consistency.test.ts is for.
+            node -e '
+              const fs = require("fs");
+              const major = JSON.parse(
+                fs.readFileSync("node_modules/@objectstack/spec/package.json", "utf8"),
+              ).version.split(".")[0];
+              const path = "objectstack.config.ts";
+              const src = fs.readFileSync(path, "utf8");
+              const stamp = /engines:\s*\{\s*protocol:\s*[\x27"][^\x27"]*[\x27"]\s*\}/;
+              if (!stamp.test(src)) {
+                console.log("::error::fallback cannot re-stamp engines.protocol — no stamp found in " + path);
+                process.exit(1);
+              }
+              const out = src.replace(stamp, "engines: { protocol: \x27^" + major + "\x27 }");
+              fs.writeFileSync(path, out);
+              console.log("::notice::fallback re-stamped engines.protocol to ^" + major + " (installed @objectstack/spec major) — this run exercises the template against protocol " + major + ", not the repo\x27s");
+            '
           fi
 
       - name: Validate and build the generated project
