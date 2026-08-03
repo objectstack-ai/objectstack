@@ -18,7 +18,8 @@ import type {
     InstallPackageResponse
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
-import { readServiceSelfInfo } from '@objectstack/spec/api';
+import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
+import { readServiceSelfInfo, ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
@@ -812,13 +813,54 @@ function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEve
 }
 
 /**
- * One row of a `batchData` result. Deliberately the shape the implementation
- * has always emitted (`error: string`, `record`), which diverges from
- * `BatchOperationResultSchema`'s `errors: ApiError[]` / `data` — reconciling
- * the two is a wire-visible change that must not ride along on a bug fix
- * (ADR-0119 D4; tracked separately).
+ * One row of a bulk-write result — exactly the `BatchOperationResult` the spec
+ * declares (`BatchOperationResultSchema`, spec/api/batch.zod.ts). Aliased to
+ * the spec type so tsc pins every batch loop in this file to the wire contract:
+ * declared = delivered (#4793; the conformance pin in
+ * protocol.batch-row-conformance.test.ts holds the runtime side).
+ *
+ * History: this was a deliberately divergent legacy shape (`error: string`,
+ * `record`, no `index`) that predated the schema; ADR-0119 D4 left it in place
+ * so a wire-visible change would not ride along on a bug fix, and #4793 is
+ * that tracked reconciliation, shipped in the v17 major window. The rollback
+ * marking (#4620) is structured with it: `ROLLED_BACK` / `NOT_ATTEMPTED` are
+ * `ApiError.code` values, not message-string prefixes.
  */
-type BatchDataRowResult = { id?: string; success: boolean; error?: string; record?: any; droppedFields?: DroppedFieldsEvent[] };
+type BatchDataRowResult = BatchOperationResult;
+
+/**
+ * Map a thrown per-row batch error into the wire's `ApiError` (#4793).
+ *
+ * `code` keeps the thrown error's own code when it is part of the declared
+ * vocabulary (StandardErrorCode ∪ ERROR_CODE_LEDGER — an invented code would
+ * make the row fail `BatchOperationResultSchema.parse`, exactly the drift the
+ * conformance pin exists to catch loudly rather than ship). Otherwise it
+ * derives from the HTTP status when the error carries one, falling back to
+ * INTERNAL_ERROR — an unclassified engine throw is a 500 in row form.
+ */
+function toRowApiError(err: any): ApiError {
+    const thrown = typeof err?.code === 'string' && ErrorCode.safeParse(err.code).success
+        ? (err.code as ApiError['code'])
+        : undefined;
+    const status = typeof err?.status === 'number' ? err.status : undefined;
+    return {
+        code: thrown ?? (status !== undefined ? standardErrorCodeForHttpStatus(status) : 'INTERNAL_ERROR'),
+        message: typeof err?.message === 'string' && err.message.length > 0 ? err.message : String(err),
+        ...(status !== undefined ? { httpStatus: status } : {}),
+    };
+}
+
+/**
+ * A batch row that names no record id for an operation that needs one — a
+ * caller error, so it carries VALIDATION_FAILED / 400 rather than falling
+ * through {@link toRowApiError}'s unclassified-throw default (#4793).
+ */
+function rowRequiredIdError(operation: 'update' | 'delete'): Error {
+    const err = new Error(`Record id is required for ${operation}`) as Error & { code?: string; status?: number };
+    err.code = 'VALIDATION_FAILED';
+    err.status = 400;
+    return err;
+}
 
 /** What one pass of the `batchData` record loop produced (ADR-0119 D4). */
 type BatchDataLoopOutcome = { results: BatchDataRowResult[]; succeeded: number; failed: number };
@@ -5468,7 +5510,9 @@ export class ObjectStackProtocolImplementation implements
         const ctxOpt = context !== undefined ? { context } : {};
         const insertCtx = context !== undefined ? { context } : undefined;
 
-        for (const record of records) {
+        // [#4793] `index` is the row's position in the REQUEST array — the
+        // correlation a caller needs for failure rows that carry no id.
+        for (const [index, record] of records.entries()) {
             try {
                 switch (operation) {
                     case 'create': {
@@ -5478,16 +5522,16 @@ export class ObjectStackProtocolImplementation implements
                         const stripped = stripReadonlyForInsert(batchSchema, record.data || record, context);
                         const ev = diffDroppedFields(object, record.data || record, stripped, 'readonly');
                         const created = await this.engine.insert(object, stripped, insertCtx as any);
-                        results.push({ id: created.id, success: true, record: created, ...(ev ? { droppedFields: [ev] } : {}) });
+                        results.push({ id: created.id, success: true, data: created, index, ...(ev ? { droppedFields: [ev] } : {}) });
                         succeeded++;
                         break;
                     }
                     case 'update': {
-                        if (!record.id) throw new Error('Record id is required for update');
+                        if (!record.id) throw rowRequiredIdError('update');
                         // [#3455] Collect the engine's LEGAL write strips per row.
                         const dropped: DroppedFieldsEvent[] = [];
                         const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
-                        results.push({ id: record.id, success: true, record: updated, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
+                        results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                         succeeded++;
                         break;
                     }
@@ -5499,10 +5543,10 @@ export class ObjectStackProtocolImplementation implements
                                 if (existing) {
                                     const dropped: DroppedFieldsEvent[] = [];
                                     const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
-                                    results.push({ id: record.id, success: true, record: updated, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
+                                    results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                                 } else {
                                     const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, insertCtx as any);
-                                    results.push({ id: created.id, success: true, record: created });
+                                    results.push({ id: created.id, success: true, data: created, index });
                                 }
                             } catch (err) {
                                 // ADR-0119 D4 — no blind fallback inside a
@@ -5512,28 +5556,28 @@ export class ObjectStackProtocolImplementation implements
                                 // aborted") that buries the real cause.
                                 if (atomic) throw err;
                                 const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, insertCtx as any);
-                                results.push({ id: created.id, success: true, record: created });
+                                results.push({ id: created.id, success: true, data: created, index });
                             }
                         } else {
                             const created = await this.engine.insert(object, record.data || record, insertCtx as any);
-                            results.push({ id: created.id, success: true, record: created });
+                            results.push({ id: created.id, success: true, data: created, index });
                         }
                         succeeded++;
                         break;
                     }
                     case 'delete': {
-                        if (!record.id) throw new Error('Record id is required for delete');
+                        if (!record.id) throw rowRequiredIdError('delete');
                         await this.engine.delete(object, { where: { id: record.id }, ...ctxOpt } as any);
-                        results.push({ id: record.id, success: true });
+                        results.push({ id: record.id, success: true, index });
                         succeeded++;
                         break;
                     }
                     default:
-                        results.push({ id: record.id, success: false, error: `Unknown operation: ${operation}` });
+                        results.push({ id: record.id, success: false, index, errors: [{ code: 'VALIDATION_FAILED', message: `Unknown operation: ${operation}`, httpStatus: 400 }] });
                         failed++;
                 }
             } catch (err: any) {
-                results.push({ id: record.id, success: false, error: err.message });
+                results.push({ id: record.id, success: false, index, errors: [toRowApiError(err)] });
                 failed++;
                 if (atomic) {
                     // Abort on the first failure; the caller rolls back. Atomic
@@ -5564,10 +5608,11 @@ export class ObjectStackProtocolImplementation implements
             total: records.length,
             succeeded,
             failed,
-            // [#3455] `returnRecords: false` drops the record payload but KEEPS
-            // `droppedFields` — it is a small write-observability warning, not the
-            // record data the flag suppresses.
-            results: options?.returnRecords !== false ? results : results.map(r => ({ id: r.id, success: r.success, error: r.error, ...(r.droppedFields ? { droppedFields: r.droppedFields } : {}) })),
+            // [#3455] `returnRecords: false` drops the record payload (`data`)
+            // but KEEPS `errors`, `index` and `droppedFields` — the last is a
+            // small write-observability warning, not the record data the flag
+            // suppresses.
+            results: options?.returnRecords !== false ? results : results.map(r => ({ id: r.id, success: r.success, index: r.index, ...(r.errors ? { errors: r.errors } : {}), ...(r.droppedFields ? { droppedFields: r.droppedFields } : {}) })),
         } as BatchUpdateResponse;
     }
 
@@ -5579,7 +5624,11 @@ export class ObjectStackProtocolImplementation implements
      * rows it had just undone were `success: true`. Rows are classified from
      * what actually happened: a row that had succeeded is now `ROLLED_BACK`,
      * the row that failed keeps its causal error, and rows the abort never
-     * reached are `NOT_ATTEMPTED`. `returnRecords` is moot — no record exists
+     * reached are `NOT_ATTEMPTED`. The classification is STRUCTURED (#4793):
+     * `ROLLED_BACK` / `NOT_ATTEMPTED` are `errors[0].code` values registered in
+     * the ERROR_CODE_LEDGER, so a client branches on the code — the message
+     * carries only the human-readable cause and the causal row's index, never
+     * a prefix convention to regex. `returnRecords` is moot — no record exists
      * to return, and a `droppedFields` warning about a reverted write would
      * only mislead.
      */
@@ -5594,17 +5643,23 @@ export class ObjectStackProtocolImplementation implements
     ): BatchUpdateResponse {
         const attempted = outcome.results;
         const causeIndex = attempted.findIndex(r => !r.success);
-        const cause = causeIndex >= 0 ? attempted[causeIndex]?.error : undefined;
+        const cause = causeIndex >= 0 ? attempted[causeIndex]?.errors?.[0]?.message : undefined;
 
-        const results: BatchDataRowResult[] = records.map((record, i) => {
-            const attempt = attempted[i];
+        const results: BatchDataRowResult[] = records.map((record, index) => {
+            const attempt = attempted[index];
             if (!attempt) {
-                return { id: record.id, success: false, error: `NOT_ATTEMPTED: atomic batch aborted by record ${causeIndex}` };
+                return {
+                    id: record.id, success: false, index,
+                    errors: [{ code: 'NOT_ATTEMPTED' as const, message: `atomic batch aborted by record ${causeIndex}` }],
+                };
             }
             if (attempt.success) {
-                return { id: attempt.id ?? record.id, success: false, error: `ROLLED_BACK: record ${causeIndex} failed — ${cause ?? 'unknown error'}` };
+                return {
+                    id: attempt.id ?? record.id, success: false, index,
+                    errors: [{ code: 'ROLLED_BACK' as const, message: `record ${causeIndex} failed — ${cause ?? 'unknown error'}` }],
+                };
             }
-            return { id: attempt.id ?? record.id, success: false, error: attempt.error };
+            return { id: attempt.id ?? record.id, success: false, index, errors: attempt.errors };
         });
 
         return {
@@ -5743,7 +5798,7 @@ export class ObjectStackProtocolImplementation implements
         let succeeded = 0;
         let failed = 0;
 
-        for (const record of records) {
+        for (const [index, record] of records.entries()) {
             try {
                 // [#3455] Two gaps the pre-#3455 loop had, both fixed per row:
                 //  1. `context` was never threaded — bulk updates ran the engine
@@ -5756,10 +5811,10 @@ export class ObjectStackProtocolImplementation implements
                 const opts: any = { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
                 if (context !== undefined) opts.context = context;
                 const updated = await this.engine.update(object, record.data, opts);
-                results.push({ id: record.id, success: true, record: updated, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
+                results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                 succeeded++;
             } catch (err: any) {
-                results.push({ id: record.id, success: false, error: err.message });
+                results.push({ id: record.id, success: false, index, errors: [toRowApiError(err)] });
                 failed++;
                 if (atomic) {
                     // Abort on the first failure; the caller rolls back.
@@ -5911,7 +5966,7 @@ export class ObjectStackProtocolImplementation implements
         let failed = 0;
         const ctxOpt = context !== undefined ? { context } : {};
 
-        for (const id of ids) {
+        for (const [index, id] of ids.entries()) {
             try {
                 // [#4435] Per-row honesty on the bulk path. This discarded the
                 // driver's return and pushed `success: true` unconditionally, so
@@ -5925,10 +5980,10 @@ export class ObjectStackProtocolImplementation implements
                 // `id` is `unknown` to this helper only because the caller's
                 // fail-closed `isScalarId` guard is what proves it scalar.
                 if (deleted === false) throw recordNotFoundError(object, id as string | number);
-                results.push({ id: String(id), success: true });
+                results.push({ id: String(id), success: true, index });
                 succeeded++;
             } catch (err: any) {
-                results.push({ id: String(id), success: false, error: err?.message });
+                results.push({ id: String(id), success: false, index, errors: [toRowApiError(err)] });
                 failed++;
                 // Same stop semantics as `batchData`: `atomic` aborts the rest on
                 // the first failure (the caller rolls back), and without

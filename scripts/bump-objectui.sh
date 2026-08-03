@@ -8,8 +8,11 @@
 #   scripts/bump-objectui.sh --no-changeset # skip the @objectstack/console changeset
 #
 # Env:
-#   CONSOLE_BUMP=minor|patch  # force the changeset bump type (default: auto —
-#                             # `minor` if the objectui range has any feat, else patch)
+#   CONSOLE_BUMP=major|minor|patch  # force the changeset bump type (default: auto —
+#                             # the HIGHEST level objectui itself declared in the
+#                             # changesets added over the range; see #4731)
+#   CONSOLE_CHANGES_MAX=<n>   # cap the rendered list (default 100). A cap that
+#                             # fires says so, with the real count — never silently.
 #
 # Assumes sibling layout:
 #   ~/work/objectui
@@ -27,6 +30,18 @@
 # the objectui commit range, routing the frontend delta through the SAME
 # changesets pipeline as the backend: it lands in @objectstack/console's
 # CHANGELOG and rolls up into the platform version + the curated release notes.
+#
+# WHAT GOES IN THE LIST — DECLARED, NOT GUESSED (#4731)
+# The list used to be a GUESS off the commit subject (`grep -iE '^- (feat|fix)'`
+# + `head -40`), and the bump level another (`grep -ciE '^feat'`). Both were
+# measured wrong on one real range: every `refactor(...)!` — the BREAKING class,
+# the one that must never vanish from a release record — was structurally unable
+# to appear, `head -40` truncated in silence, and `fix(ci)` commits that release
+# nothing were pulled in. objectui already DECLARES which commits ship: every
+# releasing PR carries a `.changeset/*.md`, and an empty frontmatter block is
+# changesets' own "release-nothing". So `objectui-changeset-digest.mjs` reads the
+# changesets added over the range — package names decide inclusion, the declared
+# level decides the bump. Nothing is inferred from a subject line.
 
 set -euo pipefail
 
@@ -41,7 +56,7 @@ for arg in "$@"; do
     --no-commit) NO_COMMIT=1 ;;
     --no-changeset) NO_CHANGESET=1 ;;
     -h|--help)
-      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) EXPLICIT_SHA="$arg" ;;
@@ -85,52 +100,60 @@ SUBJECT_LINE="$(git -C "$OBJECTUI_ROOT" log -1 --format=%s "$NEW_SHA")"
 CS_FILE=""
 if [[ "$NO_CHANGESET" -eq 0 ]]; then
   # Can we walk the OLD..NEW range in the objectui checkout? (A shallow clone or
-  # a first-ever pin may not have OLD reachable — degrade to the tip subject.)
+  # a first-ever pin may not have OLD reachable — degrade to the tip subject,
+  # and SAY SO in the artifact: a degraded list and a complete one must never
+  # look alike, #4731.)
   RANGE_OK=0
   if [[ "$OLD_SHA" != "<none>" ]] && git -C "$OBJECTUI_ROOT" cat-file -e "${OLD_SHA}^{commit}" 2>/dev/null; then
     RANGE_OK=1
   fi
 
-  CHANGES=""
-  if [[ "$RANGE_OK" -eq 1 ]]; then
-    CHANGES="$(git -C "$OBJECTUI_ROOT" log --no-merges --format='- %s' "${OLD_SHA}..${NEW_SHA}" \
-      | grep -iE '^- (feat|fix)' | head -40 || true)"
-  fi
-  [[ -z "$CHANGES" ]] && CHANGES="- ${SUBJECT_LINE}"
-
-  BUMP="${CONSOLE_BUMP:-}"
-  if [[ -z "$BUMP" ]]; then
-    # NOTE: count, don't `grep -q`. Under `set -o pipefail`, `grep -q` exits on
-    # the first match and the still-writing `git log` takes SIGPIPE, so the
-    # pipeline returns 141 and this test ALWAYS took the else branch — every
-    # refresh was silently stamped `patch`, feature ranges included. `grep -c`
-    # drains its input, so no signal and a truthful count.
-    FEAT_COUNT=0
-    if [[ "$RANGE_OK" -eq 1 ]]; then
-      FEAT_COUNT="$(git -C "$OBJECTUI_ROOT" log --format=%s "${OLD_SHA}..${NEW_SHA}" | grep -ciE '^feat' || true)"
-    fi
-    if [[ "$FEAT_COUNT" -gt 0 ]]; then
-      BUMP=minor
-    else
-      BUMP=patch
-    fi
-  fi
-
-  RANGE_LABEL="${OLD_SHA:0:12}...${NEW_SHA:0:12}"
-  [[ "$OLD_SHA" == "<none>" ]] && RANGE_LABEL="(initial pin) → ${NEW_SHA:0:12}"
-
   CS_FILE="${FRAMEWORK_ROOT}/.changeset/console-${SHORT}.md"
-  cat > "$CS_FILE" <<EOF
+  DIGEST_OK=0
+  BUMP=""
+  if [[ "$RANGE_OK" -eq 1 ]]; then
+    # The digest reads objectui's OWN declarations (.changeset/*.md added over
+    # the range) — inclusion and level both come from there, nothing is guessed
+    # off a commit subject. It writes the whole changeset file and echoes the
+    # resolved bump level.
+    if BUMP="$(node "${FRAMEWORK_ROOT}/scripts/objectui-changeset-digest.mjs" \
+        --objectui-root "$OBJECTUI_ROOT" \
+        --framework-root "$FRAMEWORK_ROOT" \
+        --from "$OLD_SHA" --to "$NEW_SHA" \
+        --max "${CONSOLE_CHANGES_MAX:-100}" \
+        --bump-override "${CONSOLE_BUMP:-}" \
+        --out "$CS_FILE")"; then
+      DIGEST_OK=1
+    fi
+  fi
+
+  if [[ "$DIGEST_OK" -eq 0 ]]; then
+    # Degraded path: no walkable range (initial pin, shallow clone, or the
+    # digest could not run). Emit the tip subject ONLY, labelled as degraded —
+    # the reader must be able to tell this list from a derived one.
+    BUMP="${CONSOLE_BUMP:-patch}"
+    RANGE_LABEL="${OLD_SHA:0:12}...${NEW_SHA:0:12}"
+    WHY="the range \`${RANGE_LABEL}\` could not be walked in this objectui checkout"
+    if [[ "$OLD_SHA" == "<none>" ]]; then
+      RANGE_LABEL="(initial pin) → ${NEW_SHA:0:12}"
+      WHY="this is the initial pin, so there is no previous SHA to walk from"
+    fi
+    cat > "$CS_FILE" <<EOF
 ---
 "@objectstack/console": ${BUMP}
 ---
 
 Console (objectui) refreshed to \`${SHORT}\`. Frontend changes in this range:
 
-${CHANGES}
+⚠️ **Degraded list** — ${WHY}, so this entry could not be derived from the
+changesets objectui declared. It names the tip commit only and is NOT a
+complete account of the range:
+
+- ${SUBJECT_LINE}
 
 objectui range: \`${RANGE_LABEL}\`
 EOF
+  fi
   echo "→ wrote changeset $(basename "$CS_FILE") (@objectstack/console: ${BUMP})"
 fi
 

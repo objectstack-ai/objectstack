@@ -8,7 +8,10 @@ import {
   REACT_BLOCK_NEEDS_RECORD_CONTEXT,
   type ReactPropFinding as PropFinding,
 } from './validate-react-page-props.js';
-import { SEARCHABLE_FIELD_UNKNOWN } from './validate-searchable-fields.js';
+import {
+  SEARCHABLE_FIELD_UNKNOWN,
+  SEARCHABLE_FIELD_UNSEARCHABLE,
+} from './validate-searchable-fields.js';
 import { PAGE_FIELD_UNKNOWN } from './validate-page-field-bindings.js';
 
 const page = (source: string) => ({ pages: [{ name: 'p', kind: 'react', source }] });
@@ -303,9 +306,24 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
 
   it('accepts registry-injected system columns absent from authored fields', () => {
     const f = validateReactPageProps(
-      listPage(list(`objectName="crm_account" searchableFields={['name', 'created_at', 'owner_id']}`)),
+      listPage(list(`objectName="crm_account" searchableFields={['name', 'created_at']}`)),
     );
     expect(f).toEqual([]);
+  });
+
+  it('flags an authored lookup — the runtime refuses the echoed override (#4830)', () => {
+    // <ListView searchableFields> is echoed verbatim as `$searchFields`, and
+    // the #4254 ingress gate rejects a lookup with 400 INVALID_FIELD — the
+    // whole toolbar search, for every role. Same judgment as the metadata
+    // list-view surface, by the shared core.
+    const f = validateReactPageProps(
+      listPage(list(`objectName="crm_account" searchableFields={['name', 'owner_id']}`)),
+    );
+    expect(f).toHaveLength(1);
+    expect(f[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(f[0].severity).toBe('error');
+    expect(f[0].path).toBe('pages[0].source › searchableFields[1]');
+    expect(f[0].message).toContain('400 INVALID_FIELD');
   });
 
   it('flags a dotted path — search cannot resolve the traversal', () => {

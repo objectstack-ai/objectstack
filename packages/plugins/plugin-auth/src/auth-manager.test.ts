@@ -1734,6 +1734,30 @@ describe('AuthManager', () => {
       await manager.assertPhoneOtpSendAllowed(PHONE);
     });
 
+    // ── #4808 — a cooldown above one hour is enforced, or rejected ─────────
+    it('accepts a cooldown above one hour and enforces it (#4808)', async () => {
+      // Used to be accepted and then served as 1h, because the send history
+      // was pruned at a flat hour. The retention now follows the cooldown —
+      // the past-the-hour proof lives in otp-send-guard.test.ts, where the
+      // clock is injectable; here the point is that the config boots at all.
+      const { manager } = await bootOtp({ phoneOtp: { cooldownSeconds: 7_200 } });
+      manager.setSmsService(fakeSms().service);
+      await manager.assertPhoneOtpSendAllowed(PHONE);
+      await expect(manager.assertPhoneOtpSendAllowed(PHONE))
+        .rejects.toThrow(/Too many verification codes/);
+    });
+
+    it('rejects an unenforceable cooldown at BOOT, not at the first send (#4808)', () => {
+      // The guard is built lazily on first send, so validating only there
+      // would report a config error as a 500 on /phone-number/send-otp.
+      expect(() => new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        plugins: { phoneNumber: true },
+        phoneOtp: { cooldownSeconds: 90_000 },
+      } as any)).toThrow(/exceeds the supported maximum of 86400 seconds/);
+    });
+
     // ── #4790 — the budget is only global if its STORE is ─────────────────
     describe('where the per-number budget is counted (#4790)', () => {
       const makeCache = () => {

@@ -33,7 +33,8 @@
     "@objectstack/service-automation": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-settings": "workspace:*",
-    "@objectstack/spec": "workspace:*"
+    "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

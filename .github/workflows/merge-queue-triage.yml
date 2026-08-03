@@ -1,0 +1,163 @@
+name: Merge Queue Triage
+
+# Why this exists (#4859): red queue builds were being blind-requeued. On
+# 2026-08-03 one PR failed the queue four times and landed unchanged on the
+# fifth attempt (09:19 → 10:22), and every failure evicted and rebuilt every
+# entry queued behind it — the queue's perceived slowness that morning was
+# mostly this amplification, not build duration.
+#
+# A queue failure is a different animal from a PR failure: the PR's own CI ran
+# affected-only, while the queue runs the FULL suite on the speculative merge
+# result. The failing test is therefore often in a package the PR never
+# touched — a flake, or a semantic conflict with another queued PR — and
+# neither of those is fixed by re-queueing; re-queueing just burns another
+# ~10-minute build for every entry behind it.
+#
+# So: every red merge_group CI run gets a triage comment on its PR — the
+# failed jobs/steps, the failing test lines pulled from the logs (best
+# effort), how many times THIS PR has already failed in the queue in the last
+# 24 h, and the queue-wide failure count. The checklist tells the author
+# (human or agent) to diagnose before re-queueing. The comment is the
+# machine-readable signal the PM dispatch loop can key on, and the cross-PR
+# flake evidence lives in these comments: the same test name appearing in two
+# unrelated PRs' triage comments is a confirmed flake.
+#
+# Fires on conclusion == failure ONLY. 'cancelled' is the queue evicting an
+# entry because something AHEAD of it failed (or a manual cancel) — it says
+# nothing about this PR, so it gets no comment (the same run-lifecycle
+# reasoning as dogfood-gate's cancelled handling in ci.yml, from the other
+# side).
+#
+# workflow_run executes in the DEFAULT branch's context: this file must be on
+# main before it fires, it never checks out or runs PR code, and it holds the
+# minimum permissions (actions: read for logs, pull-requests: write for the
+# comment).
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  triage:
+    name: Comment queue-failure triage on the PR
+    if: >-
+      github.event.workflow_run.event == 'merge_group' &&
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Post the triage comment
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const { owner, repo } = context.repo;
+
+            // Queue branches are named gh-readonly-queue/<base>/pr-<N>-<sha>.
+            const m = /^gh-readonly-queue\/.+\/pr-(\d+)-[0-9a-f]{40}$/.exec(run.head_branch ?? '');
+            if (!m) {
+              core.info(`head_branch '${run.head_branch}' is not a merge-queue branch — nothing to do.`);
+              return;
+            }
+            const prNumber = Number(m[1]);
+            const marker = `<!-- merge-queue-triage:${run.id} -->`;
+
+            // Idempotency: workflow_run deliveries can repeat; one comment per run.
+            const existing = await github.rest.issues.listComments({
+              owner, repo, issue_number: prNumber, per_page: 100,
+            });
+            if (existing.data.some((c) => (c.body ?? '').includes(marker))) {
+              core.info('triage comment for this run already exists — skipping.');
+              return;
+            }
+
+            // Failed jobs and their failed steps.
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner, repo, run_id: run.id, per_page: 100,
+            });
+            const failedJobs = jobs.filter((j) => j.conclusion === 'failure');
+
+            // Best-effort log harvest: the lines a human would grep for first.
+            // Aggregate gate jobs (Test Core / Dogfood Regression Gate) fail
+            // with no information of their own, so prefer real jobs when both
+            // are present. A 4xx on the logs endpoint degrades to names only.
+            const FAIL_LINE = /(?:^|[\s|])(?:✗|×|✕|FAIL\s|AssertionError|STALL)/;
+            const informative = failedJobs.filter((j) => (j.steps ?? []).some(
+              (s) => s.conclusion === 'failure' && !/^Verify .* results$/.test(s.name)));
+            const details = [];
+            for (const job of (informative.length ? informative : failedJobs).slice(0, 4)) {
+              const steps = (job.steps ?? [])
+                .filter((s) => s.conclusion === 'failure')
+                .map((s) => s.name);
+              let lines = [];
+              try {
+                const res = await github.request(
+                  'GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs',
+                  { owner, repo, job_id: job.id });
+                const text = typeof res.data === 'string'
+                  ? res.data
+                  : Buffer.from(res.data).toString('utf8');
+                lines = text.split('\n')
+                  .map((l) => l.replace(/^[^ ]*Z /, ''))
+                  .filter((l) => FAIL_LINE.test(l))
+                  .map((l) => l.trim().slice(0, 200))
+                  .slice(0, 12);
+              } catch (e) {
+                core.info(`logs unavailable for job ${job.id}: ${e.message}`);
+              }
+              details.push({ name: job.name, url: job.html_url, steps, lines });
+            }
+
+            // History: this PR's earlier queue failures + queue-wide count, 24 h.
+            const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+            const recent = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+              owner, repo, event: 'merge_group', created: `>=${since}`, per_page: 100,
+            });
+            const ciRuns = recent.filter((r) => r.workflow_id === run.workflow_id && r.id !== run.id);
+            const priorFailuresThisPr = ciRuns.filter((r) =>
+              r.conclusion === 'failure' && (r.head_branch ?? '').includes(`/pr-${prNumber}-`)).length;
+            const queueFailures24h = ciRuns.filter((r) => r.conclusion === 'failure').length;
+
+            const jobSections = details.map((d) => {
+              const head = `- **[${d.name}](${d.url})** — 失败步骤: ${d.steps.join('、') || '(无步骤级结论)'}`;
+              return d.lines.length
+                ? `${head}\n\n  \`\`\`\n  ${d.lines.join('\n  ')}\n  \`\`\``
+                : `${head}（日志不可读，点进 job 看）`;
+            }).join('\n');
+
+            const flakeHint = priorFailuresThisPr > 0
+              ? `⚠️ **本 PR 过去 24h 已在队列失败 ${priorFailuresThisPr} 次（不含本次）。** 内容未变而反复失败 ⇒ 高度怀疑 flaky 测试或与同组 PR 的语义冲突，重排不解决。`
+              : '本 PR 过去 24h 无队列失败记录（首次）。';
+
+            const body = [
+              '### ⛔ merge queue 构建失败 — 先分诊，再决定要不要重排',
+              '',
+              `队列构建 [${run.id}](${run.html_url}) 红了。队列跑的是**全量**套件（PR 侧 CI 只跑 affected 子集），`,
+              '所以失败的测试可能在本 PR 没碰过的包里 —— 那不是重排能修的。每次盲目重排都会让排在后面的所有 PR 重建一轮。',
+              '',
+              '**失败的 job（日志抽取，best effort）：**',
+              '',
+              jobSections || '- （没拿到 job 级信息，点上面的 run 链接看）',
+              '',
+              '**历史信号：**',
+              `- ${flakeHint}`,
+              `- 过去 24h 队列共有 ${queueFailures24h} 个失败构建（不含本次）。`,
+              '',
+              '**分诊清单：**',
+              '1. 失败测试在本 PR 改动的包里 → 真回归，修 PR。',
+              '2. 失败测试与本 PR 无关 → 在其他 PR 的同类评论里搜同名测试；出现过 ⇒ flaky 实锤，开 issue 修/隔离那条测试。修好前重排只会再烧一轮全队列。',
+              '3. 两者都不是 → 可能与同组 PR 语义冲突；等前面的 PR 落地或失败出队后再重排一次即可，不要连续重排。',
+              '',
+              marker,
+              '---',
+              '_Generated by [Claude Code](https://claude.ai/code) · merge-queue-triage workflow (#4859)_',
+            ].join('\n');
+
+            await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
+            core.info(`triage comment posted on #${prNumber}.`);

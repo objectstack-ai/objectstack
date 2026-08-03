@@ -121,11 +121,15 @@ describe('deleteManyData atomic — the deletes are actually undone (#4620)', ()
         expect(res.total).toBe(3);
         expect(res.results.every((r: any) => r.success === false)).toBe(true);
 
-        // A client must be able to tell "attempted, undone" from "never ran".
+        // A client must be able to tell "attempted, undone" from "never ran" —
+        // by errors[0].code (#4793), never by sniffing a message prefix.
         expect(res.results[0].id).toBe('a');
-        expect(res.results[0].error).toMatch(/^ROLLED_BACK:/);
-        expect(res.results[1].error).toMatch(/not found/i); // the causal row, verbatim
-        expect(res.results[2].error).toMatch(/^NOT_ATTEMPTED:/);
+        expect(res.results[0].errors?.[0]?.code).toBe('ROLLED_BACK');
+        expect(res.results[1].errors?.[0]?.message).toMatch(/not found/i); // the causal row, verbatim
+        expect(res.results[1].errors?.[0]?.code).toBe('RECORD_NOT_FOUND');  // its own code survives
+        expect(res.results[2].errors?.[0]?.code).toBe('NOT_ATTEMPTED');
+        // Rows correlate to the request array by `index` (#4793).
+        expect(res.results.map((r: any) => r.index)).toEqual([0, 1, 2]);
     });
 
     it('commits when every id deletes, and every delete runs on the transaction handle', async () => {
@@ -166,7 +170,7 @@ describe('deleteManyData atomic — the deletes are actually undone (#4620)', ()
         expect(t.del).toHaveBeenCalledTimes(1);
         expect(t.rows.size).toBe(3);
         expect(res.succeeded).toBe(0);
-        expect(res.results[1].error).toMatch(/^NOT_ATTEMPTED:/);
+        expect(res.results[1].errors?.[0]?.code).toBe('NOT_ATTEMPTED');
     });
 });
 
@@ -198,10 +202,10 @@ describe('updateManyData atomic — the option is finally read (#4620)', () => {
         expect(res.succeeded).toBe(0);
         expect(res.failed).toBe(3);
         expect(res.results[0].id).toBe('a');
-        expect(res.results[0].error).toMatch(/^ROLLED_BACK:/);
-        expect(res.results[0].error).toContain('update exploded'); // carries the cause
-        expect(res.results[1].error).toBe('update exploded');      // the causal row, verbatim
-        expect(res.results[2].error).toMatch(/^NOT_ATTEMPTED:/);
+        expect(res.results[0].errors?.[0]?.code).toBe('ROLLED_BACK');
+        expect(res.results[0].errors?.[0]?.message).toContain('update exploded'); // carries the cause
+        expect(res.results[1].errors?.[0]?.message).toBe('update exploded');      // the causal row, verbatim
+        expect(res.results[2].errors?.[0]?.code).toBe('NOT_ATTEMPTED');
         // Nothing persisted, so no reverted write may be reported as a success
         // or carry a record payload.
         expect(res.results.every((r: any) => r.success === false)).toBe(true);
@@ -243,7 +247,7 @@ describe('updateManyData atomic — the option is finally read (#4620)', () => {
         expect(t.update).toHaveBeenCalledTimes(1);
         expect(t.rows.get('b')).toEqual({ id: 'b', title: 'b-old' });
         expect(res.succeeded).toBe(0);
-        expect(res.results[1].error).toMatch(/^NOT_ATTEMPTED:/);
+        expect(res.results[1].errors?.[0]?.code).toBe('NOT_ATTEMPTED');
     });
 });
 
@@ -301,8 +305,8 @@ describe('many-data non-atomic — unchanged (#4620 regression net)', () => {
         expect(t.rows.get('a')).toEqual({ id: 'a', title: 'a-new' }); // committed, and kept
         expect(res).toMatchObject({ success: false, operation: 'update', total: 3, succeeded: 1, failed: 1 });
         expect(res.results).toHaveLength(2); // stops without continueOnError
-        expect(res.results[0]).toMatchObject({ id: 'a', success: true });
-        expect(res.results[1]).toMatchObject({ id: 'b', success: false, error: 'update exploded' });
+        expect(res.results[0]).toMatchObject({ id: 'a', success: true, index: 0 });
+        expect(res.results[1]).toMatchObject({ id: 'b', success: false, index: 1, errors: [{ message: 'update exploded' }] });
     });
 
     it('updateManyData continueOnError still processes every row', async () => {

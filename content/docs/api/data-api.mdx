@@ -226,9 +226,9 @@ Execute a batch operation (create / update / upsert / delete) on multiple record
 }
 ```
 
-**Response**: `BatchUpdateResponse` with `succeeded`, `failed`, `total`, and a per-record `results` array. Each entry in `results` has `id`, `success`, an optional `errors` array, and optional `data` (the full record, present when `returnRecords` is `true`).
+**Response**: `BatchUpdateResponse` with `succeeded`, `failed`, `total`, and a per-record `results` array. Each entry in `results` has `id`, `success`, `index` (the row's position in the request array), an optional `errors` array (`ApiError[]` — read `errors[0].message`, branch on `errors[0].code`), and optional `data` (the full record, present when `returnRecords` is `true`).
 
-`options.atomic` defaults to `false` (sequential best-effort, stopping at the first failure). Set it to `true` and the whole batch runs inside one transaction: the first failure rolls back every prior write, and the response reports `succeeded: 0` with each row marked `ROLLED_BACK:`, the causal error, or `NOT_ATTEMPTED:`. A deployment whose driver cannot roll back rejects an atomic request with `501 NOT_IMPLEMENTED` instead of running it best-effort — probe `capabilities.transactionalBatch` on `/discovery` first. `atomic` takes precedence over `continueOnError`.
+`options.atomic` defaults to `false` (sequential best-effort, stopping at the first failure). Set it to `true` and the whole batch runs inside one transaction: the first failure rolls back every prior write, and the response reports `succeeded: 0` — each row's `errors[0].code` says what happened: `ROLLED_BACK` (written, then undone), the causal row's own error code, or `NOT_ATTEMPTED` (never reached). A deployment whose driver cannot roll back rejects an atomic request with `501 NOT_IMPLEMENTED` instead of running it best-effort — probe `capabilities.transactionalBatch` on `/discovery` first. `atomic` takes precedence over `continueOnError`.
 
 ### `POST /data/:object/createMany`
 
@@ -273,9 +273,13 @@ deleted one at a time by primary key, so each honours `deleteBehavior`
 at the first failure; `continueOnError: true` processes the remaining ids and
 reports the failures instead.
 
-Note that on this route `atomic` only stops the run — deletes already performed
-are **not** rolled back. Unlike `/batch`, `deleteMany` has no wrapping
-transaction yet.
+`options.atomic: true` is honoured here the same way as on `/batch` (#4620): the
+whole id list runs inside one transaction, the first failure rolls back every
+prior delete, and the response reports `succeeded: 0` with each row's
+`errors[0].code` set to `ROLLED_BACK`, the causal error code, or
+`NOT_ATTEMPTED`. A runtime that cannot roll back refuses the request with
+`501 NOT_IMPLEMENTED` rather than degrading to best-effort. The same applies to
+`/updateMany`.
 
 ### Batch size
 

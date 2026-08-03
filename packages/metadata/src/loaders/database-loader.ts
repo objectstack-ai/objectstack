@@ -26,7 +26,7 @@ import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
 import type { MetadataLoader } from './loader-interface.js';
 import { calculateChecksum } from '../utils/metadata-history-utils.js';
 import { LRUCache } from '../utils/lru-cache.js';
-import { isSchemaAlreadyExistsError } from '../utils/schema-sync-errors.js';
+import { isMissingTableError, isSchemaAlreadyExistsError } from '../utils/schema-sync-errors.js';
 import { addSysMetadataOverlayIndex } from '../migrations/add-sys-metadata-overlay-index.js';
 import { migrateProjectIdToEnvironmentId } from '../migrations/migrate-project-id-to-environment-id.js';
 
@@ -131,6 +131,12 @@ export class DatabaseLoader implements MetadataLoader {
    */
   private schemaFailureReported = false;
   private historySchemaFailureReported = false;
+  /**
+   * Same once-only discipline for the #4825 seam: the history table is readable
+   * or it is not, and repeating the report per skipped write turns a real
+   * degradation into noise people learn to skim.
+   */
+  private historySeqFailureReported = false;
 
   /** (type, name) → metadata payload — primes `load()` */
   private readonly loadCache?: LRUCache<string, Record<string, unknown> | null>;
@@ -267,6 +273,24 @@ export class DatabaseLoader implements MetadataLoader {
    * Reads `MAX(event_seq) + 1` for the configured `organization_id`.
    * Legacy path — not transactional, so concurrent writes can collide.
    * The canonical (transactional) producer is `SysMetadataRepository`.
+   *
+   * #4825 (same shape as #4728, rule from #4632) — discriminate by error TYPE.
+   * This used to `catch { return 1 }`, with a comment that named BOTH reasons a
+   * read can fail and then answered both the same way. Exactly one of them is
+   * benign: the history table has not been provisioned, so there is no row to
+   * be inconsistent with and 1 genuinely IS the next number. Every other reason
+   * — connection drop, timeout, insufficient privileges — means the rows are
+   * still there and simply were not seen, and answering 1 against a table with
+   * N rows **collides with existing rows**: the insert succeeds, the log stays
+   * empty, and `event_seq` (the ordering key that history listing and rollback
+   * targeting both stand on) is silently wrong from then on. Note this is the
+   * costlier half of the #4728 family — not bytes that never landed, but bytes
+   * that landed *wrong*, which no retry and no restart repairs.
+   *
+   * @throws The underlying driver error, unchanged, for every non-benign read
+   *         failure. Deliberate: a sequence number this method cannot derive
+   *         from data it actually read is not a number it may invent. The
+   *         caller ({@link createHistoryRecord}) owns the consequence.
    */
   private async nextEventSeq(): Promise<number> {
     const where: Record<string, unknown> = this.organizationId
@@ -280,9 +304,11 @@ export class DatabaseLoader implements MetadataLoader {
         if (v > max) max = v;
       }
       return max + 1;
-    } catch {
-      // Table not provisioned yet or driver error — start at 1.
-      return 1;
+    } catch (error) {
+      // Benign — and ONLY benign: there is no table, therefore no row, so
+      // numbering from 1 cannot collide with anything.
+      if (isMissingTableError(error)) return 1;
+      throw error;
     }
   }
 
@@ -493,7 +519,41 @@ export class DatabaseLoader implements MetadataLoader {
     // transaction, so concurrent writers can collide. The SysMetadataRepository
     // path serializes this under engine.transaction(); DatabaseLoader is
     // deprecated for new writes and tolerates the race.
-    const eventSeq = await this.nextEventSeq();
+    //
+    // #4825: the concurrency race above is a KNOWN, recorded limitation of this
+    // path. A read failure is not the same thing and is not tolerated — if the
+    // sequence cannot be derived from rows we actually read, we write NO history
+    // row rather than one carrying a number we made up. A missing row is loud
+    // here and visibly absent later; a colliding row is silent now and corrupts
+    // the ordering that `queryHistory` and `rollback` both depend on, forever.
+    let eventSeq: number;
+    try {
+      eventSeq = await this.nextEventSeq();
+    } catch (error) {
+      if (!this.historySeqFailureReported) {
+        this.historySeqFailureReported = true;
+        console.error(
+          `[Metadata] Could not read \`${this.historyTableName}\` to determine the next \`event_seq\` — the history ` +
+            `entry for ${type}/${name} was NOT written, and further entries are being skipped while this persists. ` +
+            `The metadata write itself SUCCEEDED, so the server keeps looking healthy while its change history ` +
+            `silently develops holes: version timelines and rollback targets will be incomplete. The entry is skipped ` +
+            `deliberately — numbering it from 1 (what this code did before #4825) would collide with existing rows and ` +
+            `make \`event_seq\` ordering wrong rather than merely incomplete, which nothing detects and no restart ` +
+            `repairs. Fix the datasource/driver error below (connection, timeout, privileges); the next metadata write ` +
+            `retries and reports recovery.`,
+          error,
+        );
+      }
+      return;
+    }
+
+    if (this.historySeqFailureReported) {
+      this.historySeqFailureReported = false;
+      console.info(
+        `[Metadata] \`${this.historyTableName}\` is readable again — \`event_seq\` numbering recovered and change ` +
+          `history is being recorded again. Entries skipped during the outage are not backfilled.`,
+      );
+    }
 
     const historyRecord: Partial<MetadataHistoryRecord> = {
       id: historyId,

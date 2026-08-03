@@ -130,6 +130,7 @@ import {
 // that evaluate CEL against "the record" cannot drift apart on what that record
 // contains — see the module's own doc comment.
 import { materializeDeclaredFields } from '../declared-fields.js';
+import { describeCelFault } from '../cel-fault.js';
 
 type Mode = 'insert' | 'update';
 
@@ -846,35 +847,6 @@ function checkStateMachine(
   return null;
 }
 
-/** `No such key: <key>` is cel-js's word for "the predicate read something the
- *  record does not carry" — the single most useful fact to put in front of the
- *  author, since after materialisation it can only mean an UNDECLARED key. */
-const NO_SUCH_KEY_RE = /No such key:\s*([A-Za-z_$][\w$]*)/;
-
-/**
- * The OTHER way a predicate written against a total record still faults: an
- * ordering comparison (`<`, `>`, `<=`, `>=`) or arithmetic over a value that is
- * `null`. CEL has no overload for it, so the whole predicate aborts.
- *
- * This one deserves its own sentence because the obvious guard does not work:
- * `has(x)` is TRUE for a declared field holding `null` (CEL asks whether the key
- * is PRESENT, not whether it has a usable value), so `has(a) && has(b) && a < b`
- * still faults the moment either is null — on any driver that returns its NULL
- * columns, which is most of them. Such a rule never enforced anything on those
- * rows; #4649 is what makes that visible instead of silent.
- */
-const NULL_OVERLOAD_RE = /no such overload/i;
-
-/**
- * One-line summary of a CEL fault. The engine appends a source excerpt and a
- * caret line to `message`, which is right for a log and wrong for an API error,
- * so only the first line travels.
- */
-function faultSummary(error: { kind: string; message: string }): string {
-  const first = String(error.message ?? '').split('\n')[0]!.trim();
-  return `${error.kind}: ${first || 'unknown error'}`;
-}
-
 /**
  * The rejection a predicate that CANNOT BE EVALUATED produces (#4649).
  *
@@ -888,6 +860,12 @@ function faultSummary(error: { kind: string; message: string }): string {
  * `packages/spec`) is closed and a broken rule is still "a declared rule
  * rejected this write" from every consumer's point of view. `constraint.reason`
  * is what distinguishes the two for anyone who cares.
+ *
+ * The fault is READ by the shared `cel-fault.ts` helper (#4775), which words
+ * the same two sentences for the hook-`condition` surface next door. Two
+ * evaluators that reject a write for the same reason must not describe it in
+ * two dialects — the same argument that made `materializeDeclaredFields`
+ * shared.
  */
 function unevaluableRuleError(
   ruleName: string,
@@ -895,18 +873,10 @@ function unevaluableRuleError(
   error: { kind: string; message: string },
   what: 'predicate' | 'when-predicate',
 ): FieldValidationError {
-  const raw = String(error.message ?? '');
-  const summary = faultSummary(error);
-  const missingKey = NO_SUCH_KEY_RE.exec(raw)?.[1];
-  const nullOverload = !missingKey && NULL_OVERLOAD_RE.test(raw) && /null/.test(raw);
-  let detail = '';
-  if (missingKey) {
-    detail = ` The ${what} reads '${missingKey}', which this object does not declare — fix the rule's condition, or declare the field.`;
-  } else if (nullOverload) {
-    detail =
-      ` The ${what} compares a value that is null. Guard it with '!= null'` +
-      ` — 'has(x)' does NOT do that: a declared field holding null is still PRESENT, so has(x) is true.`;
-  }
+  const { summary, missingKey, nullOverload, detail } = describeCelFault(error, {
+    what,
+    undeclaredKeyFix: "fix the rule's condition, or declare the field",
+  });
   return {
     field,
     code: 'rule_violation',

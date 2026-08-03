@@ -71,8 +71,9 @@ export const BatchOptionsSchema = lazySchema(() => z.object({
   // they asked for; callers sending nothing keep today's behaviour exactly.
   atomic: z.boolean().optional().default(false).describe(
     'Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: '
-    + 'the first failure rolls back every prior write, and the response reports zero successes with rows '
-    + 'marked ROLLED_BACK / NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request '
+    + 'the first failure rolls back every prior write, and the response reports zero successes — each row '
+    + 'carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows '
+    + 'never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request '
     + '(501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe '
     + '`capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. '
     + 'Default false: sequential best-effort.'),
@@ -183,7 +184,10 @@ export type UpdateManyRequest = z.input<typeof UpdateManyRequestSchema>;
 export const BatchOperationResultSchema = lazySchema(() => z.object({
   id: z.string().optional().describe('Record ID if operation succeeded'),
   success: z.boolean().describe('Whether this record was processed successfully'),
-  errors: z.array(ApiErrorSchema).optional().describe('Array of errors if operation failed'),
+  errors: z.array(ApiErrorSchema).optional().describe(
+    'Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back '
+    + 'marks rows that were written then undone with code ROLLED_BACK and rows never reached with '
+    + 'NOT_ATTEMPTED, while the causal row keeps its own error (#4793).'),
   data: RecordDataSchema.optional().describe('Full record data (if returnRecords=true)'),
   index: z.number().optional().describe('Index of the record in the request array'),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(

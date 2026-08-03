@@ -18,7 +18,9 @@ import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
-import { createHostRequire, createHostImporter } from '../utils/import-from-host.js';
+// Shared with @objectstack/verify and the dogfood multi-org probes (#4700) —
+// node-only, hence the `/node` subpath rather than the edge-safe root export.
+import { createHostRequire, createHostImporter } from '@objectstack/types/node';
 import {
   printHeader,
   printKV,
@@ -1746,8 +1748,28 @@ export default class Serve extends Command {
             const tenancyPosture = resolveTenancyPosture();
             const multiTenant = tenancyPosture !== 'single';
             if (multiTenant) {
+              // #4818 — TWO STAGES, TWO FAILURES, TWO DIAGNOSES. `import` and
+              // `kernel.use(new mod.OrganizationsPlugin())` used to share one
+              // `try`, so anything the plugin threw while CONSTRUCTING or
+              // MOUNTING was reported as "@objectstack/organizations could not
+              // be loaded" — i.e. as an absent package — and was swallowed by
+              // OS_ALLOW_DEGRADED_TENANCY. Those are different facts with
+              // different remedies (install it vs. address what the plugin
+              // reported), and the escape hatch only ever meant "the capability
+              // is ABSENT and I accept the degradation".
+              //
+              // The classifier is WHICH STAGE THREW — deliberately not the
+              // error's shape. The framework must not know any of the plugin's
+              // private refusal semantics (a layering violation that would need
+              // updating per refusal reason), and the package is loaded through
+              // `importFromHost`, so CLI and plugin may hold different module
+              // instances: `instanceof` and named `code` checks are both
+              // fragile here. Stage is the only classifier that needs to know
+              // nothing about the plugin's internals.
+              const organizationsPkg = '@objectstack/organizations';
+              let orgMod: any;
+              // ── Stage 1: import. Failure here = the package is ABSENT. ──
               try {
-                const organizationsPkg = '@objectstack/organizations';
                 // Resolve from the HOST APP (cloud#1013). This package is
                 // cloud-private: it is installed in the served app's
                 // node_modules, never in the framework workspace the CLI's own
@@ -1757,9 +1779,7 @@ export default class Serve extends Command {
                 // it was OS_ALLOW_DEGRADED_TENANCY=1, i.e. exactly the unwalled
                 // state D5 exists to prevent. The host app declares the package;
                 // this resolves it from there.
-                const mod: any = await importFromHost(organizationsPkg);
-                await kernel.use(new mod.OrganizationsPlugin());
-                trackPlugin('Organizations');
+                orgMod = await importFromHost(organizationsPkg);
               } catch (orgErr) {
                 // ADR-0093 D5 — degraded tenancy fails fast. Multi-org was
                 // requested but the enterprise package can't provide tenant
@@ -1802,6 +1822,52 @@ export default class Serve extends Command {
                       'Organization boundaries are NOT enforced. (ADR-0093 D5)',
                   ),
                 );
+                // Degraded boot: `orgMod` stays undefined, so stage 2 below is
+                // skipped. Nothing was loaded, so nothing can be mounted.
+              }
+
+              // ── Stage 2: construct + mount. Failure here = the package IS
+              // present and the plugin itself declined. Report what it said,
+              // verbatim, and exit unconditionally: OS_ALLOW_DEGRADED_TENANCY
+              // does not cover this (#4818). Honouring it here would move
+              // whatever gate the plugin is enforcing onto an env var. ──
+              if (orgMod) {
+                try {
+                  await kernel.use(new orgMod.OrganizationsPlugin());
+                  trackPlugin('Organizations');
+                } catch (mountErr) {
+                  // The framework does NOT interpret this error — it does not
+                  // know why the plugin refused and must not guess a cause.
+                  // Surface the plugin's own words (plus any `code` it carries,
+                  // printed generically) and let them be the authority.
+                  const mountMessage = mountErr instanceof Error ? mountErr.message : String(mountErr);
+                  const mountCode = (mountErr as any)?.code;
+                  // process.exit (not throw): this sits inside the broad
+                  // AuthPlugin try below, which swallows errors — a throw would
+                  // be caught and boot would continue with the wall inactive.
+                  console.error(
+                    chalk.red(
+                      `\n  ✖ FATAL: tenancy posture '${tenancyPosture}' was requested and ` +
+                        '@objectstack/organizations WAS found and loaded,\n' +
+                        '    but its OrganizationsPlugin refused to mount, so the organization wall is INACTIVE.\n' +
+                        '    Refusing to boot — a deployment that requested multi-organization isolation must not\n' +
+                        '    serve traffic without it (ADR-0093 D5).\n\n' +
+                        '    This is NOT a missing-package problem: the runtime is installed and resolvable here,\n' +
+                        '    so module resolution / NODE_PATH / dependency pruning are not the place to look.\n\n' +
+                        '    The plugin reported (verbatim — the framework does not interpret it):\n' +
+                        (mountCode !== undefined ? `      code: ${String(mountCode)}\n` : '') +
+                        `      ${mountMessage}\n\n` +
+                        '    Fix one of:\n' +
+                        '      • resolve what the plugin reported above — its message is the authority on the\n' +
+                        '        remedy; this CLI has no further detail to add, or\n' +
+                        "      • set OS_TENANCY_POSTURE=single (or unset OS_MULTI_ORG_ENABLED) to run single-org.\n\n" +
+                        '    OS_ALLOW_DEGRADED_TENANCY does NOT apply to this failure and will not get past it:\n' +
+                        '    it covers an ABSENT multi-org runtime the operator accepts doing without, not a\n' +
+                        '    present one that declined to mount. (#4818)\n',
+                    ),
+                  );
+                  process.exit(1);
+                }
               }
             }
 

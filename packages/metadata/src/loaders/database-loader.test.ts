@@ -641,6 +641,201 @@ describe('DatabaseLoader schema-sync failure reporting (#4728)', () => {
   });
 });
 
+// ---------- event_seq is never invented from a read that failed ----------
+
+/**
+ * #4825 (same family as #4728, rule: #4632).
+ *
+ * `nextEventSeq()` used to `catch { return 1 }`, with a comment naming BOTH
+ * "table not provisioned yet" (benign) and "driver error" (not benign). With N
+ * rows already in `sys_metadata_history`, one flaky read therefore handed the
+ * next row `event_seq = 1` — colliding with an existing row while the insert
+ * SUCCEEDED and nothing was logged.
+ *
+ * That is why these tests assert on the VALUE that lands, not merely on whether
+ * a write happened: the damage here is not a missing row, it is a written row
+ * carrying a wrong number, which no retry and no restart repairs.
+ *
+ * Both directions are pinned, plus a same-call-site/opposite-verdict case — a
+ * suite proving only the loud half would pass on a `() => true` classifier,
+ * which is the bug, and one proving only the benign half would pass on the
+ * `catch { return 1 }` being replaced.
+ */
+describe('DatabaseLoader event_seq on a failed history read (#4825)', () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let infoSpy: ReturnType<typeof vi.spyOn>;
+
+  /** Benign: nothing has been provisioned, so there is no row to collide with. */
+  const noSuchTable = () =>
+    Object.assign(new Error('no such table: sys_metadata_history'), { code: 'SQLITE_ERROR' });
+
+  /** NOT benign: the rows are still there, this read just did not see them. */
+  const connectionReset = () =>
+    Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+
+  /** Every `event_seq` this driver was asked to persist, in order. */
+  function historySeqsWritten(driver: IDataDriver): unknown[] {
+    const calls = (driver.create as ReturnType<typeof vi.fn>).mock.calls as unknown[][];
+    return calls
+      .filter((call: unknown[]) => call[0] === 'sys_metadata_history')
+      .map((call: unknown[]) => (call[1] as Record<string, unknown>).event_seq);
+  }
+
+  /** The mock driver's own `find`, still callable after we wrap it. */
+  type DriverFind = (table: string, query: unknown) => Promise<Record<string, unknown>[]>;
+
+  /**
+   * A driver whose reads of the HISTORY table fail while `broken` — writes and
+   * the `sys_metadata` table keep working throughout, which is exactly what
+   * makes the defect invisible in production.
+   */
+  function driverWithBreakableHistoryReads(makeError: () => unknown, startBroken = false) {
+    const driver = createMockDriver();
+    const realFind = driver.find as DriverFind;
+    let broken = startBroken;
+    driver.find = vi.fn().mockImplementation((table: string, query: unknown) => {
+      if (broken && table === 'sys_metadata_history') return Promise.reject(makeError());
+      return realFind(table, query);
+    });
+    return {
+      driver,
+      breakReads: () => {
+        broken = true;
+      },
+      healReads: () => {
+        broken = false;
+      },
+    };
+  }
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+    infoSpy.mockRestore();
+  });
+
+  describe('the benign case — the history table is not provisioned yet', () => {
+    it('numbers from 1 and stays silent', async () => {
+      const { driver } = driverWithBreakableHistoryReads(noSuchTable, true);
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.save('object', 'account', { name: 'account' });
+
+      expect(historySeqsWritten(driver)).toEqual([1]);
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(infoSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a REAL read failure against a table that already has rows', () => {
+    it('does NOT restart at 1 — no colliding row is written at all', async () => {
+      const { driver, breakReads } = driverWithBreakableHistoryReads(connectionReset);
+      const loader = new DatabaseLoader({ driver });
+
+      // Build real history first: two rows, event_seq 1 and 2.
+      await loader.save('object', 'account', { name: 'account' });
+      await loader.save('object', 'contact', { name: 'contact' });
+      expect(historySeqsWritten(driver)).toEqual([1, 2]);
+
+      breakReads();
+      await loader.save('object', 'lead', { name: 'lead' });
+
+      // Before #4825 this was [1, 2, 1] — a duplicate `event_seq` written
+      // successfully, silently, over the top of an existing row's number.
+      expect(historySeqsWritten(driver)).toEqual([1, 2]);
+    });
+
+    it('reports at error, naming the consequence, the deliberate skip, and the fix', async () => {
+      const { driver, breakReads } = driverWithBreakableHistoryReads(connectionReset);
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.save('object', 'account', { name: 'account' });
+      breakReads();
+      await loader.save('object', 'lead', { name: 'lead' });
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const [message, cause] = errorSpy.mock.calls[0] as [string, unknown];
+      expect(message).toContain('sys_metadata_history');
+      expect(message).toContain('event_seq');
+      // consequence: the row is gone AND the system keeps looking fine
+      expect(message).toMatch(/NOT written/);
+      expect(message).toMatch(/SUCCEEDED/);
+      expect(message).toMatch(/looking healthy/i);
+      // why a hole is preferable to a wrong number
+      expect(message).toMatch(/collide/i);
+      // fix
+      expect(message).toMatch(/fix the datasource\/driver error/i);
+      // and the driver error is carried, not discarded
+      expect((cause as Error).message).toBe('read ECONNRESET');
+    });
+
+    it('does not fail the metadata write it accompanies', async () => {
+      const { driver, breakReads } = driverWithBreakableHistoryReads(connectionReset);
+      const loader = new DatabaseLoader({ driver });
+
+      breakReads();
+      const result = await loader.save('object', 'account', { name: 'account' });
+
+      // The record write already happened; reporting it as failed would be a
+      // worse lie than the one being fixed. The history hole is what is loud.
+      expect(result.success).toBe(true);
+      expect((await loader.load('object', 'account')).data).toEqual({ name: 'account' });
+    });
+
+    it('says it once, not once per skipped entry, and reports recovery', async () => {
+      const { driver, breakReads, healReads } = driverWithBreakableHistoryReads(connectionReset);
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.save('object', 'account', { name: 'account' });
+      breakReads();
+      await loader.save('object', 'contact', { name: 'contact' });
+      await loader.save('object', 'lead', { name: 'lead' });
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+
+      healReads();
+      await loader.save('object', 'deal', { name: 'deal' });
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect((infoSpy.mock.calls[0] as [string])[0]).toMatch(/readable again/i);
+      // Numbering resumes after the surviving max (1), never from 1 again.
+      expect(historySeqsWritten(driver)).toEqual([1, 2]);
+    });
+  });
+
+  it('DISTINGUISHES the two: same call site, opposite verdicts', async () => {
+    const { driver: benignDriver } = driverWithBreakableHistoryReads(noSuchTable, true);
+    const { driver: realDriver } = driverWithBreakableHistoryReads(connectionReset, true);
+
+    await new DatabaseLoader({ driver: benignDriver }).save('object', 'account', { name: 'a' });
+    await new DatabaseLoader({ driver: realDriver }).save('object', 'account', { name: 'a' });
+
+    // Benign: numbered, written, silent. Real: not numbered, not written, loud.
+    expect(historySeqsWritten(benignDriver)).toEqual([1]);
+    expect(historySeqsWritten(realDriver)).toEqual([]);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies to the rollback history path too, not just save()', async () => {
+    const { driver, breakReads } = driverWithBreakableHistoryReads(connectionReset);
+    const loader = new DatabaseLoader({ driver });
+
+    await loader.save('object', 'account', { name: 'account' });
+    await loader.save('object', 'account', { name: 'account', label: 'Account' });
+    expect(historySeqsWritten(driver)).toEqual([1, 2]);
+
+    breakReads();
+    await loader.registerRollback('object', 'account', { name: 'account' }, 1);
+
+    expect(historySeqsWritten(driver)).toEqual([1, 2]);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ---------- DatabaseLoader read-through cache ----------
 
 describe('DatabaseLoader read-through cache', () => {

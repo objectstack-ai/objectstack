@@ -126,21 +126,19 @@ describe('[#4770] hook condition evaluates against stored ⊕ payload', () => {
 
   it('an UNDECLARED key stays unevaluable — materialisation does not paper over typos', async () => {
     const calls: string[] = [];
-    const { logger, conditionWarnings } = captureLogger();
+    const { logger } = captureLogger();
     // `dnoe` is the classic transposition of `done`. Nothing declares it, so
     // it must NOT be materialised to null and quietly answered "false".
+    // Since #4775 the unevaluable condition ABORTS the operation instead of
+    // being swallowed into `false` — the typo is reported, not absorbed.
     const wrapped = wrapDeclarativeHook(
       makeHook('record.dnoe == true', calls),
       (async () => { calls.push('ran'); }) as any,
       { logger },
     );
 
-    await wrapped(makeCtx());
-
+    await expect(wrapped(makeCtx())).rejects.toThrow(/No such key: dnoe/);
     expect(calls).toEqual([]);
-    const warns = conditionWarnings();
-    expect(warns).toHaveLength(1);
-    expect(String(warns[0]![1]?.error)).toMatch(/No such key: dnoe/);
   });
 
   it('fabricates nothing when the prior row is not in hand (predicate bulk update)', async () => {
@@ -148,14 +146,20 @@ describe('[#4770] hook condition evaluates against stored ⊕ payload', () => {
     const { logger } = captureLogger();
     // A `multi: true` update fetches no single prior row, so the persisted
     // state is unknown. Defaulting `done` to null here would not materialise an
-    // absent value — it would contradict N stored rows.
+    // absent value — it would contradict N stored rows. #4775: the condition is
+    // therefore unevaluable, and unevaluable now aborts the write.
     const wrapped = wrapDeclarativeHook(
       makeHook('record.done == null', calls),
       (async () => { calls.push('ran'); }) as any,
       { logger },
     );
 
-    await wrapped(makeCtx({ previous: undefined, input: { data: { status: 'x' } } } as any));
+    await expect(
+      wrapped(makeCtx({
+        previous: undefined,
+        input: { data: { status: 'x' }, options: { multi: true } },
+      } as any)),
+    ).rejects.toThrow(/PREDICATE bulk write/);
     expect(calls).toEqual([]);
   });
 

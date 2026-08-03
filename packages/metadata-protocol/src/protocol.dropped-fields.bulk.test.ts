@@ -151,7 +151,7 @@ describe('batchData — per-row droppedFields + context threading (#3455)', () =
     expect(res.results[0].droppedFields).toEqual([
       { object: 'approval_case', fields: ['approval_status'], reason: 'readonly' },
     ]);
-    expect(res.results[0].record).not.toHaveProperty('approval_status');
+    expect(res.results[0].data).not.toHaveProperty('approval_status');
     // [#3455] context is threaded to the insert (was hard-coded undefined before).
     expect(insert.mock.calls[0][2].context).toEqual({ userId: 'u1' });
   });
@@ -168,7 +168,7 @@ describe('batchData — per-row droppedFields + context threading (#3455)', () =
     } as any);
 
     expect(res.results[0]).not.toHaveProperty('droppedFields');
-    expect(res.results[0].record.approval_status).toBe('approved');
+    expect(res.results[0].data.approval_status).toBe('approved');
   });
 
   it('update rows surface the engine strip and keep droppedFields when returnRecords=false', async () => {

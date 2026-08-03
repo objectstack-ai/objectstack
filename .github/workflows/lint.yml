@@ -222,6 +222,20 @@ jobs:
       - name: Startup registry-verdict guard
         run: pnpm check:startup-registry-verdict
 
+      # objectui pin-changeset guard (#4731). A frontend-only refresh reaches the
+      # platform release record ONLY through the changeset `bump-objectui.sh`
+      # writes, and that list used to be guessed off objectui's commit subjects
+      # (`feat|fix` + a silent `head -40`). On one real range the guess dropped
+      # all 13 releasing non-feat/fix commits — every breaking `refactor(...)!`
+      # among them — and pulled in 5 that release nothing. The list and the bump
+      # level now come from what objectui DECLARED (`.changeset/*.md` added over
+      # the range; empty frontmatter = release-nothing). This self-test builds
+      # throwaway git repos carrying those exact shapes, runs the real scripts
+      # over them, and asserts the emitted changeset — including that a cap which
+      # fires announces itself and that an unwalkable range degrades loudly.
+      - name: objectui pin-changeset digest guard
+        run: pnpm check:objectui-changeset
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that

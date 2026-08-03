@@ -39,8 +39,14 @@ Run `os migrate meta --from 16` to rewrite existing sources automatically.
   migration table steered retired `errors:` authors straight into it. **That
   guidance entry is rewritten here**: retiring one dead key by pointing at
   another is the defect, not the fix.
-- **`app.homePageId`** — *its own hedge*. "If not set, usually defaults to the
-  first navigation item" described the only behaviour there was.
+- **`app.homePageId`** — *a second source for one fact*. Not unread: objectui's
+  console consumed it in `resolveLandingRoute()` and it was the only thing
+  deciding where an app opened. (This entry first shipped saying otherwise;
+  corrected in #4709, which upheld the removal.) What condemns the key is its
+  shape — an ID cross-reference into `navigation` with no referential integrity,
+  falling back to the first item *silently* when the id dangled. If "land
+  somewhere other than first" is ever wanted again it belongs on the navigation
+  item itself, not on a pointer that can miss.
 - **`app.areas[].order`** — *the sibling that works*. Nav-item `order` really is
   sorted; area-level order never was, and both renderers iterate the array as
   authored.

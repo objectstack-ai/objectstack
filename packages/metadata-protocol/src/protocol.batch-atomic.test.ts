@@ -101,10 +101,14 @@ describe('batchData atomic — rollback is real and the response admits it (ADR-
         expect(res.total).toBe(3);
         expect(res.results.every((r: any) => r.success === false)).toBe(true);
 
-        expect(res.results[0].error).toMatch(/^ROLLED_BACK:/);
-        expect(res.results[0].error).toContain('insert exploded'); // carries the cause
-        expect(res.results[1].error).toBe('insert exploded');      // the causal row, verbatim
-        expect(res.results[2].error).toMatch(/^NOT_ATTEMPTED:/);
+        // "Attempted, undone" vs "never ran" is a CODE, not a message-prefix
+        // regex (#4793) — the message keeps the human-readable cause.
+        expect(res.results[0].errors?.[0]?.code).toBe('ROLLED_BACK');
+        expect(res.results[0].errors?.[0]?.message).toContain('insert exploded'); // carries the cause
+        expect(res.results[1].errors?.[0]?.message).toBe('insert exploded');      // the causal row, verbatim
+        expect(res.results[2].errors?.[0]?.code).toBe('NOT_ATTEMPTED');
+        // Rows correlate to the request array by `index` (#4793).
+        expect(res.results.map((r: any) => r.index)).toEqual([0, 1, 2]);
     });
 
     it('commits when every row succeeds, and every operation runs on the transaction handle', async () => {
@@ -156,9 +160,9 @@ describe('batchData atomic — rollback is real and the response admits it (ADR-
 
         expect(t.rollbacks).toHaveLength(1);
         expect(res.succeeded).toBe(0);
-        expect(res.results[0].error).toMatch(/^ROLLED_BACK:/);
+        expect(res.results[0].errors?.[0]?.code).toBe('ROLLED_BACK');
         expect(res.results[0].id).toBe('rec-1'); // ids survive so a caller can reconcile
-        expect(res.results[1].error).toBe('update exploded');
+        expect(res.results[1].errors?.[0]?.message).toBe('update exploded');
     });
 });
 
@@ -212,7 +216,7 @@ describe('batchData atomic — precedence and opt-in (ADR-0119 D4)', () => {
         expect(t.insert).toHaveBeenCalledTimes(1); // rows 2 and 3 never attempted
         expect(t.rollbacks).toHaveLength(1);
         expect(res.succeeded).toBe(0);
-        expect(res.results[1].error).toMatch(/^NOT_ATTEMPTED:/);
+        expect(res.results[1].errors?.[0]?.code).toBe('NOT_ATTEMPTED');
     });
 
     it('an atomic upsert whose update throws propagates instead of falling back to insert', async () => {
@@ -232,7 +236,7 @@ describe('batchData atomic — precedence and opt-in (ADR-0119 D4)', () => {
 
         expect(t.rollbacks).toHaveLength(1);
         expect(t.insert).not.toHaveBeenCalled();          // no blind fallback
-        expect(res.results[0].error).toBe('update exploded'); // the real cause survives
+        expect(res.results[0].errors?.[0]?.message).toBe('update exploded'); // the real cause survives
     });
 });
 

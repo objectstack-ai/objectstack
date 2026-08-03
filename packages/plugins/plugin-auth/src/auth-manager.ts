@@ -25,7 +25,7 @@ import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import type { TenancyService } from './tenancy-service.js';
-import { OtpSendGuard } from './otp-send-guard.js';
+import { OtpSendGuard, assertOtpCooldownSeconds } from './otp-send-guard.js';
 import type { CounterStore } from './rate-limit-storage.js';
 import {
   PHONE_SMS_TOPICS,
@@ -441,7 +441,11 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * real money (SMS pumping abuse — see otp-send-guard.ts).
    */
   phoneOtp?: {
-    /** Per-number cooldown between sends, seconds. Default 60. `0` disables. */
+    /**
+     * Per-number cooldown between sends, seconds. Default 60. `0` disables.
+     * Enforced at the declared length up to 24 hours (`MAX_COOLDOWN_SECONDS`);
+     * a longer value is REJECTED at construction, never truncated (#4808).
+     */
     cooldownSeconds?: number;
     /** Per-number rolling-hour send cap. Default 5. `0` disables. */
     maxPerHour?: number;
@@ -713,6 +717,14 @@ export class AuthManager {
 
   constructor(config: AuthManagerOptions) {
     this.config = config;
+
+    // #4808 — reject an unenforceable OTP cooldown HERE, at boot
+    // (`AuthPlugin.init()` constructs this manager), rather than at the first
+    // send: the guard itself is built lazily, so without this the operator
+    // would learn about a bad throttle from a 500 on `/phone-number/send-otp`.
+    // Values within the bound are enforced at their declared length — the
+    // history retention follows the cooldown; see otp-send-guard.ts.
+    assertOtpCooldownSeconds(config.phoneOtp?.cooldownSeconds);
 
     // WebContainer (StackBlitz) compatibility — install a synchronous
     // AsyncLocalStorage polyfill for better-auth's request-state global

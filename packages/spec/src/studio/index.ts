@@ -26,10 +26,12 @@ export {
   PanelLocationSchema,
   CommandContributionSchema,
   StudioPluginContributionsSchema,
-  // [#4653] `ActivationEventSchema` / `ActivationEvent` are RE-EXPORTS of the
-  // single declaration in `kernel/plugin-runtime.zod.ts`, not a second source.
-  // Studio plugin authors keep importing them from `@objectstack/spec/studio`.
-  ActivationEventSchema,
+  // [#4657] `ActivationEventSchema` / `ActivationEvent` are REMOVED (ADR-0049
+  // enforce-or-remove): no runtime ever read an activation event — every
+  // plugin activates immediately — so the vocabulary was retired with the
+  // `activationEvents` keys that embedded it. Do not re-export a substitute
+  // under these names; the removal is pinned by
+  // kernel/activation-events-retirement.test.ts.
   StudioPluginManifestSchema,
 
   // Types
@@ -43,7 +45,6 @@ export {
   type CommandContribution,
   type StudioPluginContributions,
   type StudioPluginManifest,
-  type ActivationEvent,
 
   // Helpers
   defineStudioPlugin,

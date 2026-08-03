@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   validateSearchableFields,
   SEARCHABLE_FIELD_UNKNOWN,
+  SEARCHABLE_FIELD_UNSEARCHABLE,
 } from './validate-searchable-fields.js';
 
 /**
@@ -280,6 +281,173 @@ describe('validateSearchableFields — list views that narrow the set', () => {
           objectName: 'crm_account',
           list: { type: 'grid', searchableFields: ['name'] },
           listViews: { active: { type: 'grid', searchableFields: ['name', 'billing_email'] } },
+        },
+      ],
+    });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('flags a lookup entry the runtime would refuse — the #4830 defect', () => {
+    // The issue's repro verbatim: `searchableFields: ['name', '<lookup>']` on a
+    // view, validate all green, first keystroke in the toolbar search → the
+    // whole query 400s (INVALID_FIELD) for every role. The runtime judgment
+    // is `resolveSearchFieldResolution` (@objectstack/spec/data); this rule
+    // consults the same function, so declared = enforced.
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'ehr_task',
+          fields: {
+            name: { type: 'text' },
+            project_id: { type: 'lookup', reference: 'ehr_project' },
+          },
+          listViews: { all: { type: 'grid', searchableFields: ['name', 'project_id'] } },
+        },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('objects[0].listViews.all.searchableFields[1]');
+    expect(findings[0].message).toContain("type 'lookup'");
+    expect(findings[0].message).toContain('400 INVALID_FIELD');
+    // The lookup-specific prescription: search cannot cross objects, so the
+    // related record's title must be mirrored onto a local text/formula field.
+    expect(findings[0].hint).toContain('mirror');
+  });
+
+  it('flags a real field outside the object\'s declared searchableFields', () => {
+    // Runtime parity, declared branch: the object declares the canonical set,
+    // and the #4254 gate refuses a `$searchFields` entry outside it even when
+    // the field exists and is text-like.
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: {
+            name: { type: 'text' },
+            billing_email: { type: 'email' },
+            notes: { type: 'textarea' },
+          },
+          searchableFields: ['name', 'billing_email'],
+          listViews: { all: { type: 'grid', searchableFields: ['notes'] } },
+        },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].message).toContain('name, billing_email');
+    expect(findings[0].hint).toContain('crm_account.searchableFields');
+  });
+
+  it('passes a view entry of odd type once the object declares it searchable', () => {
+    // The runtime's declared branch filters by EXISTENCE, never by type: a
+    // json/lookup column declared on the OBJECT is honored by the engine and
+    // admitted by the gate, so the view echoing it must stay green — flagging
+    // it would reject metadata the runtime accepts.
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: { name: { type: 'text' }, payload: { type: 'json' } },
+          searchableFields: ['name', 'payload'],
+          listViews: { all: { type: 'grid', searchableFields: ['payload'] } },
+        },
+      ],
+    });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('flags a hidden field in a view narrowing (auto-default excludes it)', () => {
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: { name: { type: 'text' }, secret_note: { type: 'text', hidden: true } },
+          listViews: { all: { type: 'grid', searchableFields: ['secret_note'] } },
+        },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].message).toContain('hidden');
+  });
+
+  it('checks defineView list and named listViews the same way', () => {
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: { name: { type: 'text' }, owner_ref: { type: 'lookup', reference: 'sys_user' } },
+        },
+      ],
+      views: [
+        {
+          objectName: 'crm_account',
+          list: { type: 'grid', searchableFields: ['owner_ref'] },
+          listViews: { active: { type: 'grid', searchableFields: ['owner_ref'] } },
+        },
+      ],
+    });
+
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [SEARCHABLE_FIELD_UNSEARCHABLE, 'views[0].list.searchableFields[0]'],
+      [SEARCHABLE_FIELD_UNSEARCHABLE, 'views[0].listViews.active.searchableFields[0]'],
+    ]);
+  });
+
+  it('keeps runtime parity when the object declares system columns searchable', () => {
+    // The runtime resolves the declared branch against the REGISTRY map, so
+    // `searchableFields: ['created_at']` is a non-empty declared set there —
+    // NOT a fall-through to the auto-default. A view entry outside that set
+    // must be flagged the way the gate refuses it, even though `created_at`
+    // is invisible to the authored field map.
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'audit_log',
+          fields: { name: { type: 'text' }, detail: { type: 'textarea' } },
+          searchableFields: ['created_at'],
+          listViews: { all: { type: 'grid', searchableFields: ['detail'] } },
+        },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].message).toContain('created_at');
+  });
+
+  it('leaves a system column in a view narrowing alone (registry meta invisible)', () => {
+    // `created_at` in a narrowing would be refused by the runtime, but its
+    // registry-side metadata is not visible to the linter — a judgment here
+    // risks the false positive ADR-0072 D1 forbids, so it is a documented
+    // missed finding instead.
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: { name: { type: 'text' } },
+          listViews: { all: { type: 'grid', searchableFields: ['name', 'created_at'] } },
+        },
+      ],
+    });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('does not type-check the object\'s own canonical set (runtime honors it)', () => {
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: { name: { type: 'text' }, owner_ref: { type: 'lookup', reference: 'sys_user' } },
+          searchableFields: ['name', 'owner_ref'],
         },
       ],
     });
