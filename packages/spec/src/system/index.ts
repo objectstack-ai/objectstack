@@ -77,7 +77,15 @@ export * from './license.zod';
 export * from './registry-config.zod';
 
 // Provisioning & Deployment
-export * from './provisioning.zod';
+// './provisioning.zod' removed (#4739, v17, dual-source #4535 C16): the
+// system-side tenant-provisioning family (TenantPlan / TenantRegion /
+// TenantProvisioningStatus / ProvisioningStep / TenantProvisioningRequest /
+// TenantProvisioningResult) was declared-only — zero implementations and zero
+// importers across objectstack / cloud / objectui — and its
+// `TenantPlan(Schema)` collided with the live declaration in `./cloud`. The
+// living provisioning surface is the `Provision*` family in
+// `@objectstack/spec/cloud` (cloud/tenant.zod.ts, cloud/environment.zod.ts),
+// which the cloud services actually consume.
 export * from './deploy-bundle.zod';
 export * from './app-install.zod';
 export * from './environment-artifact.zod';

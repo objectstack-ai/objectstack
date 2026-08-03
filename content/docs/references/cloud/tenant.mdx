@@ -28,8 +28,8 @@ Design decisions:
 ## TypeScript Usage
 
 ```typescript
-import { PackageInstallationSchema, PackageInstallationStatusSchema, ProvisionTenantRequestSchema, ProvisionTenantResponseSchema, TenantContextSchema, TenantDatabaseSchema, TenantDatabaseStatusSchema, TenantIdentificationSourceSchema, TenantRoutingConfigSchema } from '@objectstack/spec/cloud';
-import type { PackageInstallation, PackageInstallationStatus, ProvisionTenantRequest, ProvisionTenantResponse, TenantContext, TenantDatabase, TenantDatabaseStatus, TenantIdentificationSource, TenantRoutingConfig } from '@objectstack/spec/cloud';
+import { PackageInstallationSchema, PackageInstallationStatusSchema, ProvisionTenantRequestSchema, ProvisionTenantResponseSchema, TenantContextSchema, TenantDatabaseSchema, TenantDatabaseStatusSchema, TenantIdentificationSourceSchema, TenantPlanSchema, TenantRoutingConfigSchema } from '@objectstack/spec/cloud';
+import type { PackageInstallation, PackageInstallationStatus, ProvisionTenantRequest, ProvisionTenantResponse, TenantContext, TenantDatabase, TenantDatabaseStatus, TenantIdentificationSource, TenantPlan, TenantRoutingConfig } from '@objectstack/spec/cloud';
 
 // Validate data
 const result = PackageInstallationSchema.parse(data);
@@ -159,6 +159,19 @@ const result = PackageInstallationSchema.parse(data);
 * `jwt_claim`
 * `session`
 * `default`
+
+
+---
+
+## TenantPlan
+
+### Allowed Values
+
+* `free`
+* `starter`
+* `pro`
+* `enterprise`
+* `custom`
 
 
 ---
