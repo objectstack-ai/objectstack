@@ -22,6 +22,13 @@ export * from './admin-import-users.js';
 export * from './identity-write-guard.js';
 export * from './sys-user-writable-fields.js';
 export * from './otp-send-guard.js';
+// ADR-0069 D2 / #4772 — the cross-node rate-limit counter store (kernel cache,
+// resolved lazily) and the `cache` → better-auth `secondaryStorage` adapter.
+// The adapter is exported rather than auto-wired: it also relocates the SESSION
+// of record out of `sys_session`, which disables the ADR-0069 D4 session
+// controls, so a host opts into that trade explicitly or not at all.
+export * from './rate-limit-storage.js';
+export * from './secondary-storage.js';
 export * from './register-sso-provider.js';
 export * from './send-verification-email.js';
 export * from './objectql-adapter.js';

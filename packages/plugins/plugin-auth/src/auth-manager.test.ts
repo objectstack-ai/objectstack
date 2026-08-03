@@ -2782,6 +2782,82 @@ describe('AuthManager', () => {
       expect(captured.secondaryStorage).toBe(ss);
       expect(captured.rateLimit.storage).toBe('secondary-storage');
     });
+
+    // ── #4772 — counters-only store, no session relocation ────────────────
+    it('passes rateLimitStorage through as rateLimit.customStorage, without a secondaryStorage', async () => {
+      let captured: any;
+      (betterAuth as any).mockImplementation((cfg: any) => { captured = cfg; return { handler: vi.fn(), api: {} }; });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const rls = { consume: vi.fn(async () => ({ allowed: true, retryAfter: null })) };
+      const m = new AuthManager({
+        secret: SECRET,
+        baseUrl: 'http://localhost:3000',
+        rateLimitStorage: rls as any,
+      });
+      await m.getAuthInstance();
+      warn.mockRestore();
+      expect(captured.rateLimit.customStorage).toBe(rls);
+      // The session store is untouched: ADR-0069 D4 revokes by writing the
+      // `sys_session` row, which better-auth stops reading once it has a
+      // secondaryStorage snapshot to answer from.
+      expect(captured).not.toHaveProperty('secondaryStorage');
+    });
+
+    it('keeps the operator-tuned rateLimit rules alongside the custom storage', async () => {
+      let captured: any;
+      (betterAuth as any).mockImplementation((cfg: any) => { captured = cfg; return { handler: vi.fn(), api: {} }; });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const rls = { consume: vi.fn(async () => ({ allowed: true, retryAfter: null })) };
+      const m = new AuthManager({
+        secret: SECRET,
+        baseUrl: 'http://localhost:3000',
+        rateLimit: { enabled: true, window: 60, max: 10 } as any,
+        rateLimitStorage: rls as any,
+      });
+      await m.getAuthInstance();
+      warn.mockRestore();
+      expect(captured.rateLimit).toMatchObject({ enabled: true, window: 60, max: 10 });
+      expect(captured.rateLimit.customStorage).toBe(rls);
+    });
+
+    it('a host-supplied secondaryStorage wins — no customStorage is added', async () => {
+      let captured: any;
+      (betterAuth as any).mockImplementation((cfg: any) => { captured = cfg; return { handler: vi.fn(), api: {} }; });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const ss2 = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+      const rls = { consume: vi.fn(async () => ({ allowed: true, retryAfter: null })) };
+      const m = new AuthManager({
+        secret: SECRET,
+        baseUrl: 'http://localhost:3000',
+        secondaryStorage: ss2 as any,
+        rateLimitStorage: rls as any,
+      });
+      await m.getAuthInstance();
+      warn.mockRestore();
+      expect(captured.rateLimit.storage).toBe('secondary-storage');
+      expect(captured.rateLimit.customStorage).toBeUndefined();
+    });
+
+    // A settings patch replaces `rateLimit` wholesale (bindAuthSettings builds
+    // a fresh object); the counter store must survive that, or tuning the
+    // limits in Setup would silently un-share them again.
+    it('survives an applyConfigPatch that replaces rateLimit wholesale', async () => {
+      let captured: any;
+      (betterAuth as any).mockImplementation((cfg: any) => { captured = cfg; return { handler: vi.fn(), api: {} }; });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const rls = { consume: vi.fn(async () => ({ allowed: true, retryAfter: null })) };
+      const m = new AuthManager({
+        secret: SECRET,
+        baseUrl: 'http://localhost:3000',
+        rateLimitStorage: rls as any,
+      });
+      await m.getAuthInstance();
+      m.applyConfigPatch({ rateLimit: { enabled: true, window: 30, max: 5 } as any });
+      await m.getAuthInstance();
+      warn.mockRestore();
+      expect(captured.rateLimit).toMatchObject({ enabled: true, window: 30, max: 5 });
+      expect(captured.rateLimit.customStorage).toBe(rls);
+    });
   });
 
   // ADR-0069 D1: password complexity validator (custom; better-auth only does

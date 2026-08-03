@@ -594,11 +594,32 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * uses it for **rate-limit counters** (the manager also flips
    * `rateLimit.storage` to `'secondary-storage'`) and session caching, so both
    * are enforced against ONE store across every node — closing the multi-node
-   * rate-limit-bypass hole (each node otherwise counts independently). Wired by
-   * `AuthPlugin` from the kernel `cache` service (memory single-node, Redis in
-   * a cluster). Absent → better-auth keeps its per-process in-memory store.
+   * rate-limit-bypass hole (each node otherwise counts independently).
+   *
+   * HOST-SUPPLIED ONLY (#4772). `AuthPlugin` no longer derives this from the
+   * kernel `cache` service: better-auth also makes `secondaryStorage` the
+   * session store (`createSession` skips the `sys_session` row, `findSession`
+   * answers from the snapshot without reading the database), which silently
+   * disables the ADR-0069 D4 session controls that revoke by writing that row.
+   * The counters ride {@link rateLimitStorage} instead. Absent → better-auth
+   * keeps its own session + rate-limit defaults.
    */
   secondaryStorage?: BetterAuthOptions['secondaryStorage'];
+
+  /**
+   * ADR-0069 D2 (#4772) — better-auth `rateLimit.customStorage`: the store the
+   * per-IP counters are consumed from, and NOTHING else (no session
+   * relocation, unlike {@link secondaryStorage}). `AuthPlugin` supplies a
+   * lazily-cache-resolving implementation (`rate-limit-storage.ts`) so the
+   * counters reach the kernel `cache` service regardless of plugin start
+   * order. Ignored when `secondaryStorage` is set — better-auth's own
+   * `storage: 'secondary-storage'` already routes counters there.
+   *
+   * Kept as its own option rather than inside {@link rateLimit} so a settings
+   * patch that replaces `rateLimit` wholesale (`bindAuthSettings`) can never
+   * drop the store.
+   */
+  rateLimitStorage?: NonNullable<BetterAuthOptions['rateLimit']>['customStorage'];
 }
 
 /**
@@ -919,14 +940,24 @@ export class AuthManager {
 
       // ADR-0069 D2 — per-IP rate limiting (native). Only set when configured
       // so better-auth keeps its own defaults otherwise. The settings bind
-      // supplies stricter `customRules` for the auth endpoints. When a shared
-      // secondaryStorage is wired, flip the rate-limit store to it so counters
-      // are enforced across nodes (default 'memory' is per-process).
-      ...(this.config.rateLimit || this.config.secondaryStorage
+      // supplies stricter `customRules` for the auth endpoints.
+      //
+      // Where the counters live, in precedence order:
+      //  1. a host-supplied `secondaryStorage` → better-auth's own
+      //     `storage: 'secondary-storage'` (unchanged behaviour);
+      //  2. otherwise `rateLimitStorage` → `customStorage`, the counters-only
+      //     seam AuthPlugin fills with the lazily-resolved kernel cache
+      //     (#4772). better-auth ignores `storage` when `customStorage` is set.
+      // Neither → better-auth's per-process 'memory' default.
+      ...(this.config.rateLimit || this.config.secondaryStorage || this.config.rateLimitStorage
         ? {
             rateLimit: {
               ...(this.config.rateLimit ?? {}),
-              ...(this.config.secondaryStorage ? { storage: 'secondary-storage' as const } : {}),
+              ...(this.config.secondaryStorage
+                ? { storage: 'secondary-storage' as const }
+                : this.config.rateLimitStorage
+                  ? { customStorage: this.config.rateLimitStorage }
+                  : {}),
             },
           }
         : {}),

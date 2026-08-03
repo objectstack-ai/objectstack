@@ -2,6 +2,7 @@
 
 import type { BetterAuthOptions } from 'better-auth';
 import type { ICacheService } from '@objectstack/spec/contracts';
+import { incrementFixedWindow } from './rate-limit-storage.js';
 
 type SecondaryStorage = NonNullable<BetterAuthOptions['secondaryStorage']>;
 
@@ -17,6 +18,23 @@ type SecondaryStorage = NonNullable<BetterAuthOptions['secondaryStorage']>;
  * `@objectstack/service-cache`), and rate limiting is then enforced against a
  * single shared counter — closing the "each node counts independently, so an
  * attacker rotates nodes to bypass the limit" hole (ADR-0069 D2).
+ *
+ * ⚠️ `secondaryStorage` is NOT the seam the shared rate-limit counter uses any
+ * more (#4772). It cannot be: handing better-auth a `secondaryStorage` also
+ * moves the SESSION of record into it — `internalAdapter.createSession` skips
+ * the `sys_session` row unless `session.storeSessionInDatabase` is set, and
+ * `findSession` answers from the cached snapshot without consulting the
+ * database at all. ObjectStack revokes sessions by writing the row
+ * (`enforceSessionControls` / `enforceConcurrentCap` stamp `revoked_at` +
+ * a past `expires_at`, ADR-0069 D4), so a cache-backed session store makes
+ * idle-timeout, absolute-max and concurrent-cap revocation silently stop
+ * taking effect. The counters therefore ride `rateLimit.customStorage`
+ * instead (see `rate-limit-storage.ts`), which touches counters only. This
+ * adapter stays for a host that supplies `secondaryStorage` deliberately and
+ * accepts that trade; it is no longer wired automatically from the cache
+ * service. Whether ObjectStack should move the session of record into the
+ * cache at all (and rewrite D4's revocation to match) is #4785 — a decision,
+ * not a bug fix.
  *
  * better-auth's `secondaryStorage` contract is string-valued: `get` returns the
  * stored string (or null), `set` takes a string value + optional TTL (seconds),
@@ -65,8 +83,12 @@ export function cacheSecondaryStorage(cache: ICacheService): SecondaryStorage {
      *
      * `ICacheService.set` always (re)sets the TTL, so the window end is stored
      * alongside the count and each re-set is given only the REMAINING seconds.
-     * The envelope is private to this function — better-auth reads rate-limit
-     * counters exclusively through `increment`.
+     * The envelope is private to `incrementFixedWindow` — better-auth reads
+     * rate-limit counters exclusively through `increment`.
+     *
+     * Shares ONE implementation with `rateLimit.customStorage`
+     * ({@link incrementFixedWindow}) so the two seams that count auth requests
+     * cannot drift apart in window semantics.
      *
      * Without an atomic INCR this stays read-modify-write: two nodes can read
      * the same count and both admit a request, so the limit can over-admit
@@ -75,19 +97,8 @@ export function cacheSecondaryStorage(cache: ICacheService): SecondaryStorage {
      * independent counters it replaces (ADR-0069 D2).
      */
     increment: async (key: string, ttl: number): Promise<number> => {
-      const now = Date.now();
-      const current = parseCounter(await cache.get<unknown>(key));
-
-      if (!current || current.exp <= now) {
-        const exp = now + Math.max(1, ttl) * 1000;
-        await cache.set(key, JSON.stringify({ n: 1, exp }), Math.max(1, ttl));
-        return 1;
-      }
-
-      const n = current.n + 1;
-      const remaining = Math.max(1, Math.ceil((current.exp - now) / 1000));
-      await cache.set(key, JSON.stringify({ n, exp: current.exp }), remaining);
-      return n;
+      const { count } = await incrementFixedWindow(cache, key, ttl);
+      return count;
     },
     set: async (key: string, value: string, ttl?: number): Promise<void> => {
       await cache.set(key, value, ttl);
@@ -96,34 +107,4 @@ export function cacheSecondaryStorage(cache: ICacheService): SecondaryStorage {
       await cache.delete(key);
     },
   };
-}
-
-/** The window envelope `increment` stores: `n` requests so far, window ends at `exp` (epoch ms). */
-interface Counter {
-  n: number;
-  exp: number;
-}
-
-/**
- * Read back an `increment` envelope. Cache adapters differ on whether they
- * hand values back as the stored string (Redis) or as the original object
- * (memory), so both are accepted. Anything else — a legacy or foreign value
- * under the key — is treated as absent, which restarts the window rather than
- * throwing on an auth request.
- */
-function parseCounter(raw: unknown): Counter | null {
-  if (raw === undefined || raw === null) return null;
-  let value: unknown = raw;
-  if (typeof raw === 'string') {
-    try {
-      value = JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-  if (typeof value !== 'object' || value === null) return null;
-  const { n, exp } = value as Partial<Counter>;
-  if (typeof n !== 'number' || !Number.isFinite(n)) return null;
-  if (typeof exp !== 'number' || !Number.isFinite(exp)) return null;
-  return { n, exp };
 }
