@@ -26,7 +26,20 @@
 // agents themselves read. The root is `.claude`, not `.claude/skills`, so the
 // next subdirectory added under it is covered on arrival rather than missed the
 // same way twice.
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+//
+// ## Dead roots are a hard error (#4916)
+//
+// `collectFiles()` used to walk each root inside `try { ... } catch {}`. Rename,
+// move or delete any one of them and the ENOENT was swallowed in place: the scan
+// finished the *remaining* roots and printed `✓ ... N files clean`, exit 0. From
+// outside, "all three roots are clean" and "one root was never opened" are the
+// same output with a smaller N, and nobody reads N. So every ROOT is now resolved
+// at startup and an unresolvable one fails the gate **by name**. There is no
+// optional root and no empty catch — see `assertRootsResolvable` for why a
+// whitelist would be the wrong shape here rather than merely unnecessary.
+import {
+  mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 
@@ -70,10 +83,60 @@ function walk(dir, out) {
   }
 }
 
-/** Every Markdown/MDX file in scope, relative to the current working directory. */
+/** A declared ROOT that could not be resolved to a directory. Carries the names. */
+class DeadRootError extends Error {
+  constructor(dead) {
+    super(`unresolvable ROOT(s): ${dead.map((d) => `${d.root} — ${d.reason}`).join('; ')}`);
+    this.name = 'DeadRootError';
+    this.dead = dead;
+    /** @type {string[]} just the root names, for callers that only need to point. */
+    this.roots = dead.map((d) => d.root);
+  }
+}
+
+/**
+ * Resolve every declared ROOT before scanning anything; throw naming the ones that
+ * are not directories.
+ *
+ * Deliberately no whitelist / no "optional root" flag. A whitelist is the right
+ * shape when a root is *legitimately* absent in some checkout form, and none of
+ * these three are: `.claude`, `skills` and `content` are all git-tracked
+ * directories with tracked files in them, so any checkout that can run
+ * `pnpm check:doc-authoring` at the repo root has all three. Adding an optional
+ * marker "just in case" would hand the next author a supported way to silence this
+ * failure (`optional: true`) instead of fixing the rename — which is the empty
+ * `catch {}` again, only spelled politely. If a root ever does become legitimately
+ * absent, that is a real decision: add the entry *with* its condition and a test,
+ * don't relax the check.
+ *
+ * @throws {DeadRootError}
+ */
+function assertRootsResolvable(roots = ROOTS) {
+  const dead = [];
+  for (const root of roots) {
+    let stat = null;
+    try {
+      stat = statSync(root);
+    } catch (err) {
+      dead.push({ root, reason: err?.code === 'ENOENT' ? 'does not exist' : `cannot be read (${err?.code ?? err})` });
+      continue;
+    }
+    if (!stat.isDirectory()) dead.push({ root, reason: 'exists but is not a directory' });
+  }
+  if (dead.length) throw new DeadRootError(dead);
+}
+
+/**
+ * Every Markdown/MDX file in scope, relative to the current working directory.
+ *
+ * Nothing here is wrapped in a catch: an unreadable root fails loudly above, and an
+ * error *inside* `walk` (a vanished file, a permission fault) means the corpus was
+ * only partly read — which must not be reported as a clean scan either.
+ */
 function collectFiles() {
+  assertRootsResolvable();
   const files = [];
-  for (const r of ROOTS) { try { walk(r, files); } catch {} }
+  for (const r of ROOTS) walk(r, files);
   return files;
 }
 
@@ -151,6 +214,38 @@ function selfTest() {
     expect('defineX factory form passes', violations.some((v) => v.file === 'skills/legit/SKILL.md'), false);
     expect('non-ts fence and prose pass', violations.some((v) => v.file === 'content/docs/ui/pages.mdx'), false);
     expect('total violations', violations.length, 2);
+
+    // --- Reverse proof for the dead-root hard error (#4916), made permanent. ---
+    // Everything above ran green over a tree where all three roots resolve. That
+    // observation is worth nothing on its own: the defect being fixed here is a
+    // gate that goes green *because* it could not reach a root. So break one root
+    // the way a rename breaks it in the real repo, require red, require the red to
+    // name the root that died and not the survivors, then restore it and require
+    // green again. Red-then-green, in the same run, every run.
+    const renamedRoot = join(dir, '.claude-renamed-by-self-test');
+    renameSync(join(dir, '.claude'), renamedRoot);
+    let deadErr = null;
+    try { collectFiles(); } catch (err) { deadErr = err; }
+    renameSync(renamedRoot, join(dir, '.claude'));
+
+    expect('a renamed ROOT throws instead of quietly scanning less', deadErr instanceof DeadRootError, true);
+    expect('the failure names the dead root', deadErr?.roots?.join(',') ?? '<none>', '.claude');
+    expect('the failure does not blame the surviving roots', /skills|content/.test(deadErr?.message ?? ''), false);
+
+    // A ROOT that exists but is not a directory is dead in the same way: the old
+    // `catch {}` swallowed its ENOTDIR exactly as it swallowed ENOENT.
+    renameSync(join(dir, 'skills'), join(dir, 'skills-renamed-by-self-test'));
+    writeFileSync(join(dir, 'skills'), 'not a directory');
+    let notDirErr = null;
+    try { collectFiles(); } catch (err) { notDirErr = err; }
+    rmSync(join(dir, 'skills'));
+    renameSync(join(dir, 'skills-renamed-by-self-test'), join(dir, 'skills'));
+
+    expect('a ROOT that is a file is dead too', notDirErr?.dead?.[0]?.reason ?? '<none>', 'exists but is not a directory');
+
+    // ...and restoring both roots restores the green, so the red above was caused
+    // by the broken root and nothing else.
+    expect('restoring the roots makes the scan green again', collectFiles().length, files.length);
   } finally {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
@@ -160,13 +255,29 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude in, .claude/worktrees out) and detection both hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude in, .claude/worktrees out), detection, and the dead-root hard error (red when a ROOT is renamed, green when restored) all hold.');
 }
 
 function main() {
   if (process.argv.includes('--self-test')) return selfTest();
 
-  const files = collectFiles();
+  let files;
+  try {
+    files = collectFiles();
+  } catch (err) {
+    if (!(err instanceof DeadRootError)) throw err;
+    console.error(`\n✗ doc authoring guard: declared ROOT(s) do not resolve, so the scan would have been silently narrower:\n`);
+    for (const d of err.dead) console.error(`  ${d.root} — ${d.reason}`);
+    console.error(
+      `\nEvery entry in ROOTS (scripts/check-doc-authoring.mjs) must be a directory in the checkout,` +
+      `\nand this check runs from the repo root. If a corpus directory was renamed or moved, update` +
+      `\nROOTS to follow it; if it was deleted, remove the entry deliberately. Do NOT restore a` +
+      `\ntolerant skip: this used to be \`catch {}\`, and a dead root simply shrank the reported file` +
+      `\ncount while the gate kept printing green (#4916).\n`,
+    );
+    process.exit(1);
+    return;
+  }
   const violations = files.flatMap((file) => findViolations(readFileSync(file, 'utf8'), file));
 
   if (violations.length === 0) {
