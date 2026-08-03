@@ -528,7 +528,7 @@ not verdicts).
 | File | Sites | Class | Note |
 |---|---|---|---|
 | `flow.zod.ts` | 11 | authorable | **strict as of #4001** (4 schemas; `FlowVersionHistorySchema` is runtime — stays tolerant) |
-| `etl.zod.ts` | 10 | authorable (p) | authored pipelines — **candidate**. **−12 at #4738**: `sync.zod.ts` (the L1 "Simple Sync" file — `DataSyncConfig`, its `ConflictResolution` enum and satellites, formerly this row's co-candidate) was deleted whole rather than hardened: three-repo zero importers, no parse site, defs unreachable from the metadata-type roots (#4650 gate), so there was no author for strictness to protect (#4535 C13+C15). The integration-side `ConflictResolution` → `ConnectorConflictResolution` rename in the same change is name-only and moves no sites |
+| `etl.zod.ts` | 10 | mixed | **7 strict as of #4001 批 12** — the authoring half (`ETLSource` + `.incremental`, `ETLDestination`, `ETLTransformation`, `ETLPipeline` + `.retry` + `.notifications`). The other 3 — `ETLPipelineRun` + `.stats` + `.error` — are **deliberately left open**: engine-emitted run state (an id it minted, a status it reached, counters it accumulated), same disposition and same reason as `FlowVersionHistorySchema` above and all of `execution.zod.ts`. The exemption is recorded on the schema itself, not only here, because a note only this file carries is a note the next sweep does not read. The old blanket `authorable (p)` was too wide; verification split it. ⚠️ **Read the classification caveat before reusing this verdict**: `etl.zod.ts` has NO parse site in objectstack / objectui / cloud, so neither half could be settled by pointing at a live call. The 7 are authorable because the exported schema and type ARE the door (`SYNC_ARCHITECTURE.md` and the module's `@example` both hand-write `const p: ETLPipeline = { … }`) — the `webhook.zod.ts` posture. The 3 are wire on the shape's semantics plus settled precedent, NOT on an emit site anyone can point at today; if an ETL engine ever lands and a run result turns out to be operator-authored, that verdict is the one to revisit. Two out-of-scope findings were filed rather than fixed here: the `retry` block is a third retry-policy vocabulary #4661's convergence never reached (#4962), and all nine type aliases export the parsed shape under the bare name, which is why the SYNC_ARCHITECTURE.md pipeline examples do not compile (#4963). **−12 at #4738**: `sync.zod.ts` (the L1 "Simple Sync" file — `DataSyncConfig`, its `ConflictResolution` enum and satellites, formerly this row's co-candidate) was deleted whole rather than hardened: three-repo zero importers, no parse site, defs unreachable from the metadata-type roots (#4650 gate), so there was no author for strictness to protect (#4535 C13+C15). The integration-side `ConflictResolution` → `ConnectorConflictResolution` rename in the same change is name-only and moves no sites |
 | `execution.zod.ts` | 13 | wire | run-state envelopes — never strict. +5 at #4354 (the run-summary family: step metrics / skip reason / per-node / per-gate / the summary itself) — engine-emitted telemetry read by the Console and by operator queries, nobody authors them, so the `wire` verdict covers them unchanged |
 | `state-machine.zod.ts` | 6 | authorable (p) | **−1 at #4658**: the orphan `EventSchema` (`{ type, schema }`, an XState-style signal declaration nothing referenced — `StateMachineSchema` names event types as `on:` record keys) was deleted rather than converged with `kernel/events/core.zod.ts`'s envelope `EventSchema`, whose key set it did not intersect (#4535 C6). The remaining 6 sites and their verdict are unchanged |
 | `control-flow.zod.ts` | 5 | authorable (p) | validated structurally by `validateControlFlow`. **−1 at #4661**: `RetryPolicySchema` moved out to `shared/retry-policy.zod.ts` — `./automation` and `./system` published the same name for two different declarations (#4411), so the retry policy converged onto one. The site still exists and is still non-strict and authorable; it is simply no longer in a directory this ledger sections. ⚠️ That is a coverage gap worth knowing about: this audit sections `ui/` / `data/` / `automation/` / `security/` / `studio/` only, so a `shared/` shape is unaudited by construction. The tolerance is deliberate here — the `retryDelayMs` → `backoffMs` rename is tombstoned via `retiredKey()` precisely because a non-strict parent would otherwise swallow the old spelling |
@@ -605,12 +605,12 @@ classes; where it does, the split is stated. **Only the authorable half is in th
 2026-08-03 ruling's forced scope** — wire/open rows are listed so the arithmetic
 is complete and so nobody re-triages them from scratch next batch.
 
-#### `automation/` — 53 strip of 75
+#### `automation/` — 46 strip of 75
 
 | File | Strip | Sites | Class | Batch |
 |---|---|---|---|---|
 | `execution.zod.ts` | 13 | 13 | wire | **out of scope** — engine-emitted run state; the ledger row already says "never strict" |
-| `etl.zod.ts` | 10 | 10 | mixed | 7 authorable (`ETLSource` + `.incremental`, `ETLDestination`, `ETLTransformation`, `ETLPipeline` + `.retry` + `.notifications`), 3 wire (`ETLPipelineRun` + `.stats` + `.error` — run state) |
+| `etl.zod.ts` | 3 | 10 | wire | **Authorable half closed at 批 12** (7 sites: `ETLSource` + `.incremental`, `ETLDestination`, `ETLTransformation`, `ETLPipeline` + `.retry` + `.notifications`). What is left is `ETLPipelineRun` + `.stats` + `.error` — engine-emitted run state, exempt for the `FlowVersionHistorySchema` reason and pinned as such in `etl.test.ts`, so closing it means deleting a test that says not to. **This row is the first in `automation/` to shrink without disappearing**, which is worth naming: the reverse pin can only tell you a file reached zero, so a row that stops at its wire floor looks identical to a row nobody finished. The Class column is the only thing separating them — read it before treating this as unfinished work |
 | `flow.zod.ts` | 7 | 11 | mixed | 6 authorable (`FlowNode.connectorConfig` / `.position` / `.inputSchema` / `.waitEventConfig` / `.boundaryConfig`, `Flow.errorHandling`), 1 wire (`FlowVersionHistorySchema` — the ledger row already exempts it) |
 | `state-machine.zod.ts` | 6 | 6 | authorable (p) | `ActionRef` / `GuardRef` / `Transition` / `StateNode` + `.meta` / `StateMachine` |
 | `bpmn-interop.zod.ts` | 5 | 5 | wire (p) | **out of scope** — third-party BPMN import/export shapes; strictness turns an upstream addition into our parse crash |
@@ -626,10 +626,24 @@ wave — `builtin-node-config.zod.ts` (8), `schemaless-node-config.zod.ts` (4) a
 all three before the rows were removed, which is the only evidence that a
 deletion here is bookkeeping rather than a guess.
 
-**Authorable strip in `automation/`: 27 of 53** (was 41 of 67). What remains of
-the ruling's "known main body" is `etl` 7, `flow` 6, `state-machine` 6,
+**批 12** closed `etl.zod.ts`'s authorable half (7) and is the first row here to
+**shrink without disappearing** — it stops at a wire floor of 3 rather than
+reaching zero. That exercises the half of the bookkeeping 批 9 could not: the
+reverse pin proves a row's work is *done*, and it is silent about a row whose
+work is *deliberately partial*. Only the `Class` column distinguishes "finished,
+3 wire sites remain by decision" from "nobody got to it", so from 批 12 on the
+Class column is load-bearing rather than descriptive — and the decision is also
+written on the schema in `etl.zod.ts` and pinned in `etl.test.ts`, because a
+reader who arrives via the code will never open this file.
+
+**Authorable strip in `automation/`: 20 of 46** (was 27 of 53, and 41 of 67).
+What remains of the ruling's "known main body" is `flow` 6, `state-machine` 6,
 `control-flow` 5, and one each from `flow-function` / `time-relative-trigger` /
-`webhook`.
+`webhook`. ⚠️ 批 10 and 批 11 are in flight against exactly those rows as this is
+written, so expect this paragraph and the section header to conflict three ways;
+the resolution is always **keep every side's row edits and recompute the header
+from the rows**, then let `check:strictness-ledger` arbitrate — it reads the
+code, not the prose.
 
 #### `ui/` — 123 strip of 198
 
