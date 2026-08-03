@@ -385,6 +385,25 @@ jobs:
       - name: Check every driver runs the shared conformance cases
         run: pnpm check:driver-conformance
 
+      # Stall-guard self-test (#4250). scripts/run-with-stall-guard.mjs is what
+      # turns a frozen Test Core into a labeled red; six jobs across five
+      # workflows now route their test steps through it. But it only executes its
+      # interesting path during an event that is rare (~5-10% of days) and not
+      # reproducible on demand — so between real stalls there was nothing at all
+      # asserting it still works, and a guard that has never fired is
+      # indistinguishable from a guard that does not. A refactor could have
+      # disarmed CI's only stall detector and every run would have stayed green.
+      #
+      # This runs the guard against SYNTHETIC stalls — an idle hang, a
+      # sync-spinning hang, a hang with no output at all, a SIGTERM-trapping
+      # descendant — and asserts the verdict, the idle/ON-CPU classification, the
+      # SIGUSR2 stack harvest (including the "no report = blocked event loop"
+      # inference), full process-group teardown, and the negative direction: a
+      # healthy run still propagates its own exit status and steady output is
+      # never called a stall. ~50s, no build, no network.
+      - name: Stall-guard self-test
+        run: pnpm check:stall-guard
+
       - name: Type check (@objectstack/spec)
         run: pnpm --filter @objectstack/spec exec tsc --noEmit
 

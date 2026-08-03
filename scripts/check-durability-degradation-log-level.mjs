@@ -120,6 +120,14 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'rearmSuspendedWaitTimers',
         'Suspended runs survive on disk but nothing will ever resume them — the persisted state and the runtime disagree (ADR-0019, #4420).',
     ],
+    [
+        'writeDeferredReference',
+        "A seed's pass-2 back-fill never landed — the row was written but its reference column stays NULL, so a circular relationship is half-written while every row counter reads clean (#4729, framework#2805).",
+    ],
+    [
+        'writeRecord',
+        'A seed record was not written — the row is simply absent (or, on the upsert/update path, still holds its pre-seed contents) while the load moves on to the next record (#4729).',
+    ],
 ]);
 
 /** Log levels that are ACCEPTABLE inside a durability-guarding catch. */
