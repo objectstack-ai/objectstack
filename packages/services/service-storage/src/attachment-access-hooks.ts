@@ -25,7 +25,10 @@ import type {
  *  - beforeDelete: the caller must be the uploader OR hold edit on the
  *    parent record (sharing service's `canEdit`; public-model parents are
  *    editable by design). Fail-closed 403 `ATTACHMENT_DELETE_DENIED`; a
- *    multi-delete requires EVERY matched row to pass.
+ *    multi-delete requires EVERY matched row to pass, and one carrying
+ *    NEITHER an id NOR a `where` is refused outright (#4757) — the engine
+ *    would hand `deleteMany` an AST over the whole table, and a gate that
+ *    resolved no rows for it would be authorizing exactly that.
  *
  * System-context operations (engine self-writes, seeds, lifecycle sweeps)
  * bypass both gates, as do context-less programmatic calls on bare kernels
@@ -151,9 +154,22 @@ export function installAttachmentAccessHooks(
           const row = await engine.findOne('sys_attachment', { where: { id }, context: { ...SYSTEM_CTX } });
           if (row) rows.push(row);
         }
-      } else if (ctx?.input?.options?.where) {
+      } else {
+        const where = ctx?.input?.options?.where;
+        if (where === undefined || where === null) {
+          // #4757 — no id AND no predicate: the engine hands `deleteMany` an
+          // AST of `{ object }`, i.e. the WHOLE table. Falling through here
+          // would authorize that by resolving zero rows, so refuse instead.
+          // "Nothing to authorize" and "nothing was ever queried" are not the
+          // same verdict; reading the second as the first is fail-open.
+          // (Mirrors #4630's `resolveTargetRows` for sys_comment.)
+          forbid(
+            'ATTACHMENT_DELETE_DENIED',
+            'Refusing an unscoped multi-delete of attachments — scope the delete to the rows you mean (an id or a where predicate)',
+          );
+        }
         rows = await engine.find('sys_attachment', {
-          where: ctx.input.options.where,
+          where,
           limit: MULTI_DELETE_AUTH_LIMIT + 1,
           context: { ...SYSTEM_CTX },
         });
@@ -164,7 +180,9 @@ export function installAttachmentAccessHooks(
           );
         }
       }
-      if (!rows.length) return; // nothing matched — nothing to authorize
+      // Reached only after a real resolve: the query ran and matched no row
+      // (or the ids name no live row), so there is genuinely nothing to gate.
+      if (!rows.length) return;
 
       const sharing = getSharing();
       const callerCtx = callerContext(ctx);
