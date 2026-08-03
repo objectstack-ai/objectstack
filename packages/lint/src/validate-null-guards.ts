@@ -286,7 +286,15 @@ export function findUnguardedNullableOperands(
     if (!f) return;
     if (!opts.nullableFields.has(f.field)) return;
     if (guards.has(f.operand)) return;
-    const key = `${f.operand} ${operator}`;
+    // NUL separates the composite key's two halves (it can appear in neither a
+    // field path nor an operator). Written as the `\u0000` ESCAPE, never as a raw
+    // byte: a raw NUL makes grep/ripgrep treat the whole file as binary and
+    // silently return ZERO matches, so the file drops out of code search and out
+    // of every grep-based lint - and git will not warn you, because it only
+    // inspects the first 8000 bytes to decide binary-ness. Same convention as
+    // `packages/rest/src/rest-server.ts`. `\u0000` rather than `\0`, which turns
+    // into a legacy-octal-escape error the moment a digit follows it.
+    const key = `${f.operand}\u0000${operator}`;
     if (seen.has(key)) return;
     seen.add(key);
     findings.push({
