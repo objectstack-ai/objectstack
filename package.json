@@ -47,7 +47,7 @@
     "check:durability-log-level": "node scripts/check-durability-degradation-log-level.mjs --self-test && node scripts/check-durability-degradation-log-level.mjs",
     "check:startup-registry-verdict": "node scripts/check-startup-registry-verdict.mjs --self-test && node scripts/check-startup-registry-verdict.mjs",
     "check:console-sha": "node scripts/check-console-sha.mjs",
-    "check:objectui-changeset": "node scripts/objectui-changeset-digest.mjs --self-test",
+    "check:objectui-changeset": "node scripts/objectui-changeset-digest.mjs --self-test && node scripts/objectui-range.mjs --self-test",
     "check:release-notes": "node scripts/check-release-notes.mjs",
     "check:node-version": "node scripts/check-node-version.mjs",
     "check:published-files": "node scripts/check-published-files.mjs --self-test && node scripts/check-published-files.mjs",
