@@ -46,6 +46,13 @@
       "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-counters.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "MEASURED (#4867): the devDependency this ledger's sibling entries prescribe is not available here — it is CYCLIC, not merely unreviewed. @objectstack/objectql depends on @objectstack/metadata-protocol in `dependencies`, so adding objectql to metadata-protocol's devDependencies makes turbo refuse the graph outright: `Cyclic dependency detected: @objectstack/metadata-protocol#build, @objectstack/objectql#build` (turbo 2.10.7, `turbo run test --filter=@objectstack/metadata-protocol --dry`, measured by adding the edge and reverting it). The fake's delete is exercised by one test (the #4867 delete path) and is a by-id delete routed through SysMetadataRepository.delete, but that is an argument about this file, not about the contract, so the entry stays DEBT rather than EXEMPT per this ledger's own rule.",
+      "closes": "sink assertEngineDeleteDispatch into a package BOTH sides already depend on (@objectstack/metadata-core is the common dep; @objectstack/spec/contracts is the other candidate), then open the fake's delete with it — the devDependency route is closed by the cycle above, for this file and for the four sibling metadata-protocol entries alike"
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.recorded-by.test.ts",
       "unguarded": 1,
       "kind": "DEBT",
