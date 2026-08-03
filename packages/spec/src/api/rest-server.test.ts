@@ -12,9 +12,6 @@ import {
   EndpointRegistrySchema,
   RestApiConfig,
   RestServerConfig,
-  OpenApiWebhookEventSchema,
-  CallbackSchema,
-  OpenApi31ExtensionsSchema,
   type RestApiConfig as RestApiConfigType,
   type RestServerConfig as RestServerConfigType,
 } from './rest-server.zod';
@@ -652,156 +649,138 @@ describe('Integration Tests', () => {
 });
 
 // ==========================================
-// OpenAPI 3.1 Webhooks & Callbacks Tests
+// OpenAPI 3.1 Webhooks & Callbacks — retired (#4579)
 // ==========================================
+//
+// `OpenApiWebhookEventSchema` / `CallbackSchema` / `OpenApi31ExtensionsSchema`
+// tests were removed with the schemas (#4579, ADR-0049 enforce-or-remove).
+// The retirement itself is pinned below.
 
-describe('OpenApiWebhookEventSchema', () => {
-  it('should accept valid webhook event', () => {
-    const event = OpenApiWebhookEventSchema.parse({
-      name: 'record_created',
-      description: 'Fired when a record is created',
-      payloadSchema: '#/components/schemas/RecordCreated',
-      security: ['hmac_sha256'],
-    });
-
-    expect(event.name).toBe('record_created');
-    expect(event.method).toBe('POST');
-    expect(event.security).toContain('hmac_sha256');
+describe('[#4579] `RestServerConfig.openApi31` retirement', () => {
+  it('REJECTS an authored openApi31 block, with the fix in the message', () => {
+    // Tombstoned, not deleted: RestServerConfigSchema is not `.strict()`, so a
+    // plain deletion would silently strip the key — the author's webhook
+    // declarations would vanish without a word, which is the exact
+    // declared ≠ enforced failure the removal closes.
+    expect(() =>
+      RestServerConfigSchema.parse({
+        openApi31: {
+          webhooks: {
+            test_hook: {
+              name: 'test_hook',
+              description: 'Test webhook',
+              payloadSchema: '#/ref',
+              security: ['basic'],
+            },
+          },
+          pathItemReferences: true,
+        },
+      }),
+    ).toThrow(/RestServerConfig\.openApi31.*removed.*Delete the key/s);
   });
 
-  it('should enforce snake_case name', () => {
-    expect(() => OpenApiWebhookEventSchema.parse({
-      name: 'RecordCreated',
-      description: 'Bad name',
-      payloadSchema: '#/ref',
-      security: ['basic'],
-    })).toThrow();
+  it('still parses every live key cleanly — the tombstone rejects one key, not the config', () => {
+    const parsed = RestServerConfigSchema.parse({
+      api: { version: 'v1', basePath: '/api' },
+      crud: { dataPrefix: '/data' },
+      metadata: { prefix: '/meta' },
+      batch: { maxBatchSize: 200 },
+      routes: { excludeObjects: ['system_log'] },
+    });
+    expect(parsed.api?.version).toBe('v1');
+    expect(parsed.crud?.dataPrefix).toBe('/data');
+    expect(parsed).not.toHaveProperty('openApi31');
+  });
+});
+
+// #4642 established that a compile-time conditional-type pin in this package is
+// a no-op (tsconfig excludes `**/*.test.ts`; vitest never enables `typecheck`),
+// so the load-bearing pin is the compiler-API test below, with anti-vacuity
+// guards (a resolution failure would otherwise make every assertion pass
+// vacuously); sabotage-verified in the PR (re-adding an export turns it red).
+describe('[#4579] the OpenApi31 block schemas are not exported from any entry point', () => {
+  const REMOVED_NAMES = [
+    'OpenApi31ExtensionsSchema',
+    'OpenApi31Extensions',
+    'CallbackSchema',
+    'Callback',
+    'OpenApiWebhookEventSchema',
+    'OpenApiWebhookEvent',
+  ] as const;
+
+  it('resolves the export surface: no public entry names any of the six', async () => {
+    const ts = (await import('typescript')).default;
+    const { resolve, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const { readFileSync } = await import('node:fs');
+
+    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    // Every public entry point, read from package.json's exports map so a
+    // future entry cannot silently escape the pin below.
+    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
+      exports: Record<string, unknown>;
+    };
+    const entries: Record<string, string> = {};
+    for (const sub of Object.keys(pkg.exports)) {
+      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
+      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
+      // './openapi.json' / './package.json' are not TypeScript entry points.
+    }
+    // Anti-vacuity: the enumeration must have found the real surface.
+    expect(Object.keys(entries)).toContain('./api');
+    expect(Object.keys(entries).length).toBeGreaterThan(10);
+
+    const program = ts.createProgram(Object.values(entries), {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      skipLibCheck: true,
+      noEmit: true,
+    });
+    const checker = program.getTypeChecker();
+    const exportsOf = (sub: string) => {
+      const sf = program.getSourceFile(entries[sub]);
+      const moduleSym = sf && checker.getSymbolAtLocation(sf);
+      // Without this guard a resolution failure would make every assertion
+      // below pass vacuously — the exact way a gate goes dormant (#4642).
+      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
+      return checker.getExportsOfModule(moduleSym!);
+    };
+
+    // The surface stays non-trivial (the `not.toContain` cannot pass by
+    // resolving nothing) and the surviving neighbours stand.
+    const apiNames = exportsOf('./api').map((e) => e.getName());
+    expect(apiNames.length, './api must export a non-trivial surface').toBeGreaterThan(50);
+    expect(apiNames).toContain('RestServerConfigSchema');
+    expect(apiNames).toContain('RestApiConfigSchema');
+
+    for (const sub of Object.keys(entries)) {
+      const names = exportsOf(sub).map((e) => e.getName());
+      for (const removed of REMOVED_NAMES) {
+        expect(names, `${sub} must not export ${removed} (#4579)`).not.toContain(removed);
+      }
+    }
   });
 
-  it('should accept event with custom headers', () => {
-    const event = OpenApiWebhookEventSchema.parse({
-      name: 'sync_completed',
-      description: 'Sync finished',
-      payloadSchema: '#/ref',
-      security: ['bearer'],
-      headers: { 'X-Custom': 'value' },
-    });
-
-    expect(event.headers?.['X-Custom']).toBe('value');
-  });
-
-  it('should accept all security methods', () => {
-    const methods = ['hmac_sha256', 'basic', 'bearer', 'api_key'] as const;
-    const event = OpenApiWebhookEventSchema.parse({
-      name: 'test_event',
-      description: 'Test',
-      payloadSchema: '#/ref',
-      security: [...methods],
-    });
-    expect(event.security).toHaveLength(4);
+  it('keeps the runtime namespace consistent with the compiler view', async () => {
+    const api = await import('./index');
+    for (const removed of REMOVED_NAMES) {
+      expect(removed in api, `./api runtime namespace must not carry ${removed}`).toBe(false);
+    }
+    // What survives is the live config surface, not the dead documentation one.
+    expect('RestServerConfigSchema' in api).toBe(true);
   });
 
   // v17 dual-source cleanup (#4572): the bare names WebhookEvent(Schema) /
-  // WebhookConfig(Schema) now belong to @objectstack/spec/integration alone
+  // WebhookConfig(Schema) belong to @objectstack/spec/integration alone
   // (connector event enum + connector webhook config). The ./api pair was the
   // #4411-style trap: same names, different concepts, different forms
   // (z.object here vs z.enum there). WebhookConfig(Schema) on ./api was dead
-  // — wired into nothing (not even RestServerConfigSchema) — and was removed
-  // rather than renamed. Pin: this module no longer declares the bare names.
-  // The pin is compile-time (typeof import is type-level only — no runtime
-  // barrel load): if either bare name is re-added here, the conditional type
-  // flips to `true` and the `false` assignment fails `tsc --noEmit`.
-  it('does not re-expose the bare WebhookEvent/WebhookConfig names from ./api', () => {
-    type RestServerModule = typeof import('./rest-server.zod');
-    const hasBareEventSchema: 'WebhookEventSchema' extends keyof RestServerModule
-      ? true
-      : false = false;
-    const hasBareConfigSchema: 'WebhookConfigSchema' extends keyof RestServerModule
-      ? true
-      : false = false;
-    expect(hasBareEventSchema).toBe(false);
-    expect(hasBareConfigSchema).toBe(false);
-  });
-});
-
-describe('CallbackSchema', () => {
-  it('should accept valid callback', () => {
-    const cb = CallbackSchema.parse({
-      name: 'payment_completed',
-      expression: '{$request.body#/callbackUrl}',
-      method: 'POST',
-      url: '{$request.body#/callbackUrl}',
-    });
-
-    expect(cb.name).toBe('payment_completed');
-    expect(cb.method).toBe('POST');
-  });
-
-  it('should enforce snake_case name', () => {
-    expect(() => CallbackSchema.parse({
-      name: 'PaymentCompleted',
-      expression: '{$request.body#/url}',
-      method: 'POST',
-      url: 'https://example.com',
-    })).toThrow();
-  });
-});
-
-describe('OpenApi31ExtensionsSchema', () => {
-  it('should accept empty config with defaults', () => {
-    const ext = OpenApi31ExtensionsSchema.parse({});
-
-    expect(ext.jsonSchemaDialect).toBe('https://json-schema.org/draft/2020-12/schema');
-    expect(ext.pathItemReferences).toBe(false);
-  });
-
-  it('should accept webhooks map', () => {
-    const ext = OpenApi31ExtensionsSchema.parse({
-      webhooks: {
-        record_created: {
-          name: 'record_created',
-          description: 'Record created',
-          payloadSchema: '#/ref',
-          security: ['hmac_sha256'],
-        },
-      },
-    });
-
-    expect(ext.webhooks?.record_created).toBeDefined();
-  });
-
-  it('should accept callbacks map', () => {
-    const ext = OpenApi31ExtensionsSchema.parse({
-      callbacks: {
-        onComplete: [
-          {
-            name: 'on_complete',
-            expression: '{$request.body#/callbackUrl}',
-            method: 'POST',
-            url: '{$request.body#/callbackUrl}',
-          },
-        ],
-      },
-    });
-
-    expect(ext.callbacks?.onComplete).toHaveLength(1);
-  });
-
-  it('should accept RestServerConfig with openApi31', () => {
-    const config = RestServerConfigSchema.parse({
-      openApi31: {
-        webhooks: {
-          test_hook: {
-            name: 'test_hook',
-            description: 'Test webhook',
-            payloadSchema: '#/ref',
-            security: ['basic'],
-          },
-        },
-        pathItemReferences: true,
-      },
-    });
-
-    expect(config.openApi31?.pathItemReferences).toBe(true);
+  // and removed; WebhookEvent(Schema) was first renamed OpenApiWebhookEvent(Schema)
+  // (#4572) and then removed outright with the openApi31 block (#4579).
+  // Pin: this module declares neither the bare names nor the renamed ones.
+  it('does not re-expose the bare WebhookEvent/WebhookConfig names from ./api (#4572)', async () => {
+    const restServer = await import('./rest-server.zod');
+    expect('WebhookEventSchema' in restServer).toBe(false);
+    expect('WebhookConfigSchema' in restServer).toBe(false);
   });
 });

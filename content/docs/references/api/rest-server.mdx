@@ -38,8 +38,8 @@ Architecture alignment:
 ## TypeScript Usage
 
 ```typescript
-import { BatchEndpointsConfigSchema, CallbackSchema, CrudEndpointPatternSchema, CrudEndpointsConfigSchema, CrudOperation, EndpointRegistrySchema, GeneratedEndpointSchema, MetadataEndpointsConfigSchema, OpenApi31ExtensionsSchema, OpenApiWebhookEventSchema, RestApiConfigSchema, RestServerConfigSchema, RouteGenerationConfigSchema } from '@objectstack/spec/api';
-import type { BatchEndpointsConfig, Callback, CrudEndpointPattern, CrudEndpointsConfig, CrudOperation, EndpointRegistry, GeneratedEndpoint, MetadataEndpointsConfig, OpenApi31Extensions, OpenApiWebhookEvent, RestApiConfig, RestServerConfig, RouteGenerationConfig } from '@objectstack/spec/api';
+import { BatchEndpointsConfigSchema, CrudEndpointPatternSchema, CrudEndpointsConfigSchema, CrudOperation, EndpointRegistrySchema, GeneratedEndpointSchema, MetadataEndpointsConfigSchema, RestApiConfigSchema, RestServerConfigSchema, RouteGenerationConfigSchema } from '@objectstack/spec/api';
+import type { BatchEndpointsConfig, CrudEndpointPattern, CrudEndpointsConfig, CrudOperation, EndpointRegistry, GeneratedEndpoint, MetadataEndpointsConfig, RestApiConfig, RestServerConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 
 // Validate data
 const result = BatchEndpointsConfigSchema.parse(data);
@@ -57,20 +57,6 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableBatchEndpoint** | `boolean` | ✅ | Enable POST /data/:object/batch endpoint |
 | **operations** | `{ createMany: boolean; updateMany: boolean; deleteMany: boolean; upsertMany: boolean }` | optional | Enable/disable specific batch operations |
 | **defaultAtomic** | `boolean` | ✅ | Default atomic/transaction mode for batch operations |
-
-
----
-
-## Callback
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Callback identifier (snake_case) |
-| **expression** | `string` | ✅ | Runtime expression (e.g., `{$request.body#/callbackUrl}`) |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method for callback request |
-| **url** | `string` | ✅ | Callback URL template with runtime expressions |
 
 
 ---
@@ -161,36 +147,6 @@ const result = BatchEndpointsConfigSchema.parse(data);
 
 ---
 
-## OpenApi31Extensions
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **webhooks** | `Record<string, { name: string; description: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; payloadSchema: string; … }>` | optional | OpenAPI 3.1 webhooks (top-level webhook definitions) |
-| **callbacks** | `Record<string, { name: string; expression: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; url: string }[]>` | optional | OpenAPI 3.1 callbacks (async response definitions) |
-| **jsonSchemaDialect** | `string` | ✅ | JSON Schema dialect for schema definitions |
-| **pathItemReferences** | `boolean` | ✅ | Allow $ref in path items (OpenAPI 3.1 feature) |
-
-
----
-
-## OpenApiWebhookEvent
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Webhook event identifier (snake_case) |
-| **description** | `string` | ✅ | Human-readable event description |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method for webhook delivery |
-| **payloadSchema** | `string` | ✅ | JSON Schema $ref for the webhook payload |
-| **headers** | `Record<string, string>` | optional | Custom headers to include in webhook delivery |
-| **security** | `Enum<'hmac_sha256' \| 'basic' \| 'bearer' \| 'api_key'>[]` | ✅ | Supported authentication methods for webhook verification |
-
-
----
-
 ## RestApiConfig
 
 ### Properties
@@ -226,7 +182,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **metadata** | `{ prefix: string; enableCache: boolean; cacheTtl: integer; endpoints?: object }` | optional | Metadata endpoints configuration |
 | **batch** | `{ maxBatchSize: integer; enableBatchEndpoint: boolean; operations?: object; defaultAtomic: boolean }` | optional | Batch endpoints configuration |
 | **routes** | `{ includeObjects?: string[]; excludeObjects?: string[]; nameTransform: Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>; overrides?: Record<string, { enabled?: boolean; basePath?: string; operations?: Record<string, boolean> }> }` | optional | Route generation configuration |
-| **openApi31** | `{ webhooks?: Record<string, { name: string; description: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; payloadSchema: string; … }>; callbacks?: Record<string, { name: string; expression: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; url: string }[]>; jsonSchemaDialect: string; pathItemReferences: boolean }` | optional | OpenAPI 3.1 extensions configuration |
+| **openApi31** | `any` | optional | [REMOVED] `RestServerConfig.openApi31` was removed in @objectstack/spec 17 (#4579, ADR-0049) — no runtime ever read it: the REST server forwards only `api`/`crud`/`metadata`/`batch`/`routes`, and the served /openapi.json is the pre-generated contract enriched with the live server URL and the registered objects, so webhook/callback definitions declared here never appeared in it. Delete the key. Config-driven OpenAPI 3.1 webhooks/callbacks documentation is a new capability and must arrive via the enforce route of ADR-0049 (a new ADR), not by re-declaring the key; for a real outbound webhook use `Webhook` from `@objectstack/spec/automation`. |
 
 
 ---

@@ -395,61 +395,27 @@ export type RouteGenerationConfig = z.infer<typeof RouteGenerationConfigSchema>;
 export type RouteGenerationConfigInput = z.input<typeof RouteGenerationConfigSchema>;
 
 // ==========================================
-// OpenAPI 3.1 Webhooks & Callbacks
+// OpenAPI 3.1 Webhooks & Callbacks — REMOVED (#4579)
 // ==========================================
-
-/**
- * OpenAPI Webhook Event Schema
- * Defines a webhook event as declared in an OpenAPI 3.1 document's top-level
- * `webhooks` section — an API-documentation descriptor, NOT a runtime
- * subscription. (Renamed from `WebhookEventSchema` in v17 — that bare name
- * collided with the connector event enum in `@objectstack/spec/integration`,
- * a different concept AND a different form: z.object here vs z.enum there.
- * The outbound webhook an author configures is `WebhookSchema` in
- * `@objectstack/spec/automation`.)
- */
-export const OpenApiWebhookEventSchema = lazySchema(() => z.object({
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Webhook event identifier (snake_case)'),
-  description: z.string().describe('Human-readable event description'),
-  method: HttpMethod.default('POST').describe('HTTP method for webhook delivery'),
-  payloadSchema: z.string().describe('JSON Schema $ref for the webhook payload'),
-  headers: z.record(z.string(), z.string()).optional().describe('Custom headers to include in webhook delivery'),
-  security: z.array(
-    z.enum(['hmac_sha256', 'basic', 'bearer', 'api_key'])
-  ).describe('Supported authentication methods for webhook verification'),
-}));
-
-export type OpenApiWebhookEvent = z.infer<typeof OpenApiWebhookEventSchema>;
-
-/**
- * Callback Schema
- * OpenAPI 3.1 callback definition for asynchronous API responses
- */
-export const CallbackSchema = lazySchema(() => z.object({
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Callback identifier (snake_case)'),
-  expression: z.string().describe('Runtime expression (e.g., {$request.body#/callbackUrl})'),
-  method: HttpMethod.describe('HTTP method for callback request'),
-  url: z.string().describe('Callback URL template with runtime expressions'),
-}));
-
-export type Callback = z.infer<typeof CallbackSchema>;
-
-/**
- * OpenAPI 3.1 Extensions Schema
- * Extensions specific to OpenAPI 3.1 specification
- */
-export const OpenApi31ExtensionsSchema = lazySchema(() => z.object({
-  webhooks: z.record(z.string(), OpenApiWebhookEventSchema).optional()
-    .describe('OpenAPI 3.1 webhooks (top-level webhook definitions)'),
-  callbacks: z.record(z.string(), z.array(CallbackSchema)).optional()
-    .describe('OpenAPI 3.1 callbacks (async response definitions)'),
-  jsonSchemaDialect: z.string().default('https://json-schema.org/draft/2020-12/schema')
-    .describe('JSON Schema dialect for schema definitions'),
-  pathItemReferences: z.boolean().default(false)
-    .describe('Allow $ref in path items (OpenAPI 3.1 feature)'),
-}));
-
-export type OpenApi31Extensions = z.infer<typeof OpenApi31ExtensionsSchema>;
+//
+// `OpenApiWebhookEventSchema`, `CallbackSchema` and `OpenApi31ExtensionsSchema`
+// — the `RestServerConfig.openApi31` block — were removed in v17 (#4579,
+// ADR-0049 enforce-or-remove). The block was declared-but-unenforced end to
+// end: `normalizeConfig` (packages/rest/src/rest-server.ts) forwards only
+// `api` / `crud` / `metadata` / `batch` / `routes`; the served
+// `GET /openapi.json` is the pre-generated @objectstack/spec contract enriched
+// at request time with the live server URL + the runtime-registered objects;
+// and `gen:openapi` (scripts/build-openapi.ts) never read a webhook or
+// callback. So a definition authored under `openApi31.webhooks` never appeared
+// in any served document — false compliance, not a capability. Zero
+// import-level consumers across objectstack / cloud / objectui (three-repo
+// scan, #4579). Config-driven OpenAPI 3.1 webhooks/callbacks documentation is
+// a NEW capability: if it is ever needed it returns via the enforce route of
+// ADR-0049, through an ADR — not by re-declaring inert keys. The live OpenAPI
+// switch is `RestApiConfigSchema.enableOpenApi` above; the outbound webhook an
+// author actually configures is `WebhookSchema` in `@objectstack/spec/automation`.
+// The tombstone on `RestServerConfigSchema.openApi31` below carries the
+// author-facing prescription.
 
 // ==========================================
 // Complete REST Server Configuration
@@ -510,9 +476,23 @@ export const RestServerConfigSchema = lazySchema(() => z.object({
   routes: RouteGenerationConfigSchema.optional().describe('Route generation configuration'),
   
   /**
-   * OpenAPI 3.1 extensions (webhooks, callbacks)
+   * [REMOVED in #4579] The OpenAPI 3.1 extensions block (`webhooks` /
+   * `callbacks` / `jsonSchemaDialect` / `pathItemReferences`). Tombstoned
+   * rather than deleted: this schema is not `.strict()`, so a plain deletion
+   * would silently strip the key — an author who keeps declaring webhooks here
+   * would get a clean parse and a served /openapi.json that never mentions
+   * them, which is the exact declared ≠ enforced failure the removal closes
+   * (see the section comment above).
    */
-  openApi31: OpenApi31ExtensionsSchema.optional().describe('OpenAPI 3.1 extensions configuration'),
+  openApi31: retiredKey(
+    '`RestServerConfig.openApi31` was removed in @objectstack/spec 17 (#4579, ADR-0049) — no '
+    + 'runtime ever read it: the REST server forwards only `api`/`crud`/`metadata`/`batch`/`routes`, '
+    + 'and the served /openapi.json is the pre-generated contract enriched with the live server URL '
+    + 'and the registered objects, so webhook/callback definitions declared here never appeared in '
+    + 'it. Delete the key. Config-driven OpenAPI 3.1 webhooks/callbacks documentation is a new '
+    + 'capability and must arrive via the enforce route of ADR-0049 (a new ADR), not by re-declaring '
+    + 'the key; for a real outbound webhook use `Webhook` from `@objectstack/spec/automation`.',
+  ),
 }));
 
 export type RestServerConfig = z.infer<typeof RestServerConfigSchema>;

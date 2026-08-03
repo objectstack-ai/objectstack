@@ -28,14 +28,19 @@ import-statement-level consumer scan: framework, cloud, objectui):
     `registrationEndpoint` / `enabled`).
 - **Renamed** `WebhookEventSchema` / `WebhookEvent` in `@objectstack/spec/api`
   → `OpenApiWebhookEventSchema` / `OpenApiWebhookEvent` (same shape, rename
-  only; joins the existing `OpenApi*` family). `OpenApi31ExtensionsSchema.webhooks`
-  now references the renamed schema — its parsed/authored shape is unchanged.
+  only; joins the existing `OpenApi*` family).
+  **Superseded in the same major (#4579, ADR-0049):** the renamed pair was
+  then removed outright with the whole inert `RestServerConfig.openApi31`
+  block, so the rename never ships as a landing spot — see the
+  `rest-server-openapi31-block-removed` changeset.
   - FROM `import { WebhookEvent } from '@objectstack/spec/api'` →
-    TO `import { OpenApiWebhookEvent } from '@objectstack/spec/api'` (if you
-    meant the OpenAPI 3.1 webhook descriptor), or
-    `import { WebhookEvent } from '@objectstack/spec/integration'` (if you
-    meant the connector event enum — check which shape you actually consume:
-    object vs string enum).
+    TO: no `./api` replacement exists (the OpenAPI 3.1 webhook descriptor was
+    removed in #4579 — nothing ever rendered it into the served
+    `/openapi.json`). Use
+    `import { WebhookEvent } from '@objectstack/spec/integration'` if you
+    meant the connector event enum (check which shape you actually consume:
+    object vs string enum), or `Webhook` from `@objectstack/spec/automation`
+    for a real outbound webhook.
 - `@objectstack/spec/integration`'s `WebhookConfig(Schema)` /
   `WebhookEvent(Schema)` are **unchanged** and are now the sole owners of the
   bare names. Imports from `./integration` need no migration.
