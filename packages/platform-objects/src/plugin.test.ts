@@ -12,6 +12,7 @@ import { SysMigration, SysMigrationJournal, SysSecret } from './system/index.js'
 function makeCtx() {
   const services = new Map<string, any>();
   const hooks: Array<() => Promise<void> | void> = [];
+  const byEvent: Record<string, Array<() => Promise<void> | void>> = {};
   const logs: { info: string[]; warn: string[] } = { info: [], warn: [] };
   const ctx: any = {
     logger: {
@@ -26,9 +27,12 @@ function makeCtx() {
       return s as T;
     },
     hook: (event: string, fn: () => Promise<void> | void) => {
+      (byEvent[event] ??= []).push(fn);
       if (event === 'kernel:ready') hooks.push(fn);
     },
     _flushReady: async () => { for (const h of hooks) await h(); },
+    _flush: async (event: string) => { for (const h of byEvent[event] ?? []) await h(); },
+    _events: () => Object.keys(byEvent),
   };
   return ctx;
 }
@@ -168,5 +172,80 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
     await boot(engine);
 
     expect(invalidated).toBe(1);
+  });
+
+  /**
+   * #4769 — the attestation has to run after the boot's own data has landed.
+   * `kernel:ready` alone was too early for a deployment that seeds: the
+   * certificate went in while rows contradicting it were still being written,
+   * and the next boot enforced it against them.
+   */
+  describe('timing: after this boot has finished writing (#4769)', () => {
+    it('subscribes to app:seeded, the settle point for this boot own seed', async () => {
+      const plugin = new PlatformObjectsPlugin();
+      const ctx = makeCtx();
+      ctx.registerService('objectql', engineWith(true));
+
+      await plugin.init(ctx);
+      await plugin.start(ctx);
+
+      expect(ctx._events()).toContain('app:seeded');
+    });
+
+    it('attests when the seed settles, without waiting for kernel:ready', async () => {
+      const engine = engineWith(true);
+      const plugin = new PlatformObjectsPlugin();
+      const ctx = makeCtx();
+      ctx.registerService('objectql', engine);
+      await plugin.init(ctx);
+      await plugin.start(ctx);
+
+      await ctx._flush('app:seeded');
+
+      expect(engine.rows.map((r: any) => r.id).sort()).toEqual([
+        'adr-0104-file-references',
+        'adr-0104-value-shapes',
+      ]);
+    });
+
+    it('the two passes are one idempotent call — kernel:ready adds nothing after app:seeded', async () => {
+      const engine = engineWith(true);
+      const plugin = new PlatformObjectsPlugin();
+      const ctx = makeCtx();
+      ctx.registerService('objectql', engine);
+      await plugin.init(ctx);
+      await plugin.start(ctx);
+
+      await ctx._flush('app:seeded');
+      await ctx._flushReady();
+
+      expect(engine.rows).toHaveLength(2);
+    });
+
+    /**
+     * The seed's counterexample reaches the attestation through the engine,
+     * so a boot that wrote an off-shape value certifies nothing — the
+     * end-to-end shape of the #4769 repro, one layer up from the engine's own
+     * tests.
+     */
+    it('a boot whose seed wrote a violating value attests nothing for that gate', async () => {
+      const engine = engineWith(true);
+      engine.valueShapeViolationsAdmitted = () => ({
+        'adr-0104-file-references': {
+          count: 10,
+          first: { object: 'showcase_task', field: 'cover', type: 'image', detail: 'Expected an opaque sys_file id' },
+        },
+      });
+      const plugin = new PlatformObjectsPlugin();
+      const ctx = makeCtx();
+      ctx.registerService('objectql', engine);
+      await plugin.init(ctx);
+      await plugin.start(ctx);
+
+      await ctx._flush('app:seeded');
+      await ctx._flushReady();
+
+      expect(engine.rows.map((r: any) => r.id)).toEqual(['adr-0104-value-shapes']);
+    });
   });
 });

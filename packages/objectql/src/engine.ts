@@ -83,6 +83,7 @@ import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
+import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import { applyHaving } from './having-filter.js';
@@ -92,6 +93,28 @@ import {
   type DanglingReferenceAuditOptions,
   type DanglingReferenceReport,
 } from './integrity/dangling-reference-audit.js';
+
+/**
+ * One read of a `sys_migration` flag row: the verdict, plus whether the ledger
+ * could actually be consulted to reach it (#4769). Both negatives keep the
+ * gate closed; only the conclusive one is worth remembering.
+ */
+interface MigrationFlagRead {
+  verified: boolean;
+  conclusive: boolean;
+}
+
+/**
+ * What this boot has ADMITTED against one ADR-0104 migration's contract —
+ * the counterexample that forbids attesting it (#4769). `count` is a lower
+ * bound (every admitted value is counted, but a revocation records the total
+ * known at the moment it wrote); `first` is the one an operator is shown,
+ * because a prescription needs a place to start, not a census.
+ */
+export interface AdmittedValueShapeViolationTally {
+  count: number;
+  first: { object: string; field: string; type: string; detail: string };
+}
 
 /**
  * The lifecycle events the engine actually dispatches via `triggerHooks`. This
@@ -3060,15 +3083,13 @@ export class ObjectQL implements IObjectQLEngine {
    * short-circuits before any query.
    */
   async isFileReferencesMigrationVerified(): Promise<boolean> {
-    if (!this.fileReferencesMigrationVerified) {
-      this.fileReferencesMigrationVerified = this.readMigrationFlagVerified(
-        FILE_REFERENCES_MIGRATION_ID,
-        '[value-shape] this deployment has verified the file-as-reference migration — ' +
-          'media value shapes are enforced and released field files may be collected ' +
-          '(ADR-0104 / #3617)',
-      );
-    }
-    return this.fileReferencesMigrationVerified;
+    return this.readMigrationFlagMemoized(
+      'fileReferencesMigrationVerified',
+      FILE_REFERENCES_MIGRATION_ID,
+      '[value-shape] this deployment has verified the file-as-reference migration — ' +
+        'media value shapes are enforced and released field files may be collected ' +
+        '(ADR-0104 / #3617)',
+    );
   }
 
   /**
@@ -3081,14 +3102,53 @@ export class ObjectQL implements IObjectQLEngine {
    * classes.
    */
   async isValueShapesMigrationVerified(): Promise<boolean> {
-    if (!this.valueShapesMigrationVerified) {
-      this.valueShapesMigrationVerified = this.readMigrationFlagVerified(
-        VALUE_SHAPES_MIGRATION_ID,
-        '[value-shape] this deployment has verified the value-shape scan — reference and ' +
-          'structured-JSON value shapes are enforced (ADR-0104 / #3438)',
-      );
-    }
-    return this.valueShapesMigrationVerified;
+    return this.readMigrationFlagMemoized(
+      'valueShapesMigrationVerified',
+      VALUE_SHAPES_MIGRATION_ID,
+      '[value-shape] this deployment has verified the value-shape scan — reference and ' +
+        'structured-JSON value shapes are enforced (ADR-0104 / #3438)',
+    );
+  }
+
+  /**
+   * The memoized seam both public flag readers share — and the place where
+   * "read once per process" is kept from meaning "answer from a read that
+   * never happened" (#4769).
+   *
+   * The two negatives this read can produce are NOT the same fact:
+   *
+   *  - **Conclusive.** The ledger was reachable and it does not authorise the
+   *    gate (no row, `verified_at` null, blocking findings). Evidence was
+   *    consulted; memoize it. A later in-process migration run announces
+   *    itself through {@link invalidateDataMigrationFlags}.
+   *  - **Inconclusive.** The ledger could not be ASKED — `sys_migration` is
+   *    not registered yet, or the query threw. Both still answer `false` (an
+   *    unaskable gate stays closed), but freezing that for the life of the
+   *    process turns one unlucky early write into a whole boot's posture. It
+   *    is exactly how one boot ends up lax over data the next boot rejects:
+   *    the platform objects register during kernel init while the very first
+   *    write can land before them, so the answer cached is about a moment
+   *    when nothing could have answered at all.
+   *
+   * So an inconclusive read is answered but not kept. The retry costs one
+   * registry lookup per write until the ledger exists (it short-circuits
+   * before any query), and stops the moment a real read succeeds.
+   */
+  private async readMigrationFlagMemoized(
+    slot: 'fileReferencesMigrationVerified' | 'valueShapesMigrationVerified',
+    migrationId: string,
+    verifiedLog: string,
+  ): Promise<boolean> {
+    const cached = this[slot];
+    if (cached) return (await cached).verified;
+    const pending = this.readMigrationFlagVerified(migrationId, verifiedLog);
+    this[slot] = pending;
+    const result = await pending;
+    // Only a read that actually consulted the ledger may be remembered. Clear
+    // by identity so a concurrent `invalidateDataMigrationFlags()` (or a
+    // re-read that already replaced this slot) is not undone here.
+    if (!result.conclusive && this[slot] === pending) this[slot] = null;
+    return result.verified;
   }
 
   /**
@@ -3098,11 +3158,21 @@ export class ObjectQL implements IObjectQLEngine {
    * an unreadable table, a malformed row — all `false`. Enforcement derives
    * from evidence, and absent evidence is not permission.
    *
+   * `conclusive` says whether the ledger was actually consulted, so the caller
+   * can tell "asked, and the answer is no" from "could not ask" — see
+   * {@link readMigrationFlagMemoized}. It never changes the verdict, only
+   * whether that verdict is worth remembering.
+   *
    * Costs nothing on a kernel without the platform objects: the registry
    * lookup short-circuits before any query.
    */
-  private async readMigrationFlagVerified(migrationId: string, verifiedLog: string): Promise<boolean> {
-    if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return false;
+  private async readMigrationFlagVerified(
+    migrationId: string,
+    verifiedLog?: string,
+  ): Promise<{ verified: boolean; conclusive: boolean }> {
+    if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) {
+      return { verified: false, conclusive: false };
+    }
     try {
       const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
         where: { id: migrationId },
@@ -3110,7 +3180,7 @@ export class ObjectQL implements IObjectQLEngine {
         context: { isSystem: true } as ExecutionContextInput,
       });
       const row: any = rows?.[0];
-      if (!row || row.id !== migrationId) return false;
+      if (!row || row.id !== migrationId) return { verified: false, conclusive: true };
       const verified = isDataMigrationFlagVerified({
         id: migrationId,
         last_run_at: String(row.last_run_at ?? ''),
@@ -3119,11 +3189,173 @@ export class ObjectQL implements IObjectQLEngine {
         // coercion lands on NaN, which fails the === 0 test.
         blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
       });
-      if (verified) this.logger.info(verifiedLog);
-      return verified;
+      if (verified && verifiedLog) this.logger.info(verifiedLog);
+      return { verified, conclusive: true };
     } catch {
-      return false; // unreadable evidence → stay lenient
+      return { verified: false, conclusive: false }; // unreadable evidence → stay lenient, keep asking
     }
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // The counterexamples this boot has written (ADR-0104 / #4769)
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Every ADR-0104 value-shape violation this process has ADMITTED, tallied
+   * per migration id — the evidence that stops a boot certifying a contract it
+   * has itself broken.
+   *
+   * ## The invariant this exists to keep
+   *
+   * A boot may not prove a contract it violates in that same boot. The
+   * fresh-datastore attestation used to do exactly that: a store created from
+   * empty was recorded as `verified` because emptiness settles both ADR-0104
+   * facts — and then the very same boot seeded rows whose values contradict
+   * them. The certificate was true at the instant it was written and false a
+   * second later, so the FIRST boot ran warn-first over data it stored and
+   * every LATER boot read the certificate, enforced, and rejected the data its
+   * own predecessor had written. Nothing changed but a restart.
+   *
+   * ## Why the write path is the right witness
+   *
+   * Certifying a deployment clean needs a complete scan; showing it is NOT
+   * clean needs one counterexample. The write path already computes that
+   * counterexample with the exact predicate strict mode would use, so this
+   * tally is free, exact, and impossible to drift from enforcement — the three
+   * properties a second scan implementation would have had to earn.
+   *
+   * Keyed by migration id (not by field class) so the one place that maps a
+   * value class to the flag that gates it stays here, beside the gates
+   * themselves. A consumer asks about `adr-0104-file-references` and gets an
+   * answer about `adr-0104-file-references`.
+   */
+  valueShapeViolationsAdmitted(): Record<string, AdmittedValueShapeViolationTally> {
+    const out: Record<string, AdmittedValueShapeViolationTally> = {};
+    for (const [migrationId, tally] of this.admittedValueShapeViolations) {
+      out[migrationId] = { count: tally.count, first: { ...tally.first } };
+    }
+    return out;
+  }
+
+  /** Per-migration tally of admitted violations; see the accessor above. */
+  private readonly admittedValueShapeViolations = new Map<string, AdmittedValueShapeViolationTally>();
+  /** Ids whose creation attestation this process has already torn up. */
+  private readonly retractedCreationAttestations = new Set<string>();
+  /** Serializes retraction writes so concurrent violations issue one update. */
+  private creationAttestationRetraction: Promise<void> = Promise.resolve();
+
+  /**
+   * The sink `validateRecord` reports admitted violations to. Built per write
+   * (one closure per call, not per row) so the tally can name the object.
+   */
+  private admittedViolationSink(object: string): AdmittedValueShapeViolationSink {
+    return (violation) => this.noteAdmittedValueShapeViolation(object, violation);
+  }
+
+  private noteAdmittedValueShapeViolation(object: string, violation: AdmittedValueShapeViolation): void {
+    const migrationId =
+      violation.gate === 'media' ? FILE_REFERENCES_MIGRATION_ID : VALUE_SHAPES_MIGRATION_ID;
+    const existing = this.admittedValueShapeViolations.get(migrationId);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      this.admittedValueShapeViolations.set(migrationId, {
+        count: 1,
+        first: { object, field: violation.field, type: violation.type, detail: violation.detail },
+      });
+    }
+    this.retractCreationAttestation(migrationId);
+  }
+
+  /**
+   * Tear up a creation attestation this boot has just contradicted (#4769).
+   *
+   * The attestation normally never gets written in the first place: it asks
+   * {@link valueShapeViolationsAdmitted} before recording anything, so a boot
+   * that seeded a violating value declines to certify. This closes the other
+   * order — the certificate is already in the ledger and the contradicting
+   * value lands afterwards, which is reachable whenever the deployment is
+   * still lenient at that moment (`OS_ALLOW_LAX_MEDIA_VALUES` /
+   * `OS_ALLOW_LAX_VALUE_SHAPES`, or a seed that finishes in the background
+   * after its budget). Without this the ledger would keep asserting a fact the
+   * store contradicts, and the NEXT boot would enforce it against exactly the
+   * data this one wrote.
+   *
+   * Deliberately narrow:
+   *
+   *  - only on a store THIS boot created from empty, so the only verified row
+   *    that can exist is the attestation this boot issued. Evidence produced by
+   *    a real `os migrate … --apply` run is never rewritten from here — a scan
+   *    that walked the whole store outranks a single write's observation, and
+   *    an operator who opted into leniency did not ask us to revoke their
+   *    migration;
+   *  - never inserts. No row means nothing was certified, and the attestation
+   *    declining on the tally is what keeps it that way;
+   *  - once per migration id per process, and never awaited by the write. The
+   *    recorded `blocking` count is therefore a LOWER bound — which is all the
+   *    gate reads, since any non-zero count closes it.
+   */
+  private retractCreationAttestation(migrationId: string): void {
+    if (this.retractedCreationAttestations.has(migrationId)) return;
+    if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return;
+    if (!this.wasDatastoreCreatedFromEmpty()) return;
+    this.retractedCreationAttestations.add(migrationId);
+    this.creationAttestationRetraction = this.creationAttestationRetraction
+      .then(async () => {
+        const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
+          where: { id: migrationId },
+          limit: 1,
+          context: { isSystem: true } as ExecutionContextInput,
+        });
+        const row: any = rows?.[0];
+        if (!row || row.id !== migrationId) return; // nothing certified — nothing to revoke
+        if (row.verified_at == null) return; // gate already closed
+        const tally = this.admittedValueShapeViolations.get(migrationId);
+        const now = new Date().toISOString();
+        let details: Record<string, unknown> = {};
+        if (typeof row.details === 'string' && row.details.length > 0) {
+          try {
+            const parsed = JSON.parse(row.details);
+            if (parsed && typeof parsed === 'object') details = parsed as Record<string, unknown>;
+          } catch {
+            details = { previous_details: row.details };
+          }
+        }
+        await this.update(
+          DATA_MIGRATION_FLAG_OBJECT,
+          {
+            id: migrationId,
+            verified_at: null,
+            blocking: tally?.count ?? 1,
+            details: JSON.stringify({
+              ...details,
+              revoked: 'boot-admitted-violating-value',
+              revoked_at: now,
+              revoked_by: tally?.first,
+            }),
+            updated_at: now,
+          },
+          { context: { isSystem: true } as ExecutionContextInput },
+        );
+        this.invalidateDataMigrationFlags();
+        this.logger.warn(
+          `[value-shape] revoked '${migrationId}': this deployment was recorded as verified at ` +
+            'creation, then this boot wrote a value that contradicts it ' +
+            `(${tally?.first.object}.${tally?.first.field}: ${tally?.first.detail}). ` +
+            'The gate is closed again — fix the data, then run `os migrate ' +
+            (migrationId === FILE_REFERENCES_MIGRATION_ID ? 'files-to-references' : 'value-shapes') +
+            ' --apply` to re-earn it (ADR-0104 / #4769).',
+        );
+      })
+      .catch((err: any) => {
+        // Bookkeeping must never surface as a write failure. Staying verified
+        // is the bad direction, so say so loudly rather than silently.
+        this.logger.warn(
+          `[value-shape] could not revoke the creation attestation for '${migrationId}' ` +
+            `(${err?.message ?? err}) — the ledger still claims this deployment is verified ` +
+            'while its data contradicts that; run the migration to re-derive it (#4769)',
+        );
+      });
   }
 
   /**
@@ -3178,7 +3410,13 @@ export class ObjectQL implements IObjectQLEngine {
         if ((media || mediaByEnv) && (covered || coveredByEnv)) break;
       }
 
-      if (media && !(await this.isFileReferencesMigrationVerified())) {
+      // [#4769] Read the ledger, not the memo. This advisory runs once, at
+      // `kernel:bootstrapped`, and the fresh-datastore attestation may have
+      // written its rows moments earlier — after the boot's first write had
+      // already memoized "not verified". Reporting from that memo tells a
+      // brand-new deployment to run a migration whose gate is already closed.
+      // One query per applicable gate, once per boot.
+      if (media && !(await this.readMigrationFlagVerified(FILE_REFERENCES_MIGRATION_ID)).verified) {
         this.logger.info(
           '[value-shape] media values are checked but NOT enforced here, and released files are ' +
             'never collected — this deployment has not verified its file migration. Run ' +
@@ -3186,7 +3424,7 @@ export class ObjectQL implements IObjectQLEngine {
             'to close the gate (ADR-0104 / #3617).',
         );
       }
-      if (covered && !(await this.isValueShapesMigrationVerified())) {
+      if (covered && !(await this.readMigrationFlagVerified(VALUE_SHAPES_MIGRATION_ID)).verified) {
         this.logger.info(
           '[value-shape] reference and structured-JSON values are checked but NOT enforced here — ' +
             'this deployment has not verified its value-shape scan. Run `os migrate value-shapes` ' +
@@ -3267,8 +3505,8 @@ export class ObjectQL implements IObjectQLEngine {
    * lenient — the safe direction. A host that migrates in-process can call
    * {@link invalidateDataMigrationFlags} instead of waiting for a restart.
    */
-  private fileReferencesMigrationVerified: Promise<boolean> | null = null;
-  private valueShapesMigrationVerified: Promise<boolean> | null = null;
+  private fileReferencesMigrationVerified: Promise<MigrationFlagRead> | null = null;
+  private valueShapesMigrationVerified: Promise<MigrationFlagRead> | null = null;
 
   /** Lazily-built index: child object name → roll-up summary descriptors on
    *  parent objects that aggregate it. Invalidated when packages register. */
@@ -4203,6 +4441,9 @@ export class ObjectQL implements IObjectQLEngine {
         // a media field, and memoized after the first object that does.
         const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(schemaForValidation);
         const valueShapeStrict = await this.valueShapeStrictFor(schemaForValidation);
+        // [#4769] Where a warn-first admission is recorded, so this boot cannot
+        // go on to certify a contract it has just written data against.
+        const onAdmittedValueShapeViolation = this.admittedViolationSink(object);
         // Locale + translation hooks for the rejection messages (#3957) —
         // resolved once for the batch, identical for every row.
         const msgCtx = this.validationMessageContext(object, opCtx.context);
@@ -4220,7 +4461,7 @@ export class ObjectQL implements IObjectQLEngine {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
-            validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx });
+            validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx });
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
@@ -4500,10 +4741,13 @@ export class ObjectQL implements IObjectQLEngine {
            const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(updateSchema);
            const valueShapeStrict = await this.valueShapeStrictFor(updateSchema);
            const updateMsgCtx = this.validationMessageContext(object, opCtx.context);
+           // [#4769] See the insert path — an update admits values on the same
+           // terms, so it owes the same counterexample.
+           const onAdmittedValueShapeViolation = this.admittedViolationSink(object);
            if (hookContext.input.id) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx });
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                if (needsPriorRecord(updateSchema as any) || (this.hooks.get('afterUpdate')?.length ?? 0) > 0) {
                    const priorAst: QueryAST = { object, where: { id: hookContext.input.id }, limit: 1 };
                    priorRecord = await driver.findOne(object, priorAst, hookContext.input.options as any);
@@ -4534,7 +4778,7 @@ export class ObjectQL implements IObjectQLEngine {
            } else if (options?.multi && driver.updateMany) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx });
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
                // [#2982] Consume the middleware-composed AST seeded above, so
                // the injected row-scoping (RLS write filter, sharing's
                // editable-rows filter) actually binds the driver operation. Fail
