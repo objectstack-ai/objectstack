@@ -120,6 +120,7 @@ import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
 import { validateSecurityPosture } from './validate-security-posture.js';
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
+import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
@@ -794,6 +795,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateOrgAxisRedLines(stack),
+  },
+  // #4698 — the "declared but never read" gate, for the one surface where the
+  // predicate is EXACT rather than inferred. A sharing rule's `condition` has a
+  // single runtime consumer (`bootstrapDeclaredSharingRules`) whose only use of
+  // the key is `compileCelToFilter(condition, { variables: {} })`; a condition
+  // that does not lower means the rule is SKIPPED at boot, so the grant is
+  // declared and does not exist. The lint calls that same compiler, from the
+  // same package, with the same options — the verdict cannot drift from the
+  // consumer's. Gating for the ADR-0078 reason `SharingRuleSchema`'s own
+  // docblock states: the whole authorable surface is enforced, and this was the
+  // one field where that sentence was not yet true.
+  {
+    name: 'validateSharingRuleEnforceability',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-sharing-rule-enforceability.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'P2 (#4463): a sharing rule is not a `flow`, and P1 gates `flow` alone. The rule itself is '
+      + 'snapshot-safe — it reads ONLY `stack.sharingRules[].condition` and needs no other collection — '
+      + 'so widening it here is a `runtimeTypes: [\'sharing_rule\']` edit once the gate accepts that type, '
+      + 'not new wiring. Recorded as pending rather than done, because a rule that has never run at a '
+      + 'door should not claim it.',
+    run: (stack) => validateSharingRuleEnforceability(stack),
   },
 ];
 
