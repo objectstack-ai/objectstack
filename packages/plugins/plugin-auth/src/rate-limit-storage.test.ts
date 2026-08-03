@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   createLazyCacheRateLimitStorage,
+  createLazyCounterStore,
   incrementFixedWindow,
   InProcessCounterStore,
 } from './rate-limit-storage.js';
@@ -208,6 +209,77 @@ describe('createLazyCacheRateLimitStorage — no cache service at all (#4772 acc
       logger: {},
     });
     await expect(storage.consume('k', { window: 1, max: 1 })).resolves.toBeTruthy();
+  });
+});
+
+// #4790 — the resolution half, extracted so ObjectStack's OWN counters (the
+// #2780 per-number OTP send budget) reach the shared cache through the same
+// path as better-auth's, instead of a second copy of it.
+describe('createLazyCounterStore (#4790 — one lazy resolution, many counters)', () => {
+  it('names the subject in both log lines, so two degraded budgets are distinguishable', async () => {
+    const logger = makeLogger();
+    const resolve = createLazyCounterStore({
+      resolveCache: async () => undefined,
+      logger,
+      subject: 'per-number OTP send budget (#2780)',
+      degradedImpact: 'an N-node deployment can send N× the configured PAID SMS',
+    });
+    await resolve();
+    const warned = logger.warn.mock.calls[0][0] as string;
+    expect(warned).toContain('per-number OTP send budget (#2780)');
+    expect(warned).toContain('no `cache` service registered at all');
+    expect(warned).toContain('N× the configured PAID SMS');
+
+    const bound = createLazyCounterStore({
+      resolveCache: async () => makeCache() as any,
+      logger,
+      subject: 'per-number OTP send budget (#2780)',
+    });
+    await bound();
+    expect(logger.info.mock.calls[0][0]).toContain(
+      'per-number OTP send budget (#2780) bound to the kernel cache service',
+    );
+  });
+
+  it('hands back ONE fallback instance, so the degraded path still counts per node', async () => {
+    const resolve = createLazyCounterStore({ resolveCache: async () => undefined, subject: 'x' });
+    const first = await resolve();
+    const second = await resolve();
+    expect(first).toBe(second);
+    expect(first).toBeInstanceOf(InProcessCounterStore);
+  });
+
+  it('keeps asking until the cache is there, then memoises it', async () => {
+    const cache = makeCache();
+    let registered = false;
+    const resolveCache = vi.fn(async () => (registered ? (cache as any) : undefined));
+    const resolve = createLazyCounterStore({ resolveCache, subject: 'x' });
+
+    expect(await resolve()).toBeInstanceOf(InProcessCounterStore);
+    registered = true;
+    expect(await resolve()).toBe(cache);
+    await resolve();
+    // One miss + one hit; once resolved the handle is never looked up again.
+    expect(resolveCache).toHaveBeenCalledTimes(2);
+  });
+
+  it('warns once and survives a logger without warn/info', async () => {
+    const logger = makeLogger();
+    const resolve = createLazyCounterStore({ resolveCache: async () => undefined, logger, subject: 'x' });
+    await resolve();
+    await resolve();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+
+    const bare = createLazyCounterStore({ resolveCache: async () => undefined, logger: {}, subject: 'x' });
+    await expect(bare()).resolves.toBeInstanceOf(InProcessCounterStore);
+  });
+
+  it('treats a throwing resolver as "no shared store right now"', async () => {
+    const resolve = createLazyCounterStore({
+      resolveCache: async () => { throw new Error('service registry exploded'); },
+      subject: 'x',
+    });
+    await expect(resolve()).resolves.toBeInstanceOf(InProcessCounterStore);
   });
 });
 
