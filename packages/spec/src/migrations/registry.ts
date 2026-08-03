@@ -737,7 +737,23 @@ const step17: MigrationStep = {
     + '(its schema is not `.strict()`; a plain delete would strip it silently), the studio '
     + 'key is rejected by the strict manifest parse with its own guidance prescription, and '
     + 'the orphaned `ActivationEventSchema` def is removed with them. Behaviour is '
-    + 'byte-identical: eager activation was always the only behaviour.',
+    + 'byte-identical: eager activation was always the only behaviour.\n\n'
+    + 'That kernel-side tombstone was then SUPERSEDED inside the same unreleased major by '
+    + '#4834, which finished the enforce-or-remove pass one level up: the entire '
+    + '`plugin-runtime.zod` family — `DynamicLoadRequest`, `DynamicUnloadRequest`, '
+    + '`DynamicPluginResult`, `PluginSource`, `DynamicPluginOperation` — is removed, because '
+    + 'the "Dynamic Loading" capability it described (runtime load / unload / reload without '
+    + 'a kernel restart, with sandboxing, integrity hashes, drain strategies and '
+    + 'dependent-cascade policy) has no server anywhere: no runtime in objectstack, cloud or '
+    + 'objectui ever received one of these requests or produced one of these results. #3896 '
+    + 'had suspended the call on these five deliberately — "operation contracts, not security '
+    + 'promises" — in a changeset paragraph no issue carried; #4834 is that decision, '
+    + 'answered REMOVE. So a v16 author who wrote `activationEvents` inside a '
+    + '`DynamicLoadRequest` value does not delete a key: the whole value has no shape and no '
+    + 'recipient, and importing `DynamicLoadRequestSchema` at all is TS2305 in v17. The '
+    + 'studio half of the `activationEvents` retirement is untouched and still rejects the '
+    + 'key with its own prescription — `defineStudioPlugin` remains a live authoring surface. '
+    + 'Behaviour is again byte-identical: nothing ever executed a dynamic plugin operation.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1249,14 +1265,71 @@ const step17: MigrationStep = {
         + 'with a guidance prescription (as are its former VS Code-flavoured aliases '
         + '`activation` / `events` / `onActivate`), and the orphaned `ActivationEventSchema` / '
         + '`ActivationEvent` exports are removed from `./kernel` and `./studio` with the keys '
-        + '(#3950: an exported schema with no consumer is read as a capability). #4657.',
+        + '(#3950: an exported schema with no consumer is read as a capability). #4657. '
+        + 'SUPERSEDED ON THE KERNEL SIDE by #4834 (same unreleased major): the whole '
+        + '`DynamicLoadRequest` shape — and the rest of the plugin-runtime family with it — '
+        + 'was removed, which took this key\'s `retiredKey()` tombstone with it. That is '
+        + 'strictly stronger than the tombstone, not weaker: there is no longer a '
+        + '`DynamicLoadRequest` to author the key INTO, so the prescription an author needs '
+        + 'is no longer "delete this key" but "this request shape does not exist" (see '
+        + '`plugin-runtime-family-retired` below). The studio half of this entry is '
+        + 'unaffected and still enforced by the strict manifest parse.',
       acceptanceCriteria:
-        'No `DynamicLoadRequest` or `defineStudioPlugin` input authors `activationEvents` — '
-        + 'authoring it is a tsc error (`never` on the kernel side; an unknown key on the '
-        + 'strict studio manifest) and a parse error carrying the prescription on both. No '
+        'No `defineStudioPlugin` input authors `activationEvents` — authoring it is an '
+        + 'unknown key on the strict studio manifest and a parse error carrying the '
+        + 'prescription. On the kernel side the stronger #4834 criterion applies instead: '
+        + 'there is no `DynamicLoadRequest` type or schema left to author it into at all. No '
         + 'code imports `ActivationEventSchema` / `ActivationEvent` from '
         + '`@objectstack/spec/kernel` or `@objectstack/spec/studio` (TS2305 after upgrade). '
         + 'Runtime behaviour is byte-identical: plugins loaded eagerly before and after.',
+    },
+    {
+      id: 'plugin-runtime-family-retired',
+      surface:
+        'kernel.dynamicLoadRequest / kernel.dynamicUnloadRequest / kernel.dynamicPluginResult '
+        + '/ kernel.pluginSource / kernel.dynamicPluginOperation',
+      replacement:
+        '(removed — there is no replacement shape, because there is no operation to describe. '
+        + 'Plugins are composed at boot: `defineStack` registers them and the kernel runs '
+        + 'register → init → start; the set is fixed until the process restarts. Delete the '
+        + 'import and the value. Runtime plugin loading, if it is ever built, returns via the '
+        + 'enforce route of ADR-0049 through a new ADR — loader first, vocabulary second)',
+      reason:
+        'The five schemas declared the "Dynamic Loading" capability — runtime load / unload / '
+        + 'reload of plugins without a kernel restart, with sandboxing, integrity hashes, '
+        + 'drain strategies and dependent-cascade policy — and NOTHING implemented it. A '
+        + 'bare-name scan of objectstack, cloud and objectui found zero references outside '
+        + "this package's own declaration, its unit tests and the generated artifacts: no "
+        + 'runtime ever received a `DynamicLoadRequest`, performed a load/unload, or produced '
+        + 'a `DynamicPluginResult`. That is the ADR-0049 false-compliance shape at its most '
+        + 'inviting to an AI author (ADR-0033), who reads `DynamicLoadRequestSchema` in the '
+        + 'published IDE bundle as proof the platform hot-loads plugins and constructs a '
+        + 'request that parses clean and is received by nobody (#3950: an exported schema '
+        + 'with no consumer is read as a capability). The #3896 follow-up removed this '
+        + "module's discovery/sandbox config island and left these five in place explicitly — "
+        + '"operation contracts, not security promises; the enforce-or-remove call on them is '
+        + 'a design decision rather than a correction" — but that suspension lived only in a '
+        + 'changeset paragraph with no issue carrying it. #4834 is that decision, answered '
+        + 'REMOVE. `experimental` was considered and rejected: it is only `.describe()` prose '
+        + 'and cannot stop an import, the weakest of the three ADR-0049 channels. None of the '
+        + 'five is stored metadata — they are root request/result payload shapes embedded in '
+        + 'no parent schema and parsed against no metadata document — so no `sys_metadata` '
+        + 'row can carry one and there is no source for the D2 chain to rewrite; this entry '
+        + 'is the D3 record. The removal also subsumes the kernel half of '
+        + '`plugin-activation-events-retired` (#4657): that tombstone goes with the shape '
+        + 'that carried it. ADR-0049, #4834.',
+      acceptanceCriteria:
+        'No code imports `DynamicLoadRequestSchema`, `DynamicUnloadRequestSchema`, '
+        + '`DynamicPluginResultSchema`, `PluginSourceSchema`, `DynamicPluginOperationSchema` '
+        + 'or any of their type aliases (`DynamicLoadRequest`, `DynamicUnloadRequest`, '
+        + '`DynamicPluginResult`, `PluginSource`, `DynamicPluginOperation`, '
+        + '`DynamicLoadRequestInput`, `DynamicUnloadRequestInput`) from '
+        + '`@objectstack/spec` or `@objectstack/spec/kernel` — every one is TS2305 after '
+        + 'upgrade, on every public entry (pinned by symbol identity in '
+        + '`plugin-runtime-retirement.test.ts`). Nothing regresses at runtime, because '
+        + 'nothing called anything: a caller that believed it was hot-loading a plugin was '
+        + 'already only building an object. Boot-time composition through `defineStack` is '
+        + 'unchanged.',
     },
   ],
 };

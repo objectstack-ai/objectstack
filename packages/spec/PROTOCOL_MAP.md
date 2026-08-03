@@ -187,7 +187,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`service-registry.zod.ts`](src/kernel/service-registry.zod.ts) | | **Service Registry**. Internal dependency injection. |
 | [`metadata-loader.zod.ts`](src/kernel/metadata-loader.zod.ts) | | **Loader**. Logic for loading definitions from disk/DB. |
 | [`plugin-loading.zod.ts`](src/kernel/plugin-loading.zod.ts) | ⭐ | **Plugin Loading**. Loading strategies, production-safe hot reload (`environment`, `productionSafety`), full plugin sandboxing (`scope`, `ipc`), code splitting, caching, and performance monitoring. |
-| [`plugin-runtime.zod.ts`](src/kernel/plugin-runtime.zod.ts) | ⭐ | **Dynamic Loading**. Runtime load/unload of plugins (`DynamicLoadRequest`, `DynamicUnloadRequest`), activation events, plugin discovery from registries/directories, and source resolution (npm/local/url/registry/git). |
 | [`plugin-registry.zod.ts`](src/kernel/plugin-registry.zod.ts) | | **Plugin Registry**. Metadata for available plugins. |
 | [`plugin-security.zod.ts`](src/kernel/plugin-security.zod.ts) | | **Plugin Security**. Security verification for plugins. |
 | [`plugin-versioning.zod.ts`](src/kernel/plugin-versioning.zod.ts) | | **Versioning**. Semantic versioning rules for plugins. |

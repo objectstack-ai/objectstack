@@ -23,9 +23,13 @@ import { describe, it, expect } from 'vitest';
 // load-bearing pin is the program below, with anti-vacuity guards — the
 // #4737 `ActionLocation` retirement's machinery, pointed at absence instead of
 // ownership. Sabotage-verified in the PR: resurrecting the declaration in
-// `plugin-runtime.zod.ts` turns it red, re-exporting ANY schema under the bare
-// name from `./studio` turns it red, and pointing the enumeration at nothing
-// trips the anti-vacuity guards rather than passing silently.
+// `./kernel` turns it red, re-exporting ANY schema under the bare name from
+// `./studio` turns it red, and pointing the enumeration at nothing trips the
+// anti-vacuity guards rather than passing silently.
+//
+// (#4834 superseded the kernel half: `DynamicLoadRequest` — the shape that
+// carried the tombstoned key — was removed whole, so this file's kernel-side
+// parse assertion is gone. See the block above the studio test.)
 describe('[#4657] ActivationEventSchema removal — no entry exports the name', () => {
   it('resolves the export surface: the retired names have ZERO holders across every public entry', async () => {
     const ts = (await import('typescript')).default;
@@ -87,8 +91,12 @@ describe('[#4657] ActivationEventSchema removal — no entry exports the name', 
     const studioNames = exportsOf('./studio').map((e) => e.getName());
     expect(kernelNames.length, './kernel must export a non-trivial surface').toBeGreaterThan(40);
     expect(studioNames.length, './studio must export a non-trivial surface').toBeGreaterThan(40);
-    expect(kernelNames).toContain('DynamicLoadRequestSchema');
-    expect(kernelNames).toContain('PluginSourceSchema');
+    // (The kernel anchors used to be `DynamicLoadRequestSchema` /
+    // `PluginSourceSchema` — the parents of the retired key. #4834 removed that
+    // whole family, so the anchors move to surviving kernel neighbours; the
+    // assertion they serve is unchanged.)
+    expect(kernelNames).toContain('PluginSchema');
+    expect(kernelNames).toContain('PluginContextSchema');
     expect(studioNames).toContain('StudioPluginManifestSchema');
     expect(studioNames).toContain('StudioPluginContributionsSchema');
 
@@ -110,29 +118,28 @@ describe('[#4657] ActivationEventSchema removal — no entry exports the name', 
       expect('ActivationEventSchema' in ns, `${label} must not export ActivationEventSchema`).toBe(false);
     }
     // Anti-vacuity: the namespaces just probed are real and non-trivial.
-    expect('DynamicLoadRequestSchema' in kernel).toBe(true);
+    expect('PluginSchema' in kernel).toBe(true);
     expect('StudioPluginManifestSchema' in studio).toBe(true);
   });
 
-  it('the live paths still parse — and reject the retired key with its prescription', async () => {
-    const { DynamicLoadRequestSchema } = await import('./plugin-runtime.zod');
+  // ─── The kernel half of #4657 is SUPERSEDED by #4834 ───────────────────────
+  //
+  // `DynamicLoadRequest.activationEvents` was tombstoned here with a
+  // `retiredKey()` prescription. #4834 removed the ENTIRE `DynamicLoadRequest`
+  // family (ADR-0049 enforce-or-remove on the whole "Dynamic Loading"
+  // capability, four-repo zero-consumer), which took the tombstone with it —
+  // legitimately: "the whole request shape is gone" is strictly stronger than
+  // "this one key is gone", and there is no longer a parse for a prescription
+  // to be delivered at. What replaces it as the kernel-side pin is
+  // `plugin-runtime-retirement.test.ts` (zero holders for all five names),
+  // plus the zero-holder assertion above, which covers `ActivationEventSchema`
+  // itself on both entries. Only the studio half still has a live parse:
+  it('the studio manifest still parses — and rejects the retired key with its prescription', async () => {
     const { StudioPluginManifestSchema } = await import('../studio/plugin.zod');
 
-    // Kernel side: tombstoned (non-strict schema — a plain delete would have
-    // Zod silently strip an authored value, replacing one silent no-op with
-    // another).
-    const load = { pluginId: 'com.acme.analytics', source: { type: 'npm', location: '@acme/x' } };
-    expect(DynamicLoadRequestSchema.parse(load)).not.toHaveProperty('activationEvents');
-    expect(() =>
-      DynamicLoadRequestSchema.parse({
-        ...load,
-        activationEvents: [{ type: 'onStartup', pattern: '*' }],
-      }),
-    ).toThrow(/activationEvents.*removed.*#4657/s);
-
-    // Studio side: strict parse + guidance — the SAME document differing only
-    // in this one key stays legal without it (so the negative cannot pass for
-    // an unrelated reason).
+    // Strict parse + guidance — the SAME document differing only in this one
+    // key stays legal without it (so the negative cannot pass for an unrelated
+    // reason).
     const manifest = { id: 'objectstack.my-plugin', name: 'My Plugin' };
     expect(StudioPluginManifestSchema.parse(manifest)).not.toHaveProperty('activationEvents');
     expect(() =>

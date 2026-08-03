@@ -41,7 +41,39 @@ export * from './package-upgrade.zod';
 export * from './plugin-capability.zod';
 export * from './plugin-lifecycle-advanced.zod';
 export * from './plugin-loading.zod';
-export * from './plugin-runtime.zod';
+// plugin-runtime.zod (DynamicLoadRequestSchema / DynamicUnloadRequestSchema /
+// DynamicPluginResultSchema / PluginSourceSchema / DynamicPluginOperationSchema
+// + every type alias) was REMOVED per ADR-0049 enforce-or-remove (#4834). The
+// module declared the "Dynamic Loading" capability — runtime load / unload /
+// reload of plugins without a kernel restart, with sandboxing, integrity hashes,
+// drain strategies and dependent-cascade policy. No runtime in any repo
+// (objectstack / cloud / objectui) ever received a DynamicLoadRequest, performed
+// a load/unload, or produced a DynamicPluginResult: the operations the vocabulary
+// names do not exist. Plugins are composed at boot (`defineStack` → the kernel's
+// register/init/start sequence) and the set is fixed until the process restarts.
+//
+// The #3896 follow-up removed this module's discovery/sandbox config island and
+// recorded the remaining five as a deliberate SUSPENSION ("operation contracts,
+// not security promises; the enforce-or-remove call is a design decision") — a
+// decision that then lived only in a changeset paragraph, with no issue carrying
+// it. #4834 IS that decision, resolved REMOVE: a published request/result
+// vocabulary with no server behind it is the #3950 shape at its most inviting to
+// an AI author (ADR-0033), who reads `DynamicLoadRequestSchema` as proof the
+// platform hot-loads plugins and builds a request that parses clean and is
+// received by nobody.
+//
+// This SUPERSEDES the narrower #4657 retirement of
+// `DynamicLoadRequest.activationEvents`: that key's `retiredKey()` tombstone is
+// removed together with the shape that carried it, because "the whole request
+// shape is gone" is strictly stronger than "this one key is gone" — an author
+// who wrote `activationEvents` now deletes the entire `DynamicLoadRequest`
+// value, not one key of it. The studio half of #4657
+// (`StudioPluginManifest.activationEvents`) is untouched and still rejects the
+// key with its own prescription.
+//
+// Runtime plugin loading, if it is ever built, returns via the enforce route of
+// ADR-0049 through a new ADR — write the loader first, then declare exactly the
+// operations it performs. The vocabulary it needs is unlikely to be this one.
 export * from './plugin-security-advanced.zod';
 export * from './plugin-structure.zod';
 export * from './plugin-validator.zod';

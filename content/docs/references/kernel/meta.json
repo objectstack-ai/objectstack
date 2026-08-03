@@ -6,7 +6,6 @@
     "plugin-lifecycle-advanced",
     "plugin-loading",
     "plugin-registry",
-    "plugin-runtime",
     "plugin-structure",
     "plugin-validator",
     "---Plugin Security & Dependencies---",

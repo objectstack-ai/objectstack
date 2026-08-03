@@ -156,15 +156,25 @@ Isolation levels: `none`, `process`, `vm`, `iframe`, `web-worker`.
 - Transports: `message-port`, `unix-socket`, `tcp`, `memory`
 - Configurable message size limit, timeout, and service ACL (`allowedServices`)
 
-### 5.3 Dynamic Loading (`plugin-runtime.zod.ts`)
+### 5.3 Dynamic Loading — ~~`plugin-runtime.zod.ts`~~ REMOVED in v17
 
-Plugins can be loaded and unloaded at runtime **without restarting the kernel**:
+The whole module is gone (#4834, ADR-0049 enforce-or-remove). It declared runtime
+load / unload / reload of plugins **without restarting the kernel** — sources
+(`npm` / `local` / `url` / `registry` / `git`), integrity hashes, sandboxing,
+graceful/forceful/drain unload, dependent-cascade policy — and **no runtime in
+any repo ever implemented one of those operations**: a bare-name scan of
+objectstack, cloud and objectui found zero references outside the declaration
+itself, its own unit tests and the generated artifacts. Removed with the module:
+`DynamicLoadRequestSchema`, `DynamicUnloadRequestSchema`,
+`DynamicPluginResultSchema`, `PluginSourceSchema`, `DynamicPluginOperationSchema`
+and every type alias. The `activationEvents` tombstone #4657 left on
+`DynamicLoadRequest` goes with the shape that carried it, as did the
+discovery/sandbox config island #3896 had already retired.
 
-- **`DynamicLoadRequestSchema`** — Load a plugin from `npm`, `local`, `url`, `registry`, or `git` sources with optional integrity verification
-- **`DynamicUnloadRequestSchema`** — Graceful/forceful/drain unload with dependency awareness (`cascade`, `warn`, or `block` dependents)
-- ~~`ActivationEventSchema`~~ — REMOVED in v17 (#4657, ADR-0049): the lazy-activation trigger vocabulary had no runtime reader in any repo — every plugin activates immediately on load — so it was retired with the `activationEvents` keys that embedded it. Lazy activation, if built, returns via the enforce route of ADR-0049
-- **`PluginDiscoveryConfigSchema`** — Runtime discovery from registries and local directories with polling and trust filtering
-- **`DynamicLoadingConfigSchema`** — Subsystem configuration: max dynamic plugins, default sandbox policy, allowed sources, integrity requirements
+**What is real:** plugins are composed at boot. `defineStack` registers them and
+the kernel runs `init` → `start`; the set is fixed until the process restarts.
+Runtime loading, if it is ever built, returns via the enforce route of ADR-0049
+through a new ADR — loader first, vocabulary second.
 
 ### 5.4 Plugin System Assessment Summary
 
@@ -178,4 +188,4 @@ Plugins can be loaded and unloaded at runtime **without restarting the kernel**:
 | Health Checks | ✅ | `plugin-lifecycle-advanced.zod.ts` — Per-plugin health + system aggregation |
 | Hot Reload | ✅ | `plugin-loading.zod.ts` — Dev + production-safe with rollback and draining |
 | Plugin Isolation | ✅ | `plugin-loading.zod.ts` — Configurable scope + IPC for process boundaries |
-| Dynamic Loading | ✅ | `plugin-runtime.zod.ts` — Runtime load/unload (eager activation; the unenforced activation-events vocabulary was removed in #4657) |
+| Dynamic Loading | ❌ | **Not built.** The `plugin-runtime.zod.ts` vocabulary that declared it was removed in v17 (#4834, ADR-0049) — it had no runtime reader in any repo. Plugins are composed at boot; the set is fixed until restart |
