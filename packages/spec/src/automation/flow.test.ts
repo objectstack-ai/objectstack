@@ -1306,4 +1306,165 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
         .toContain('`is_input` → `isInput`');
     });
   });
+
+  // ── batch 11: the INNER blocks ────────────────────────────────────────────
+  //
+  // Closing the four outer shells above left six nested authoring blocks on
+  // zod's default `.strip`. Same defect, one layer in — a guard put where the
+  // author who wrote it was standing.
+  //
+  // What those six were actually hiding is worth stating, because it is not the
+  // obvious case: a slip on a REQUIRED key was always loud (the key then reads
+  // as missing). `.strip` swallowed the OPTIONAL half — the mapped input map,
+  // the retry budget, `interrupting: false`, `required: true` — i.e. precisely
+  // the keys an author adds to CONSTRAIN behaviour, silently replaced by a
+  // permissive default.
+  describe('the nested authoring blocks (batch 11)', () => {
+    const node = (extra: Record<string, unknown>) => ({ id: 'n1', type: 'script', label: 'N', ...extra });
+
+    it('connectorConfig: rejects an undeclared key and points input synonyms at `input`', () => {
+      const issue = unknownKeyIssue(FlowNodeSchema, node({
+        connectorConfig: { connectorId: 'rest', actionId: 'get', params: {} },
+      }));
+      expect(issue!.message).toContain("connector_action node's `connectorConfig`");
+      expect(issue!.message).toContain('`params` → `input`');
+    });
+
+    it('connectorConfig: the silent case was the OPTIONAL half, not the ids', () => {
+      // Before this change, `{ connectorId, actionId, params }` parsed clean and
+      // the executor dispatched `input ?? {}` — a successful call carrying
+      // nothing. A slip on a REQUIRED id was never silent (it reads as missing),
+      // which is why this block's history names the input map and not the ids.
+      const result = FlowNodeSchema.safeParse(node({
+        connectorConfig: { connectorID: 'rest', actionId: 'get' },
+      }));
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result.error!.issues)).toContain('connectorId');
+    });
+
+    it('position: rejects a third coordinate rather than dropping it at (0, 0)', () => {
+      const issue = unknownKeyIssue(FlowNodeSchema, node({ position: { x: 1, y: 2, z: 3 } }));
+      expect(issue!.message).toContain("node's canvas `position`");
+      expect(issue!.message).toContain('`z`');
+    });
+
+    it('inputSchema: an `optional` key gets the POLARITY, not a bare rename', () => {
+      const issue = unknownKeyIssue(FlowNodeSchema, node({
+        inputSchema: { url: { type: 'string', optional: true } },
+      }));
+      // A bare "did you mean `required`" would be a confidently wrong
+      // prescription — `optional: true` is `required: FALSE`. The rejection
+      // has to say which way to flip the value.
+      expect(issue!.message).toContain('required: false');
+      expect(issue!.message).not.toContain('`optional` → `required`');
+    });
+
+    it('waitEventConfig: renames `signal`, and sends `timeout` to `timerDuration` — never to the tombstone', () => {
+      const issue = unknownKeyIssue(FlowNodeSchema, node({
+        type: 'wait',
+        waitEventConfig: { eventType: 'signal', signal: 'paid', timeout: 60_000 },
+      }));
+      expect(issue!.message).toContain('`signal` → `signalName`');
+      expect(issue!.message).toContain('`timerDuration`');
+      // `timeoutMs` is a #4158 tombstone. Pointing a typo at a REMOVED key is
+      // the `triggerPhrase → triggerPhrases` chain (ledger finding 7): the
+      // author follows the advice straight into a second rejection.
+      expect(issue!.message).not.toContain('→ `timeoutMs`');
+      expect(issue!.message).not.toContain('→ `onTimeout`');
+    });
+
+    it('boundaryConfig: translates BPMN\'s own attribute names', () => {
+      const issue = unknownKeyIssue(FlowNodeSchema, node({
+        type: 'boundary_event',
+        boundaryConfig: { attachedToRef: 'n0', eventType: 'error', cancelActivity: true },
+      }));
+      expect(issue!.message).toContain('`attachedToRef` → `attachedToNodeId`');
+      expect(issue!.message).toContain('`cancelActivity` → `interrupting`');
+    });
+
+    it('errorHandling: `backoffMs` is the sibling retry policy\'s converged spelling (#4661)', () => {
+      const issue = unknownKeyIssue(FlowSchema, {
+        ...minimalFlow,
+        errorHandling: { strategy: 'retry', maxRetries: 3, backoffMs: 5000 },
+      });
+      expect(issue!.message).toContain("flow's `errorHandling` block");
+      expect(issue!.message).toContain('`backoffMs` → `retryDelayMs`');
+    });
+
+    it('errorHandling: `maxAttempts` gets the off-by-one, not a rename', () => {
+      const issue = unknownKeyIssue(FlowSchema, {
+        ...minimalFlow,
+        errorHandling: { strategy: 'retry', maxAttempts: 3 },
+      });
+      // Renaming alone would silently run one attempt FEWER than asked for:
+      // RetryConfig's `maxAttempts` counts the first try, `maxRetries` does not.
+      expect(issue!.message).not.toContain('`maxAttempts` → `maxRetries`');
+      expect(issue!.message).toContain('maxAttempts - 1');
+    });
+
+    it('errorHandling: the `strategy: retry` refinement still runs after the block is strict', () => {
+      // The `.superRefine` chains off `strictObject(...)` now. Losing it would
+      // re-open #4247's zero-attempt "retry", and nothing else here would tell.
+      const result = FlowSchema.safeParse({ ...minimalFlow, errorHandling: { strategy: 'retry' } });
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result.error!.issues)).toContain('requires `maxRetries` >= 1');
+    });
+
+    it('every key the six blocks declare still parses', () => {
+      const parsed = FlowNodeSchema.parse(node({
+        type: 'connector_action',
+        connectorConfig: { connectorId: 'c', actionId: 'a', input: { k: 1 } },
+        position: { x: 1, y: 2 },
+        inputSchema: { p: { type: 'string', required: true, description: 'd' } },
+        waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H', signalName: 's' },
+        boundaryConfig: {
+          attachedToNodeId: 'n0', eventType: 'timer', interrupting: false,
+          errorCode: 'E', timerDuration: 'PT5M', signalName: 's',
+        },
+      }));
+      expect(parsed.connectorConfig!.input).toEqual({ k: 1 });
+      const flow = FlowSchema.parse({
+        ...minimalFlow,
+        errorHandling: {
+          strategy: 'retry', maxRetries: 2, retryDelayMs: 10, backoffMultiplier: 2,
+          maxRetryDelayMs: 100, jitter: true,
+        },
+      });
+      expect(flow.errorHandling!.jitter).toBe(true);
+    });
+  });
+
+  // The two shapes this file deliberately leaves open. Asserted, not assumed,
+  // so the next sweep reads a test rather than reaching for `strictObject`.
+  describe('deliberately still open', () => {
+    it('the node `config` slot stays open (ADR-0018 plugin node-type namespace)', () => {
+      const parsed = FlowNodeSchema.parse({
+        id: 'n1', type: 'some_plugin_node', label: 'P',
+        config: { aKeyOnlyThatPluginDeclares: true },
+      });
+      expect((parsed.config as Record<string, unknown>).aKeyOnlyThatPluginDeclares).toBe(true);
+    });
+
+    it('FlowVersionHistorySchema stays open — it is emitted, not authored', () => {
+      // Every other object site in flow.zod.ts is closed, so this reads like
+      // the last hold-out. It is the file's only WIRE shape (the ledger row has
+      // exempted it since it was written): closing it would turn a future
+      // emitter-side field into a parse failure for whoever reads history.
+      const parsed = FlowVersionHistorySchema.parse({
+        flowName: 'f', version: 1, definition: minimalFlow,
+        createdAt: '2026-08-03T00:00:00.000Z',
+        aFieldSomeFutureWriterStamps: true,
+      });
+      expect(parsed.flowName).toBe('f');
+    });
+
+    it('…but the flow INSIDE a history record is still gated by FlowSchema', () => {
+      const result = FlowVersionHistorySchema.safeParse({
+        flowName: 'f', version: 1,
+        definition: { ...minimalFlow, notAKey: 1 },
+        createdAt: '2026-08-03T00:00:00.000Z',
+      });
+      expect(result.success).toBe(false);
+    });
+  });
 });

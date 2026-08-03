@@ -122,3 +122,64 @@ describe('defineStack({ functions }) — the authoring surface (#4396)', () => {
     } as never)).toThrow();
   });
 });
+
+// #4001 batch 11. Worth being precise about WHERE this binds, because the
+// campaign's rule is that a tightening claims no reach it does not have:
+// authoring only. `defineStack` parses the entry; the boot path
+// (`AppPlugin` / `hook-binder`) reads it with the hand-written
+// `normalizeFlowFunctionEntry` instead.
+//
+// Which is exactly why it is not redundant. That reader takes TWO keys and
+// ignores everything else by construction, so a misspelled `effect` was
+// dropped at the schema and then not looked for — and the failure is the quiet
+// direction: the function registers, runs, and its writes are counted as none,
+// keeping #4354's broken-sweep query silent on the one run that needed it.
+describe('unknown keys are rejected, not stripped (#4001 batch 11)', () => {
+  const base = {
+    manifest: { id: 'com.example.demo', name: 'demo', version: '1.0.0', type: 'app' as const },
+  };
+  const unknownKeyIssue = (value: unknown) => {
+    const result = FlowFunctionDeclarationSchema.safeParse(value);
+    expect(result.success).toBe(false);
+    return result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+  };
+
+  it('rejects a misspelled `effect` instead of silently reading it as pure', () => {
+    const issue = unknownKeyIssue({ handler: () => 1, efect: 'writes' });
+    expect(issue!.message).toContain('`functions` entry');
+    expect(issue!.message).toContain('`efect` → `effect`');
+  });
+
+  it('points the short words for "the callable" at `handler`', () => {
+    for (const key of ['fn', 'callback', 'execute']) {
+      expect(unknownKeyIssue({ handler: () => 1, [key]: () => 2 })!.message)
+        .toContain(`\`${key}\` → \`handler\``);
+    }
+  });
+
+  it('explains that a function is named by its MAP KEY, not by a `name` inside', () => {
+    const issue = unknownKeyIssue({ handler: () => 1, name: 'scoreLead' });
+    expect(issue!.message).toContain('named by its KEY');
+    // A rename would be wrong: `name` is real on the ARRAY form, and pointing
+    // at a declared key of this record would be inventing one.
+    expect(issue!.message).not.toContain('`name` → ');
+  });
+
+  it('binds through defineStack — the authoring door this actually gates', () => {
+    expect(() => defineStack({
+      ...base,
+      functions: { syncBilling: { handler: () => ({ ok: true }), efect: 'writes' } },
+    } as never)).toThrow();
+  });
+
+  it('leaves the two spellings an author actually writes alone', () => {
+    expect(FlowFunctionDeclarationSchema.safeParse({ handler: () => 1 }).success).toBe(true);
+    expect(FlowFunctionDeclarationSchema.safeParse({ handler: () => 1, effect: 'writes' }).success).toBe(true);
+    // The array form keeps its own shape — `name`/`packageId` live there, not
+    // on this record, and strictness here must not reach across.
+    expect(defineStack({
+      ...base,
+      functions: [{ name: 'syncBilling', handler: () => ({ ok: true }), packageId: 'p', effect: 'writes' }],
+    })).toBeTruthy();
+  });
+});
