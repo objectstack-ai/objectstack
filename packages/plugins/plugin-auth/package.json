@@ -30,7 +30,7 @@
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "better-auth": "1.7.0-rc.2",
-    "jose": "^6.2.4"
+    "jose": "^6.2.5"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
