@@ -26,6 +26,7 @@ import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
 import type { MetadataLoader } from './loader-interface.js';
 import { calculateChecksum } from '../utils/metadata-history-utils.js';
 import { LRUCache } from '../utils/lru-cache.js';
+import { isSchemaAlreadyExistsError } from '../utils/schema-sync-errors.js';
 import { addSysMetadataOverlayIndex } from '../migrations/add-sys-metadata-overlay-index.js';
 import { migrateProjectIdToEnvironmentId } from '../migrations/migrate-project-id-to-environment-id.js';
 
@@ -123,6 +124,13 @@ export class DatabaseLoader implements MetadataLoader {
   private trackHistory: boolean;
   private schemaReady = false;
   private historySchemaReady = false;
+  /**
+   * Whether the loud "DDL failed" report has already been printed for the
+   * metadata table / history table respectively. AGENTS.md → "Degradation log
+   * levels": say it **once**, at the first degradation, not once per retry.
+   */
+  private schemaFailureReported = false;
+  private historySchemaFailureReported = false;
 
   /** (type, name) → metadata payload — primes `load()` */
   private readonly loadCache?: LRUCache<string, Record<string, unknown> | null>;
@@ -321,22 +329,59 @@ export class DatabaseLoader implements MetadataLoader {
         ...SysMetadataObject,
         name: this.tableName,
       });
-      this.schemaReady = true;
-      // v5.0 forward migration: project_id → environment_id (idempotent).
-      try {
-        await migrateProjectIdToEnvironmentId(this.driver!);
-      } catch {
-        // ignore — migration is best-effort on bootstrap
+    } catch (error) {
+      // #4728 (rule: #4632, accident: #4420) — discriminate by error TYPE.
+      // Exactly ONE failure reason is benign here: the table/columns are
+      // already provisioned and a non-fully-idempotent driver reports that as
+      // an error. Every other reason (insufficient privileges, datasource never
+      // connected, incompatible column type) means the table or column does NOT
+      // exist — and the previous code marked `schemaReady = true` for all of
+      // them, making a total durability failure indistinguishable from success
+      // with not one line in the log.
+      if (!isSchemaAlreadyExistsError(error)) {
+        if (!this.schemaFailureReported) {
+          this.schemaFailureReported = true;
+          console.error(
+            `[Metadata] DDL for the metadata table \`${this.tableName}\` FAILED — its table/columns were NOT created or altered. ` +
+              `Every metadata write from here on (Studio saves, app installs, org overlays) targets storage that may not exist: ` +
+              `writes will error out, or silently drop columns on a lenient driver, while the server keeps reporting healthy. ` +
+              `This is NOT the benign "already exists" case — check the datasource/driver error below (insufficient privileges, ` +
+              `datasource not connected, incompatible column type), fix it and restart. Schema sync is retried on the next ` +
+              `metadata operation, so a transient cause recovers on its own.`,
+            error,
+          );
+        }
+        // Deliberate, and the opposite of what this code did before: on a REAL
+        // DDL failure `schemaReady` stays FALSE. Startup is still not blocked
+        // (this method does not throw — callers proceed and fail loudly at the
+        // driver if the table is truly missing), but the loader never claims a
+        // readiness it does not have, and the next operation retries the sync
+        // so a datasource that was merely still connecting heals itself. Same
+        // shape as `ensureHistorySchema()` below.
+        return;
       }
-      // Apply ADR-0005 partial UNIQUE INDEX (best-effort, idempotent)
-      try {
-        await addSysMetadataOverlayIndex(this.driver!);
-      } catch {
-        // ignore — index is optimization
-      }
+      // Benign — and ONLY benign: the table is already provisioned, so the DDL
+      // was a no-op rather than a failure. Fall through to the ready path.
+    }
+
+    if (this.schemaFailureReported) {
+      this.schemaFailureReported = false;
+      console.info(
+        `[Metadata] DDL for the metadata table \`${this.tableName}\` succeeded on retry — metadata writes are durable again.`,
+      );
+    }
+    this.schemaReady = true;
+    // v5.0 forward migration: project_id → environment_id (idempotent).
+    try {
+      await migrateProjectIdToEnvironmentId(this.driver!);
     } catch {
-      // If syncSchema fails (e.g. table already exists), mark ready and continue
-      this.schemaReady = true;
+      // ignore — migration is best-effort on bootstrap
+    }
+    // Apply ADR-0005 partial UNIQUE INDEX (best-effort, idempotent)
+    try {
+      await addSysMetadataOverlayIndex(this.driver!);
+    } catch {
+      // ignore — index is optimization
     }
   }
 
@@ -358,11 +403,35 @@ export class DatabaseLoader implements MetadataLoader {
         ...SysMetadataHistoryObject,
         name: this.historyTableName,
       });
+      if (this.historySchemaFailureReported) {
+        this.historySchemaFailureReported = false;
+        console.info(
+          `[Metadata] DDL for the metadata history table \`${this.historyTableName}\` succeeded on retry — change history is being recorded again.`,
+        );
+      }
       this.historySchemaReady = true;
     } catch (error) {
-      // Log the error; historySchemaReady remains false so the next operation retries.
-      // If the error is a benign "already exists" the next attempt will also succeed.
-      console.error('Failed to ensure history schema, will retry on next operation:', error);
+      // Same discrimination as `ensureSchema()` above (#4728). A benign
+      // "already exists" means the history table IS provisioned — treat it as
+      // the no-op it is instead of re-reporting it (and re-running the DDL) on
+      // every single write, which is the mirror-image failure: an `error` line
+      // for a non-degradation trains everyone to skim `error`.
+      if (isSchemaAlreadyExistsError(error)) {
+        this.historySchemaReady = true;
+        return;
+      }
+      // Real failure: loud once, `historySchemaReady` stays false so the next
+      // operation retries.
+      if (!this.historySchemaFailureReported) {
+        this.historySchemaFailureReported = true;
+        console.error(
+          `[Metadata] DDL for the metadata history table \`${this.historyTableName}\` FAILED — its table/columns were NOT created. ` +
+            `Metadata change history (versions, diffs, rollback) will NOT be persisted while every metadata write keeps succeeding, ` +
+            `so the audit trail silently ends here. Fix the datasource/driver error below and restart; the sync is retried on the ` +
+            `next metadata operation.`,
+          error,
+        );
+      }
     }
   }
 

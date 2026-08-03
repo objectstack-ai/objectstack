@@ -384,7 +384,6 @@ export const manifest = defineStudioPlugin({
   name: 'Flow Designer',
   version: '2.0.0',
   description: 'Visual flow builder for automation workflows',
-  activationEvents: [{ type: 'onMetadataType', pattern: 'flow' }],
 
   contributes: {
     metadataViewers: [{
@@ -434,16 +433,13 @@ export const manifest = defineStudioPlugin({
 });
 ```
 
-### Activation Events
+### Activation
 
-Control when your plugin loads with activation events:
-
-| Pattern | Trigger |
-|:---|:---|
-| `*` | Activate immediately (eager, default) |
-| `onMetadataType:object` | When metadata type "object" is loaded |
-| `onCommand:myPlugin.doSomething` | When command is invoked |
-| `onView:myPlugin.myPanel` | When panel is opened |
+Every Studio plugin loads and activates immediately on registration — `activate()`
+runs at registration time, unconditionally. The former `activationEvents` manifest
+key was removed in v17 (#4657, ADR-0049): it declared lazy activation that no
+Studio host ever implemented, so a manifest that still carries it now fails the
+parse with the upgrade prescription. Delete the key.
 
 ### View Modes
 

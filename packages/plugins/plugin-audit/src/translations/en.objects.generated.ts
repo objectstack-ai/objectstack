@@ -186,9 +186,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Parent Comment",
         help: "Optional parent comment for nested replies"
       },
-      reply_count: {
-        label: "Reply Count"
-      },
       author_id: {
         label: "Author"
       },
@@ -215,14 +212,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       edited_at: {
         label: "Edited At"
-      },
-      visibility: {
-        label: "Visibility",
-        options: {
-          public: "public",
-          internal: "internal",
-          private: "private"
-        }
       },
       created_at: {
         label: "Created At"

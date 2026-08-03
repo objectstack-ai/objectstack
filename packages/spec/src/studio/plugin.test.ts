@@ -10,7 +10,6 @@ import {
   PanelContributionSchema,
   CommandContributionSchema,
   StudioPluginContributionsSchema,
-  ActivationEventSchema,
   StudioPluginManifestSchema,
   defineStudioPlugin,
 } from './plugin.zod';
@@ -200,33 +199,12 @@ describe('StudioPluginContributionsSchema', () => {
   });
 });
 
-describe('ActivationEventSchema', () => {
-  it('should accept valid activation events', () => {
-    // [#4653] The four events this file documented pre-v17, in the structured
-    // form they converged onto. Every one still expresses what it used to.
-    const events = [
-      { type: 'onStartup', pattern: '*' },            // was '*'
-      { type: 'onMetadataType', pattern: 'object' },  // was 'onMetadataType:object'
-      { type: 'onCommand', pattern: 'myPlugin.do' },  // was 'onCommand:myPlugin.do'
-      { type: 'onView', pattern: 'myPanel' },         // was 'onView:myPanel'
-    ];
-    events.forEach(e => {
-      expect(() => ActivationEventSchema.parse(e)).not.toThrow();
-    });
-  });
-
-  it('should reject the pre-v17 bare-string form', () => {
-    // Loud, not silently coerced — the manual migration depends on this.
-    expect(() => ActivationEventSchema.parse('onMetadataType:object')).toThrow();
-    expect(() => ActivationEventSchema.parse('*')).toThrow();
-    expect(() => ActivationEventSchema.parse(123)).toThrow();
-  });
-
-  it('should reject an unknown trigger type', () => {
-    // The capability the old `z.string()` declaration could never provide.
-    expect(() => ActivationEventSchema.parse({ type: 'onMetadatType', pattern: 'flow' })).toThrow();
-  });
-});
+// `ActivationEventSchema` was REMOVED (#4657, ADR-0049): no Studio host ever
+// read an activation event — plugins load and activate immediately on
+// registration — so the vocabulary retired with the `activationEvents` keys
+// that embedded it. Export-surface pins live in
+// ../kernel/activation-events-retirement.test.ts; the manifest-level
+// rejection pins are in the StudioPluginManifestSchema block below.
 
 describe('StudioPluginManifestSchema', () => {
   const minimalManifest = {
@@ -237,8 +215,9 @@ describe('StudioPluginManifestSchema', () => {
   it('should accept minimal manifest with defaults', () => {
     const result = StudioPluginManifestSchema.parse(minimalManifest);
     expect(result.version).toBe('0.0.1');
-    // [#4653] Eager activation, structured. FROM `['*']`.
-    expect(result.activationEvents).toEqual([{ type: 'onStartup', pattern: '*' }]);
+    // [#4657] No activation-events key materializes — eager activation is the
+    // runtime's unconditional behaviour, not a manifest setting.
+    expect(result).not.toHaveProperty('activationEvents');
     expect(result.contributes).toBeDefined();
     expect(result.description).toBeUndefined();
     expect(result.author).toBeUndefined();
@@ -260,20 +239,40 @@ describe('StudioPluginManifestSchema', () => {
           modes: ['preview', 'design', 'data'],
         }],
       },
-      activationEvents: [{ type: 'onMetadataType', pattern: 'object' }],
     };
     expect(() => StudioPluginManifestSchema.parse(manifest)).not.toThrow();
   });
 
-  it('rejects a manifest still carrying the pre-v17 string activation events', () => {
-    // The migration is manual (no conversion can reach a studio plugin
-    // manifest — it is a root schema, never part of a stack), so the ONLY
-    // thing standing between a stale manifest and a wrong-shaped plugin is
-    // this parse failing. Pinned so it can never soften into a coercion.
+  // ─── [#4657] `activationEvents` retirement pins (ADR-0049) ───────────
+  it('rejects activationEvents with the retirement prescription — structured form', () => {
+    // The post-#4653 structured form: the shape an up-to-date v17-rc author
+    // would have written. The strict parse must carry the prescription, not a
+    // bare "unrecognized key".
+    expect(() => StudioPluginManifestSchema.parse({
+      ...minimalManifest,
+      activationEvents: [{ type: 'onMetadataType', pattern: 'object' }],
+    })).toThrow(/activationEvents.*removed.*17\.0\.0.*#4657.*Delete the key/s);
+  });
+
+  it('rejects activationEvents with the retirement prescription — pre-v17 string form', () => {
+    // A v16 manifest jumping straight to the release gets the same
+    // prescription: the VALUE shape no longer matters, the KEY is retired.
     expect(() => StudioPluginManifestSchema.parse({
       ...minimalManifest,
       activationEvents: ['onMetadataType:object'],
-    })).toThrow();
+    })).toThrow(/activationEvents.*removed.*#4657/s);
+  });
+
+  it('rejects the former VS Code-flavoured aliases with the same prescription', () => {
+    // `activation` / `events` / `onActivate` used to alias `activationEvents`;
+    // an alias must never point at a key the schema cannot accept, so each now
+    // carries the retirement guidance itself.
+    for (const key of ['activation', 'events', 'onActivate']) {
+      expect(() => StudioPluginManifestSchema.parse({
+        ...minimalManifest,
+        [key]: ['*'],
+      })).toThrow(/activationEvents.*removed.*#4657/s);
+    }
   });
 
   it('should reject invalid id format', () => {
@@ -303,8 +302,8 @@ describe('defineStudioPlugin', () => {
     });
     expect(result.id).toBe('objectstack.flow-designer');
     expect(result.version).toBe('0.0.1');
-    // [#4653] FROM `['*']` — eager activation, now structured.
-    expect(result.activationEvents).toEqual([{ type: 'onStartup', pattern: '*' }]);
+    // [#4657] No activation-events key — plugins activate eagerly, always.
+    expect(result).not.toHaveProperty('activationEvents');
   });
 
   it('should throw on invalid input', () => {
@@ -312,74 +311,7 @@ describe('defineStudioPlugin', () => {
   });
 });
 
-// ─── [#4653] Dual-source regression pin ──────────────────────────────
-//
-// RUNTIME assertions, deliberately. #4642 established that a compile-time pin
-// in `packages/spec` is a no-op: `tsconfig.json` excludes `**/*.test.ts` and
-// `vitest.config.ts` never enables `typecheck`, so neither path type-checks a
-// test file — a conditional-type pin here would be dead text. These run.
-//
-// What they defend: `ActivationEventSchema` naming ONE declaration across both
-// published entries. Re-introducing a local declaration in `studio/plugin.zod.ts`
-// (the pre-v17 `z.string()`, or any other) re-creates the #4411 trap where the
-// validation an author gets depends on which subpath they imported from, and
-// puts the name straight back on `dual-source-exports.baseline.json`.
-describe('[#4653] ActivationEventSchema is single-source across ./kernel and ./studio', () => {
-  it('both entry points export the very same declaration', async () => {
-    const kernelEntry = await import('../kernel/index');
-    const studioEntry = await import('../studio/index');
-
-    // Identity, not shape: `lazySchema` returns one Proxy per declaration site,
-    // so two declarations can never be `toBe`-equal however alike they look.
-    // This is exactly what check:dual-source-exports measures (symbol identity
-    // after alias resolution) — asserted here at runtime so a re-split fails
-    // `pnpm test` too, not only the gate.
-    expect(studioEntry.ActivationEventSchema).toBe(kernelEntry.ActivationEventSchema);
-  });
-
-  it('the shared declaration is the structured kernel form on BOTH entries', async () => {
-    const kernelEntry = await import('../kernel/index');
-    const studioEntry = await import('../studio/index');
-
-    for (const [entry, schema] of [
-      ['./kernel', kernelEntry.ActivationEventSchema],
-      ['./studio', studioEntry.ActivationEventSchema],
-    ] as const) {
-      // Structured form accepted...
-      expect(
-        schema.parse({ type: 'onMetadataType', pattern: 'flow' }),
-        `${entry} must accept the structured form`,
-      ).toEqual({ type: 'onMetadataType', pattern: 'flow' });
-      // ...bare string rejected, on both paths, identically.
-      expect(
-        () => schema.parse('onMetadataType:flow'),
-        `${entry} must reject the pre-v17 string form`,
-      ).toThrow();
-    }
-  });
-
-  it('the trigger vocabulary is the union of both pre-v17 vocabularies', async () => {
-    const studioEntry = await import('../studio/index');
-    // 7 from kernel + `onMetadataType` / `onView` rescued from studio's docs.
-    // Losing either of the last two would silently drop a capability studio
-    // authors were already using.
-    const union = [
-      'onCommand', 'onRoute', 'onObject', 'onEvent',
-      'onService', 'onSchedule', 'onStartup',
-      'onMetadataType', 'onView',
-    ];
-    for (const type of union) {
-      expect(
-        () => studioEntry.ActivationEventSchema.parse({ type, pattern: '*' }),
-        `'${type}' must stay in the vocabulary`,
-      ).not.toThrow();
-    }
-    // And it is exactly that set — a tenth value would mean an undeclared
-    // vocabulary change slipped in (e.g. cloud-v1's `onInstall` / `onWebhook`,
-    // deliberately not adopted: nothing reads them, see ADR-0049 / #4657).
-    const options = (studioEntry.ActivationEventSchema as unknown as {
-      shape: { type: { options: string[] } };
-    }).shape.type.options;
-    expect([...options].sort()).toEqual([...union].sort());
-  });
-});
+// The [#4653] single-source pin that lived here retired WITH the schema it
+// defended: `ActivationEventSchema` is removed from both entries (#4657,
+// ADR-0049), and the export-surface pin — no entry may export the name at all
+// — lives in ../kernel/activation-events-retirement.test.ts.

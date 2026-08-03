@@ -1,0 +1,20 @@
+{
+  "$comment": [
+    "Accepted exceptions for scripts/check-startup-registry-verdict.mjs (#4777).",
+    "SHRINK-ONLY and hand-edited under review: the checker fails on a stale entry, so a",
+    "site that gets fixed must have its entry deleted in the same PR. There is deliberately",
+    "no `--fix`/`--update` flag — a generator would let a new violation be admitted by",
+    "'just run the update command', which is precisely how a gate stops meaning anything.",
+    "Every entry must name WHY it is still here and WHAT closes it.",
+    "",
+    "Empty on purpose: the three instances this gate was written from (#4769, #4771, #4772)",
+    "were all fixed before it landed, and the gate is clean on the `main` it landed on.",
+    "The bidirectional proof is in the PR — it reports the #4771 and #4772 shapes on their",
+    "pre-fix commits. A gate that has only ever been green cannot be told apart from a gate",
+    "that matches nothing (#4690).",
+    "",
+    "Key format: rule A `<file>::<unit>.<phase>()::<service>`; rule B `<file>::<function>::<registries>`.",
+    "Run the checker to see the exact key it computes for a finding."
+  ],
+  "entries": []
+}

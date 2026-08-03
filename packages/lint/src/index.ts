@@ -225,10 +225,12 @@ export type { NavTargetRefFinding, NavTargetRefSeverity } from './validate-nav-t
 export {
   validateSearchableFields,
   SEARCHABLE_FIELD_UNKNOWN,
+  SEARCHABLE_FIELD_UNSEARCHABLE,
 } from './validate-searchable-fields.js';
 export type {
   SearchableFieldFinding,
   SearchableFieldSeverity,
+  SearchableFieldRole,
 } from './validate-searchable-fields.js';
 
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
