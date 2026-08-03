@@ -63,6 +63,13 @@ interface DeliveryRow {
  * `UPDATE WHERE status='pending'` for the exactly-once claim; precomputed
  * `partition_key`; SELECT-then-INSERT dedup converging on the unique index).
  * Dedup uniqueness is `(source, dedup_key)`; partition affinity is on `ref_id`.
+ *
+ * **No UPDATE here writes `updated_at`** (#4765) — same rule, same reason as
+ * {@link SqlNotificationOutbox}: the platform's `sys_stamp_audit_update` hook
+ * owns that column, a caller-supplied value is stripped as `readonly` (#2948)
+ * with a WARN per call, and `claim()`'s unconditional reap UPDATE runs on every
+ * dispatcher tick — so writing it turned an idle dev server into a console
+ * firehose while changing nothing about the stored row.
  */
 export class SqlHttpOutbox implements IHttpOutbox {
     private readonly objectName: string;
@@ -127,7 +134,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
         // 1. Reap stale in_flight rows — visibility-timeout recovery.
         await this.engine.update(
             this.objectName,
-            { status: 'pending', claimed_by: null, claimed_at: null, updated_at: now },
+            { status: 'pending', claimed_by: null, claimed_at: null },
             {
                 where: {
                     status: 'in_flight',
@@ -155,7 +162,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
         // 3. Atomic claim. WHERE status='pending' rejects rows another worker took.
         await this.engine.update(
             this.objectName,
-            { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now, updated_at: now },
+            { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now },
             { where: { id: { $in: ids }, status: 'pending' }, multi: true },
         );
 
@@ -205,7 +212,6 @@ export class SqlHttpOutbox implements IHttpOutbox {
                 response_body: result.responseBody ?? null,
                 next_retry_at: nextRetryAt,
                 error,
-                updated_at: now,
             },
             { where: { id }, multi: false },
         );
@@ -230,7 +236,6 @@ export class SqlHttpOutbox implements IHttpOutbox {
                 'DELIVERY_NOT_ELIGIBLE',
             );
         }
-        const now = Date.now();
         await this.engine.update(
             this.objectName,
             {
@@ -243,7 +248,6 @@ export class SqlHttpOutbox implements IHttpOutbox {
                 response_code: null,
                 response_body: null,
                 error: null,
-                updated_at: now,
             },
             { where: { id, status: { $in: ['success', 'failed', 'dead'] } }, multi: false },
         );

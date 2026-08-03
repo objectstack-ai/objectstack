@@ -53,6 +53,18 @@ interface DeliveryRow {
  * `UPDATE … WHERE status='pending'` claim. `partition_key` is precomputed on
  * enqueue (ObjectQL has no portable `hash()` in WHERE). Mirrors
  * `SqlWebhookOutbox`.
+ *
+ * **No UPDATE here writes `updated_at`** (#4765). ObjectQL's builtin
+ * `sys_stamp_audit_update` hook stamps it on every update unconditionally, and
+ * `updated_at` is `readonly`, so a caller-supplied value is stripped by
+ * `stripReadonlyFields` (#2948) before it reaches the driver — with a WARN per
+ * call. `claim()` / `claimDigest()` start with an unconditional reap UPDATE that
+ * runs whether or not a row is stale, so on an idle dev server the three claim
+ * paths × 8 partitions × a 500 ms dispatcher tick spammed 48 identical warnings
+ * a second and drowned the console. Writing the column was already a no-op
+ * (stripped, then re-stamped); passing it as epoch-ms would also have been the
+ * wrong shape for a native TIMESTAMP column (see `toEpochMs`) had it ever
+ * survived the strip. Leave it to the platform.
  */
 export class SqlNotificationOutbox implements INotificationOutbox {
     private readonly objectName: string;
@@ -114,7 +126,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         // 1. Reap stale in_flight rows (visibility-timeout recovery).
         await this.engine.update(
             this.objectName,
-            { status: 'pending', claimed_by: null, claimed_at: null, updated_at: now },
+            { status: 'pending', claimed_by: null, claimed_at: null },
             { where: { status: 'in_flight', claimed_at: { $lt: now - opts.claimTtlMs } }, multi: true } as any,
         );
 
@@ -137,7 +149,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         // 3. Atomic claim — WHERE status='pending' rejects rows another worker took.
         await this.engine.update(
             this.objectName,
-            { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now, updated_at: now },
+            { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now },
             { where: { id: { $in: ids }, status: 'pending' }, multi: true } as any,
         );
 
@@ -154,7 +166,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         // 1. Reap stale in_flight (same as claim).
         await this.engine.update(
             this.objectName,
-            { status: 'pending', claimed_by: null, claimed_at: null, updated_at: now },
+            { status: 'pending', claimed_by: null, claimed_at: null },
             { where: { status: 'in_flight', claimed_at: { $lt: now - opts.claimTtlMs } }, multi: true } as any,
         );
 
@@ -177,7 +189,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         // 3. Atomic claim.
         await this.engine.update(
             this.objectName,
-            { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now, updated_at: now },
+            { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now },
             { where: { id: { $in: ids }, status: 'pending' }, multi: true } as any,
         );
 
@@ -224,7 +236,6 @@ export class SqlNotificationOutbox implements INotificationOutbox {
                 claimed_at: null,
                 next_attempt_at: nextAttemptAt,
                 error,
-                updated_at: now,
             },
             { where: { id }, multi: false } as any,
         );
