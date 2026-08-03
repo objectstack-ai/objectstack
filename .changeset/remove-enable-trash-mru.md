@@ -1,5 +1,5 @@
 ---
-"@objectstack/spec": minor
+"@objectstack/spec": major
 ---
 
 feat(spec)!: remove the dead `object.enable.trash` / `enable.mru` capability flags (#2377, ADR-0049 enforce-or-remove — close-out)
@@ -27,7 +27,10 @@ soft-delete existed to opt out of.
   `lifecycle` policy for recoverability).
 
 **Migration**: delete any `enable.trash` / `enable.mru` keys from object
-metadata — they never changed behavior. `ObjectSchema.create()` /
-`ObjectCapabilities.parse()` now reject them with this prescription. A real
+metadata — they never changed behavior, so the removal is drop-the-key only.
+`ObjectSchema.create()` / `ObjectCapabilities.parse()` now reject them with
+this prescription; `os migrate meta --from 16` rewrites authored sources
+automatically, and stored 16.x rows replay clean through the ADR-0087 chain
+(`object-enable-trash-mru-removed`). Soft delete is parked at #3146; a real
 recycle bin or MRU feature, if built, returns as a live enforced flag
-(#1893 prune-or-build).
+(ADR-0049 prune-or-build).

@@ -46,7 +46,7 @@ export const LEGACY_API_METHOD_GUIDANCE: Record<LegacyApiMethod, string> = {
   aggregate: "declare ['list'] — `aggregate` derives from list",
   history: "declare ['get'] with `enable.trackHistory: true` — `history` derives from get ∧ trackHistory",
   search: "declare ['list'] (with `searchable` not false) — `search` derives from list ∧ searchable",
-  restore: "delete the value — `restore` never derives (`enable.trash` retired, #2377); it returns only with a real recycle bin (#1893)",
+  restore: "delete the value — `restore` never derives (`enable.trash` retired, #2377); it returns only with a real recycle bin (#3146, parked)",
   purge: "delete the value — `purge` never derives (`enable.trash` retired, #2377)",
   import: "declare ['create'] and/or ['update'] — `import` derives from create ∨ update (writeMode-precise at the gate)",
   export: "declare ['list'] — `export` derives from list",
@@ -133,18 +133,20 @@ export function stripLegacyApiMethods(
  */
 const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   trash:
-    '`enable.trash` was removed from @objectstack/spec in the 16.x line (#2377, ' +
+    '`enable.trash` was removed from @objectstack/spec in the 16.x line (#2377/#3207, ' +
     'ADR-0049) — it never had a runtime consumer: every delete has always been a ' +
     'hard delete, and a default-true flag promising a recycle bin was a false ' +
     'affordance (authors wrote `trash: false` believing they were opting out of a ' +
     'soft-delete that never ran). Delete the key. For recoverability use per-field ' +
-    '`trackHistory` (audit trail) or a `lifecycle` policy; a real recycle bin, if ' +
-    'built, returns as a live enforced flag (#1893 prune-or-build).',
+    '`trackHistory` (audit trail) or a `lifecycle` policy; soft delete is parked at ' +
+    '#3146 and, if built, returns as a live enforced flag (ADR-0049 prune-or-build). ' +
+    'Run `os migrate meta --from 16` to rewrite it automatically.',
   mru:
-    '`enable.mru` was removed from @objectstack/spec in the 16.x line (#2377, ' +
+    '`enable.mru` was removed from @objectstack/spec in the 16.x line (#2377/#3207, ' +
     'ADR-0049) — Most-Recently-Used tracking was never implemented; no reader ' +
     'existed, so the flag changed nothing. Delete the key. If MRU tracking is ' +
-    'built it returns as a live enforced flag (#1893 prune-or-build).',
+    'built it returns as a live enforced flag (ADR-0049 prune-or-build). ' +
+    'Run `os migrate meta --from 16` to rewrite it automatically.',
 };
 
 /**

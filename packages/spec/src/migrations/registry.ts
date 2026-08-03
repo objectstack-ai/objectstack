@@ -694,7 +694,15 @@ const step17: MigrationStep = {
     + 'TODO for event consumers rather than a source rewrite, and it carries no tombstone: a '
     + 'removed enum VALUE cannot hold a fix-it error, exactly as the sharing-rule `full` '
     + 'retirement noted. Should a real per-field stream ever be wanted, it earns its own '
-    + 'contract on the #4639 precedent rather than reclaiming this slot.',
+    + 'contract on the #4639 precedent rather than reclaiming this slot.\n\n'
+    + 'The object capability block closes out the same ADR-0049 pass: `enable.trash` and '
+    + '`enable.mru` left the schema in the 16.x line (#3207, the #2377 close-out — every '
+    + 'delete has always been a hard delete and MRU tracking was never implemented, so both '
+    + 'default-true flags gated nothing), and the `.strict()` capabilities block rejects them '
+    + 'with the prescription. This step registers the migration surface that removal was '
+    + 'missing: stored 16.x rows replay clean instead of flagging `metadata_spec_invalid`, '
+    + 'and `os migrate meta --from 16` rewrites authored sources. Soft delete stays parked at '
+    + '#3146; if built it returns as a live enforced flag rather than by reviving these keys.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -731,6 +739,7 @@ const step17: MigrationStep = {
     'flow-node-script-branch-keys-removed',
     'object-managed-by-system-to-system-data',
     'retry-policy-converged',
+    'object-enable-trash-mru-removed',
   ],
   semantic: [
     {

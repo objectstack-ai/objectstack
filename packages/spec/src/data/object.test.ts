@@ -31,8 +31,8 @@ describe('ObjectCapabilities', () => {
     expect(result).toEqual(capabilities);
   });
 
-  // #2377 (ADR-0049): `trash`/`mru` parsed-but-did-nothing for years — the
-  // retired keys must fail loudly with the upgrade prescription, not strip
+  // #2377/#3207 (ADR-0049): `trash`/`mru` parsed-but-did-nothing for years —
+  // the retired keys must fail loudly with the upgrade prescription, not strip
   // silently (#1535; pattern of the tenancy tombstones, #2763).
   it('rejects the retired trash/mru flags with upgrade guidance', () => {
     for (const key of ['trash', 'mru'] as const) {
@@ -41,7 +41,17 @@ describe('ObjectCapabilities', () => {
       const message = result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
       expect(message).toContain(`\`${key}\``);
       expect(message).toContain('#2377');
+      // The prescription names the source rewrite (the #3207 conversion).
+      expect(message).toContain('os migrate meta --from 16');
     }
+    // `trash` additionally points at the parked soft-delete issue — the
+    // parking spot the 2026-08-02 #3207 ruling designates (#1893, the old
+    // pointer, closed 2026-07-24).
+    const trash = ObjectCapabilities.safeParse({ trash: false });
+    expect(trash.success).toBe(false);
+    const trashMsg = trash.success ? '' : trash.error.issues.map((i) => i.message).join('\n');
+    expect(trashMsg).toContain('#3146');
+    expect(trashMsg).not.toContain('#1893');
   });
 
   it('rejects unknown capability keys instead of stripping them', () => {

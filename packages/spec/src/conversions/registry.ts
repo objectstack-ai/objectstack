@@ -3199,6 +3199,79 @@ const objectManagedBySystemToSystemData: MetadataConversion = {
 };
 
 /**
+ * The dead object capability flags leave the surface (protocol 17, #3207 —
+ * the #2377 ADR-0049 close-out slice PR #3414 removed from the schema).
+ *
+ * `enable.trash` promised a recycle bin and `enable.mru` promised
+ * Most-Recently-Used tracking; neither ever had a behavior-changing reader —
+ * every delete has always been a hard delete, and no MRU state was ever
+ * written. Both defaulted `true`, the ADR-0078 silent-failure shape: authors
+ * wrote `trash: false // never soft-delete audit logs` believing they were
+ * opting out of a soft-delete that never ran. Soft delete stays parked at
+ * #3146; if built it returns as a live enforced flag (ADR-0049).
+ *
+ * `retiredFromLoadPath`: the capabilities block is `.strict()` and rejects
+ * both keys with the prescription (`CAPABILITIES_RETIRED_KEY_GUIDANCE`), so a
+ * live author is taught at parse; this entry exists so stored 16.x rows
+ * replay clean (`applyConversionsToStoredItem` — without it a pre-removal row
+ * flags `metadata_spec_invalid` forever, mislabelling chain-owned history as
+ * a current-contract violation) and so `os migrate meta --from 16` rewrites
+ * sources.
+ */
+const objectEnableTrashMruRemoved: MetadataConversion = {
+  id: 'object-enable-trash-mru-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'object.enable.trash / object.enable.mru',
+  summary:
+    "object capability flags 'enable.trash'/'enable.mru' removed (#3207, #2377 close-out — no "
+    + 'recycle bin and no MRU tracking ever ran; both default-true flags gated nothing)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'objects', (obj, path) => {
+      // `enable.*` sits one level down, so stripKeys (top-level only) cannot
+      // reach it — drill in, and copy-on-write so an untouched object keeps
+      // its identity (pattern of `datasource-inert-blocks-removed`).
+      const enable = obj.enable;
+      if (!enable || typeof enable !== 'object' || Array.isArray(enable)) return obj;
+      const stripped = stripKeys(
+        enable as Record<string, unknown>,
+        ['trash', 'mru'],
+        emit,
+        `${path}.enable`,
+      );
+      if (stripped === enable) return obj;
+      return { ...obj, enable: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      objects: [
+        {
+          name: 'task',
+          label: 'Task',
+          enable: { trash: false, mru: true, searchable: true },
+        },
+        // an object without the retired keys passes through untouched
+        { name: 'crm_account', label: 'Account', enable: { searchable: true } },
+      ],
+    },
+    // Two notices: one per removed key; the surviving `searchable` proves the
+    // strip is surgical, not a block-level delete.
+    after: {
+      objects: [
+        {
+          name: 'task',
+          label: 'Task',
+          enable: { searchable: true },
+        },
+        { name: 'crm_account', label: 'Account', enable: { searchable: true } },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
  * The retry policy converges to one declaration (protocol 17, #4661 — the
  * #4535 C8 dual-source cluster).
  *
@@ -3394,6 +3467,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowNodeScriptBranchKeysRemoved,
     retryPolicyConverged,
     objectManagedBySystemToSystemData,
+    objectEnableTrashMruRemoved,
   ],
 };
 

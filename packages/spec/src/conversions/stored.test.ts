@@ -46,6 +46,24 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () =>
     expect(out.sharingModel).toBe('public_read');
   });
 
+  // #3207 — a 16.x row still carrying the retired `enable.trash`/`enable.mru`
+  // flags replays clean instead of tripping the registry's spec-conformance
+  // diagnostic forever (`.strict()` capabilities would flag it
+  // `metadata_spec_invalid` on every rehydration).
+  it('strips the retired enable.trash/mru flags from a stored object row', () => {
+    const row = {
+      name: 'sys_audit_log',
+      label: 'Audit Log',
+      enable: { trash: false, mru: false, searchable: true },
+    };
+    const notices: ConversionNotice[] = [];
+    const out = applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) }) as {
+      enable: Record<string, unknown>;
+    };
+    expect(out.enable).toEqual({ searchable: true });
+    expect(notices.filter((n) => n.conversionId === 'object-enable-trash-mru-removed')).toHaveLength(2);
+  });
+
   it('is idempotent — a canonical row passes through by reference', () => {
     const row = {
       name: 'crm_task',

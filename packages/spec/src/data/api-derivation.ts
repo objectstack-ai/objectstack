@@ -131,7 +131,7 @@ interface DerivationRule {
  * - `restore`/`purge` map to `delete` but their flag is permanently `false`:
  *   `enable.trash` was retired (#2377/ADR-0049) with no runtime consumer, so
  *   there is no soft-delete state to restore/purge. They return as live derived
- *   verbs only if/when a real recycle bin ships (#1893).
+ *   verbs only if/when a real recycle bin ships (#3146, parked).
  */
 export const API_METHOD_DERIVATION: Record<LegacyApiMethod, DerivationRule> = {
   upsert: { all: ['create', 'update'] },

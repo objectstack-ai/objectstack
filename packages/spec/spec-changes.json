@@ -277,6 +277,12 @@
         "to": "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the name describing what the bucket actually holds: admin/user-writable platform data)",
         "conversionId": "object-managed-by-system-to-system-data",
         "toMajor": 17
+      },
+      {
+        "surface": "object.enable.trash / object.enable.mru",
+        "to": "object capability flags 'enable.trash'/'enable.mru' removed (#3207, #2377 close-out — no recycle bin and no MRU tracking ever ran; both default-true flags gated nothing)",
+        "conversionId": "object-enable-trash-mru-removed",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -859,6 +865,12 @@
           "surface": "object.managedBy",
           "to": "object managedBy 'system' → 'system-data' (#3355 — ADR-0103's residual bucket named the engine-owned half v16 had already moved out to `engine-owned`; the rename leaves the name describing what the bucket actually holds: admin/user-writable platform data)",
           "conversionId": "object-managed-by-system-to-system-data",
+          "toMajor": 17
+        },
+        {
+          "surface": "object.enable.trash / object.enable.mru",
+          "to": "object capability flags 'enable.trash'/'enable.mru' removed (#3207, #2377 close-out — no recycle bin and no MRU tracking ever ran; both default-true flags gated nothing)",
+          "conversionId": "object-enable-trash-mru-removed",
           "toMajor": 17
         }
       ],
