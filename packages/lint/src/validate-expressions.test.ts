@@ -341,7 +341,13 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
             close_date: { type: 'date' },
             expected: { type: 'formula', formula: 'record.amount * record.probability / 100' },
           },
-          validations: [{ name: 'future', expression: 'record.close_date >= today()' }],
+          // The `!= null` guard is load-bearing since #4763: `close_date` is a
+          // declared NULLABLE field, and an un-guarded `>=` over it faults at
+          // runtime (`null >= timestamp` has no overload) — the null-guard gate
+          // rejects that shape at authoring now. Soundness (this block's
+          // subject) and null-guarding are separate verdicts; the predicate has
+          // to satisfy both to produce zero issues.
+          validations: [{ name: 'future', expression: 'record.close_date != null && record.close_date >= today()' }],
         }],
       });
       expect(issues).toHaveLength(0);
@@ -755,6 +761,206 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           edges: [],
         }],
       })).toHaveLength(0);
+    });
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────
+// #4763 — `has(x)` reads as a null guard and is not one.
+//
+// Scope note (constraint of the issue, pinned here so it stays a decision):
+// this gate walks the AUTHORED METADATA the stack carries — object validation
+// rules and lifecycle-hook conditions. It never reads source files, so the
+// deliberately-bad fixtures in `packages/objectql/src/validation/rule-*.test.ts`
+// (which pin the runtime's fail-closed behaviour and MUST keep the bad shape)
+// are structurally out of its reach.
+// ───────────────────────────────────────────────────────────────────────
+describe('null-guard gate (#4763)', () => {
+  // Mirrors `showcase_project`: dates and money are declared but nullable;
+  // `status` carries a default option and `name` is required, so neither can
+  // be null and neither may ever be flagged.
+  const project = {
+    name: 'showcase_project',
+    fields: {
+      name: { type: 'text', required: true },
+      status: { type: 'select', options: [{ value: 'planned', default: true }, { value: 'active' }] },
+      start_date: { type: 'date' },
+      end_date: { type: 'date' },
+      budget: { type: 'currency' },
+      spent: { type: 'currency', defaultValue: 0 },
+    },
+  };
+  const withRule = (rule: Record<string, unknown>) =>
+    validateStackExpressions({ objects: [{ ...project, validations: [rule] }] });
+
+  it('REJECTS the `has(a) && has(b) && a < b` shape over nullable declared fields', () => {
+    const issues = withRule({
+      type: 'script',
+      name: 'end_after_start',
+      condition: 'has(record.start_date) && has(record.end_date) && record.end_date < record.start_date',
+    });
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.every((i) => (i.severity ?? 'error') === 'error')).toBe(true);
+    const joined = issues.map((i) => i.message).join('\n');
+    // names the rule …
+    expect(joined).toContain("validation rule 'end_after_start'");
+    // … the operand …
+    expect(joined).toContain('record.end_date');
+    expect(joined).toContain('record.start_date');
+    // … and the fix, in the runtime's own words.
+    expect(joined).toContain("Guard it with '!= null'");
+    expect(joined).toContain('has(x)');
+    expect(issues[0].where).toContain("object 'showcase_project'");
+  });
+
+  it('ACCEPTS the `!= null` form (the fix #4761 landed in the examples)', () => {
+    expect(
+      withRule({
+        type: 'script',
+        name: 'end_after_start',
+        condition:
+          'record.start_date != null && record.end_date != null && record.end_date < record.start_date',
+      }),
+    ).toHaveLength(0);
+  });
+
+  it('ACCEPTS a guarded arithmetic predicate (showcase `spent_within_budget`)', () => {
+    expect(
+      withRule({
+        type: 'script',
+        name: 'spent_within_budget',
+        condition: 'record.budget != null && record.spent != null && record.spent > record.budget * 1.2',
+      }),
+    ).toHaveLength(0);
+  });
+
+  it('never flags a required field or one with a default (`spent`, `status`, `name`)', () => {
+    expect(
+      withRule({ type: 'script', name: 'spend_positive', condition: 'record.spent > 0' }),
+    ).toHaveLength(0);
+  });
+
+  it('reaches the predicates nested in a `conditional` rule’s then/otherwise', () => {
+    const issues = withRule({
+      type: 'conditional',
+      name: 'budget_sanity',
+      when: "record.status == 'active'",
+      then: { type: 'script', name: 'over_budget', condition: 'has(record.budget) && record.budget > 1' },
+    });
+    expect(issues.length).toBe(1);
+    expect(issues[0].message).toContain('record.budget');
+    expect(issues[0].where).toContain("'budget_sanity' then → 'over_budget'");
+  });
+
+  // Negative-case pin: the real `showcase_account` rule pair. Both use `has()`
+  // — legitimately, to tell "key absent from the PATCH" apart from "explicit
+  // null" — and both compare with EQUALITY only. They must stay legal; a rule
+  // that flags them is too broad.
+  it('leaves `showcase_account.churn_reason_consistency` alone (legitimate `has()`)', () => {
+    const issues = validateStackExpressions({
+      objects: [{
+        name: 'showcase_account',
+        fields: { status: { type: 'select', options: [{ value: 'churned' }] }, churn_reason: { type: 'text' } },
+        validations: [{
+          type: 'conditional',
+          name: 'churn_reason_consistency',
+          when: "record.status == 'churned'",
+          then: {
+            type: 'script',
+            name: 'churn_reason_present',
+            condition: "!has(record.churn_reason) || record.churn_reason == null || record.churn_reason == ''",
+          },
+          otherwise: {
+            type: 'script',
+            name: 'churn_reason_absent',
+            condition: "has(record.churn_reason) && record.churn_reason != null && record.churn_reason != ''",
+          },
+        }],
+      }],
+    });
+    expect(issues).toHaveLength(0);
+  });
+
+  describe('hook conditions — the third instance the issue named', () => {
+    const hookStack = (condition: string) => ({
+      objects: [project],
+      hooks: [{ name: 'project_budget_alert', object: 'showcase_project', condition }],
+    });
+
+    // Regression pin. `examples/app-showcase/src/data/hooks/index.ts` carried
+    // `has(record.spent) && has(record.budget) && record.spent > record.budget`
+    // until #4770/#4786 corrected it. This asserts the bad shape cannot come
+    // back: it is red today, and would have been red before that fix.
+    it('REJECTS the pre-#4786 showcase hook shape', () => {
+      const issues = validateStackExpressions(
+        hookStack('has(record.spent) && has(record.budget) && record.spent > record.budget'),
+      );
+      expect(issues.length).toBeGreaterThan(0);
+      expect(issues[0].where).toContain("hook 'project_budget_alert'");
+      expect(issues.map((i) => i.message).join('\n')).toContain('record.budget');
+    });
+
+    it('ACCEPTS the corrected shape now on `main`', () => {
+      expect(
+        validateStackExpressions(
+          hookStack('record.spent != null && record.budget != null && record.spent > record.budget'),
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('applies per target for a multi-object hook', () => {
+      const issues = validateStackExpressions({
+        objects: [project, { name: 'other_obj', fields: { budget: { type: 'currency', required: true } } }],
+        hooks: [{ name: 'multi', object: ['showcase_project', 'other_obj'], condition: 'record.budget > 1' }],
+      });
+      // Only the object that declares `budget` nullable is flagged.
+      expect(issues).toHaveLength(1);
+      expect(issues[0].where).toContain('showcase_project');
+    });
+  });
+
+  describe('surfaces deliberately NOT covered', () => {
+    it('leaves sharing-rule conditions alone (compiled to a SQL filter, never faults)', () => {
+      expect(
+        validateStackExpressions({
+          objects: [project],
+          sharingRules: [{
+            name: 'big_budget',
+            object: 'showcase_project',
+            condition: "record.status == 'active' && record.budget > 100000",
+          }],
+        }),
+      ).toHaveLength(0);
+    });
+
+    it('leaves flattened flow conditions alone (a bare id may be a flow variable)', () => {
+      expect(
+        validateStackExpressions({
+          objects: [project],
+          flows: [{
+            name: 'escalate',
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'showcase_project' } },
+              { id: 'd', type: 'decision', config: { condition: 'record.budget > 100000' } },
+            ],
+            edges: [],
+          }],
+        }),
+      ).toHaveLength(0);
+    });
+
+    it('leaves `Field.formula` expressions alone (blessed `guard ? value : null`, #3306)', () => {
+      expect(
+        validateStackExpressions({
+          objects: [{
+            ...project,
+            fields: {
+              ...project.fields,
+              remaining: { type: 'formula', formula: 'record.budget - record.spent' },
+            },
+          }],
+        }),
+      ).toHaveLength(0);
     });
   });
 });

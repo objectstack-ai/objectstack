@@ -98,9 +98,14 @@ Schema reference: [API](/docs/references/api)
 
 The discovery endpoint is the entry point for all clients. It returns the API version, available routes, service capabilities, and per-service status.
 
-### `GET /api/v1`
+### `GET /api/v1` (and `GET /api/v1/discovery`)
 
-Returns the full discovery manifest.
+Returns the full discovery manifest. `@objectstack/rest` registers **one handler at both
+paths** — the API base path and `<basePath>/discovery` — so the two are the same document,
+not a redirect and not two shapes. In a REST-less composition the runtime dispatcher
+registers `<basePath>/discovery` as the fallback owner instead, and then serves its own
+`/.well-known/objectstack` payload there (see below); when `@objectstack/rest` is mounted
+the dispatcher cedes the route to it, so a single owner answers it (ADR-0076 D11).
 
 **Response**:
 ```json
@@ -125,7 +130,8 @@ Returns the full discovery manifest.
   "capabilities": {
     "cron": { "enabled": false },
     "automation": { "enabled": false },
-    "search": { "enabled": false }
+    "search": { "enabled": false },
+    "transactionalBatch": { "enabled": true, "description": "Atomic cross-object batch endpoint (POST {basePath}/batch)…" }
   }
 }
 ```
@@ -133,6 +139,15 @@ Returns the full discovery manifest.
 Disabled/uninstalled route keys (e.g. `auth`, `analytics`, `workflow`) are omitted from `routes` entirely rather than set to `null`; check `services` to tell "not installed" apart from "installed but not yet mounted here." The sample above shows a minimal install: `analytics` reports `unavailable` and advertises no route until `@objectstack/service-analytics` registers the engine — the dispatcher then also mounts `/api/v1/analytics/*` (the routes are capability-conditional; an uninstalled capability answers 404 for every method).
 
 `metadata` is reported from whatever implementation fills its slot, so the sample's `available` is the `MetadataPlugin` case (a persisted `sys_metadata` registry). A stack running the kernel's in-memory fallback instead reports `status: "degraded"` with a `message` naming what is missing and what to install. `handlerReady` is `true` either way: `/api/v1/meta` is served by the protocol, so the route is mounted whichever registry sits behind it.
+
+`capabilities` is a flat map of platform feature flags, one entry per well-known
+capability (`comments`, `automation`, `cron`, `search`, `export`, `chunkedUpload`,
+`transactionalBatch`), each derived from what is actually registered — never hardcoded.
+`transactionalBatch` (#3298, ADR-0034) is the one worth negotiating at connect time: it is
+`true` **iff** the atomic cross-object batch route (`POST {basePath}/batch`) is mounted
+*and* the runtime engine can honour a transaction, so a client can decide once whether to
+send an atomic batch or fall back to client-side sequencing, instead of probing for
+`404`/`405`/`501`. See [Data API → batch](/docs/api/data-api).
 
 ### `GET /.well-known/objectstack`
 

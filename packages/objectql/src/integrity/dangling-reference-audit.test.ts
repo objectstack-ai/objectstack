@@ -372,3 +372,162 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
     ]);
   });
 });
+
+/**
+ * [#4747] "The datasource refused" and "nobody asked" are different facts.
+ *
+ * The audit reads through a live engine, and the engine outlives it only until
+ * the host closes the pool. Before this, every `os migrate` invocation ended
+ * with `unreadableObjects: ['sys_metadata', 'sys_view_definition']` — the sweep
+ * fired 60s after boot, inside a process whose datasource had already been
+ * disconnected. An `unreadableObjects` that is non-empty on every healthy run
+ * is not a cautious report; it is a broken alarm, and it costs exactly the
+ * signal #4551 built the bucket for.
+ *
+ * The pair of tests that opens this block is the whole point: BEFORE the fix
+ * the two runs were indistinguishable, and after it they must never again be
+ * confusable. Deleting the abort handling makes the second one fail; deleting
+ * the `unreadableObjects` push makes the first one fail.
+ */
+describe('[#4747] a run that was called off is not a finding about the data', () => {
+  /** A port whose listing always fails — the two runs below differ ONLY in why. */
+  const unreadablePort = () => makePort({
+    objects: [binding],
+    rows: {},
+    unreadable: new Set(['sys_position_permission_set']),
+  });
+
+  it('a REAL datasource fault still lands in `unreadableObjects`, loudly', async () => {
+    // The case the bucket exists for, and the one that must survive the fix:
+    // the audit tried, the store would not answer, and the report must not read
+    // as a clean bill of health on an object nothing could look at.
+    const port = unreadablePort();
+
+    const out = await auditDanglingReferences(port);
+
+    expect(out.unreadableObjects).toEqual(['sys_position_permission_set']);
+    expect(out.aborted).toBe(false);
+    expect(port.warnings.map((w) => w[0])).toContain(
+      '[integrity] dangling-reference audit could not list an object',
+    );
+  });
+
+  it('the SAME failure, raced by a teardown, is dropped instead of filed', async () => {
+    // Identical throw from identical code — the only difference is that the
+    // caller had called the run off, which is what closing a connection pool on
+    // purpose looks like from in here. It is not evidence about the datasource,
+    // so it must not spend the bucket that only holds evidence.
+    const signal = { aborted: false };
+    const port = unreadablePort();
+    const failing = port.find.bind(port);
+    port.find = async (o, opts) => {
+      signal.aborted = true;          // the pool closes mid-query
+      return failing(o, opts);        // …and the query fails because of it
+    };
+
+    const out = await auditDanglingReferences(port, { signal });
+
+    expect(out.unreadableObjects).toEqual([]);
+    // Not silence either: the run says it did not finish, so nothing can read
+    // `dangling: []` as "everything is fine".
+    expect(out.aborted).toBe(true);
+    expect(port.warnings).toEqual([]);
+  });
+
+  it('called off BEFORE a read: no query is issued at all', async () => {
+    // This is what removes the `ERROR Find operation failed` line from a
+    // SUCCESSFUL command — the engine never gets asked, so it never logs.
+    const reads: string[] = [];
+    const port = makePort({
+      objects: [binding, task],
+      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }] },
+    });
+    const findSpy = port.find.bind(port);
+    port.find = async (o, opts) => { reads.push(o); return findSpy(o, opts); };
+
+    const out = await auditDanglingReferences(port, { signal: { aborted: true } });
+
+    expect(reads).toEqual([]);
+    expect(port.probes).toEqual([]);
+    expect(out.aborted).toBe(true);
+    expect(out.unreadableObjects).toEqual([]);
+  });
+
+  it('called off MID-run keeps what it already proved and stops there', async () => {
+    // A finding is a finding whenever it was made; only the SILENCE about the
+    // rest of the run becomes unreliable, which is what `aborted` records. So
+    // an abort must not discard the first object's verdict — and must not turn
+    // the second object into a report about the datasource.
+    const signal = { aborted: false };
+    const reads: string[] = [];
+    const port = makePort({
+      objects: [binding, task],   // binding is scanned first (security surface)
+      rows: {
+        sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }],
+        showcase_task: [{ id: 't1', title: 'T', project: 'proj_gone' }],
+      },
+      unreadable: new Set(['showcase_task']),
+    });
+    const findSpy = port.find.bind(port);
+    port.find = async (o, opts) => {
+      reads.push(o);
+      // Teardown lands as the second listing is issued — so that listing fails
+      // BECAUSE the run was called off, which is the production race exactly.
+      if (o === 'showcase_task') signal.aborted = true;
+      return findSpy(o, opts);
+    };
+
+    const out = await auditDanglingReferences(port, { signal });
+
+    expect(reads).toEqual(['sys_position_permission_set', 'showcase_task']);
+    expect(out.dangling).toHaveLength(1);
+    expect(out.dangling[0]).toMatchObject({ recordId: 'ppr_1', value: 'ps_gone' });
+    expect(out.aborted).toBe(true);
+    // The object the teardown cut short is NOT reported as unreadable.
+    expect(out.unreadableObjects).toEqual([]);
+    // The real finding is still reported, and the summary line carries the
+    // incompleteness so the log cannot read as a finished run either.
+    const summary = port.warnings.find((w) => w[0].includes('#4551'));
+    expect(summary).toBeDefined();
+    expect((summary![1] as any).aborted).toBe(true);
+  });
+
+  it('a probe that fails under a teardown is not `undetermined` either', async () => {
+    // `undetermined` means "the probe RAN and could not tell". A withdrawn
+    // question did not run, so counting it there would repeat the same category
+    // error one bucket over.
+    const signal = { aborted: false };
+    const port = makePort({
+      objects: [binding],
+      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_x' }] },
+      throwingTargets: new Set(['sys_permission_set']),
+    });
+    const probeSpy = port.probe.bind(port);
+    port.probe = async (target, id) => {
+      signal.aborted = true;
+      return probeSpy(target, id);
+    };
+
+    const out = await auditDanglingReferences(port, { signal });
+
+    expect(out.undetermined).toBe(0);
+    expect(out.dangling).toEqual([]);
+    expect(out.aborted).toBe(true);
+  });
+
+  it('a run nobody called off says so explicitly — `aborted: false`, not absent', async () => {
+    // The flag is a positive statement about completeness, so a consumer never
+    // has to guess whether `undefined` meant "finished" or "old report shape".
+    const port = makePort({
+      objects: [binding],
+      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_real' }] },
+      existing: new Set(['sys_permission_set ps_real']),
+    });
+
+    const out = await auditDanglingReferences(port, { signal: { aborted: false } });
+    expect(out.aborted).toBe(false);
+
+    const noSignal = await auditDanglingReferences(port);
+    expect(noSignal.aborted).toBe(false);
+  });
+});

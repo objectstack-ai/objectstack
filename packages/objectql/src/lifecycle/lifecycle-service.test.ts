@@ -794,7 +794,119 @@ describe('LifecycleService reference audit leg (#4551)', () => {
       return { scanned: 0, dangling: [], undetermined: 0, unreadableObjects: [], truncatedObjects: [] };
     };
 
-    await service(engine, { referenceAudit: { enabled: true, rowsPerObject: 7, maxRows: 21 } }).sweep();
-    expect(seen).toEqual({ rowsPerObject: 7, maxRows: 21 });
+    const svc = service(engine, { referenceAudit: { enabled: true, rowsPerObject: 7, maxRows: 21 } });
+    await svc.sweep();
+    // …and it hands the audit the teardown bit (#4747) — the audit's lifetime
+    // is this service's lifetime, so `signal` is the service's own, never a
+    // configured one.
+    expect(seen).toEqual({ rowsPerObject: 7, maxRows: 21, signal: { aborted: false } });
+  });
+});
+
+/**
+ * [#4747] The sweep must not outlive the engine it sweeps through.
+ *
+ * `stop()` used to clear the timers and nothing else — which was moot anyway,
+ * because the only caller was `ObjectQLPlugin.stop()`, a hook the kernel never
+ * invokes (the Plugin contract is `init`/`start`/`destroy`). So on a one-shot
+ * host the sweep woke 60s after boot, inside a process whose datasource had
+ * already been disconnected, and the #4551 audit filed the objects it could not
+ * read as findings — on every healthy run.
+ *
+ * Note what is NOT the fix here: switching the audit off for one-shot commands.
+ * That would make the audit permanently blind exactly where an operator has no
+ * other tool, which is the opposite of why #4551 built it. What the audit gets
+ * is the teardown bit, so it reads while the engine is live and stops when it
+ * is not.
+ */
+describe('LifecycleService teardown (#4747)', () => {
+  const AUDIT_CLEAN = {
+    scanned: 0, dangling: [], undetermined: 0,
+    unreadableObjects: [], truncatedObjects: [], aborted: false,
+  };
+
+  it('a sweep that starts after stop() reads nothing at all', async () => {
+    const { engine, deletes } = captureEngine([
+      { name: 'sys_job_run', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } },
+    ]);
+    let audits = 0;
+    engine.inspectDanglingReferences = async () => { audits += 1; return AUDIT_CLEAN; };
+
+    const svc = service(engine);
+    svc.stop();
+    const report = await svc.sweep();
+
+    expect(svc.stopped).toBe(true);
+    expect(audits).toBe(0);         // no read → no `ERROR Find operation failed`
+    expect(deletes).toEqual([]);    // and no write against a closing pool either
+    expect(report.swept).toEqual([]);
+    expect(report.danglingReferences).toBeUndefined();
+  });
+
+  it('stop() DURING a sweep calls the audit off instead of racing it', async () => {
+    // The real shape of the bug: the sweep is async, so clearing a timer says
+    // nothing about the work already in flight. The audit is handed the bit,
+    // and by the time it runs it can see that teardown began.
+    const { engine } = captureEngine([
+      { name: 'sys_job_run', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } },
+    ]);
+    let seenSignal: { aborted: boolean } | undefined;
+    engine.inspectDanglingReferences = async (opts: any) => {
+      seenSignal = opts?.signal;
+      return AUDIT_CLEAN;
+    };
+    const svc = service(engine);
+    // Teardown lands while the reaping leg is running.
+    const original = engine.delete.bind(engine);
+    engine.delete = async (object: string, options: any) => {
+      svc.stop();
+      return original(object, options);
+    };
+
+    const report = await svc.sweep();
+
+    // The audit leg is not entered at all once the service is stopped …
+    expect(seenSignal).toBeUndefined();
+    expect(report.danglingReferences).toBeUndefined();
+    // … and the sweep unwinds rather than issuing more work.
+    expect(svc.stopped).toBe(true);
+  });
+
+  it('an audit already running sees the abort through the signal it was given', async () => {
+    // Belt to the timing braces: even if a sweep gets into the audit leg before
+    // stop() lands, the object it is holding flips to aborted, so the audit
+    // stops reading and its report says it did not finish.
+    const { engine } = captureEngine([]);
+    const svc = service(engine);
+    let signalDuringAudit: { aborted: boolean } | undefined;
+    engine.inspectDanglingReferences = async (opts: any) => {
+      signalDuringAudit = opts.signal;
+      expect(opts.signal.aborted).toBe(false);
+      svc.stop();                               // teardown mid-audit
+      return { ...AUDIT_CLEAN, aborted: opts.signal.aborted };
+    };
+
+    const report = await svc.sweep();
+
+    expect(signalDuringAudit!.aborted).toBe(true);
+    expect(report.danglingReferences?.aborted).toBe(true);
+  });
+
+  it('stop() then start() re-arms the service — teardown is not one-way', async () => {
+    const { engine } = captureEngine([]);
+    let audits = 0;
+    engine.inspectDanglingReferences = async () => { audits += 1; return AUDIT_CLEAN; };
+
+    // A far-off first sweep: this test drives `sweep()` directly, and an armed
+    // 1ms timer would race its own assertion.
+    const svc = service(engine, { initialDelayMs: 600_000 });
+    svc.stop();
+    expect(svc.stopped).toBe(true);
+    svc.start();
+    expect(svc.stopped).toBe(false);
+
+    await svc.sweep();
+    expect(audits).toBe(1);
+    svc.stop();
   });
 });

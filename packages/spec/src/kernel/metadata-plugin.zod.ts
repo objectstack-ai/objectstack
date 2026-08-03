@@ -113,7 +113,13 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // code contributions: plugin `contributes.routes` + declarative `apis:`
   // (router), `defineStack({ functions })` + `contributes.functions`
   // (function), and the plugin/service registry itself (service).
-  'email_template', // Outbound email templates (EmailTemplateSchema)
+  // #4616: the canonical schema is `EmailTemplateDefinitionSchema`
+  // (`system/email-template.zod.ts`), which is what `BUILTIN_METADATA_TYPE_SCHEMAS`
+  // resolves this kind to. This comment used to name `EmailTemplateSchema` — the
+  // legacy sub-shape spec 7.1.0 demoted when it fixed that Prime Directive #8
+  // double-declaration, and removed outright in #4616 — which is exactly how
+  // consumers kept wiring the wrong one.
+  'email_template', // Outbound email templates (EmailTemplateDefinitionSchema)
   'doc',         // Package documentation — flat Markdown items (DocSchema, ADR-0046)
   'book',        // Documentation navigation spine (BookSchema, ADR-0046 §6)
 

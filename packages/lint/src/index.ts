@@ -27,6 +27,16 @@ export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-wid
 export { validateStackExpressions } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
 
+// #4763 — `has(x)` reads as a null guard and is not one. The decision procedure
+// is exported on its own so other authoring surfaces (cloud graph-lint, the AI
+// authoring path) reuse ONE verdict instead of re-deriving it.
+export {
+  findUnguardedNullableOperands,
+  nullGuardMessage,
+  NULL_GUARD_HINT,
+} from './validate-null-guards.js';
+export type { NullGuardFinding, NullGuardOptions } from './validate-null-guards.js';
+
 export { validateListViewMode, LIST_VIEW_FILTERS_IN_VIEWS_MODE } from './validate-list-view-mode.js';
 
 // [ADR-0078] The functional-completeness gate. All judgement lives in the shared
