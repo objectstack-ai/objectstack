@@ -46,6 +46,30 @@ import { PLATFORM_OBJECTS_BY_PACKAGE } from '@objectstack/spec/system';
  * nothing about the rows it never read. Together they are what stops
  * "0 dangling" from ever being read as "everything is fine".
  *
+ * ## …and NOT-ATTEMPTED is a third answer again (#4747)
+ *
+ * The corollary that bucket discipline needs to survive contact with a real
+ * process. `unreadableObjects` means **"I tried to read this object and the
+ * datasource would not give it to me"** — an operational finding. It does NOT
+ * mean "the run was called off". Those are different facts with different
+ * remedies (investigate the datasource / nothing to do), and a bucket that
+ * holds both stops carrying either.
+ *
+ * The distinction is not cosmetic: before #4747 every single `os migrate`
+ * invocation ended with `unreadableObjects: ['sys_metadata',
+ * 'sys_view_definition']`, because the sweep this audit rides fired after the
+ * engine's connection pool had been torn down. An alarm that is true on every
+ * healthy run carries no information and trains its operator to skip the line —
+ * so the ONE run where a datasource really was unreadable would have read
+ * exactly like all the others.
+ *
+ * Hence {@link DanglingReferenceAuditOptions.signal}: when the caller says the
+ * run is being called off, the audit stops issuing reads and marks the report
+ * {@link DanglingReferenceReport.aborted}. A read that loses the race and fails
+ * *after* the abort is dropped rather than filed — it is not evidence about the
+ * datasource. `aborted` keeps the incompleteness loud (the report can never be
+ * read as a clean bill of health) without spending the finding bucket on it.
+ *
  * ## Scope — the same judgments #4441 already made, not new ones
  *
  * - **`readonly` reference fields are skipped**, exactly as the write-path
@@ -95,6 +119,21 @@ export interface DanglingReferenceReport {
    * the rows beyond the budget.
    */
   truncatedObjects: string[];
+  /**
+   * [#4747] `true` when the run was called off before it finished — the caller
+   * aborted it (see {@link DanglingReferenceAuditOptions.signal}), typically
+   * because the engine it reads through is being torn down.
+   *
+   * An aborted run inspected only the objects it reached, so its findings are
+   * real but its SILENCE proves nothing. Deliberately its own field rather than
+   * an entry in `unreadableObjects`: "nobody asked" is not "the datasource
+   * refused". `false` on a run that walked every object it was given.
+   *
+   * Optional in the type only so a hand-written {@link DanglingReferenceReport}
+   * (a test double) still satisfies it; every report this module produces sets
+   * it explicitly.
+   */
+  aborted?: boolean;
 }
 
 /** Minimal object shape the audit reads — duck-typed so tests need no registry. */
@@ -124,6 +163,16 @@ export interface DanglingReferenceAuditPort {
   warn?(message: string, meta?: unknown): void;
 }
 
+/**
+ * The "stop now" input, narrowed to the one bit the audit reads. Structurally
+ * satisfied by the platform `AbortSignal`, so a caller that already has one
+ * passes it directly — but declared here so this module needs no DOM lib and a
+ * test can hand it a plain object.
+ */
+export interface AuditAbortSignal {
+  readonly aborted: boolean;
+}
+
 export interface DanglingReferenceAuditOptions {
   /** Rows read per object. Default {@link DEFAULT_ROWS_PER_OBJECT}. */
   rowsPerObject?: number;
@@ -131,6 +180,17 @@ export interface DanglingReferenceAuditOptions {
   maxRows?: number;
   /** Restrict the scan to these objects (diagnostics / tests). */
   objects?: string[];
+  /**
+   * [#4747] Called off — checked before every read, so an aborted run issues no
+   * further queries and reports {@link DanglingReferenceReport.aborted} instead
+   * of filing the objects it never reached.
+   *
+   * The audit reads through a live engine; the engine outlives it only until
+   * the host tears the datasource down. Without this the sweep kept querying a
+   * closed pool, which surfaced as an `ERROR Find operation failed` on a
+   * SUCCESSFUL command and as a permanently non-empty `unreadableObjects`.
+   */
+  signal?: AuditAbortSignal;
 }
 
 /** Bounded per object so one enormous table cannot starve every other. */
@@ -199,7 +259,16 @@ export async function auditDanglingReferences(
 ): Promise<DanglingReferenceReport> {
   const report: DanglingReferenceReport = {
     scanned: 0, dangling: [], undetermined: 0, unreadableObjects: [], truncatedObjects: [],
+    aborted: false,
   };
+
+  const signal = options?.signal;
+  /** Cheap enough to ask before every read; the answer can flip mid-run. */
+  const calledOff = (): boolean => signal?.aborted === true;
+  if (calledOff()) {
+    report.aborted = true;
+    return report;
+  }
 
   let all: AuditableObject[];
   try {
@@ -224,13 +293,23 @@ export async function auditDanglingReferences(
   // it out of code search and every grep-based lint (`pnpm check:nul-bytes`
   // enforces this). The escape is byte-identical at runtime.
   const probed = new Map<string, boolean | null>();
-  const exists = async (target: string, value: string): Promise<boolean | null> => {
+  /**
+   * `'called-off'` is a THIRD answer alongside the probe's own three: it means
+   * the question was withdrawn, so the value must not be counted as
+   * `undetermined` either — that bucket is for probes that ran and could not
+   * tell (#4747).
+   */
+  const exists = async (target: string, value: string): Promise<boolean | null | 'called-off'> => {
+    if (calledOff()) return 'called-off';
     const key = `${target}\u0000${value}`;
     if (probed.has(key)) return probed.get(key)!;
     let answer: boolean | null;
     try {
       answer = await port.probe(target, value);
     } catch {
+      // A probe that threw because the run was called off underneath it says
+      // nothing about the target — it is withdrawn, not undetermined.
+      if (calledOff()) return 'called-off';
       // A throwing probe is "could not determine", never "does not exist".
       answer = null;
     }
@@ -238,8 +317,11 @@ export async function auditDanglingReferences(
     return answer;
   };
 
-  for (const obj of prioritise(all)) {
+  objects: for (const obj of prioritise(all)) {
     if (report.scanned >= maxRows) break;
+    // Called off before this object was read: it was never attempted, so it is
+    // not a finding about the object — the run reports that it stopped instead.
+    if (calledOff()) { report.aborted = true; break; }
     const name = obj?.name;
     if (!name || (only && !only.has(name))) continue;
     const refFields = auditableReferenceFields(obj);
@@ -254,6 +336,11 @@ export async function auditDanglingReferences(
         context: { isSystem: true },
       })) ?? [];
     } catch (err) {
+      // A read that failed because the run was called off underneath it is not
+      // evidence about the datasource — the pool was closed on purpose. Filing
+      // it would put a non-finding in the one bucket that must only ever hold
+      // findings (#4747).
+      if (calledOff()) { report.aborted = true; break; }
       // Unreadable ⇒ unknown. Recorded so the report cannot be mistaken for a
       // clean bill of health on an object nothing could look at.
       report.unreadableObjects.push(name);
@@ -275,6 +362,7 @@ export async function auditDanglingReferences(
           // An expanded record in the slot is a read shape, not an id write.
           if (typeof v === 'object') continue;
           const answer = await exists(target, v);
+          if (answer === 'called-off') { report.aborted = true; break objects; }
           if (answer === null) { report.undetermined++; continue; }
           if (answer) continue;
           report.dangling.push({
@@ -296,6 +384,9 @@ export async function auditDanglingReferences(
       undetermined: report.undetermined,
       unreadableObjects: report.unreadableObjects,
       truncatedObjects: report.truncatedObjects,
+      // Carried into the log line too: findings from a run that stopped early
+      // are real, but its silence about everything else is not a verdict.
+      aborted: report.aborted,
       references: report.dangling.map(
         (d) => `${d.objectName}#${d.recordId}.${d.field} → ${d.target}#${d.value}`,
       ),
