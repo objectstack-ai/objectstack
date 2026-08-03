@@ -402,9 +402,17 @@ export class ObjectQLPlugin implements Plugin {
                 try {
                     await this.syncRegisteredSchemas(ctx);
                 } catch (e: any) {
-                    ctx.logger.warn('[ObjectQLPlugin] reload-time schema sync failed', {
-                        error: e?.message ?? String(e),
-                    });
+                    // #4632 — durability degradation, not a functional one. A
+                    // Studio edit that adds a field lands in metadata (the UI
+                    // shows it, the API accepts it, the author sees a saved
+                    // record) while the column it needs was never created. The
+                    // author is told the value was saved and it was not.
+                    ctx.logger.error(
+                        '[ObjectQLPlugin] reload-time schema sync FAILED — objects changed by this metadata reload are live in the ' +
+                            'registry, UI and API, but their new/altered columns were NOT created: writes against them are accepted and ' +
+                            'then silently lost or rejected. Fix the driver error below and reload again (or restart) to re-run DDL.',
+                        { error: e?.message ?? String(e) },
+                    );
                 }
             });
             await this.reloadSchemaSync;
@@ -910,6 +918,42 @@ export class ObjectQLPlugin implements Plugin {
 
     let synced = 0;
     let skipped = 0;
+    let failed = 0;
+
+    /**
+     * #4632 — a failed schema sync is a DURABILITY degradation, not a
+     * functional one, so it is reported at `error`.
+     *
+     * The object stays in the registry, keeps its REST routes, keeps rendering
+     * in the UI — the system looks completely healthy — while its table or its
+     * newly-declared columns were never created. Writes then fail, or (on
+     * drivers that accept unknown attributes) succeed while silently dropping
+     * the un-created column: the thing the system claims it persisted is not
+     * on disk. That is exactly the #4420 shape one layer up from the durable
+     * suspended-run store #4460 fixed, so it carries the same obligation —
+     * name the CONSEQUENCE and the FIX at the first failure.
+     */
+    const reportSyncFailure = (
+      obj: any,
+      tableName: string,
+      driverName: string,
+      err: unknown,
+    ): void => {
+      failed++;
+      ctx.logger.error(
+        `Schema sync FAILED for object '${obj?.name}' — its table/columns were NOT created or altered, but the object stays ` +
+          `registered and served: writes to it will fail, or silently drop the columns that were never created. ` +
+          `Nothing that claims to be persisted for this object is guaranteed to be on disk. ` +
+          `Fix the driver/datasource error below and restart (or trigger a metadata reload) to re-run DDL; ` +
+          `if this deployment manages DDL out-of-band, set \`skipSchemaSync\` / OS_SKIP_SCHEMA_SYNC so the omission is deliberate.`,
+        {
+          object: obj?.name,
+          tableName,
+          driver: driverName,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      );
+    };
 
     // Group objects by driver for potential batch optimization
     const driverGroups = new Map<any, Array<{ obj: any; tableName: string }>>();
@@ -993,18 +1037,15 @@ export class ObjectQLPlugin implements Plugin {
             driver: driver.name,
             error: e instanceof Error ? e.message : String(e),
           });
-          // Fallback: sequential sync for this driver's objects
+          // Fallback: sequential sync for this driver's objects. The batch
+          // warn above is correct at `warn` — it RECOVERS here; only a
+          // sequential failure actually loses the DDL.
           for (const { obj, tableName } of entries) {
             try {
               await driver.syncSchema(tableName, obj);
               synced++;
             } catch (seqErr: unknown) {
-              ctx.logger.warn('Failed to sync schema for object', {
-                object: obj.name,
-                tableName,
-                driver: driver.name,
-                error: seqErr instanceof Error ? seqErr.message : String(seqErr),
-              });
+              reportSyncFailure(obj, tableName, driver.name, seqErr);
             }
           }
         }
@@ -1015,18 +1056,23 @@ export class ObjectQLPlugin implements Plugin {
             await driver.syncSchema(tableName, obj);
             synced++;
           } catch (e: unknown) {
-            ctx.logger.warn('Failed to sync schema for object', {
-              object: obj.name,
-              tableName,
-              driver: driver.name,
-              error: e instanceof Error ? e.message : String(e),
-            });
+            reportSyncFailure(obj, tableName, driver.name, e);
           }
         }
       }
     }
 
-    if (synced > 0 || skipped > 0) {
+    // #4632 — never claim "complete" over a pass that lost DDL. The old line
+    // logged `info: Schema sync complete` after any number of failures, which
+    // is the "looks normal" half of the accident: the only honest summary of a
+    // pass with failures is an error.
+    if (failed > 0) {
+      ctx.logger.error(
+        `Schema sync finished with ${failed} FAILED object(s) — those objects are registered and served but their storage was ` +
+          `never created or altered; writes to them are not durable. See the per-object errors above for the driver failure and the fix.`,
+        { synced, skipped, failed, total: allObjects.length },
+      );
+    } else if (synced > 0 || skipped > 0) {
       ctx.logger.info('Schema sync complete', { synced, skipped, total: allObjects.length });
     }
   }

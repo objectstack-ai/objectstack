@@ -188,6 +188,22 @@ jobs:
       - name: Init-service declaration guard
         run: pnpm check:init-service-contract
 
+      # Durability-degradation log-level guard (#4632). #4460 raised ONE
+      # best-effort degradation from warn to error — the durable suspended-run
+      # store writing to a table that never existed (#4420), which looked healthy
+      # while every restart dropped all in-flight approvals. The rule that fix
+      # implied now lives in AGENTS.md ("Degradation log levels"): a degradation
+      # that costs only FUNCTIONALITY may warn; one that costs DURABILITY must
+      # error, naming the consequence and the fix. This gate is what keeps that
+      # from being one more declared-but-unenforced convention — it walks the AST
+      # for catch blocks guarding a declared vocabulary of durability-critical
+      # operations (schema DDL, suspended-run re-arm) and fails when one degrades
+      # below `error` without rethrowing. Deliberately narrow: it cannot discover
+      # a new durability seam, only stop known ones from regressing. Runs its own
+      # --self-test first.
+      - name: Durability-degradation log-level guard
+        run: pnpm check:durability-log-level
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that

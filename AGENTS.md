@@ -538,6 +538,69 @@ composition with its real services, or do not claim an answer.
 
 ---
 
+## Degradation log levels — `warn` vs `error`
+
+Nearly every `catch` in this repo is a best-effort degradation, and nearly every
+one of them logs `warn`. That default is wrong for a specific, recurring class,
+and the cost of getting it wrong is not noise — it is silent data loss. Decide
+the level with **one question**, not with an adjective:
+
+> **After the degradation, does the system still look "normal" from the outside,
+> while something it claims is persisted has not actually landed?**
+> **Yes → `error`. No → `warn`/`info` is right.**
+
+- **Functional degradation → `warn` / `info`.** A screen is missing, a trigger is
+  not armed, a capability is not enabled, an optional service never showed up.
+  The system is *visibly* smaller than it should be, and the next person to use
+  the missing thing finds out. `ScheduleTriggerPlugin: job service not available
+  — scheduled flows will not run until one is registered` is exactly right at
+  `warn`.
+- **Durability / data-consistency degradation → `error`.** A write that claims
+  to persist does not, DDL that was supposed to run did not, persisted state and
+  runtime state disagree. Nothing looks broken; the loss surfaces a release
+  later, to someone who cannot connect it to this line.
+
+**Why this is a rule and not a preference.** #4420: the durable suspended-run
+store attached to a table that was never created, every write failed into a
+`warn` nobody read, and every restart dropped all in-flight approvals — the
+symptom surfaced a release after the cause. #4460 raised that one site to
+`error`; #4632 made it the rule, because the *class* is what recurs. It is the
+same failure Prime Directive #10 names — advertising a capability (here:
+durability) the runtime does not deliver — and the same instinct as "Absence must
+be loud" above: **prefer failing to falling back**, and when you must fall back,
+say what was lost.
+
+**An `error` here owes two things**, both, in the first line it prints
+(`packages/services/service-automation/src/plugin.ts` `start()` is the reference
+text):
+
+1. the **consequence**, concretely — *what* is not durable, and that the system
+   will keep looking healthy anyway;
+2. the **fix** — the composition/config change that restores durability, or the
+   explicit opt-out that makes the degradation deliberate (`suspendedRunStore:
+   'memory'`, `OS_SKIP_SCHEMA_SYNC`).
+
+Say it **once**, at the first degradation, not once per failed write.
+
+**Do not over-apply it.** Escalating a functional degradation to `error` is the
+mirror-image failure: it trains everyone to skim `error`, which is what made the
+#4420 `warn` unreadable in the first place. In particular, an `if (!service)`
+composition branch is usually functional and usually belongs at `warn`; a `catch`
+around a write, a DDL call, or a store initialization is where this rule bites.
+
+**It has teeth** (a rule this repo only writes down is the very "declared ≠
+enforced" shape it keeps paying to fix): `pnpm check:durability-log-level` walks
+the AST for `catch` blocks guarding a declared vocabulary of durability-critical
+operations and fails when one logs below `error` without rethrowing. It is
+deliberately narrow — it cannot *discover* a new durability seam, only stop the
+known ones from regressing. Found a new one? Add it to
+`DURABILITY_CRITICAL_CALLEES` in `scripts/check-durability-degradation-log-level.mjs`
+in the same PR that fixes it. Accepted exceptions live in
+`scripts/durability-degradation.baseline.json`, hand-edited with a reason and
+shrink-only.
+
+---
+
 ## Post-Task Checklist
 
 1. `pnpm test` — verify nothing broke. Touched a type-check-covered package? `pnpm typecheck` too.

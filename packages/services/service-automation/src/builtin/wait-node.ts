@@ -125,6 +125,13 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
 interface RearmLogger {
   info(msg: string, ...args: unknown[]): void;
   warn(msg: string, ...args: unknown[]): void;
+  /**
+   * #4632 — required, not optional. Every degradation on the re-arm path leaves
+   * a run persisted-but-unreachable, which is a durability degradation and must
+   * be reported at `error`; a logger that cannot carry that level could not
+   * satisfy the contract this function owes its caller.
+   */
+  error(msg: string, ...args: unknown[]): void;
 }
 
 /**
@@ -157,7 +164,16 @@ export async function rearmSuspendedWaitTimers(
   try {
     runs = await store.list();
   } catch (err) {
-    logger.warn(`[wait] timer re-arm: failed to list suspended runs: ${(err as Error)?.message ?? err}`);
+    // #4632 — durability degradation, not a functional one: returning 0 here
+    // re-arms NOTHING, so every run persisted before this restart stays paused
+    // forever while the process reports a clean boot. The rows survived; the
+    // promise that they would resume did not.
+    logger.error(
+      `[wait] suspended wait-timer re-arm ABORTED — the suspended-run store could not be listed, so NO timer was re-armed: ` +
+        `every wait/approval paused before this restart will hang indefinitely instead of resuming. The runs themselves are ` +
+        `still persisted. Fix the store/datasource error and restart to re-attempt the re-arm, or resume them via ` +
+        `resume(runId). Cause: ${(err as Error)?.message ?? err}`,
+    );
     return 0;
   }
 
@@ -174,12 +190,26 @@ export async function rearmSuspendedWaitTimers(
         await engine.resume(run.runId);
         rearmed++;
       } catch (err) {
-        logger.warn(`[wait] timer re-arm: resume of overdue run '${run.runId}' failed: ${(err as Error)?.message ?? err}`);
+        // #4632 — this run's deadline already passed, so nothing else will ever
+        // wake it: it is persisted, overdue, and now unreachable.
+        logger.error(
+          `[wait] suspended run '${run.runId}' is OVERDUE and could not be resumed — it stays persisted but nothing will ` +
+            `wake it again (its deadline has already passed, so no timer will be re-armed for it). Fix the cause below and ` +
+            `restart, or resume it directly via resume('${run.runId}'). Cause: ${(err as Error)?.message ?? err}`,
+        );
       }
       continue;
     }
 
     if (!job) {
+      // #4632 — deliberately stays `warn`. This is the FUNCTIONAL half of the
+      // rule: a host with no job service never had auto-resume to begin with,
+      // so nothing was promised and then broken — the capability is simply not
+      // composed, and the line already names the remedy. Escalating a declared
+      // absence like this to `error` is the mirror-image failure: it would fire
+      // once per suspended run on every boot of every job-less host, and teach
+      // everyone to skim `error` — which is what made the #4420 `warn`
+      // unreadable in the first place.
       logger.warn(
         `[wait] timer re-arm: run '${run.runId}' waits until ${wakeAt} but no job service is registered — ` +
           `resume it externally via resume(runId)`,
@@ -202,7 +232,15 @@ export async function rearmSuspendedWaitTimers(
       });
       rearmed++;
     } catch (err) {
-      logger.warn(`[wait] timer re-arm: failed to re-schedule run '${run.runId}': ${(err as Error)?.message ?? err}`);
+      // #4632 — the run is persisted and waiting, but its wake-up job was never
+      // scheduled: it will sit at its wait node past its deadline with nothing
+      // to resume it.
+      logger.error(
+        `[wait] suspended run '${run.runId}' could NOT be re-scheduled — it stays persisted with a deadline of ${wakeAt}, ` +
+          `but no job was armed to wake it, so it will hang past that deadline instead of resuming. Fix the job-service ` +
+          `error below and restart to re-attempt the re-arm, or resume it via resume('${run.runId}'). ` +
+          `Cause: ${(err as Error)?.message ?? err}`,
+      );
     }
   }
   return rearmed;

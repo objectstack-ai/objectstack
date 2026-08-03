@@ -879,7 +879,19 @@ export class AutomationServicePlugin implements Plugin {
                     ctx.logger.info(`[Automation] Re-armed ${rearmed} suspended wait timer(s) after restart`);
                 }
             } catch (err) {
-                ctx.logger.warn(`[Automation] wait-timer re-arm failed: ${(err as Error).message}`);
+                // #4632 — the persisted state and the runtime now disagree, and
+                // the runtime is the one that looks fine. The suspended runs ARE
+                // on disk (durability held), but nothing re-armed their timers,
+                // so no wait/approval that was in flight before this restart will
+                // ever resume on its own. To everyone waiting on one, that is
+                // indistinguishable from the #4420 loss this store exists to
+                // prevent — so it is reported at `error`, not `warn`.
+                ctx.logger.error(
+                    `[Automation] suspended wait-timer re-arm FAILED after restart — suspended runs are still persisted in ` +
+                        `sys_automation_run, but their timers were NOT re-armed: every wait/approval paused before this restart ` +
+                        `will hang indefinitely instead of resuming. Fix the job-service error below and restart to re-attempt the ` +
+                        `re-arm; runs can also be resumed manually via the automation resume API. Cause: ${(err as Error).message}`,
+                );
             }
         }
     }

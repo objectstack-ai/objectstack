@@ -5337,8 +5337,28 @@ export class ObjectQL implements IObjectQLEngine {
       if (typeof (driver as any).syncSchema === 'function') {
         try {
           await (driver as any).syncSchema(tableName, obj);
-        } catch {
-          // best effort — log suppressed to avoid noise on already-synced tables
+        } catch (e: unknown) {
+          // #4632 — this catch used to be empty, with the comment "log
+          // suppressed to avoid noise on already-synced tables". Suppressing an
+          // already-synced no-op is not what it did: `syncSchema` is required to
+          // be idempotent (see this method's doc comment), so a driver that
+          // reaches this catch did NOT sync. The only callers are runtime
+          // installs — marketplace plugin install, template seeding — which go
+          // on to INSERT into a table this failure means does not exist, and
+          // then report the install as successful. Nothing that claims to be
+          // persisted afterwards is.
+          this.logger.error(
+            `Schema sync FAILED for object '${obj.name}' — its table/collection was NOT created or altered, yet the object is ` +
+              `registered and will be written to: those writes will fail, or drop the columns that were never created. ` +
+              `Any seeding or install step that continues past this point is not durable. ` +
+              `Fix the driver error below, then re-run the install/sync.`,
+            {
+              object: obj.name,
+              tableName,
+              driver: (driver as any)?.name,
+              error: e instanceof Error ? e.message : String(e),
+            },
+          );
         }
       }
     }
