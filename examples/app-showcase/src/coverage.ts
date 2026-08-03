@@ -97,7 +97,12 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
 
   // ── automation ──
   flow: { status: 'demonstrated', files: ['src/automation/flows/index.ts'] },
-  job: { status: 'demonstrated', files: ['src/automation/jobs/index.ts'] },
+  // `job` is only demonstrated end-to-end if its handler actually resolves —
+  // the declaration alone left the sweep registered and never run (#4774).
+  job: {
+    status: 'demonstrated',
+    files: ['src/automation/jobs/index.ts', 'src/automation/jobs/sweep-project-health.ts'],
+  },
 
   // ── system ──
   datasource: {

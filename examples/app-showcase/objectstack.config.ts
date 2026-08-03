@@ -30,7 +30,7 @@ import { CapabilityMapPage, StartHerePage, ComponentGalleryPage, ProjectWorkspac
 import { allFlows } from './src/automation/flows/index.js';
 import { allWebhooks } from './src/automation/webhooks/index.js';
 import { allHooks } from './src/data/hooks/index.js';
-import { allJobs } from './src/automation/jobs/index.js';
+import { allJobs, sweepProjectHealth, bindShowcaseJobRuntime } from './src/automation/jobs/index.js';
 import { allEmails } from './src/system/emails/index.js';
 import { allBooks } from './src/system/books/index.js';
 import { allApis } from './src/system/apis/index.js';
@@ -209,9 +209,18 @@ export default defineStack({
   // A flow function is PURE: it takes `inputs`, RETURNS a value, and a later
   // declarative node uses or persists it — it does no data I/O of its own
   // (#4396), which is why it needs no `effect` declaration here.
+  //
+  // A JOB handler resolves through this same map (`collectBundleFunctions`), so
+  // `sweepProjectHealth` — the handler `HealthSweepJob` names — lives here too.
+  // It is the case the pure contract does not cover: a nightly sweep has no
+  // downstream declarative node to persist for it, so it writes over an engine
+  // handle captured at `onEnable` and says so with `effect: 'writes'` (#4396).
+  // The declaration grants nothing; it makes the run report "cannot count these
+  // writes" instead of silently claiming it wrote nothing.
   functions: {
     summarizeCompletedTask: ({ input }: { input: Record<string, unknown> }) =>
       `Completed: ${String(input.title ?? 'task')} (priority ${String(input.priority ?? 'normal')}).`,
+    sweepProjectHealth: { handler: sweepProjectHealth, effect: 'writes' as const },
   },
   jobs: allJobs,
   emailTemplates: allEmails,
@@ -262,4 +271,9 @@ export const onEnable = async (ctx: unknown): Promise<void> => {
   // real pending requests land in the inbox (cannot be a seed — see
   // seed-approval-demo.ts).
   registerShowcaseApprovalDemo(ctx as Parameters<typeof registerShowcaseApprovalDemo>[0]);
+  // Hand the nightly health-sweep job its data handle. A job handler is invoked
+  // by the job service with `{ jobId, data }` and no engine (flow functions are
+  // pure by default, #4396), so `onEnable` — the one place the app is handed a
+  // live engine — is where the sweep gets one.
+  bindShowcaseJobRuntime(ctx as Parameters<typeof bindShowcaseJobRuntime>[0]);
 };
