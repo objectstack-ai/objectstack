@@ -81,6 +81,21 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
   keys, `flow.active` and `agent.knowledge` among them) and the last three
   deprecated authorable aliases are removed — each one had been parsed and
   ignored.
+- **One name, one declaration.** Seventeen clusters of `@objectstack/spec`
+  exports resolved to *different declarations* depending on which subpath you
+  imported from — `Session`, `EventSchema`, `RetryPolicy`, `FieldMapping`,
+  `HttpMethod`, `TenantPlan`, `PackageDependency` and eleven more. An
+  auto-import picked by name, the shapes overlapped enough to compile, and the
+  mistake surfaced later as an `undefined` or a silently stripped key. Each
+  cluster is now judged and resolved — one declaration keeps the bare name, the
+  other is renamed, re-exported or deleted — and a symbol-identity ratchet
+  fails the build if a name ever forks again.
+- **The authorable surface is closed.** Every authorable metadata type now
+  rejects unknown keys with a named prescription, on the parse path and not
+  only in `create()`. The #4001 campaign that started with one object schema
+  ends this line at zero: object, field, view, dashboard, action, agent, page,
+  mapping, translation, the six validation variants, the Studio surface and the
+  registered types behind them.
 
 ## Breaking changes & migration
 
@@ -2038,6 +2053,481 @@ covers are folded into the list below rather than left to the changelog.)
   longer capped at 8 objects; the chart view gets a label and an icon in the
   view switcher; and the developer-voiced default form subtitle is dropped.
 
+## Landed since 17.0.0-rc.1
+
+These changes are on `main` after the `rc.1` cut and **roll into 17.0.0-rc.2**.
+At the time of writing the window has left 209 changesets pending — 46
+`major`-class, 74 `minor`, 55 `patch`, and 34 that release nothing (CI, tooling
+and docs). The Console pin is **unchanged** at `785b8a5d432c`, so the objectui
+delta rc.2 bundles is the one already documented in the section above; there is
+no new Console delta this round. (If `scripts/bump-objectui.sh` advances the pin
+before the cut, that range needs its own section — objectui `main` has moved
+past `785b8a5d432c`.)
+
+Two campaigns dominate the window, and both are *finishing* rather than
+starting: the #4535 dual-source convergence and #4001's close of the authorable
+surface. Around them, the ADR-0049 enforce-or-remove sweep reaches the driver
+and datasource contracts, ADR-0078 grows a completeness gate plus a runtime
+twin, ADR-0119 makes multi-write atomicity real and migrations crash-safe, and a
+run of security and fail-loud corrections lands.
+
+As in the rc.0 window, landings that belong to a section above are documented
+**there** rather than repeated here:
+
+- **`findOne` must say which record it wants** (#4419) — the missing-predicate
+  read that returned an arbitrary first row.
+- **The `workflow` service slot, `datasource.readReplicas`, the two connector
+  clusters and the `kernel` metadata-loader envelope family** — all in the dead
+  spec clusters table (#4451, #4468, #4480, #4499, #4411).
+- **`MetadataWatchEvent.type` narrows to the three values the runtime emits**
+  (#4536), and **`MetadataExportOptions` / `MetadataImportOptions` move to
+  `./contracts`** (#4538) — both in the upgrade checklist.
+- **`os migrate meta --stored`** (#4327) — in the checklist as the optional
+  stored-metadata pass.
+
+### One name, one declaration — the #4535 dual-source campaign closes
+
+A bare name exported from two `@objectstack/spec` subpaths, resolving to **two
+different declarations**, is the #4411 trap: an editor's auto-import picks by
+name, the shapes overlap enough to compile, and the mistake surfaces far from
+its cause — an `undefined` at an edge value, or (when neither side is
+`.strict()`) every foreign key silently stripped. Seventeen clusters are closed
+here, each judged individually against an import-statement-level scan of all
+three repositories (framework, cloud, objectui): the declaration that actually
+flows at runtime keeps the bare name.
+
+| Cluster | Name(s) | Resolution |
+|---|---|---|
+| C1 (#4572) | `WebhookConfig` / `WebhookEvent` | removed from `./api` — the bare names are `./integration`'s alone; `./api`'s OpenAPI webhook *descriptor* is renamed `OpenApiWebhookEvent` |
+| C2 (#4587) | `MetadataEvent` / `MetadataBulkRegisterRequest` | removed from `./kernel` (a lifecycle envelope nothing emitted); `./api` owns them |
+| C3 (#4610) | `Notification` / `NotificationConfig` | removed from `./ui` (a toast shape objectui never adopted) and `./system`; `./api` owns them |
+| C4 (#4641) | `Session` | `./identity`'s declaration removed — the two did not even agree on field names, so a wrong pick failed as a runtime `undefined`; `./api` keeps the names |
+| C5 (#4653) | `ActivationEventSchema` | converged on `./kernel`'s **structured** shape (`./studio`'s `z.string()` validated nothing); `./studio` re-exported it — then #4657 retired the whole vocabulary, see below |
+| C6 (#4658) | `EventSchema` | `./automation`'s orphan state-machine *signal* declaration deleted (zero key overlap with the event-bus envelope); `./kernel` is the single source |
+| C7 (#4741) | `PackageDependency` | `./kernel` renamed `ResolvedPackageDependencySchema` (the resolver's edge); `./cloud`'s manifest declaration keeps the bare name |
+| C8 (#4661) | `RetryPolicy` | one declaration carrying the union of both; `./automation` and `./system` re-export it |
+| C9 (#4684) | `RateLimitConfig` | `./integration` renamed `ConnectorRateLimitConfig` — the two limit **opposite directions** of traffic, and spell the window `windowSeconds` vs `windowMs` |
+| C10 (#4740) | `EnvironmentArtifact` | single declaration on `./system` holding the **live wire** shape, re-exported by `./cloud`; the never-implemented v0 family (`functions` / `manifest` / `payloadRef` + 8 sub-schemas) removed |
+| C11 (#4688) | `HttpRequest` | `./shared` holds the one declaration |
+| C12 (#4703) | `FieldMapping` | **three** declarations → `ConnectorFieldMapping` and `ImportFieldMapping`; `./shared` keeps the base |
+| C13 + C15 (#4738) | `DataSyncConfig` / `ConflictResolution` | the automation-side L1 "Simple Sync" layer (17 exports, zero consumers) deleted; `./integration`'s enum renamed `ConnectorConflictResolution`; `./ui`'s offline-sync vocabulary keeps the bare name |
+| C14 (#4691) | `HttpMethod` | `./ui`'s 5-value subset renamed `HttpMethodType`; the value sets differed, not just the types |
+| C16 (#4739) | `TenantPlan` + the tenant-provisioning family | `./system`'s never-implemented provisioning protocol deleted (including `IProvisioningService` / `ITenantRouter` / `ResolvedTenantContext`); `./cloud` untouched |
+| C17 (#4737) | `ActionLocationSchema` | `./studio` renamed `ActionContributionLocationSchema` (3 Studio-shell values); `./ui`'s 7-value app-UI vocabulary keeps the bare name |
+
+Three more convergences land alongside them: the dual-source `MetadataFormat` /
+`CacheStrategy` enums, which had diverged on their **values** (#4537); the
+eleven `./contracts`-vs-domain parameter/result names (#4538); and the three
+cross-form names, where the two sides did not share a *form* — `ShareRecipientType`
+→ `RecordShareRecipientType`, plus `TransformType` and `suggestFieldType` (#4539).
+
+**None of this is authorable metadata**, so there is no `os migrate meta` step
+and no tombstone: these are type and schema *exports*, and every break is a
+compile-time `TS2305` naming the symbol. Fix it by changing an import path or a
+name. The campaign leaves a gate behind — `dual-source-exports.baseline.json` is
+now ratcheted by **symbol identity**, not by name (#4446), so two entries
+exporting the same name from different declarations fail the build.
+
+### The authorable surface closes — #4001 reaches zero
+
+The unknown-key strictness campaign began with a single object schema and ends
+in this window. Every authorable type now rejects unknown keys with a
+prescription that names the offending key and its canonical spelling:
+
+- **`ObjectSchema` closes on the PARSE path**, not only in `create()` (#4522) —
+  the founding example of #4001, which had been live only at one of its two doors.
+- **`field`** (#4531), reusing the curated table that already recorded which
+  advice would have been wrong.
+- **`dashboard`** header, filter bar and root (#4532).
+- **`action`** (#4533), taking the ADR-0010 protection-envelope debt list to zero.
+- **`mapping` / `agent` / `page`** (#4530) — and `strictObject` stops suggesting
+  keys that were removed.
+- **`translation`** bundles and items, at both doors (#4529), retiring #3778's
+  bespoke ten-key guard into the shared error message.
+- **The six `validation` variants**, each against its own key set (#4527).
+- **Six more registered types** — `report`, `dataset`, `email_template`,
+  `skill`, `job`, `book` (#4528); `skill`'s silently-stripped `permissions`
+  stops pretending to be a gate.
+- **The Studio authoring surface** — plugin manifests, the flow builder, the
+  object designer (#4541).
+- **The view surface** — the container, both view kinds and the ~28 config
+  shapes under them (#4534). This is the last batch.
+
+`strictObject` (#4514) is what made the tail cheap: closing a shape is one call,
+with `seed` and `doc` converted first. One gate turned out to be hollow on the
+way through — the protection-envelope invariant test silently skipped 24 of 25
+registered types; fixed, it immediately found 8 undeclared envelopes (#4519).
+The deleted-baseline discipline tightened too: a removed `authorable-surface.json`
+line must now prove itself rather than being taken on trust (#4650).
+
+### ADR-0049 enforce-or-remove — the sweep reaches the driver and datasource contracts
+
+The v16 sweep took the *authoring* surface; this one takes the **contracts**.
+Each removal below was declared, strict-guarded or `required`, and read by
+nothing.
+
+| Removed | Why |
+|---|---|
+| 31 of 34 `DriverCapabilities` bits (#4634) | written by every driver, consulted by no engine, planner, REST layer or renderer. With zero readers the values went wrong unnoticed: `SqlDriver` declared `streaming: false` while implementing `findStream`; `InMemoryDriver` declared `streaming: true` over a full-table read — the exact inverse of the guarantee. Three bits have a real reader and stay |
+| `IDataDriver.findStream` (#4484) | a **required** contract method with no caller anywhere, documented as the memory-safe large read — and its two main implementations did the opposite |
+| `IDataEngine.batch?` (#4618, ADR-0119 D3) | declared for the life of the contract, implemented by nothing, called by no one. Use `engine.transaction(cb)`, `batchData` with `options.atomic`, or `POST {basePath}/batch` |
+| `datasource.retryPolicy` (#4583 B) | four keys read by no connect or query path — nothing ever retried on them. Do **not** "fix" this by renaming: `hook.retryPolicy` / `job.retryPolicy` are enforced, spell the delay `backoffMs`, and are a different key on a different type |
+| `datasource.healthCheck` (#4583 C) | no probe loop ever existed. Liveness is probed on demand via the driver handle's `ping()` / `checkHealth()` |
+| `datasource.capabilities` (#4583) | eleven booleans, none read — pushdown is decided by the runtime driver's own `supports.*`. `readOnly` is why this is not tidy-up: it reads as a safety property, the shipped CRM example labelled a datasource a "Read Replica" on the strength of it, and the datasource accepted writes exactly like the primary |
+| `external.label` / `external.requirePermission` (#4583 D) | a second display name that never displayed, and a permission no authorization check ever consulted |
+| `RestServerConfig.openApi31` (#4579) | `normalizeConfig` forwarded five keys and silently discarded this one; the served `/openapi.json` never consulted the config |
+| `activationEvents` (both keys) + `ActivationEventSchema` (#4657) | lazy plugin activation no runtime in four repositories ever implemented — every plugin has always activated on load |
+| The standalone `validation` metadata kind (#4509, ADR-0088) | `ValidationRuleSchema` carries **no object-binding key**, and all six variants are `strictObject`, so an author could not supply one. A rule authored through that door parsed, saved, reported success and intercepted nothing — including a `state_machine` rule, so an author could believe they had locked down state transitions and have changed nothing |
+| `job` runtime creation and org overrides (#4509) | `JobSchema.handler` names a function in the compiled bundle's function table, which a runtime writer cannot reach — so a job created in Studio or via `PUT /meta` saved and never ran. `allowRuntimeCreate` / `allowOrgOverride` are now `false`; `job` stays first-class through `*.job.ts` and `defineStack({ jobs })` |
+| Six `authorWarn` dead keys (#4667) | `book`/`group` `translations`, `job.id`, `translation.validationMessages`, `app.homePageId`, `app.areas[].order` — each shaped so an author reasonably concludes it configures something |
+| Five unwarnable keys (#4509) | mapping `extractQuery` / `errorPolicy` / `batchSize`, contextSelector `includeAll` / `placement`. Four carry schema **defaults**, and a default materialises at parse time — so the advisory lint could not tell an authored value from a supplied one, and removal was the only channel that reaches the author |
+| `app.areas[].visible` / `.requiredPermissions` (#4651) | not inert — **fail-open**. See Security corrections |
+| `sys_comment.visibility` / `.reply_count` (#4756) | `visibility` is a security-looking key with no gate behind it: a comment marked `private` was visible to exactly the same people as a `public` one. After #4630 there is no replacement key — access is the record's |
+| `DataEventType 'data.field.changed'` (#4673) | no producer, and unimplementable against `DataEventSchema` as written — the payload is record-shaped, with no `field` / `oldValue` / `newValue` slot |
+| The orphan notification-template vocabulary (#4616) | `EmailTemplate` / `SMSTemplate` / `PushNotification` / `InAppNotification` existed only as members of the union #4610 deleted. Use `EmailTemplateDefinition` and its siblings |
+| `script` node `actionType` branches (#4343) | see below |
+
+Two entries in the same batch went the **other** way, because a bridge existed:
+`doc.tags` is now declared, so a book group's `include: { tag }` can finally
+match something, and declared email templates reach the mail service (#4509).
+Closing a door and building a bridge are the same discipline applied to
+different evidence.
+
+One rename rounds it out: **`managedBy: 'system'` becomes `'system-data'`**
+(#3355). ADR-0103 split the overloaded bucket additively in v16, which left the
+surviving value naming the half that had already moved out — `system` sitting on
+precisely the objects a user writes. `system-data` states both boundaries: the
+schema is the platform's, the data is the admin's or the user's. One deliberate
+consequence — the affordance default flips from LOCKED to **WRITABLE**, so the
+`userActions: { create, edit, delete }` blocks the eight platform objects used to
+re-open their writes with are now redundant and deleted. Keep `userActions` only
+to *narrow*.
+
+### Author-time gates: a completeness test, and a fourth door
+
+**ADR-0078 completeness (#4544).** An instance can be Zod-valid, use only live
+properties, and have a correctly-authored sibling that provably runs — and still
+be dead, because it omits a config its consumer needs and the consumer silently
+no-ops. The founding case: an AI authored `{ type: 'summary' }` with no
+`summaryOperations`, the index builder skipped it, the field read `0` forever,
+and every gate the author could see was green. This is worse than the unknown-key
+hole #4001 closed: there the author wrote a key we don't know and the parse
+rejects it; here every key is one we know and the author gets a **success**.
+
+The judgement now lives in `@objectstack/spec/kernel` (`checkFieldCompleteness` /
+`checkViewCompleteness`) and is consumed by `@objectstack/lint`'s
+`validate-functional-completeness`, so `os build` / `os validate` / `os lint`,
+MCP and hand authoring are all covered rather than only cloud's AI-build
+graph-lint. Every rule cites the runtime line that makes it true:
+
+| Rule | The silent skip | Severity |
+|---|---|---|
+| `field/summary-without-operations` | `engine.ts` — `if (!d.summaryOperations) continue` | error |
+| `field/formula-without-expression` | the formula plan is built only from fields that have one | error |
+| `field/relationship-without-reference` | `$expand` — `if (!referenceObject) continue` | error |
+| `field/choice-without-options` (`select`, `radio`) | `record-validator.ts` — an empty option list disables server-side value validation | error |
+| `field/choice-without-options` (`checkboxes`) | same branch, shared with free-form | warning |
+| `view/layout-without-binding` (`kanban`, `calendar`, `gantt`) | the renderer falls back to literal default field names | warning |
+
+The deliberate **non**-rules are pinned as hard as the rules: `multiselect`
+without options is blessed by `record-validator.ts` as a mode, so flagging it
+would be another false prescription. Phase 3 adds the shapes whose verification
+passes are done — a webhook with no `triggers` (#4565), an action nobody placed
+(#4501), and nav targets that are not object names (`page` / `report` /
+`dashboard`, ADR-0072, #4574). Phase 4 gives the field rules and the webhook
+rule a **runtime twin** (#4599): `SchemaRegistry.registerObject` — the choke
+point every metadata door converges on — emits the *same rule ids* at
+registration, one aggregated line per object, and **warns without ever
+throwing**. An inert field must not kill a boot that thousands of healthy
+objects share.
+
+**The fourth door (#4463).** The 26 author-time rules `os validate` / `os build` /
+`os lint` share ran on those three commands and nowhere else — but every runtime
+metadata write (Studio's designer, REST `/meta` CRUD, an MCP agent authoring a
+flow) reaches `saveMetaItem`, which did a Zod `safeParse` and stopped. For a
+tenant, that was not the weakest of four doors, it was the **only** door: a
+`sys_metadata` overlay row is not in the CLI's config file, so there was no
+command they could run instead. An approval flow whose `expression` approver is
+broken CEL is Zod-valid, so it saved, registered, and failed at the node's entry
+the first time it fired.
+
+- `AUTHORING_RULES` moved from `packages/cli` into `@objectstack/lint`, with a
+  kernel-safe `@objectstack/lint/runtime` subpath that loads neither `typescript`
+  nor `sucrase`. There is one table, and a second cannot be introduced without
+  failing `authoring-rule-wiring.test.ts`.
+- A `state: 'active'` `saveMetaItem` — and the draft→active promotion in
+  `publishMetaItem` — of a **flow** runs the flow / approval / expression /
+  reference rule families and refuses a gating finding with **422
+  `INVALID_METADATA`**, carrying `rule` / `path` / `where` / `message` / `hint`.
+- **Draft saves are never gated.** Only the write is judged: rules run twice
+  (with and without the submitted item) so a pre-existing violation in a stored
+  row never blocks an unrelated save.
+- Escape hatch `OS_ALLOW_UNLINTED_METADATA_WRITES=1` turns the refusal into a
+  loud log for a migration window. Only `flow` writes are gated in this pass;
+  every other type carries a recorded reason in the registry.
+
+Alongside them: every author-time rule that *can* gate now runs on all three
+commands (#4409); view `searchableFields` is validated at build time against the
+same judgement the runtime applies, so a `lookup` typo no longer waits for a 400
+(#4830); `has(x)` is not a null guard, and publish rejects unguarded nullable
+comparisons (#4763); `bulkActionDefs` gets a real shape and its aggregate name is
+linted (#4457); `validateFormLayout` is wired into the registry; and the liveness
+gate now governs **every** registered metadata type (#4487, #4488).
+
+New CI gates land with them — `check:adr-anchors` so governed code keeps naming
+its decision, expanded to the full authz/security ADR set (#4575);
+`check:init-service-contract` (#4471, ADR-0116); a startup-registry-verdict gate
+(#4777); a driver-conformance run that discovers zero drivers now **fails**
+(#4646); `check:i18n` fails on an undeclared authoring key rather than only on
+bundle drift (#4804); and `check:react-conformance` is renamed
+`check:react-declaration-parity`, because it compares two declarations and said
+it compared a declaration to an implementation (#4472).
+
+### Atomicity and durable migrations — ADR-0118, ADR-0119
+
+- **`atomic` becomes a guarantee (#4612, D1/D4).** `batchData`'s
+  `options.atomic` promised "rollback entire batch on any failure" and delivered
+  a `break`: every write before the failure stayed committed, and the response
+  reported those rows `success: true` under the one flag whose job is to
+  guarantee they were undone. An explicitly atomic batch now runs inside one
+  `engine.transaction()`; rows come back `ROLLED_BACK:` / `NOT_ATTEMPTED:` with
+  the causal error, and **no row reports success**. On a runtime that cannot roll
+  back the request is refused with **501 `NOT_IMPLEMENTED`** rather than
+  degrading silently. `IObjectQLEngine.transaction` joins the slot contract, so
+  plugin space reaches it without `as unknown as` casts.
+  **The declared default flips `true` → `false`** — aligned down to what every
+  site already did, rather than up to what none of them did.
+- **Its two siblings follow (#4620).** `deleteManyData` was fake-atomic (a
+  partial delete with no natural undo, reported as atomic) and `updateManyData`
+  ignored `atomic` entirely. Both now run the same shared atomic runner, so a
+  fourth copy of transaction handling cannot drift into a fourth lie.
+- **The migration journal (#4617, D2).** Migration-class work does not fit in
+  one transaction: a million-row backfill cannot hold a write lock, and a
+  process *killed* defeats in-process rollback entirely. `runMigrationJournal`
+  (`@objectstack/core`) preflights every step's read-only validator before any
+  step writes, chunks the rows, runs each chunk inside `engine.transaction()`,
+  compensates newest-first on failure, and on restart resumes forward from the
+  first chunk lacking `chunk_done` — or unwinds, per the plan's `onCrash`
+  policy. The invariant that carries it: `chunk_done(i)` is written **inside**
+  the chunk's own transaction and `chunk_started(i)` autonomously before it, so
+  `started ∧ ¬done` has exactly one meaning. `sys_migration_journal` is
+  registered unconditionally, because recovery must be discoverable with zero
+  host wiring. Boot reconciliation and `os migrate resume` make an interrupted
+  run impossible to miss.
+- **Actors are typed, not stringly (#4608 ADR-0118, #4586).** A non-user actor
+  is represented as `NULL` with an explicit `isSystem`, fail-closed, and
+  better-auth's real operator is now carried onto identity-table writes so
+  `sys_member` history stops saying "system". `sys_metadata_history.recorded_by`
+  is declared `Field.lookup('sys_user')` and was being filled with the **string**
+  `'system'` — an id that dereferences to nothing under any reading; it stores
+  `NULL` now (#4556).
+- **Stored metadata gets a finish line.** `os migrate meta --stored` rewrites
+  `sys_metadata` rows in place (#4327) and now covers flow rows too (#4454);
+  `POST /meta/_migrate-stored` runs it without a shell; `saveMetaItem`
+  canonicalizes flow bodies on write, so a Studio edit heals a legacy row like
+  every other type's (#4542), and says so out loud when it had to skip
+  canonicalization (#4580); `duplicatePackage` stops minting pre-protocol flow
+  rows (#4498).
+
+### Protocol & wire changes
+
+- **Batch per-row results deliver their declared shape (#4793).** The rows of
+  `POST /data/:object/batch`, `/updateMany` and `/deleteMany` had drifted from
+  `BatchOperationResultSchema`: the schema, the SDK's exported
+  `BatchOperationResult` and the reference docs all said `errors: ApiError[]` /
+  `data` / `index`, while the wire carried `error: string` / `record` and never
+  sent `index`. A TypeScript consumer written against the published type
+  compiled, validated, and read `undefined` at runtime. A conformance pin now
+  parses every emitted row against the schema. `ROLLED_BACK` and `NOT_ATTEMPTED`
+  are registered batch-row error codes.
+- **`IAutomationService.getSuspendedScreen(runId)` is async (#4515).** A
+  synchronous signature could only read the engine's in-memory hot cache, so
+  after a restart a still-suspended screen run could be *resumed* (200) while
+  `GET …/runs/:runId/screen` answered 404 — the refresh-safe re-fetch failing in
+  exactly the situation it exists for. It now falls through to the durable store
+  that `resume()` rehydrates from. One-line fix: `await` the call.
+- **`sys_comment` derives its access from the record its thread names (#4630).**
+  See Security corrections.
+- **The app-metadata gate filters inside `areas[]` (#4722).** Response shape
+  tightens: gated navigation items no longer appear at all, and an area filtered
+  empty is stripped.
+- **Discovery stops advertising routes for kernel-internal slots (#4318)** —
+  cache, queue and job have no HTTP surface.
+- **Metadata audit history and global search sort by `order`, not `direction`
+  (#4674)**, and the `/meta` read/write/delete boundary settles on one canonical
+  type key (#4432).
+- **Four ADR-0112 envelope defects found in the v17 verification sweep** are
+  closed (#4431, #4435, #4436, #4483), along with the `$search` field set.
+- **A stored reference value that is an embedded record is no longer a valid id
+  (#4455).** `ReferenceIdValueSchema` was `z.string().min(1)`, and in SQL a
+  legacy embedded reference reaches storage as JSON *text* — a non-empty string.
+  So `os migrate value-shapes`, the evidence half of the ADR-0104 D1 gate, ran
+  the scan on a deployment carrying exactly the values it exists to find, was
+  told it was clean, and closed the gate.
+
+### Metadata authoring & runtime changes
+
+- **A hook `condition` the platform cannot evaluate now ABORTS the operation
+  (#4775).** It used to `logger.warn` and `return false` — the hook simply did
+  not fire. "The condition said no" and "the platform could not work out what the
+  condition says" carry **opposite** risks depending on the hook, and collapsing
+  them into one outcome meant a `before*` guard silently let writes through.
+  Hooks that have been getting by on that skip will now fail the write; that is
+  the point, not a side effect.
+- **A hook `condition` reads the record, and can express a transition (#4770,
+  #4784).** The gate evaluated against `ctx.input.data` — only the fields the
+  write happened to carry — so `condition: "record.done == true"` did not run on
+  the most ordinary updates there are. It now evaluates against **stored ⊕
+  payload**, total over the object's declared fields, and the CEL scope binds
+  `previous` alongside `record`, which both published skill docs already taught.
+  Write a transition as `previous.done != true && record.done == true`.
+- **Validation rules fail CLOSED (#4649).** A `script` / `cross_field` /
+  `conditional` rule whose predicate faulted was logged at WARN and **skipped**,
+  so the write went through while the rule stayed declared and enforced nothing.
+  The merged record is now total on update as well as insert, and a predicate
+  that still cannot be evaluated rejects the write with `VALIDATION_FAILED`,
+  naming the rule and the key it read. `severity` still governs blocking.
+- **A `script` node is a function call (#4343).** It had four ways to name what
+  it ran and only one ran anything: `actionType: 'email' | 'slack'` were
+  logger-backed stubs that reported success and delivered nothing, `template` /
+  `recipients` / `variables` fed those stubs, and an inline `config.script` was
+  recognized and never executed (there is no server-side JS sandbox). What
+  remains is what worked — `config.function` (now **required**), `config.inputs`,
+  `config.outputVariable`. `script` and `subflow` config is parsed at execute
+  time.
+- **A `user` field carries its target in the TYPE (#4438).** `Field.user()`
+  writes `reference: 'sys_user'` itself, but two callers read `field.reference`
+  raw and disagreed, so `?expand=<a bare user field>` answered
+  `400 INVALID_FIELD … declares no target object`. Metadata authored without the
+  redundant key — hand-written JSON, an AI author, a Studio form — was read as
+  under-specified when it was complete. `referenceTargetOf` is now the single
+  arbiter both halves of the expand path read.
+- **A `datasourceMapping` rule is routing, not a hint (#4462).** Map an object to
+  a Postgres datasource with a bad URL and the boot succeeded, `/ready` answered
+  200, the datasource name appeared in zero log lines, the write returned 201 —
+  and the row was physically in the **default** store. A mapping that matches and
+  names a datasource with no live driver now throws.
+- **`datasource.config` is parsed against its driver's contract (#4410)**, and
+  the driver factory's four legacy `??` fallbacks graduate into an ADR-0087
+  conversion instead of staying as consumer-side aliases (#4456).
+- **Decision routing has one working model (#4414, #4440).** The two shapes that
+  could never route are gated at author time, the inert `config.condition` is
+  flagged, `isDefault` is enforced, and an unclaimable branch label stops being
+  swallowed. `evaluateCondition` decides its dialect from the source rather than
+  from the caller (#4336).
+- **The `record:*` blocks are withdrawn from the react tier (#4413)** — no
+  renderer read the props they published.
+- **Flow node-type validation waits for the plugin vocabulary to close (#4771)**,
+  so an approval flow is no longer mis-reported as "will fail at runtime".
+- **`Seed.env` is enforced (#4836)** — environment-scoped datasets no longer seed
+  everywhere — and a seed replay keeps its per-org tenant stamp as an id rather
+  than resolving it as a natural key (#4644).
+- **A `defaultValue` runtime token never becomes a column DEFAULT (#4560).**
+
+### Security corrections in this window
+
+- **Comments were readable by anyone who could guess a thread id (#4630).**
+  Attachments derive visibility from the parent record; comments derived
+  nothing. On the same record, the same user who got `200, 0 rows` for the
+  opportunity and its attachments got `200, 1 row` for its comments — and could
+  `POST` a new one. `sys_comment` now derives its access from the record its
+  `thread_id` names.
+- **Navigation gates inside an area were rendering-layer politeness (#4722).**
+  `filterAppForUser` is the server-authoritative visibility gate for app
+  metadata on `/meta`, but it only walked the app's **top-level** `navigation`
+  tree — `item.areas` was never read. `requiredPermissions` / `requiresService`
+  written on an item inside an area were enforced only by the client renderer,
+  so the item and its `objectName` / `pageName` / `componentRef` targets arrived
+  in the `/meta` body regardless. The same `filterNav` now runs on every
+  `areas[].navigation`, and the service-probe surface was widened to match — a
+  probe narrower than the filter would strip a live entry. Note the deliberate
+  asymmetry: `visible` (CEL) is still client-only at every level. **If it must
+  never reach the browser, write `requiredPermissions`, not `visible`.**
+- **Two area-level gates failed open (#4651).** `app.areas[].visible` and
+  `.requiredPermissions` were not inert keys — an author wrote
+  `requiredPermissions: ['sales.admin']` on a navigation area, got a clean parse
+  and a stored value, and the area with everything under it was served and
+  rendered to **every user**. Both are removed, with a prescription; this is a
+  real migration, not a rename.
+- **An unscoped multi-delete of `sys_attachment` is refused (#4757)** rather than
+  authorized.
+- **`/analytics/query` is scoped to the caller's readable records, and a measure
+  over a missing field is refused (#4467, #4437).**
+- **Deactivating or deleting a sharing rule now withdraws its materialised
+  grants (#4433, #4434)** — and `DELETE` stops answering 500.
+- **The org-admin auto-grant can actually revoke (#4640)** — `tryDelete` was
+  calling the engine's `delete` with the wrong signature, so demoted admins kept
+  tenant admin.
+- **Permission-set projection writes only spec-declared keys, and a failed
+  backfill becomes loud (#4669).**
+- **AI routes carry the capability channel onto `req.user` (#4705)**, and a
+  degraded tenancy posture no longer hands out a default organization (#4423).
+- **OTP hardening.** The per-number send budget counts in the shared store
+  rather than per node (#4790); the cooldown's retention follows the declared
+  value instead of a hard-coded hour (#4808); and the rate-limit counters
+  resolve the kernel cache lazily, which fixed both a spurious warning and the
+  functional hole that shared rate limiting never engaged (#4772).
+- **The issuer is the provider's to declare (#4552)** — Google account links
+  stopped resolving under a synthesized one.
+- **Approvals.** An admin override of a staffed approver slate is recorded *as*
+  an override (#4466); the record lock holds for predicate (`multi`) updates
+  (#4778); stranded requests nothing was looking at are findable (#4469); a
+  decision can no longer report success while its flow stays parked (#4420); and
+  `resume` enforces the suspended screen's declared field contract (#4477).
+- **Three auth-gate disconnects close (#4509)** — `email_template` bridges to the
+  mail service, `job` and `validation` close their doors.
+- **The ADR-0104 fresh-datastore attestation concludes on this boot's own data
+  (#4769)**, not on the emptiness it remembers from before the boot wrote.
+
+### New backend capabilities in this window
+
+- **Predicate writes get an honest bulk event contract (#4639).** A `multi: true`
+  update or delete reaches `updateMany` / `deleteMany`, which resolve a row
+  **count** — satisfying neither `DataEvent.recordId` nor `before` / `after`, so
+  the engine used to fabricate an event with `recordId: ''`. New `BulkDataEvent`
+  (`data.records.updated` / `data.records.deleted` — note the plural) carries
+  `matched` and no `recordId`, so a consumer knows from the type alone what is
+  coming. Webhooks gain opt-in `bulk_update` / `bulk_delete` triggers —
+  deliberately **not** extra sources for the per-record ones — and the SDK gains
+  `client.events.subscribeBulkData`. A predicate matching zero rows publishes
+  nothing.
+- **`subscribeData` and `subscribeMetadata` deliver what they declare** — real
+  `DataEvent`s (#4626) and real `MetadataEvent`s (#4602), with loud boundary
+  validation.
+- **`@objectstack/client-react` grows bulk-write hooks, and `useAutoRefresh`
+  refreshes on predicate writes (#4678).** Five hooks stopped looping on
+  dependency identity (#4693, #4694), and the package finally has a test harness
+  pinning realtime behavior (#4682).
+- **Blueprints can say what they compute.** A `formula` field states its
+  `expression` (#4577), and a blueprint can declare roll-ups, including
+  conditional ones (#4425).
+- **Stored `lookup` references that resolve to nothing are reported (#4551)** —
+  an inspection that reports and never blocks. (It no longer misfires during
+  shutdown, where every `os migrate` subcommand was reporting `sys_metadata` and
+  `sys_view_definition` as unreadable — #4747.)
+- **Aggregate bulk dispatch works end to end (#4461):** `_selectedIds` passes the
+  action param gate, so an aggregate bulk action makes one call instead of N.
+- **A roll-up registered at runtime computes without a restart (#4427)**, and a
+  just-saved overlay is dispatchable immediately rather than after the next
+  listing (#4521).
+- **Analytics correctness continues.** A percentage measure carries its SCALE, so
+  a ratio of 1 reads as 100% (#4442); a measure a query never reported reads `0`
+  for a count/sum on every merge seam, `compareTo` included (#4708); and
+  `compareTo` applies each measure's own filters, so `<measure>__compare` is the
+  same measure as the column beside it rather than a different one (#4820).
+- **Boot and operations tell the truth.** A `sys_metadata` DDL failure is loud —
+  only "table already exists" may be silent (#4728); the history `event_seq` is
+  never invented from a read that failed (#4825); a best-effort degradation that
+  costs **durability** logs `error`, not `warn`, with a gate enforcing the rule
+  (#4632); declarative `defineJob` cron jobs are actually scheduled (#4567); and
+  the SQL outboxes stop writing `updated_at` on UPDATE, which was flooding the
+  `pnpm dev` console (#4765).
+- **`os serve` distinguishes "the multi-org package is absent" from "the plugin
+  refused to mount" (#4818)**, and resolves the enterprise organizations package
+  from the **host app** rather than the framework (#4699, #4700).
+- **A `RETURNING` write persists on `driver-sqlite-wasm` (#4518)**, unblocking
+  cold-boot e2e.
+
 ## Upgrade checklist
 
 ### 17.0.0
@@ -2218,6 +2708,90 @@ covers are folded into the list below rather than left to the changelog.)
   `recipients`/`title`/`message`/`actionUrl`, script `functionName`/`input` →
   `function`/`inputs`) or run `os migrate meta` — the conversion windows
   close at protocol 18 (#3796, #4278, #4045).
+- **Spec importers (dual-source renames):** every break here is a compile-time
+  `TS2305` naming the symbol, and none of it is authorable metadata, so
+  `os migrate meta` has nothing to do. Change the **import path** for
+  `WebhookConfig`/`WebhookEvent` (→ `./integration`), `MetadataEvent`/
+  `MetadataBulkRegisterRequest` (→ `./api`), `Notification`/`NotificationConfig`
+  (→ `./api`), `Session` (→ `./api`), `EventSchema` (→ `./kernel`). Change the
+  **name** for `PackageDependencySchema` on `./kernel` (→
+  `ResolvedPackageDependencySchema`), `RateLimitConfig` on `./integration` (→
+  `ConnectorRateLimitConfig`), `FieldMapping` on `./integration` / `./data` (→
+  `ConnectorFieldMapping` / `ImportFieldMapping`), `ConflictResolution` on
+  `./integration` (→ `ConnectorConflictResolution`), `HttpMethod` on `./ui` (→
+  `HttpMethodType`), `ActionLocationSchema` on `./studio` (→
+  `ActionContributionLocationSchema`), `ShareRecipientType` on `./contracts` (→
+  `RecordShareRecipientType`). Deleted outright: the `./automation` `DataSyncConfig`
+  family, `./system`'s tenant-provisioning family with `IProvisioningService` /
+  `ITenantRouter` / `ResolvedTenantContext`, and the orphan notification-template
+  schemas (use `EmailTemplateDefinition` and siblings).
+- **Datasource authors (again):** delete `retryPolicy`, `healthCheck`,
+  `capabilities`, `external.label` and `external.requirePermission` —
+  `os migrate meta --from 16` removes all of them. None ever had an effect;
+  `capabilities.readOnly` in particular never made a datasource read-only.
+  Then verify the **mapping**: an object mapped to a datasource with no live
+  driver now throws instead of silently reading and writing the default store,
+  so a mapping you have been carrying decoratively will surface at boot.
+- **Driver implementors:** delete `findStream` (the required method nothing
+  called) and the 31 retired `DriverCapabilities` bits; three bits with real
+  readers remain. Delete any `IDataEngine.batch` implementation and route
+  multi-write atomicity through `engine.transaction(cb)`.
+- **Bulk/batch callers:** read per-row results under the declared shape —
+  `errors: ApiError[]` (not `error: string`), `data` (not `record`), plus the
+  `index` that was never sent. `options.atomic` now **defaults to `false`** and
+  is a real guarantee when set: an atomic batch either rolls back completely
+  (zero successes, rows marked `ROLLED_BACK:` / `NOT_ATTEMPTED:`) or is refused
+  with 501 on a runtime that cannot transact. If you were passing
+  `atomic: true` and relying on partial results surviving, switch to
+  `atomic: false`. `deleteMany` / `updateMany` behave identically now (#4620).
+- **Hook authors:** a `condition` that cannot be evaluated **aborts the write**
+  instead of skipping the hook — grep your conditions for keys that are not
+  declared fields before upgrading. Conditions now read the merged record
+  (stored ⊕ payload), so `record.x == v` is true on every update of an
+  already-matching row; write transitions with the new `previous` binding
+  (`previous.done != true && record.done == true`).
+- **Validation authors:** a `script`/`cross_field`/`conditional` rule whose
+  predicate faults now **rejects** the write instead of being skipped. Expect
+  previously-silent rules to start firing; that is the defect being fixed, not
+  a regression. Lower `severity` to `warning`/`info` only where blocking is
+  genuinely wrong.
+- **Flow authors (`script` nodes):** `config.function` is required. Replace
+  `actionType: 'email' | 'slack'` and their `template`/`recipients`/`variables`
+  with a `notify` node against a real messaging service; replace inline
+  `config.script` with a registered function — it never executed.
+- **Standalone validation artifacts:** delete `*.validation.ts` files and the
+  Studio Validations entries built from them, and move each rule into the
+  object's own `validations[]`. Nothing authored through that door ever gated a
+  write — including `state_machine` rules.
+- **Job authors:** jobs can no longer be created at runtime or overridden per
+  org. Move any runtime-created job into `defineStack({ jobs, functions })` so
+  its `handler` resolves against a real function. Existing `sys_metadata` rows
+  are left untouched — they were never scheduled — and now report `skipped`.
+- **`managedBy` authors:** rename `'system'` → `'system-data'`
+  (`os migrate meta --from 16` does it; stored rows are converted, never
+  reinterpreted). The bucket defaults **writable**, so delete now-redundant
+  `userActions: { create, edit, delete }` blocks and keep `userActions` only to
+  narrow.
+- **App authors:** delete `areas[].visible` and `areas[].requiredPermissions` —
+  both failed open, so anything you were gating with them was visible to
+  everyone. Re-gate item-by-item inside `areas[].navigation`, which is now
+  filtered server-side. Also expect gated items to be **absent** from the
+  `/meta` payload rather than present-and-hidden.
+- **Comment consumers:** `sys_comment` is now gated by the record its
+  `thread_id` names; `visibility` and `reply_count` are removed. A UI that read
+  `visibility` to decide what to show should stop — it never decided anything.
+- **Automation hosts:** `await` `IAutomationService.getSuspendedScreen(runId)`
+  and make test doubles resolve rather than return (#4515).
+- **Runtime metadata writers (Studio / `/meta` / MCP agents):** an active
+  **flow** write is now linted and refused with 422 `INVALID_METADATA` when a
+  gating rule fires. Fix the metadata; `OS_ALLOW_UNLINTED_METADATA_WRITES=1`
+  buys a migration window and should not outlive it.
+- **Everyone:** run `os validate` before upgrading. The ADR-0078 completeness
+  rules are new **errors**, and they fire on metadata that has been parsing
+  cleanly for majors — a `summary` field with no `summaryOperations`, a
+  `formula` with no `expression`, a relationship with no reference, a
+  `select`/`radio` with no options. Each finding is a field that has been
+  computing nothing.
 
 ## References
 
@@ -2253,3 +2827,23 @@ guessing) · #3916 (report ordering) · #4350 (protocol-17 relabel) ·
 occupancy + deferred DDL) · #4243/#4270 (platform-objects infrastructure) ·
 #4395/#4396 (unmeasured effects) · #4365/#4366 (approval reassign + audit
 attribution) · #4261/#4248 (published-files hygiene).
+
+Landed since rc.1: ADR-0118 (non-user actor contract) · ADR-0119
+(plugin-reachable transactions, migration journal) · ADR-0088 (metadata-kind
+admission) · ADR-0103 (`managedBy` buckets) · #4535 + #4411 (dual-source
+convergence C1–C17: #4572, #4587, #4610, #4641, #4653, #4658, #4661, #4684,
+#4688, #4691, #4703, #4737, #4738, #4739, #4740, #4741) · #4537/#4538/#4539
+(enum, contracts and cross-form convergence) · #4446 (symbol-identity ratchet) ·
+#4001 final batches (#4514/#4519/#4522/#4527/#4528/#4529/#4530/#4531/#4532/#4533/#4534/#4541) ·
+#4544 (ADR-0078 completeness, Phases 1/3/4: #4501, #4565, #4574, #4599) ·
+#4463 (runtime authoring gate) · #4409/#4487/#4488 (rule + liveness coverage) ·
+#4583/#4634/#4484/#4618/#4579/#4657/#4673/#4616 (enforce-or-remove: datasource,
+driver and contract surfaces) · #4509 (validation kind, job door, doc.tags,
+email-template bridge) · #4667 (authorWarn keys) · #3355 (`system-data`) ·
+#4612/#4617/#4620 (atomicity + migration journal) · #4793 (batch row shape) ·
+#4639/#4626/#4602/#4678 (event contracts + client-react) · #4343 (`script`
+node) · #4649/#4770/#4775/#4784 (predicate and condition semantics) ·
+#4419 (`findOne`) · #4462/#4410/#4456 (datasource routing + config contract) ·
+#4630/#4651/#4722/#4757 (security corrections) · #4433/#4434/#4640/#4669
+(sharing + permission corrections) · #4467/#4437/#4442/#4708/#4820 (analytics) ·
+#4327/#4454/#4542 (stored-metadata migration).
