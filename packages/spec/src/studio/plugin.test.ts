@@ -3,7 +3,7 @@ import {
   ViewModeSchema,
   MetadataViewerContributionSchema,
   SidebarGroupContributionSchema,
-  ActionLocationSchema,
+  ActionContributionLocationSchema,
   ActionContributionSchema,
   MetadataIconContributionSchema,
   PanelLocationSchema,
@@ -80,15 +80,15 @@ describe('SidebarGroupContributionSchema', () => {
   });
 });
 
-describe('ActionLocationSchema', () => {
+describe('ActionContributionLocationSchema', () => {
   it('should accept all valid locations', () => {
     ['toolbar', 'contextMenu', 'commandPalette'].forEach(loc => {
-      expect(() => ActionLocationSchema.parse(loc)).not.toThrow();
+      expect(() => ActionContributionLocationSchema.parse(loc)).not.toThrow();
     });
   });
 
   it('should reject invalid location', () => {
-    expect(() => ActionLocationSchema.parse('sidebar')).toThrow();
+    expect(() => ActionContributionLocationSchema.parse('sidebar')).toThrow();
   });
 });
 

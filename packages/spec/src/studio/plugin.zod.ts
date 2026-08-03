@@ -138,8 +138,24 @@ export type SidebarGroupContribution = z.infer<typeof SidebarGroupContributionSc
 
 // ─── Action Contribution ─────────────────────────────────────────────
 
-/** Where an action can appear in the UI */
-export const ActionLocationSchema = lazySchema(() => z.enum(['toolbar', 'contextMenu', 'commandPalette']));
+/**
+ * Where an action CONTRIBUTION appears inside the Studio IDE shell.
+ *
+ * [#4737] This was exported as `ActionLocationSchema` until v17 — the same
+ * name `@objectstack/spec/ui` exports for a DIFFERENT concept: the 7-value
+ * platform-canonical vocabulary for where an action renders in a running
+ * application's UI (`list_toolbar`, `record_header`, …, `global_nav`), whose
+ * docblock declares it "single source of truth for the whole platform". This
+ * one is the 3-value Studio IDE surface enum consumed only by
+ * `ActionContributionSchema.location` below. Same name, disjoint
+ * vocabularies: which type you got depended on nothing but the import path —
+ * the #4411 trap (dual-source ledger #4535, cluster C17). Per ADR-0112 D9(a)
+ * the studio side takes the domain-specific name; the ui side keeps the bare
+ * name. Do NOT re-export the ui enum under the old name here: that would tell
+ * studio plugin authors the app-UI vocabulary is valid in a manifest.
+ */
+export const ActionContributionLocationSchema = lazySchema(() => z.enum(['toolbar', 'contextMenu', 'commandPalette']));
+export type ActionContributionLocation = z.infer<typeof ActionContributionLocationSchema>;
 
 /**
  * Declares an action that can be triggered on metadata items.
@@ -159,7 +175,7 @@ export const ActionContributionSchema = lazySchema(() => strictObject({
   icon: z.string().optional().describe('Lucide icon name'),
 
   /** Where this action appears */
-  location: ActionLocationSchema.describe('UI location'),
+  location: ActionContributionLocationSchema.describe('UI location'),
 
   /** Metadata types this action applies to (empty = all types) */
   metadataTypes: z.array(z.string()).default([]).describe('Applicable metadata types'),
