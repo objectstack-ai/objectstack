@@ -7,6 +7,10 @@ export default defineConfig({
     'src/index.ts',
     'src/node.ts',
     'src/migrations/index.ts',
+    // `@objectstack/metadata/errors` — the shared driver-error discriminators
+    // (#4728/#4825/#4867). Its own entry so a consumer that needs only the
+    // predicate does not load the manager, the loaders and their deps.
+    'src/errors.ts',
   ],
   splitting: false,
   sourcemap: true,
