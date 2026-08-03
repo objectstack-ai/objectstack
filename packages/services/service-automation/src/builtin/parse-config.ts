@@ -34,10 +34,23 @@
  * silence the contract for a node forever, the same suppression shape #3863
  * closed for the other refuse-to-execute guards.
  *
- * Unknown keys are NOT this seam's job: Zod's default `.strip()` drops them
- * silently here, and `registerFlow()` rejects them loudly at registration
- * (the tightened #4059 check). Type + `required` live here; key membership
- * lives there.
+ * Key membership is not this seam's JOB, but since #4001 批 10 it is no longer
+ * this seam's blind spot either. It used to be both: zod's default `.strip()`
+ * dropped an unknown key silently here, so the sentence "key membership lives
+ * at `registerFlow()`" described a division of labour AND a hole — anything
+ * reaching this parse by another route got no key check at all. The three
+ * ADR-0031 control-flow contracts (`LoopConfigSchema`, `ParallelConfigSchema`,
+ * `TryCatchConfigSchema`) are now `strictObject`, so an unknown key here
+ * refuses like any other contract violation.
+ *
+ * In engine-run flows that refusal should never fire: `validateNodeConfigKeys`
+ * rejects the same key at registration, earlier and with the descriptor's own
+ * prescriptions, and a flow that fails registration never reaches execution.
+ * That ordering is the point — the loud door stays the first one. What
+ * changed is only that the second door stopped being open.
+ *
+ * Type + `required` still live here; key membership still belongs at
+ * registration.
  */
 
 import { refuseNode } from '../guard-refusal.js';

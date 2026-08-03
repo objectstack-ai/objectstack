@@ -28,6 +28,7 @@ const SHARED_SHOWCASE = [
   'test/showcase-permission-zoo.dogfood.test.ts',
   'test/showcase-private-owd.dogfood.test.ts',
   'test/showcase-public-read-owd.dogfood.test.ts',
+  'test/showcase-readonly-when-parent.dogfood.test.ts',
   'test/showcase-search.dogfood.test.ts',
   'test/showcase-static-readonly.dogfood.test.ts',
   'test/two-doors-permission.dogfood.test.ts',

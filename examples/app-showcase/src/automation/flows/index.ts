@@ -981,7 +981,14 @@ export const ResilientSyncFlow = defineFlow({
       type: 'try_catch',
       label: 'Push with retry',
       config: {
-        retry: { maxRetries: 3, retryDelayMs: 1000, backoffMultiplier: 2, maxRetryDelayMs: 10000 },
+        // Canonical retry policy (`@objectstack/spec` 17.0.0, #4661): the base
+        // delay is `backoffMs` on BOTH `try_catch.retry` and `job.retryPolicy`.
+        // The pre-17 automation-side spelling `retryDelayMs` is tombstoned and
+        // only survives via the `retry-policy-converged` conversion, which
+        // retires in protocol 18 — never author it. `maxRetryDelayMs` is NOT
+        // part of that rename: it is a canonical key of `RetryPolicySchema`
+        // (the ceiling for a single backoff delay).
+        retry: { maxRetries: 3, backoffMs: 1000, backoffMultiplier: 2, maxRetryDelayMs: 10000 },
         errorVariable: '$error',
         try: {
           nodes: [
@@ -1173,7 +1180,8 @@ export const ProjectEscalationFlow = defineFlow({
       type: 'try_catch',
       label: 'Push to incident system',
       config: {
-        retry: { maxRetries: 2, retryDelayMs: 500, backoffMultiplier: 2 },
+        // Canonical `backoffMs` — see the note on ResilientSyncFlow above.
+        retry: { maxRetries: 2, backoffMs: 500, backoffMultiplier: 2 },
         errorVariable: '$error',
         try: {
           nodes: [{ id: 'push', type: 'http', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', body: { project: '{record.id}', severity: 'critical' } } }],
