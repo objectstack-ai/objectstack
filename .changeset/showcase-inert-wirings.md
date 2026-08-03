@@ -11,9 +11,9 @@ nothing — `@objectstack/example-showcase` is private.
   Sweep" had never run. Implemented for real: it recomputes
   `showcase_project.health` from budget burn measured against delivered task
   progress, over an engine handle captured at `onEnable` (a job handler is
-  invoked with `{ jobId, data }` and no data engine), and is registered with
-  `effect: 'writes'` so the run reports "cannot count these writes" rather than
-  silently claiming it wrote nothing.
+  invoked with `{ jobId, data }` and no data engine). It is registered in the
+  bare-callable form rather than the `effect: 'writes'` declaration it wants:
+  that declared form cannot survive `objectstack build` today, filed as #4976.
 - **`showcase.export_data` now materializes.** The capability declared no
   owning package, so it was never written to `sys_capability` — leaving
   `OpsPermissionSet` granting a permission that would never exist. It now
@@ -34,7 +34,8 @@ nothing — `@objectstack/example-showcase` is private.
   declared, with its gallery binding, and is populated by uploading a cover.
 
 Guarded by `test/inert-wirings.test.ts`: every declared job's handler must
-resolve against `defineStack({ functions })`, every declared capability must
+resolve against `defineStack({ functions })` in a form the build can carry,
+every declared capability must
 resolve an owning package, no permission set may grant an undeclared
 capability, no **source file** may author `retryDelayMs` (the parsed stack
 cannot answer this — the conversion has already rewritten it), and no seeded

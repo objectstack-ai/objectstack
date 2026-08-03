@@ -214,13 +214,23 @@ export default defineStack({
   // `sweepProjectHealth` — the handler `HealthSweepJob` names — lives here too.
   // It is the case the pure contract does not cover: a nightly sweep has no
   // downstream declarative node to persist for it, so it writes over an engine
-  // handle captured at `onEnable` and says so with `effect: 'writes'` (#4396).
-  // The declaration grants nothing; it makes the run report "cannot count these
-  // writes" instead of silently claiming it wrote nothing.
+  // handle captured at `onEnable`.
+  //
+  // ⚠️ Do NOT rewrite this as `{ handler: sweepProjectHealth, effect: 'writes' }`.
+  // That declared form (#4396) is the honest spelling for a writer and is what
+  // this entry wants — but it cannot survive `objectstack build` today: the CLI
+  // lowers it to `{ handler: 'sweepProjectHealth', effect: 'writes' }` and
+  // `FlowFunctionEntrySchema` accepts a bare callable, a declaration whose
+  // `handler` is a CALLABLE, or a bare string ref — never a declaration whose
+  // handler has been lowered to a string. `pnpm build` fails with
+  // `functions: invalid_union`. Filed as #4976; switch back once it lands.
+  // Nothing is lost at runtime meanwhile: `effect` has exactly one consumer,
+  // the `script` node's `unmeasuredEffect` metric, and the JOB path drops it
+  // (`collectBundleFunctions` keeps only the handler).
   functions: {
     summarizeCompletedTask: ({ input }: { input: Record<string, unknown> }) =>
       `Completed: ${String(input.title ?? 'task')} (priority ${String(input.priority ?? 'normal')}).`,
-    sweepProjectHealth: { handler: sweepProjectHealth, effect: 'writes' as const },
+    sweepProjectHealth,
   },
   jobs: allJobs,
   emailTemplates: allEmails,

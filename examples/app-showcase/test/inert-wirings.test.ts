@@ -96,12 +96,24 @@ describe('declarative jobs resolve their handler (#4774 ①)', () => {
     });
   }
 
-  it('the health sweep declares `effect: writes` (#4396)', () => {
-    // A job handler that does its own data I/O must say so: an UNDECLARED
-    // writer is counted as having written nothing, which makes the run's own
-    // report a lie rather than an honest "cannot count".
-    const entry = functionEntry('sweepProjectHealth') as { effect?: string } | undefined;
-    expect(entry?.effect).toBe('writes');
+  it('every functions entry is authored in a form `objectstack build` can carry', () => {
+    // `objectstack build` LOWERS each inline callable to a serialisable string
+    // ref before the stack is parsed, and `FlowFunctionEntrySchema` accepts a
+    // bare callable, a declaration whose `handler` is a CALLABLE, or a bare
+    // string ref — but NOT a declaration whose handler has been lowered to a
+    // string, which is exactly what the CLI emits for the declared form
+    // (`{ handler: fn, effect: 'writes' }`, #4396). So authoring the declared
+    // form here builds green from source and fails `pnpm build` with
+    // `functions: invalid_union`. Filed as #4976.
+    //
+    // Pinning the bare form keeps that failure out of the reference app until
+    // the schema accepts the lowered declaration. Delete this guard — don't
+    // work around it — when #4976 lands.
+    const declared = functionNames().filter((name) => typeof functionEntry(name) !== 'function');
+    expect(
+      declared,
+      `declared-form functions entry/entries cannot survive \`objectstack build\` (#4976): ${declared.join(', ')}`,
+    ).toEqual([]);
   });
 });
 
