@@ -5,43 +5,23 @@ description: Notification protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Email Template Schema
+Notification Channel Enum
 
-Defines the structure and content of email notifications.
+Supported notification delivery channels.
 
-Supports variables for personalization and file attachments.
+⚠️ PARTIALLY ENFORCED — the delivery channels actually registered by
 
-@example
+`service-messaging` are `inbox`, `email`, and `sms` (#3197). `push`,
 
-```json
+`slack`, `teams`, and `webhook` have no delivery implementation, and the
 
-\{
+dispatcher dead-letters any message addressed to an unregistered channel.
 
-"id": "welcome-email",
+Note also the naming drift: this enum says `in-app` while the implemented
 
-"subject": "Welcome to \{\{company_name\}\}",
+channel registers as `inbox` (which this enum does not contain) —
 
-"body": "<h1>Welcome \{\{user_name\}\}!</h1>",
-
-"bodyType": "html",
-
-"variables": ["company_name", "user_name"],
-
-"attachments": [
-
-\{
-
-"name": "guide.pdf",
-
-"url": "https://example.com/guide.pdf"
-
-\}
-
-]
-
-\}
-
-```
+reconcile before wiring this enum into the runtime.
 
 <Callout type="info">
 **Source:** `packages/spec/src/system/notification.zod.ts`
@@ -50,44 +30,12 @@ Supports variables for personalization and file attachments.
 ## TypeScript Usage
 
 ```typescript
-import { EmailTemplateSchema, InAppNotificationSchema, NotificationChannelSchema, PushNotificationSchema, SMSTemplateSchema } from '@objectstack/spec/system';
-import type { EmailTemplate, InAppNotification, NotificationChannel, PushNotification, SMSTemplate } from '@objectstack/spec/system';
+import { NotificationChannelSchema } from '@objectstack/spec/system';
+import type { NotificationChannel } from '@objectstack/spec/system';
 
 // Validate data
-const result = EmailTemplateSchema.parse(data);
+const result = NotificationChannelSchema.parse(data);
 ```
-
----
-
-## EmailTemplate
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Template identifier |
-| **subject** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Email subject — supports `{{var}`} interpolation |
-| **body** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Email body content — supports `{{var}`} interpolation |
-| **bodyType** | `Enum<'text' \| 'html' \| 'markdown'>` | optional | Body content type |
-| **variables** | `string[]` | optional | Template variables |
-| **attachments** | `{ name: string; url: string }[]` | optional | Email attachments |
-
-
----
-
-## InAppNotification
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **title** | `string` | ✅ | Notification title |
-| **message** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Notification message — supports `{{var}`} interpolation |
-| **type** | `Enum<'info' \| 'success' \| 'warning' \| 'error'>` | ✅ | Notification type |
-| **actionUrl** | `string` | optional | Action URL |
-| **dismissible** | `boolean` | optional | User dismissible |
-| **expiresAt** | `number` | optional | Expiration timestamp |
-
 
 ---
 
@@ -104,36 +52,6 @@ Notification delivery channel (implemented today: inbox, email, sms — push/sla
 * `slack`
 * `teams`
 * `webhook`
-
-
----
-
-## PushNotification
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **title** | `string` | ✅ | Notification title |
-| **body** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Notification body — supports `{{var}`} interpolation |
-| **icon** | `string` | optional | Notification icon URL |
-| **badge** | `number` | optional | Badge count |
-| **data** | `Record<string, any>` | optional | Custom data |
-| **actions** | `{ action: string; title: string }[]` | optional | Notification actions |
-
-
----
-
-## SMSTemplate
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Template identifier |
-| **message** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | SMS message content — supports `{{var}`} interpolation |
-| **maxLength** | `number` | optional | Maximum message length |
-| **variables** | `string[]` | optional | Template variables |
 
 
 ---

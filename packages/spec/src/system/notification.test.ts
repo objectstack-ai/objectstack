@@ -1,246 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  EmailTemplateSchema,
-  SMSTemplateSchema,
-  PushNotificationSchema,
-  InAppNotificationSchema,
-  NotificationChannelSchema,
-  type EmailTemplate,
-  type SMSTemplate,
-} from './notification.zod';
-
-describe('EmailTemplateSchema', () => {
-  it('should validate complete email template', () => {
-    const validTemplate: EmailTemplate = {
-      id: 'welcome-email',
-      subject: 'Welcome to {{company_name}}',
-      body: '<h1>Welcome {{user_name}}!</h1>',
-      bodyType: 'html',
-      variables: ['company_name', 'user_name'],
-      attachments: [
-        {
-          name: 'guide.pdf',
-          url: 'https://example.com/guide.pdf',
-        },
-      ],
-    };
-
-    expect(() => EmailTemplateSchema.parse(validTemplate)).not.toThrow();
-  });
-
-  it('should accept minimal email template', () => {
-    const minimalTemplate = {
-      id: 'simple-email',
-      subject: 'Test Email',
-      body: 'Simple text body',
-    };
-
-    expect(() => EmailTemplateSchema.parse(minimalTemplate)).not.toThrow();
-  });
-
-  it('should default bodyType to html', () => {
-    const template = {
-      id: 'test',
-      subject: 'Test',
-      body: 'Body',
-    };
-
-    const parsed = EmailTemplateSchema.parse(template);
-    expect(parsed.bodyType).toBe('html');
-  });
-
-  it('should accept text bodyType', () => {
-    const template = {
-      id: 'text-email',
-      subject: 'Plain Text',
-      body: 'Plain text body',
-      bodyType: 'text' as const,
-    };
-
-    expect(() => EmailTemplateSchema.parse(template)).not.toThrow();
-  });
-
-  it('should accept markdown bodyType', () => {
-    const template = {
-      id: 'markdown-email',
-      subject: 'Markdown Email',
-      body: '# Header\n\nContent',
-      bodyType: 'markdown' as const,
-    };
-
-    expect(() => EmailTemplateSchema.parse(template)).not.toThrow();
-  });
-
-  it('should validate attachment URLs', () => {
-    const invalidTemplate = {
-      id: 'email-1',
-      subject: 'Test',
-      body: 'Body',
-      attachments: [
-        {
-          name: 'file.pdf',
-          url: 'not-a-url',
-        },
-      ],
-    };
-
-    expect(() => EmailTemplateSchema.parse(invalidTemplate)).toThrow();
-  });
-});
-
-describe('SMSTemplateSchema', () => {
-  it('should validate complete SMS template', () => {
-    const validTemplate: SMSTemplate = {
-      id: 'verification-sms',
-      message: 'Your verification code is {{code}}',
-      maxLength: 160,
-      variables: ['code'],
-    };
-
-    expect(() => SMSTemplateSchema.parse(validTemplate)).not.toThrow();
-  });
-
-  it('should accept minimal SMS template', () => {
-    const minimalTemplate = {
-      id: 'simple-sms',
-      message: 'Hello World',
-    };
-
-    expect(() => SMSTemplateSchema.parse(minimalTemplate)).not.toThrow();
-  });
-
-  it('should default maxLength to 160', () => {
-    const template = {
-      id: 'sms-1',
-      message: 'Test message',
-    };
-
-    const parsed = SMSTemplateSchema.parse(template);
-    expect(parsed.maxLength).toBe(160);
-  });
-
-  it('should accept custom maxLength', () => {
-    const template = {
-      id: 'long-sms',
-      message: 'Long message',
-      maxLength: 320,
-    };
-
-    const parsed = SMSTemplateSchema.parse(template);
-    expect(parsed.maxLength).toBe(320);
-  });
-});
-
-describe('PushNotificationSchema', () => {
-  it('should validate complete push notification', () => {
-    const validPush = {
-      title: 'New Message',
-      body: 'You have a new message from John',
-      icon: 'https://example.com/icon.png',
-      badge: 5,
-      data: { messageId: 'msg_123' },
-      actions: [
-        { action: 'view', title: 'View' },
-        { action: 'dismiss', title: 'Dismiss' },
-      ],
-    };
-
-    expect(() => PushNotificationSchema.parse(validPush)).not.toThrow();
-  });
-
-  it('should accept minimal push notification', () => {
-    const minimalPush = {
-      title: 'Alert',
-      body: 'Something happened',
-    };
-
-    expect(() => PushNotificationSchema.parse(minimalPush)).not.toThrow();
-  });
-
-  it('should validate icon URL', () => {
-    const invalidPush = {
-      title: 'Test',
-      body: 'Body',
-      icon: 'not-a-url',
-    };
-
-    expect(() => PushNotificationSchema.parse(invalidPush)).toThrow();
-  });
-
-  it('should accept custom data payload', () => {
-    const push = {
-      title: 'Order Update',
-      body: 'Your order has shipped',
-      data: {
-        orderId: 'ord_123',
-        trackingNumber: 'TRK456',
-        status: 'shipped',
-      },
-    };
-
-    expect(() => PushNotificationSchema.parse(push)).not.toThrow();
-  });
-});
-
-describe('InAppNotificationSchema', () => {
-  it('should validate complete in-app notification', () => {
-    const validNotification = {
-      title: 'System Update',
-      message: 'New features are now available',
-      type: 'info' as const,
-      actionUrl: '/updates',
-      dismissible: true,
-      expiresAt: 1704067200000,
-    };
-
-    expect(() => InAppNotificationSchema.parse(validNotification)).not.toThrow();
-  });
-
-  it('should accept minimal in-app notification', () => {
-    const minimalNotification = {
-      title: 'Alert',
-      message: 'Important message',
-      type: 'warning' as const,
-    };
-
-    expect(() => InAppNotificationSchema.parse(minimalNotification)).not.toThrow();
-  });
-
-  it('should default dismissible to true', () => {
-    const notification = {
-      title: 'Test',
-      message: 'Message',
-      type: 'info' as const,
-    };
-
-    const parsed = InAppNotificationSchema.parse(notification);
-    expect(parsed.dismissible).toBe(true);
-  });
-
-  it('should accept all notification types', () => {
-    const types = ['info', 'success', 'warning', 'error'] as const;
-
-    types.forEach((type) => {
-      const notification = {
-        title: 'Test',
-        message: 'Message',
-        type,
-      };
-
-      expect(() => InAppNotificationSchema.parse(notification)).not.toThrow();
-    });
-  });
-
-  it('should reject invalid notification type', () => {
-    const invalidNotification = {
-      title: 'Test',
-      message: 'Message',
-      type: 'invalid',
-    };
-
-    expect(() => InAppNotificationSchema.parse(invalidNotification)).toThrow();
-  });
-});
+import { NotificationChannelSchema } from './notification.zod';
 
 describe('NotificationChannelSchema', () => {
   it('should accept all valid channels', () => {
@@ -264,19 +23,203 @@ describe('NotificationChannelSchema', () => {
   });
 });
 
-// Pin: this module no longer declares the bare NotificationConfig names. The
-// pin is compile-time (typeof import is type-level only — no runtime barrel
-// load): if either bare name is re-added here, the conditional type flips to
-// `true` and the `false` assignment fails `tsc --noEmit`. The name left the
-// spec export surface entirely (#4610): its ./ui twin was removed in the same
-// change, and ADR-0030's delivery vocabulary (NotificationService.emit /
-// NotifyConfigSchema / sys_* objects) is the live contract.
-describe('NotificationConfig removal (#4610)', () => {
-  it('does not re-expose the bare NotificationConfig names from ./system', () => {
-    type SystemNotificationModule = typeof import('./notification.zod');
-    const hasConfigSchema: 'NotificationConfigSchema' extends keyof SystemNotificationModule
-      ? true
-      : false = false;
-    expect(hasConfigSchema).toBe(false);
+// ─── [#4616] the orphan notification-template vocabulary is gone ─────────────
+//
+// ADR-0049 enforce-or-remove, v17 breaking window. `EmailTemplateSchema`,
+// `SMSTemplateSchema`, `PushNotificationSchema` and `InAppNotificationSchema`
+// (+ their four type aliases) existed ONLY as the member shapes of the
+// `NotificationConfigSchema.template` union that #4610 (#4535 C3) deleted.
+// After #4610 they were reachable from no parent schema and from no
+// metadata-type root — declared capability the runtime never read.
+//
+// This is a whole-def removal (#4650 route 3: the defs stop being emitted, so
+// the authorable-surface deletion is adjudicated by json-schema.manifest.json
+// and check:api-surface), NOT a `retiredKey()` tombstone: a tombstone lives on
+// a surviving schema's shape, and there is no surviving shape here. No
+// ADR-0087 D2 conversion either — no metadata document was ever parsed against
+// these defs, so `os migrate meta` has nothing to rewrite (same disposition as
+// #4610 in this very file, and as #4767/#4783).
+//
+// WHY THIS PIN IS A COMPILER-API TEST. #4642 established that a conditional
+// type over `typeof import(...)` in this package is a NO-OP — `tsconfig.json`
+// excludes `**/*.test.ts` and vitest never enables `typecheck`, so nothing ever
+// evaluates it. The `NotificationConfig` pin #4610 left here was exactly that
+// shape; it is folded into the load-bearing test below rather than left as a
+// gate that cannot fail. Sabotage-verified in the PR: S1 re-declares a removed
+// const in notification.zod.ts, S2 re-exports it from another entry under the
+// bare name (the route a "./system does not export it" assertion would miss).
+describe('[#4616] notification-template orphan removal', () => {
+  /** Names that must not be exported by ANY public entry point. */
+  const REMOVED = [
+    // #4616 — this change.
+    'EmailTemplateSchema',
+    'EmailTemplate',
+    'SMSTemplateSchema',
+    'SMSTemplate',
+    'PushNotificationSchema',
+    'PushNotification',
+    'InAppNotificationSchema',
+    'InAppNotification',
+    // #4610 — the holder that made the four above orphans; pinned here so the
+    // whole cluster has one enforceable home.
+    'NotificationConfigSchema',
+    'NotificationConfig',
+  ];
+
+  it('resolves the export surface: no removed name survives on any entry, and the survivors keep their owners', async () => {
+    const ts = (await import('typescript')).default;
+    const { resolve, relative, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const { readFileSync } = await import('node:fs');
+
+    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    // Every public entry point, read from package.json's exports map so a
+    // future entry cannot silently escape the assertions below.
+    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
+      exports: Record<string, unknown>;
+    };
+    const entries: Record<string, string> = {};
+    for (const sub of Object.keys(pkg.exports)) {
+      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
+      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
+      // './openapi.json' / './package.json' are not TypeScript entry points.
+    }
+    // Anti-vacuity: the enumeration must have found the real surface, including
+    // every entry these names could plausibly be re-exported from.
+    for (const needed of ['.', './system', './ui', './contracts', './api']) {
+      expect(Object.keys(entries), `exports map must include ${needed}`).toContain(needed);
+    }
+    expect(Object.keys(entries).length).toBeGreaterThan(10);
+
+    const program = ts.createProgram(Object.values(entries), {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      skipLibCheck: true,
+      noEmit: true,
+    });
+    const checker = program.getTypeChecker();
+    const unalias = (s: import('typescript').Symbol) =>
+      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
+
+    const exportsOf = (sub: string) => {
+      const sf = program.getSourceFile(entries[sub]);
+      const moduleSym = sf && checker.getSymbolAtLocation(sf);
+      // Without this guard a resolution failure would make every `not.toContain`
+      // below pass vacuously — the exact way a gate goes dormant (#4642).
+      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
+      return checker.getExportsOfModule(moduleSym!);
+    };
+
+    const originOf = (sym: import('typescript').Symbol, label: string) => {
+      const decl = unalias(sym).declarations?.[0];
+      expect(decl, `${label} must have a declaration`).toBeTruthy();
+      const declFile = decl!.getSourceFile();
+      return `${relative(specDir, declFile.fileName)}:${
+        declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
+      }`;
+    };
+
+    /** Every entry that exports `name`, with each occurrence's declaration origin. */
+    const holdersOf = (name: string) => {
+      const out: Array<{ sub: string; origin: string }> = [];
+      for (const sub of Object.keys(entries)) {
+        for (const sym of exportsOf(sub).filter((e) => e.getName() === name)) {
+          out.push({ sub, origin: originOf(sym, `${sub} ${name}`) });
+        }
+      }
+      return out.sort((a, b) => a.sub.localeCompare(b.sub));
+    };
+
+    // Anti-vacuity: the entries we are about to prove things ABSENT from must
+    // each resolve a large, real surface first.
+    expect(exportsOf('./system').length, './system must export a non-trivial surface').toBeGreaterThan(400);
+    expect(exportsOf('./ui').length, './ui must export a non-trivial surface').toBeGreaterThan(200);
+    expect(exportsOf('./contracts').length, './contracts must export a non-trivial surface').toBeGreaterThan(100);
+
+    // 1. Every removed name is absent from EVERY entry — not merely from
+    //    ./system. A re-export elsewhere under the bare name would keep the
+    //    orphan authorable while looking like a clean removal of the
+    //    declaration (the C14/C15/C17 lesson: a re-export can lie about the
+    //    domain even when the symbol is honest).
+    for (const name of REMOVED) {
+      expect(holdersOf(name), `${name} must not be exported by any entry point`).toEqual([]);
+    }
+
+    // 2. The survivor in this module: `NotificationChannel(Schema)` is live —
+    //    `./contracts` re-exports the TYPE and service-messaging consumes it —
+    //    so both holders must resolve to the ONE declaration in this file.
+    const channelSchema = holdersOf('NotificationChannelSchema');
+    expect(channelSchema.map((h) => h.sub)).toEqual(['./system']);
+    expect(channelSchema[0].origin).toMatch(/^src\/system\/notification\.zod\.ts:\d+$/);
+    const channelType = holdersOf('NotificationChannel');
+    expect(channelType.map((h) => h.sub)).toEqual(['./contracts', './system']);
+    for (const h of channelType) {
+      expect(h.origin, 'both holders must share one declaration').toMatch(
+        /^src\/system\/notification\.zod\.ts:\d+$/,
+      );
+    }
+
+    // 3. The live email-template contract — what an author must use instead of
+    //    the removed `EmailTemplateSchema`. `BUILTIN_METADATA_TYPE_SCHEMAS`
+    //    resolves the `email_template` kind to this one; spec 7.1.0 already
+    //    demoted the legacy shape here, and #4616 finished the job.
+    const definition = holdersOf('EmailTemplateDefinitionSchema');
+    expect(definition.map((h) => h.sub)).toEqual(['./system']);
+    expect(definition[0].origin).toMatch(/^src\/system\/email-template\.zod\.ts:\d+$/);
+
+    // 4. REFUTED SIBLING — #4616's issue body proposed retiring `./ui`'s
+    //    `NotificationSeveritySchema` in the same sweep on the premise that
+    //    objectui pins only Type/Position/Action. That is false: objectui
+    //    re-exports the TYPE (`packages/types/src/index.ts`), consumes it in
+    //    `packages/core/src/protocols/NotificationProtocol.ts`, pins the SCHEMA
+    //    name in `packages/types/src/__tests__/spec-ui-schema-reexports.test.ts`,
+    //    and types two severity→tone maps as `Record<NotificationSeverityLevel, …>`
+    //    precisely so a new spec severity fails type-check downstream. It stays
+    //    live and ./ui-owned; this assertion exists so the claim is not
+    //    re-litigated from the issue text.
+    for (const name of ['NotificationSeveritySchema', 'NotificationSeverity']) {
+      const holders = holdersOf(name);
+      expect(holders.map((h) => h.sub), `${name} is LIVE in objectui — must stay ./ui-owned`).toEqual(['./ui']);
+      expect(holders[0].origin).toMatch(/^src\/ui\/notification\.zod\.ts:\d+$/);
+    }
+  });
+
+  it('keeps the runtime namespaces consistent with the compiler view', async () => {
+    const system = await import('./index');
+    const ui = await import('../ui/index');
+
+    for (const name of REMOVED) {
+      expect(name in system, `./system must not export ${name} at runtime`).toBe(false);
+      expect(name in ui, `./ui must not export ${name} at runtime`).toBe(false);
+    }
+
+    // Anti-vacuity: the namespaces just probed are real, and the neighbours
+    // that must survive do.
+    expect('NotificationChannelSchema' in system).toBe(true);
+    expect('EmailTemplateDefinitionSchema' in system).toBe(true);
+    expect('NotificationSeveritySchema' in ui).toBe(true);
+
+    // The live email-template contract still parses a canonical authored item,
+    // and still rejects the removed legacy shape — so "use the definition
+    // schema instead" is a prescription that actually works.
+    const parsed = system.EmailTemplateDefinitionSchema.parse({
+      name: 'crm_welcome',
+      label: 'Welcome',
+      subject: 'Welcome to {{company}}',
+      bodyHtml: '<h1>Welcome {{user}}</h1>',
+    });
+    expect(parsed.name).toBe('crm_welcome');
+    expect(parsed.locale).toBe('en-US');
+    // The legacy shape's required keys (`id`, `body`) are not this contract's,
+    // and it is a strictObject — authoring the old shape fails loudly instead
+    // of being silently stripped.
+    expect(() =>
+      system.EmailTemplateDefinitionSchema.parse({
+        id: 'welcome-email',
+        subject: 'Welcome',
+        body: '<h1>Welcome</h1>',
+        bodyType: 'html',
+      }),
+    ).toThrow();
   });
 });
