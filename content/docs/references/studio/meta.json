@@ -3,7 +3,6 @@
   "pages": [
     "flow-builder",
     "object-designer",
-    "plugin",
-    "plugin-runtime"
+    "plugin"
   ]
 }

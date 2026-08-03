@@ -19,15 +19,11 @@ Inspired by:
 
 - Kubernetes Operator pattern (reconciliation loop)
 
-- VS Code Extension Host (activation events)
-
 This protocol enables:
 
 - Runtime load/unload of plugins without kernel restart
 
 - Plugin discovery from registries and local filesystem
-
-- Activation events (load plugin only when needed)
 
 - Safe unload with dependency awareness
 
@@ -38,26 +34,12 @@ This protocol enables:
 ## TypeScript Usage
 
 ```typescript
-import { ActivationEventSchema, DynamicLoadRequestSchema, DynamicPluginOperationSchema, DynamicPluginResultSchema, DynamicUnloadRequestSchema, PluginSourceSchema } from '@objectstack/spec/kernel';
-import type { ActivationEvent, DynamicLoadRequest, DynamicPluginOperation, DynamicPluginResult, DynamicUnloadRequest, PluginSource } from '@objectstack/spec/kernel';
+import { DynamicLoadRequestSchema, DynamicPluginOperationSchema, DynamicPluginResultSchema, DynamicUnloadRequestSchema, PluginSourceSchema } from '@objectstack/spec/kernel';
+import type { DynamicLoadRequest, DynamicPluginOperation, DynamicPluginResult, DynamicUnloadRequest, PluginSource } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = ActivationEventSchema.parse(data);
+const result = DynamicLoadRequestSchema.parse(data);
 ```
-
----
-
-## ActivationEvent
-
-Lazy activation trigger for a dynamic plugin
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `Enum<'onCommand' \| 'onRoute' \| 'onObject' \| 'onEvent' \| 'onService' \| 'onSchedule' \| 'onStartup' \| 'onMetadataType' \| 'onView'>` | ✅ | Trigger type for lazy activation |
-| **pattern** | `string` | ✅ | Match pattern for the activation trigger |
-
 
 ---
 
@@ -71,7 +53,7 @@ Request to dynamically load a plugin at runtime
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ | Unique plugin identifier |
 | **source** | `{ type: Enum<'npm' \| 'local' \| 'url' \| 'registry' \| 'git'>; location: string; version?: string; integrity?: string }` | ✅ | Plugin source location for dynamic resolution |
-| **activationEvents** | `{ type: Enum<'onCommand' \| 'onRoute' \| 'onObject' \| 'onEvent' \| 'onService' \| 'onSchedule' \| 'onStartup' \| 'onMetadataType' \| 'onView'>; pattern: string }[]` | optional | Lazy activation triggers; if omitted plugin starts immediately |
+| **activationEvents** | `any` | optional | [REMOVED] `dynamicLoadRequest.activationEvents` was removed in @objectstack/spec 17.0.0 (#4657, ADR-0049) — no runtime ever read it: every plugin activates immediately on load, so the declared lazy-activation window never existed. Delete the key; eager activation is the only behaviour there has ever been. Lazy activation, if built, returns via the enforce route of ADR-0049 with a vocabulary its executor actually honours. |
 | **config** | `Record<string, any>` | optional | Runtime configuration overrides |
 | **priority** | `integer` | ✅ | Loading priority (lower is higher) |
 | **sandbox** | `boolean` | ✅ | Run in an isolated sandbox |
