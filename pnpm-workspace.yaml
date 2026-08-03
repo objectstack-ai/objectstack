@@ -105,13 +105,16 @@ overrides:
   svelte: '^5.55.7'
   '@tootallnate/once@<2.0.1': '2.0.1'
   # OSV batch 2026-07 — transitive-only fixes (no publishable package declares these):
-  # brace-expansion GHSA-mh99-v99m-4gvg (via minimatch@10.x); sharp GHSA-f88m-g3jw-g9cj
+  # brace-expansion GHSA-mh99-v99m-4gvg (via minimatch@10.x), then GHSA-rgw5-rvv9-x895
+  # (7.5 high) which affects 5.0.8 itself — the version the first pin landed on — so the
+  # bound moves to <5.0.9. Still transitive-only through minimatch (ts-morph, eslint,
+  # @typescript-eslint, glob, @vscode/vsce, archiver); sharp GHSA-f88m-g3jw-g9cj
   # (next optionalDep ^0.34.5 excludes the fix); react-router GHSA-qwww-vcr4-c8h2 has no
   # 7.x fix — fumadocs-core peer allows 8.x and docs uses the next adapter, so jump to 8;
   # @sveltejs/kit GHSA-866w-xmhq-wj7x/GHSA-wqjv-9729-c5q2 (better-auth optional peer);
   # @hono/node-server GHSA-frvp-7c67-39w9 has no 1.x fix — @modelcontextprotocol/sdk
   # declares ^1.19.9 and only imports getRequestListener, which 2.x still exports.
-  'brace-expansion@>=5.0.0 <5.0.8': '^5.0.8'
+  'brace-expansion@>=5.0.0 <5.0.9': '^5.0.9'
   'sharp@>=0.34.0 <0.35.0': '^0.35.0'
   'react-router@<8.3.0': '^8.3.0'
   '@sveltejs/kit@<2.69.1': '^2.69.1'

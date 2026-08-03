@@ -319,10 +319,47 @@ async function bindUserToSoleOrganization(
 }
 
 /**
- * Best-effort explicit audit row. better-auth writes bypass the ObjectQL
- * lifecycle hooks that plugin-audit subscribes to, so admin identity
- * operations would otherwise leave no compliance trail. Never throws; never
- * includes password material (red line).
+ * Best-effort explicit audit row for an admin identity operation. Never
+ * throws; never includes password material (red line).
+ *
+ * **Corrected rationale (#4940).** This comment used to justify the row by
+ * asserting that *"better-auth writes bypass the ObjectQL lifecycle hooks that
+ * plugin-audit subscribes to, so admin identity operations would otherwise
+ * leave no compliance trail"*. That is **false** — the same stale mechanism
+ * claim #4802 refuted one layer up (see `AuthManagerOptions.databaseHooks`) —
+ * and it is refuted here rather than quietly deleted, because it was copied
+ * widely enough to keep producing wrong conclusions (cloud#1022). A reader
+ * arriving from one of those copies needs to see the claim named. Verified:
+ *
+ * - `objectql-adapter.ts` writes with a plain `dataEngine.insert(...)`.
+ * - `ObjectQL.insert()` runs `triggerHooks('beforeInsert'/'afterInsert')`
+ *   INSIDE `executeWithMiddleware()`'s executor (`objectql/src/engine.ts`).
+ * - `plugin-audit/src/audit-writers.ts` registers its writer as a bare
+ *   `engine.registerHook('afterInsert', writeAudit, { packageId })` — no
+ *   object filter — and `sys_user` is NOT in its `SKIP_OBJECTS`.
+ *
+ * So plugin-audit's generic writer **does** record the user this endpoint
+ * creates. Measured on the real routes in
+ * `packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts`:
+ * `POST /admin/create-user` leaves exactly TWO `action: 'create'` rows on the
+ * new `sys_user` — this explicit one and plugin-audit's — plus an `update` row
+ * for the must-change-password stamp.
+ *
+ * The row is kept anyway, for three reasons that are actually true:
+ *
+ * 1. **plugin-audit is optional.** Nothing in this package depends on it; with
+ *    it uninstalled there is no `sys_audit_log` table at all and the `catch`
+ *    below is the whole story. Minting a login-capable account is precisely
+ *    the operation whose trail must not be contingent on an optional plugin.
+ * 2. **`sys_account` IS in `SKIP_OBJECTS`.** `/admin/set-user-password` writes
+ *    the credential on `sys_account`, so the generic writer emits nothing for
+ *    it — measured ZERO rows. This explicit row is the only record that a
+ *    password was administratively reset. "The hook covers it, drop the
+ *    explicit insert" would silently delete that trail.
+ * 3. **Disjoint payloads.** The generic row is a field diff / row snapshot;
+ *    this one records the admin's DECISIONS (`event`, `passwordGenerated`,
+ *    `mustChangePassword`, `placeholderEmail`, `membershipCreated`), none of
+ *    which is derivable from the stored row.
  */
 async function writeAdminAudit(
   deps: AdminUserEndpointDeps,

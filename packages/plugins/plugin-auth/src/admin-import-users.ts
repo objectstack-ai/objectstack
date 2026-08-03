@@ -491,8 +491,25 @@ export async function runAdminImportUsers(
       }
     }
 
-    // Run-level audit (better-auth writes bypass the ObjectQL hooks that
-    // plugin-audit subscribes to). Best-effort; NO password material.
+    // Run-level audit. Best-effort; NO password material.
+    //
+    // Corrected rationale (#4940): this used to read "better-auth writes
+    // bypass the ObjectQL hooks that plugin-audit subscribes to" — the stale
+    // claim #4802 refuted (`AuthManagerOptions.databaseHooks` carries the
+    // hop-by-hop correction). The hooks DO fire for the adapter's writes, and
+    // each imported `sys_user` gets plugin-audit's own per-row `create` row;
+    // this loop writes no explicit per-row row at all.
+    //
+    // What survives is a complement, not a duplicate. plugin-audit's
+    // `actionFor` maps afterInsert/Update/Delete → create/update/delete and
+    // nothing else, so `action: 'import'` with `record_id: null` is a shape
+    // its writer structurally cannot emit — and it answers what no per-row
+    // ledger can: who ran which import, and what the run did overall (totals,
+    // policy, and the per-channel delivery split). It is still best-effort
+    // because plugin-audit is OPTIONAL: with it uninstalled there is no
+    // `sys_audit_log` table, and an import must not fail over its own audit.
+    // Both facts are pinned in
+    // `packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts`.
     try {
       await engine.insert('sys_audit_log', {
         action: 'import',
