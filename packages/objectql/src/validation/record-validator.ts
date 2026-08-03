@@ -353,6 +353,7 @@ function validateOne(
   mediaStrict = false,
   ctx?: ValidationMessageContext,
   valueStrict = false,
+  onAdmitted?: AdmittedValueShapeViolationSink,
 ): FieldValidationError | null {
   const fail = (
     code: FieldErrorCode,
@@ -518,6 +519,19 @@ function validateOne(
       const isMedia = FILE_REFERENCE_TYPES.has(t);
       if (isMedia ? mediaStrictEffective(mediaStrict) : valueShapeStrictEffective(valueStrict)) {
         return fail('invalid_type', { type: t, detail }, 'invalid_value_shape');
+      }
+      // [#4769] The write is about to be ADMITTED: this deployment will hold a
+      // value that the same contract, once enforced, rejects. Report it before
+      // the log line, and unconditionally — `warnOnce` dedupes by field, and a
+      // deployment's evidence must count every value, not every distinct field.
+      // Whoever may attest this deployment's ADR-0104 posture reads this: a
+      // boot cannot certify a contract it has itself just broken.
+      if (onAdmitted) {
+        try {
+          onAdmitted({ gate: isMedia ? 'media' : 'value-shape', field: name, type: t, detail });
+        } catch {
+          // An evidence sink must never be the reason a write fails.
+        }
       }
       // The warn-first path is a DEVELOPER log line, not an end-user message —
       // it names the API field and stays English so it greps the same in every
@@ -691,6 +705,41 @@ function shapeSchemaFor(def: FieldDef): ReturnType<typeof valueSchemaFor> {
   return schema;
 }
 
+/**
+ * One ADR-0104 value-shape violation this deployment ADMITTED (#4769).
+ *
+ * "Admitted", not "found": the warn-first path let the value through, so the
+ * store now holds it. That is a different fact from a rejection — a rejected
+ * value never becomes part of this deployment's data and settles nothing about
+ * it, while an admitted one is a standing counterexample to the very contract
+ * the gate would later enforce.
+ *
+ * It exists because a NEGATIVE needs only one witness. Certifying a deployment
+ * clean takes a complete scan (`os migrate …`); showing it is not clean takes
+ * a single admitted value, which the write path has already computed with the
+ * exact predicate strict mode uses. So this costs nothing and is exactly as
+ * authoritative as the enforcement it anticipates.
+ */
+export interface AdmittedValueShapeViolation {
+  /**
+   * Which ADR-0104 gate this value would fail once enforced — the two classes
+   * are attested by two different migrations, so a counterexample to one says
+   * nothing about the other (see `FILE_REFERENCES_MIGRATION_ID` vs
+   * `VALUE_SHAPES_MIGRATION_ID`).
+   */
+  gate: 'media' | 'value-shape';
+  /** API field name the value was written to. */
+  field: string;
+  /** The declared field type, so a report can group by what went wrong. */
+  type: string;
+  /** The first parse issue — the prescription an author acts on. */
+  detail: string;
+}
+
+/** Where {@link AdmittedValueShapeViolation}s are reported. Never throws into
+ *  the write path: the caller wraps it. */
+export type AdmittedValueShapeViolationSink = (violation: AdmittedValueShapeViolation) => void;
+
 export interface ValidateRecordOptions {
   /**
    * Has THIS DEPLOYMENT completed and self-check-verified the ADR-0104
@@ -726,6 +775,18 @@ export interface ValidateRecordOptions {
    * behavior for any caller that has no principal to read a locale from.
    */
   messages?: ValidationMessageContext;
+
+  /**
+   * Called for every value-shape violation this call ADMITS (#4769) — i.e. the
+   * warn-first path, never the rejecting one. The engine passes a sink so the
+   * deployment's own contradiction of an ADR-0104 contract is recorded where
+   * the fresh-datastore attestation can see it, instead of being a log line
+   * that only a human ever reads.
+   *
+   * Omitted by every caller that does not attest anything; the check costs one
+   * truthiness test on a path that is already building an error message.
+   */
+  onAdmittedValueShapeViolation?: AdmittedValueShapeViolationSink;
 }
 
 /**
@@ -748,6 +809,7 @@ export function validateRecord(
   const mediaStrict = options.mediaValueShapeStrict === true;
   const valueStrict = options.valueShapeStrict === true;
   const messages = options.messages;
+  const onAdmitted = options.onAdmittedValueShapeViolation;
 
   if (mode === 'insert') {
     // Walk all declared fields — required check applies even when
@@ -755,7 +817,7 @@ export function validateRecord(
     for (const [name, def] of Object.entries(fields)) {
       if (SKIP_FIELDS.has(name)) continue;
       if (def.system || def.readonly) continue;
-      const err = validateOne(name, def, data[name], false, mediaStrict, messages, valueStrict);
+      const err = validateOne(name, def, data[name], false, mediaStrict, messages, valueStrict, onAdmitted);
       if (err) errors.push(err);
     }
   } else {
@@ -784,7 +846,7 @@ export function validateRecord(
       // skipRequired: PATCH-omitted fields must not 400. (No def clone — the
       // registry's own field object flows through so the ADR-0104 value-shape
       // schema cache, keyed on def identity, hits.)
-      const err = validateOne(name, def, value, true, mediaStrict, messages, valueStrict);
+      const err = validateOne(name, def, value, true, mediaStrict, messages, valueStrict, onAdmitted);
       if (err) errors.push(err);
     }
   }

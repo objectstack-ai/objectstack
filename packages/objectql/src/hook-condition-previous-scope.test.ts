@@ -1,0 +1,477 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#4784] A declarative hook `condition` evaluates against `record` AND
+ * `previous` — the same two bindings a validation predicate reads.
+ *
+ * Before this fix the scope carried a single root (`{ record }`), so the
+ * `previous.*` form BOTH published skill docs teach — `skills/objectstack-formula`
+ * §5 and its `ISCHANGED(x)` → `previous.x != record.x` migration row — faulted
+ * with `No such key: previous` and was swallowed into `false`.
+ *
+ * It matters more since #4770: `record` now means the record's STATE, so
+ * `record.done == true` is true on EVERY update of an already-done row. The
+ * transition ("just became done"), which is what an audit hook actually means,
+ * is expressible only by comparing against `previous`.
+ *
+ * Semantics copied verbatim from `validation/rule-validator.ts`:
+ *   - total over the object's DECLARED fields (shared `materializeDeclaredFields`),
+ *     so a column the driver never returned reads as `null` rather than faulting;
+ *   - an UNDECLARED key stays unevaluable, so typos remain reportable;
+ *   - copied, never mutated in place — the after-hooks that run next observe
+ *     the engine's own `ctx.previous`;
+ *   - absent (unbound identifier) whenever the prior state is not in hand:
+ *     insert, and a predicate bulk update.
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ObjectQL } from './engine.js';
+import { bindHooksToEngine } from './hook-binder.js';
+import { wrapDeclarativeHook } from './hook-wrappers.js';
+import type { Hook, HookContext } from '@objectstack/spec/data';
+
+/** `archived` is declared but never written by any test here — the
+ *  declared-but-absent column materialisation exists for. */
+const TASK_FIELDS = {
+  id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+  title: { name: 'title', label: 'Title', type: 'text' as const },
+  status: { name: 'status', label: 'Status', type: 'text' as const },
+  done: { name: 'done', label: 'Done', type: 'boolean' as const },
+  archived: { name: 'archived', label: 'Archived', type: 'boolean' as const },
+};
+
+const taskObject = { name: 'hook_task', label: 'Task', fields: TASK_FIELDS };
+
+const qlStub = {
+  getObject: (name: string) => (name === 'hook_task' ? taskObject : undefined),
+};
+
+function makeCtx(overrides: Partial<HookContext> = {}): HookContext {
+  return {
+    object: 'hook_task',
+    event: 'afterUpdate',
+    input: { id: 't1', data: { done: true } },
+    previous: { id: 't1', title: 'Ship it', status: 'todo', done: false },
+    ql: qlStub,
+    ...overrides,
+  } as unknown as HookContext;
+}
+
+function makeHook(condition: string, events: string[] = ['afterUpdate']): Hook {
+  return {
+    name: 'audit', object: 'hook_task', events, priority: 100,
+    condition,
+    handler: () => {},
+  } as unknown as Hook;
+}
+
+function captureLogger() {
+  const warn = vi.fn();
+  return {
+    warn,
+    logger: { debug: () => {}, info: () => {}, warn, error: () => {} },
+    conditionWarnings: () =>
+      warn.mock.calls.filter(([msg]) => String(msg).includes('condition evaluation failed')),
+  };
+}
+
+/** The transition form the skill docs teach, and #4784's headline shape. */
+const TRANSITION = 'previous.done != true && record.done == true';
+
+describe('[#4784] hook condition binds `previous` alongside `record`', () => {
+  it('fires on the update that FLIPS the field, not on later updates of a done record', async () => {
+    const calls: string[] = [];
+    const { logger, conditionWarnings } = captureLogger();
+    const wrapped = wrapDeclarativeHook(
+      makeHook(TRANSITION),
+      (async () => { calls.push('ran'); }) as any,
+      { logger },
+    );
+
+    // The flip: stored done=false, this write sets done=true.
+    await wrapped(makeCtx());
+    expect(calls).toEqual(['ran']);
+
+    // A later, unrelated update of the (already done) record.
+    await wrapped(makeCtx({
+      previous: { id: 't1', title: 'Ship it', status: 'in_progress', done: true },
+      input: { id: 't1', data: { status: 'review' } },
+    } as any));
+    expect(calls).toEqual(['ran']);
+
+    expect(conditionWarnings()).toEqual([]);
+  });
+
+  it('is TOTAL over declared fields — a column the driver never returned reads as null', async () => {
+    const calls: string[] = [];
+    const { logger, conditionWarnings } = captureLogger();
+    // `archived` is declared; this driver's prior row simply has no such key.
+    // Guarded with `!= null`, never `has()` — a materialised null is a PRESENT
+    // key, so `has(previous.archived)` is uniformly true (#4649/#4770).
+    const wrapped = wrapDeclarativeHook(
+      makeHook('previous.archived == null && record.done == true'),
+      (async () => { calls.push('ran'); }) as any,
+      { logger },
+    );
+
+    await wrapped(makeCtx());
+
+    expect(calls).toEqual(['ran']);
+    expect(conditionWarnings()).toEqual([]);
+  });
+
+  it('an UNDECLARED key on `previous` stays unevaluable — typos stay reportable', async () => {
+    const calls: string[] = [];
+    const { logger, conditionWarnings } = captureLogger();
+    const wrapped = wrapDeclarativeHook(
+      makeHook('previous.dnoe != true'),
+      (async () => { calls.push('ran'); }) as any,
+      { logger },
+    );
+
+    await wrapped(makeCtx());
+
+    expect(calls).toEqual([]);
+    const warns = conditionWarnings();
+    expect(warns).toHaveLength(1);
+    expect(String(warns[0]![1]?.error)).toMatch(/No such key: dnoe/);
+  });
+
+  it('never leaks materialised nulls back into the engine\'s ctx.previous', async () => {
+    const calls: string[] = [];
+    const wrapped = wrapDeclarativeHook(
+      makeHook('previous.archived == null'),
+      (async () => { calls.push('ran'); }) as any,
+    );
+    const ctx = makeCtx();
+    await wrapped(ctx);
+
+    expect(calls).toEqual(['ran']);
+    // The after-hooks that run next observe THIS object. A fabricated
+    // `archived: null` here would be a column the row never had.
+    expect(Object.keys(ctx.previous as object).sort()).toEqual(['done', 'id', 'status', 'title']);
+    expect((ctx.previous as any).archived).toBeUndefined();
+  });
+
+  it('leaves `previous` UNBOUND on insert — verbatim the validation side', async () => {
+    const calls: string[] = [];
+    const { logger, conditionWarnings } = captureLogger();
+    // `rule-validator.ts` binds `previous` only for `mode: 'update'` with a
+    // prior record in hand; on insert it passes `undefined`, which omits the
+    // identifier from the CEL scope. Referencing it on an insert event is
+    // therefore an author error, reported — not silently answered.
+    const wrapped = wrapDeclarativeHook(
+      makeHook(TRANSITION, ['beforeInsert']),
+      (async () => { calls.push('ran'); }) as any,
+      { logger },
+    );
+
+    await wrapped(makeCtx({
+      event: 'beforeInsert',
+      previous: undefined,
+      input: { data: { done: true } },
+    } as any));
+
+    expect(calls).toEqual([]);
+    expect(conditionWarnings()).toHaveLength(1);
+  });
+
+  it('a `record`-only condition on insert is unaffected by the added binding', async () => {
+    const calls: string[] = [];
+    const { logger, conditionWarnings } = captureLogger();
+    const wrapped = wrapDeclarativeHook(
+      makeHook('record.done == true', ['beforeInsert']),
+      (async () => { calls.push('ran'); }) as any,
+      { logger },
+    );
+
+    await wrapped(makeCtx({
+      event: 'beforeInsert',
+      previous: undefined,
+      input: { data: { done: true } },
+    } as any));
+
+    expect(calls).toEqual(['ran']);
+    expect(conditionWarnings()).toEqual([]);
+  });
+
+  it('fabricates nothing on a predicate bulk update — `previous` stays unbound', async () => {
+    const calls: string[] = [];
+    const { logger } = captureLogger();
+    // A `multi: true` update matched N rows and fires the hook ONCE; there is
+    // no single prior record. Binding `{}` or `null` would make
+    // `previous.done != true` answer for rows nobody read.
+    const wrapped = wrapDeclarativeHook(
+      makeHook(TRANSITION),
+      (async () => { calls.push('ran'); }) as any,
+      { logger },
+    );
+
+    await wrapped(makeCtx({ previous: undefined, input: { data: { done: true } } } as any));
+
+    expect(calls).toEqual([]);
+  });
+
+  it('a delete-shaped context evaluates `previous` against the pre-image', async () => {
+    const calls: string[] = [];
+    const { logger, conditionWarnings } = captureLogger();
+    const wrapped = wrapDeclarativeHook(
+      makeHook('previous.done != true', ['beforeDelete']),
+      (async () => { calls.push('ran'); }) as any,
+      { logger },
+    );
+
+    await wrapped(makeCtx({ event: 'beforeDelete', input: { id: 't1', options: {} } } as any));
+
+    expect(calls).toEqual(['ran']);
+    expect(conditionWarnings()).toEqual([]);
+  });
+
+  it('a context with no engine still binds `previous` (merge only, no materialisation)', async () => {
+    const calls: string[] = [];
+    const { logger, conditionWarnings } = captureLogger();
+    const wrapped = wrapDeclarativeHook(
+      makeHook(TRANSITION),
+      (async () => { calls.push('ran'); }) as any,
+      { logger },
+    );
+
+    await wrapped(makeCtx({ ql: undefined } as any));
+
+    expect(calls).toEqual(['ran']);
+    expect(conditionWarnings()).toEqual([]);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Through a REAL engine, over an in-memory driver that — like a SQL driver —
+ * stores only the columns a write actually touched.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+function makeMemoryDriver() {
+  const stores = new Map<string, Map<string, Record<string, unknown>>>();
+  /** Every read the engine performs, so "no extra fetch" is measurable. */
+  const reads = { findOne: 0, find: 0 };
+  const storeFor = (obj: string) => {
+    let s = stores.get(obj);
+    if (!s) { s = new Map(); stores.set(obj, s); }
+    return s;
+  };
+  let nextId = 0;
+  const matchesWhere = (row: Record<string, unknown>, where: any): boolean => {
+    if (!where || typeof where !== 'object') return true;
+    for (const [k, v] of Object.entries(where)) {
+      if (k.startsWith('$')) continue;
+      const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
+      if ((row[k] ?? null) !== (expected ?? null)) return false;
+    }
+    return true;
+  };
+  const driver: any = {
+    name: 'memory', version: '0.0.0', supports: {} as any,
+    async connect() {}, async disconnect() {}, async checkHealth() { return true; },
+    async execute() { return null; },
+    async find(object: string, ast: any) {
+      reads.find += 1;
+      return Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+    },
+    async findOne(object: string, ast: any) {
+      reads.findOne += 1;
+      for (const r of storeFor(object).values()) if (matchesWhere(r, ast?.where)) return r;
+      return null;
+    },
+    async create(object: string, data: Record<string, unknown>) {
+      nextId += 1;
+      const id = (data.id as string) ?? `r_${nextId}`;
+      // Only written columns are stored: a declared-but-unwritten column is
+      // absent from every row this driver ever returns.
+      const row: Record<string, unknown> = { ...data, id };
+      storeFor(object).set(id, row);
+      return row;
+    },
+    async update(object: string, id: string, data: Record<string, unknown>) {
+      const s = storeFor(object);
+      const cur = s.get(id);
+      if (!cur) return null;
+      const updated = { ...cur, ...data, id };
+      s.set(id, updated);
+      return updated;
+    },
+    async upsert(object: string, data: Record<string, unknown>) {
+      const id = data.id as string | undefined;
+      if (id && storeFor(object).has(id)) return this.update(object, id, data);
+      return this.create(object, data);
+    },
+    async delete(object: string, id: string) { return storeFor(object).delete(id); },
+    async count(object: string, ast: any) { return (await this.find(object, ast)).length; },
+    async bulkCreate(object: string, rows: Record<string, unknown>[]) {
+      return Promise.all(rows.map((r) => this.create(object, r)));
+    },
+    async bulkUpdate() { return []; },
+    async bulkDelete() {},
+    async updateMany(object: string, ast: any, data: Record<string, unknown>) {
+      const rows = await this.find(object, ast);
+      for (const r of rows) storeFor(object).set(r.id as string, { ...r, ...data, id: r.id });
+      return rows.length;
+    },
+    async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
+    async commit() {}, async rollback() {},
+  };
+  return { driver, stores, reads };
+}
+
+describe('[#4784] transition condition over a real engine', () => {
+  let engine: ObjectQL;
+  let audited: string[];
+  let warn: ReturnType<typeof vi.fn>;
+  let reads: { findOne: number; find: number };
+
+  const conditionWarnings = () =>
+    warn.mock.calls.filter(([msg]) => String(msg).includes('condition evaluation failed'));
+
+  async function boot(hooks: Hook[]) {
+    engine = new ObjectQL();
+    const mem = makeMemoryDriver();
+    reads = mem.reads;
+    engine.registerDriver(mem.driver, true);
+    await engine.init();
+    engine.registry.registerObject(taskObject as any);
+
+    audited = [];
+    warn = vi.fn();
+    bindHooksToEngine(engine, hooks, {
+      packageId: 'app:showcase',
+      logger: { debug: () => {}, info: () => {}, warn, error: () => {} },
+    });
+  }
+
+  beforeEach(async () => {
+    await boot([{
+      // `showcase_audit_task_completion`'s own description says "after a task
+      // transitions to done". Since #4770 `record.done == true` says "IS done";
+      // only this shape says "just BECAME done".
+      name: 'showcase_audit_task_completion',
+      object: 'hook_task',
+      events: ['afterUpdate'],
+      priority: 90,
+      condition: TRANSITION,
+      handler: (ctx: any) => { audited.push(String(ctx.input?.id ?? '?')); },
+    } as unknown as Hook]);
+  });
+
+  it('audits exactly the update that completes the task', async () => {
+    const row: any = await engine.insert('hook_task', { title: 'Ship it', status: 'todo', done: false });
+
+    await engine.update('hook_task', { done: true }, { where: { id: row.id } } as any);
+    expect(audited).toEqual([row.id]);
+
+    // Two further updates of a record that is ALREADY done — the transition
+    // happened once, so the audit happens once.
+    await engine.update('hook_task', { status: 'in_progress' }, { where: { id: row.id } } as any);
+    await engine.update('hook_task', { title: 'Ship it (v2)' }, { where: { id: row.id } } as any);
+
+    expect(audited).toEqual([row.id]);
+    expect(conditionWarnings()).toEqual([]);
+  });
+
+  it('does not audit an update that leaves the task incomplete', async () => {
+    const row: any = await engine.insert('hook_task', { title: 'Draft', status: 'todo', done: false });
+    await engine.update('hook_task', { status: 'in_progress' }, { where: { id: row.id } } as any);
+
+    expect(audited).toEqual([]);
+    expect(conditionWarnings()).toEqual([]);
+  });
+
+  it('completes a task whose `done` column was never written — no fault', async () => {
+    // The driver stored no `done` column at all; `previous.done` must read as
+    // the materialised null, not abort the expression.
+    const row: any = await engine.insert('hook_task', { title: 'Untouched', status: 'todo' });
+    await engine.update('hook_task', { done: true }, { where: { id: row.id } } as any);
+
+    expect(audited).toEqual([row.id]);
+    expect(conditionWarnings()).toEqual([]);
+  });
+
+  it('does not leak materialised nulls into what the after-hook observes', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    await boot([{
+      name: 'observe_previous',
+      object: 'hook_task',
+      events: ['afterUpdate'],
+      priority: 90,
+      condition: 'previous.archived == null && record.done == true',
+      handler: (ctx: any) => { seen.push(ctx.previous); },
+    } as unknown as Hook]);
+
+    const row: any = await engine.insert('hook_task', { title: 'Ship it', status: 'todo' });
+    await engine.update('hook_task', { done: true }, { where: { id: row.id } } as any);
+
+    expect(seen).toHaveLength(1);
+    // `archived` is DECLARED and was materialised for the condition. The
+    // hook's own view of `previous` must not have gained it.
+    expect(Object.keys(seen[0]!).sort()).toEqual(['id', 'status', 'title']);
+  });
+});
+
+describe('[#4784] a condition that never mentions `previous` costs zero extra fetches', () => {
+  /**
+   * The demand-driven prior fetch (`engine.ts`, the `needsPriorRecord(...) ||
+   * afterUpdate hooks exist` gate) is the ONE mechanism that decides whether a
+   * prior row is read; #4784 adds no second one. These two pins are what a
+   * future narrowing of that gate has to keep true.
+   */
+  async function bootWith(hooks: Hook[]) {
+    const engine = new ObjectQL();
+    const mem = makeMemoryDriver();
+    engine.registerDriver(mem.driver, true);
+    await engine.init();
+    engine.registry.registerObject(taskObject as any);
+    bindHooksToEngine(engine, hooks, {
+      packageId: 'app:pin',
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+    });
+    return { engine, reads: mem.reads };
+  }
+
+  it('reads no prior row at all for a before-hook condition over `record` only', async () => {
+    const { engine, reads } = await bootWith([{
+      name: 'record_only_guard',
+      object: 'hook_task',
+      events: ['beforeUpdate'],
+      priority: 100,
+      condition: 'record.status == "todo"',
+      handler: () => {},
+    } as unknown as Hook]);
+
+    const row: any = await engine.insert('hook_task', { title: 'A', status: 'todo', done: false });
+    const before = reads.findOne;
+    await engine.update('hook_task', { status: 'in_progress' }, { where: { id: row.id } } as any);
+
+    // No afterUpdate hook, no prior-needing validation rule → nothing to fetch.
+    expect(reads.findOne - before).toBe(0);
+  });
+
+  it('reads the SAME number of rows whether or not the condition mentions `previous`', async () => {
+    const mkHook = (condition: string): Hook => ({
+      name: 'audit', object: 'hook_task', events: ['afterUpdate'], priority: 90,
+      condition, handler: () => {},
+    } as unknown as Hook);
+
+    const plain = await bootWith([mkHook('record.done == true')]);
+    const plainRow: any = await plain.engine.insert('hook_task', { title: 'A', status: 'todo', done: false });
+    const plainBefore = plain.reads.findOne;
+    await plain.engine.update('hook_task', { done: true }, { where: { id: plainRow.id } } as any);
+    const plainCost = plain.reads.findOne - plainBefore;
+
+    const withPrev = await bootWith([mkHook(TRANSITION)]);
+    const prevRow: any = await withPrev.engine.insert('hook_task', { title: 'A', status: 'todo', done: false });
+    const prevBefore = withPrev.reads.findOne;
+    await withPrev.engine.update('hook_task', { done: true }, { where: { id: prevRow.id } } as any);
+    const prevCost = withPrev.reads.findOne - prevBefore;
+
+    // Both pay the one fetch the afterUpdate gate already made; `previous`
+    // rides along on it.
+    expect(plainCost).toBe(1);
+    expect(prevCost).toBe(plainCost);
+  });
+});
