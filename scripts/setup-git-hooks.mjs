@@ -26,21 +26,43 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { DRIVER_NAME } from './regen-artifacts.mjs';
+import { GIT_SETTINGS } from './regen-artifacts.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const SETTINGS = [
-  { key: `merge.${DRIVER_NAME}.name`, value: 'regenerate generator-owned artifacts instead of text-merging' },
-  // %O %A %B %P — ancestor, ours (the output file), theirs, pathname. `node` and
-  // a repo-relative path keep this working on Windows and in linked worktrees,
-  // where a bare `./scripts/...` would resolve against the wrong root.
-  { key: `merge.${DRIVER_NAME}.driver`, value: `node "${join(REPO_ROOT, 'scripts/git-merge-regen.mjs')}" %O %A %B %P` },
-  { key: 'core.hooksPath', value: '.githooks' },
-];
+// What gets registered lives in `regen-artifacts.mjs` — one declaration, read both
+// by this registrar and by the `--self-test` gate that verifies it (#4868).
+//
+// The driver value is deliberately NOT an absolute path any more. It must satisfy
+// two constraints at once, and the obvious spellings each satisfy only one:
+//
+//   - It must not bind to one specific worktree. Baking an absolute
+//     `${REPO_ROOT}/scripts/...` in here did exactly that: linked worktrees SHARE
+//     one `.git/config`, so every `pnpm install` re-pointed the container-wide
+//     driver at the installing worktree, and the moment that worktree was removed
+//     — which AGENTS.md *requires* on task cleanup — every merge of a
+//     `merge=os-regen` path in every other worktree died with MODULE_NOT_FOUND.
+//     Observed drifting across four worktrees before anyone noticed.
+//   - It must still resolve to the right root. A bare `./scripts/...` relies on
+//     git's (undocumented) choice of cwd for merge drivers, which is what the
+//     absolute path was originally there to avoid.
+//
+// `$(git rev-parse --show-toplevel)` satisfies both: git runs merge drivers
+// through a shell, so the substitution happens per invocation, inside the worktree
+// being merged. Verified in git 2.43 from a linked worktree, invoked from both the
+// worktree root and a subdirectory.
+//
+// Two traps, both verified empirically rather than assumed:
+//   - NO leading `!`. That prefix is alias/credential-helper syntax; a merge driver
+//     value is already handed to the shell verbatim, so `!node ...` runs a program
+//     literally named `!node` — "not found", and git falls back to a text merge.
+//   - The placeholders stay UNQUOTED. git substitutes %O %A %B as generated temp
+//     names and already shell-quotes %P itself; wrapping them in quotes of our own
+//     hands the driver a pathname with literal quote characters in it.
+const SETTINGS = GIT_SETTINGS;
 
 function git(args, opts = {}) {
   return execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
