@@ -2746,7 +2746,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "用于多租户隔离的组织。"
       },
       recorded_by: {
-        label: "记录人"
+        label: "记录人",
+        help: "User who made this change. NULL = system-initiated (boot sync, migration, scheduled job) — never a sentinel string."
       },
       recorded_at: {
         label: "记录时间"

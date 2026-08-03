@@ -54,11 +54,16 @@ export * from './knowledge-adapter.js';
 export * from './embedder.js';
 
 // Provisioning & Deployment
-export * from './provisioning-service.js';
+// './provisioning-service.js' (IProvisioningService) and './tenant-router.js'
+// (ITenantRouter / ResolvedTenantContext) removed (#4739, v17): both
+// contracts had zero implementations and zero call sites in any repo
+// (objectstack / cloud / objectui) — declared-only fiction over the
+// system-side provisioning family retired in the same change (#4535 C16).
+// The living provisioning contract is the `Provision*` family in
+// `@objectstack/spec/cloud`, consumed by the cloud services (service-tenant).
 export * from './schema-diff-service.js';
 export * from './external-datasource-service.js';
 export * from './deploy-pipeline-service.js';
-export * from './tenant-router.js';
 export * from './app-lifecycle-service.js';
 export * from './seed-loader-service.js';
 export * from './crypto-provider.js';

@@ -10,7 +10,6 @@
     "environment-artifact",
     "license",
     "migration",
-    "provisioning",
     "registry-config",
     "settings-client",
     "settings-manifest",
