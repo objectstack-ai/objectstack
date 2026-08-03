@@ -535,9 +535,9 @@ not verdicts).
 | `bpmn-interop.zod.ts` | 5 | wire (p) | interop import shapes |
 | `approval.zod.ts` | 4 | authorable | **strict as of #4001 step 3** — all four authoring schemas (node config / approver / escalation / decision-output). The published JSON schema carries `additionalProperties: false` into the Studio form AND `registerFlow()` config validation (#4027/#4040), so an unknown key in an approval node's `config` is rejected at registration too — verified: `z.toJSONSchema` on the strict lazySchema does not throw (#3746 hazard checked) |
 | `node-executor.zod.ts` | 4 | wire | executor contract |
-| `io-node-config.zod.ts` | 2 | authorable | `NotifyConfigSchema` / `HttpConfigSchema` (#4045) — the sibling contracts that validate the **open** `config` slot on flow `notify` / `http` nodes. Authored per-node, so the open-slot exemption above does not extend to them; candidate once the executors' own drift is verified |
-| `builtin-node-config.zod.ts` | 8 | authorable | Same family (#4045): the CRUD quartet, `screen`, `map`. Written from what the executors read rather than from the descriptors' `configSchema` literals, and reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` — so unlike most rows here, this one already has a drift check of its own. Same candidacy note as `io-node-config` |
-| `schemaless-node-config.zod.ts` | 4 | authorable | Same family, third panel (#4278): `script` / `subflow` / `decision` (+ the decision branch item) — the descriptor-schemaless nodes whose form lives in objectui's hand-written table. Written from the executors; the drift check is objectui's `flow-node-config.spec-reconciliation` test (cross-repo, via the published exports). Since #4343 `script` and `subflow` ARE parsed at execute time (`parse-config.ts`) — `script` once retiring its `actionType` branches left it flat — so strictness candidacy now follows `io-node-config` on the same terms rather than being moot; `decision` stays export-only |
+| `io-node-config.zod.ts` | 2 | authorable | `NotifyConfigSchema` / `HttpConfigSchema` (#4045) — the sibling contracts that validate the **open** `config` slot on flow `notify` / `http` nodes. Authored per-node, so the open-slot exemption above does not extend to them. **Strict as of #4001 批 9**; the node `config` SLOT itself stays open (ADR-0018 keeps `node.type` open, so the slot cannot be closed without closing the plugin extension point). Five `guidance` entries carry the ADR-0087 notify aliases (`to`/`subject`/`body`/`url`/`source`) |
+| `builtin-node-config.zod.ts` | 8 | authorable | Same family (#4045): the CRUD quartet, `screen`, `map`. Written from what the executors read rather than from the descriptors' `configSchema` literals, and reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` — so unlike most rows here, this one already has a drift check of its own. **Strict as of #4001 批 9.** The curated tables are the `FLOW_NODE_UNKNOWN_KEY_GUIDANCE` prose from `service-automation`'s registration door, plus two entries that door never had: `recordId` (measured on CRUD nodes across the repo's own flow fixtures, read by no executor — on `delete_record` that is #3810 wearing a key that looks like a constraint) and `outputVariable` on `update_record` / `delete_record` (a documented ABSENCE, and the likeliest wrong key precisely because five sibling contracts declare it) |
+| `schemaless-node-config.zod.ts` | 4 | authorable | Same family, third panel (#4278): `script` / `subflow` / `decision` (+ the decision branch item) — the descriptor-schemaless nodes whose form lives in objectui's hand-written table. Written from the executors; the drift check is objectui's `flow-node-config.spec-reconciliation` test (cross-repo, via the published exports — it compares `.shape` key sets, so strictness does not move it). Since #4343 `script` and `subflow` ARE parsed at execute time (`parse-config.ts`). **Strict as of #4001 批 9 — and this is the one row in the table where strictness is the FIRST unknown-key gate, not a second one**: `registerFlow()`'s #4277 rejection derives its declared set from a descriptor `configSchema`, so it structurally skips the schemaless class. `decision` stays export-only, closed anyway; its `condition` guidance suppresses a one-edit rename to `conditions` that #4414 proves is the worse outcome |
 | `webhook.zod.ts` | 1 | authorable (p) | spec-only (#3461) |
 | `time-relative-trigger.zod.ts` | 1 | authorable | **Undeclared until the #4001 re-measurement, and invisible for the worst possible reason**: `TimeRelativeTriggerSchema` is written `z\n  .object({`, the old textual counter matched zero sites, and a zero-site file is SKIPPED by the coverage walk as "nothing to classify". So the gate whose whole promise is "no undeclared surface" reported green over an authorable schema — the same shape as `data/driver/`, one layer subtler, because this time the file was not hidden by the walk but by the counter feeding it. Classification is not a guess: the file's own `@example` blocks author it by hand into a flow start node (`config: { timeRelative: { object, dateField, offsetDays, filter } }`), which is the authoring door. A stripped key here means the sweep silently never matches — `offsetDay` for `offsetDays` returns a trigger that never fires, reported as configured |
 | `flow-function.zod.ts` | 1 | authorable | `FlowFunctionDeclarationSchema` (#4396) — the `{ handler, effect }` form of a `defineStack({ functions })` entry. Authored, but note what an undeclared key here would be: a sibling of a **live function**, not data. `defineStack`'s union already rejects a record whose `handler` is not callable, and the boot-path reader is the hand-written `normalizeFlowFunctionEntry` rather than a `.parse()` (re-validating a live handler every boot buys nothing), so strictness would bind at authoring only. Candidate on the same verify-first rule as its `*-node-config` neighbours |
@@ -605,25 +605,31 @@ classes; where it does, the split is stated. **Only the authorable half is in th
 2026-08-03 ruling's forced scope** — wire/open rows are listed so the arithmetic
 is complete and so nobody re-triages them from scratch next batch.
 
-#### `automation/` — 67 strip of 75
+#### `automation/` — 53 strip of 75
 
 | File | Strip | Sites | Class | Batch |
 |---|---|---|---|---|
 | `execution.zod.ts` | 13 | 13 | wire | **out of scope** — engine-emitted run state; the ledger row already says "never strict" |
 | `etl.zod.ts` | 10 | 10 | mixed | 7 authorable (`ETLSource` + `.incremental`, `ETLDestination`, `ETLTransformation`, `ETLPipeline` + `.retry` + `.notifications`), 3 wire (`ETLPipelineRun` + `.stats` + `.error` — run state) |
-| `builtin-node-config.zod.ts` | 8 | 8 | authorable | CRUD quartet + `Screen` (+ `.options`) + `Map`; already has a bidirectional drift check (`builtin-node-form-zod-ledger.test.ts`) |
 | `flow.zod.ts` | 7 | 11 | mixed | 6 authorable (`FlowNode.connectorConfig` / `.position` / `.inputSchema` / `.waitEventConfig` / `.boundaryConfig`, `Flow.errorHandling`), 1 wire (`FlowVersionHistorySchema` — the ledger row already exempts it) |
 | `state-machine.zod.ts` | 6 | 6 | authorable (p) | `ActionRef` / `GuardRef` / `Transition` / `StateNode` + `.meta` / `StateMachine` |
 | `bpmn-interop.zod.ts` | 5 | 5 | wire (p) | **out of scope** — third-party BPMN import/export shapes; strictness turns an upstream addition into our parse crash |
 | `control-flow.zod.ts` | 5 | 5 | authorable (p) | `FlowRegion` / `Loop` / `ParallelBranch` / `Parallel` / `TryCatch` — validated structurally by `validateControlFlow` today, which is a sibling guard, not a key gate |
 | `node-executor.zod.ts` | 4 | 4 | wire | **out of scope** — executor registration contract, code-to-code |
-| `schemaless-node-config.zod.ts` | 4 | 4 | authorable | `Script` / `Subflow` / `DecisionCondition` / `Decision`; `script` + `subflow` ARE parsed at execute time since #4343 |
-| `io-node-config.zod.ts` | 2 | 2 | authorable | `NotifyConfig` / `HttpConfig` — the sibling contracts for the deliberately-open flow node `config` slot |
 | `flow-function.zod.ts` | 1 | 1 | authorable | `FlowFunctionDeclarationSchema`; binds at authoring only (the boot reader is `normalizeFlowFunctionEntry`, not a `.parse()`) |
 | `time-relative-trigger.zod.ts` | 1 | 1 | authorable | `TimeRelativeTriggerSchema` — **newly visible** (see its triage row); a stripped `offsetDay`/`withinDay` yields a trigger that never fires, reported as configured |
 | `webhook.zod.ts` | 1 | 1 | authorable (p) | `WebhookSchema`, spec-only (#3461) |
 
-**Authorable strip in `automation/`: 41 of 67.** This is the ruling's "known main body".
+Three rows left this table at **批 9** (#4001), the ruling's first `automation/`
+wave — `builtin-node-config.zod.ts` (8), `schemaless-node-config.zod.ts` (4) and
+`io-node-config.zod.ts` (2), all reaching zero strip. The reverse pin fired on
+all three before the rows were removed, which is the only evidence that a
+deletion here is bookkeeping rather than a guess.
+
+**Authorable strip in `automation/`: 27 of 53** (was 41 of 67). What remains of
+the ruling's "known main body" is `etl` 7, `flow` 6, `state-machine` 6,
+`control-flow` 5, and one each from `flow-function` / `time-relative-trigger` /
+`webhook`.
 
 #### `ui/` — 123 strip of 198
 

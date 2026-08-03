@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { backfillRuleGrants, backfillRetiredAccessLevels } from './sharing-plugin.js';
@@ -58,13 +59,11 @@ function makeEngine() {
       return t[i];
     },
     async delete(o: string, opts?: any) {
-      // Mirror `ObjectQLEngine.delete`'s dispatch guard (#4434) — see the same
-      // note in sharing-rule.test.ts. A fake looser than the contract it
-      // stands in for is how a green suite ships a dead route.
-      const whereId = opts?.where && typeof opts.where === 'object' ? (opts.where as any).id : undefined;
-      const t0 = typeof whereId;
-      const scalarId = whereId != null && (t0 === 'string' || t0 === 'number' || t0 === 'bigint');
-      if (!scalarId && !opts?.multi) throw new Error('Delete requires an ID or options.multi=true');
+      // Pinned to `ObjectQLEngine.delete`'s own dispatch predicate (#4434,
+      // #4550) — see the longer note in sharing-rule.test.ts. This used to
+      // MIRROR the guard by hand; a mirror is a second copy of the contract,
+      // so it now calls the producer's exported decision instead.
+      assertEngineDeleteDispatch(opts);
       const t = ensure(o); const where = opts?.where ?? {};
       for (let i = t.length - 1; i >= 0; i--) if (matches(t[i], where)) t.splice(i, 1);
       return { ok: true };

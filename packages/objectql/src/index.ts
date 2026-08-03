@@ -63,6 +63,25 @@ export type {
 } from './driver-connect-errors.js';
 export type { InsertManyRowOutcome } from './engine.js';
 
+// [#4550] The delete-dispatch contract, exported so a TEST DOUBLE that stands
+// in for the engine can import the producer's own decision rather than
+// re-deriving it. A fake looser than the contract it replaces is how #4434
+// shipped a REST route that 500'd for every caller with its suite green.
+// `scripts/check-engine-double-contract.mjs` is the gate that keeps new
+// engine doubles on this.
+export {
+  resolveEngineDeleteDispatch,
+  assertEngineDeleteDispatch,
+  scalarDeleteId,
+  ENGINE_DELETE_REJECT_MESSAGE,
+  ENGINE_DELETE_DISPATCH_CASES,
+} from './engine-delete-dispatch.js';
+export type {
+  EngineDeleteDispatch,
+  EngineDeleteDispatchInput,
+  EngineDeleteDispatchCase,
+} from './engine-delete-dispatch.js';
+
 // Export in-memory aggregation fallback (used by engine.aggregate when the
 // driver lacks native groupBy/aggregations support; also useful for tests).
 export { applyInMemoryAggregation, bucketDateValue } from './in-memory-aggregation.js';

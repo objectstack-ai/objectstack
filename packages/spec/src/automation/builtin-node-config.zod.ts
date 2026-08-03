@@ -32,8 +32,29 @@
  * type and `required` violations refuse the node as a guard. All of these
  * parse the RAW stored config — their typed slots are strings (or `unknown`
  * where values interpolate), so `{token}` templates pass and resolve at the
- * executor's existing interpolation points. Unknown keys are rejected earlier,
- * at `registerFlow()` (the tightened #4059 check); the parse here strips them.
+ * executor's existing interpolation points.
+ *
+ * ## Unknown keys — closed here too, as of #4001 批 9
+ *
+ * These contracts used to say "unknown keys are rejected earlier, at
+ * `registerFlow()` (the tightened #4059 check); the parse here strips them."
+ * The registration walk is still the first and more informative door — it
+ * descends NESTED config against the descriptor's JSON Schema, which is how it
+ * catches `fields[0].visibleIf` (#3528) and not just top-level typos — but
+ * "some other door is closed" is the exact reasoning #4001 exists to retire:
+ * the sibling of every guard in this campaign turned out to leave the other
+ * doors open, because its author was fixing one bug rather than auditing a
+ * surface. A config reaching `parse()` without passing registration (tooling
+ * that parses a contract directly, a host composing the engine itself) is no
+ * longer silently trimmed.
+ *
+ * The two doors are kept in agreement by `builtin-node-form-zod-ledger.test.ts`,
+ * which reconciles these key sets against the descriptors' in both directions.
+ * The per-key prescriptions below are the same curation the registration
+ * rejection carries in `FLOW_NODE_UNKNOWN_KEY_GUIDANCE` — the campaign's
+ * finding is that a bespoke guard's detection generalizes for free the moment
+ * a default flips, while its PROSE does not, so the prose is copied to the new
+ * door rather than left behind at the old one.
  *
  * Deliberately absent:
  *  - `assignment` — its config cannot be described by a fixed key set: with no
@@ -52,6 +73,88 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
+
+/** What a rejected key on these contracts silently did before #4001 批 9. */
+const BUILTIN_NODE_CONFIG_HISTORY =
+  'Until #4001 an undeclared key here was dropped at the execute-time parse — the step still ran and the run '
+  + 'still reported success, minus whatever the key was meant to configure.';
+
+/**
+ * The two ADR-0087 D2 aliases every CRUD node shares.
+ *
+ * Both are retired SPELLINGS rather than typos, and both are rewritten at load
+ * (`flow-node-crud-object-alias`, `flow-node-crud-filter-alias`), so a config
+ * still carrying one at parse time carries the canonical key too —
+ * `renameConfigKey` leaves a shadowed alias in place instead of clobbering the
+ * winner. Hence each prescription answers both readings: the rename, and
+ * "delete the dead twin".
+ *
+ * `object` also earns its entry on distance alone: `object` → `objectName` is
+ * four edits against a threshold of two, so the suggester would say nothing at
+ * all for the single most common wrong spelling on this surface.
+ */
+const CRUD_ALIAS_GUIDANCE = {
+  object:
+    'The object slot is `objectName`. `object` was the last tenant of the `readAliasedConfig` executor shim; it '
+    + 'graduated into the ADR-0087 D2 conversion `flow-node-crud-object-alias` (#3796), which rewrites it at load — '
+    + 'so a surviving `object` means `objectName` already won and this key is dead. Delete it.',
+  filters:
+    'The match map is `filter` (singular). `filters` was a consumer-side executor fallback that graduated into the '
+    + 'ADR-0087 D2 conversion `flow-node-crud-filter-alias`, which rewrites it at load; delete it once `filter` '
+    + 'carries the pairs. Beware the half-migrated shape: an empty `filter` next to a populated `filters` is what '
+    + 'made this alias dangerous enough to declare (#3810 — a match-everything write).',
+} as const;
+
+/**
+ * `recordId` — the shape the repo's own flow fixtures teach and no CRUD
+ * executor has ever read.
+ *
+ * Measured, not guessed: the #4001 payload scan found it on `get_record`,
+ * `update_record` and `delete_record` nodes across `packages/spec`'s flow
+ * fixtures and the conversion registry's own illustrations, while every CRUD
+ * executor targets rows through `filter` only. Under `.strip` it parsed
+ * clean and then addressed nothing — on a `delete_record` that is precisely
+ * the #3810 hazard (a node that names no constraint) wearing a key that reads
+ * like one.
+ *
+ * Edit distance reaches none of the declared keys, so without this entry the
+ * rejection would name the key and offer nothing.
+ */
+const CRUD_RECORD_ID_GUIDANCE =
+  'CRUD nodes address rows through `filter`, never through a `recordId` key — no executor has ever read one. '
+  + "Write the id as a filter VALUE: `filter: { id: '{record.id}' }`, which is the shape the node's own descriptor "
+  + 'documents. This matters most on `delete_record`: a config whose only "constraint" is an unread key is a '
+  + 'match-everything delete, the #3810 hazard.';
+
+/**
+ * `fieldValues` — the AI-authoring dialect that never had a runtime reader.
+ *
+ * Kept verbatim in intent with `FLOW_NODE_UNKNOWN_KEY_GUIDANCE` in
+ * `service-automation`'s engine, which carries it at the registration door.
+ * Prime Directive #12's worked example is this exact key: framework#2419
+ * proposed a `cfg.fields ?? cfg.fieldValues` runtime alias and it was rejected
+ * by design — the fix is the authoring source plus a loud rejection.
+ */
+const FIELD_VALUES_GUIDANCE =
+  'The write map is `fields`. `fieldValues` was an AI-authoring dialect that never had a runtime reader, and a '
+  + 'consumer-side `cfg.fields ?? cfg.fieldValues` alias was rejected by design (#2419) — the fix is the authoring '
+  + 'source and this rejection, not a runtime fallback.';
+
+/**
+ * `update_record` / `delete_record` bind no output — a documented absence, not
+ * an oversight (#4045 recorded it "so nobody re-chases it").
+ *
+ * It is the single likeliest undeclared key on these two shapes, because the
+ * four sibling contracts (`get_record`, `create_record`, `map`, `script`,
+ * `subflow`) all declare it, and edit distance against the remaining keys
+ * reaches nothing.
+ */
+const NO_OUTPUT_VARIABLE_GUIDANCE =
+  'This node binds no output — the executor reads no `outputVariable`, and #4045 recorded that absence '
+  + 'deliberately after re-verifying the executor. Its siblings (`get_record`, `create_record`, `map`) do declare '
+  + 'one, which is why the key looks universal and is not. To use what was written, follow this node with a '
+  + '`get_record` that reads the row back.';
 
 // ─── CRUD quartet ────────────────────────────────────────────────────
 
@@ -64,7 +167,11 @@ import { lazySchema } from '../shared/lazy-schema';
  * widening the query (#3810). `limit > 1` selects `find` (a `records` list);
  * otherwise `findOne` (a single `record`).
  */
-export const GetRecordConfigSchema = lazySchema(() => z.object({
+export const GetRecordConfigSchema = lazySchema(() => strictObject({
+  surface: 'this get_record node config',
+  history: BUILTIN_NODE_CONFIG_HISTORY,
+  guidance: { ...CRUD_ALIAS_GUIDANCE, recordId: CRUD_RECORD_ID_GUIDANCE },
+}, {
   /** Object to query (execute-time required). */
   objectName: z.string().describe('Object to query'),
   /** Field/value pairs to match; operator objects and `{token}` templates are legal values. */
@@ -84,7 +191,14 @@ export type GetRecordConfig = z.input<typeof GetRecordConfigSchema>;
 export type GetRecordConfigParsed = z.infer<typeof GetRecordConfigSchema>;
 
 /** `create_record` node config — what the executor reads. `objectName` is execute-time required. */
-export const CreateRecordConfigSchema = lazySchema(() => z.object({
+export const CreateRecordConfigSchema = lazySchema(() => strictObject({
+  surface: 'this create_record node config',
+  history: BUILTIN_NODE_CONFIG_HISTORY,
+  // `filters` is deliberately absent: `create_record` has no match map, so
+  // `flow-node-crud-filter-alias` never covered it and prescribing `filter`
+  // here would point an author at a key this shape does not declare.
+  guidance: { object: CRUD_ALIAS_GUIDANCE.object, fieldValues: FIELD_VALUES_GUIDANCE },
+}, {
   /** Object to insert into (execute-time required). */
   objectName: z.string().describe('Object to insert into'),
   /** Field values to write on the new record; values interpolate `{token}` templates. */
@@ -102,7 +216,16 @@ export type CreateRecordConfigParsed = z.infer<typeof CreateRecordConfigSchema>;
  * `update_record` node config — what the executor reads. No `outputVariable`:
  * the executor does not read one (recorded in #4045 so nobody re-chases it).
  */
-export const UpdateRecordConfigSchema = lazySchema(() => z.object({
+export const UpdateRecordConfigSchema = lazySchema(() => strictObject({
+  surface: 'this update_record node config',
+  history: BUILTIN_NODE_CONFIG_HISTORY,
+  guidance: {
+    ...CRUD_ALIAS_GUIDANCE,
+    recordId: CRUD_RECORD_ID_GUIDANCE,
+    fieldValues: FIELD_VALUES_GUIDANCE,
+    outputVariable: NO_OUTPUT_VARIABLE_GUIDANCE,
+  },
+}, {
   /** Object to update (execute-time required). */
   objectName: z.string().describe('Object to update'),
   /** Field/value pairs identifying the record(s) to update; an erased template condition refuses the node (#3810). */
@@ -116,7 +239,15 @@ export type UpdateRecordConfig = z.input<typeof UpdateRecordConfigSchema>;
 export type UpdateRecordConfigParsed = z.infer<typeof UpdateRecordConfigSchema>;
 
 /** `delete_record` node config — what the executor reads. The erased-condition guard matters most here (#3810). */
-export const DeleteRecordConfigSchema = lazySchema(() => z.object({
+export const DeleteRecordConfigSchema = lazySchema(() => strictObject({
+  surface: 'this delete_record node config',
+  history: BUILTIN_NODE_CONFIG_HISTORY,
+  guidance: {
+    ...CRUD_ALIAS_GUIDANCE,
+    recordId: CRUD_RECORD_ID_GUIDANCE,
+    outputVariable: NO_OUTPUT_VARIABLE_GUIDANCE,
+  },
+}, {
   /** Object to delete from (execute-time required). */
   objectName: z.string().describe('Object to delete from'),
   /** Field/value pairs identifying the record(s) to delete. */
@@ -134,7 +265,18 @@ export type DeleteRecordConfigParsed = z.infer<typeof DeleteRecordConfigSchema>;
  * `ScreenSpec` the client renders). `visibleWhen` is forwarded RAW — the client
  * re-evaluates it against the values collected so far (#3528).
  */
-export const ScreenFieldConfigSchema = lazySchema(() => z.object({
+export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
+  surface: 'this screen field',
+  history: BUILTIN_NODE_CONFIG_HISTORY,
+  guidance: {
+    visibleIf:
+      'The visibility predicate is `visibleWhen` — bare CEL (ADR-0032), forwarded raw and re-evaluated '
+      + 'client-side as the user types (#3528). `visibleIf` is four edits away from the right key, which is why '
+      + 'the registration-time rejection prints the declared set rather than trusting a suggester; it is also the '
+      + 'typo the whole undeclared-key ladder descends from — three diagnostic passes for a field that silently '
+      + 'never hid.',
+  },
+}, {
   /** Field name — an item with an empty name is dropped. */
   name: z.string().describe('Field name (the flow variable the value binds to)'),
   /** Display label. */
@@ -144,7 +286,10 @@ export const ScreenFieldConfigSchema = lazySchema(() => z.object({
   /** Whether the runner requires a value before resume. */
   required: z.boolean().optional().describe('Whether a value is required to submit'),
   /** Choices for a select-style field. */
-  options: z.array(z.object({
+  options: z.array(strictObject({
+    surface: 'this screen field option',
+    history: BUILTIN_NODE_CONFIG_HISTORY,
+  }, {
     value: z.unknown().describe('Stored value'),
     label: z.string().describe('Display label'),
   })).optional().describe('Choices for a select-style field'),
@@ -167,7 +312,17 @@ export type ScreenFieldConfig = z.input<typeof ScreenFieldConfigSchema>;
  * `recordId`, `defaults`, `idVariable` apply only there). `recordId` is what
  * makes `mode: 'edit'` usable — it names the record the form edits.
  */
-export const ScreenConfigSchema = lazySchema(() => z.object({
+export const ScreenConfigSchema = lazySchema(() => strictObject({
+  surface: 'this screen node config',
+  history: BUILTIN_NODE_CONFIG_HISTORY,
+  // `object` → `objectName` is four edits against a threshold of two, so the
+  // suggester reaches it on no surface at all. It has a whole ADR-0087
+  // conversion of its own on the CRUD nodes, which is exactly why an author
+  // arrives here already spelling it that way — but `screen` is NOT in that
+  // conversion's node-type set, so nothing rewrites it and the rename has to
+  // be said out loud.
+  aliases: { object: 'objectName' },
+}, {
   /** Heading (falls back to the node label). Interpolates `{token}`. */
   title: z.string().optional().describe('Heading shown above the screen'),
   /** Body text. Interpolates `{token}`. */
@@ -208,7 +363,16 @@ export type ScreenConfigParsed = z.infer<typeof ScreenConfigSchema>;
  * conversion `flow-node-map-flow-alias` rewrites it at load, so the executor
  * only ever sees `flowName` (#4045 — the `notify.source` graduation path).
  */
-export const MapConfigSchema = lazySchema(() => z.object({
+export const MapConfigSchema = lazySchema(() => strictObject({
+  surface: 'this map node config',
+  history: BUILTIN_NODE_CONFIG_HISTORY,
+  guidance: {
+    flow:
+      'The per-item subflow is named by `flowName`. `flow` was an undeclared executor fallback no schema or form '
+      + 'described; it graduated into the ADR-0087 D2 conversion `flow-node-map-flow-alias` (#4045), which rewrites '
+      + 'it at load — so a surviving `flow` means `flowName` already won and this key is dead. Delete it.',
+  },
+}, {
   /** The collection — a `{token}` template / bare variable name, or an inline array. */
   collection: z.union([z.string(), z.array(z.unknown())])
     .describe('Template/variable resolving to the array to process (an inline array is accepted)'),
