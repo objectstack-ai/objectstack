@@ -1298,9 +1298,9 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
   describe('retired app keys (#4667)', () => {
     it('rejects `homePageId` and names what actually decides the landing page', () => {
       // Tombstoned (retiredKey), matching the seven #4142 retirements on this
-      // schema — so it is a tsc error as well as a parse error. The schema's own
-      // hedge ("if not set, usually defaults to the first navigation item") had
-      // been describing the only behaviour that ever existed.
+      // schema — so it is a tsc error as well as a parse error. Post-v17 the
+      // landing page really is the first navigation item; what the message must
+      // NOT do is explain *why* by claiming nobody read the key (see below).
       const parse = () => AppSchema.parse({
         name: 'crm', label: 'CRM', homePageId: 'nav_pipeline',
         navigation: [{ id: 'nav_home', type: 'object', label: 'Home', objectName: 'account' }],
@@ -1308,6 +1308,28 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
       expect(parse).toThrow(/homePageId.*removed.*17\.0\.0/s);
       expect(parse).toThrow(/first navigation item/s);
       expect(parse).toThrow(/isDefault/s);
+    });
+
+    it('the tombstone states the REAL reason, not the false "no shell read it" premise (#4709)', () => {
+      // #4667 shipped this tombstone claiming "no shell ever read it". It was
+      // false — objectui's console read the key in `resolveLandingRoute()`
+      // (packages/app-shell/src/console/AppContent.tsx @785b8a5d) and it was the
+      // only thing deciding where an app opened — and it contradicted this
+      // repo's own 2026-06 AppSchema liveness audit, which listed the key LIVE.
+      // The removal stands (#4709 ruling B): the key encoded the landing page as
+      // an ID cross-reference that silently fell back when it dangled. Pinned
+      // because a tombstone is what the next reader reasons FROM: this sentence
+      // already sent one session to the renderer to discover it was wrong, and a
+      // regression would re-arm exactly that trap.
+      const parse = () => AppSchema.parse({
+        name: 'crm', label: 'CRM', homePageId: 'nav_pipeline',
+        navigation: [{ id: 'nav_home', type: 'object', label: 'Home', objectName: 'account' }],
+      });
+      expect(parse).not.toThrow(/no shell ever read/i);
+      expect(parse).toThrow(/did read it/i);
+      expect(parse).toThrow(/resolveLandingRoute/);
+      // The prescription is unchanged by the correction — reorder, or isDefault.
+      expect(parse).toThrow(/reorder `navigation`/s);
     });
 
     it('routes the three retired homePageId aliases to the same prescription', () => {
