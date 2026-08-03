@@ -78,8 +78,8 @@ import { SqlDriver } from '../src/index.js';
 import { LegacyStorageDriver } from './legacy-datetime-storage.testkit.js';
 import {
   DIALECT_CELLS,
-  EXPECT_LIVE_DIALECTS,
   assertThreeWayZoneSkew,
+  declareUnprovisionedCell,
   readServerZone,
   type DialectCell,
   type ServerZone,
@@ -133,7 +133,11 @@ async function dropTable(driver: SqlDriver | undefined, table: string): Promise<
 
 for (const cell of DIALECT_CELLS) {
   if (!cell.available) {
-    declareUnprovisionedCell(cell);
+    // Reported, never omitted — a named skip locally, a red under
+    // `OS_EXPECT_LIVE_DIALECT_MATRIX=1`. The guard is the testkit's (shared with
+    // the pagination and filter-logic matrices, #4714) so it cannot weaken in
+    // one consumer's copy alone.
+    declareUnprovisionedCell(cell, 'temporal conformance');
     continue;
   }
   if (cell.live) declareServerTimezoneAxis(cell);
@@ -141,27 +145,6 @@ for (const cell of DIALECT_CELLS) {
   declareLegacyDatetimeSweep(cell);
   declareTimeSweep(cell);
   declareLegacyTimeSweep(cell);
-}
-
-/**
- * A cell nobody provisioned is REPORTED, not omitted: a named skip locally, a
- * failure under `OS_EXPECT_LIVE_DIALECT_MATRIX=1` — which is what stops the CI
- * job from quietly degrading to SQLite-only coverage if its `env:` block is
- * ever dropped.
- */
-function declareUnprovisionedCell(cell: DialectCell): void {
-  describe(`sql-driver — temporal conformance matrix (${cell.label})`, () => {
-    it.skipIf(!EXPECT_LIVE_DIALECTS)(
-      `is provisioned — set ${cell.env} to run this cell of the D-A3 driver axis`,
-      () => {
-        expect.fail(
-          `${cell.env} is unset while OS_EXPECT_LIVE_DIALECT_MATRIX=1: this runner declared it ` +
-            `provisions live Postgres and MySQL, so the ${cell.label} cell of the temporal ` +
-            `conformance matrix must not be skipped (ADR-0053 D-A3 "Postgres at minimum").`,
-        );
-      },
-    );
-  });
 }
 
 /**

@@ -42,7 +42,7 @@
  * Test-only: not exported from `index.ts`.
  */
 
-import { expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { SqlDriver, SqlDriverConfig } from './sql-driver.js';
 
 /** The dialects `driver-sql` speaks that the matrices are run across. */
@@ -133,6 +133,37 @@ export const DIALECT_CELLS: readonly DialectCell[] = [
 
 /** The live cells only — the ones the server-timezone axis applies to. */
 export const LIVE_DIALECT_CELLS = DIALECT_CELLS.filter((c) => c.live);
+
+/**
+ * Declare a cell nobody provisioned: REPORTED, never omitted.
+ *
+ * A named skip locally (so `it was not run` is readable in the output), a
+ * failure under `OS_EXPECT_LIVE_DIALECT_MATRIX=1` — which is what stops the
+ * `Temporal Conformance (live PG + MySQL)` job from quietly degrading to
+ * SQLite-only coverage if its `env:` block is ever dropped.
+ *
+ * Lives here rather than in each consumer for the same reason `DIALECT_CELLS`
+ * does: a guard copy-pasted per suite is a guard that can weaken in one copy
+ * and nowhere else — and "the matrix silently found zero cells and reported
+ * OK" is the failure #4646 already paid for once.
+ *
+ * @param matrix which matrix this cell belongs to, e.g. `temporal conformance`
+ *   — it names both the suite and the failure message.
+ */
+export function declareUnprovisionedCell(cell: DialectCell, matrix: string): void {
+  describe(`sql-driver — ${matrix} matrix (${cell.label})`, () => {
+    it.skipIf(!EXPECT_LIVE_DIALECTS)(
+      `is provisioned — set ${cell.env} to run this cell of the D-A3 driver axis`,
+      () => {
+        expect.fail(
+          `${cell.env} is unset while OS_EXPECT_LIVE_DIALECT_MATRIX=1: this runner declared it ` +
+            `provisions live Postgres and MySQL, so the ${cell.label} cell of the ${matrix} ` +
+            `matrix must not be skipped (ADR-0053 D-A3 "Postgres at minimum").`,
+        );
+      },
+    );
+  });
+}
 
 /** What a server reports about its own timezone. */
 export interface ServerZone {
