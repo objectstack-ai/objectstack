@@ -23,7 +23,7 @@
  * See `validate-null-guards.ts` for the decision procedure and its scope.
  */
 
-import { validateExpression } from '@objectstack/formula';
+import { validateExpression, collectCelRootIdentifiers } from '@objectstack/formula';
 import { collectFlowGraphs, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 import type { FlowNodeParsed } from '@objectstack/spec/automation';
 
@@ -145,6 +145,39 @@ function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
     idx.set(name, nullable);
   }
   return idx;
+}
+
+/**
+ * [#4889] Does this CEL source read the `parent` root — the master-detail
+ * header the write path binds for a detail object's field predicates?
+ *
+ * Decided from the parsed AST (the same `collectCelRootIdentifiers` the runtime
+ * gate uses, so build and runtime can never disagree about what "reads
+ * `parent`" means), never a substring scan: a field named `parent_id`, or the
+ * string literal `'parent'`, is not a reference to the binding. A source that
+ * does not parse answers `false` — the ordinary syntax pass already reports it,
+ * and this gate must not report the same defect twice under a worse name.
+ */
+function readsParentRoot(source: string): boolean {
+  const roots = collectCelRootIdentifiers(source);
+  return roots.ok && roots.roots.includes('parent');
+}
+
+/**
+ * The number of `master_detail` relationships an object declares — what decides
+ * whether `parent` is a fact the metadata states (#4889). Exactly one ⇒ the
+ * write path binds that master as `parent`. Zero ⇒ nothing to bind. Two ⇒ no
+ * single "the parent", and picking one by declaration order would make a
+ * data-integrity lock depend on field ordering.
+ */
+function masterDetailCount(obj: AnyRec): number {
+  let n = 0;
+  for (const [, def] of fieldEntries(obj)) {
+    if (def.type !== 'master_detail') continue;
+    const ref = def.reference ?? def.referenceTo;
+    if (typeof ref === 'string' && ref.trim() !== '') n += 1;
+  }
+  return n;
 }
 
 /** The raw CEL source behind a predicate slot (string or `{ dialect, source }`). */
@@ -372,6 +405,10 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // with `field.columnName` itself in #2377: the field no longer exists, so there
     // is no dual-source ambiguity to guard — external column mapping is `external.columnMap`.)
 
+    // [#4889] How many masters this object has, for the `parent`-scope gate
+    // below. Computed once per object, not per field.
+    const masters = masterDetailCount(obj);
+
     for (const f of fieldList) {
       // Field-level conditional rules are server-enforced (rule-validator) and
       // record-scoped — a bare ref silently fails the rule (required/readonly
@@ -380,6 +417,37 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         const fname = (f.name as string) ?? '?';
         for (const key of ['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen'] as const) {
           check(`object '${objectName}' · field '${fname}' ${key}`, (f as AnyRec)[key], objectName, 'record');
+        }
+        // [#4889] A `parent`-scoped `readonlyWhen` is a SERVER-enforced lock:
+        // the write path resolves the object's master-detail header and binds
+        // it as `parent`. That binding exists only when the object declares
+        // exactly ONE `master_detail` relationship. With none — or with two,
+        // where the metadata does not say which one "the parent" is — the
+        // predicate can never evaluate, and the runtime then holds the field
+        // LOCKED forever (it will not wave a declared lock through just because
+        // it could not be checked). The metadata already contains everything
+        // needed to see that at build time, so it is decided here rather than
+        // discovered as an unwritable field in production — PD #12, declared
+        // rather than guessed.
+        //
+        // Scoped to `readonlyWhen` on purpose: it is the one field predicate
+        // the server enforces as a write-path lock, so it is the one whose
+        // unbindable scope changes what lands in the database. `requiredWhen` /
+        // `visibleWhen` keep their existing verdicts untouched.
+        const roWhenSource = celSourceOf((f as AnyRec).readonlyWhen);
+        if (masters !== 1 && roWhenSource && readsParentRoot(roWhenSource)) {
+          issues.push({
+            where: `object '${objectName}' · field '${fname}' readonlyWhen`,
+            message:
+              `\`readonlyWhen\` reads \`parent\`, but object '${objectName}' declares ` +
+              `${masters === 0 ? 'no' : `${masters}`} \`master_detail\` relationship${masters === 1 ? '' : 's'} — ` +
+              `so the server has no header record to bind as \`parent\` and the field would be locked on every write. ` +
+              (masters === 0
+                ? `Declare the owning relationship as \`Field.masterDetail('<master>')\`, or rewrite the predicate against \`record\`.`
+                : `\`parent\` needs exactly one master; name the header explicitly through \`record.<fk>\` state instead, or model the extra relationship as a \`lookup\`.`),
+            source: roWhenSource,
+            severity: 'error',
+          });
         }
       }
       if (f && typeof f === 'object' && f.formula) {
