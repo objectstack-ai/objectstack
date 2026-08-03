@@ -94,6 +94,20 @@ jobs:
       - name: Doc/skill authoring guard
         run: pnpm check:doc-authoring
 
+      # #4851: the docs-accuracy-audit workflow carries its default scope inline
+      # (a workflow script runs in a vm with no filesystem, so it cannot enumerate
+      # content/docs/ itself). Hand-kept, that list rotted in BOTH directions —
+      # 16 entries pointing at files that no longer existed after the
+      # protocol/objectos → protocol/kernel rename, and 48 existing docs missing
+      # from it — while every "FULL audit" run reported green, which is how the
+      # accuracy defects in #4781 and #4817 survived ~2 months. This regenerates
+      # the list from the filesystem and fails when the two disagree either way.
+      # It lives in this job deliberately: the change that breaks the list is a
+      # docs rename, so a `packages/**` paths filter would blind the gate to
+      # exactly its own failure mode.
+      - name: Docs-audit scope is derived, not hand-kept
+        run: pnpm check:docs-audit-scope
+
       # ADR-0090 D3 vocabulary ratchet: "role" is reserved-forbidden in docs
       # and skills. Existing occurrences are frozen in the baseline (better-auth
       # boundary, ARIA samples, educational mentions); NEW occurrences fail.
