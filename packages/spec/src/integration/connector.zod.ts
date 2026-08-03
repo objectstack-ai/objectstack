@@ -5,6 +5,7 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
 import { WebhookSchema } from '../automation/webhook.zod';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Connector Protocol - LEVEL 3: Enterprise Connector
@@ -109,8 +110,9 @@ import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.
  * `./data` (`ImportFieldMappingSchema`, a CSV/table column mapping that is not
  * a connector mapping at all). Which type an importer got depended only on the
  * import path — the #4411 trap. Prefixing the domain-specific sides keeps the
- * base name for the base, matching `ConnectorRateLimitConfig` (#4684),
- * `ConnectorErrorCategory` and `ConnectorRetryStrategy` in this same file, and
+ * base name for the base, matching `ConnectorErrorCategory` and
+ * `ConnectorRetryStrategy` in this same file (`ConnectorRateLimitConfig`,
+ * #4684, was the fourth until its whole shape was retired in #4911), and
  * `ExternalFieldMappingSchema` in `data/external-lookup.zod.ts` — which extends
  * the same base and, precisely because it carries a domain prefix, never
  * entered the dual-source baseline.
@@ -304,73 +306,38 @@ export const WebhookConfigSchema = lazySchema(() => WebhookSchema.extend({
 export type WebhookConfig = z.infer<typeof WebhookConfigSchema>;
 
 // ============================================================================
-// Rate Limiting and Retry Configuration
+// Retry Configuration
 // ============================================================================
-
-/**
- * Rate Limiting Strategy
- */
-export const RateLimitStrategySchema = lazySchema(() => z.enum([
-  'fixed_window',       // Fixed time window
-  'sliding_window',     // Sliding time window
-  'token_bucket',       // Token bucket algorithm
-  'leaky_bucket',       // Leaky bucket algorithm
-]).describe('Rate limiting strategy'));
-
-export type RateLimitStrategy = z.infer<typeof RateLimitStrategySchema>;
-
-/**
- * Rate Limiting Configuration — connector-side (OUTBOUND throttling).
- *
- * `Connector`-prefixed because `shared/http.zod.ts` exports a different
- * `RateLimitConfig` for INBOUND API rate limiting (`enabled` / `windowMs` /
- * `maxRequests`, all defaulted). The two describe opposite directions and are
- * not interchangeable: this one throttles the calls *we* make to an external
- * system (token bucket, burst capacity, and the upstream `X-RateLimit-*`
- * response headers we read back), while the shared one limits the calls
- * *others* make to us — where `respectUpstreamLimits` / `rateLimitHeaders` are
- * structurally meaningless. Same name, different units (`windowSeconds` vs
- * `windowMs`) and different requiredness, so an author copying a snippet from
- * one side to the other got a clean parse with the foreign keys silently
- * stripped (#4684, ADR-0104). They may not share a name (ADR-0112 D9a).
- */
-export const ConnectorRateLimitConfigSchema = lazySchema(() => z.object({
-  /**
-   * Rate limiting strategy
-   */
-  strategy: RateLimitStrategySchema.optional().default('token_bucket'),
-  
-  /**
-   * Maximum requests per window
-   */
-  maxRequests: z.number().min(1).describe('Maximum requests per window'),
-  
-  /**
-   * Time window in seconds
-   */
-  windowSeconds: z.number().min(1).describe('Time window in seconds'),
-  
-  /**
-   * Burst capacity (for token bucket)
-   */
-  burstCapacity: z.number().min(1).optional().describe('Burst capacity'),
-  
-  /**
-   * Respect external system rate limits
-   */
-  respectUpstreamLimits: z.boolean().optional().default(true).describe('Respect external rate limit headers'),
-  
-  /**
-   * Custom rate limit headers to check
-   */
-  rateLimitHeaders: z.object({
-    remaining: z.string().optional().default('X-RateLimit-Remaining').describe('Header for remaining requests'),
-    limit: z.string().optional().default('X-RateLimit-Limit').describe('Header for rate limit'),
-    reset: z.string().optional().default('X-RateLimit-Reset').describe('Header for reset time'),
-  }).optional().describe('Custom rate limit headers'),
-}));
-
-export type ConnectorRateLimitConfig = z.infer<typeof ConnectorRateLimitConfigSchema>;
+//
+// ─── REMOVED: outbound rate limiting (#4911, ADR-0049) ──────────────────
+//
+// `ConnectorRateLimitConfigSchema` / `ConnectorRateLimitConfig` and the
+// `RateLimitStrategySchema` / `RateLimitStrategy` enum it embedded were removed
+// wholesale in @objectstack/spec 17.0.0. The key that carried them
+// (`ConnectorSchema.rateLimitConfig`) is tombstoned below.
+//
+// The reason is not "no reader yet" — it is that **the engine does not exist**.
+// The platform's only token bucket is `packages/runtime/src/security/
+// rate-limit.ts`, and it is INBOUND: the dispatcher calls `consume(key)` with a
+// request fingerprint and short-circuits with 429. Nothing anywhere throttles
+// the calls *we* make to an external system, so `strategy` / `maxRequests` /
+// `windowSeconds` / `burstCapacity` / `respectUpstreamLimits` /
+// `rateLimitHeaders` were six well-formed knobs wired to nothing, on the most
+// safety-shaped surface a connector has: an author who set them believed they
+// had capped their outbound call rate. ADR-0049 says such a property is
+// enforced, marked `experimental`, or absent; with no implementation and no
+// committed roadmap, absent is the honest disposition. The vocabulary comes
+// back **with** the engine, in the same change — implementation-first, the
+// #4834 / PR #4878 precedent.
+//
+// Do NOT reach for `shared/http.zod.ts`'s `RateLimitConfig` as a replacement:
+// that one is the INBOUND limiter (`enabled` / `windowMs` / `maxRequests`) and
+// limits the calls *others* make to us. The two describe opposite directions and
+// were separated by name for exactly that reason (#4684, ADR-0112 D9a) — the
+// rename is absorbed by this removal (`scripts/lib/renamed-defs.ts`).
+//
+// Until an outbound throttle exists, rate-limit an integration where the calls
+// are actually made: at the connector provider / upstream gateway.
 
 /**
  * Retry Strategy — connector-side.
@@ -706,10 +673,24 @@ export const ConnectorSchema = lazySchema(() => z.object({
   webhooks: z.array(WebhookConfigSchema).optional().describe('Webhook configurations (not yet enforced — never read at registration; see #3197)'),
   
   /**
-   * Rate limiting configuration
+   * REMOVED (#4911) — outbound rate limiting. See the block above
+   * "REMOVED: outbound rate limiting" for why the whole shape went, not just
+   * this key. `ConnectorSchema` is NOT `.strict()`, so a plain delete would be
+   * a silent strip (ADR-0104); the tombstone makes the removal audible in the
+   * two channels an upgrading author actually hits — `tsc` and the parse.
    */
-  rateLimitConfig: ConnectorRateLimitConfigSchema.optional().describe('Rate limiting configuration'),
-  
+  rateLimitConfig: retiredKey(
+    '`connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (#4911, ADR-0049 D2) — ' +
+    'the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its ' +
+    '`RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ' +
+    'ever existed. The platform\'s only token bucket (runtime `security/rate-limit.ts`) throttles ' +
+    'INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob ' +
+    'here was inert while reading like a configured cap. Delete the key. Do NOT substitute ' +
+    '`shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; ' +
+    'until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. ' +
+    'Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
+
   /**
    * Retry configuration
    */

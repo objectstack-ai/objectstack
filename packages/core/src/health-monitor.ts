@@ -107,10 +107,11 @@ export class PluginHealthMonitor {
     try {
       // Check if plugin has a custom health check method
       if (config.checkMethod && typeof (plugin as any)[config.checkMethod] === 'function') {
-        const checkResult = await Promise.race([
+        const checkResult = await this.raceCheckTimeout(
           (plugin as any)[config.checkMethod](),
-          this.timeout(config.timeout, `Health check timeout after ${config.timeout}ms`)
-        ]);
+          config.timeout,
+          `Health check timeout after ${config.timeout}ms`
+        );
 
         if (checkResult === false || (checkResult && checkResult.status === 'unhealthy')) {
           status = 'unhealthy';
@@ -308,11 +309,44 @@ export class PluginHealthMonitor {
   }
 
   /**
-   * Timeout helper
+   * Race a plugin's custom health check against its timeout guard, and
+   * reclaim the guard the moment the race settles (#4875).
+   *
+   * Same shape, same reasoning as `ObjectKernel.raceStartupTimeout()` (#4813,
+   * PR #4874): the guard used to be armed and then abandoned — when the check
+   * won the race, its `setTimeout` stayed ref'd in the event loop for the full
+   * `config.timeout`. Health checks are *periodic*, so unlike the kernel's
+   * one-shot startup guards the orphans here accumulate: one per plugin per
+   * round, each pinning the loop for `config.timeout`.
+   *
+   * Clearing on settle rather than `unref()`-ing at arm time is deliberate.
+   * An unref'd guard also stops pinning the loop, but it stops being a guard
+   * as well: if the check never settles and nothing else keeps the loop alive,
+   * Node exits before the timer can fire and the timeout is never reported.
+   * The guard has to stay ref'd exactly as long as the race is undecided,
+   * which is what `clearTimeout` in a `finally` expresses.
+   *
+   * `check` is widened to `T | PromiseLike<T>` because `checkMethod` is called
+   * dynamically off the plugin and may be synchronous; such a check wins the
+   * race immediately and the guard is reclaimed on the same turn.
    */
-  private timeout<T>(ms: number, message: string): Promise<T> {
-    return new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(message)), ms);
+  private async raceCheckTimeout<T>(
+    check: T | PromiseLike<T>,
+    ms: number,
+    message: string
+  ): Promise<T> {
+    let guard: ReturnType<typeof setTimeout> | undefined;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      guard = setTimeout(() => {
+        reject(new Error(message));
+      }, ms);
     });
+
+    try {
+      return await Promise.race([check, timeoutPromise]);
+    } finally {
+      clearTimeout(guard);
+    }
   }
 }
