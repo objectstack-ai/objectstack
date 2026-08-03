@@ -79,6 +79,15 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // distinct concept (client/server offline sync) and the only side with
   // cross-repo consumers (objectui useOffline + re-export + parity ratchet).
   'integration/ConflictResolution': 'integration/ConnectorConflictResolution',
+
+  // #4737 / ADR-0112 D9a — `ActionLocation` was published by ./studio AND ./ui
+  // for two disjoint concepts. The studio side (3-value IDE surface enum,
+  // consumed only by `ActionContributionSchema.location`) takes the
+  // domain-specific name (0-key carry: enum def, no authorable properties).
+  // `ui/ActionLocation` keeps the bare name: its docblock declares it the
+  // platform-wide canonical vocabulary and objectui pins it by reference
+  // (spec-derived-unions.test.ts).
+  'studio/ActionLocation': 'studio/ActionContributionLocation',
 };
 
 /**
