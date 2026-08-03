@@ -18,13 +18,21 @@ import { ObjectQLPlugin } from './plugin.js';
 interface Recorded {
   level: 'debug' | 'info' | 'warn' | 'error';
   message: string;
-  meta?: unknown;
+  /**
+   * Everything after the message. The two loggers in play take DIFFERENT
+   * shapes — the engine's is `(msg, Error, context)` while `PluginContext`'s is
+   * `(msg, context)` — so the recorder keeps the raw tail and each assertion
+   * says which one it means. (Collapsing them into a single `meta` is what let
+   * a `{ object: … }` land in the engine's `Error` slot and turn the DTS build
+   * red while every runtime test stayed green.)
+   */
+  args: unknown[];
 }
 
 function recordingLogger() {
   const records: Recorded[] = [];
-  const push = (level: Recorded['level']) => (message: string, meta?: unknown) =>
-    void records.push({ level, message: String(message), meta });
+  const push = (level: Recorded['level']) => (message: string, ...args: unknown[]) =>
+    void records.push({ level, message: String(message), args });
   return {
     records,
     logger: { debug: push('debug'), info: push('info'), warn: push('warn'), error: push('error') },
@@ -32,6 +40,13 @@ function recordingLogger() {
       return records.filter((r) => r.level === level);
     },
   };
+}
+
+/** Flatten a record's tail args to text, Error messages included. */
+function tailText(r: Recorded): string {
+  return r.args
+    .map((a) => (a instanceof Error ? a.message : JSON.stringify(a)))
+    .join(' ');
 }
 
 /** A driver whose DDL always fails — the whole point of these tests. */
@@ -70,8 +85,12 @@ describe('ObjectQL.syncSchemas() — DDL failure is an error, not a silent swall
     expect(errors[0].message).toMatch(/not durable/);
     // FIX: what to actually do about it.
     expect(errors[0].message).toMatch(/re-run the install\/sync/);
-    // The driver's own error is preserved for diagnosis.
-    expect(JSON.stringify(errors[0].meta)).toContain('no such column: status');
+    // The driver's own error is preserved for diagnosis, and — the part CI
+    // caught — it goes in the engine logger's `Error` slot, with the structured
+    // context in the third argument where it type-checks.
+    expect(errors[0].args[0]).toBeInstanceOf(Error);
+    expect((errors[0].args[0] as Error).message).toContain('no such column: status');
+    expect(errors[0].args[1]).toMatchObject({ object: 'invoice' });
   });
 
   it('does not hide the failure at warn/debug — the level is the whole point', async () => {
@@ -134,7 +153,13 @@ describe('ObjectQLPlugin.syncRegisteredSchemas() — per-object and summary leve
     // The FIX includes the DELIBERATE opt-out, so a host that manages DDL
     // out-of-band can make the omission explicit instead of living with an error.
     expect(perObject!.message).toMatch(/OS_SKIP_SCHEMA_SYNC/);
-    expect(JSON.stringify(perObject!.meta)).toContain('permission denied for schema public');
+    // `Logger.error` is `(message, error?, meta?)` on BOTH loggers — the Error
+    // in slot 2, the context bag in slot 3. (`warn` puts context in slot 2,
+    // which is exactly the asymmetry that made a mechanical warn→error swap
+    // compile-fail in the DTS build while every runtime assertion stayed green.)
+    expect(perObject!.args[0]).toBeInstanceOf(Error);
+    expect(tailText(perObject!)).toContain('permission denied for schema public');
+    expect(perObject!.args[1]).toMatchObject({ object: 'invoice' });
   });
 
   it('never logs "Schema sync complete" at info over a pass that lost DDL', async () => {
@@ -150,7 +175,10 @@ describe('ObjectQLPlugin.syncRegisteredSchemas() — per-object and summary leve
     const summary = rec.at('error').find((r) => /finished with/.test(r.message));
     expect(summary).toBeDefined();
     expect(summary!.message).toContain('2 FAILED');
-    expect(summary!.meta).toMatchObject({ failed: 2, synced: 0 });
+    // No single Error owns a whole-pass summary, so slot 2 is `undefined` and
+    // the counts ride in slot 3.
+    expect(summary!.args[0]).toBeUndefined();
+    expect(summary!.args[1]).toMatchObject({ failed: 2, synced: 0 });
   });
 
   it('still says "complete" at info when every object synced', async () => {

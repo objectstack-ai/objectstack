@@ -140,16 +140,23 @@ describe('rearmSuspendedWaitTimers — durability degradations are errors (#4632
     await first.execute('wait_flow');
     await new Promise((r) => setTimeout(r, 10)); // let the 1ms deadline lapse
 
-    // A fresh "process" that never registered the flow: resume() cannot run it.
-    const amnesiac = new AutomationEngine(silent());
-    amnesiac.setSuspendedRunStore(store);
+    // `resume()` normally REPORTS machine-state problems in its result rather
+    // than throwing, so the only thing that reaches this catch is a genuine
+    // fault on the resume path (a driver blowing up, the store vanishing
+    // mid-resume). Stand one in.
+    const brokenEngine = {
+      async resume() {
+        throw new Error('datasource connection lost mid-resume');
+      },
+    } as never;
 
     const cap = capturingLogger();
-    await rearmSuspendedWaitTimers(amnesiac, store, undefined, cap.logger);
+    await rearmSuspendedWaitTimers(brokenEngine, store, undefined, cap.logger);
 
     expect(cap.text('error')).toMatch(/is OVERDUE and could not be resumed/);
     expect(cap.text('error')).toMatch(/nothing will\s+wake it again/);
     expect(cap.text('error')).toMatch(/resume\('/);
+    expect(cap.text('error')).toContain('datasource connection lost mid-resume');
   });
 });
 

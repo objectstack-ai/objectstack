@@ -407,11 +407,13 @@ export class ObjectQLPlugin implements Plugin {
                     // shows it, the API accepts it, the author sees a saved
                     // record) while the column it needs was never created. The
                     // author is told the value was saved and it was not.
+                    // `Logger.error` is `(message, error?, meta?)` — the second
+                    // slot is the Error, NOT the context bag `warn` takes there.
                     ctx.logger.error(
                         '[ObjectQLPlugin] reload-time schema sync FAILED — objects changed by this metadata reload are live in the ' +
                             'registry, UI and API, but their new/altered columns were NOT created: writes against them are accepted and ' +
                             'then silently lost or rejected. Fix the driver error below and reload again (or restart) to re-run DDL.',
-                        { error: e?.message ?? String(e) },
+                        e instanceof Error ? e : new Error(String(e?.message ?? e)),
                     );
                 }
             });
@@ -940,18 +942,18 @@ export class ObjectQLPlugin implements Plugin {
       err: unknown,
     ): void => {
       failed++;
+      // NB `Logger.error` is `(message, error?, meta?)` — the Error goes in the
+      // SECOND slot, unlike `warn`'s `(message, meta?)`. This call was written
+      // as a mechanical warn→error swap and the mismatch only surfaced in the
+      // DTS build, never in a test run.
       ctx.logger.error(
         `Schema sync FAILED for object '${obj?.name}' — its table/columns were NOT created or altered, but the object stays ` +
           `registered and served: writes to it will fail, or silently drop the columns that were never created. ` +
           `Nothing that claims to be persisted for this object is guaranteed to be on disk. ` +
           `Fix the driver/datasource error below and restart (or trigger a metadata reload) to re-run DDL; ` +
           `if this deployment manages DDL out-of-band, set \`skipSchemaSync\` / OS_SKIP_SCHEMA_SYNC so the omission is deliberate.`,
-        {
-          object: obj?.name,
-          tableName,
-          driver: driverName,
-          error: err instanceof Error ? err.message : String(err),
-        },
+        err instanceof Error ? err : new Error(String(err)),
+        { object: obj?.name, tableName, driver: driverName },
       );
     };
 
@@ -1070,6 +1072,7 @@ export class ObjectQLPlugin implements Plugin {
       ctx.logger.error(
         `Schema sync finished with ${failed} FAILED object(s) — those objects are registered and served but their storage was ` +
           `never created or altered; writes to them are not durable. See the per-object errors above for the driver failure and the fix.`,
+        undefined,
         { synced, skipped, failed, total: allObjects.length },
       );
     } else if (synced > 0 || skipped > 0) {

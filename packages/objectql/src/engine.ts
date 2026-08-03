@@ -5352,12 +5352,8 @@ export class ObjectQL implements IObjectQLEngine {
               `registered and will be written to: those writes will fail, or drop the columns that were never created. ` +
               `Any seeding or install step that continues past this point is not durable. ` +
               `Fix the driver error below, then re-run the install/sync.`,
-            {
-              object: obj.name,
-              tableName,
-              driver: (driver as any)?.name,
-              error: e instanceof Error ? e.message : String(e),
-            },
+            e as Error,
+            { object: obj.name, tableName, driver: (driver as any)?.name },
           );
         }
       }
