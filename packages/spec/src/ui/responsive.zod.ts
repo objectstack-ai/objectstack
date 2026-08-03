@@ -46,6 +46,18 @@ import { strictObject } from '../shared/strict-object';
 // That is the campaign's thesis in one parse: a strict shell over strip-mode
 // blocks is not a closed surface, it is a closed surface's silhouette.
 //
+// WHERE THIS BINDS, MEASURED — because a tightening must not claim reach it does
+// not have. The door is `getMetadataTypeSchema('page')`, i.e. the registry read
+// by `MetadataManager.validate`, `GET /api/v1/meta` and the Studio page form:
+// against it, the crossed vocabulary and the legacy breakpoint-keyed shape are
+// both rejected, and a clean page still parses. It does NOT bind in
+// `objectstack build` / `validate` — that path never parses page metadata at
+// all, which a control proves rather than a guess: a key `PageComponentSchema`
+// has rejected since ADR-0089 D3a passes both commands and lands in the built
+// artifact. That gap predates this change and is filed as #5000; it is recorded
+// here so nobody reads the campaign's usual "three example apps validate" line
+// as evidence for this surface.
+//
 // LIVENESS IS NOT WHAT THIS CHANGE CLAIMS. `responsiveStyles` is read —
 // objectui's `compileScopedStyles` (`@object-ui/core`, `styling/scoped-styles.ts`)
 // compiles exactly `large`/`medium`/`small`/`xsmall` into id-scoped CSS, and the
