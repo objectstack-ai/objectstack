@@ -14,7 +14,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { valueSchemaFor } from '@objectstack/spec/data';
-import { MATRIX } from './field-zoo.matrix';
+import { MATRIX } from './field-zoo.matrix.js';
 
 describe('ADR-0104: field-zoo MATRIX write vectors parse under valueSchemaFor(stored)', () => {
   const writable = MATRIX.filter(

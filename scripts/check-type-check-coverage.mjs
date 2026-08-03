@@ -129,10 +129,6 @@ const DEBT = {
     errors: 91,
     note: 'code-tier 3; the rest is config-tier (TS2835/TS2347 module resolution) and noise (TS7006).',
   },
-  '@objectstack/dogfood': {
-    errors: 12,
-    note: 'code-tier 8 (TS2322/TS2554) + 3 config-tier + 1 noise.',
-  },
   '@objectstack/hono': {
     errors: 3,
     note: 'all code-tier (TS2769/TS18046).',

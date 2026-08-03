@@ -81,7 +81,11 @@ describe('showcase: the platform connects to its OWN MCP endpoint (#3167 self-co
     try {
       const handler = bundle.handlers['list_objects'];
       expect(handler, 'list_objects handler present').toBeDefined();
-      const result = await handler!({});
+      // Two args, as the engine itself dispatches them (connector-nodes.ts calls
+      // `handler(input, handlerCtx)`); the connector's own tests call it the same
+      // way. The one-arg call here only ever worked because this MCP handler
+      // happens to ignore `ctx` — it was not the declared contract.
+      const result = await handler!({}, {});
       // The app's own object list, round-tripped back through its own MCP surface.
       expect(JSON.stringify(result), `self list_objects result: ${JSON.stringify(result)}`).toContain('showcase_');
     } finally {

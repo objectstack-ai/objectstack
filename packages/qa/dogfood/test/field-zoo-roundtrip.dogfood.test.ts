@@ -21,7 +21,7 @@ import showcaseStack from '@objectstack/example-showcase';
 import { SECRET_MASK } from '@objectstack/objectql';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 
-import { MATRIX, REFERENCE_TARGETS } from './field-zoo.matrix';
+import { MATRIX, REFERENCE_TARGETS } from './field-zoo.matrix.js';
 describe('dogfood: field-type capability matrix round-trips over HTTP (#2004)', () => {
   let stack: VerifyStack;
   let record: Record<string, unknown>;

@@ -21,6 +21,7 @@
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import type { Flow } from '@objectstack/spec/automation';
 
 /** The one object under test: a note the flow stamps as processed. */
 export const FlowNote = ObjectSchema.create({
@@ -42,7 +43,7 @@ export const FlowNote = ObjectSchema.create({
  * `status` to `processed`. Triggered via `POST /automation/flow_touch/trigger`
  * with `{ params: { noteId } }`.
  */
-export const flowTouch = {
+export const flowTouch: Flow = {
   name: 'flow_touch',
   label: 'Flow Touch',
   type: 'autolaunched',
