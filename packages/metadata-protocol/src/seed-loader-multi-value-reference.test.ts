@@ -276,7 +276,14 @@ describe('seed reference resolution — multi-value lookup (multiple: true)', ()
     // The unwritable value never reaches the driver; the record still lands.
     expect(store.book[0].reviewer).toBeUndefined();
     expect(store.book[0].name).toBe('Refactoring');
-    expect(logger.warn).toHaveBeenCalled();
+    // #4729: the row landed WITHOUT its association and the row counters stay
+    // clean, so this is reported at `error` — the one level a reader of the
+    // console is not trained to skim — and the line says what was lost.
+    const dropped = logger.error.mock.calls.map((c: any[]) => String(c[0])).find((m: string) => m.includes('reviewer'));
+    expect(dropped, 'the dropped reference was not reported at error level').toBeDefined();
+    expect(dropped).toContain('DROPPED');
+    expect(dropped).toContain('re-run the seed');
+    expect(logger.warn).not.toHaveBeenCalled();
 
     // framework#3932: the row WAS written, so `errored` stays 0 and the row
     // counters all look healthy — the loss only shows up here.
