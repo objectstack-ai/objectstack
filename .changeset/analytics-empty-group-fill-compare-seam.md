@@ -1,5 +1,5 @@
 ---
-"@objectstack/service-analytics": patch
+"@objectstack/service-analytics": minor
 ---
 
 fix(service-analytics): a measure a query never reported reads 0 for a count/sum on every merge seam (#4708)
@@ -43,3 +43,8 @@ measures plus their `<measure>__compare` columns.
 Widgets that worked around this with `?? 0` in the consumer or a `coalesce` in
 the measure can drop it; the coercion belongs in the executor, which is the only
 layer that knows which aggregate produced the gap.
+
+**New export.** `fillEmptyGroups(rows, columnAggregates)` is exported from the
+package root beside `mergeByDimensions`, so a host assembling a grid outside
+`DatasetExecutor` can apply the same aggregate-kind rule rather than
+reimplementing it — which is what makes this a `minor` rather than a `patch`.
