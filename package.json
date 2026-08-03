@@ -38,7 +38,7 @@
     "check:role-word": "node scripts/check-role-word.mjs",
     "check:adr-anchors": "node scripts/check-adr-anchors.mjs",
     "check:org-identifier": "node scripts/check-org-identifier.mjs",
-    "check:authz-resolver": "node scripts/check-single-authz-resolver.mjs",
+    "check:authz-resolver": "node scripts/check-single-authz-resolver.mjs --self-test && node scripts/check-single-authz-resolver.mjs",
     "check:slot-lookup": "node scripts/check-slot-lookup-ratchet.mjs",
     "check:service-providers": "node scripts/check-service-providers.mjs",
     "check:route-envelope": "node scripts/check-route-envelope.mjs --self-test && node scripts/check-route-envelope.mjs",
