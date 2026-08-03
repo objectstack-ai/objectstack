@@ -81,6 +81,44 @@ looks like the obvious next step and is a provable no-op, for two independent re
 A hand-edited CHANGELOG outside a release is also close to nonexistent in practice. Left
 counted, and recorded here so the idea is not rediscovered as a gap.
 
+## 1b. `check-audit-scope.mjs` — the audit workflow's scope, derived not hand-kept
+
+```bash
+node scripts/docs-audit/check-audit-scope.mjs           # verify (also: pnpm check:docs-audit-scope)
+node scripts/docs-audit/check-audit-scope.mjs --write   # regenerate the list from the filesystem
+node scripts/docs-audit/check-audit-scope.mjs --self-test
+```
+
+The `docs-accuracy-audit` workflow (part 3) carries its default scope **inline**, as
+`ALL_HANDWRITTEN`. It has to: a workflow script runs inside a `node:vm` context whose
+only globals are `log`/`phase`/`console`/`budget`/timers plus
+`agent`/`parallel`/`pipeline`/`workflow`/`args`, with code generation disabled — no
+`require`, no `import`, no filesystem. It can neither walk `content/docs/` nor read a
+JSON artifact, so the list cannot be derived *at run time*.
+
+It is therefore derived at *generation* time instead: `--write` rewrites the block from
+`affected-docs.mjs --all` (one definition of "hand-written doc", not two), and the plain
+run is a CI gate in `lint.yml` that fails when the block and `content/docs/` disagree
+**in either direction**.
+
+Both directions matter, and only one had ever been noticed (#4851):
+
+- **listed but missing** — the 10 `content/docs/protocol/objectos/**` paths left behind
+  by the rename to `protocol/kernel/`, plus 6 others. An audit agent pointed at a
+  non-existent file reads nothing and reports `fixCount: 0`, which in the run summary is
+  indistinguishable from a doc that was checked and found accurate. That is how the
+  accuracy defects in #4781 and #4817 sat in `protocol/kernel/` for ~2 months while full
+  audits reported green.
+- **exists but unlisted** — 48 docs, including all of `protocol/kernel/**` and the whole
+  `capabilities/` directory. A run logging `FULL audit (no args.docs given)` was
+  auditing 130 of 178 docs.
+
+The workflow additionally preflights its resolved scope — including a caller-supplied
+`args.docs`, which no CI gate can see — and aborts naming any path that does not exist;
+and each audit agent reports `docExists` from the read path itself, so a preflight that
+was wrong cannot be laundered into a green summary. The gate covers the default list,
+the preflight covers the caller's list, and the read path checks both.
+
 ## 2. CI gate — `.github/workflows/docs-drift-check.yml`
 
 On any PR that touches `packages/**`, runs `affected-docs.mjs` against the base branch
@@ -119,6 +157,8 @@ opens a PR when there are fixes. See the routine prompt for the exact steps.
 
 ---
 
-**Cost note:** a full audit of all 128 hand-written docs is ~2.8M output tokens / ~160
-agents. Always prefer the change-scoped list (`affected-docs.mjs`) over `--all` except for
-the periodic full backstop.
+**Cost note:** a full audit is ~2 agents per doc — measured at ~2.8M output tokens /
+~160 agents when the scope was 128 docs, and the hand-written set is 178 today (run
+`check-audit-scope.mjs` for the current number; don't trust a count written down here).
+Always prefer the change-scoped list (`affected-docs.mjs`) over `--all` except for the
+periodic full backstop.
