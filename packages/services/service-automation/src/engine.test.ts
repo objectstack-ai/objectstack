@@ -2316,14 +2316,33 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
         expect(warnings.some(w => w.includes('send_sms'))).toBe(false);
     });
 
-    it('registers the flow but warns when a node type has no executor or descriptor', () => {
+    it('registers the flow and reports the unknown type once the vocabulary is sealed (#4771)', () => {
         const warnings: string[] = [];
         const engine = new AutomationEngine(createCapturingLogger(warnings));
 
         // Soft-fail per ADR-0018: register but warn (a temporarily-absent
-        // plugin should not block flow registration).
+        // plugin should not block flow registration). The warning is deferred
+        // to the moment the vocabulary can no longer grow — during boot an
+        // unknown type means "no plugin has registered it YET" (#4771).
         expect(() => engine.registerFlow('plugin_node_flow', baseFlow('not_a_real_type'))).not.toThrow();
+        expect(warnings.some(w => w.includes('not_a_real_type'))).toBe(false);
+
+        const audit = engine.sealNodeTypeVocabulary();
+        expect(audit).toEqual([
+            expect.objectContaining({ flowName: 'plugin_node_flow', unknownTypes: ['not_a_real_type'] }),
+        ]);
         expect(warnings.some(w => w.includes('not_a_real_type'))).toBe(true);
+    });
+
+    it('warns INLINE for a flow registered after the vocabulary is sealed (#4771)', () => {
+        const warnings: string[] = [];
+        const engine = new AutomationEngine(createCapturingLogger(warnings));
+
+        // Post-boot registration (Studio publish / dev reload) is judged against
+        // a complete vocabulary, so the assertion is true and immediate.
+        engine.sealNodeTypeVocabulary();
+        engine.registerFlow('plugin_node_flow', baseFlow('not_a_real_type'));
+        expect(warnings.filter(w => w.includes('not_a_real_type'))).toHaveLength(1);
     });
 
     it('does not warn for the structural start/end node types', () => {
@@ -2339,7 +2358,44 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
             ],
             edges: [{ id: 'e1', source: 'start', target: 'end' }],
         });
+        engine.sealNodeTypeVocabulary();
         expect(warnings.filter(w => w.includes('no registered executor'))).toHaveLength(0);
+    });
+
+    it('stays quiet about a DISABLED flow — a flow that cannot run cannot fail (#4771)', () => {
+        const warnings: string[] = [];
+        const engine = new AutomationEngine(createCapturingLogger(warnings));
+
+        // `status: 'obsolete'` unbinds the flow and guards execute(), so
+        // asserting a run-time failure for it would be the same false claim
+        // this check was moved to stop making.
+        engine.registerFlow('retired_flow', { ...baseFlow('not_a_real_type'), status: 'obsolete' });
+        expect(engine.sealNodeTypeVocabulary()).toEqual([]);
+        expect(warnings.filter(w => w.includes('not_a_real_type'))).toHaveLength(0);
+    });
+
+    it('seals idempotently — a second seal never re-reports the same finding (#4771)', () => {
+        const warnings: string[] = [];
+        const engine = new AutomationEngine(createCapturingLogger(warnings));
+        engine.registerFlow('plugin_node_flow', baseFlow('not_a_real_type'));
+
+        expect(engine.sealNodeTypeVocabulary()).toHaveLength(1);
+        expect(engine.sealNodeTypeVocabulary()).toHaveLength(1); // still reports as STATE…
+        expect(warnings.filter(w => w.includes('not_a_real_type'))).toHaveLength(1); // …but warns once
+    });
+
+    it('says nothing about a type a plugin registered AFTER the flow (the #4771 false alarm)', () => {
+        const warnings: string[] = [];
+        const engine = new AutomationEngine(createCapturingLogger(warnings));
+
+        // Exactly the showcase cold-boot order: flows are pulled first, the
+        // contributing plugin starts second. Pre-fix this warned "will fail at
+        // execution time" about a node type that was registered 0.8s later.
+        engine.registerFlow('plugin_node_flow', baseFlow('approval'));
+        engine.registerNodeExecutor({ type: 'approval', async execute() { return { success: true }; } });
+
+        expect(engine.sealNodeTypeVocabulary()).toEqual([]);
+        expect(warnings.filter(w => w.includes('approval'))).toHaveLength(0);
     });
 
     it('publishes a descriptor into the registry when an executor declares one', () => {

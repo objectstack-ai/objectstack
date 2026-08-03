@@ -1209,4 +1209,115 @@ describe('AuthPlugin', () => {
       expect(ql.tables.sys_member.find((m: any) => m.user_id === 'seeded_u2')).toBeUndefined();
     });
   });
+
+  // ── #4772 — the kernel `cache` service is resolved at COUNTING time ─────────
+  //
+  // AuthPlugin.init() runs before CacheServicePlugin registers `cache` (21ms
+  // earlier in a showcase cold start). The eager probe that used to live in
+  // init() therefore concluded "no cache" in deployments that had one, printed
+  // a warning telling the operator to provision Redis, and — the part that was
+  // not just noise — froze that conclusion, so the rate-limit counters never
+  // reached the shared store even after it came up.
+  describe('rate-limit counter store (ADR-0069 D2 / #4772)', () => {
+    const makeCache = () => {
+      const store = new Map<string, unknown>();
+      return {
+        store,
+        get: vi.fn(async (k: string) => (store.has(k) ? store.get(k) : undefined)),
+        set: vi.fn(async (k: string, v: unknown, _ttl?: number) => { store.set(k, v); }),
+        delete: vi.fn(async (k: string) => store.delete(k)),
+        has: vi.fn(async (k: string) => store.has(k)),
+        clear: vi.fn(async () => store.clear()),
+        stats: vi.fn(async () => ({ hits: 0, misses: 0, keys: store.size })),
+      };
+    };
+
+    /** Boot the plugin against a context whose `cache` resolution is under test control. */
+    const bootWith = async (resolveCache: () => Promise<unknown>) => {
+      const ctx = {
+        ...mockContext,
+        getServiceAsync: vi.fn(async (name: string) => {
+          if (name === 'cache') return await resolveCache();
+          return undefined;
+        }),
+      } as unknown as PluginContext;
+      const plugin = new AuthPlugin({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+      });
+      await plugin.init(ctx);
+      const manager = (ctx.registerService as any).mock.calls.find(
+        ([name]: [string]) => name === 'auth',
+      )?.[1] as AuthManager;
+      return { ctx, manager, storage: (manager as any).config.rateLimitStorage };
+    };
+
+    it('does not warn during init when the cache has not registered yet', async () => {
+      // Exactly the showcase cold start: `cache` is not in the registry when
+      // plugin-auth initializes.
+      const { ctx } = await bootWith(async () => undefined);
+      const warned = (ctx.logger.warn as any).mock.calls.map((c: any[]) => String(c[0]));
+      expect(warned.some((m: string) => m.includes('no cache service registered'))).toBe(false);
+      expect(warned.some((m: string) => m.includes('rate-limit'))).toBe(false);
+    });
+
+    it('counts in the cache registered AFTER init — the counters really are shared', async () => {
+      const cache = makeCache();
+      let registered = false;
+      const { ctx, storage } = await bootWith(async () => (registered ? cache : undefined));
+      expect(storage).toBeDefined();
+
+      // CacheServicePlugin comes up 21ms later.
+      registered = true;
+
+      const decision = await storage.consume('ip:203.0.113.7', { window: 60, max: 3 });
+      expect(decision).toEqual({ allowed: true, retryAfter: null });
+      expect(cache.store.size).toBe(1);
+      const info = (ctx.logger.info as any).mock.calls.map((c: any[]) => String(c[0]));
+      expect(info.some((m: string) => m.includes('rate-limit counters bound to the kernel cache service'))).toBe(true);
+    });
+
+    it('warns at counting time — and only then — when there is genuinely no cache service', async () => {
+      const { ctx, storage } = await bootWith(async () => undefined);
+      const rateLimitWarnings = () =>
+        (ctx.logger.warn as any).mock.calls
+          .map((c: any[]) => String(c[0]))
+          .filter((m: string) => m.includes('rate-limit counters'));
+      expect(rateLimitWarnings()).toEqual([]);
+
+      await storage.consume('ip:198.51.100.9', { window: 60, max: 3 });
+      expect(rateLimitWarnings()).toHaveLength(1);
+
+      const warned = (ctx.logger.warn as any).mock.calls.map((c: any[]) => String(c[0]));
+      expect(warned.some((m: string) => m.includes('no `cache` service registered at all'))).toBe(true);
+    });
+
+    it('leaves the counters to better-auth when the host supplies its own secondaryStorage', async () => {
+      const ctx = {
+        ...mockContext,
+        getServiceAsync: vi.fn(async () => undefined),
+      } as unknown as PluginContext;
+      const plugin = new AuthPlugin({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        secondaryStorage: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      } as any);
+      await plugin.init(ctx);
+      const manager = (ctx.registerService as any).mock.calls.find(
+        ([name]: [string]) => name === 'auth',
+      )?.[1] as AuthManager;
+      expect((manager as any).config.rateLimitStorage).toBeUndefined();
+      expect((manager as any).config.secondaryStorage).toBeDefined();
+    });
+
+    it('never binds the kernel cache as better-auth secondaryStorage (sessions stay in sys_session)', async () => {
+      // ADR-0069 D4's session controls revoke by writing the `sys_session` row;
+      // better-auth answers `findSession` from a secondaryStorage snapshot
+      // without reading the database, so a cache-backed session store would
+      // silently disable them. The cache reaches the COUNTERS only.
+      const cache = makeCache();
+      const { manager } = await bootWith(async () => cache);
+      expect((manager as any).config.secondaryStorage).toBeUndefined();
+    });
+  });
 });

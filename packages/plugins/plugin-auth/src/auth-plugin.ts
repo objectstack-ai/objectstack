@@ -331,33 +331,50 @@ export class AuthPlugin implements Plugin {
       },
     };
 
-    // ADR-0069 D2 — wire the kernel `cache` service as better-auth's shared
-    // secondaryStorage (rate-limit counters + session cache). Shared across
-    // nodes iff the cache service is (Redis adapter in a cluster; memory
-    // single-node). An explicit `secondaryStorage` on the options wins. Skipped
-    // when no cache service is registered — with a warning, because a multi-node
-    // deployment then silently rate-limits per-process (ADR-0069 D2 honesty).
+    // ADR-0069 D2 — cross-node rate-limit counters, backed by the kernel
+    // `cache` service and resolved LAZILY (#4772).
+    //
+    // This used to be an eager `getServiceAsync('cache')` probe right here,
+    // whose answer was frozen for the life of the process. `init()` runs before
+    // CacheServicePlugin registers the service (21ms earlier in a showcase cold
+    // start), so the probe resolved `undefined` in deployments that HAVE a cache
+    // configured, and the warning it printed sent operators to provision Redis
+    // for a problem they did not have. Worse than the misdiagnosis: the
+    // degradation was real and permanent — the counters never reached the shared
+    // store even once it came up, so a multi-node deployment's limits were never
+    // enforced globally. `createLazyCacheRateLimitStorage` resolves the service
+    // at the moment a counter is consumed, which is strictly after `kernel:ready`
+    // and therefore after ANY plugin ordering, and warns only when a counter
+    // genuinely has nowhere shared to count.
+    //
+    // Deliberately `rateLimit.customStorage`, NOT `secondaryStorage`: a
+    // `secondaryStorage` also relocates the SESSION of record into the cache
+    // (better-auth's `createSession` skips the `sys_session` row and
+    // `findSession` answers from the snapshot without reading the database),
+    // which would silently disable the ADR-0069 D4 session controls — idle
+    // timeout, absolute max and concurrent cap all revoke by writing that row.
+    // Whether the session of record should live in the cache at all is #4785.
+    // A host that supplies `secondaryStorage` itself still wins and keeps
+    // better-auth's own `storage: 'secondary-storage'` counters.
     if (!authConfig.secondaryStorage) {
-      // The `cache` service is registered ASYNC — `getService` throws for it,
-      // so resolve via `getServiceAsync` and treat any failure (not registered,
-      // or not yet ready) as "no shared cache".
-      let cache: any;
-      try {
-        cache = await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> }).getServiceAsync?.('cache');
-      } catch {
-        cache = undefined;
-      }
-      if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') {
-        const { cacheSecondaryStorage } = await import('./secondary-storage.js');
-        authConfig.secondaryStorage = cacheSecondaryStorage(cache);
-        ctx.logger.info(
-          '[auth] rate-limit + session store bound to the kernel cache service — shared across nodes iff the cache is (ADR-0069 D2)',
-        );
-      } else {
-        ctx.logger.warn(
-          '[auth] no cache service registered — rate-limit counters use a per-process in-memory store; a multi-node deployment needs a shared cache (Redis) to enforce limits globally (ADR-0069 D2)',
-        );
-      }
+      const { createLazyCacheRateLimitStorage } = await import('./rate-limit-storage.js');
+      authConfig.rateLimitStorage = createLazyCacheRateLimitStorage({
+        // The `cache` service is registered ASYNC — `getService` throws for it,
+        // so resolve via `getServiceAsync` and treat any failure (not
+        // registered, or not yet ready) as "no shared cache, ask again later".
+        resolveCache: async () => {
+          let cache: any;
+          try {
+            cache = await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> })
+              .getServiceAsync?.('cache');
+          } catch {
+            return undefined;
+          }
+          if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') return cache;
+          return undefined;
+        },
+        logger: ctx.logger,
+      });
     }
 
     this.applyEnvSocialProviderFallbacks(authConfig);

@@ -290,7 +290,7 @@ describe('#4389 — registration validators cover region graphs', () => {
     });
   });
 
-  describe('validateNodeTypes (soft-fail)', () => {
+  describe('unknown node types (soft-fail)', () => {
     const unknownNode = [{ id: 'x', type: 'no_such_node_type', label: 'X' }];
 
     const warningsFor = (nested: boolean) => {
@@ -298,6 +298,11 @@ describe('#4389 — registration validators cover region graphs', () => {
       const engine = new AutomationEngine(recordingLogger(warnings));
       registerLoopNode(engine, ctx());
       engine.registerFlow('sweep', flowWith(nested, unknownNode));
+      // #4771 — the verdict is delivered once the vocabulary is sealed (during
+      // boot an unknown type only means "not registered YET"). Region coverage
+      // is unchanged: the audit walks ADR-0031 regions exactly as the
+      // registration-time check did.
+      engine.sealNodeTypeVocabulary();
       return warnings.filter(w => w.includes('no registered executor'));
     };
 

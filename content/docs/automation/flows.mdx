@@ -137,7 +137,7 @@ Each node performs a specific action in the flow.
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | `string` | ✅ | Unique node identifier |
-| `type` | `string` | ✅ | Node type — a built-in id from the table above **or** a plugin-registered one. Per ADR-0018 the spec does not gate this with a closed enum; it is checked against the live action registry at `registerFlow()` |
+| `type` | `string` | ✅ | Node type — a built-in id from the table above **or** a plugin-registered one. Per ADR-0018 the spec does not gate this with a closed enum; it is checked against the live action registry once that registry is complete — plugins contribute node types while they start, so flows registered during boot are checked in one pass when the vocabulary closes (all plugins started), and anything registered after that (Studio publish, dev reload) is checked immediately. Unknown types warn, never reject; executing one fails with `NO_EXECUTOR` |
 | `label` | `string` | ✅ | Display label |
 | `config` | `object` | optional | Type-specific configuration — the registered executor's `configSchema` owns its shape. Keys that schema does not declare are rejected at `registerFlow()`, and the built-in executors `parse()` the value against their Zod contract before running (#4277) |
 | `connectorConfig` | `object` | optional | `{ connectorId, actionId, input }` for a `connector_action` node |

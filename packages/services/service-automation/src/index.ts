@@ -16,6 +16,7 @@ export type {
     SuspendedRunStore,
     RunRecord,
     StepLogEntry,
+    UnknownNodeTypeAuditEntry,
 } from './engine.js';
 
 // Per-run summary (#4354): the fold that turns a run's step log into

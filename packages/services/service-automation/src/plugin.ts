@@ -842,6 +842,41 @@ export class AutomationServicePlugin implements Plugin {
         // startup summary. The warn matters for embedded hosts and tests.
         ctx.hook('kernel:bootstrapped', async () => {
             if (!this.engine) return;
+
+            // ── ADR-0018 §M1 node-type audit, at the ONE moment it can be true
+            // (#4771). The vocabulary is open by design: a plugin contributes
+            // node types from its own init()/start() — ApprovalsServicePlugin
+            // registers `approval` in start() — while flows are pulled and
+            // registered earlier in THIS plugin's start(). Judging types at
+            // registration therefore warned "will fail at execution time" about
+            // every ADR-0019 approval flow ~0.8s before the executor that runs
+            // them showed up: eight false alarms per showcase cold boot, and a
+            // deployment genuinely missing the plugin emitted the identical
+            // eight, so the warning could not distinguish the two.
+            //
+            // kernel:bootstrapped — not kernel:ready — because the vocabulary
+            // is only closed after every kernel:ready handler has settled: this
+            // plugin's own handler registers more flows (syncFlowsFromProtocol),
+            // and a plugin that starts after us could still contribute an
+            // executor from its. That is precisely what the kernel documents
+            // this hook for (reconcile work consuming data produced by a later
+            // plugin's kernel:ready handler). Sealing also re-arms the inline
+            // check, so a Studio publish / dev reload into the RUNNING server —
+            // where the vocabulary really is complete — warns immediately again.
+            //
+            // The engine owns the warning text (one wording for this pass and
+            // for every post-seal registration); this hook only picks the
+            // moment. It returns the audit so a host can also read the finding
+            // as state rather than as log lines.
+            const unknownNodeTypeAudit = this.engine.sealNodeTypeVocabulary();
+            if (unknownNodeTypeAudit.length > 0) {
+                ctx.logger.warn(
+                    `[Automation] ${unknownNodeTypeAudit.length} flow(s) reference node types no installed plugin provides ` +
+                        `(${[...new Set(unknownNodeTypeAudit.flatMap((e) => e.unknownTypes))].join(', ')}) — ` +
+                        `install/enable the plugin that contributes them (e.g. 'approval' ⇐ @objectstack/plugin-approvals).`,
+                );
+            }
+
             const audit = this.engine.getTriggerBindingAudit();
             for (const entry of audit) {
                 ctx.logger.warn(
