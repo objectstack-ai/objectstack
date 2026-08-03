@@ -537,6 +537,25 @@ export const MAX_PERSISTED_HISTORY_STEPS = 200;
  */
 export type RunSummaryLogLevel = 'info' | 'debug' | 'off';
 
+/**
+ * One flow whose node types the (sealed) vocabulary does not cover — the
+ * ADR-0018 §M1 audit entry produced by
+ * {@link AutomationEngine.getUnknownNodeTypeAudit}.
+ *
+ * Structured rather than a log line because the finding has two consumers with
+ * different needs: the plugin warns per entry at `kernel:bootstrapped`, and a
+ * host (CLI startup summary, a health endpoint) reads the state off the engine
+ * — the same split as {@link AutomationEngine.getTriggerBindingAudit}.
+ */
+export interface UnknownNodeTypeAuditEntry {
+    /** Flow that references the unknown type(s). */
+    flowName: string;
+    /** Node `type` values no executor and no action descriptor covers. */
+    unknownTypes: string[];
+    /** The full vocabulary the audit judged against, for the operator's benefit. */
+    knownTypes: string[];
+}
+
 /** Construction options for {@link AutomationEngine}. */
 export interface AutomationEngineOptions {
     /**
@@ -1023,6 +1042,15 @@ export class AutomationEngine implements IAutomationService {
     private flowVersionHistory = new Map<string, Array<{ version: number; definition: FlowParsed; createdAt: string }>>();
     private nodeExecutors = new Map<string, NodeExecutor>();
     private actionDescriptors = new Map<string, ActionDescriptor>();
+    /**
+     * Whether the node-type vocabulary can still grow implicitly (#4771).
+     * `false` for the whole boot — ADR-0018 lets plugins contribute node types
+     * from their own `init()`/`start()`, so an unknown type seen while flows
+     * are being pulled means "not registered YET", not "will fail". The host
+     * flips it via {@link sealNodeTypeVocabulary} once every plugin has
+     * started; only then is an unknown type a finding worth warning about.
+     */
+    private nodeTypeVocabularySealed = false;
     private triggers = new Map<string, FlowTrigger>();
     /**
      * Flows currently wired to a trigger, keyed by flow name → the trigger
@@ -1783,12 +1811,13 @@ export class AutomationEngine implements IAutomationService {
         // Execution takes the parsed shape (schema defaults materialized).
         const { parsed } = this.canonicalizeStoredFlow(name, definition);
 
-        // ADR-0018 §M1 — validate node types against the live action registry.
-        // The protocol no longer gates `type` with a closed enum; membership is
-        // checked here instead. Soft-fail (warn, don't throw): a flow authored
-        // against a plugin that is currently disabled should still register, and
-        // executeNode() already throws NO_EXECUTOR at run time for unknown types.
-        this.validateNodeTypes(name, parsed);
+        // ADR-0018 §M1 — node types are validated against the live action
+        // registry, but NOT here: the check moved to the moment the vocabulary
+        // is closed (see the end of this method and {@link
+        // sealNodeTypeVocabulary}). The protocol no longer gates `type` with a
+        // closed enum; membership is checked at that seam instead, and stays
+        // soft-fail — a flow authored against a currently-absent plugin must
+        // still register, and executeNode() throws NO_EXECUTOR at run time.
 
         // #4277 — REJECT config keys the node's descriptor does not declare
         // (the tightened #4059 warning; a `visibleIf` typo used to register in
@@ -1832,6 +1861,25 @@ export class AutomationEngine implements IAutomationService {
             this.flowEnabled.set(name, true);
         }
         this.logger.info(`Flow registered: ${name} (version ${parsed.version})`);
+
+        // ADR-0018 §M1 node-type check, inline — but ONLY once the vocabulary
+        // is closed (#4771). During boot the registry is still filling up
+        // (plugins contribute executors from their own init()/start(), which
+        // runs after the flow pull), so a verdict here would judge a world that
+        // has not finished forming — that is what warned about every showcase
+        // `approval` flow 0.8s before the `approval` executor existed. The
+        // authoritative boot pass runs in sealNodeTypeVocabulary(); after it,
+        // every later registration (Studio publish, dev reload, a runtime
+        // registerFlow) IS against a complete vocabulary, so it warns at once.
+        // Placed after the enable/disable resolution above so it can honor the
+        // same "a flow that cannot run cannot fail" rule as the audit.
+        if (this.nodeTypeVocabularySealed && this.flowEnabled.get(name) !== false) {
+            const known = this.knownNodeTypes();
+            const unknownTypes = this.unknownNodeTypes(parsed, known);
+            if (unknownTypes.length > 0) {
+                this.warnUnknownNodeTypes({ flowName: name, unknownTypes, knownTypes: [...known] });
+            }
+        }
 
         // Re-bind in case the definition changed its trigger, then (re)activate.
         this.deactivateFlowTrigger(name);
@@ -3302,36 +3350,108 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * Validate each node's `type` against the live action registry (ADR-0018).
+     * The node-type vocabulary this engine can validate against (ADR-0018).
      * A type is known if it is structural (start/end), has a registered
-     * executor, or has a published action descriptor. Unknown types are
-     * warned about (not rejected) so flows authored against a temporarily
-     * absent plugin still register; the runtime surfaces a hard NO_EXECUTOR
-     * error if such a node is actually executed.
+     * executor, or has a published action descriptor.
+     */
+    private knownNodeTypes(): Set<string> {
+        return new Set<string>([
+            ...FLOW_STRUCTURAL_NODE_TYPES,
+            ...this.nodeExecutors.keys(),
+            ...this.actionDescriptors.keys(),
+        ]);
+    }
+
+    /**
+     * The node types one flow references that the CURRENT vocabulary does not
+     * cover. Pure — it reports, it never logs; the callers below decide whether
+     * the answer is authoritative yet.
      *
      * Covers nodes inside ADR-0031 regions (#4389). A node in a `loop` body is
      * as executable as one beside it, so leaving regions out meant the warning
      * that exists to predict NO_EXECUTOR went quiet on exactly the nodes whose
      * failure is hardest to place at run time.
      */
-    private validateNodeTypes(flowName: string, flow: FlowParsed): void {
-        const known = new Set<string>([
-            ...FLOW_STRUCTURAL_NODE_TYPES,
-            ...this.nodeExecutors.keys(),
-            ...this.actionDescriptors.keys(),
-        ]);
-        const unknown = [...new Set(
+    private unknownNodeTypes(flow: FlowParsed, known: Set<string>): string[] {
+        return [...new Set(
             collectFlowGraphs(flow)
                 .flatMap(g => g.nodes.map(n => n.type))
                 .filter(t => !known.has(t)),
         )];
-        if (unknown.length > 0) {
-            this.logger.warn(
-                `Flow '${flowName}' references node type(s) with no registered executor or descriptor: ` +
-                `${unknown.join(', ')}. They will fail at execution time unless a plugin registers them. ` +
-                `Registered types: ${[...known].join(', ') || '(none)'}`,
-            );
+    }
+
+    /**
+     * Unknown-node-type audit over every ENABLED registered flow, against the
+     * live registry (ADR-0018 §M1). Empty when every node type is covered.
+     *
+     * Disabled flows (`status: 'obsolete'`/`'invalid'`, or toggled off) are
+     * skipped for the same reason the whole check moved: the finding asserts a
+     * *run-time* failure, and a flow that cannot run cannot fail. Mirrors
+     * {@link getTriggerBindingAudit}, which skips them too.
+     *
+     * Read this only where the vocabulary is complete — see
+     * {@link sealNodeTypeVocabulary} for why "complete" is a moment in the boot
+     * sequence and not a property of the engine.
+     */
+    getUnknownNodeTypeAudit(): UnknownNodeTypeAuditEntry[] {
+        const known = this.knownNodeTypes();
+        const audit: UnknownNodeTypeAuditEntry[] = [];
+        for (const [flowName, flow] of this.flows) {
+            if (this.flowEnabled.get(flowName) === false) continue;
+            const unknownTypes = this.unknownNodeTypes(flow, known);
+            if (unknownTypes.length > 0) {
+                audit.push({ flowName, unknownTypes, knownTypes: [...known] });
+            }
         }
+        return audit;
+    }
+
+    /**
+     * Declare the node-type vocabulary CLOSED and run the authoritative
+     * unknown-type audit, warning once per offending flow (#4771).
+     *
+     * Why this is a separate act, rather than a check inside `registerFlow`:
+     * ADR-0018 makes the node vocabulary **open and runtime-extensible** — a
+     * plugin contributes types via `registerNodeExecutor()` during its own
+     * `init()`/`start()`. Flows, meanwhile, are registered from the boot pull
+     * long before the last plugin has started. Validating at registration
+     * therefore judged a world that had not finished forming: every ADR-0019
+     * `approval` flow in the showcase was warned about as "will fail at
+     * execution time" ~0.8s before `ApprovalsServicePlugin` registered the
+     * `approval` executor. Eight false alarms per cold boot, phrased as an
+     * assertion — and a deployment that genuinely lacks the plugin produced
+     * the identical eight, so the signal could not tell the two apart.
+     *
+     * The host calls this once the vocabulary can no longer grow implicitly
+     * (`AutomationServicePlugin` does it at `kernel:bootstrapped`, strictly
+     * after every plugin's `start()` and every `kernel:ready` handler). From
+     * then on `registerFlow` validates inline again — a flow published into a
+     * running server (Studio publish, dev reload) IS being registered against
+     * a complete vocabulary, and its unknown types deserve an immediate warn.
+     *
+     * Idempotent: only the first call warns (a second one would re-report
+     * findings whose flows have not changed), and every call returns the
+     * current audit so a host can surface it its own way — the CLI startup
+     * summary reads engine state rather than scraping log lines.
+     */
+    sealNodeTypeVocabulary(): UnknownNodeTypeAuditEntry[] {
+        const alreadySealed = this.nodeTypeVocabularySealed;
+        this.nodeTypeVocabularySealed = true;
+        const audit = this.getUnknownNodeTypeAudit();
+        if (!alreadySealed) {
+            for (const entry of audit) this.warnUnknownNodeTypes(entry);
+        }
+        return audit;
+    }
+
+    /** One warning per flow, shared by the boot audit and the post-seal path. */
+    private warnUnknownNodeTypes(entry: UnknownNodeTypeAuditEntry): void {
+        this.logger.warn(
+            `Flow '${entry.flowName}' references node type(s) with no registered executor or descriptor: ` +
+            `${entry.unknownTypes.join(', ')}. Every plugin has started, so nothing will register them now — ` +
+            `these nodes fail at execution time with NO_EXECUTOR. Install/enable the plugin that contributes them. ` +
+            `Registered types: ${entry.knownTypes.join(', ') || '(none)'}`,
+        );
     }
 
     /**

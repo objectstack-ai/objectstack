@@ -274,14 +274,30 @@ export class ApprovalsServicePlugin implements Plugin {
     // present. The node lets a flow suspend on an approval and resume on
     // decision; the service is wired to the same engine so `decide()` can
     // resume the suspended run.
+    //
+    // #4771 — the degradation must be LOUD (#4632). This used to be one
+    // try/catch logging at `info`, and dev's default log level is `warn`: the
+    // one line that says "every `approval` node in this deployment is dead"
+    // was invisible in exactly the deployment where it is true, while the flow
+    // registration was warning about `approval` in the deployments where it is
+    // false. The catch is also narrowed to the service *lookup*, so a genuine
+    // failure inside registerApprovalNode surfaces as itself instead of being
+    // relabelled "no automation engine".
+    let automation: ApprovalAutomationSurface | undefined;
     try {
-      const automation = ctx.getService<ApprovalAutomationSurface>('automation');
-      if (automation && typeof automation.registerNodeExecutor === 'function') {
-        this.service.attachAutomation(automation);
-        registerApprovalNode(automation, this.service, ctx.logger);
-      }
+      automation = ctx.getService<ApprovalAutomationSurface>('automation');
     } catch {
-      ctx.logger.info('ApprovalsServicePlugin: no automation engine — approval node not registered');
+      automation = undefined; // no automation service registered in this stack
+    }
+    if (automation && typeof automation.registerNodeExecutor === 'function') {
+      this.service.attachAutomation(automation);
+      registerApprovalNode(automation, this.service, ctx.logger);
+    } else {
+      ctx.logger.warn(
+        'ApprovalsServicePlugin: no automation engine — the `approval` flow node is NOT registered. '
+        + 'Every ADR-0019 approval flow in this deployment fails at execution time with NO_EXECUTOR. '
+        + 'Add @objectstack/service-automation to the stack to enable them.',
+      );
     }
   }
 
