@@ -1,5 +1,5 @@
 {
-  "description": "Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. Auto-appended when new schemas are added (commit the change). A listed schema that a build no longer emits fails gen:schema \u2014 remove a key ONLY for a deliberate retirement. See #2978.",
+  "description": "Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. Auto-appended when new schemas are added (commit the change). A listed schema that a build no longer emits fails gen:schema — remove a key ONLY for a deliberate retirement. See #2978.",
   "schemas": [
     "ai/AIModelConfig",
     "ai/AIUsageRecord",
@@ -1256,7 +1256,6 @@
     "system/EmailAndPasswordConfig",
     "system/EmailProvider",
     "system/EmailServiceConfig",
-    "system/EmailTemplate",
     "system/EmailTemplateDefinition",
     "system/EmailTemplateDefinitionCategory",
     "system/EmailTemplateDefinitionVariable",
@@ -1278,7 +1277,6 @@
     "system/HistogramBucketConfig",
     "system/HttpDestinationConfig",
     "system/HttpServerConfig",
-    "system/InAppNotification",
     "system/Incident",
     "system/IncidentCategory",
     "system/IncidentNotificationMatrix",
@@ -1370,7 +1368,6 @@
     "system/PackagePublishResult",
     "system/Plan",
     "system/PresignedUrlConfig",
-    "system/PushNotification",
     "system/QueueConfig",
     "system/QuotaEnforcementResult",
     "system/RPO",
@@ -1385,7 +1382,6 @@
     "system/RollbackPlan",
     "system/RouteHandlerMetadata",
     "system/RowLevelIsolationStrategy",
-    "system/SMSTemplate",
     "system/SamplingDecision",
     "system/SamplingStrategyType",
     "system/Schedule",
