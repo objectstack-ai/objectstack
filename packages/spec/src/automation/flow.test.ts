@@ -1310,10 +1310,15 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
   // ── batch 11: the INNER blocks ────────────────────────────────────────────
   //
   // Closing the four outer shells above left six nested authoring blocks on
-  // zod's default `.strip`, so the gate rejected `nodee:` at the node level
-  // while `connectorConfig: { connectorID }` — one capital letter — parsed
-  // clean and dispatched against an undefined connector id. Same defect, one
-  // layer in: a guard put where the author who wrote it was standing.
+  // zod's default `.strip`. Same defect, one layer in — a guard put where the
+  // author who wrote it was standing.
+  //
+  // What those six were actually hiding is worth stating, because it is not the
+  // obvious case: a slip on a REQUIRED key was always loud (the key then reads
+  // as missing). `.strip` swallowed the OPTIONAL half — the mapped input map,
+  // the retry budget, `interrupting: false`, `required: true` — i.e. precisely
+  // the keys an author adds to CONSTRAIN behaviour, silently replaced by a
+  // permissive default.
   describe('the nested authoring blocks (batch 11)', () => {
     const node = (extra: Record<string, unknown>) => ({ id: 'n1', type: 'script', label: 'N', ...extra });
 
@@ -1323,11 +1328,18 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       }));
       expect(issue!.message).toContain("connector_action node's `connectorConfig`");
       expect(issue!.message).toContain('`params` → `input`');
-      // The one that motivates the block: a case slip on the id the executor
-      // reads, which used to dispatch with `connectorId: undefined`.
-      expect(unknownKeyIssue(FlowNodeSchema, node({
+    });
+
+    it('connectorConfig: the silent case was the OPTIONAL half, not the ids', () => {
+      // Before this change, `{ connectorId, actionId, params }` parsed clean and
+      // the executor dispatched `input ?? {}` — a successful call carrying
+      // nothing. A slip on a REQUIRED id was never silent (it reads as missing),
+      // which is why this block's history names the input map and not the ids.
+      const result = FlowNodeSchema.safeParse(node({
         connectorConfig: { connectorID: 'rest', actionId: 'get' },
-      }))!.message).toContain('`connectorID` → `connectorId`');
+      }));
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result.error!.issues)).toContain('connectorId');
     });
 
     it('position: rejects a third coordinate rather than dropping it at (0, 0)', () => {

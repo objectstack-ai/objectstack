@@ -85,11 +85,21 @@ export const FLOW_STRUCTURAL_NODE_TYPES: readonly string[] = ['start', 'end'];
  * / `.position` / `.inputSchema` / `.waitEventConfig` / `.boundaryConfig` and
  * `Flow.errorHandling`. That is the shape this campaign keeps re-finding: a
  * guard put where the author who wrote it was standing. The outer gate rejected
- * `nodee:` at the node level while `connectorConfig: { connectorID }` — one
- * capital letter — still parsed clean and dispatched the action against an
- * undefined connector id. They use {@link strictObject}, whose candidate list is
- * read from the shape itself, so these six need no drift-guard entry (and adding
- * one would be the second copy of the truth the helper exists to delete).
+ * `nodee:` at the node level while `connectorConfig: { connectorId, actionId,
+ * params: {…} }` parsed clean and dispatched the action with **no inputs at
+ * all** — the executor reads `input ?? {}`, so the whole mapped payload became
+ * an empty object and the call succeeded against nothing.
+ *
+ * Note which cases those six were, and were not, hiding: a slip on a REQUIRED
+ * key (`connectorID` for `connectorId`, `attachedToRef` for `attachedToNodeId`)
+ * was always loud, because the required key then reads as missing. What
+ * `.strip` swallowed is the OPTIONAL half — the input map, the retry budget,
+ * `interrupting: false`, `required: true` — i.e. exactly the keys an author adds
+ * to CONSTRAIN behaviour, dropped back to a permissive default without a word.
+ *
+ * They use {@link strictObject}, whose candidate list is read from the shape
+ * itself, so these six need no drift-guard entry (and adding one would be the
+ * second copy of the truth the helper exists to delete).
  *
  * Deliberately still open, both re-confirmed here rather than left to be
  * rediscovered: the node `config` slot (above), and
@@ -206,9 +216,9 @@ export const FlowNodeSchema = lazySchema(() => z.object({
         payload: 'input',
       },
       history:
-        'Until #4001 these were dropped silently — the block still parsed, so a ' +
-        'mis-spelled connector/action id or a whole input map was ignored and the ' +
-        'action dispatched with `input ?? {}` against `undefined`.',
+        'Until #4001 these were dropped silently — the block still parsed, so a whole ' +
+        'mapped input map written under another word vanished and the executor ' +
+        'dispatched the action with `input ?? {}`: a successful call carrying nothing.',
     },
     {
       connectorId: z.string().describe('Registered connector name'),
@@ -229,8 +239,10 @@ export const FlowNodeSchema = lazySchema(() => z.object({
     {
       surface: "this node's canvas `position`",
       history:
-        'Until #4001 these were dropped silently — the block still parsed, so a node ' +
-        'carrying a size or a third coordinate landed on the canvas at (0, 0) instead.',
+        'Until #4001 these were dropped silently — the block still parsed, so a canvas ' +
+        'hint written beside x/y (a size, a third coordinate, a designer marker) was ' +
+        'discarded, and the round-trip back through the designer could not tell it had ' +
+        'ever been written.',
     },
     { x: z.number(), y: z.number() },
   ).optional(),
@@ -255,8 +267,9 @@ export const FlowNodeSchema = lazySchema(() => z.object({
       },
       history:
         'Until #4001 these were dropped silently — the declaration still parsed, so a ' +
-        'parameter the author marked required was generated as an optional Studio form ' +
-        'field and never validated at run time.',
+        'parameter constrained under a word we do not declare (`optional: false`) came ' +
+        'back UNconstrained: `required` fell to its `false` default, and the engine\'s ' +
+        'pre-execution check (`validateNodeInputSchemas`) then had nothing to require.',
     },
     {
       type: z.enum(['string', 'number', 'boolean', 'object', 'array']).describe('Parameter type'),
@@ -368,9 +381,10 @@ export const FlowNodeSchema = lazySchema(() => z.object({
       duration: 'timerDuration',
     },
     history:
-      'Until #4001 these were dropped silently — the block still parsed, so a boundary ' +
-      'event whose host node the author named with the BPMN word attached to nothing and ' +
-      'never fired.',
+      'Until #4001 these were dropped silently — the block still parsed, so BPMN\'s ' +
+      '`cancelActivity: false` was discarded and `interrupting` fell to its `true` ' +
+      'default: an event the author declared NON-interrupting cancelled the host ' +
+      'activity anyway.',
   }, {
     /** ID of the host node this boundary event is attached to */
     attachedToNodeId: z.string().describe('Host node ID this boundary event monitors'),
