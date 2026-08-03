@@ -20,7 +20,6 @@ import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
 
 export default defineStack({
-  name: 'service-realtime-i18n-extract',
   objects: [SysPresence] as any,
   translations: [
     { en: { objects: enObjects } },

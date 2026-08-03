@@ -1734,6 +1734,88 @@ describe('AuthManager', () => {
       await manager.assertPhoneOtpSendAllowed(PHONE);
     });
 
+    // ── #4790 — the budget is only global if its STORE is ─────────────────
+    describe('where the per-number budget is counted (#4790)', () => {
+      const makeCache = () => {
+        const store = new Map<string, unknown>();
+        return {
+          store,
+          get: vi.fn(async (k: string) => (store.has(k) ? store.get(k) : undefined)),
+          set: vi.fn(async (k: string, v: unknown, _ttl?: number) => { store.set(k, v); }),
+        };
+      };
+      const bootNode = async (sharedCounterStore: any) => {
+        const { manager } = await bootOtp({ sharedCounterStore });
+        manager.setSmsService(fakeSms().service);
+        return manager;
+      };
+
+      it('spends ONE budget across nodes when a shared counter store is wired', async () => {
+        const { createLazyCounterStore } = await import('./rate-limit-storage.js');
+        const cache = makeCache();
+        // Two nodes: separate managers, separate resolvers, one cache.
+        const nodeStore = () =>
+          createLazyCounterStore({ resolveCache: async () => cache as any, subject: 'otp-budget' });
+        const nodeA = await bootNode(nodeStore());
+        const nodeB = await bootNode(nodeStore());
+
+        await nodeA.assertPhoneOtpSendAllowed(PHONE);
+        // Rotating nodes no longer buys a fresh cooldown.
+        await expect(nodeB.assertPhoneOtpSendAllowed(PHONE))
+          .rejects.toThrow(/Too many verification codes/);
+        expect(cache.store.size).toBe(1);
+        expect([...cache.store.keys()][0]).toContain(PHONE);
+      });
+
+      it('resolves the store per check, so a cache registered after boot still binds', async () => {
+        const { createLazyCounterStore } = await import('./rate-limit-storage.js');
+        const cache = makeCache();
+        let registered = false;
+        const manager = await bootNode(
+          createLazyCounterStore({
+            resolveCache: async () => (registered ? (cache as any) : undefined),
+            subject: 'otp-budget',
+          }),
+        );
+        registered = true; // CacheServicePlugin comes up after plugin-auth.
+        await manager.assertPhoneOtpSendAllowed(PHONE);
+        expect(cache.store.size).toBe(1);
+      });
+
+      it('a host-supplied secondaryStorage keeps owning the budget', async () => {
+        const kv = new Map<string, string>();
+        const secondaryStorage = {
+          get: async (k: string) => kv.get(k) ?? null,
+          set: async (k: string, v: string) => { kv.set(k, v); },
+          delete: async (k: string) => { kv.delete(k); },
+        };
+        const cache = makeCache();
+        const { manager } = await bootOtp({
+          secondaryStorage,
+          sharedCounterStore: async () => cache as any,
+        });
+        manager.setSmsService(fakeSms().service);
+        await manager.assertPhoneOtpSendAllowed(PHONE);
+        expect(kv.size).toBe(1);
+        expect(cache.store.size).toBe(0);
+      });
+
+      it('without any shared store the budget is per-manager — degraded, still enforced', async () => {
+        const { manager: nodeA } = await bootOtp();
+        const { manager: nodeB } = await bootOtp();
+        nodeA.setSmsService(fakeSms().service);
+        nodeB.setSmsService(fakeSms().service);
+
+        await nodeA.assertPhoneOtpSendAllowed(PHONE);
+        // Enforced on its own node…
+        await expect(nodeA.assertPhoneOtpSendAllowed(PHONE))
+          .rejects.toThrow(/Too many verification codes/);
+        // …and not on the other one: exactly the N× multiplication #4790 is
+        // about, which is why AuthPlugin warns loudly when it has to do this.
+        await nodeB.assertPhoneOtpSendAllowed(PHONE);
+      });
+    });
+
     it('features.phoneNumberOtp requires plugin + deliverable SMS', async () => {
       const { manager } = await bootOtp();
       expect((manager.getPublicConfig() as any).features.phoneNumberOtp).toBe(false);
