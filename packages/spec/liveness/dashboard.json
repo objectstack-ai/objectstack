@@ -56,7 +56,7 @@
           "authorWarn": true,
           "verifiedAt": "2026-08-03",
           "authorHint": "No dashboard render path reads the top-level `colorVariant`. The inline metric card takes its accent from `options` (MetricWidget's `colorVariant` prop is fed by the `...options` spread in DashboardRenderer), and the ADR-0021 dataset-bound path (DatasetWidget) has no colour affordance at all — so move it under `options`, or drop it.",
-          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03 (objectui @91757a7). Every read of `widget.colorVariant` is an AUTHORING surface — WidgetConfigPanel.tsx:407, plugin-designer/DashboardEditor.tsx:266-267, metadata-admin/inspectors/DashboardWidgetInspector.tsx:380, DashboardWithConfig.tsx:113 (config-panel draft) — i.e. the designers write the key back out and no renderer consults it. DashboardRenderer builds the metric/object-metric component schema explicitly (`{ type: 'metric', ...options, label, value }`), so only `options.colorVariant` ever reaches MetricWidget. This repo's own packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts authors it 7 times, which is the cost of the gap being invisible."
+          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03 (objectui @91757a7). Every read of `widget.colorVariant` is an AUTHORING surface — WidgetConfigPanel.tsx:407, plugin-designer/DashboardEditor.tsx:266-267, metadata-admin/inspectors/DashboardWidgetInspector.tsx:380, DashboardWithConfig.tsx:113 (config-panel draft) — i.e. the designers write the key back out and no renderer consults it. DashboardRenderer builds the metric/object-metric component schema explicitly (`{ type: 'metric', ...options, label, value }`), so only `options.colorVariant` ever reaches MetricWidget. This repo's own packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts authors it 7 times, which is the cost of the gap being invisible. ADR-0049 enforce-or-remove tracked in #5010."
         },
         "requiresObject": {
           "status": "live",
@@ -75,21 +75,21 @@
           "authorWarn": true,
           "verifiedAt": "2026-08-03",
           "authorHint": "No renderer draws a per-widget action button — only `dashboard.header.actions[]` is dispatched. Move the affordance to a header action, or drop the key.",
-          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03 (objectui @91757a7). All 14 `actionUrl` occurrences in DashboardRenderer.tsx are scoped to `schema.header.actions[]` (:242-245 ActionDef build, :282-284 label i18n, :767-792 dispatch) — that is the DashboardHeaderAction schema, a different shape. Nothing anywhere reads `widget.actionUrl`. Note the second-order cost: packages/lint/src/validate-dashboard-action-refs.ts:328-333 enforces reference integrity on this key and its docblock calls it 'the per-widget button', mirroring a runtime dispatch that does not exist — so a dangling target fails the build for an affordance that never renders."
+          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03 (objectui @91757a7). All 14 `actionUrl` occurrences in DashboardRenderer.tsx are scoped to `schema.header.actions[]` (:242-245 ActionDef build, :282-284 label i18n, :767-792 dispatch) — that is the DashboardHeaderAction schema, a different shape. Nothing anywhere reads `widget.actionUrl`. Note the second-order cost: packages/lint/src/validate-dashboard-action-refs.ts:328-333 enforces reference integrity on this key and its docblock calls it 'the per-widget button', mirroring a runtime dispatch that does not exist — so a dangling target fails the build for an affordance that never renders. ADR-0049 enforce-or-remove tracked in #5010."
         },
         "actionType": {
           "status": "dead",
           "authorWarn": true,
           "verifiedAt": "2026-08-03",
           "authorHint": "Pairs with the dead `actionUrl` — no per-widget action button exists. Use `dashboard.header.actions[]`.",
-          "note": "Same absence as `actionUrl`, same measurement (objectui @91757a7): every `actionType` read in the dashboard renderer belongs to `header.actions[]`. Read only by packages/lint/src/validate-dashboard-action-refs.ts:331 to pick which resolution rule to apply to the (unrendered) `actionUrl`."
+          "note": "Same absence as `actionUrl`, same measurement (objectui @91757a7): every `actionType` read in the dashboard renderer belongs to `header.actions[]`. Read only by packages/lint/src/validate-dashboard-action-refs.ts:331 to pick which resolution rule to apply to the (unrendered) `actionUrl`. ADR-0049 enforce-or-remove tracked in #5010."
         },
         "actionIcon": {
           "status": "dead",
           "authorWarn": true,
           "verifiedAt": "2026-08-03",
           "authorHint": "No per-widget action button renders, so its icon reaches nothing. Use `dashboard.header.actions[].icon`.",
-          "note": "The starkest of the three: zero references in either repo outside this schema declaration and one objectui type comment listing spec-derived keys (packages/types/src/complex.ts:676). Not even the action-ref lint looks at it."
+          "note": "The starkest of the three: zero references in either repo outside this schema declaration and one objectui type comment listing spec-derived keys (packages/types/src/complex.ts:676). Not even the action-ref lint looks at it. ADR-0049 enforce-or-remove tracked in #5010."
         },
         "filter": {
           "status": "live",
@@ -101,7 +101,7 @@
           "status": "live",
           "verifiedAt": "2026-08-03",
           "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:495 (passed into the object-chart schema); objectui: packages/core/src/utils/compare-to.ts:23-25 — shiftFilterByCompareTo honours all three declared arms; objectui: packages/plugin-charts/src/ObjectChart.tsx:468-477",
-          "note": "LIVE ON ONE PATH ONLY — recorded rather than smoothed over, the `action.disabled` precedent. The inline object-provider chart path honours all three arms ('previousPeriod' / 'previousYear' / { offset }) via shiftFilterByCompareTo. The ADR-0021 dataset-bound path — which the spec calls the single author-facing analytics shape — does NOT: DatasetWidget.tsx:163-168 deliberately DROPS the two string arms, and forwards the `{ offset }` object into DatasetSelection.compareTo, whose contract (packages/spec/src/contracts/analytics-service.ts:104-109) is `{ kind, dimension }` — so packages/services/service-analytics/src/dataset-executor.ts:870-876 throws 'compareTo requires a timeDimension \"undefined\"'. Filed as a follow-up; do not read this `live` as 'works on a dataset widget'."
+          "note": "LIVE ON ONE PATH ONLY — recorded rather than smoothed over, the `action.disabled` precedent. The inline object-provider chart path honours all three arms ('previousPeriod' / 'previousYear' / { offset }) via shiftFilterByCompareTo. The ADR-0021 dataset-bound path — which the spec calls the single author-facing analytics shape — does NOT: DatasetWidget.tsx:163-168 deliberately DROPS the two string arms, and forwards the `{ offset }` object into DatasetSelection.compareTo, whose contract (packages/spec/src/contracts/analytics-service.ts:104-109) is `{ kind, dimension }` — so packages/services/service-analytics/src/dataset-executor.ts:870-876 throws 'compareTo requires a timeDimension \"undefined\"'. Filed as #5011; do not read this `live` as 'works on a dataset widget'."
         },
         "dataset": {
           "status": "live",
@@ -155,7 +155,7 @@
           "authorWarn": true,
           "verifiedAt": "2026-08-03",
           "authorHint": "Declared ARIA attributes never reach the DOM on a dashboard widget — no renderer applies them. Delete the key; the renderer emits its own aria-* attributes.",
-          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03 across both repos: no consumer of `widget.aria` anywhere. The `aria-*` attributes in DashboardRenderer / DatasetWidget are the renderer's own DOM attributes, and objectui's one `.aria` read (plugin-view/src/ObjectView.tsx:989) is the VIEW's. Same false-compliance shape as the dashboard-level `aria` removed in the #3896 sweep — an accessibility guarantee an author can declare and nothing honours."
+          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03 across both repos: no consumer of `widget.aria` anywhere. The `aria-*` attributes in DashboardRenderer / DatasetWidget are the renderer's own DOM attributes, and objectui's one `.aria` read (plugin-view/src/ObjectView.tsx:989) is the VIEW's. Same false-compliance shape as the dashboard-level `aria` removed in the #3896 sweep — an accessibility guarantee an author can declare and nothing honours. ADR-0049 enforce-or-remove tracked in #5010."
         }
       }
     },
