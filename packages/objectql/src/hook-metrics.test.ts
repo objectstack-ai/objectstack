@@ -82,7 +82,13 @@ describe('hook metrics', () => {
             object: 'account',
             events: ['beforeInsert'],
             priority: 100,
-            condition: 'name == "skipme"',
+            // [#4775] Was a bare `name == "skipme"`. Hook conditions are
+            // `record`-scoped, so the bare identifier resolved to nothing and
+            // the expression FAULTED on every call — the "skip" this test
+            // asserted came from the old swallow (fault → warn → false), not
+            // from a condition that answered NO. `record.name` is the same
+            // intent, actually evaluated: 'acme' != 'skipme' ⇒ FALSE ⇒ skip.
+            condition: 'record.name == "skipme"',
             handler: async () => { /* noop */ },
         };
         bindHooksToEngine(engine, [hook], { packageId: 'p', metrics });
