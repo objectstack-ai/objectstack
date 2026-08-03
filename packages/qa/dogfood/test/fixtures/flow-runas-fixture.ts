@@ -30,6 +30,7 @@
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, RLS, type PermissionSet } from '@objectstack/spec/security';
+import type { Flow } from '@objectstack/spec/automation';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
 /** The one object under test: an owner-scoped note (isolated via `created_by`). */
@@ -51,7 +52,7 @@ export const RunAsNote = ObjectSchema.create({
  * whose id is passed as the `noteId` input variable. The two variants differ
  * ONLY in `runAs`, isolating the identity switch as the single variable.
  */
-function touchFlow(name: string, runAs: 'system' | 'user', stamp: string) {
+function touchFlow(name: string, runAs: 'system' | 'user', stamp: string): Flow {
   return {
     name,
     label: `RunAs ${runAs} touch`,
@@ -81,7 +82,7 @@ function touchFlow(name: string, runAs: 'system' | 'user', stamp: string) {
  * `data.output.found`. Under `system` the elevated read returns the record;
  * under `user` the RLS-scoped read returns null.
  */
-function readFlow(name: string, runAs: 'system' | 'user') {
+function readFlow(name: string, runAs: 'system' | 'user'): Flow {
   return {
     name,
     label: `RunAs ${runAs} read`,

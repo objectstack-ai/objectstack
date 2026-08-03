@@ -799,7 +799,22 @@ const step17: MigrationStep = {
     + 'It is deliberately NOT converted to `shared` `RateLimitConfig`, which limits the calls '
     + 'others make to US; #4684 split their names for precisely this confusion, and rewriting an '
     + 'outbound cap into an inbound one would throttle the wrong direction. Delete the key and '
-    + 'rate-limit where the calls are actually made — the connector provider or upstream gateway.',
+    + 'rate-limit where the calls are actually made — the connector provider or upstream gateway.\n\n'
+    + 'Last, it removes `dashboard.widgets[].responsive` (#4876) — the straggler of the #3896 '
+    + 'sweep above, which retired the literally same-named `view.responsive` on the same '
+    + 'evidence four days earlier. Re-measured before removal: no objectui code reads '
+    + '`widget.responsive` (DashboardRenderer, DashboardEditor and plugin-designer name it only '
+    + 'in comments), and there are zero authored instances repo-wide, so the conversion is '
+    + 'expected to be a no-op on every real source — it exists so that a stored dashboard '
+    + 'carrying the key is cleaned deterministically rather than meeting the tombstone at load. '
+    + 'What kept it alive was not evidence but a hole in the instrument: the liveness ledger '
+    + 'declares no `children` on `dashboard.widgets`, and the walk only drills one level through '
+    + 'an explicit `children`, so no widget-level key has ever been classified at all (filed as '
+    + '#4956, fixed separately). The removal is deliberately narrow — it takes the widget EMBED, '
+    + 'not the shape. `ResponsiveConfig` stays exported and stays live on '
+    + '`page.components[].responsive`, which objectui `useResponsiveConfig` genuinely reads, so '
+    + 'no import breaks and authors who need breakpoint behaviour today have somewhere real to '
+    + 'put it. Per-widget responsive layout returns if and when a renderer implements it.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -839,6 +854,7 @@ const step17: MigrationStep = {
     'object-enable-trash-mru-removed',
     'hook-body-crypto-hash-removed',
     'connector-rate-limit-config-removed',
+    'dashboard-widget-responsive-removed',
   ],
   semantic: [
     {

@@ -186,6 +186,86 @@ describe('seed deferred back-fill failure is reported, not swallowed (framework#
     expect(result.errors.some((e: { field: string }) => e.field === 'head_id')).toBe(true);
   });
 
+  /**
+   * #4729 — the LOG LEVEL has to agree with the count.
+   *
+   * The comment above this catch has always said the failure "must be a
+   * reported, counted error, never a silent warning", and `recordDeferredError`
+   * duly counts it — but the call underneath it was `logger.warn`, i.e. the
+   * level #4420 proved nobody reads, on the ONE line this failure leaves in a
+   * seed's console output. AGENTS.md → "Degradation log levels" also requires
+   * that line to carry the consequence and the fix, not just a label.
+   */
+  it('logs the failed back-fill at ERROR, naming object.field, the NULL consequence and the remedy (#4729)', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = createMetadata();
+    const logger = createLogger();
+
+    const realUpdate = (engine.update as any).getMockImplementation();
+    (engine.update as any).mockImplementation(async (obj: string, data: any, opts: any) => {
+      if (obj === 'audit_department') throw new Error('UPDATE rejected by validation rule');
+      return realUpdate(obj, data, opts);
+    });
+
+    const result = await new SeedLoaderService(engine, metadata, logger).load({
+      seeds: SEEDS,
+      config: CONFIG,
+    });
+
+    // The reference genuinely did not land.
+    expect(store.audit_department.find((r) => r.name === 'Engineering')!.head_id == null).toBe(true);
+
+    const line = logger.error.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .find((m: string) => m.includes('audit_department.head_id'));
+    expect(line, 'the failed back-fill was not reported at error level').toBeDefined();
+
+    // The consequence, concretely: which reference stays NULL, and that
+    // everything else looks fine.
+    expect(line).toContain('stays NULL');
+    expect(line).toContain('HALF-WRITTEN');
+    expect(line).toContain('audit_worker.name');
+    // The fix.
+    expect(line).toMatch(/re-run the seed/);
+    // The cause travels on the same line (a `warn` reader is not owed a second look).
+    expect(line).toContain('UPDATE rejected by validation rule');
+    // The structured error object is passed through for the logger's own
+    // error rendering, per the `Logger` contract's `(message, error, meta)`.
+    const [, err, meta] = logger.error.mock.calls.find((c: unknown[]) =>
+      String(c[0]).includes('audit_department.head_id'),
+    )!;
+    expect(err).toBeInstanceOf(Error);
+    expect(meta).toMatchObject({ object: 'audit_department', field: 'head_id' });
+
+    // NOT at warn — the level this issue exists to correct.
+    expect(
+      logger.warn.mock.calls.some((c: unknown[]) => String(c[0]).includes('deferred reference')),
+      'the back-fill failure is still being reported at warn',
+    ).toBe(false);
+
+    // …and it is still COUNTED, which is what the level now agrees with.
+    expect(result.success).toBe(false);
+    expect(result.summary.totalErrored).toBeGreaterThan(0);
+    expect(result.errors.some((e: { field: string }) => e.field === 'head_id')).toBe(true);
+  });
+
+  it('a back-fill that SUCCEEDS logs nothing loud (#4729 — do not train readers to skim `error`)', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = createMetadata();
+    const logger = createLogger();
+
+    const result = await new SeedLoaderService(engine, metadata, logger).load({
+      seeds: SEEDS,
+      config: CONFIG,
+    });
+
+    const aliceId = store.audit_worker.find((r) => r.name === 'Alice')!.id;
+    expect(store.audit_department.find((r) => r.name === 'Engineering')!.head_id).toBe(aliceId);
+    expect(result.success).toBe(true);
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
   it('a transient blip that recovers on retry still reports clean success', async () => {
     const { engine, store } = createFaithfulEngine();
     const metadata = createMetadata();

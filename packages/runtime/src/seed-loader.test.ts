@@ -1251,7 +1251,11 @@ describe('SeedLoaderService', () => {
       });
 
       expect(result.summary.totalErrored).toBe(1);
-      expect(logger.warn).toHaveBeenCalled();
+      // #4729: a failed write is COUNTED as an error, so it logs at `error` —
+      // count and log level must agree (AGENTS.md → "Degradation log levels").
+      expect(logger.error).toHaveBeenCalled();
+      expect(logger.error.mock.calls.some(([m]) => String(m).includes('Failed to write account'))).toBe(true);
+      expect(logger.warn).not.toHaveBeenCalled();
     });
 
     it('should handle multiple references on same object', async () => {

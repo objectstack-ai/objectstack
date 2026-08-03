@@ -20,6 +20,7 @@
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import type { Flow } from '@objectstack/spec/automation';
 
 /** One object, so the sweep flow has something real to select. */
 export const FxInvoice = ObjectSchema.create({
@@ -36,7 +37,7 @@ export const FxInvoice = ObjectSchema.create({
 });
 
 /** start → get_record → script → end. `fn` is the only thing that varies. */
-const sweepFlow = (name: string, fn: string) => ({
+const sweepFlow = (name: string, fn: string): Flow => ({
   name,
   label: name,
   type: 'autolaunched',
