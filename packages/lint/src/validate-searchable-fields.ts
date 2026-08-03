@@ -2,7 +2,7 @@
 
 /**
  * [ADR-0061 — searchable set] `searchableFields` entries must name a field the
- * object actually has.
+ * object actually has — and, on a list view, one the runtime will agree to scan.
  *
  * `searchableFields` is `z.array(z.string())` in both `object.zod.ts` and the
  * list-view schema, so nothing checks that an entry resolves to anything. Rename
@@ -41,25 +41,48 @@
  * `validate-flow-template-paths` makes for a filter-position token: gating when
  * the miss widens the query rather than shrinking the page.
  *
- * ── What is checked, and what is deliberately not ────────────────────────
+ * ── What is checked ──────────────────────────────────────────────────────
  *
- * Existence only. A field that exists but is an odd search target (a `json`
- * column, say) is NOT flagged: an explicit `searchableFields` is authoritative
- * — the engine scans exactly what it names — so declaring one is a choice, not
- * a mistake. Only a name resolving to no field at all is drift.
+ * 1. EXISTENCE, on every surface (`searchable-field-unknown`): an entry that
+ *    resolves to no field at all is drift, whatever declared it.
  *
- * Three skips keep false positives near zero (ADR-0072 D1 — one dead finding
- * and authors stop trusting the linter):
+ * 2. RUNTIME ADMISSIBILITY, on view-level narrowings only
+ *    (`searchable-field-unsearchable`, #4830): a list view's
+ *    `searchableFields` is echoed verbatim by clients as the `$searchFields`
+ *    override, and the #4254 ingress gate
+ *    (`assertSearchFieldsAreSearchable`, `@objectstack/metadata-protocol`)
+ *    refuses any entry outside the object's server-resolved allowed set — so
+ *    ONE lookup-typed entry 400s EVERY toolbar search on that list, for every
+ *    role, and until #4830 `compile`/`validate` passed it in silence. The
+ *    allowed set here is computed by the very function the runtime gate and
+ *    the engine consult — {@link resolveSearchFieldResolution}
+ *    (`@objectstack/spec/data`) — never by a second copy of its type list, so
+ *    linter, gate and engine cannot drift apart (the same one-source move
+ *    #4254 made between gate and engine).
+ *
+ * The OBJECT's own `searchableFields` stays existence-only: the runtime's
+ * declared branch filters by existence, never by type, so a json or lookup
+ * column declared THERE is a choice the engine executes (a `$contains` over
+ * the raw column), not a 400. Flagging it would reject metadata the runtime
+ * accepts — the false finding that makes authors stop trusting the linter
+ * (ADR-0072 D1).
+ *
+ * Three skips keep false positives near zero (ADR-0072 D1):
  *
  *   1. An object this stack does not define. It may come from another package,
  *      and a field map we cannot see cannot be judged (the same skip the
  *      page/flow/widget rules take).
  *   2. An object that declares no field map at all — external objects and
  *      datasource-introspected schemas whose columns are resolved at runtime.
- *   3. Registry-injected system columns, which are searchable at runtime but
- *      never appear in authored `fields` — the package-shared `SYSTEM_FIELDS`
+ *   3. Registry-injected system columns, which exist at runtime but never
+ *      appear in authored `fields` — the package-shared `SYSTEM_FIELDS`
  *      (`system-fields.ts`), derived from the spec's own declarations rather
- *      than hand-copied (#4330).
+ *      than hand-copied (#4330). The admissibility check also skips them:
+ *      their runtime field metadata (type, hidden) is registry-owned and not
+ *      visible here, and judging a column we cannot see risks the false
+ *      positive this list exists to avoid. (Cost asymmetry: a system column
+ *      the runtime would refuse — `created_by` in a view's narrowing — is a
+ *      missed finding, not a wrong one.)
  *
  * Dotted paths are NOT skipped here, unlike every sibling rule. Elsewhere
  * `owner_id.name` is left alone because the query engine resolves the traversal;
@@ -68,9 +91,17 @@
  * one wrong spelling most likely to be borrowed from `select`/`sort`.
  */
 
+import {
+  resolveSearchFieldResolution,
+  SEARCHABLE_TEXTUAL_TYPES,
+  SEARCHABLE_ENUM_TYPES,
+  SEARCH_AUTO_EXCLUDED_FIELDS,
+  type SearchFieldMeta,
+} from '@objectstack/spec/data';
 import { SYSTEM_FIELDS } from './system-fields.js';
 
 export const SEARCHABLE_FIELD_UNKNOWN = 'searchable-field-unknown';
+export const SEARCHABLE_FIELD_UNSEARCHABLE = 'searchable-field-unsearchable';
 
 export type SearchableFieldSeverity = 'error' | 'warning';
 
@@ -88,6 +119,19 @@ export interface SearchableFieldFinding {
   /** How to fix it. */
   hint: string;
 }
+
+/**
+ * Which runtime judgment applies to the declaration being checked:
+ *
+ * - `'canonical'` — the object's own `searchableFields`. The runtime honors
+ *   any entry that exists (existence-filtered, never type-filtered), so only
+ *   existence is checked.
+ * - `'narrowing'` — a list view's `searchableFields` (metadata or react
+ *   surface). Clients echo it as the `$searchFields` override, which the
+ *   #4254 ingress gate intersects with the object's allowed set — entries the
+ *   runtime would refuse are flagged (#4830).
+ */
+export type SearchableFieldRole = 'canonical' | 'narrowing';
 
 type AnyRec = Record<string, unknown>;
 
@@ -109,19 +153,86 @@ function strName(v: unknown): string | undefined {
 }
 
 /**
- * The declared field NAMES of an object, or `null` when the object declares no
- * readable field map (external / introspected — nothing to judge against).
- * Reads both shapes: the name-keyed map and the legacy array of `{ name }`.
+ * The slice of an object the search checks resolve against: the authored
+ * field map (existence + the `type`/`hidden` meta search resolution reads),
+ * plus the object's own declarations the runtime's resolution consumes.
+ * `null` when the object declares no readable field map (external /
+ * introspected — nothing to judge against).
  */
-function declaredFieldNames(obj: AnyRec): Set<string> | null {
+export interface ObjectSearchTarget {
+  /** Authored field names, for the existence check. */
+  names: Set<string>;
+  /** name → the metadata slice `resolveSearchFieldResolution` reads. */
+  fields: Record<string, SearchFieldMeta>;
+  /** The object's own `searchableFields`, when declared as an array. */
+  searchableFields?: string[];
+  /** `nameField` / `displayNameField` — ordering only, passed for parity. */
+  displayField?: string;
+}
+
+/**
+ * Read both field-map shapes (name-keyed map, legacy array of `{ name }`) into
+ * the target slice, or `null` when the object declares no readable field map.
+ */
+function declaredFieldTarget(obj: AnyRec): ObjectSearchTarget | null {
   const fields = obj.fields;
   if (!fields || typeof fields !== 'object') return null;
   const names = new Set<string>();
+  const metas: Record<string, SearchFieldMeta> = {};
   for (const f of asArray(fields)) {
     const n = strName(f.name);
-    if (n) names.add(n);
+    if (!n) continue;
+    names.add(n);
+    metas[n] = {
+      type: typeof f.type === 'string' ? f.type : undefined,
+      hidden: f.hidden === true,
+    };
   }
-  return names.size > 0 ? names : null;
+  if (names.size === 0) return null;
+  const searchableFields = Array.isArray(obj.searchableFields)
+    ? obj.searchableFields.filter((e): e is string => typeof e === 'string')
+    : undefined;
+  return {
+    names,
+    fields: metas,
+    searchableFields,
+    displayField: strName(obj.nameField) ?? strName(obj.displayNameField),
+  };
+}
+
+/**
+ * The object's ALLOWED search-field set, judged by the SAME function the
+ * runtime ingress gate and the engine consult (`resolveSearchFieldResolution`,
+ * `@objectstack/spec/data`) — the one-source-of-truth requirement of #4830.
+ *
+ * One seam papered over deliberately: the runtime resolves the declared branch
+ * against the REGISTRY field map (authored + injected system columns), while
+ * this rule only sees authored `fields`. A declared entry naming a system
+ * column (`searchableFields: ['name', 'created_at']`) must therefore survive
+ * the resolution's existence filter exactly as it does at runtime, so such
+ * entries get a stub meta ({}). The stub cannot leak into the auto-default:
+ * `autoDefaultFields` requires a readable searchable `type`, which a stub
+ * never has.
+ */
+function resolveAllowedSet(target: ObjectSearchTarget): {
+  allowed: Set<string>;
+  source: 'declared' | 'auto';
+  declaredList: string[];
+} {
+  let fields = target.fields;
+  const systemDeclared = (target.searchableFields ?? []).filter(
+    (f) => !target.names.has(f) && SYSTEM_FIELDS.has(f),
+  );
+  if (systemDeclared.length > 0) {
+    fields = { ...fields };
+    for (const f of systemDeclared) fields[f] = {};
+  }
+  const { allowed, source } = resolveSearchFieldResolution({
+    fields,
+    searchableFields: target.searchableFields,
+    displayField: target.displayField,
+  });
+  return { allowed: new Set(allowed), source, declaredList: allowed };
 }
 
 /** Levenshtein-bounded "did you mean?" over the object's own field names. */
@@ -157,50 +268,57 @@ function distance(a: string, b: string): number {
 }
 
 /**
- * object name → declared field names. `null` marks an object with no readable
- * field map, so "declared nothing" stays distinguishable from "not in stack".
- * Exported alongside `checkSearchableFieldList` so every surface that authors
- * a searchable set resolves against the identical index (#4329).
+ * object name → the search-target slice. `null` marks an object with no
+ * readable field map, so "declared nothing" stays distinguishable from "not in
+ * stack". Exported alongside `checkSearchableFieldList` so every surface that
+ * authors a searchable set resolves against the identical index (#4329).
  */
 export function indexObjectSearchTargets(
   stack: Record<string, unknown>,
-): Map<string, Set<string> | null> {
-  const fieldsByObject = new Map<string, Set<string> | null>();
+): Map<string, ObjectSearchTarget | null> {
+  const fieldsByObject = new Map<string, ObjectSearchTarget | null>();
   if (!isRec(stack)) return fieldsByObject;
   for (const obj of asArray(stack.objects)) {
     const name = strName(obj.name);
-    if (name) fieldsByObject.set(name, declaredFieldNames(obj));
+    if (name) fieldsByObject.set(name, declaredFieldTarget(obj));
   }
   return fieldsByObject;
 }
 
 /**
- * Check one `searchableFields` array against the field map `fieldsByObject`
+ * Check one `searchableFields` array against the target `fieldsByObject`
  * holds for `objectName` — the shared core behind every surface that authors a
  * searchable set: the object/list-view metadata walked by
  * `validateSearchableFields` below, and the react page surface
  * (`<ListView searchableFields={…}>`, `validate-react-page-props`), which
  * reuses it so the two surfaces agree on what counts as a field — same three
- * skips, same dotted-path strictness (#4329).
+ * skips, same dotted-path strictness (#4329), same runtime-admissibility
+ * judgment for a view-level narrowing (#4830).
  *
  * `subject` names the declaration for the message, since an object's own set
  * and a view's narrowing of it are fixed differently; the entry index is
- * appended to `path` so the author can go straight to the stale name.
+ * appended to `path` so the author can go straight to the stale name. `role`
+ * picks the runtime judgment to mirror — see {@link SearchableFieldRole};
+ * every list-view surface is a `'narrowing'`, which is the default.
  */
 export function checkSearchableFieldList(
   declared: unknown,
   objectName: string | undefined,
-  fieldsByObject: ReadonlyMap<string, Set<string> | null>,
+  fieldsByObject: ReadonlyMap<string, ObjectSearchTarget | null>,
   where: string,
   path: string,
   subject: string,
+  role: SearchableFieldRole = 'narrowing',
 ): SearchableFieldFinding[] {
   const findings: SearchableFieldFinding[] = [];
   if (!Array.isArray(declared) || declared.length === 0) return findings;
   if (!objectName) return findings; // nothing to resolve against
   if (!fieldsByObject.has(objectName)) return findings; // ① object from another package
-  const known = fieldsByObject.get(objectName);
-  if (!known) return findings; // ② external / introspected — no authored field map
+  const target = fieldsByObject.get(objectName);
+  if (!target) return findings; // ② external / introspected — no authored field map
+
+  const known = target.names;
+  const resolution = role === 'narrowing' ? resolveAllowedSet(target) : undefined;
 
   for (let i = 0; i < declared.length; i++) {
     const entry = declared[i];
@@ -208,30 +326,96 @@ export function checkSearchableFieldList(
     // schema owns, not a dangling reference.
     const name = strName(entry);
     if (!name) continue;
-    if (known.has(name) || SYSTEM_FIELDS.has(name)) continue; // ③ system column
 
-    const dotted = name.includes('.');
+    if (!known.has(name) && !SYSTEM_FIELDS.has(name)) {
+      const dotted = name.includes('.');
+      findings.push({
+        severity: 'error',
+        rule: SEARCHABLE_FIELD_UNKNOWN,
+        where,
+        path: `${path}[${i}]`,
+        message:
+          `${subject} entry "${name}" is not a field on object "${objectName}". ` +
+          `The declaration is stale: searching it can never match, and the engine ` +
+          `silently drops it — leaving a narrower search than declared, or the ` +
+          `auto-default set once every entry is dropped.` +
+          (dotted ? '' : suggest(name, known)),
+        hint:
+          (dotted
+            ? `'search' scans this object's own columns, so a related record's ` +
+              `column cannot be a search target — expand the relation and search ` +
+              `the related object, or copy the value onto a formula field here. `
+            : `Fix the name, or add "${name}" to ${objectName}.fields. `) +
+          `Clients echo this declaration verbatim as the '$searchFields' ` +
+          `override, so a stale entry becomes a 400 INVALID_FIELD on list ` +
+          `search (#4254), not just a quietly narrowed one.` +
+          (known.size > 0 ? ` Object fields: ${[...known].sort().join(', ')}.` : ''),
+      });
+      continue;
+    }
+
+    // ── Runtime admissibility (#4830) — view-level narrowings only ──
+    if (!resolution || resolution.allowed.has(name)) continue;
+    // ③ System column outside the allowed set: its runtime metadata is
+    // registry-owned and invisible here — skip rather than risk the false
+    // positive (module note).
+    if (!known.has(name)) continue;
+    const meta = target.fields[name];
+
+    if (resolution.source === 'declared') {
+      findings.push({
+        severity: 'error',
+        rule: SEARCHABLE_FIELD_UNSEARCHABLE,
+        where,
+        path: `${path}[${i}]`,
+        message:
+          `${subject} entry "${name}" is outside object "${objectName}"'s declared ` +
+          `searchableFields (${resolution.declaredList.join(', ')}) — the set 'search' ` +
+          `scans. Clients echo this declaration verbatim as the '$searchFields' ` +
+          `override, and the runtime refuses an entry outside the allowed set: every ` +
+          `toolbar search on this list returns 400 INVALID_FIELD (#4254).`,
+        hint:
+          `Add "${name}" to ${objectName}.searchableFields, or drop it from this ` +
+          `view — a view narrows the object's searchable set, never widens it ` +
+          `(ADR-0061).`,
+      });
+      continue;
+    }
+
+    // Auto-default source. Mirror the gate's own "why" — excluded name, then
+    // hidden, then type; an unreadable type is unresolvable, not wrong.
+    const isReference = meta?.type === 'lookup' || meta?.type === 'master_detail';
+    let why: string;
+    if (SEARCH_AUTO_EXCLUDED_FIELDS.has(name)) {
+      why = 'a system/audit column, which the auto-default set never includes';
+    } else if (meta?.hidden) {
+      why = 'hidden';
+    } else if (typeof meta?.type === 'string') {
+      why = `of type '${meta.type}', which 'search' cannot scan`;
+    } else {
+      continue; // no readable type — unresolvable, not wrong (ADR-0072 D1)
+    }
     findings.push({
       severity: 'error',
-      rule: SEARCHABLE_FIELD_UNKNOWN,
+      rule: SEARCHABLE_FIELD_UNSEARCHABLE,
       where,
       path: `${path}[${i}]`,
       message:
-        `${subject} entry "${name}" is not a field on object "${objectName}". ` +
-        `The declaration is stale: searching it can never match, and the engine ` +
-        `silently drops it — leaving a narrower search than declared, or the ` +
-        `auto-default set once every entry is dropped.` +
-        (dotted ? '' : suggest(name, known)),
+        `${subject} entry "${name}" on object "${objectName}" is ${why}. With no ` +
+        `'searchableFields' declared on the object, 'search' scans its text-like ` +
+        `columns (${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')}). ` +
+        `Clients echo this declaration verbatim as the '$searchFields' override, and ` +
+        `the runtime refuses it: every toolbar search on this list returns ` +
+        `400 INVALID_FIELD (#4254).`,
       hint:
-        (dotted
-          ? `'search' scans this object's own columns, so a related record's ` +
-            `column cannot be a search target — expand the relation and search ` +
-            `the related object, or copy the value onto a formula field here. `
-          : `Fix the name, or add "${name}" to ${objectName}.fields. `) +
-        `Clients echo this declaration verbatim as the '$searchFields' ` +
-        `override, so a stale entry becomes a 400 INVALID_FIELD on list ` +
-        `search (#4254), not just a quietly narrowed one.` +
-        (known.size > 0 ? ` Object fields: ${[...known].sort().join(', ')}.` : ''),
+        (isReference
+          ? `A ${meta?.type} column stores only the referenced record's id, so it ` +
+            `cannot be a keyword target — drop "${name}" from this view and, to ` +
+            `search by the related record's title, mirror it onto a text/formula ` +
+            `field here and declare that instead. `
+          : `Drop "${name}" from this view, or target a text-like field instead. `) +
+        `Declaring 'searchableFields' on object "${objectName}" chooses the ` +
+        `searchable set explicitly.`,
     });
   }
   return findings;
@@ -260,9 +444,10 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
     where: string,
     path: string,
     subject: string,
+    role: SearchableFieldRole,
   ) => {
     findings.push(
-      ...checkSearchableFieldList(declared, objectName, fieldsByObject, where, path, subject),
+      ...checkSearchableFieldList(declared, objectName, fieldsByObject, where, path, subject, role),
     );
   };
 
@@ -279,6 +464,7 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
       label,
       `objects[${oi}].searchableFields`,
       'searchableFields',
+      'canonical',
     );
 
     if (isRec(obj.listViews)) {
@@ -292,6 +478,7 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
           `${label} › listViews.${key}`,
           `objects[${oi}].listViews.${key}.searchableFields`,
           'list-view searchableFields',
+          'narrowing',
         );
       }
     }
@@ -314,6 +501,7 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
         `view "${viewLabel}" › list`,
         `views[${vi}].list.searchableFields`,
         'list-view searchableFields',
+        'narrowing',
       );
     }
 
@@ -326,6 +514,7 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
           `view "${viewLabel}" › listViews.${key}`,
           `views[${vi}].listViews.${key}.searchableFields`,
           'list-view searchableFields',
+          'narrowing',
         );
       }
     }

@@ -12,12 +12,10 @@ import { z } from 'zod';
  * Inspired by:
  * - OSGi Dynamic Module System (bundle lifecycle)
  * - Kubernetes Operator pattern (reconciliation loop)
- * - VS Code Extension Host (activation events)
- * 
+ *
  * This protocol enables:
  * - Runtime load/unload of plugins without kernel restart
  * - Plugin discovery from registries and local filesystem
- * - Activation events (load plugin only when needed)
  * - Safe unload with dependency awareness
  */
 
@@ -26,6 +24,7 @@ import { z } from 'zod';
  * Operations that can be performed on plugins at runtime
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const DynamicPluginOperationSchema = lazySchema(() => z.enum([
   'load',        // Load and initialize a plugin at runtime
   'unload',      // Gracefully unload a running plugin
@@ -67,67 +66,39 @@ export const PluginSourceSchema = lazySchema(() => z.object({
 }).describe('Plugin source location for dynamic resolution'));
 
 /**
- * Activation Event
- * Defines when a dynamically available plugin should be activated.
- * Plugins remain dormant until an activation event fires.
+ * REMOVED — `ActivationEventSchema` / `ActivationEvent` (#4657, ADR-0049).
  *
- * [#4653] **This is the platform's single activation vocabulary.** Until v17
- * the name `ActivationEventSchema` resolved to two DIFFERENT declarations
- * depending on the import path (#4411's trap): this structured
- * `{ type, pattern }` on `./kernel`, and a bare `z.string()` on `./studio`.
- * A studio plugin author wrote `activationEvents: ['onMetadataType:flow']` and
- * got no validation at all — `z.string()` accepts `'onMetadatType:flow'`, and
- * every other typo, forever. `./studio` now re-exports THIS declaration, so
- * there is one trigger vocabulary and one place to extend it.
+ * The schema declared a lazy-activation trigger vocabulary (`onCommand`,
+ * `onRoute`, …, `onView` after the #4653 convergence) that NO runtime in any
+ * repo (objectstack / cloud / cloud-v1 / objectui) ever read: every plugin has
+ * always activated immediately on load/registration — cloud-v1's own ROADMAP
+ * recorded lazy activation as ❌ unimplemented. A published trigger vocabulary
+ * with zero executors is the ADR-0049 false-compliance shape: an author (very
+ * often an AI, ADR-0033) writes `activationEvents` expecting deferral and gets
+ * eager activation with a clean parse.
  *
- * The enum below is the **union of both sides' pre-v17 vocabularies**, because
- * dropping either side's values would have silently removed a capability its
- * authors were already using:
+ * Both keys that embedded it are retired in the same change —
+ * `DynamicLoadRequestSchema.activationEvents` (tombstoned below) and
+ * `StudioPluginManifestSchema.activationEvents` (rejected by that schema's
+ * strict parse with its own prescription) — which left the def an orphaned
+ * value schema: an export with no consumer is read as a capability by whoever
+ * finds it (#3950), so it goes with the keys rather than outliving them. Its
+ * `json-schema.manifest.json` entries (`kernel/ActivationEvent`,
+ * `studio/ActivationEvent`) and `authorable-surface.json` lines are dropped
+ * deliberately in the same PR; the removal is pinned by
+ * `activation-events-retirement.test.ts`.
  *
- * | value            | came from                                                  |
- * |:-----------------|:-----------------------------------------------------------|
- * | `onCommand`      | kernel enum + studio docs (`onCommand:myPlugin.doSomething`) |
- * | `onRoute`        | kernel enum                                                 |
- * | `onObject`       | kernel enum                                                 |
- * | `onEvent`        | kernel enum                                                 |
- * | `onService`      | kernel enum                                                 |
- * | `onSchedule`     | kernel enum                                                 |
- * | `onStartup`      | kernel enum; also the target of studio's eager `'*'`         |
- * | `onMetadataType` | studio docs/tests (`onMetadataType:object`) — kernel lacked it |
- * | `onView`         | studio docs/tests (`onView:myPlugin.myPanel`) — kernel lacked it |
- *
- * Deliberately NOT adopted: `priority`, and the `onInstall` / `onWebhook`
- * values that cloud-v1's unreleased marketplace runtime carries. Nothing in
- * any repo reads them, and adding an unenforced key is the exact debt ADR-0049
- * is retiring — they can be proposed when there is an executor that honours
- * them.
+ * Lazy activation, if ever built, returns via the enforce route of ADR-0049:
+ * write the executor first, then declare exactly the vocabulary it honours.
  */
-export const ActivationEventSchema = lazySchema(() => z.object({
-  /**
-   * Event type
-   */
-  type: z.enum([
-    'onCommand',         // Activate when a specific command is executed
-    'onRoute',           // Activate when a URL route is matched
-    'onObject',          // Activate when a specific object type is accessed
-    'onEvent',           // Activate when a system event fires
-    'onService',         // Activate when a service is requested
-    'onSchedule',        // Activate on a cron schedule
-    'onStartup',         // Activate immediately on startup (eager)
-    'onMetadataType',    // Activate when a metadata type is loaded
-    'onView',            // Activate when a view / panel is opened
-  ]).describe('Trigger type for lazy activation'),
 
-  /**
-   * Pattern to match (command name, route glob, object name, event pattern, etc.)
-   *
-   * The pre-v17 studio string form packed this into the same token after a
-   * colon — `'onCommand:myPlugin.doSomething'` is `{ type: 'onCommand',
-   * pattern: 'myPlugin.doSomething' }`, and eager `'*'` is
-   * `{ type: 'onStartup', pattern: '*' }`.
-   */
-  pattern: z.string().describe('Match pattern for the activation trigger'),
-}).describe('Lazy activation trigger for a dynamic plugin'));
+const ACTIVATION_EVENTS_RETIRED =
+  '`dynamicLoadRequest.activationEvents` was removed in @objectstack/spec 17.0.0 '
+  + '(#4657, ADR-0049) — no runtime ever read it: every plugin activates immediately '
+  + 'on load, so the declared lazy-activation window never existed. Delete the key; '
+  + 'eager activation is the only behaviour there has ever been. Lazy activation, if '
+  + 'built, returns via the enforce route of ADR-0049 with a vocabulary its executor '
+  + 'actually honours.';
 
 /**
  * Dynamic Load Request
@@ -143,13 +114,16 @@ export const DynamicLoadRequestSchema = lazySchema(() => z.object({
    * Plugin source
    */
   source: PluginSourceSchema,
-  
+
   /**
-   * Activation events (if omitted, plugin activates immediately)
+   * RETIRED (#4657, ADR-0049) — tombstoned, not deleted: this schema is not
+   * `.strict()`, so a plain delete would have Zod silently STRIP the key and
+   * replace one silent no-op with another (#2169 shape). The tombstone keeps
+   * the removal audible in both channels: `tsc` (input type `never`) and the
+   * parse (the prescription itself).
    */
-  activationEvents: z.array(ActivationEventSchema).optional()
-    .describe('Lazy activation triggers; if omitted plugin starts immediately'),
-  
+  activationEvents: retiredKey(ACTIVATION_EVENTS_RETIRED),
+
   /**
    * Configuration overrides for the plugin
    */
@@ -292,7 +266,6 @@ export const DynamicPluginResultSchema = lazySchema(() => z.object({
 // Export types
 export type DynamicPluginOperation = z.infer<typeof DynamicPluginOperationSchema>;
 export type PluginSource = z.infer<typeof PluginSourceSchema>;
-export type ActivationEvent = z.infer<typeof ActivationEventSchema>;
 export type DynamicLoadRequest = z.infer<typeof DynamicLoadRequestSchema>;
 export type DynamicUnloadRequest = z.infer<typeof DynamicUnloadRequestSchema>;
 export type DynamicPluginResult = z.infer<typeof DynamicPluginResultSchema>;

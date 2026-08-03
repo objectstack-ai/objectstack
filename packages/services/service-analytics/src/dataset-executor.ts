@@ -26,6 +26,8 @@ export type CompareTo = DatasetCompareTo;
  * runtime, then post-processes the results:
  *   - resolves the base measures a selection needs (including derived deps),
  *   - applies measure-scoped filters via supplementary grouped queries,
+ *   - fills the empty-group value into columns no query reported, by aggregate
+ *     kind (#4708) — a count/sum over an excluded group is 0, avg/min/max null,
  *   - evaluates derived measures (ratio/sum/difference/product) row-by-row (Q1),
  *   - shifts the query for `compareTo` (previousPeriod / previousYear) and
  *     attaches `<measure>__compare` columns,
@@ -147,6 +149,61 @@ export function evaluateDerivedMeasures(
     }
     return out;
   });
+}
+
+/**
+ * Fill the EMPTY-GROUP value into every measure column the assembled grid
+ * LISTS but no query REPORTED — by aggregate kind (#4708, objectui#3136).
+ *
+ * The grid is assembled from several results: the primary query, one
+ * supplementary query per measure-scoped filter, and (for `compareTo`) a
+ * shifted pass. {@link mergeByDimensions} writes a measure's column only onto
+ * rows its source result returned, and a `GROUP BY` over a filtered row set
+ * emits NO group at all for a dimension value the filter excludes entirely.
+ * The column therefore comes back **absent**, not `0` — and absent renders as
+ * "no data for this row", which for a count is the opposite of what the row
+ * means. A derived ratio over it goes null as well ({@link computeDerived}
+ * treats a missing operand as unknowable), so the blank spreads.
+ *
+ * The bias runs the worst possible way: the rows that blank are the ones whose
+ * numerator the filter excluded — the WORST-performing rows. A `lead_source`
+ * that won nothing renders as "no data" while one that won everything renders
+ * fine.
+ *
+ * **Filled strictly by aggregate kind**, never wholesale. `count` /
+ * `count_distinct` over an excluded group is unambiguously `0` ("how many rows
+ * matched" has an exact answer when the answer is none), and `sum` over the
+ * empty set is its identity `0`. `avg` / `min` / `max` are genuinely null —
+ * there is nothing to average — and flattening those to `0` would trade this
+ * lie for the opposite one, reporting a measurement nobody made. The
+ * kind→identity mapping is `emptyGroupValueFor` in `@objectstack/spec/data`,
+ * shared with the authoring-side coherence checks so the two cannot drift.
+ *
+ * **Only rows that already exist are touched** — no group is invented. A
+ * dimension value no query reported at all has genuinely no data and stays out
+ * of the grid; this fills the cell, never the row.
+ *
+ * Deliberately NOT a `?? 0` in the widget or a `coalesce` in the measure: a
+ * consumer-side patch must be repeated by every author of every ratio widget
+ * forever, and forgetting it is silent. Only the executor knows which aggregate
+ * produced the gap, so only the executor can tell `0` from unknown.
+ *
+ * Mutates `rows` in place (they are already this pipeline's own copies) and
+ * returns them for chaining.
+ *
+ * @param columnAggregates - Grid column → the aggregate that produced it.
+ *   Includes `<measure>__compare` columns, which merge through the same seam.
+ */
+export function fillEmptyGroups(
+  rows: Record<string, unknown>[],
+  columnAggregates: Record<string, string | undefined>,
+): Record<string, unknown>[] {
+  for (const [column, aggregate] of Object.entries(columnAggregates)) {
+    const empty = emptyGroupValueFor(aggregate);
+    if (empty === undefined) continue;
+    for (const row of rows) if (row[column] == null) row[column] = empty;
+  }
+  return rows;
 }
 
 function num(v: unknown): number | null {
@@ -554,23 +611,6 @@ export class DatasetExecutor {
       result.fields.push({ name: m, type: 'number' });
     }
 
-    // A measure-scoped filter can exclude EVERY row of a group the grid still
-    // lists, and the database reports that by omitting the group from the
-    // sub-result — indistinguishable, after the merge, from "not measured".
-    // For a count or a sum it IS measured: the answer is 0. Fill it in, so a
-    // "0 of 12 paid" group reads as 0 rather than blank and any ratio built on
-    // it computes instead of going null (objectui#3136). avg/min/max keep their
-    // null — there is nothing to average over an empty group.
-    //
-    // Runs after ALL supplementary merges, not inside the loop: a later
-    // measure's merge can append rows for dimension keys no earlier query saw,
-    // and those rows need the same fill.
-    for (const m of filtered) {
-      const empty = emptyGroupValueFor(compiled.cube.measures?.[m]?.type);
-      if (empty === undefined) continue;
-      for (const row of result.rows) if (row[m] == null) row[m] = empty;
-    }
-
     // compareTo — run a shifted query over the same base measures and attach.
     if (selection.compareTo) {
       const compareRows = await this.runCompare(compiled, selection, [...baseMeasures], dimensions, baseFilter, context);
@@ -582,6 +622,34 @@ export class DatasetExecutor {
       );
       for (const m of baseMeasures) result.fields.push({ name: `${m}__compare`, type: 'number' });
     }
+
+    // Empty-group fill (#4708) — a group a query never reported reads `0` for a
+    // count/sum and stays null for avg/min/max. See {@link fillEmptyGroups} for
+    // why this belongs to the executor and not to every widget author.
+    //
+    // Placed after EVERY merge and before the derived pass, because each merge
+    // is a place a column can go missing and `mergeByDimensions` APPENDS rows:
+    //   - a supplementary measure-scoped query omits the groups its filter
+    //     excluded (the "won nothing" rows — the original defect);
+    //   - a later supplementary query can append rows for dimension keys no
+    //     earlier query saw, and those need the same fill;
+    //   - the compareTo pass appends a row for every bucket that existed in the
+    //     PREVIOUS window and not in this one, on which *every* base measure is
+    //     absent — including unfiltered ones, which is why the fill covers all
+    //     base measures rather than only the filter-scoped ones.
+    // Running it before the compare merge left that last class blank, so a lead
+    // source that sold last month and nothing this month rendered as "no data"
+    // instead of 0 — the same worst-row bias, one merge later.
+    //
+    // Derived measures are evaluated AFTER, so a ratio over a filled 0 computes
+    // (0%) instead of being poisoned by an absent operand.
+    const fillColumns: Record<string, string | undefined> = {};
+    for (const m of baseMeasures) {
+      const aggregate = compiled.cube.measures?.[m]?.type;
+      fillColumns[m] = aggregate;
+      if (selection.compareTo) fillColumns[`${m}__compare`] = aggregate;
+    }
+    fillEmptyGroups(result.rows, fillColumns);
 
     // Derived measures (computed from base + compare columns already present).
     result.rows = evaluateDerivedMeasures(result.rows, selectedDerived);

@@ -1,0 +1,145 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import { describe, it, expect } from 'vitest';
+
+// ─── [#4657] `ActivationEventSchema` / `ActivationEvent` are REMOVED ─────────
+//
+// ADR-0049 enforce-or-remove, ruled REMOVE: the activation-event vocabulary
+// declared lazy plugin activation ("plugins remain dormant until an activation
+// event fires") that NO runtime in objectstack / cloud / cloud-v1 / objectui
+// ever implemented — every plugin activates immediately on load/registration,
+// and cloud-v1's ROADMAP recorded the capability as unimplemented. Both keys
+// that embedded the schema are retired in this change
+// (`DynamicLoadRequest.activationEvents` → retiredKey() tombstone;
+// `StudioPluginManifest.activationEvents` → strict-parse guidance rejection),
+// which left the def an orphaned value schema: an exported schema with no
+// consumer is read as a capability by whoever finds it (#3950), so the
+// declaration and both its entry-point exports (`./kernel`, and the `./studio`
+// re-export #4653 had just added) are deleted.
+//
+// Why a compiler-API pin rather than a type-level one: #4642 established that
+// a compile-time conditional-type pin in this package is a no-op (tsconfig
+// excludes `**/*.test.ts`; vitest never enables `typecheck`), so the
+// load-bearing pin is the program below, with anti-vacuity guards — the
+// #4737 `ActionLocation` retirement's machinery, pointed at absence instead of
+// ownership. Sabotage-verified in the PR: resurrecting the declaration in
+// `plugin-runtime.zod.ts` turns it red, re-exporting ANY schema under the bare
+// name from `./studio` turns it red, and pointing the enumeration at nothing
+// trips the anti-vacuity guards rather than passing silently.
+describe('[#4657] ActivationEventSchema removal — no entry exports the name', () => {
+  it('resolves the export surface: the retired names have ZERO holders across every public entry', async () => {
+    const ts = (await import('typescript')).default;
+    const { resolve, relative } = await import('node:path');
+    const { dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const { readFileSync } = await import('node:fs');
+
+    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    // Every public entry point, read from package.json's exports map so a
+    // future entry cannot silently escape the absence pins below.
+    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
+      exports: Record<string, unknown>;
+    };
+    const entries: Record<string, string> = {};
+    for (const sub of Object.keys(pkg.exports)) {
+      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
+      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
+      // './openapi.json' / './package.json' are not TypeScript entry points.
+    }
+    // Anti-vacuity: the enumeration must have found the real surface — the two
+    // entries that used to export the retired names most of all.
+    for (const needed of ['./kernel', './studio']) {
+      expect(Object.keys(entries), `exports map must include ${needed}`).toContain(needed);
+    }
+    expect(Object.keys(entries).length).toBeGreaterThan(10);
+
+    const program = ts.createProgram(Object.values(entries), {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      skipLibCheck: true,
+      noEmit: true,
+    });
+    const checker = program.getTypeChecker();
+
+    const exportsOf = (sub: string) => {
+      const sf = program.getSourceFile(entries[sub]);
+      const moduleSym = sf && checker.getSymbolAtLocation(sf);
+      // Without this guard a resolution failure would make every `not.toContain`
+      // below pass vacuously — the exact way a gate goes dormant (#4642).
+      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
+      return checker.getExportsOfModule(moduleSym!);
+    };
+
+    /** Every entry that exports `name` — for a removal this must be []. */
+    const holdersOf = (name: string) => {
+      const out: string[] = [];
+      for (const sub of Object.keys(entries)) {
+        if (exportsOf(sub).some((e) => e.getName() === name)) out.push(sub);
+      }
+      return out;
+    };
+
+    // 1. Anti-vacuity on the two surfaces that carried the names: both still
+    //    export a non-trivial surface (so "does not contain" cannot pass by
+    //    resolving nothing), and the SURVIVING neighbours stand — the parents
+    //    whose keys were retired most of all.
+    const kernelNames = exportsOf('./kernel').map((e) => e.getName());
+    const studioNames = exportsOf('./studio').map((e) => e.getName());
+    expect(kernelNames.length, './kernel must export a non-trivial surface').toBeGreaterThan(40);
+    expect(studioNames.length, './studio must export a non-trivial surface').toBeGreaterThan(40);
+    expect(kernelNames).toContain('DynamicLoadRequestSchema');
+    expect(kernelNames).toContain('PluginSourceSchema');
+    expect(studioNames).toContain('StudioPluginManifestSchema');
+    expect(studioNames).toContain('StudioPluginContributionsSchema');
+
+    // 2. The removal itself: NO public entry exports either retired name — not
+    //    the old owners, and not any other entry that might "helpfully" adopt
+    //    them. A re-export of anything under the bare name would tell authors
+    //    the platform has an activation vocabulary again (the C14/C15 lesson:
+    //    a re-export can lie about the domain even when the symbol is honest).
+    for (const retired of ['ActivationEventSchema', 'ActivationEvent']) {
+      expect(holdersOf(retired), `${retired} must have zero holders`).toEqual([]);
+    }
+  });
+
+  it('keeps the runtime namespaces consistent with the compiler view', async () => {
+    const kernel = await import('./index');
+    const studio = await import('../studio/index');
+
+    for (const [label, ns] of [['./kernel', kernel], ['./studio', studio]] as const) {
+      expect('ActivationEventSchema' in ns, `${label} must not export ActivationEventSchema`).toBe(false);
+    }
+    // Anti-vacuity: the namespaces just probed are real and non-trivial.
+    expect('DynamicLoadRequestSchema' in kernel).toBe(true);
+    expect('StudioPluginManifestSchema' in studio).toBe(true);
+  });
+
+  it('the live paths still parse — and reject the retired key with its prescription', async () => {
+    const { DynamicLoadRequestSchema } = await import('./plugin-runtime.zod');
+    const { StudioPluginManifestSchema } = await import('../studio/plugin.zod');
+
+    // Kernel side: tombstoned (non-strict schema — a plain delete would have
+    // Zod silently strip an authored value, replacing one silent no-op with
+    // another).
+    const load = { pluginId: 'com.acme.analytics', source: { type: 'npm', location: '@acme/x' } };
+    expect(DynamicLoadRequestSchema.parse(load)).not.toHaveProperty('activationEvents');
+    expect(() =>
+      DynamicLoadRequestSchema.parse({
+        ...load,
+        activationEvents: [{ type: 'onStartup', pattern: '*' }],
+      }),
+    ).toThrow(/activationEvents.*removed.*#4657/s);
+
+    // Studio side: strict parse + guidance — the SAME document differing only
+    // in this one key stays legal without it (so the negative cannot pass for
+    // an unrelated reason).
+    const manifest = { id: 'objectstack.my-plugin', name: 'My Plugin' };
+    expect(StudioPluginManifestSchema.parse(manifest)).not.toHaveProperty('activationEvents');
+    expect(() =>
+      StudioPluginManifestSchema.parse({
+        ...manifest,
+        activationEvents: [{ type: 'onStartup', pattern: '*' }],
+      }),
+    ).toThrow(/activationEvents.*removed.*#4657/s);
+  });
+});

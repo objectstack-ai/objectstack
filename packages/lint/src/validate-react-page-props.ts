@@ -869,11 +869,14 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
             checkObjectChart({ values, where, path }, objectFields, findings);
           }
           // <ListView searchableFields> names fields on the bound object — the
-          // react-surface twin of `searchable-field-unknown` (#4329). It runs
-          // the metadata rule's own core, so the skips (cross-package object,
-          // no authored field map, system columns) and the dotted-path
-          // strictness match by construction. A non-static value — either
-          // attribute — bails inside the checker: unresolvable is not wrong.
+          // react-surface twin of `searchable-field-unknown` (#4329) and, as a
+          // view-level narrowing echoed to the runtime as `$searchFields`, of
+          // `searchable-field-unsearchable` too (#4830, the checker's default
+          // role). It runs the metadata rule's own core, so the skips
+          // (cross-package object, no authored field map, system columns) and
+          // the dotted-path strictness match by construction. A non-static
+          // value — either attribute — bails inside the checker: unresolvable
+          // is not wrong.
           if (tag === 'ListView' && !hasSpread) {
             findings.push(
               ...checkSearchableFieldList(

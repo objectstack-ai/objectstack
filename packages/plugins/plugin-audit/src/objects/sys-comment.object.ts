@@ -15,6 +15,34 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * `sys_comment` when you want a focused threaded discussion surface
  * without the heavier Chatter envelope.
  *
+ * ## Removed fields (ADR-0049 enforce-or-remove, #4756)
+ *
+ * Two fields were modelled here with **zero** runtime consumers — nothing in
+ * this repo, in `objectui`, or in `cloud` ever read or maintained them. Under
+ * ADR-0049 a declared-but-unenforced key is removed rather than left to lie,
+ * following the `sys_attachment.share_type` / `sys_attachment.visibility`
+ * precedent (#2755: "attachment access is derived from the parent record").
+ *
+ * - **`visibility`** (`'public' | 'internal' | 'private'`) — never consulted by
+ *   any gate: not `enforceFeedsCapability`, not the record-level gates added in
+ *   #4630, not the REST layer, not objectui's discussion panel. A comment marked
+ *   `private` was exactly as visible as a `public` one — a *security-looking*
+ *   lever with no gate behind it (Prime Directive #10). **Prescription:** comment
+ *   visibility is decided by the record-level permissions of the record
+ *   `thread_id` names (#4630) — there is no per-row override. A designed
+ *   external/portal distinction would have to be defined against ADR-0090 D11's
+ *   `externalSharingModel` first, and can return as an enforced key with tests.
+ * - **`reply_count`** — never incremented; `readonly: true` meant an author
+ *   could not even set it by hand, so every row read `0` forever. **Prescription:**
+ *   count `parent_id` children at read time. Deliberately NOT re-introduced as a
+ *   hook-maintained roll-up: the predicate/bulk write-hook gaps tracked by
+ *   #4770 / #4778 / #4779 are exactly where such a counter drifts (a bulk delete
+ *   of replies would never decrement it), and a counter that drifts is worse
+ *   than no counter — both the UI and an AI reading the record would trust it.
+ *
+ * Existing databases keep the two columns as unmanaged leftovers; there is no
+ * migration (same disposition as #2755).
+ *
  * @namespace sys
  */
 export const SysComment = ObjectSchema.create({
@@ -49,17 +77,12 @@ export const SysComment = ObjectSchema.create({
       group: 'Thread',
     }),
 
+    // The reply relationship is `parent_id` and nothing else — a reply count is
+    // an aggregate over the children, computed at read time (#4756).
     parent_id: Field.lookup('sys_comment', {
       label: 'Parent Comment',
       required: false,
       description: 'Optional parent comment for nested replies',
-      group: 'Thread',
-    }),
-
-    reply_count: Field.number({
-      label: 'Reply Count',
-      defaultValue: 0,
-      readonly: true,
       group: 'Thread',
     }),
 
@@ -119,14 +142,8 @@ export const SysComment = ObjectSchema.create({
       group: 'Lifecycle',
     }),
 
-    visibility: Field.select(
-      ['public', 'internal', 'private'],
-      {
-        label: 'Visibility',
-        defaultValue: 'public',
-        group: 'Lifecycle',
-      },
-    ),
+    // No `visibility` field: who can see a comment is decided by the record
+    // `thread_id` points at (#4630, #4756) — one rule, no second source.
 
     created_at: Field.datetime({
       label: 'Created At',

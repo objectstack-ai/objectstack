@@ -601,6 +601,72 @@ shrink-only.
 
 ---
 
+## Startup registry reads — never record a verdict the boot can still contradict
+
+A boot fills its registries incrementally. Asking a registry "is X there?" while
+it is still filling is fine — the answer is simply not final yet. Turning that
+not-yet into a **verdict and recording the verdict** is the defect, because the
+provider registers a moment later and nothing goes back to undo the record.
+
+Decide with **one question**, the counterpart of the degradation-log-level one:
+
+> **At the moment this code concludes "X is not registered", can a provider
+> still register X during this same boot? And is that conclusion RECORDED
+> anywhere that outlives the moment?**
+> **Yes and yes → defect.**
+
+Three parts, all three or it is not a finding:
+
+1. a read of a registry that is still filling — the service registry during
+   `init()`, or a plugin-extensible capability registry before it is sealed;
+2. a terminal conclusion drawn from "absent";
+3. that conclusion **recorded** — cached in an instance field or module binding,
+   asserted in a `warn`, or persisted.
+
+Part 3 is what makes this a rule and not noise. **A read-only probe is
+completely legal**: `AutomationEngine.getUnknownNodeTypeAudit()` reads the
+executor registry on every call, records nothing, and is correct.
+
+**Why this is a rule and not a preference.** One showcase cold start on
+2026-08-03 produced three instances, in three unrelated subsystems, written by
+three people at three times: plugin-auth froze an `undefined` cache handle into
+its config for the life of the process, so rate-limit counters never reached the
+shared store and the printed warning sent operators to provision Redis for a
+problem they did not have (#4772); service-automation asserted that eight
+approval flows "will fail at execution time" 0.8s before the executor that runs
+them was registered, and a deployment that genuinely lacked the plugin emitted
+the identical eight, so the signal could not tell the two apart (#4771); objectql
+wrote an ADR-0104 attestation into `sys_migration` during the same boot that was
+still seeding rows contradicting it, so the next restart rejected its
+predecessor's data (#4769). Whether the kernel contract itself should be
+tightened further is #4776.
+
+**The three cures, in preference order:**
+
+1. **Resolve where it is used, not where you start.** A lazy accessor or a
+   `kernel:ready` hook sees a provider that registered later —
+   `createLazyCacheRateLimitStorage()` in plugin-auth is the reference.
+2. **Declare the ordering (ADR-0116).** `dependencies` / `optionalDependencies`
+   / `requiresServices` make the kernel hoist the provider ahead or assert it
+   registered, which makes "absent" a *fact*. Tolerance belongs in the plugin's
+   own declaration, where the kernel enforces it — not in a checker's ledger.
+3. **Seal the vocabulary, then judge.** For a registry that is open by contract
+   (ADR-0018 flow node types), the host declares the moment it can no longer
+   grow — `AutomationEngine.sealNodeTypeVocabulary()`, called at
+   `kernel:bootstrapped` — and only then is an absence worth reporting.
+
+**It has teeth**: `pnpm check:startup-registry-verdict` walks the AST for that
+three-part shape and fails on it; accepted exceptions live in the shrink-only,
+hand-edited `scripts/startup-registry-verdict.baseline.json`. Like
+`check:durability-log-level` it is deliberately narrow — it cannot *discover* a
+new seam, only stop known ones from regressing, and it under-matches on purpose
+rather than risk a false positive: `getService('cache')` is visible, a
+`resolveCacheOrFallback()` three layers down another package is not, and #4769's
+"registry" is a database table it can never see. Found a new open registry? Add
+it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
+
+---
+
 ## Post-Task Checklist
 
 1. `pnpm test` — verify nothing broke. Touched a type-check-covered package? `pnpm typecheck` too.
