@@ -314,6 +314,13 @@
           "description": "Static/precomputed data to chart directly instead of binding via objectName + aggregate."
         },
         {
+          "name": "drillDown",
+          "type": "{ enabled?: boolean; filter?: Record<string, unknown>; title?: string; target?: 'drawer' | 'dialog'; columns?: string[]; maxRows?: number }",
+          "kind": "binding",
+          "required": false,
+          "description": "Click a segment to open the underlying records, filtered by the clicked category, in a drawer (or 'dialog'). Present = on; {} is enough. `filter`/`title` support ${event.*} interpolation; omit `filter` to derive it from aggregate.groupBy. Declared by ChartDrillDownSchema — NOT a dashboard widget key (a dataset-bound widget drills through the semantic layer instead), and not ReportSchema.drilldown (that is lowercase, boolean, report-only)."
+        },
+        {
           "name": "filter",
           "type": "FilterArray",
           "kind": "controlled",
