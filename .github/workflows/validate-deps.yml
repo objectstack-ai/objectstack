@@ -9,6 +9,11 @@ on:
       - 'pnpm-workspace.yaml'
       - 'scripts/check-changeset-fixed.mjs'
       - 'scripts/check-override-consistency.mjs'
+      # The OSV exemption ledger and its check: a PR that touches either must
+      # run this workflow, or an exemption could be added without the gate
+      # that governs it ever running on the PR that adds it.
+      - 'osv-scanner.toml'
+      - 'scripts/check-osv-exemptions.mjs'
       # Re-run when the workflow itself changes, so edits to these gates are
       # exercised on the PR that introduces them.
       - '.github/workflows/validate-deps.yml'
@@ -80,9 +85,25 @@ jobs:
       # reads pnpm-lock.yaml directly against the OSV database and exits non-zero
       # when any advisory matches, restoring a working blocking gate.
       #
-      # Note: OSV-Scanner blocks on any severity, not just high/critical. To
-      # accept a specific advisory, add an osv-scanner.toml `[[IgnoredVulns]]`
-      # entry rather than lowering the gate.
+      # Note: OSV-Scanner blocks on any severity, not just high/critical. When
+      # the advisory has a fixed version you take the fix. The ONLY escape
+      # hatch, for an advisory with no fix available, is an `[[IgnoredVulns]]`
+      # entry in `osv-scanner.toml` at the repo root — never lowering the gate.
+      #
+      # That escape hatch is governed by three conventions (#4965), stated in
+      # full in the header of osv-scanner.toml: `ignoreUntil` mandatory
+      # (default 30 days, ceiling 90), `reason` mandatory with an advisory link
+      # plus a sentence on why it cannot be fixed, and exemptions land in their
+      # own `osv-exemption`-labelled PR. The scanner enforces none of that — it
+      # reads a missing `ignoreUntil` as "ignore forever", silently — so the
+      # step below runs first and fails on any exemption that is missing,
+      # quoted, expired, over the ceiling, or unexplained. `--self-test` proves
+      # the check in both directions.
+      - name: Verify OSV exemptions carry an expiry and a reason
+        run: |
+          node scripts/check-osv-exemptions.mjs --self-test
+          node scripts/check-osv-exemptions.mjs
+
       - name: Audit dependencies for known vulnerabilities (OSV-Scanner)
         uses: google/osv-scanner-action/osv-scanner-action@9fd1bcce27f67e3bd819a0a7620e332803dc43bc # v2.3.8
         with:
