@@ -79,6 +79,23 @@ import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
 
 /**
+ * [#5259] A {@link MetadataLoader} that also implements deletion.
+ *
+ * `MetadataLoader` declares `save?` but no `delete?`, so `unregister()` has
+ * always duck-typed the method at the call site. Naming the shape here replaces
+ * the two `as any` casts that did it before — the cast is still a cast, but it
+ * is now one declared shape rather than an untyped hole, and the `typeof
+ * … === 'function'` guard in front of it is what actually decides.
+ *
+ * Whether the loader contract itself should declare `delete?` (and what a
+ * `capabilities.write` loader *without* one means) is a separate question,
+ * deliberately not answered here.
+ */
+type DeletableMetadataLoader = MetadataLoader & {
+  delete?: (type: string, name: string) => Promise<unknown>;
+};
+
+/**
  * [#5189] Appended to the namespace gate's message when `publishPackage` was
  * called without one, because the gate's own text ("declare an explicit
  * `manifest.namespace`") describes a stack file this caller may not have.
@@ -228,6 +245,17 @@ export class MetadataManager implements IMetadataService {
   //
   // Invalidated on every `register()` / `unregister()` to keep CRUD writes
   // visible to subsequent reads.
+  //
+  // [#5259] WHERE in a write the invalidation sits is part of that promise, not
+  // an implementation detail. `list()` merges registry ∪ loaders, so an
+  // invalidation issued while only ONE of the two has been updated lets the
+  // next read memoize the half-applied view for a full TTL. The rule both
+  // writers follow: **invalidate last, once every store already holds the state
+  // being announced** — `register()` satisfies it by writing the registry
+  // first (the registry outranks loaders in the merge, so its save window
+  // already shows the post-write value); `unregister()` satisfies it by
+  // deleting from storage first and invalidating after, with nothing awaited
+  // between the registry drop and the invalidation. See `unregister()`.
   private listCache = new Map<string, ListCacheEntry>();
   private static readonly LIST_CACHE_TTL_MS = 30_000;
   /**
@@ -863,6 +891,14 @@ export class MetadataManager implements IMetadataService {
    * pre-write answer, and a caller arriving after this point gets a fresh read
    * instead of joining a pre-write one. The reasoning — including why waiting
    * callers are NOT restarted — is on the `inflightListReads` field.
+   *
+   * [#5259] Both halves are only as good as WHEN the caller invokes this. This
+   * clears what is stale *as of now*; it cannot pre-empt a store the caller has
+   * not finished updating yet. Callers must therefore invalidate only once
+   * every store already holds the state they are about to announce — see the
+   * `listCache` field comment and {@link unregister}, whose pre-#5259 ordering
+   * invalidated one await too early and let the next read cache a view in which
+   * the registry was empty and the loader was not.
    */
   private invalidateListCache(type: string): void {
     this.listCache.delete(type);
@@ -933,9 +969,78 @@ export class MetadataManager implements IMetadataService {
    * {@link MetadataWatchEvent} — the delete half of the {@link register}
    * contract. Pass `{ notify: false }` only for teardown that announces by
    * other means.
+   *
+   * ## [#5259] Storage FIRST, in-memory second — the order is the fix
+   *
+   * This method used to drop the registry entry and call
+   * {@link invalidateListCache} *before* awaiting `loader.delete()`. Those two
+   * steps are separated by a real await window (one DB round-trip per writable
+   * loader), and inside it the manager was in a state that exists nowhere else:
+   * **registry already empty, loader not yet empty**. `list()` merges the two,
+   * so a read arriving in that window
+   *
+   *   • missed the cache (it had just been invalidated),
+   *   • assembled the still-stored row into its answer, and
+   *   • memoized that answer as a COMPLETE read — the full 30s healthy TTL,
+   *     because no loader threw, so #5184's 2s degraded TTL never applied.
+   *
+   * Nothing invalidated again afterwards ({@link notifyWatchers} does not touch
+   * `listCache`), so a row that was gone from storage kept being enumerated for
+   * up to 30s — and `get()`, which never consulted that cache, disagreed with
+   * `list()` the whole time. For a gating type (`permission`, `api`) the two
+   * faces of the same manager answered opposite questions about whether a
+   * declaration exists.
+   *
+   * {@link register} never had this defect, and the reason is instructive: it
+   * writes the registry *first*, and the registry outranks every loader in the
+   * merge, so throughout its own save window the merged view already equals the
+   * post-write state. The invariant that makes register correct is not "where
+   * the invalidate sits" but **the invalidate must be the last thing after
+   * every store already holds the announced state**. Restated for delete, that
+   * means storage first:
+   *
+   *   1. `await loader.delete()` on every writable loader. Throughout this
+   *      window registry AND loaders still hold the item, so a concurrent
+   *      `list()` observes a coherent pre-delete state — which is the truth,
+   *      because the delete has not landed and has not been announced.
+   *   2. Drop the registry entry and `invalidateListCache(type)` — with **no
+   *      await between them**, so no read can interleave and observe the
+   *      half-applied state that produced the bug. Everything cached or
+   *      in-flight from step 1 is dropped here, at the moment the final state
+   *      becomes true.
+   *   3. Publish + announce. #5219's invalidate-before-notify bar, unchanged:
+   *      a watcher woken by the `deleted` event and re-reading through `list()`
+   *      gets a fresh read of the post-delete state.
+   *
+   * **Composition with #5253's single-flight (this is the load-bearing half).**
+   * A `list()` that is still walking the loaders when step 2 runs cannot be
+   * fixed by dropping `listCache` alone — it has not written its entry yet, and
+   * it would write the pre-delete answer *after* the invalidation. The
+   * mechanism that covers it is `invalidateListCache()` also retracting the
+   * read's registration in `inflightListReads`: a retracted read still resolves
+   * for the callers already waiting on it (they asked before the delete) but
+   * loses the right to memoize, and any caller arriving after step 2 starts a
+   * fresh read rather than joining the pre-delete one. So every read is
+   * covered: one that FINISHED in the window has its entry deleted, one still
+   * IN FLIGHT loses its permission to cache, and one starting later reads the
+   * post-delete state. That is why the invalidate must come after the deletes
+   * rather than being duplicated on both sides of them — a second invalidate
+   * before the await would buy nothing and would re-open step 1's window.
    */
   async unregister(type: string, name: string, options?: MetadataWriteOptions): Promise<void> {
-    // Remove from in-memory registry
+    // ── 1. Storage first ────────────────────────────────────────────────
+    // Delete only from database-backed loaders that declare write capability.
+    for (const loader of this.loaders.values()) {
+      if (loader.contract.protocol !== 'datasource:' || !loader.contract.capabilities.write) continue;
+      if (typeof (loader as DeletableMetadataLoader).delete !== 'function') continue;
+      try {
+        await this.deleteMetaItemFromLoader(loader, type, name);
+      } catch (error) {
+        this.reportMetaItemDeleteFailure(loader.contract.name, type, name, error);
+      }
+    }
+
+    // ── 2. In-memory state, then invalidation — nothing awaited between ──
     const typeStore = this.registry.get(type);
     if (typeStore) {
       typeStore.delete(name);
@@ -945,18 +1050,7 @@ export class MetadataManager implements IMetadataService {
     }
     this.invalidateListCache(type);
 
-    // Delete only from database-backed loaders that declare write capability
-    for (const loader of this.loaders.values()) {
-      if (loader.contract.protocol !== 'datasource:' || !loader.contract.capabilities.write) continue;
-      if (typeof (loader as any).delete === 'function') {
-        try {
-          await (loader as any).delete(type, name);
-        } catch (error) {
-          this.logger.warn(`Failed to delete ${type}/${name} from loader ${loader.contract.name}`, { error });
-        }
-      }
-    }
-
+    // ── 3. Announce ─────────────────────────────────────────────────────
     // Publish metadata.{type}.deleted event to realtime service
     await this.publishRealtimeMetadataEvent('deleted', type, name, {
       userId: options?.userId,
@@ -973,6 +1067,86 @@ export class MetadataManager implements IMetadataService {
         timestamp: new Date().toISOString(),
       });
     }
+  }
+
+  /**
+   * Delete one metadata item from one writable loader — the storage half of
+   * {@link unregister}.
+   *
+   * A one-line wrapper on purpose: it gives this durability seam a **name**.
+   * `check:durability-log-level` matches by callee name against an explicit
+   * vocabulary, and the raw call is `loader.delete(...)` — putting `delete` in
+   * that vocabulary would claim every `.delete()` in the monorepo (`Map`,
+   * `Set`, cache handles, `URLSearchParams`) and the gate would drown in false
+   * positives, which is exactly the failure mode its own header warns about.
+   * Named here, `deleteMetaItemFromLoader` is in `DURABILITY_CRITICAL_CALLEES`
+   * with a blast radius of precisely this call site, mirroring `saveMetaItem`
+   * on the write side (#4754).
+   *
+   * `MetadataLoader` declares `save?` but no `delete?`, which is why the caller
+   * duck-types before getting here; widening the loader contract is a separate
+   * question and deliberately not answered by this issue.
+   */
+  private async deleteMetaItemFromLoader(
+    loader: MetadataLoader,
+    type: string,
+    name: string,
+  ): Promise<void> {
+    const del = (loader as DeletableMetadataLoader).delete;
+    if (typeof del !== 'function') return;
+    await del.call(loader, type, name);
+  }
+
+  /**
+   * Report — at `error` — that a loader refused to delete an item the runtime
+   * has already dropped and announced as deleted.
+   *
+   * [#5259] This used to be a `logger.warn('Failed to delete …')` and continue.
+   * AGENTS.md → "Degradation log levels" decides the level with one question:
+   * *after the degradation, does the system still look normal from the outside
+   * while something it claims is persisted has not actually landed?* Here it is
+   * the deletion that did not land, which is the same class and the same
+   * silence: `unregister()` resolves normally, the caller is told the delete
+   * succeeded, and the surviving row is read straight back out of storage —
+   * permanently, since nothing ever retries this. Durability/consistency
+   * degradation ⇒ `error`, naming the **consequence** and the **fix**.
+   *
+   * **Why the registry entry is still dropped when this fires.** The
+   * alternative — keep the item registered so runtime state matches storage —
+   * looks safer and is not. The loader still holds the row, and `list()`/`get()`
+   * merge registry ∪ loaders, so the item is served either way; the only thing
+   * the surviving registry entry would change is *which copy wins*, pinning an
+   * in-memory definition that outranks the stored row nobody is maintaining
+   * anymore. Dropping it makes the very next read fall through to storage,
+   * which is the actual truth after a failed delete — the item still exists —
+   * and it surfaces that immediately (the item visibly reappears) instead of at
+   * the next restart. One truth, read from where it lives; the divergence is
+   * reported here rather than papered over with a second in-memory copy.
+   *
+   * **Said once per un-deleted item, not once per loader.** The once-per-outage
+   * discipline of {@link reportLoaderReadFailure} exists because `list()` is hot
+   * and its repeats are *identical*; these are not. Each line names a different
+   * item that is still in storage and that nothing will ever retry, so
+   * collapsing them would hand an operator the first casualty and silently drop
+   * the rest of the list — the failure this level was raised to prevent.
+   */
+  private reportMetaItemDeleteFailure(
+    loaderName: string,
+    type: string,
+    name: string,
+    error: unknown,
+  ): void {
+    this.logger.error(
+      `[MetadataManager] Loader \`${loaderName}\` could NOT delete \`${type}/${name}\` — the row is STILL in its store, ` +
+        `while the runtime has already dropped the item from its registry and announced it as deleted. ` +
+        `Nothing looks broken: \`unregister()\` resolves normally and the caller (Studio/Setup, REST DELETE, the CLI, a package teardown) ` +
+        `is told the delete succeeded — but the surviving row is read straight back out of storage by the very next \`list()\`/\`get()\`, ` +
+        `so the "deleted" item reappears and keeps reappearing across restarts. Nothing retries this delete. ` +
+        `Fix: check the datasource behind \`${loaderName}\` — connection, credentials, and that its metadata table exists and is writable — ` +
+        `then re-issue the delete for \`${type}/${name}\`. Until that succeeds the item is NOT deleted, whatever the delete call reported.`,
+      error instanceof Error ? error : undefined,
+      { loader: loaderName, type, name, error },
+    );
   }
 
   /**
