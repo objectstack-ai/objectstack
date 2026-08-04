@@ -1,0 +1,123 @@
+---
+title: Stack Server
+description: Stack Server protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+`defineStack(\{ server \})` — the authorable server-facing configuration.
+
+## Why this is NOT `HttpServerConfigSchema`
+
+`[system/http-server.zod.ts](/docs/references/system/http-server)` declares nine keys (`port`, `host`, `cors`,
+
+`requestTimeout`, `bodyLimit`, `compression`, `security`, `static`,
+
+`trustProxy`). #4938 measured them: **none had a runtime reader and none was
+
+reachable from any authoring surface** — `stack.zod.ts` had no `server:` key,
+
+so the whole shape was unwritable as well as unread. Mounting it wholesale
+
+here would have made eight dead keys authorable in one move, which is the
+
+declared-≠-enforced defect (Prime Directive #10) manufactured on purpose.
+
+So this schema is deliberately NARROW: it carries only keys an executor
+
+actually consumes, and it grows one key at a time, each arriving with its
+
+consumer. Today that is exactly two:
+
+| key | consumed by |
+
+|---|---|
+
+| `security.rateLimit` | `createDispatcherPlugin` → the inbound token bucket (`@objectstack/runtime` `security/inbound-rate-limit.ts`) — an over-budget caller gets `429` + `Retry-After` |
+
+| `trustProxy` | the same limiter's IP resolution — see below |
+
+The other seven `HttpServerConfigSchema` keys stay unreachable, and their
+
+enforce-or-remove fate is tracked by #4938. Adding one here without an
+
+executor re-opens the hole this narrowness exists to close.
+
+## What `server:` is NOT for
+
+**Deployment knobs stay on the CLI.** There is no `server.port` / `server.host`
+
+on purpose: the listening socket is a property of *where* a stack runs, not of
+
+the stack itself, and it is already owned by `objectstack serve -p <port>` /
+
+`PORT`. Two authorities for one number is how a config becomes advisory. If a
+
+future need does add `server.port`, the precedence is settled in advance and
+
+recorded here so it cannot be re-litigated per-caller: **the CLI flag wins over
+
+`server:`, and `server:` wins over the built-in default** — an operator
+
+overriding a port at the command line must not be silently overruled by a file
+
+baked into the artifact.
+
+Related: #4910 (this seam), #4937 (the limiter that documented an execution
+
+chain it never had), #4936 (`apis:` endpoint-level `rateLimit`, still
+
+unwired), ADR-0069 D2 (shared counters), ADR-0049 (enforce or remove).
+
+<Callout type="info">
+**Source:** `packages/spec/src/system/stack-server.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { ServerRateLimitConfigSchema, StackServerConfigSchema, StackServerSecuritySchema } from '@objectstack/spec/system';
+import type { ServerRateLimitConfig, StackServerConfig, StackServerSecurity } from '@objectstack/spec/system';
+
+// Validate data
+const result = ServerRateLimitConfigSchema.parse(data);
+```
+
+---
+
+## ServerRateLimitConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ | Enable rate limiting |
+| **windowMs** | `integer` | ✅ | Time window in milliseconds |
+| **maxRequests** | `integer` | ✅ | Max requests per window |
+
+
+---
+
+## StackServerConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **security** | `{ rateLimit?: object }` | optional | Server-level security configuration. Today: the global inbound rate limit. |
+| **trustProxy** | `boolean` | ✅ | Believe `X-Forwarded-For` / `X-Real-IP` when identifying a caller. Declare `true` ONLY when a reverse proxy you control overwrites those headers on every inbound request. Left `false` (the default) the caller IP is the transport's own peer address, which a client cannot forge. Consumed by the inbound rate limiter when `server.security.rateLimit.enabled` is set. |
+
+
+---
+
+## StackServerSecurity
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rateLimit** | `{ enabled: boolean; windowMs: integer; maxRequests: integer }` | optional | Global inbound rate limit. When `enabled`, every inbound request consumes from a token bucket derived from this budget (capacity = `maxRequests`, refill = `maxRequests / (windowMs / 1000)` tokens per second); an empty bucket answers 429 with a `Retry-After` header. The bucket is keyed by the RESOLVED PRINCIPAL, falling back to the caller IP for anonymous traffic — so one abusive session cannot exhaust another user's budget, and credential-stuffing traffic (which has no principal yet) is still metered per source. See `server.trustProxy` for how that IP is determined. |
+
+
+---
+
